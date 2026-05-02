@@ -32,6 +32,8 @@ A shared capability catalog now drives both:
 
 Source: `src/electron/mcp/connectors/capabilities.ts`
 
+Related UI: configured integrations from native settings, gateway channels, and MCP connectors also feed the grouped composer `@` menu. That menu is documented in [Composer Mentions](composer-mentions.md) and uses local state only; it does not run `integration_setup` or health checks while typing.
+
 ### Tool actions
 
 `integration_setup` now supports:

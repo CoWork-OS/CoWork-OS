@@ -27,6 +27,8 @@ Everything else is a surrounding surface:
 
 That makes `Routines` the main user-facing automation abstraction without redefining the actual core runtime boundary.
 
+Task view can also create a direct scheduled task with `... > Add automation...`. That flow is intentionally a shortcut into `Scheduled Tasks`, not a new core cognition loop and not a separate routine authoring path. It is useful when a completed or in-progress task should become a recurring cron-backed check while preserving a source task title, task ID, and `cowork://tasks/<taskId>` reference. See [Task Automations](task-automations.md).
+
 ## Ownership Model
 
 Core automation is owned by `AutomationProfile`, not by persona templates and not by raw role editing.
@@ -62,6 +64,8 @@ Direct reflection target ownership is intentionally narrow:
 - `pull_request`
 
 Non-core concepts such as triggers, schedules, briefings, mailbox threads, and devices can still contribute evidence or execute outcomes, but they are not direct cognition targets.
+
+Task-sourced scheduled tasks follow the same rule: they can execute recurring work and produce new task evidence, but the original task, deeplink, schedule, or worktree is not a Workflow Intelligence ownership target.
 
 ## Mission Control
 

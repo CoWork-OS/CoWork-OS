@@ -87,6 +87,8 @@ Example:
 - `manim-video` can add artifact expectations and project-scaffolding context for a local Manim workspace, but it still does not replace the user's original animation request.
 - `kami` can add scaffold/render expectations for a workspace-local document project, but it still does not replace the user's original document request or mutate the bundled templates.
 
+Composer integration mentions are separate from skill application. `integrationMentions` can add soft routing guidance such as "prefer Gmail tools", but it does not apply a skill, grant permissions, or become `allowedTools`. See [Composer Mentions](composer-mentions.md).
+
 ### Reuse Guard
 
 If the same skill is already applied with the same parameters, the executor does not reapply it. Instead it emits a reuse event so repeated planner/model invocations do not keep stacking identical skill context.
@@ -136,6 +138,7 @@ Natural-language skill routing is still proactive, but it is now shortlist-based
 - the planner sees concise relevant-skill hints
 - the model can decide to call `use_skill`
 - explicit mentions like "use the frontend skill" can boost or pin a skill in that shortlist
+- implementation-focused skills such as `react-best-practices` can be shortlisted for React/Next.js workspace changes while preserving the original feature or refactor request
 
 ### What No Longer Happens
 
@@ -167,9 +170,9 @@ The routing query is sanitized to avoid false positives from:
 
 The same principle applies after a skill is loaded: skill-expanded content should not recursively trigger more skill discovery as if it were fresh user intent.
 
-## Slash Commands
+## Slash Commands and Message Box Shortcuts
 
-Slash commands remain deterministic. `/simplify`, `/batch`, and `/llm-wiki` still map directly to `use_skill`, but the result is now applied additively.
+Skill slash commands remain deterministic. `/simplify`, `/batch`, `/llm-wiki`, direct skill IDs, and plugin-pack aliases still map to `use_skill`, but the result is now applied additively.
 
 That means:
 
@@ -178,6 +181,12 @@ That means:
 - the task stays anchored to the same canonical user request
 
 Slash behavior is special only in how the skill is selected, not in how the task is redefined.
+
+The main message box now has one `/` picker for both deterministic app commands and skill-backed workflow shortcuts. App commands such as `/schedule`, `/clear`, `/plan`, `/cost`, `/compact`, `/doctor`, and `/undo` are not skills. Plugin-pack `slashCommands` and enabled task skills are skills, so they use this additive skill model.
+
+Plugin aliases are resolved before direct skill IDs when an enabled alias and a direct skill share the same visible token. This keeps backend execution aligned with the picker display. If an alias target is missing or disabled, the resolver can fall back to an enabled direct skill ID.
+
+See [Message Box Shortcuts](message-box-shortcuts.md) for picker ordering, app command behavior, plugin alias resolution, and the bundled CoWork Shortcuts pack.
 
 ## Planner and Execution Alignment
 

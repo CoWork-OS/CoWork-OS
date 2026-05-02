@@ -21,6 +21,9 @@
 
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
+  <a href="docs/composer-mentions.md">Composer Mentions</a> &middot;
+  <a href="docs/message-box-shortcuts.md">Message Box Shortcuts</a> &middot;
+  <a href="docs/ask-inbox-architecture.md">Ask Inbox</a> &middot;
   <a href="docs/everything-workbench.md">Everything Workbench</a> &middot;
   <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
@@ -42,7 +45,7 @@
 - **Everything Workbench** — Chat, tasks, documents, spreadsheets, presentations, web pages, PDFs, and file outputs live in one local-first workspace. Generate an artifact, open it in the app, review or edit it, and ask for follow-up changes with fewer switches into separate office apps. [Learn more](docs/everything-workbench.md)
 - **Browser Workbench** — Test live websites and local apps in a visible in-app browser. The agent clicks, fills, scrolls, screenshots, annotates, and shows cursor movement in the same right-sidebar/fullscreen browser the user can see. [Learn more](docs/browser-workbench.md)
 - **Coding, web design, and knowledge work** — Use the same agentic workspace for repository work, frontend/product design, research, docs, spreadsheets, presentations, web pages, PDFs, and long-running operational tasks.
-- **Inbox Agent** — local-first email workspace with Classic and Today modes, AI triage, Mailbox Ask, manual reply/reply-all/forward, editable AI drafts, sender cleanup, commitments, and background sync.
+- **Inbox Agent** — local-first email workspace with Classic and Today modes, AI triage, an Ask Inbox sidebar with live mailbox-agent steps and hybrid evidence search, `@Inbox` main-composer routing, manual reply/reply-all/forward, editable AI drafts, sender cleanup, commitments, and background sync.
 - **Workflow Intelligence** — Always-on cognition is now framed as one reviewable loop: Memory is the source of truth, Heartbeat schedules reflection, Reflection evaluates evidence internally, and Suggestions are the user-facing output.
 - **Digital Twin Personas** — Pre-built opt-in persona presets for every role. Twins stay visible and activatable, but they no longer own heartbeat, workflow-intelligence, or memory runtime state.
 - **Zero-Human Company Ops** — Configure CoWork OS as a founder-directed autonomous company shell with venture workspace kits, automation-profile-backed operator agents, strategic planner loops, and Mission Control ops monitoring.
@@ -51,14 +54,15 @@
 - **34 LLM provider options** — 13 built-in providers plus 21 compatible/gateway options, including Claude, OpenAI, Google, Ollama, AWS Bedrock, and OpenRouter. Bring your own keys or run local models.
 - **17 messaging channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, Feishu/Lark, WeCom, iMessage, Signal, X, and more. Chat with your AI from anywhere.
 - **44 MCP connectors** — Pre-built enterprise integrations across CRM, support, productivity, analytics, and payments, with native connector support for the most common internal surfaces.
-- **18 bundled role-specific packs** — including Mobile Development, Game Development, and 5 Financial packs, with 55+ skills, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
-- **140 built-in skills** — Documents, code review, web search, image generation, cloud integrations, game development, mobile development, financial analysis, infrastructure-as-code, and more, including bundled workflows such as `llm-wiki` for persistent research vaults, `manim-video` for programmatic technical animation, `kami` for editorial PDFs and slide decks, and `taste-skill` for high-agency frontend design.
+- **Composer @ mentions** — Type `@` in the message box to pick Agents, configured Integrations, or Files. Integration chips keep icon+name rendering in the prompt and task history while sending soft routing metadata to the runtime. [Learn more](docs/composer-mentions.md)
+- **19 bundled packs** — including Mobile Development, Game Development, 5 Financial packs, and the CoWork Shortcuts pack for message-box workflow aliases, with 100+ pack skills/shortcuts, in-app Plugin Store for installing community packs, remote registry, and enterprise admin policies for organization-wide control.
+- **147 built-in skills** — Documents, code review, web search, image generation, cloud integrations, game development, mobile development, financial analysis, infrastructure-as-code, React/Next.js performance guidance, and more, including bundled workflows such as `llm-wiki` for persistent research vaults, `manim-video` for programmatic technical animation, `kami` for editorial PDFs and slide decks, `react-best-practices` for React workspace changes, and `taste-skill` for high-agency frontend design.
 - **Profiles & portability** — run separate CoWork profiles with isolated app data, export/import complete profile bundles, and keep credentials, channels, skills, and sessions separated by profile.
 - **Active Context sidebar** — Always-visible panel showing 44 available MCP connectors with branded Lucide icons and enabled skills, auto-refreshed every 30 seconds.
 - **Agent teams** — Multi-agent collaboration with shared checklists, graph-backed runs, collaborative mode, multi-LLM synthesis, persistent teams, and ACP-targeted delegation for local or remote specialists.
 - **External agent orchestration** — Discover ACP agents, delegate work to A2A-compatible remote endpoints, and keep remote calls under the same approval and policy model as other governed actions, with persisted ACP tasks, restart-safe resume, remote cancel support, and the shared orchestration graph as the runtime backbone.
 - **Think With Me mode** — Socratic brainstorming that helps you clarify thinking without executing actions.
-- **Chat mode** — Direct LLM chat with no tools, no step timeline, same-session follow-ups, and chat-only streaming for supported providers.
+- **Chat mode** — Direct LLM chat with no tools by default, no step timeline, same-session follow-ups, chat-only streaming for supported providers, and a narrow read-only analysis exception for uploaded PDFs that need deeper document reading.
 - **Build Mode** — Go from idea to working prototype with a phased canvas workflow (Concept → Plan → Scaffold → Iterate) and named checkpoints.
 - **AI Playbook** — Auto-captures what worked from successful tasks and injects relevant patterns into future prompts. Repeated patterns auto-promote to governed, one-click-approvable skills via the Playbook-to-Skill pipeline.
 - **Evolving Intelligence** — The layered memory runtime keeps curated hot memory prompt-visible by default, leaves archive recall off by default, and adds explicit `search_sessions` / `memory_topics_load` recall paths for recent runs and topical packs. Adaptive Style Engine learns your communication preferences from message patterns and feedback. Evolution Metrics dashboard quantifies improvement over time (correction rate, knowledge growth, style alignment).
@@ -84,6 +88,7 @@ Stable workflow entry points for the newest high-impact capabilities.
 - **Document artifacts** — task-created Word-style files render as compact artifact cards. `.docx` opens directly in an editable right-sidebar document surface with Google Docs-style controls, save, copy, external-open, fullscreen mode, and the same functional follow-up composer used by spreadsheet artifacts. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related Word-style formats are recognized with best-effort preview or external-app/folder actions. [Learn more](docs/document-artifacts.md)
 - **Designed editorial documents** — bundled `kami` skill for resumes, one-pagers, white papers, letters, portfolios, diagrams, and slide decks with workspace-local source scaffolding and PDF/PPTX export helpers. [Learn more](docs/skills/kami.md)
 - **Format-aware file preview popup** — clicking any file link in chat opens a unified preview modal that adapts to the format. Built-in support for HTML, Markdown, code (with `highlight.js` syntax colors), JSON / JSONL / GeoJSON (collapsible tree + raw toggle), CSV / TSV (RFC-4180 table), XLSX, DOCX, PDF (with page/OCR summary), images (fit / actual-size toggle, dimensions, alpha checkerboard), video, audio (with duration), LaTeX, and PPTX. Each format gets its own width profile, a header subtitle showing format-specific metadata, and a unified action bar with Copy path, Show in Finder, Open externally, and Close.
+- **Smart PDF attachments** — uploaded PDFs are copied into the workspace, summarized into a compact prompt excerpt with page/extraction metadata, and read on demand with the document parser when the user asks for summaries, Q&A, extraction, comparison, or transformation. Scanned/image-heavy PDFs keep OCR/scan status visible, PDF excerpts are marked as untrusted document data, and `read_pdf_visual` remains reserved for layout, formatting, and page-appearance questions.
 - **Spreadsheet artifacts** — task-created spreadsheet files render as compact artifact cards. Excel workbooks and CSV/TSV files open in the editable right-sidebar viewer; native Numbers, Google Sheets shortcut, ODS, XLSB, and other recognized spreadsheet outputs still get the same card and external-app/folder actions. Fullscreen mode expands editable sheets across the app with cell/range/row/column selection, copy, zoom, add row/column, save, model picker, voice input, attachments, and follow-up task context. [Learn more](docs/spreadsheet-artifacts.md)
 - **Presentation artifacts** — generated `.pptx` decks render as compact artifact cards and open by default in the resizable right-sidebar presentation viewer. The viewer shows thumbnails, slide navigation, zoom, a white slide canvas, speaker notes, text-first fast loading, cached rendered slide images, fullscreen follow-up context, and background refresh after requested deck edits. Legacy PowerPoint formats are recognized with external-app/folder actions. [Learn more](docs/pptx-generation-and-preview.md)
 - **Web page artifacts** — generated `.html` / `.htm` pages and built React output such as `dist/index.html`, `build/index.html`, or `out/index.html` render as compact artifact cards and open by default in a resizable right-sidebar sandboxed iframe preview. Fullscreen mode keeps the functional follow-up composer and refreshes after the relevant file or build output changes. React-style source projects without build output show a clear build-output-needed state instead of auto-starting a dev server. [Learn more](docs/web-page-artifacts.md)
@@ -91,13 +96,14 @@ Stable workflow entry points for the newest high-impact capabilities.
 - **Image generation** — configurable provider ordering across Gemini, OpenAI, Azure OpenAI, and OpenRouter.
 - **Video generation** — text-to-video and image-to-video routing with polling tools and inline preview.
 - **Programmatic technical video** — bundled `manim-video` skill for Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](docs/skills/manim-video.md)
+- **React/Next.js implementation guidance** — bundled `react-best-practices` skill for React workspace changes, Next.js feature work, reviews, refactors, data-fetching improvements, bundle-size checks, and rendering-performance fixes. [Learn more](docs/skills/react-best-practices.md)
 - **High-agency frontend design** — bundled `taste-skill` for stricter anti-slop frontend work with stronger layout variance, typography, motion, and implementation rules.
 
 See [Workflow Intelligence](docs/workflow-intelligence.md), [Core Automation](docs/core-automation.md), [I Gave CoWork OS Workflow Intelligence, And Now It Learns From Reviewable Work | Full Guide](docs/continual-learning-in-cowork.md), [Features](docs/features.md), [Heartbeat v3](docs/heartbeat-v3.md), [Providers](docs/providers.md), and [Plugin Packs](docs/plugin-packs.md) for current runtime details.
 
 ### Latest Release
 
-**`0.5.42`** is a Windows installer hotfix for the Everything Workbench release. It rebuilds the Windows installer as an x64 app package so standard Windows PCs install `CoWork OS.exe` correctly. Start with [Release Notes 0.5.42](docs/release-notes-0.5.42.md), then [Release Notes 0.5.41](docs/release-notes-0.5.41.md), [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Everything Workbench](docs/everything-workbench.md), [Browser Workbench](docs/browser-workbench.md), and the [Changelog](CHANGELOG.md).
+**`0.5.42`** is a Windows installer hotfix plus a composer-routing refresh. It rebuilds the Windows installer as an x64 app package, adds grouped `@` mentions for configured integrations, routes `@Inbox` prompts into Inbox Agent, and unifies app commands plus skill-backed workflow shortcuts in the message box `/` picker. Start with [Release Notes 0.5.42](docs/release-notes-0.5.42.md), then [Message Box Shortcuts](docs/message-box-shortcuts.md), [Composer Mentions](docs/composer-mentions.md), [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Everything Workbench](docs/everything-workbench.md), [Browser Workbench](docs/browser-workbench.md), and the [Changelog](CHANGELOG.md).
 
 ## Quick Start
 
@@ -200,6 +206,7 @@ Completion state and file availability are now explicit:
 - **Spreadsheet artifact workbench**: spreadsheet outputs render as compact cards. `.xlsx`, `.xls`, `.xlsm`, `.csv`, and `.tsv` open into a resizable editable sidebar by default; `.numbers`, `.gsheet`, `.ods`, and `.xlsb` are recognized as spreadsheet artifacts with external-app/folder actions. Editable sheets can expand into fullscreen spreadsheet mode with copy/save controls, zoom, attachments, voice input, and model selection for follow-up prompts
 - **Document artifact workbench**: Word-style outputs render as compact cards. `.docx` opens into a resizable editable sidebar by default and can expand into fullscreen document mode with a Google Docs-style toolbar, save, copy, attachments, voice input, model selection, follow-up context, and automatic preview refresh after follow-up edits. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related formats are recognized with preview/external actions according to local parser support
 - **LaTeX/PDF artifact workbench**: explicit LaTeX/TikZ paper tasks can write `.tex`, compile it with a system TeX engine, and show the source plus rendered PDF together with Summary, source, and PDF tabs
+- **Smart PDF attachment reading**: user-uploaded PDFs keep the initial prompt compact while preserving the workspace-relative path, page count, extraction mode, OCR/scan status, and a safe excerpt. For deeper PDF content tasks, CoWork calls `parse_document` on demand instead of stuffing the whole PDF into every turn; visual PDF inspection stays on `read_pdf_visual`
 - **Presentation artifact workbench**: `.pptx` outputs show inline deck cards in task events and assistant summaries, then open into a resizable sidebar or fullscreen viewer with thumbnails, previous/next navigation, zoom, speaker notes, fast text-first loading, cached rendered slide images, external actions, and follow-up prompt context. `.ppt`, `.pptm`, `.potx`, `.potm`, `.ppsx`, and `.ppsm` are recognized with external-app/folder actions
 - **Web page artifact workbench**: generated `.html` / `.htm` files and built React output entrypoints show compact web page cards, then open into a resizable sidebar or fullscreen sandboxed iframe preview with browser/folder/copy actions, persisted sidebar width, and follow-up prompt context. React-style projects without `dist`, `build`, or `out` HTML output show a build-output-needed preview state rather than auto-running a dev server
 - **Semantic completion labels**: completed tool batches and verifier verdicts now feed the richer completion text shown in timelines, feed relays, and export surfaces
@@ -224,7 +231,7 @@ The Devices tab turns CoWork OS into a multi-machine control surface. Save and r
 
 ### Automations
 
-Automations are now organized around a hard boundary: **Workflow Intelligence** is the always-on cognitive loop, while `Routines` are the main saved-automation product layered on top of lower-level execution surfaces. `Scheduled Tasks`, `Webhooks`, and `Event Triggers` still exist, but they now also serve as advanced or compiled backends for routines rather than competing first-class automation concepts. The home dashboard, welcome-screen Next actions, and routines panel surface recent automation suggestions/runs so you can monitor background systems without hunting through tabs. [Learn more](docs/core-automation.md)
+Automations are now organized around a hard boundary: **Workflow Intelligence** is the always-on cognitive loop, while `Routines` are the main saved-automation product layered on top of lower-level execution surfaces. `Scheduled Tasks`, `Webhooks`, and `Event Triggers` still exist, but they now also serve as advanced or compiled backends for routines rather than competing first-class automation concepts. Task view can also turn the current task into a real scheduled task from the three-dot menu with `Add automation...`, preserving the source task title, ID, and `cowork://tasks/<taskId>` deeplink. The home dashboard, welcome-screen Next actions, and routines panel surface recent automation suggestions/runs so you can monitor background systems without hunting through tabs. [Learn more](docs/core-automation.md) | [Task Automations](docs/task-automations.md)
 
 ### Zero-Human Company Ops
 
@@ -251,7 +258,8 @@ Local-first inbox workspace that turns email into an action queue while preservi
 - **Mailbox views**: Inbox, Sent, All, plus Recent/Priority sorting, saved views, account filters, and practical domain filters
 - **Normal email actions**: manual Reply, Reply all, Forward, To/Cc/Bcc, editable subject/body, and provider-backed send
 - **AI draft handling**: generated replies are editable before send, and sent drafts disappear after successful send
-- **Mailbox Ask**: search local mailbox evidence and indexed attachment text, with LLM summaries when configured
+- **Ask Inbox**: ask mailbox questions in the right sidebar, see live retrieval/reading/answer steps, and search local FTS, semantic mailbox embeddings, provider-native mail search, and indexed attachment text with LLM summaries when configured
+- **`@Inbox` composer routing**: type `@Inbox` or `@inbox ...` in the main composer to open Inbox Agent, switch to Ask Inbox, and run the query there
 - **Workflow buttons**: Cleanup, Follow-up, Reply, Forward, Mark done, Prep thread, Extract todos, Schedule, Refresh intel
 - **Gmail auto-forwarding**: create forwarding automations from a Gmail thread with dry-run support, attachment filters, per-message dedupe, and thread-scoped execution
 - **Commitment tracking**: accept commitments into real follow-up tasks, mark already-handled threads done, or dismiss items
@@ -276,6 +284,7 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 
 - **Cloud Storage**: 6 integrations, including Notion, Box, OneDrive, Google Workspace, Dropbox, and SharePoint
 - **44 MCP Connectors**: pre-built enterprise integrations for CRM, support, productivity, analytics, and payments (Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Socket, and more), with connector notifications available as trigger inputs for automations
+- **Composer mentions**: type `@` in the message box to choose configured integrations. Google Workspace is shown as Gmail, Google Drive, and Google Calendar; gateway channels and MCP connectors appear only when locally usable. Mentions render as icon+name chips and are passed as soft routing hints, not permission grants. [Learn more](docs/composer-mentions.md)
 - **Developer Tools**: `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry
 
 [Learn more](docs/features.md)
@@ -294,7 +303,7 @@ Dashboard with task metrics, cost/token tracking by model, prompt-cache read tel
 
 ### Plugin Platform & Customize
 
-Unified plugin platform with 18 bundled role-specific packs (Engineering, DevOps, Product, Sales, QA, Finance, and more), each bundling skills, agent roles, connectors, and "Try asking" prompts. Packs can link to Digital Twin personas as optional role presets.
+Unified plugin platform with 19 bundled packs (Engineering, DevOps, Product, Sales, QA, Finance, CoWork Shortcuts, and more), each bundling skills, agent roles, connectors, slash command aliases, and "Try asking" prompts. Packs can link to Digital Twin personas as optional role presets.
 
 - **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
 - **Per-skill control**: Enable or disable individual skills within a pack without toggling the whole pack
@@ -324,9 +333,9 @@ These are the workflows where approval gates, local data control, and measurable
 
 ### Extensibility
 
-- **140 built-in skills** across developer, productivity, communication, documents, game development, mobile development, financial analysis, infrastructure-as-code, and more
+- **147 built-in skills** across developer, productivity, communication, documents, frontend, game development, mobile development, financial analysis, infrastructure-as-code, and more
 - **Custom skills** in `~/Library/Application Support/cowork-os/skills/` (macOS) or `%APPDATA%\cowork-os\skills\` (Windows)
-- **18 bundled plugin packs** with 55+ role-specific skills and Digital Twin integration
+- **19 bundled plugin packs** with 100+ pack skills/shortcuts, message-box slash aliases, and Digital Twin integration where applicable
 - **Plugin Store** — browse, install from Git/URL, scaffold custom packs, and review quarantine/report state for imported packs
 - **Skill Store** — browse CoWork Registry skills, search ClawHub, import external skills from Git, raw JSON, or raw `SKILL.md`, and review quarantine/report state for imported skills
 - **MCP support** — client, host, and registry
@@ -409,8 +418,8 @@ See [Security Guide](docs/security-guide.md) and [Security Architecture](docs/se
 | Mode | Platform | Guide |
 |------|----------|-------|
 | **Desktop App** | macOS, Windows | [Getting Started](docs/getting-started.md) |
-| **Headless / Server** | Linux VPS | [VPS Guide](docs/vps-linux.md) |
-| **Self-Hosted** | Docker / systemd | [Self-Hosting](docs/self-hosting.md) |
+| **Packaged Server** | Linux x64 VPS | [VPS Guide](docs/vps-linux.md) |
+| **Self-Hosted** | GitHub release tarball / Docker / systemd | [Self-Hosting](docs/self-hosting.md) |
 | **Remote Access** | Tailscale / SSH | [Remote Access](docs/remote-access.md) |
 
 ## Screenshots
@@ -462,11 +471,13 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Beginner's Guide](docs/cowork-school.md) | Practical guide to what CoWork OS is for and which workflows to try first |
 | [Release Notes 0.5.42](docs/release-notes-0.5.42.md) | What is new in the latest release |
+| [Composer Mentions](docs/composer-mentions.md) | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing |
+| [Message Box Shortcuts](docs/message-box-shortcuts.md) | `/` picker for deterministic app commands and skill-backed workflow shortcuts |
 | [Use Case Showcase](docs/showcase.md) | Comprehensive guide to what you can build and automate |
 | [Features](docs/features.md) | Complete feature reference |
 | [Everything Workbench](docs/everything-workbench.md) | Unified in-app artifact model for docs, sheets, decks, web pages, PDFs, and live browser sessions |
 | [Browser Workbench](docs/browser-workbench.md) | Visible in-app browser for website testing, screenshots, annotation, and browser-use automation |
-| [Chat Mode](docs/chat-mode.md) | Direct chat-only mode with no tools and same-session follow-ups |
+| [Chat Mode](docs/chat-mode.md) | Direct chat mode, same-session follow-ups, and the narrow PDF-attachment read-only analysis exception |
 | [Platform Updates](docs/integration-skill-bootstrap-lifecycle.md) | Detailed implementation notes for integration setup, skill proposals, workspace-kit contracts, and bootstrap lifecycle |
 | [Channels](docs/channels.md) | Messaging channel setup (17 channels) |
 | [X Mention Triggers](docs/x-mention-triggers.md) | Configure `do:` mention-triggered task ingress on desktop and headless |
@@ -478,8 +489,10 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [LLM Wiki](docs/llm-wiki.md) | First-class research vault workflow, slash syntax, vault layout, analyzer outputs, and Obsidian-friendly knowledge-base behavior |
 | [Kami Skill](docs/skills/kami.md) | Bundled editorial document workflow for resumes, one-pagers, white papers, diagrams, and slide decks |
 | [manim-video Skill](docs/skills/manim-video.md) | Bundled Manim CE workflow for technical animation, project scaffolding, and draft-to-production render flow |
+| [React Best Practices Skill](docs/skills/react-best-practices.md) | Bundled React and Next.js guidance for feature work, refactors, reviews, data fetching, bundle size, and rendering performance |
 | [Workflow Intelligence](docs/workflow-intelligence.md) | Memory + Heartbeat + Reflection + Suggestions model, reviewable outputs, and feedback learning |
 | [Core Automation](docs/core-automation.md) | Runtime boundary for Workflow Intelligence, automation profiles, and the core harness |
+| [Task Automations](docs/task-automations.md) | Create scheduled tasks directly from a task's overflow menu |
 | [Heartbeat v3](docs/heartbeat-v3.md) | Default two-lane heartbeat architecture, signals, Pulse, Dispatch, and automation-profile-backed operator semantics |
 | [Security Guide](docs/security-guide.md) | Security model and best practices |
 | [Enterprise Connectors](docs/enterprise-connectors.md) | MCP connector development |

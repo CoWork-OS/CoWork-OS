@@ -9,7 +9,7 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - **Personal AI Gateway**: Connect your AI assistant to WhatsApp, Telegram, Discord, Slack, and iMessage
 - **Everything Workbench**: Create, open, review, lightly edit, and revise generated documents, spreadsheets, presentations, web pages, PDFs, and previews from the same local-first task workspace
 - **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices tab
-- **Automations Surface**: One settings group for queueing, scheduling, triggers, briefing, and Workflow Intelligence suggestions/reflection
+- **Automations Surface**: One settings group for queueing, scheduling, triggers, briefing, and Workflow Intelligence suggestions/reflection; task view can also create cron scheduled tasks from the current task menu
 - **Renderer Performance**: Sidebar and timeline virtualization in the `CoWork-OS/CoWork-OS` repo use `@chenglou/pretext` for text measurement and keep long task feeds responsive
 - **Security-First Design**: 4,932 automated tests across 390 test files, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
 - **Imported Capability Security**: managed skill and pack imports are staged, scanned, reported, and quarantined when blocked instead of being activated directly
@@ -104,6 +104,16 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] Session management
 - [x] Security modes (pairing, allowlist, open)
 - [x] Located: `src/electron/gateway/`
+
+#### Composer Routing
+- [x] Grouped `@` autocomplete for Agents, Integrations, and Files
+- [x] Configured integration mention resolver with Google Workspace split into Gmail, Google Drive, and Google Calendar
+- [x] Rich inline integration chips in the composer, sent user bubbles, and restored task/session history
+- [x] Soft `integrationMentions` runtime guidance without changing `allowedTools`
+- [x] `@Inbox` routing from the main composer into Inbox Agent Ask Inbox
+- [x] Ask Inbox right-sidebar chat with run-scoped live step events and matched evidence
+- [x] Hybrid mailbox search architecture for Ask Inbox: local FTS, semantic mailbox index, provider-native search, attachment text, shortlist/read/rerank
+- [x] Located: `src/renderer/components/PromptComposerInput.tsx`, `src/electron/integrations/`
 
 ### 2. Tools & Skills
 
@@ -243,6 +253,7 @@ CoWork OS is a **security-first personal AI assistant platform** with multi-chan
 - [x] Guardrail settings (budgets, limits)
 - [x] Queue settings (concurrency)
 - [x] Automations settings group (queue, Workflow Intelligence, scheduled, hooks, triggers, briefing)
+- [x] Task-sourced scheduled automations from task view overflow menu
 - [x] Custom Skills management
 - [x] Quarantined Imports sections for skills and plugin packs with report, retry scan, and removal actions
 - [x] Personality settings (styles, personas, quirks)
@@ -528,7 +539,7 @@ Expected behavior:
 - **Multi-Channel**: WhatsApp, Telegram, Discord, Slack, iMessage integration
 - **Multi-Provider**: 30+ LLM providers and compatible gateways, including Claude, GPT, Gemini, Bedrock, OpenRouter, and Ollama
 - **Local-First**: Your data stays on your machine, BYOK model
-- **Extensible**: MCP support (Client, Host, Registry), 140 built-in skills, and plugin packs
+- **Extensible**: MCP support (Client, Host, Registry), 147 built-in skills, and plugin packs
 
 ### Feature Highlights
 - Real Office document creation (Excel, Word, PDF, PowerPoint)

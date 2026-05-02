@@ -23,6 +23,21 @@ Benefits:
 - Works with existing CoWork MCP settings, registry, and tool discovery.
 - Avoids duplicate surfaces where native integrations are the better default.
 
+## Connector Mentions In The Composer
+
+The main message composer exposes connected/configured connectors through the grouped `@` menu under **Integrations**. The menu is resolved from local state only, so typing `@` does not run connector health checks or network discovery.
+
+Connector mention behavior:
+
+- native and Tier-1 integrations appear only when locally usable
+- Google Workspace is shown as Gmail, Google Drive, and Google Calendar instead of one broad connector option
+- multi-service MCP connectors split into service-level mention options when their exposed tool names make that safe
+- unknown MCP connectors appear as one connector option only when connected/configured
+- selected connectors render as icon+name chips in the prompt and user message history
+- submitted `integrationMentions` metadata is soft routing guidance only; it does not grant permissions or set `allowedTools`
+
+See [Composer Mentions](composer-mentions.md) for the full resolver and runtime contract.
+
 ## Connector Events and Content Triggers
 
 CoWork can now treat MCP connector notifications as automation inputs, not just tool catalogs.

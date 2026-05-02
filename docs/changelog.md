@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Linux server release package**: GitHub Releases can now publish `cowork-os-server-linux-x64-v<version>.tar.gz` plus a `.sha256` checksum for production VPS/systemd deployments. The package includes built daemon assets, full resources, connector runtimes, runtime dependencies, systemd templates, and a Linux smoke test that boots `coworkd-node` and checks `/health`. See [Linux VPS](vps-linux.md).
+- **Task-sourced scheduled automations**: task view now has `... > Add automation...`, which opens a Codex-style modal prefilled from the current task and creates a real cron scheduled task through the existing scheduler API. The saved job keeps the source task title, task ID, and `cowork://tasks/<taskId>` deeplink for traceability. See [Task Automations](task-automations.md).
+- **Composer `@` mentions for integrations**: added a grouped autocomplete above the message box with Agents, configured Integrations, and Files. Integration mentions render as icon+name chips in prompts and user message bubbles, restore from task/session history, and submit `integrationMentions` as soft runtime guidance. See [Composer Mentions](composer-mentions.md).
+- **`@Inbox` main-composer routing**: `@Inbox` / `@inbox ...` now opens Inbox Agent and runs the remaining query through the Ask Inbox module instead of starting a normal task run.
+- **Message box slash shortcuts**: added one `/` picker for deterministic app commands and skill-backed workflow shortcuts. App commands include `/schedule`, `/clear`, `/plan`, `/cost`, `/compact`, `/doctor`, and `/undo`; plugin-pack aliases resolve to target skills through the skills runtime. See [Message Box Shortcuts](message-box-shortcuts.md).
+- **CoWork Shortcuts pack**: added a bundled shortcuts pack with workflow aliases such as `/strategy`, `/review`, `/memory`, `/batch-rename`, `/smart-deduplication`, `/folder-structure`, `/gmail-summary-drive`, `/calendar-prep-brief`, `/multi-source-report`, `/weekly-newsletter`, `/daily-inbox-zero`, `/monday-planning-brief`, and `/end-of-day-log`.
+- **Ask Inbox sidebar chat**: Inbox Agent now has right-sidebar tabs for Agent Rail and Ask Inbox. Ask Inbox shows the user question, live mailbox-agent steps, final answer, and matched email evidence, with a pinned composer for follow-up questions. See [Ask Inbox Architecture](ask-inbox-architecture.md).
+- **Hybrid mailbox retrieval for Ask Inbox**: Ask Inbox now plans broad mailbox searches across local FTS, semantic mailbox embeddings, provider-native search, and attachment text, then shortlists and reads evidence before answering.
+- **Bundled `react-best-practices` skill**: added React and Next.js implementation guidance for feature work, enhancements, refactors, reviews, data fetching, bundle-size checks, and rendering-performance fixes. See [React Best Practices Skill](skills/react-best-practices.md).
+
+### Changed
+- **Right sidebar polish**: refined the task right sidebar with keyboard-accessible section headers, cleaner compact spacing, stable row grids, clearer in-progress/checklist states, tighter truncation, a four-row scroll cap for Tools used, and lighter feedback/file/context surfaces.
+- **Files panel type icons**: the right-sidebar Files section now shows format-aware Lucide icons beside created/modified/deleted file rows, distinguishing markdown/text, code, JSON, spreadsheets, images, presentations, media, archives, folders, and generic files while preserving the existing action color states.
+- **Automation docs and concept model**: README, Features, Core Automation, docs home, and Development now describe task automations as a shortcut into `Scheduled Tasks`, not a new Workflow Intelligence owner or separate routine system.
+- **Integration mention resolver**: Google Workspace now appears as Gmail, Google Drive, and Google Calendar in the composer; gateway channels and MCP connectors appear only when locally connected/configured; multi-service MCP connectors can split by service tool groups.
+- **Message-box shortcut docs and behavior**: plugin alias precedence now matches picker display, optional-input skill shortcuts insert the slash token for user context, `/clear` preserves workspace context, and `/schedule` keeps deterministic handler precedence from the composer.
+- **Bundled-skill docs**: README, Features, Skill Store, development guidance, docs home, and status docs now reflect the `react-best-practices` addition and the built-in skill count increase to 147.
+- **Inbox Agent docs**: Inbox Agent, Features, Composer Mentions, troubleshooting, use cases, showcase, and implementation docs now describe Ask Inbox as a sidebar mailbox-agent chat with transient progress events and hybrid evidence retrieval.
+
+### Fixed
+- **Rich composer mention editing**: fixed duplicate `@` rendering and the React `removeChild` crash when deleting a raw mention or integration chip.
+- **Google Workspace reconnect recovery**: stale Google Workspace refresh tokens are cleared after refresh bad-request failures, and changing Google OAuth client credentials or scopes clears old tokens before reconnect.
+- **Azure OpenAI tool-result replay**: normalized long Responses fallback tool-call ids so Azure OpenAI does not reject integration-heavy turns with a `call_id` length error.
+
 ## [0.5.42] - 2026-04-30
 
 ### Fixed
@@ -15,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.41] - 2026-04-29
 
 ### Added
+- **Smart PDF attachment reading**: uploaded PDFs now carry compact attachment metadata, a safe excerpt, page/extraction/OCR status, and workspace-relative path guidance. Deeper PDF summaries, Q&A, extraction, comparison, and transformation use `parse_document` on demand instead of inlining the whole PDF; explicit chat PDF turns can auto-promote to read-only analysis for that document read.
 - **Release notes for 0.5.41**: see [Release Notes 0.5.41](release-notes-0.5.41.md).
 - **Everything Workbench positioning docs**: added the canonical [Everything Workbench](everything-workbench.md) page and refreshed product copy around CoWork OS as a local-first personal agentic OS and everything app for coding, web design, research, generated docs, sheets, decks, web pages, PDFs, previews, tasks, channels, devices, and automations.
 - **Document artifact workbench**: Word-style document artifact cards now recognize DOCX, DOCM, DOTX, DOTM, DOC, RTF, ODT, OTT, and Pages outputs. DOCX opens directly into an editable sidebar/fullscreen document surface with Google Docs-style controls, save/copy actions, external app actions, functional follow-up composer controls, and automatic preview refresh after follow-up edits. See [Document Artifacts](document-artifacts.md).
@@ -27,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Format-aware in-app file preview popup**: the file preview modal that opens when a file link is clicked in chat is now format-aware. Each format has its own modal width/height profile (compact for text/code, wider for HTML/PDF/image/video, narrow for audio, presentation-sized for `.pptx`). The header shows a format-specific subtitle (e.g. `PNG · 1920×1080 · 240 KB`, `PDF · 12 pages · 1.4 MB`, `CSV · 412 rows · 24 KB`, `Audio · 3:42 · 5.1 MB`) and a unified action bar with Copy path, Show in Finder, Open externally, and Close on every format. New first-class branches: collapsible JSON tree view for `.json/.jsonl/.geojson` (with raw/tree toggle and parse-error fallback), CSV/TSV table rendering with an RFC-4180 quoted-field parser, an audio player for `.mp3/.wav/.ogg/.m4a/.flac/.aac` with duration metadata, and `highlight.js`-driven syntax highlighting for code and LaTeX. Image previews add a fit/actual-size toggle, dimension readout, and an alpha checkerboard for PNG/SVG/WebP/GIF/ICO. The hardcoded modal background and PDF summary colors were replaced with theme tokens, so light theme renders correctly across all formats.
 
 ### Changed
+- **PDF attachment safety model**: PDF excerpts are documented and emitted as untrusted document data, scanned/image-heavy PDFs no longer present as native text when no native pages were found, and `read_pdf_visual` remains scoped to visual/layout/page-appearance analysis.
 - **Product positioning**: README, docs home, Features, Getting Started, Showcase, Use Cases, GTM, best-fit workflows, artifact docs, architecture, development, troubleshooting, and status docs now frame document, spreadsheet, presentation, web page, PDF, and preview surfaces as one unified artifact workbench inside the broader personal agentic OS/everything app positioning. The workbench reduces app switching for generated knowledge work without claiming full office-suite replacement.
 - **Document output concept**: README, Features, Architecture, Development, Getting Started, Troubleshooting, Project Status, and the docs index now describe Word-style outputs as first-class document artifacts with sidebar/fullscreen editing for DOCX and preview/external handling for other document formats.
 - **Spreadsheet output concept**: README, Features, Architecture, Development, Getting Started, Troubleshooting, Project Status, and the docs index now describe Excel outputs as first-class spreadsheet artifacts with sidebar/fullscreen workbench behavior rather than only generic XLSX file previews.

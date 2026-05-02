@@ -9,7 +9,9 @@ Inbox Agent has moved past the original saved-view slice into the email-client r
 - Classic three-pane mode plus Today lanes for `Needs action`, `Happening today`, `Good to know`, and `More to browse`
 - richer classifier fields: `todayBucket` and `domainCategory`
 - domain chips for travel, packages, receipts, bills, newsletters, shopping, work, and all domains
-- Mailbox Ask over local mailbox evidence and on-demand indexed attachment text
+- Ask Inbox as a right-sidebar mailbox chat with live run steps, hybrid retrieval, final answers, and matched evidence
+- `@Inbox` / `@inbox ...` main-composer routing into Ask Inbox
+- hybrid mailbox search over local FTS, semantic mailbox embeddings, provider-native mail search where available, and attachment text
 - sender cleanup digest and cleanup center
 - attachment metadata capture during Gmail sync and on-demand text extraction for supported file types
 - autosync with cached mail shown immediately on startup
@@ -81,12 +83,13 @@ Additional implemented slices since then:
 
 7. **Today mode** — Classifier-backed Today buckets with lane-specific grouping.
 8. **Domain categories** — Life/work domain classification and filtering.
-9. **Ask Mailbox** — Local retrieval with optional LLM summary and attachment evidence.
+9. **Ask Inbox** — Right-sidebar mailbox chat with live agentic steps, hybrid retrieval, optional LLM summary, attachment evidence, and `@Inbox` main-composer routing.
 10. **Attachment indexing** — Metadata during sync, bytes/text on demand.
 11. **Sender cleanup** — Noisy sender ranking with estimated weekly reduction.
 12. **Manual email compose** — Reply, reply-all, and forward from the thread detail view.
 13. **Editable AI drafts** — Generated draft subject/body can be edited before send.
 14. **Autosync and read-state polish** — Background refresh, clearer unread cards, provider-backed mark read/unread where supported.
+15. **Ask Inbox architecture** — Dedicated `MailboxAgentSearchService`, query planning, local FTS/vector/provider/attachment channels, shortlist-then-read behavior, run-scoped `mailbox:askEvent` progress streaming, and Ask Inbox sidebar transcript.
 
 ## 4. Success Metrics
 
@@ -106,5 +109,7 @@ Additional implemented slices since then:
 
 - UI: [InboxAgentPanel.tsx](../src/renderer/components/InboxAgentPanel.tsx)
 - Service: [MailboxService.ts](../src/electron/mailbox/MailboxService.ts)
+- Search service: [MailboxAgentSearchService.ts](../src/electron/mailbox/MailboxAgentSearchService.ts)
 - Types: [mailbox.ts](../src/shared/mailbox.ts)
 - Mission Control: [useMissionControlData.ts](../src/renderer/components/mission-control/useMissionControlData.ts)
+- Architecture: [Ask Inbox Architecture](ask-inbox-architecture.md)

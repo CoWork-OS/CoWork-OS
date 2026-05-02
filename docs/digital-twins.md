@@ -4,7 +4,7 @@ Digital Twin Personas are pre-built AI agent templates that create role-specific
 
 A persona template now bundles prompt/personality defaults, recommended skills, display metadata, and cognitive offload categories. Activating a template creates a fully configured role preset in one click, but it does not automatically enroll that role into the always-on core runtime.
 
-Access from **Settings** > **Digital Twins** or **Mission Control** > **Add Digital Twin**. For company-ops workflows, you can also open Digital Twins from **Settings** > **Companies** to create operators in company context. Digital twins can also be activated through [Plugin Packs](plugin-packs.md) — 7 of the 10 bundled packs link directly to a persona template.
+Access from **Settings** > **Digital Twins** or **Mission Control** > **Add Digital Twin**. For company-ops workflows, you can also open Digital Twins from **Settings** > **Companies** to create operators in company context. Digital twins can also be activated through [Plugin Packs](plugin-packs.md) — 9 of the 19 bundled packs link directly to a persona template.
 
 Digital Twins are intentionally separate from the core automation runtime. See [Workflow Intelligence](workflow-intelligence.md), [Core Automation](core-automation.md), and [Heartbeat v3](heartbeat-v3.md) for the architecture source of truth.
 

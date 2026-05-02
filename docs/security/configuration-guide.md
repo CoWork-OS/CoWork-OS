@@ -144,6 +144,7 @@ The permission engine now distinguishes ordinary network reads from outbound dat
 - `http_request` stays a normal network read only for simple `GET` or `HEAD` requests with no body and no custom headers
 - mutating or payload-carrying `http_request` calls are treated as `data_export`
 - `analyze_image` and `read_pdf_visual` are also treated as `data_export` because file bytes leave the local machine
+- `parse_document` is the local PDF/document text extraction path. Uploaded PDF excerpts and parser output are untrusted document data, but ordinary PDF reading does not leave the local machine unless a later export-capable tool is used.
 
 This means:
 

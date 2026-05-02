@@ -1,6 +1,6 @@
 # Plugin Packs & Customize
 
-Plugin packs are composable, role-specific bundles that group skills, agent roles, connectors, and slash commands into a single installable unit. Each pack targets a job function — engineering, sales, product management — and can optionally link to a [Digital Twin Persona](digital-twins.md) as an optional role preset.
+Plugin packs are composable bundles that group skills, agent roles, connectors, and slash commands into a single installable unit. Most packs target a job function — engineering, sales, product management — while workflow packs such as **CoWork Shortcuts** add reusable message-box shortcuts. Packs can optionally link to a [Digital Twin Persona](digital-twins.md) as an optional role preset.
 
 Access from **Settings** > **Customize**.
 
@@ -16,7 +16,7 @@ A JSON manifest (`cowork.plugin.json`) that bundles related capabilities:
 |-------|---------|
 | **Skills** | Prompt templates with parameter substitution for specific workflows |
 | **Agent Roles** | Pre-configured agent identities with system prompts and capabilities |
-| **Slash Commands** | Shortcut mappings that trigger skills via `/command` syntax |
+| **Slash Commands** | Shortcut mappings that trigger skills via `/command` syntax in the message box |
 | **Connectors** | Declarative tool definitions (HTTP, shell, script) for external services |
 | **Try Asking** | Natural language prompt suggestions for discoverability |
 | **Digital Twin Link** | Optional `personaTemplateId` connecting the pack to a proactive persona |
@@ -40,6 +40,28 @@ Individual skills are standalone prompt templates. A pack is a **curated collect
 - Recommended external connectors (MCP servers)
 - Discoverable prompt suggestions via "Try asking"
 - Optional digital twin integration for proactive automation
+
+### Slash Commands and Message Box Shortcuts
+
+Pack `slashCommands` are skill aliases. They map a visible command token to a target `skillId`:
+
+```json
+{
+  "name": "gmail-summary-drive",
+  "description": "Triage email and save a dated summary",
+  "skillId": "gmail-summary-drive"
+}
+```
+
+These aliases appear in the main message box `/` picker alongside deterministic app commands such as `/schedule` and `/clear`. Selection and manual typing both route through the existing skills runtime:
+
+- aliases resolve to their mapped `skillId`
+- pack and per-skill enable/disable state controls availability
+- aliases with required skill parameters open the parameter modal
+- aliases with optional-only parameters insert the slash token so the user can add context
+- alias collisions are resolved the same way in the picker and backend: enabled plugin aliases win over direct skill IDs
+
+See [Message Box Shortcuts](message-box-shortcuts.md) for the full composer shortcut contract.
 
 ---
 
@@ -135,7 +157,60 @@ It auto-refreshes every 30 seconds and provides at-a-glance awareness of your ac
 
 ## Bundled Plugin Packs
 
-CoWork OS ships with 17 plugin packs covering common job functions.
+CoWork OS ships with 19 plugin packs covering common job functions and reusable workflow shortcuts.
+
+### CoWork Shortcuts
+
+| | |
+|---|---|
+| **Icon** | ⚡ |
+| **Category** | Productivity |
+| **Agent Role** | None |
+
+**Purpose:** seed message-box workflow shortcuts as regular skills, not hard-coded app actions.
+
+**Core shortcuts:**
+- `/strategy`
+- `/review`
+- `/memory`
+
+**File and workspace shortcuts:**
+- `/batch-rename`
+- `/smart-deduplication`
+- `/folder-structure`
+- `/archive-stale-files`
+- `/template-generator`
+- `/recursive-search-extract`
+- `/format-converter`
+- `/size-audit`
+
+**Communication, calendar, and cross-source shortcuts:**
+- `/gmail-summary-drive`
+- `/calendar-prep-brief`
+- `/slack-action-items`
+- `/email-chain-resolver`
+- `/meeting-notes-distributor`
+- `/multi-source-report`
+- `/weekly-newsletter`
+- `/daily-inbox-zero`
+- `/monday-planning-brief`
+- `/end-of-day-log`
+
+**Document and research shortcuts:**
+- `/drive-analysis-slides`
+- `/cross-platform-search`
+- `/voice-note-draft`
+- `/meeting-recording-notes`
+- `/research-executive-brief`
+- `/proposal-customizer`
+- `/contract-plain-english`
+- `/spreadsheet-narrative`
+- `/content-repurposing`
+- `/weekly-file-cleanup`
+- `/monthly-financial-organizer`
+- `/competitive-scan`
+
+See [Message Box Shortcuts](message-box-shortcuts.md#cowork-shortcuts-pack) for the complete current list and runtime behavior.
 
 ### Engineering
 

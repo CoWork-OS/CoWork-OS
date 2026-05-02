@@ -33,6 +33,19 @@ Once complete, the packaged app will be in the `release/` folder:
 - **`mac-*/CoWork OS.app`** — unpacked macOS app bundle
 - **`win-*/`** — unpacked Windows app directory
 
+## Linux Server Release Package
+
+The Linux server artifact is separate from desktop packaging. It is a Linux x64 tarball for VPS/systemd deployments:
+
+```bash
+npm run package:linux:server
+npm run package:linux:server:smoke
+```
+
+This must run on Linux x64 so native runtime modules match the target. The package script builds the daemon and connectors, stages runtime dependencies, installs the Electron binary compatibility dependency, copies the full `resources/` tree, derives the connector list from `build:connectors`, writes `release/cowork-os-server-linux-x64-v<version>.tar.gz`, and writes a matching `.sha256` file.
+
+The smoke test extracts the tarball, verifies required files/resources/dependencies, checks `better-sqlite3`, confirms the Electron binary exists, starts `coworkd-node` on a temporary Control Plane port, and checks `/health`.
+
 ## Development Mode
 
 Run the app with hot reload:
@@ -77,6 +90,8 @@ npm run dev:log
 | `npm run dev:start` | Internal raw dev start command (used by wrappers) |
 | `npm run build` | Production build |
 | `npm run package` | Package desktop installers (`.dmg` on macOS, `.exe` on Windows) |
+| `npm run package:linux:server` | Build the Linux x64 server tarball and checksum on Linux |
+| `npm run package:linux:server:smoke` | Extract and boot-smoke the Linux server tarball on Linux |
 | `npm run setup` | Set up native modules for Electron |
 | `npm run fmt` | Format code with Oxfmt |
 | `npm run fmt:check` | Check formatting without writing |
@@ -116,6 +131,37 @@ npm run type-check
 ```
 
 If the entry chunk grows unexpectedly, rebuild with sourcemaps and inspect the generated `dist/renderer/assets/index-*.js.map` to identify newly eager modules.
+
+## Task Automation UI
+
+Task view supports `... > Add automation...`, a renderer-side shortcut that creates a real cron scheduled task from the current task.
+
+Implementation contract:
+
+- The task title/three-dot menu lives in `src/renderer/components/MainContent.tsx`.
+- The modal is `TaskAutomationModal` in the same file so task-derived defaults stay local to task view.
+- Saving must call `window.electronAPI.addCronJob`; do not create a parallel automation store for this flow.
+- Default run mode is `Chat`, with `shellAccess: false` and `allowUserInput: false`.
+- `Local` sets `shellAccess: true`.
+- `Worktree` should remain disabled until the cron creation payload can preserve a task worktree execution context.
+- Saved prompts should include a source task title, task ID, and `cowork://tasks/<taskId>` deeplink so future runs remain traceable.
+- Template selection should fill name, prompt, and schedule only; templates are not routines or managed agents.
+
+Focused helpers exported from `MainContent.tsx` for tests:
+
+- `TASK_AUTOMATION_TEMPLATES`
+- `buildTaskAutomationSchedule`
+- `buildTaskAutomationPrompt`
+- `buildTaskAutomationCronJobCreate`
+
+Validate changes with:
+
+```bash
+npx vitest run src/renderer/components/__tests__/main-content-working-state.test.ts
+npm run build:react
+```
+
+See [Task Automations](task-automations.md) for the product concept and user-facing behavior.
 
 ## Reliability Workflow (Local)
 
@@ -196,7 +242,19 @@ npm run skills:check
 
 `setup.sh` reports the local Kami render toolchain (`python3`, `node`, `weasyprint`, `pypdf`, `pptxgenjs`, `playwright`, `pdffonts`, and local Chromium-family browser availability). If some render dependencies are missing, the skill can still scaffold and edit source projects, but PDF/PPTX export should be treated as conditional.
 
-PPTX generation and previews use Codex's bundled `@oai/artifact-tool` runtime first. Generation falls back to `pptxgenjs` if that runtime is missing. Preview loading is two-phase: fast mode extracts slide text/notes and cached images immediately, while full mode renders missing slide images through artifact-tool, then local `soffice` (LibreOffice) plus `pdftoppm`, then text-only preview if no renderer succeeds. See [Presentation Artifacts and PPTX Preview](./pptx-generation-and-preview.md).
+PPTX generation and previews use the bundled `@oai/artifact-tool` runtime first. Generation falls back to `pptxgenjs` if that runtime is missing. Preview loading is two-phase: fast mode extracts slide text/notes and cached images immediately, while full mode renders missing slide images through artifact-tool, then local `soffice` (LibreOffice) plus `pdftoppm`, then text-only preview if no renderer succeeds. See [Presentation Artifacts and PPTX Preview](./pptx-generation-and-preview.md).
+
+### Testing `react-best-practices`
+
+The bundled `react-best-practices` skill has no helper scripts or native dependencies. When editing the skill, validate the content contract and routing coverage:
+
+```bash
+npm run skills:check:core
+npm run skills:eval-routing
+npm run skills:check
+```
+
+The routing eval includes a React workspace feature prompt so the skill remains discoverable for React/Next.js implementation work without colliding with React Native guidance.
 
 ### Everything Workbench artifact model
 
@@ -385,6 +443,86 @@ npx vitest run \
 | `src/shared/` | Shared types between main and renderer |
 | `resources/skills/` | Built-in skill definitions |
 | `connectors/` | Enterprise MCP connector implementations |
+
+## Composer Mentions
+
+The main composer supports a grouped `@` autocomplete for **Agents**, **Integrations**, and **Files**. The user-facing behavior is documented in [Composer Mentions](composer-mentions.md); this section captures the developer contract.
+
+Implementation boundaries:
+
+- `src/shared/types.ts` owns `IntegrationMentionOption` and `IntegrationMentionSelection`.
+- `src/electron/integrations/integration-mention-options.ts` builds integration mention options from local configured state only. It must stay fast and must not run network checks while the user types.
+- `src/electron/ipc/handlers.ts` and `src/electron/preload.ts` expose `listIntegrationMentionOptions()`.
+- `src/renderer/components/PromptComposerInput.tsx` owns rich inline mention editing. It keeps clean text serialization such as `@Gmail`, renders icon+label chips, and treats each chip as one removable unit for Backspace/Delete.
+- `src/renderer/components/MainContent.tsx` owns grouped menu filtering, section order, task/follow-up submission metadata, user message rendering, and `@Inbox` main-composer routing.
+- `src/renderer/components/IntegrationMentionText.tsx` renders integration chips in sent user messages and restored session history.
+- `src/electron/agent/executor.ts` turns `agentConfig.integrationMentions` into a soft routing guidance block. Do not convert mentions into `allowedTools`.
+
+Focused checks:
+
+```bash
+npx vitest run \
+  src/electron/integrations/__tests__/integration-mention-options.test.ts \
+  src/renderer/components/__tests__/prompt-composer-input.test.ts \
+  src/renderer/components/__tests__/integration-mention-text.test.ts
+npm run lint
+npm run type-check
+```
+
+## Ask Inbox
+
+Ask Inbox is the mailbox-specific agentic question surface inside Inbox Agent. The product and architecture contract is documented in [Ask Inbox Architecture](ask-inbox-architecture.md); this section captures the developer boundaries.
+
+Implementation boundaries:
+
+- `src/renderer/components/InboxAgentPanel.tsx` owns the right-sidebar `Agent Rail` / `Ask Inbox` tabs, the left ask launcher behavior, the Ask Inbox transcript, live step timeline, matched email rows, and pinned Ask composer.
+- `src/electron/mailbox/MailboxService.ts` owns `askMailbox()`, action-intent classification, progress emission, provider search adapters, answer generation, and safe draft creation paths.
+- `src/electron/mailbox/MailboxAgentSearchService.ts` owns query planning, local FTS retrieval, semantic mailbox retrieval, provider-result normalization, attachment-aware search, shortlist/read/rerank behavior, and no-evidence answers.
+- `src/shared/mailbox.ts` owns `MailboxAskInput`, `MailboxAskResult`, and `MailboxAskRunEvent`.
+- `src/shared/types.ts`, `src/electron/ipc/handlers.ts`, and `src/electron/preload.ts` own the transient `mailbox:askEvent` channel and `onMailboxAskEvent()` subscription.
+
+Rules:
+
+- Do not stream Ask progress through persisted `MailboxEvent`. Ask progress is transient UI telemetry and must not trigger mailbox automations, Heartbeat, Knowledge Graph, or playbooks.
+- Keep provider-native search additive. If Gmail or Outlook/Microsoft Graph search fails, Ask Inbox must fall back to local evidence.
+- Keep destructive actions out of Ask Inbox. It may answer questions and create reviewable drafts, but it must not silently send, archive, trash, mark done, or bulk mutate mail.
+- Preserve source metadata on results (`local_fts`, `local_vector`, `provider_search`, `attachment_text`) so UI evidence labels remain truthful.
+
+Focused checks:
+
+```bash
+npx vitest run src/electron/mailbox/__tests__/MailboxAgentSearchService.test.ts
+npx tsc -p tsconfig.electron.json
+npm run type-check
+```
+
+## Message Box Shortcuts
+
+The main composer supports a grouped `/` autocomplete for deterministic app commands and skill-backed workflow shortcuts. The user-facing behavior is documented in [Message Box Shortcuts](message-box-shortcuts.md); this section captures the developer contract.
+
+Implementation boundaries:
+
+- `src/shared/message-shortcuts.ts` owns the deterministic app command catalog and parser for `/schedule`, `/clear`, `/plan`, `/cost`, `/compact`, `/doctor`, and `/undo`.
+- `src/renderer/utils/message-slash-options.ts` owns picker option ordering, filtering, app-vs-skill display, optional/required parameter classification, invalid-token filtering, and keyboard selected-index clamping.
+- `src/renderer/components/MainContent.tsx` owns composer detection, selection behavior, skill parameter modal launch, optional-parameter insertion, app command task creation, and `/schedule` fresh-task precedence.
+- `src/renderer/App.tsx` owns the safe `/clear` task-view reset. `/clear` must not delete task history or switch workspaces.
+- `src/electron/agent/skill-slash-aliases.ts` resolves plugin-pack `slashCommands` aliases to target skill IDs. Backend precedence must match picker display; enabled plugin aliases win over direct skill IDs when tokens collide.
+- `src/electron/agent/executor.ts` owns generic skill slash execution. The deterministic `/schedule` handler must continue to run before generic skill slash routing.
+- `resources/plugin-packs/cowork-shortcuts/cowork.plugin.json` seeds the bundled CoWork Shortcuts workflow pack as normal skills and aliases.
+
+Focused checks:
+
+```bash
+npx vitest run \
+  src/shared/__tests__/message-shortcuts.test.ts \
+  src/shared/__tests__/skill-slash-commands.test.ts \
+  src/electron/agent/__tests__/skill-slash-aliases.test.ts \
+  src/electron/agent/__tests__/executor-schedule-slash.test.ts \
+  src/renderer/utils/__tests__/message-slash-options.test.ts \
+  src/renderer/components/__tests__/main-content-working-state.test.ts
+npm run type-check
+npm run build:react
+```
 
 ## Building Custom Connectors
 

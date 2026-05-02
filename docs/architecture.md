@@ -7,6 +7,8 @@ CoWork OS is a local-first desktop runtime and AI workbench for task execution, 
 - **Electron main process**: task orchestration, agent runtime, heartbeat orchestration, IPC, and tool execution
 - **React renderer**: desktop UI, Mission Control, task timeline, settings, and monitoring surfaces
 - **Tool and connector layer**: file, shell, browser, web, native integrations, document generation/compilation tools including source-first LaTeX PDF compilation, MCP connectors, remote execution, and **macOS computer use** (`screenshot`, `click`, `type_text`, and related tools) as a governed desktop-GUI lane (helper-targeted permissions, single-session lock, policy-gated routing). See [Computer use (macOS)](computer-use.md).
+- **Composer mention layer**: the renderer and Electron preload expose a grouped `@` autocomplete for Agents, configured Integrations, and Files. Integration mentions are resolved locally, render as rich chips, persist in task/session metadata, and inject soft routing guidance into the executor without changing permissions or `allowedTools`. See [Composer Mentions](composer-mentions.md).
+- **Message shortcut layer**: the renderer exposes one `/` picker for deterministic app commands and skill-backed workflow shortcuts. Shared app command parsing handles `/schedule`, `/clear`, `/plan`, `/cost`, `/compact`, `/doctor`, and `/undo`; plugin-pack aliases resolve to target skill IDs before generic skill slash execution. See [Message Box Shortcuts](message-box-shortcuts.md).
 - **Chronicle screen-context lane**: desktop-only passive recent-screen capture, local ranking/OCR enrichment, source resolution, provenance-aware `screen_context_resolve` tool exposure, and promotion of task-used observations into workspace-backed `screen_context` evidence plus optional linked background memory generation. See [Chronicle](chronicle.md).
 - **Managed resource layer**: first-class `ManagedAgent`, `ManagedEnvironment`, and `ManagedSession` control-plane resources package reusable execution definitions and durable run identities on top of existing `Task`, `AgentTeamRun`, and `SessionRuntime` primitives. See [Managed Agents](managed-agents.md).
 - **Automation/event layer**: scheduled tasks, webhooks, channel events, and MCP connector/resource notifications all flow through the same trigger engine
@@ -63,7 +65,7 @@ The skill system now follows an additive contract:
 - the canonical user request is resolved as `rawPrompt -> userPrompt -> prompt`
 - task creation normalizes prompt fields centrally so new tasks always persist canonical prompt data
 - skill routing works as shortlist-and-hint guidance, not prompt takeover
-- slash commands can still invoke skills deterministically, including first-class bundled workflows such as `/simplify`, `/batch`, and `/llm-wiki`, but the result is applied additively
+- slash commands can still invoke skills deterministically, including first-class bundled workflows such as `/simplify`, `/batch`, `/llm-wiki`, direct skill IDs, and plugin-pack aliases from the message box shortcut picker, but the result is applied additively
 - `use_skill` returns structured context plus scoped directives, not a replacement task definition
 - the executor builds runtime context from canonical prompt + task notes + applied skill content
 - the renderer always shows canonical task text and renders applied skills separately

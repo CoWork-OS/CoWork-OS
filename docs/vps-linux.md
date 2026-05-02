@@ -1,17 +1,26 @@
 # Linux VPS (Headless) Guide
 
-CoWork OS can run on Linux as a long-running daemon in two ways:
+CoWork OS can run on Linux as a long-running daemon through three supported install paths:
 
-1. **Node-only daemon (recommended for VPS)**: no Electron/Xvfb required.
-2. **Headless Electron daemon**: closer to desktop parity, but requires Electron runtime deps + Xvfb.
+1. **Packaged server release (recommended for production VPS)**: a Linux x64 tarball from GitHub Releases with built daemon assets, runtime dependencies, systemd templates, bundled resources, and connectors.
+2. **Node-only daemon from source/npm**: run `coworkd-node` under Node.js, with no desktop window and no Xvfb.
+3. **Headless Electron daemon from source**: closer to desktop parity, but requires Electron runtime deps + Xvfb.
 
-Both modes can be driven remotely using:
+All server modes can be driven remotely using:
 
 - `--headless` (no Electron windows)
 - The **WebSocket Control Plane** for remote task creation/monitoring (Web UI + CLI)
 - Optional channel gateways (Telegram/Discord/Slack/etc) if you’ve configured them in the DB
 
-This mode is designed for VPS/systemd/docker deployments.
+These modes are designed for VPS/systemd/docker deployments.
+
+Current packaging concept:
+
+- The release tarball target is Linux x64 on glibc-based distributions.
+- It starts `bin/coworkd-node.js`; it does not launch the desktop UI and does not require Xvfb.
+- It includes the full `resources/` tree, built MCP connector runtimes, and runtime `node_modules`.
+- It may include Electron as a compatibility dependency while shared daemon code still imports Electron-safe helpers; users should not run the desktop app from this package.
+- Interaction happens through the Control Plane Web UI, `coworkctl`, or configured messaging channels.
 
 If you want an overview (what the interface is, which runtime to pick, what works on Linux), start with:
 
@@ -94,7 +103,7 @@ This quick start is great for first run/testing. For always-on production, conti
   You are likely on an older broken npm publish that missed daemon build artifacts. Upgrade and retry:
   `npm install cowork-os@latest --no-audit --no-fund`
 
-## Option A: Packaged Server Release (Node-Only)
+## Option A: Packaged Server Release (Recommended)
 
 Use this path when you want a GitHub release artifact that does not require cloning the repo or building TypeScript on the server.
 
@@ -154,7 +163,7 @@ sudo systemctl enable --now cowork-os-node
 sudo journalctl -u cowork-os-node -f
 ```
 
-The packaged release uses `bin/coworkd-node.js` by default. It does not launch the desktop UI or require Xvfb.
+The packaged release uses `bin/coworkd-node.js` by default. It does not launch the desktop UI or require Xvfb. Keep Node.js 24 installed; the package is built and smoke-tested on Linux x64 and includes runtime dependencies, but `coworkd-node` can still attempt a native dependency rebuild if the local Node ABI is incompatible.
 
 ## Option B: Docker (Headless Electron)
 
@@ -194,7 +203,7 @@ node bin/coworkctl.js call config.get
 docker compose up --build -d
 ```
 
-If you prefer the **Node-only daemon** (no Electron/Xvfb), use the compose profile:
+If you prefer the **Node daemon** container with no desktop window or Xvfb, use the compose profile:
 
 ```bash
 docker compose --profile node up --build -d cowork-os-node
@@ -219,7 +228,7 @@ If you need to print it again later, restart with:
 
 ## Option C: Systemd from Source (Node-Only Daemon)
 
-This is the simplest non-Docker setup when you don’t want to install Xvfb/Electron GUI deps.
+This is the source-build path when you don’t want Docker or a prebuilt release artifact.
 
 1. Install OS deps (Debian/Ubuntu):
 

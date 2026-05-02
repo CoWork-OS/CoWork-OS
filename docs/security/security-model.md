@@ -107,6 +107,7 @@ CoWork now models outbound transfer separately from generic network reads.
 - `http_request` stays in `network_access` only for plain `GET` or `HEAD` requests with no body and no custom headers
 - mutating or payload-carrying `http_request` calls are classified as `data_export`
 - `analyze_image` and `read_pdf_visual` are also classified as `data_export` because file bytes are sent to external model providers
+- `parse_document` is the local document/PDF text extraction path. Uploaded PDF excerpts and parser results remain untrusted document data, but ordinary PDF text reading does not become `data_export` unless the task uses an outbound tool such as `read_pdf_visual`.
 
 ### Destination Controls
 

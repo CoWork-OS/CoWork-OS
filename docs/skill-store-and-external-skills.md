@@ -200,10 +200,12 @@ Installed external skills follow the same execution contract as bundled skills.
 
 - they can be shortlisted proactively when their routing metadata matches the canonical task intent
 - they can be invoked deterministically through slash/manual flows
+- they can appear in the message box `/` picker when enabled and their skill ID is a valid slash token
+- they can be targeted by plugin-pack `slashCommands` aliases when a pack maps a visible command token to the installed skill ID
 - `use_skill` applies them as additive context and scoped runtime directives
 - they do not replace the original task prompt
 
-See [Skills Runtime Model](skills-runtime-model.md) for the runtime semantics after a skill is loaded.
+See [Skills Runtime Model](skills-runtime-model.md) for the runtime semantics after a skill is loaded and [Message Box Shortcuts](message-box-shortcuts.md) for picker and slash-alias behavior.
 
 ## Security and Trust Model
 
@@ -242,7 +244,7 @@ Current limits:
 
 This gives CoWork OS an important ecosystem advantage:
 - users can start with bundled skills
-- bundled examples now include workflows such as `llm-wiki`, `kami`, and `taste-skill`
+- bundled examples now include workflows such as `llm-wiki`, `kami`, `react-best-practices`, and `taste-skill`
 - adopt curated CoWork registry skills
 - pull in popular ClawHub skills directly from the app
 - bring skills from other ecosystems without waiting for a custom marketplace integration

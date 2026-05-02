@@ -1476,6 +1476,24 @@
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/proofread.json"
     },
     {
+      "id": "react-best-practices",
+      "name": "React Best Practices",
+      "description": "React and Next.js performance guidance for code changes, enhancements, feature work, reviews, and refactors.",
+      "version": "1.0.0",
+      "author": "Vercel",
+      "tags": [
+        "react",
+        "nextjs",
+        "performance",
+        "frontend",
+        "vercel"
+      ],
+      "icon": "⚛️",
+      "category": "Development",
+      "updatedAt": "2026-05-02",
+      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/react-best-practices.json"
+    },
+    {
       "id": "react-native-skills",
       "name": "react-native-skills",
       "description": "React Native and Expo best practices for performance, UI patterns, and native integrations.",

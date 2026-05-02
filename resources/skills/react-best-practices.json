@@ -1,0 +1,45 @@
+{
+  "id": "react-best-practices",
+  "name": "React Best Practices",
+  "description": "React and Next.js performance guidance for code changes, enhancements, feature work, reviews, and refactors.",
+  "icon": "⚛️",
+  "category": "Development",
+  "prompt": "# React Best Practices\n\nBundled upstream source: https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices\n\nUse this skill when a React or Next.js workspace needs code changes, enhancements, new features, refactors, reviews, data-fetching work, bundle optimization, or performance improvements.\n\nDo not use this skill when:\n- the request is React Native or Expo work; use `react-native-skills` instead\n- the request is purely visual frontend design with no React/Next.js code concern; use the frontend design skill instead\n- the user is only asking conceptual product strategy or documentation unrelated to React implementation\n\nExecution workflow:\n1. Before editing, inspect the existing workspace shape and worktree status. If the worktree is dirty, say that you are using the React best-practices guidance, keep edits narrow, and avoid reverting existing user changes.\n2. Read `{baseDir}/SKILL.md` for the quick rule index.\n3. For detailed examples, read only the relevant rule files under `{baseDir}/rules/`. Use `{baseDir}/AGENTS.md` only when you need the full compiled guide.\n4. Prioritize the highest-impact categories first: eliminating waterfalls, bundle size optimization, server-side performance, client-side data fetching, and re-render reduction.\n5. Apply the guidance in sympathy with the existing codebase. Prefer existing project patterns, avoid unrelated rewrites, and keep abstractions justified by actual complexity.\n6. Verify with the repo's targeted test, type-check, lint, or build command that best matches the changed React/Next.js surface.\n\nSuccess criteria:\n- React/Next.js changes follow the relevant performance and rendering guidance.\n- Work stays scoped to the requested feature, enhancement, review, or refactor.\n- The final response names the concrete validation performed or explains why validation was not run.",
+  "parameters": [],
+  "enabled": true,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "Vercel",
+    "repository": "https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices",
+    "tags": [
+      "react",
+      "nextjs",
+      "performance",
+      "frontend",
+      "vercel"
+    ],
+    "routing": {
+      "useWhen": "Use when a React or Next.js workspace needs implementation changes, enhancements, new features, refactors, reviews, data fetching, bundle optimization, rendering fixes, or performance improvements.",
+      "dontUseWhen": "Do not use for React Native or Expo work, generic visual frontend design without React implementation concerns, backend-only tasks, or conceptual planning unrelated to React/Next.js code.",
+      "outputs": "React/Next.js implementation or review work that applies the relevant performance, rendering, data-fetching, and bundle-size rules with scoped validation notes.",
+      "successCriteria": "The work uses the relevant React/Next.js best-practice rules, preserves existing project patterns, avoids unrelated reversions, and reports targeted validation.",
+      "examples": {
+        "positive": [
+          "Add this new settings panel to our React app and keep it performant.",
+          "Refactor this Next.js page to remove data-fetching waterfalls.",
+          "Review these React component changes for re-render and bundle-size issues.",
+          "Enhance the composer UI in this React workspace without disturbing unrelated edits."
+        ],
+        "negative": [
+          "Build this Expo screen for a React Native app.",
+          "Design a landing page mockup without touching implementation.",
+          "Write a high-level product brief for our frontend roadmap.",
+          "Fix this backend database migration failure."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
+    }
+  }
+}

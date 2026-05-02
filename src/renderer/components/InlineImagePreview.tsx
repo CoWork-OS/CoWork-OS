@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Download } from "lucide-react";
 import type { FileViewerResult } from "../../electron/preload";
 
 type InlineImagePreviewProps = {
@@ -93,25 +94,37 @@ export function InlineImagePreview({
 
       {!loading && !error && result?.content && (
         <>
-          <button
-            className="inline-image-preview-button"
-            type="button"
-            onClick={handleOpen}
-            title="Click to preview"
-            aria-label="Open image preview"
-          >
-            <img
-              src={result.content}
-              alt={result.fileName}
-              className="inline-image-preview-image"
-              onLoad={(e) => {
-                const img = e.currentTarget;
-                if (img?.naturalWidth && img?.naturalHeight) {
-                  setDimensions({ width: img.naturalWidth, height: img.naturalHeight });
-                }
-              }}
-            />
-          </button>
+          <div className="inline-image-preview-frame">
+            <button
+              className="inline-image-preview-button"
+              type="button"
+              onClick={handleOpen}
+              title="Click to preview"
+              aria-label="Open image preview"
+            >
+              <img
+                src={result.content}
+                alt={result.fileName}
+                className="inline-image-preview-image"
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  if (img?.naturalWidth && img?.naturalHeight) {
+                    setDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+                  }
+                }}
+              />
+            </button>
+            <a
+              className="inline-image-preview-download-button"
+              href={result.content}
+              download={result.fileName || "image.png"}
+              title="Download image"
+              aria-label={`Download ${result.fileName || "image"}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Download size={17} strokeWidth={2.2} aria-hidden="true" />
+            </a>
+          </div>
           {meta && <div className="inline-image-preview-meta">{meta}</div>}
         </>
       )}

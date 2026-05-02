@@ -16,6 +16,7 @@ import {
 } from "./types";
 import {
   buildOpenAICompatibleSystemMessages,
+  createToolCallIdMapper,
   fromOpenAICompatibleResponse,
   toOpenAICompatibleMessages,
   toOpenAICompatibleTools,
@@ -31,6 +32,7 @@ const logger = createLogger("azure-openai");
 const DEFAULT_AZURE_API_VERSION = "2024-12-01-preview";
 const AZURE_MAX_TOOLS = 128;
 const AZURE_CHAT_MAX_TOOL_CALL_ID_LENGTH = 64;
+const AZURE_RESPONSES_MAX_CALL_ID_LENGTH = 64;
 const textDecoder = new TextDecoder();
 
 const isToolResult = (item: LLMContent | LLMToolResult): item is LLMToolResult =>
@@ -172,6 +174,7 @@ export class AzureOpenAIProvider implements LLMProvider {
   private buildResponsesInput(messages: LLMMessage[], system?: string, systemBlocks?: LLMRequest["systemBlocks"]): Any[] {
     const input: Any[] = [];
     const systemMessages = buildOpenAICompatibleSystemMessages(system, systemBlocks);
+    const mapToolCallId = createToolCallIdMapper(AZURE_RESPONSES_MAX_CALL_ID_LENGTH);
 
     for (const systemMessage of systemMessages) {
       input.push({
@@ -204,7 +207,7 @@ export class AzureOpenAIProvider implements LLMProvider {
         if (isToolResult(item)) {
           input.push({
             type: "function_call_output",
-            call_id: item.tool_use_id,
+            call_id: mapToolCallId(item.tool_use_id),
             output:
               typeof item.content === "string" ? item.content : JSON.stringify(item.content ?? ""),
           });
@@ -236,7 +239,7 @@ export class AzureOpenAIProvider implements LLMProvider {
         for (const toolUse of toolUses) {
           input.push({
             type: "function_call",
-            call_id: toolUse.id,
+            call_id: mapToolCallId(toolUse.id),
             name: toolUse.name,
             arguments: JSON.stringify(toolUse.input ?? {}),
           });

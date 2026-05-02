@@ -786,19 +786,40 @@ export interface MailboxAskInput {
   query: string;
   limit?: number;
   includeAnswer?: boolean;
+  runId?: string;
+}
+
+export interface MailboxAskRunEvent {
+  runId: string;
+  timestamp: number;
+  type: "started" | "step_started" | "step_completed" | "completed" | "error";
+  stepId: string;
+  label: string;
+  detail?: string;
+  status: "running" | "done" | "error";
+  payload?: Record<string, unknown>;
 }
 
 export interface MailboxAskResult {
   query: string;
+  runId?: string;
   answer?: string;
+  steps?: MailboxAskRunEvent[];
   results: Array<{
     thread: MailboxThreadListItem;
     matchedAttachment?: MailboxAttachmentRecord;
     snippet: string;
     score: number;
+    searchSources?: Array<"local_fts" | "local_vector" | "provider_search" | "attachment_text">;
+    matchedFields?: string[];
+    evidenceSnippets?: string[];
   }>;
   usedLlm: boolean;
   error?: string;
+  action?: {
+    type: "sent_followup_drafts";
+    result: MailboxSentFollowupDraftResult;
+  };
 }
 
 export interface MailboxSenderCleanupDigest {
@@ -1013,6 +1034,27 @@ export interface MailboxDraftOptions {
   tone?: "concise" | "warm" | "direct" | "executive";
   includeAvailability?: boolean;
   allowNoreplySender?: boolean;
+}
+
+export interface MailboxSentFollowupDraft {
+  thread: MailboxThreadListItem;
+  draft: MailboxDraftSuggestion;
+  lastOutboundAt: number;
+  waitHours: number;
+  reason: string;
+}
+
+export interface MailboxSentFollowupDraftInput {
+  thresholdHours?: number;
+  limit?: number;
+}
+
+export interface MailboxSentFollowupDraftResult {
+  thresholdHours: number;
+  createdDraftCount: number;
+  skippedExistingDraftCount: number;
+  drafts: MailboxSentFollowupDraft[];
+  generatedAt: number;
 }
 
 export interface MailboxBulkReviewInput {

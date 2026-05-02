@@ -1904,7 +1904,9 @@ export class MessageRouter {
     const channelConfig = (channel.config || {}) as Any;
     const ambientMode = channelConfig.ambientMode === true;
     const silentUnauthorized =
-      channelConfig.silentUnauthorized === true || ambientMode;
+      channelConfig.silentUnauthorized === true ||
+      ambientMode ||
+      adapter.type === "email";
     message.text = this.normalizeIncomingTextForRouting(
       adapter.type,
       message.text,
@@ -5913,7 +5915,7 @@ export class MessageRouter {
         break;
 
       case "openai": {
-        currentModel = settings.openai?.model || "gpt-4o-mini";
+        currentModel = status.currentModel;
         const cachedOpenAI = LLMProviderFactory.getCachedModels("openai");
         if (cachedOpenAI && cachedOpenAI.length > 0) {
           models = cachedOpenAI;
@@ -6093,7 +6095,7 @@ export class MessageRouter {
         break;
 
       case "openai": {
-        currentModel = settings.openai?.model || "gpt-4o-mini";
+        currentModel = status.currentModel;
         const cachedOpenAI = LLMProviderFactory.getCachedModels("openai");
         if (cachedOpenAI && cachedOpenAI.length > 0) {
           models = cachedOpenAI;

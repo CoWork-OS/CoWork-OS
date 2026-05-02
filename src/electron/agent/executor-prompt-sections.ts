@@ -103,7 +103,7 @@ export function buildModeDomainContract(executionMode: ExecutionMode, taskDomain
       : executionMode === "verified"
         ? "- Mode policy: full tool execution with step verification when configured."
       : executionMode === "chat"
-        ? "- Mode policy: direct chat only. Do not use tools."
+        ? "- Mode policy: direct chat only. Do not use tools. PDF attachment turns that require deeper reading are auto-promoted to read-only analysis before this chat policy is applied."
       : executionMode === "plan"
         ? "- Mode policy: planning-only. Do not use mutating tools."
         : "- Mode policy: strict analysis/read-only. Do not use mutating tools.",

@@ -1176,7 +1176,7 @@ export class ChannelRegistry extends EventEmitter {
         icon: "📧",
         builtin: true,
         capabilities: {
-          sendMessage: true,
+          sendMessage: false,
           receiveMessage: true,
           attachments: true,
           reactions: false,

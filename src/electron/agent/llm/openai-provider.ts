@@ -34,7 +34,7 @@ import {
 import { createLogger } from "../../utils/logger";
 
 // Default model for openai-codex (ChatGPT backend)
-const DEFAULT_CODEX_MODEL = "gpt-5.1-codex-mini";
+const DEFAULT_CODEX_MODEL = "gpt-5.5";
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const OPENAI_CODEX_API = "openai-codex-responses";
 const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -49,8 +49,10 @@ const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
   "gpt-5.2-codex",
   "gpt-5.1",
   "gpt-5.1-codex-max",
-  "gpt-5.1-codex-mini",
 ];
+const UNSUPPORTED_CHATGPT_SUBSCRIPTION_MODEL_IDS = new Set([
+  "gpt-5.1-codex-mini",
+]);
 const logger = createLogger("OpenAI");
 
 const isToolResult = (item: LLMContent | LLMToolResult): item is LLMToolResult =>
@@ -270,7 +272,7 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private shouldUseResponsesApi(modelId: string | undefined): boolean {
-    return this.normalizeCodexModelId(modelId || this.model) === "gpt-5.5";
+    return this.normalizeCodexModelId(modelId || this.model).startsWith("gpt-5");
   }
 
   private getOpenAIReasoningEffort(request: LLMRequest): OpenAIReasoningEffort | undefined {
@@ -521,9 +523,9 @@ export class OpenAIProvider implements LLMProvider {
     const normalizedModelId = this.normalizeCodexModelId(modelId);
     // Map common public model names to ChatGPT internal models
     const modelMap: Record<string, string> = {
-      // Map gpt-4o models to gpt-5.1
-      "gpt-4o": "gpt-5.1",
-      "gpt-4o-mini": "gpt-5.1-codex-mini",
+      // Map legacy OpenAI API model names to ChatGPT-account models.
+      "gpt-4o": DEFAULT_CODEX_MODEL,
+      "gpt-4o-mini": DEFAULT_CODEX_MODEL,
       // Map o1/reasoning models to gpt-5.2
       o1: "gpt-5.2",
       "o1-mini": "gpt-5.2-codex",
@@ -531,7 +533,7 @@ export class OpenAIProvider implements LLMProvider {
       // Default mappings
       "gpt-4-turbo": "gpt-5.1",
       "gpt-4": "gpt-5.1",
-      "gpt-3.5-turbo": "gpt-5.1-codex-mini",
+      "gpt-3.5-turbo": DEFAULT_CODEX_MODEL,
     };
 
     return modelMap[normalizedModelId] || normalizedModelId;
@@ -702,11 +704,13 @@ export class OpenAIProvider implements LLMProvider {
         // Get models from pi-ai SDK for openai-codex provider
         const piAiModels = getModels(OPENAI_CODEX_PROVIDER);
 
-        const models = piAiModels.map((m) => ({
-          id: m.id,
-          name: m.name || this.formatModelName(m.id),
-          description: this.getModelDescription(m.id),
-        }));
+        const models = piAiModels
+          .filter((m) => !UNSUPPORTED_CHATGPT_SUBSCRIPTION_MODEL_IDS.has(m.id))
+          .map((m) => ({
+            id: m.id,
+            name: m.name || this.formatModelName(m.id),
+            description: this.getModelDescription(m.id),
+          }));
         for (const id of CHATGPT_SUBSCRIPTION_MODEL_IDS) {
           if (!models.some((model) => model.id === id)) {
             models.push({
@@ -799,11 +803,6 @@ export class OpenAIProvider implements LLMProvider {
         id: "gpt-5.4-nano",
         name: "GPT-5.4 Nano",
         description: "Fastest GPT-5.4 model for ChatGPT subscription access",
-      },
-      {
-        id: "gpt-5.1-codex-mini",
-        name: "GPT-5.1 Codex Mini",
-        description: "Fast and efficient for most tasks",
       },
       {
         id: "gpt-5.1-codex-max",

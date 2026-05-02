@@ -573,6 +573,59 @@ describeWithSqlite("MailboxService", () => {
       "news@example.com",
       "An unrelated launch plan mention already present in the FTS table.",
     );
+    db.prepare(
+      `INSERT INTO mailbox_threads
+        (id, account_id, provider_thread_id, provider, subject, snippet, participants_json, labels_json, category, today_bucket, domain_category, priority_score, urgency_score, needs_reply, stale_followup, cleanup_candidate, handled, unread_count, message_count, last_message_at, last_synced_at, metadata_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "gmail-thread:qnb-statement",
+      "gmail:test@example.com",
+      "qnb-statement",
+      "gmail",
+      "QNB E-Ekstre",
+      "Miles&Smiles QNB First kredi kartinizin hesap ozeti ektedir.",
+      JSON.stringify([{ email: "qnb@example.com", name: "QNB E-Ekstre" }]),
+      JSON.stringify([]),
+      "updates",
+      "needs_action",
+      "finance",
+      60,
+      70,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      now - 1000,
+      now,
+      JSON.stringify({}),
+      now,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO mailbox_messages
+        (id, thread_id, provider_message_id, direction, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, body_text, received_at, is_unread, metadata_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      randomUUID(),
+      "gmail-thread:qnb-statement",
+      "m-qnb",
+      "incoming",
+      "QNB E-Ekstre",
+      "qnb@example.com",
+      JSON.stringify([{ email: "test@example.com", name: "Test User" }]),
+      JSON.stringify([]),
+      JSON.stringify([]),
+      "QNB E-Ekstre",
+      "Son Odeme Tarihi 11/05/2026",
+      "QNB credit card account extract. Donem Borcu 36,243.09 TL. Asgari Odeme Tutari 14,498.00 TL. Son Odeme Tarihi 11/05/2026.",
+      now - 1000,
+      0,
+      JSON.stringify({}),
+      now,
+      now,
+    );
 
     const senderDigest = await service.getMailboxSenderCleanupDigest({ limit: 5 });
     expect(senderDigest.senders.some((sender) => sender.email === "news@example.com")).toBe(true);
@@ -580,6 +633,189 @@ describeWithSqlite("MailboxService", () => {
     const ask = await service.askMailbox({ query: "launch plan", includeAnswer: false });
     expect(ask.results.map((result) => result.thread.id)).toContain("gmail-thread:alpha");
     expect(ask.usedLlm).toBe(false);
+
+    const paymentAsk = await service.askMailbox({
+      query: "when do I need to make a payment to QNB bank for my credit card",
+      includeAnswer: false,
+    });
+    expect(paymentAsk.results[0]?.thread.id).toBe("gmail-thread:qnb-statement");
+    expect(paymentAsk.results[0]?.searchSources).toEqual(expect.arrayContaining(["local_fts"]));
+    expect(paymentAsk.results[0]?.evidenceSnippets?.join(" ")).toContain("Son Odeme Tarihi 11/05/2026");
+  });
+
+  it("creates prioritized follow-up drafts for sent threads without replies", async () => {
+    const staleOutboundAt = now - 26 * 60 * 60 * 1000;
+    const repliedOutboundAt = now - 30 * 60 * 60 * 1000;
+    const existingDraftOutboundAt = now - 28 * 60 * 60 * 1000;
+
+    for (const thread of [
+      {
+        id: "gmail-thread:sent-followup",
+        providerThreadId: "sent-followup",
+        subject: "Proposal review",
+        snippet: "Following up on the proposal.",
+        participants: [{ email: "jordan@example.com", name: "Jordan" }],
+        priorityScore: 92,
+        urgencyScore: 88,
+        lastMessageAt: staleOutboundAt,
+      },
+      {
+        id: "gmail-thread:sent-replied",
+        providerThreadId: "sent-replied",
+        subject: "Already replied",
+        snippet: "This thread received a reply.",
+        participants: [{ email: "casey@example.com", name: "Casey" }],
+        priorityScore: 99,
+        urgencyScore: 99,
+        lastMessageAt: now - 60 * 60 * 1000,
+      },
+      {
+        id: "gmail-thread:sent-existing-draft",
+        providerThreadId: "sent-existing-draft",
+        subject: "Existing draft",
+        snippet: "This thread already has a draft.",
+        participants: [{ email: "riley@example.com", name: "Riley" }],
+        priorityScore: 89,
+        urgencyScore: 80,
+        lastMessageAt: existingDraftOutboundAt,
+      },
+    ]) {
+      db.prepare(
+        `INSERT INTO mailbox_threads
+          (id, account_id, provider_thread_id, provider, subject, snippet, participants_json, labels_json, category, priority_score, urgency_score, needs_reply, stale_followup, cleanup_candidate, handled, unread_count, message_count, last_message_at, last_synced_at, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        thread.id,
+        "gmail:test@example.com",
+        thread.providerThreadId,
+        "gmail",
+        thread.subject,
+        thread.snippet,
+        JSON.stringify(thread.participants),
+        JSON.stringify([]),
+        "follow_up",
+        thread.priorityScore,
+        thread.urgencyScore,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        thread.lastMessageAt,
+        now,
+        JSON.stringify({}),
+        now,
+        now,
+      );
+    }
+
+    const insertMessage = (
+      threadId: string,
+      providerMessageId: string,
+      direction: "incoming" | "outgoing",
+      fromEmail: string,
+      fromName: string,
+      to: Array<{ email: string; name?: string }>,
+      subject: string,
+      receivedAt: number,
+    ) => {
+      db.prepare(
+        `INSERT INTO mailbox_messages
+          (id, thread_id, provider_message_id, direction, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, body_text, received_at, is_unread, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        randomUUID(),
+        threadId,
+        providerMessageId,
+        direction,
+        fromName,
+        fromEmail,
+        JSON.stringify(to),
+        JSON.stringify([]),
+        JSON.stringify([]),
+        subject,
+        "Message snippet",
+        "Could you take a look when you have a chance?",
+        receivedAt,
+        direction === "incoming" ? 1 : 0,
+        JSON.stringify({}),
+        now,
+        now,
+      );
+    };
+
+    insertMessage(
+      "gmail-thread:sent-followup",
+      "m-sent-followup",
+      "outgoing",
+      "test@example.com",
+      "Test User",
+      [{ email: "jordan@example.com", name: "Jordan" }],
+      "Proposal review",
+      staleOutboundAt,
+    );
+    insertMessage(
+      "gmail-thread:sent-replied",
+      "m-sent-replied-out",
+      "outgoing",
+      "test@example.com",
+      "Test User",
+      [{ email: "casey@example.com", name: "Casey" }],
+      "Already replied",
+      repliedOutboundAt,
+    );
+    insertMessage(
+      "gmail-thread:sent-replied",
+      "m-sent-replied-in",
+      "incoming",
+      "casey@example.com",
+      "Casey",
+      [{ email: "test@example.com", name: "Test User" }],
+      "Re: Already replied",
+      now - 60 * 60 * 1000,
+    );
+    insertMessage(
+      "gmail-thread:sent-existing-draft",
+      "m-sent-existing-draft",
+      "outgoing",
+      "test@example.com",
+      "Test User",
+      [{ email: "riley@example.com", name: "Riley" }],
+      "Existing draft",
+      existingDraftOutboundAt,
+    );
+    db.prepare(
+      `INSERT INTO mailbox_drafts
+        (id, thread_id, subject, body_text, tone, rationale, schedule_notes, metadata_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+    ).run(
+      randomUUID(),
+      "gmail-thread:sent-existing-draft",
+      "Re: Existing draft",
+      "Existing body",
+      "concise",
+      "Already drafted",
+      JSON.stringify({}),
+      now,
+      now,
+    );
+
+    const ask = await service.askMailbox({
+      query:
+        "Please nudge anyone I have not heard back from after 24 hours and write polite follow-up drafts for the most important ones.",
+      includeAnswer: true,
+    });
+
+    expect(ask.action?.type).toBe("sent_followup_drafts");
+    expect(ask.action?.result.createdDraftCount).toBe(1);
+    expect(ask.action?.result.skippedExistingDraftCount).toBe(1);
+    expect(ask.results.map((result) => result.thread.id)).toEqual(["gmail-thread:sent-followup"]);
+
+    const detail = await service.getThread("gmail-thread:sent-followup");
+    expect(detail?.drafts).toHaveLength(1);
+    expect(detail?.drafts[0]?.subject).toBe("Re: Proposal review");
+    expect(detail?.drafts[0]?.body).toContain("Just following up");
   });
 
   it("filters threads by suggested proposals and open commitments", async () => {

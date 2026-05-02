@@ -201,6 +201,7 @@ describe("RightPanel checklist rendering", () => {
     expect(markup).toContain('aria-label="1 file"');
     expect(markup).toContain('class="cli-file-count-number">1</span>');
     expect(markup).not.toContain(">file</span>");
+    expect(markup).toContain('aria-label="Text file"');
     expect(markup).toContain("ch_01.md");
   });
 

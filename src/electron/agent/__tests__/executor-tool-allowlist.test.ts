@@ -168,6 +168,30 @@ describe("TaskExecutor tool allow-list semantics", () => {
     expect(allowlist.has("read_pdf_visual")).toBe(false);
   });
 
+  it("keeps parse_document available for attached PDF question-answering", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      title: "PDF Q&A",
+      prompt:
+        "Based on the attached PDF at .cowork/uploads/123/report.pdf, answer what the contract says about renewal.",
+      agentConfig: {
+        taskIntent: "execution",
+      },
+    };
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+
+    const allowlist = (TaskExecutor as Any).prototype.buildStepToolAllowlist.call(
+      executor,
+      { requiredTools: new Set<string>() },
+      "analysis",
+      "writing",
+      "Answer the user's question from the attached PDF content.",
+    );
+
+    expect(allowlist.has("parse_document")).toBe(true);
+    expect(allowlist.has("read_pdf_visual")).toBe(false);
+  });
+
   it("adds read_pdf_visual only for explicit PDF layout analysis steps", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = {

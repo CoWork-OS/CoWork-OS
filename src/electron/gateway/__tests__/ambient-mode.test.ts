@@ -22,10 +22,15 @@ describe("Gateway ambient mode logic", () => {
   }
 
   function computeSilentUnauthorized(opts: {
-    channelSilentUnauthorized: boolean;
+    channelSilentUnauthorized?: boolean;
     ambientMode: boolean;
+    channelType?: string;
   }): boolean {
-    return opts.channelSilentUnauthorized || opts.ambientMode;
+    return (
+      opts.channelSilentUnauthorized === true ||
+      opts.ambientMode ||
+      opts.channelType === "email"
+    );
   }
 
   describe("ingestOnly computation", () => {
@@ -101,6 +106,20 @@ describe("Gateway ambient mode logic", () => {
       expect(
         computeSilentUnauthorized({ channelSilentUnauthorized: false, ambientMode: false }),
       ).toBe(false);
+    });
+
+    it("is true by default for email channels", () => {
+      expect(computeSilentUnauthorized({ ambientMode: false, channelType: "email" })).toBe(true);
+    });
+
+    it("cannot be disabled for email channels", () => {
+      expect(
+        computeSilentUnauthorized({
+          channelSilentUnauthorized: false,
+          ambientMode: false,
+          channelType: "email",
+        }),
+      ).toBe(true);
     });
   });
 });

@@ -29,6 +29,39 @@ vi.mock("../../settings/personality-manager", () => ({
 }));
 
 describe("TaskExecutor chat mode", () => {
+  it("promotes explicit chat PDF attachment turns to read-only analysis mode", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "task-chat-pdf",
+      title: "PDF chat",
+      prompt: [
+        "Summarize this PDF",
+        "",
+        "Attached files (relative to workspace):",
+        "- report.pdf (.cowork/uploads/123/report.pdf)",
+        "  Extracted content:",
+        "    PDF attachment: report.pdf",
+        "    Path: .cowork/uploads/123/report.pdf",
+      ].join("\n"),
+      userPrompt: "Summarize this PDF",
+      rawPrompt: "Summarize this PDF",
+      createdAt: Date.now(),
+      agentConfig: {
+        executionMode: "chat",
+        executionModeSource: "user",
+        conversationMode: "hybrid",
+      },
+    };
+
+    expect((TaskExecutor as Any).prototype.getEffectiveExecutionMode.call(executor)).toBe(
+      "analyze",
+    );
+    expect((TaskExecutor as Any).prototype.getEffectiveExecutionModeSource.call(executor)).toBe(
+      "auto_promote",
+    );
+    expect((TaskExecutor as Any).prototype.isExplicitChatExecutionMode.call(executor)).toBe(false);
+  });
+
   it("returns a single chat response without entering the task pipeline", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     const companionPrompt = vi.fn().mockResolvedValue(undefined);

@@ -78,7 +78,6 @@ import {
   Goal,
   Issue,
   IssueFilters,
-  LLMProviderType,
   OrchestrationGraphRun,
   OrchestrationNodeNotification,
   WorkerRoleKind,
@@ -149,8 +148,6 @@ import {
   scoreTaskRisk,
 } from "../eval/risk";
 import { buildEntropySweepPrompt, collectBlastRadiusPaths } from "./post-task-entropy-sweep";
-import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
-import { LLMProviderFactory } from "./llm/provider-factory";
 import { OrchestrationGraphEngine, type OrchestrationGraphNodeInput } from "./orchestration/OrchestrationGraphEngine";
 import { OrchestrationGraphRepository } from "./orchestration/OrchestrationGraphRepository";
 
@@ -489,11 +486,13 @@ export class AgentDaemon extends EventEmitter {
 
   private applyTaskFollowUpOverrides(
     task: Task,
-    options?: Pick<TaskFollowUpInput, "permissionMode" | "shellAccess">,
+    options?: Pick<TaskFollowUpInput, "permissionMode" | "shellAccess" | "integrationMentions">,
   ): { task: Task; changed: boolean } {
     const hasPermissionMode = typeof options?.permissionMode === "string";
     const hasShellAccess = typeof options?.shellAccess === "boolean";
-    if (!hasPermissionMode && !hasShellAccess) {
+    const hasIntegrationMentions =
+      Boolean(options) && Object.prototype.hasOwnProperty.call(options, "integrationMentions");
+    if (!hasPermissionMode && !hasShellAccess && !hasIntegrationMentions) {
       return { task, changed: false };
     }
 
@@ -507,6 +506,19 @@ export class AgentDaemon extends EventEmitter {
     if (hasShellAccess && nextAgentConfig.shellAccess !== options.shellAccess) {
       nextAgentConfig.shellAccess = options.shellAccess;
       changed = true;
+    }
+    if (hasIntegrationMentions) {
+      const nextMentions =
+        options?.integrationMentions && options.integrationMentions.length > 0
+          ? options.integrationMentions
+          : undefined;
+      if (
+        JSON.stringify(nextAgentConfig.integrationMentions ?? null) !==
+        JSON.stringify(nextMentions ?? null)
+      ) {
+        nextAgentConfig.integrationMentions = nextMentions;
+        changed = true;
+      }
     }
 
     if (!changed) {
@@ -780,33 +792,6 @@ export class AgentDaemon extends EventEmitter {
           reviewPolicy: configured === "strict" ? "strict" : "balanced",
         };
         agentConfigChanged = true;
-      }
-    }
-
-    // Automated tasks (cron, improvement, heartbeat, etc.) use a dedicated model when
-    // configured, or fall back to Cheap/Execution model when profile routing is enabled.
-    const hasExplicitModelOverride =
-      typeof nextAgentConfig.modelKey === "string" && nextAgentConfig.modelKey.trim().length > 0;
-    if (
-      isAutomatedTaskLike(task) &&
-      !hasExplicitModelOverride &&
-      !task.strategyLock
-    ) {
-      try {
-        const settings = LLMProviderFactory.loadSettings();
-        const providerType =
-          (nextAgentConfig.providerType || settings.providerType) as LLMProviderType;
-        const routing = LLMProviderFactory.getProviderRoutingSettings(settings, providerType);
-        if (routing.automatedTaskModelKey) {
-          nextAgentConfig = { ...nextAgentConfig, modelKey: routing.automatedTaskModelKey };
-          delete nextAgentConfig.llmProfileHint;
-          agentConfigChanged = true;
-        } else if (routing.profileRoutingEnabled && routing.cheapModelKey) {
-          nextAgentConfig = { ...nextAgentConfig, llmProfileHint: "cheap" };
-          agentConfigChanged = true;
-        }
-      } catch {
-        // Ignore; fall back to strategy-derived profile
       }
     }
 
@@ -7875,7 +7860,7 @@ export class AgentDaemon extends EventEmitter {
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: Pick<TaskFollowUpInput, "permissionMode" | "shellAccess">,
+    options?: Pick<TaskFollowUpInput, "permissionMode" | "shellAccess" | "integrationMentions">,
   ): Promise<{ queued: boolean }> {
     let cached = this.activeTasks.get(taskId);
     let executor: TaskExecutor;
@@ -7927,12 +7912,14 @@ export class AgentDaemon extends EventEmitter {
     // If the executor is busy (mutex locked), queue the message for the running
     // loop to pick up and return immediately so the IPC doesn't block.
     if (executor.isRunning) {
-      executor.queueFollowUp(message, images, quotedAssistantMessage);
+      const integrationMentions = effectiveTask.agentConfig?.integrationMentions;
+      executor.queueFollowUp(message, images, quotedAssistantMessage, integrationMentions);
       // Emit user_message event immediately so the UI shows the message right away.
       // The executor's sendMessageLegacy won't re-emit because the message is
       // injected directly into the conversation loop, not through sendMessage.
       this.logEvent(taskId, "user_message", {
         message,
+        ...(integrationMentions && integrationMentions.length > 0 ? { integrationMentions } : {}),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
       });
       return { queued: true };
@@ -8021,6 +8008,9 @@ export class AgentDaemon extends EventEmitter {
             followUp.message,
             followUp.images,
             followUp.quotedAssistantMessage,
+            Object.prototype.hasOwnProperty.call(followUp, "integrationMentions")
+              ? { integrationMentions: followUp.integrationMentions }
+              : undefined,
           );
         })
         .then(() => {

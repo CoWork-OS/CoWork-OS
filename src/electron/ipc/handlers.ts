@@ -151,6 +151,7 @@ import { rateLimiter, RATE_LIMIT_CONFIGS } from "../utils/rate-limiter";
 import { toPublicChannel } from "./channel-config-sanitizer";
 import { buildSavedLLMSettings } from "./llm-settings-save";
 import { buildTaskExportJson } from "../reports/task-export";
+import { listIntegrationMentionOptions } from "../integrations/integration-mention-options";
 import { ProfileManager } from "../profiles/ProfileManager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import {
@@ -3036,11 +3037,33 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.MAILBOX_ASK, async (event, data?: Any) => {
     assertTrustedMailboxSender(event);
-    return mailboxService.askMailbox({
-      query: typeof data?.query === "string" ? data.query : "",
-      limit: typeof data?.limit === "number" ? data.limit : undefined,
-      includeAnswer: typeof data?.includeAnswer === "boolean" ? data.includeAnswer : undefined,
-    });
+    const runId = typeof data?.runId === "string" ? data.runId : undefined;
+    try {
+      return await mailboxService.askMailbox(
+        {
+          query: typeof data?.query === "string" ? data.query : "",
+          limit: typeof data?.limit === "number" ? data.limit : undefined,
+          includeAnswer: typeof data?.includeAnswer === "boolean" ? data.includeAnswer : undefined,
+          runId,
+        },
+        {
+          onAskEvent: (askEvent) => event.sender.send(IPC_CHANNELS.MAILBOX_ASK_EVENT, askEvent),
+        },
+      );
+    } catch (error) {
+      if (runId) {
+        event.sender.send(IPC_CHANNELS.MAILBOX_ASK_EVENT, {
+          runId,
+          timestamp: Date.now(),
+          type: "error",
+          stepId: "error",
+          label: "Ask failed",
+          detail: error instanceof Error ? error.message : String(error),
+          status: "error",
+        });
+      }
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.MAILBOX_ATTACHMENT_EXTRACT_TEXT, async (event, data?: Any) => {
@@ -4496,6 +4519,9 @@ export async function setupIpcHandlers(
 	        {
 	          ...(validated.permissionMode ? { permissionMode: validated.permissionMode } : {}),
 	          ...(validated.shellAccess !== undefined ? { shellAccess: validated.shellAccess } : {}),
+	          ...(validated.integrationMentions !== undefined
+	            ? { integrationMentions: validated.integrationMentions }
+	            : {}),
 	        },
 	      );
       // If the message was queued for a running executor, the executor owns
@@ -6044,7 +6070,27 @@ export async function setupIpcHandlers(
         settings,
         "google workspace settings",
       ) as GoogleWorkspaceSettingsData;
-      GoogleWorkspaceSettingsManager.saveSettings(validated);
+      const existing = GoogleWorkspaceSettingsManager.loadSettings();
+      const normalize = (value?: string) => (value || "").trim();
+      const normalizeScopes = (value?: string[]) =>
+        (value || []).map((scope) => scope.trim()).filter(Boolean).sort().join(" ");
+      const oauthConfigChanged =
+        normalize(existing.clientId) !== normalize(validated.clientId) ||
+        normalize(existing.clientSecret) !== normalize(validated.clientSecret) ||
+        normalizeScopes(existing.scopes) !== normalizeScopes(validated.scopes);
+      const tokenPayloadChanged =
+        normalize(existing.accessToken) !== normalize(validated.accessToken) ||
+        normalize(existing.refreshToken) !== normalize(validated.refreshToken);
+      const nextSettings =
+        oauthConfigChanged && !tokenPayloadChanged
+          ? {
+              ...validated,
+              accessToken: undefined,
+              refreshToken: undefined,
+              tokenExpiresAt: undefined,
+            }
+          : validated;
+      GoogleWorkspaceSettingsManager.saveSettings(nextSettings);
       GoogleWorkspaceSettingsManager.clearCache();
       return { success: true };
     },
@@ -6517,6 +6563,13 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GET_CHANNELS, async () => {
     if (!gateway) return [];
     return gateway.getChannels().map((ch) => toPublicChannel(ch));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.INTEGRATION_MENTION_OPTIONS, async () => {
+    const channels = gateway ? gateway.getChannels().map((ch) => toPublicChannel(ch)) : [];
+    return listIntegrationMentionOptions(
+      channels as Parameters<typeof listIntegrationMentionOptions>[0],
+    );
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, async (_, data) => {

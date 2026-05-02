@@ -1354,8 +1354,20 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
       return { ok: true };
     }
     case Methods.TASK_SEND_MESSAGE: {
-      const { taskId, message, images, quotedAssistantMessage } = sanitizeTaskMessageParams(params);
-      await controlPlaneDeps.agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage);
+      const {
+        taskId,
+        message,
+        images,
+        quotedAssistantMessage,
+        permissionMode,
+        shellAccess,
+        integrationMentions,
+      } = sanitizeTaskMessageParams(params);
+      await controlPlaneDeps.agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
+        ...(permissionMode ? { permissionMode } : {}),
+        ...(shellAccess !== undefined ? { shellAccess } : {}),
+        ...(integrationMentions !== undefined ? { integrationMentions } : {}),
+      });
       return { ok: true };
     }
     case Methods.APPROVAL_LIST: {
@@ -3076,8 +3088,20 @@ function registerTaskAndWorkspaceMethods(
 
   server.registerMethod(Methods.TASK_SEND_MESSAGE, async (client, params) => {
     requireScope(client, "admin");
-    const { taskId, message, images, quotedAssistantMessage } = sanitizeTaskMessageParams(params);
-    await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage);
+    const {
+      taskId,
+      message,
+      images,
+      quotedAssistantMessage,
+      permissionMode,
+      shellAccess,
+      integrationMentions,
+    } = sanitizeTaskMessageParams(params);
+    await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
+      ...(permissionMode ? { permissionMode } : {}),
+      ...(shellAccess !== undefined ? { shellAccess } : {}),
+      ...(integrationMentions !== undefined ? { integrationMentions } : {}),
+    });
     return { ok: true };
   });
 

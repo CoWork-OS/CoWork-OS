@@ -50,7 +50,17 @@ import {
   PenLine,
   Flame,
   Bell,
+  Archive,
+  Braces,
+  File as FileIcon,
+  FileCode2,
   type LucideProps,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  Film,
+  Music,
+  Presentation,
 } from "lucide-react";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { measureRendererPerf, recordRendererRender } from "../utils/renderer-perf";
@@ -122,6 +132,76 @@ const TOOL_FRIENDLY_LABELS: Record<string, string> = {
   skill: "Run skill",
   request_user_input: "Collect details from you",
 };
+
+const CODE_FILE_EXTENSIONS = new Set([
+  "c",
+  "cc",
+  "cpp",
+  "cs",
+  "css",
+  "go",
+  "h",
+  "hpp",
+  "html",
+  "java",
+  "js",
+  "jsx",
+  "kt",
+  "mjs",
+  "php",
+  "py",
+  "rb",
+  "rs",
+  "sh",
+  "sql",
+  "swift",
+  "toml",
+  "ts",
+  "tsx",
+  "vue",
+  "xml",
+  "yaml",
+  "yml",
+]);
+const TEXT_FILE_EXTENSIONS = new Set([
+  "csv",
+  "doc",
+  "docx",
+  "log",
+  "md",
+  "mdx",
+  "pdf",
+  "rtf",
+  "txt",
+]);
+const SPREADSHEET_FILE_EXTENSIONS = new Set(["numbers", "ods", "tsv", "xls", "xlsm", "xlsx"]);
+const IMAGE_FILE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "ico", "jpg", "jpeg", "png", "svg", "webp"]);
+const PRESENTATION_FILE_EXTENSIONS = new Set(["key", "odp", "potx", "ppsx", "ppt", "pptm", "pptx"]);
+const VIDEO_FILE_EXTENSIONS = new Set(["avi", "m4v", "mov", "mp4", "mpeg", "mpg", "webm"]);
+const AUDIO_FILE_EXTENSIONS = new Set(["aac", "flac", "m4a", "mp3", "ogg", "wav"]);
+const ARCHIVE_FILE_EXTENSIONS = new Set(["7z", "bz2", "dmg", "gz", "rar", "tar", "tgz", "zip"]);
+
+function getFileExtension(path: string): string {
+  const fileName = path.split(/[\\/]/).pop() || path;
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === fileName.length - 1) return "";
+  return fileName.slice(dotIndex + 1).toLowerCase();
+}
+
+function getFileTypeIcon(path: string): { Icon: ComponentType<LucideProps>; label: string } {
+  if (path.endsWith("/") || path.endsWith("\\")) return { Icon: FolderOpen, label: "Folder" };
+  const extension = getFileExtension(path);
+  if (extension === "json" || extension === "jsonl") return { Icon: Braces, label: "JSON file" };
+  if (SPREADSHEET_FILE_EXTENSIONS.has(extension)) return { Icon: FileSpreadsheet, label: "Spreadsheet file" };
+  if (IMAGE_FILE_EXTENSIONS.has(extension)) return { Icon: FileImage, label: "Image file" };
+  if (PRESENTATION_FILE_EXTENSIONS.has(extension)) return { Icon: Presentation, label: "Presentation file" };
+  if (VIDEO_FILE_EXTENSIONS.has(extension)) return { Icon: Film, label: "Video file" };
+  if (AUDIO_FILE_EXTENSIONS.has(extension)) return { Icon: Music, label: "Audio file" };
+  if (ARCHIVE_FILE_EXTENSIONS.has(extension)) return { Icon: Archive, label: "Archive file" };
+  if (CODE_FILE_EXTENSIONS.has(extension)) return { Icon: FileCode2, label: "Code file" };
+  if (TEXT_FILE_EXTENSIONS.has(extension)) return { Icon: FileText, label: "Text file" };
+  return { Icon: FileIcon, label: "File" };
+}
 
 /**
  * Strips technical tool-call language from LLM-generated plan step descriptions.
@@ -784,7 +864,12 @@ const ProgressSection = memo(function ProgressSection({
 }) {
   return (
     <div className="right-panel-section cli-section">
-      <div className="cli-section-header" onClick={toggleSection}>
+      <button
+        type="button"
+        className="cli-section-header"
+        onClick={toggleSection}
+        aria-expanded={expanded}
+      >
         <span className="cli-section-prompt">&gt;</span>
         <span className="cli-section-title">
           <span className="terminal-only">{progressTitleText}</span>
@@ -794,7 +879,7 @@ const ProgressSection = memo(function ProgressSection({
           <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
           <span className="modern-only">{expanded ? "−" : "+"}</span>
         </span>
-      </div>
+      </button>
       <ProgressSectionContent
         expanded={expanded}
         planSteps={planSteps}
@@ -859,7 +944,12 @@ const QueueSection = memo(function QueueSection({
   if (!visible) return null;
   return (
     <div className="right-panel-section cli-section">
-      <div className="cli-section-header" onClick={toggleSection}>
+      <button
+        type="button"
+        className="cli-section-header"
+        onClick={toggleSection}
+        aria-expanded={expanded}
+      >
         <span className="cli-section-prompt">&gt;</span>
         <span className="cli-section-title">
           <span className="terminal-only">{queueTitleText}</span>
@@ -870,7 +960,7 @@ const QueueSection = memo(function QueueSection({
           <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
           <span className="modern-only">{expanded ? "−" : "+"}</span>
         </span>
-      </div>
+      </button>
       <QueueSectionContent
         expanded={expanded}
         runningTasks={runningTasks}
@@ -925,7 +1015,12 @@ const ChecklistSection = memo(function ChecklistSection({
   recordRendererRender("RightPanel.section", "checklist", rendererPerfLoggingEnabled);
   return (
     <div className="right-panel-section cli-section">
-      <div className="cli-section-header" onClick={toggleSection}>
+      <button
+        type="button"
+        className="cli-section-header"
+        onClick={toggleSection}
+        aria-expanded={expanded}
+      >
         <span className="cli-section-prompt">&gt;</span>
         <span className="cli-section-title">
           <span className="terminal-only">CHECKLIST</span>
@@ -935,7 +1030,7 @@ const ChecklistSection = memo(function ChecklistSection({
           <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
           <span className="modern-only">{expanded ? "−" : "+"}</span>
         </span>
-      </div>
+      </button>
       {expanded && (
         <div className="cli-section-content">
           <div className="cli-progress-list">
@@ -1009,7 +1104,12 @@ const FolderSection = memo(function FolderSection({
   const fileCountLabel = `${fileCount} file${fileCount === 1 ? "" : "s"}`;
   return (
     <div className="right-panel-section cli-section">
-      <div className="cli-section-header" onClick={toggleSection}>
+      <button
+        type="button"
+        className="cli-section-header"
+        onClick={toggleSection}
+        aria-expanded={expanded}
+      >
         <span className="cli-section-prompt">&gt;</span>
         <span className="cli-section-title">
           <span className="terminal-only">{filesTitleText}</span>
@@ -1028,32 +1128,35 @@ const FolderSection = memo(function FolderSection({
           <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
           <span className="modern-only">{expanded ? "−" : "+"}</span>
         </span>
-      </div>
+      </button>
       {expanded && (
         <div className="cli-section-content">
           <div className="cli-file-list">
-            {files.map((file, index) => (
-              <div
-                key={`${file.path}-${index}`}
-                ref={(el) => {
-                  fileItemRefs.current.set(file.path, el);
-                }}
-                className={`cli-file-item ${file.action} ${outputSummary?.primaryOutputPath === file.path ? "primary-output" : ""} ${highlightedOutputPath === file.path ? "highlight-output" : ""}`}
-              >
-                <span className={`cli-file-action ${file.action}`}>
-                  <span className="terminal-only">{getFileActionSymbol(file.action)}</span>
-                  <span className="modern-only">
-                    <span className="file-action-dot" />
+            {files.map((file, index) => {
+              const { Icon, label } = getFileTypeIcon(file.path);
+              return (
+                <div
+                  key={`${file.path}-${index}`}
+                  ref={(el) => {
+                    fileItemRefs.current.set(file.path, el);
+                  }}
+                  className={`cli-file-item ${file.action} ${outputSummary?.primaryOutputPath === file.path ? "primary-output" : ""} ${highlightedOutputPath === file.path ? "highlight-output" : ""}`}
+                >
+                  <span className={`cli-file-action ${file.action}`}>
+                    <span className="terminal-only">{getFileActionSymbol(file.action)}</span>
+                    <span className="modern-only cli-file-type-icon" aria-label={label} title={label}>
+                      <Icon size={16} strokeWidth={2.15} aria-hidden="true" />
+                    </span>
                   </span>
-                </span>
-                <ClickableFilePath
-                  path={file.path}
-                  workspacePath={workspace?.path}
-                  className="cli-file-name"
-                  onOpenViewer={setViewerFilePath}
-                />
-              </div>
-            ))}
+                  <ClickableFilePath
+                    path={file.path}
+                    workspacePath={workspace?.path}
+                    className="cli-file-name"
+                    onOpenViewer={setViewerFilePath}
+                  />
+                </div>
+              );
+            })}
           </div>
           {workspace && (
             <div
@@ -1108,7 +1211,12 @@ const ActiveContextSection = memo(function ActiveContextSection({
   recordRendererRender("RightPanel.section", "activeContext", rendererPerfLoggingEnabled);
   return (
     <div className="right-panel-section cli-section">
-      <div className="cli-section-header" onClick={toggleSection}>
+      <button
+        type="button"
+        className="cli-section-header"
+        onClick={toggleSection}
+        aria-expanded={expanded}
+      >
         <span className="cli-section-prompt">&gt;</span>
         <span className="cli-section-title">
           <span className="terminal-only">ACTIVE</span>
@@ -1119,7 +1227,7 @@ const ActiveContextSection = memo(function ActiveContextSection({
           <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
           <span className="modern-only">{expanded ? "−" : "+"}</span>
         </span>
-      </div>
+      </button>
       {expanded && (
         <div className="cli-section-content">
           <div className="cli-context-list">
@@ -1183,7 +1291,12 @@ const ContextSection = memo(function ContextSection({
   recordRendererRender("RightPanel.section", "context", rendererPerfLoggingEnabled);
   return (
     <div className="right-panel-section cli-section">
-      <div className="cli-section-header" onClick={toggleSection}>
+      <button
+        type="button"
+        className="cli-section-header"
+        onClick={toggleSection}
+        aria-expanded={expanded}
+      >
         <span className="cli-section-prompt">&gt;</span>
         <span className="cli-section-title">
           <span className="terminal-only">{contextTitleText}</span>
@@ -1193,7 +1306,7 @@ const ContextSection = memo(function ContextSection({
           <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
           <span className="modern-only">{expanded ? "−" : "+"}</span>
         </span>
-      </div>
+      </button>
       {expanded && (
         <div className="cli-section-content">
           <div className="cli-context-list">
@@ -1216,13 +1329,15 @@ const ContextSection = memo(function ContextSection({
                   <span className="terminal-only"># tools_used:</span>
                   <span className="modern-only">Tools used</span>
                 </div>
-                {toolUsage.map((tool, index) => (
-                  <div key={`${tool.name}-${index}`} className="cli-context-item">
-                    <span className="cli-context-key">{tool.name}</span>
-                    <span className="cli-context-sep">:</span>
-                    <span className="cli-context-val">{tool.count}x</span>
-                  </div>
-                ))}
+                <div className="cli-context-tool-usage-list">
+                  {toolUsage.map((tool, index) => (
+                    <div key={`${tool.name}-${index}`} className="cli-context-item">
+                      <span className="cli-context-key">{tool.name}</span>
+                      <span className="cli-context-sep">:</span>
+                      <span className="cli-context-val">{tool.count}x</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             {referencedFiles.length > 0 && (

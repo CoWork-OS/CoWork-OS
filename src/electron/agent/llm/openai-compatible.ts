@@ -30,7 +30,7 @@ function hashToolCallId(id: string): string {
   return createHash("sha256").update(id).digest("hex");
 }
 
-function createToolCallIdMapper(maxLength?: number): (id: string) => string {
+export function createToolCallIdMapper(maxLength?: number): (id: string) => string {
   if (!maxLength || maxLength < 1) {
     return (id) => id;
   }

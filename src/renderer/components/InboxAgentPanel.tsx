@@ -26,6 +26,7 @@ import {
 import {
   MailboxActionProposal,
   MailboxAskResult,
+  MailboxAskRunEvent,
   MailboxAutomationRecord,
   MailboxClientState,
   MailboxCommitment,
@@ -52,8 +53,10 @@ import type { Company } from "../../shared/types";
 import { GOOGLE_SCOPE_GMAIL_MODIFY, hasScope } from "../../shared/google-workspace";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { computeEmailFitScale, getEmailFitInset, measureEmailContentWidth } from "../utils/email-html-layout";
+import { sanitizeEmailHtml } from "../utils/email-html-sanitize";
 
 type QueueMode = "cleanup" | "follow_up" | null;
+type RightRailTab = "agent_rail" | "ask_inbox";
 type ThreadSortOrder = "recent" | "priority";
 type InboxMode = "classic" | "today";
 const MAILBOX_AUTO_SYNC_MAX_AGE_MS = 15 * 60 * 1000;
@@ -62,10 +65,49 @@ const MAILBOX_AUTO_SYNC_LIMIT = 25;
 const MAILBOX_CLASSIFICATION_WARNING_KEY = "mailboxClassificationWarningAcknowledged";
 const MAILBOX_SERVER_ACTION_WARNING_KEY = "mailboxServerActionWarningAcknowledged";
 const ALL_MAILBOX_ACCOUNTS_FILTER = "__all__";
+
+function createMailboxAskRunId(): string {
+  const randomPart = Math.random().toString(36).slice(2, 9);
+  return `mailbox-ask-${Date.now()}-${randomPart}`;
+}
+
+function mergeMailboxAskEvents(
+  current: MailboxAskRunEvent[],
+  incoming: MailboxAskRunEvent[] = [],
+): MailboxAskRunEvent[] {
+  const seen = new Set(current.map((event) => `${event.runId}:${event.timestamp}:${event.type}:${event.stepId}`));
+  const merged = [...current];
+  for (const event of incoming) {
+    const key = `${event.runId}:${event.timestamp}:${event.type}:${event.stepId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(event);
+  }
+  return merged.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function latestMailboxAskStepEvents(events: MailboxAskRunEvent[]): MailboxAskRunEvent[] {
+  const byStep = new Map<string, MailboxAskRunEvent>();
+  for (const event of events) {
+    if (event.type === "started" || event.type === "completed" || event.type === "error") continue;
+    byStep.set(event.stepId, event);
+  }
+  return Array.from(byStep.values()).sort((a, b) => a.timestamp - b.timestamp);
+}
+
 type FocusFilter = "unread" | "needsReply" | "queue" | "commitments" | null;
 type ThreadMailboxView = MailboxThreadMailboxView;
 type DomainFilter = MailboxDomainCategory | "all" | "work";
 type ManualComposeMode = "reply" | "reply_all" | "forward";
+type AskInboxRun = {
+  runId: string;
+  query: string;
+  createdAt: number;
+  status: "running" | "done" | "error";
+  steps: MailboxAskRunEvent[];
+  result?: MailboxAskResult;
+  error?: string;
+};
 type ThreadGroup = {
   id: string;
   label: string;
@@ -236,36 +278,6 @@ function prefixMailboxSubject(subject: string, prefix: "Re:" | "Fwd:"): string {
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
-
-/**
- * Sanitize email HTML to remove external resources that would trigger CSP
- * violations (external stylesheets, fonts, scripts, tracking pixels).
- * Images are converted to placeholder alt-text blocks.
- */
-function sanitizeEmailHtml(raw: string): string {
-  return raw
-    // Remove <script> tags and content
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    // Remove <link> tags (external stylesheets / fonts)
-    .replace(/<link\b[^>]*>/gi, "")
-    // Remove <meta http-equiv="Content-Security-Policy" ...> to avoid parse errors
-    .replace(/<meta\b[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, "")
-    // Keep <img> so HTTPS previews load (renderer CSP allows img-src https:). Strip event handlers.
-    .replace(/<img\b([^>]*)>/gi, (_match, attrs: string) => {
-      const clean = attrs.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "");
-      return `<img${clean}>`;
-    })
-    // Remove any remaining external resource references in <style> blocks (@import, url() pointing to http)
-    .replace(/@import\s+url\([^)]*\)\s*;?/gi, "")
-    .replace(/@import\s+['"][^'"]*['"]\s*;?/gi, "")
-    // Neutralize <form> elements — remove action/method so they cannot submit to remote URLs
-    .replace(/<form\b([^>]*)>/gi, (_match, attrs: string) => {
-      const sanitizedAttrs = attrs
-        .replace(/\baction\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "")
-        .replace(/\bmethod\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "");
-      return `<form${sanitizedAttrs} action="javascript:void(0)" onsubmit="return false;">`;
-    });
-}
 
 /**
  * Renders email HTML inside a sandboxed iframe that auto-sizes to its content.
@@ -598,6 +610,8 @@ function IconBtn({
 }
 
 export type InboxAgentPanelProps = {
+  /** Ask Inbox request created from the global prompt composer. */
+  externalAskRequest?: { id: number; query: string } | null;
   /** Open Mission Control focused on a company issue (e.g. from an inbox handoff). */
   onOpenMissionControlIssue?: (companyId: string, issueId: string) => void;
 };
@@ -605,7 +619,7 @@ export type InboxAgentPanelProps = {
 // ─── main component ───────────────────────────────────────────────────────────
 
 export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
-  const { onOpenMissionControlIssue } = props;
+  const { externalAskRequest, onOpenMissionControlIssue } = props;
   const [status, setStatus] = useState<MailboxSyncStatus | null>(null);
   const [mailboxClientState, setMailboxClientState] = useState<MailboxClientState | null>(null);
   const [digest, setDigest] = useState<MailboxDigestSnapshot | null>(null);
@@ -633,7 +647,9 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [domainFilter, setDomainFilter] = useState<DomainFilter>("all");
   const [domainFiltersOpen, setDomainFiltersOpen] = useState(false);
   const [askQuery, setAskQuery] = useState("");
-  const [askResult, setAskResult] = useState<MailboxAskResult | null>(null);
+  const [askInboxQuery, setAskInboxQuery] = useState("");
+  const [askInboxRuns, setAskInboxRuns] = useState<AskInboxRun[]>([]);
+  const [rightRailTab, setRightRailTab] = useState<RightRailTab>("agent_rail");
   const [askBusy, setAskBusy] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(ALL_MAILBOX_ACCOUNTS_FILTER);
   const [googleWorkspaceEnabled, setGoogleWorkspaceEnabled] = useState(false);
@@ -693,6 +709,8 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const autoMarkReadInFlightRef = useRef<Set<string>>(new Set());
   const selectedThreadIdRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const askInboxScrollRef = useRef<HTMLDivElement | null>(null);
+  const handledExternalAskRequestRef = useRef<number | null>(null);
   selectedThreadIdRef.current = selectedThreadId;
 
   const loadSnippets = async () => {
@@ -1126,6 +1144,37 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     });
     return unsubscribe;
   }, [selectedThreadId, query, category, domainFilter, mailboxView, focusFilter, threadSortOrder, selectedAccountId]);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onMailboxAskEvent?.((event) => {
+      setAskInboxRuns((runs) =>
+        runs.map((run) =>
+          run.runId === event.runId
+            ? {
+                ...run,
+                status: event.status === "error"
+                  ? "error"
+                  : event.type === "completed"
+                    ? "done"
+                    : run.status === "done" || run.status === "error"
+                      ? run.status
+                      : "running",
+                steps: mergeMailboxAskEvents(run.steps, [event]),
+                error: event.status === "error" ? event.detail || run.error : run.error,
+              }
+            : run,
+        ),
+      );
+    });
+    return unsubscribe || undefined;
+  }, []);
+
+  useEffect(() => {
+    if (rightRailTab !== "ask_inbox") return;
+    const element = askInboxScrollRef.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+  }, [askInboxRuns, rightRailTab]);
 
   useEffect(() => {
     if (!handoffPanelOpen || !handoffCompanyId) return;
@@ -1842,23 +1891,73 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     });
   };
 
-  const runMailboxAsk = async () => {
-    const q = askQuery.trim();
+  const runMailboxAsk = async (queryOverride?: string) => {
+    const q = (queryOverride ?? askQuery).trim();
     if (!q) return;
+    const runId = createMailboxAskRunId();
+    setRightRailTab("ask_inbox");
+    setAskInboxRuns((runs) => [
+      ...runs.slice(-7),
+      {
+        runId,
+        query: q,
+        createdAt: Date.now(),
+        status: "running",
+        steps: [],
+      },
+    ]);
     setAskBusy(true);
     setError(null);
     try {
-      const result = await window.electronAPI.askMailbox({ query: q, limit: 8 });
-      setAskResult(result);
+      const result = await window.electronAPI.askMailbox({ query: q, limit: 8, runId });
+      setAskInboxRuns((runs) =>
+        runs.map((run) =>
+          run.runId === runId
+            ? {
+                ...run,
+                status: result.error ? "error" : "done",
+                result,
+                error: result.error,
+                steps: mergeMailboxAskEvents(run.steps, result.steps || []),
+              }
+            : run,
+        ),
+      );
+      setAskQuery("");
+      setAskInboxQuery("");
       if (result.results[0]?.thread.id) {
         setSelectedThreadId(result.results[0].thread.id);
       }
+      if (result.action?.type === "sent_followup_drafts") {
+        await reloadAll(result.results[0]?.thread.id);
+      }
     } catch (err) {
+      const message = err instanceof Error ? err.message : "Mailbox Ask failed.";
+      setAskInboxRuns((runs) =>
+        runs.map((run) =>
+          run.runId === runId
+            ? {
+                ...run,
+                status: "error",
+                error: message,
+              }
+            : run,
+        ),
+      );
       setError(err instanceof Error ? err.message : "Mailbox Ask failed.");
     } finally {
       setAskBusy(false);
     }
   };
+
+  useEffect(() => {
+    const request = externalAskRequest;
+    if (!request?.query.trim()) return;
+    if (handledExternalAskRequestRef.current === request.id) return;
+    handledExternalAskRequestRef.current = request.id;
+    setAskInboxQuery(request.query);
+    void runMailboxAsk(request.query);
+  }, [externalAskRequest?.id, externalAskRequest?.query]);
 
   const categories = [
     { id: "all", label: "All" },
@@ -2168,6 +2267,390 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       </article>
     );
   };
+
+  const renderAskInboxRun = (run: AskInboxRun) => {
+    const stepEvents = latestMailboxAskStepEvents(run.steps);
+    const results = run.result?.results || [];
+    const answer = run.result?.answer;
+    const displayError = run.error || run.result?.error;
+
+    return (
+      <div key={run.runId} style={{ display: "grid", gap: "10px", marginBottom: "16px" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <div
+            style={{
+              maxWidth: "92%",
+              padding: "9px 11px",
+              borderRadius: "var(--radius-md, 10px) var(--radius-sm, 8px) var(--radius-md, 10px) var(--radius-md, 10px)",
+              background: "var(--color-accent-subtle)",
+              border: "1px solid rgba(124, 92, 191, 0.24)",
+              color: "var(--color-text-primary)",
+              fontSize: "0.8rem",
+              lineHeight: 1.45,
+              overflowWrap: "break-word",
+            }}
+          >
+            {run.query}
+          </div>
+        </div>
+
+        <div
+          style={{
+            border: "1px solid var(--color-border-subtle)",
+            borderRadius: "var(--radius-md, 10px)",
+            background: "var(--color-bg-secondary)",
+            padding: "10px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+            <span
+              style={{
+                fontSize: "0.68rem",
+                fontWeight: 800,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: "var(--color-text-muted)",
+              }}
+            >
+              Steps
+            </span>
+            <span
+              style={{
+                fontSize: "0.68rem",
+                color: run.status === "error" ? "var(--color-error)" : "var(--color-text-muted)",
+              }}
+            >
+              {run.status === "running" ? "Running" : run.status === "error" ? "Stopped" : "Done"}
+            </span>
+          </div>
+          {stepEvents.length ? (
+            <div style={{ display: "grid", gap: "7px", marginTop: "9px" }}>
+              {stepEvents.map((event) => (
+                <div
+                  key={`${event.runId}-${event.stepId}-${event.timestamp}`}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "14px minmax(0, 1fr)",
+                    gap: "8px",
+                    alignItems: "start",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      marginTop: 5,
+                      borderRadius: "999px",
+                      background: event.status === "error"
+                        ? "var(--color-error)"
+                        : event.status === "done"
+                          ? "var(--color-accent)"
+                          : "var(--color-text-muted)",
+                      boxShadow: event.status === "running" ? "0 0 0 3px rgba(124, 92, 191, 0.12)" : "none",
+                    }}
+                  />
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: "0.76rem",
+                        fontWeight: 700,
+                        color: "var(--color-text-primary)",
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {event.label}
+                    </div>
+                    {event.detail && (
+                      <div
+                        style={{
+                          fontSize: "0.7rem",
+                          color: "var(--color-text-muted)",
+                          lineHeight: 1.4,
+                          marginTop: "2px",
+                          overflowWrap: "break-word",
+                        }}
+                      >
+                        {event.detail}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ marginTop: "8px", fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
+              Starting mailbox search…
+            </div>
+          )}
+        </div>
+
+        {(answer || displayError || run.status === "done") && (
+          <div
+            style={{
+              border: "1px solid var(--color-border-subtle)",
+              borderRadius: "var(--radius-md, 10px)",
+              background: "var(--color-bg-elevated)",
+              padding: "10px 11px",
+            }}
+          >
+            {displayError ? (
+              <div style={{ fontSize: "0.78rem", color: "var(--color-error)", lineHeight: 1.5 }}>
+                {displayError}
+              </div>
+            ) : answer ? (
+              <div
+                className="markdown-content"
+                style={{ "--color-text": "var(--color-text-primary)" } as CSSProperties}
+              >
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    p: ({ children }) => <p style={{ margin: "0 0 7px", fontSize: "0.8rem", lineHeight: 1.55 }}>{children}</p>,
+                    strong: ({ children }) => (
+                      <strong style={{ color: "var(--color-text-primary)", fontWeight: 700 }}>{children}</strong>
+                    ),
+                    code: ({ children }) => (
+                      <code
+                        style={{
+                          fontFamily: "var(--font-ui)",
+                          fontSize: "0.95em",
+                          background: "transparent",
+                          padding: 0,
+                          color: "var(--color-text-primary)",
+                        }}
+                      >
+                        {children}
+                      </code>
+                    ),
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        onClick={(event) => event.preventDefault()}
+                        style={{ color: "var(--color-accent)", textDecoration: "none" }}
+                      >
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {answer}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div style={{ fontSize: "0.78rem", color: "var(--color-text-muted)", lineHeight: 1.5 }}>
+                No direct answer found from the mailbox evidence.
+              </div>
+            )}
+          </div>
+        )}
+
+        {!!results.length && (
+          <div style={{ display: "grid", gap: "7px" }}>
+            <SectionLabel>Matched emails</SectionLabel>
+            {results.map((result, index) => {
+              const sender = result.thread.participants[0];
+              const active = selectedThreadId === result.thread.id;
+              const sourceLabel = result.searchSources?.length
+                ? result.searchSources.map((source) => source.replace(/_/g, " ")).join(" · ")
+                : "mailbox search";
+              return (
+                <button
+                  key={`${run.runId}-${result.thread.id}-${index}`}
+                  type="button"
+                  onClick={() => openThread(result.thread)}
+                  style={{
+                    width: "100%",
+                    border: `1px solid ${active ? "rgba(124, 92, 191, 0.34)" : "var(--color-border-subtle)"}`,
+                    borderRadius: "var(--radius-sm, 8px)",
+                    background: active ? "var(--color-accent-subtle)" : "var(--color-bg-secondary)",
+                    color: "var(--color-text-secondary)",
+                    padding: "8px 9px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    fontFamily: "var(--font-ui)",
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr)",
+                    gap: "3px",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "28px minmax(0, 1fr) auto",
+                      alignItems: "baseline",
+                      gap: "8px",
+                      minWidth: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: "var(--color-text-primary)",
+                        fontSize: "0.72rem",
+                        fontWeight: 800,
+                        textAlign: "right",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {index + 1}.
+                    </span>
+                    <strong
+                      style={{
+                        color: "var(--color-text-primary)",
+                        fontSize: "0.74rem",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        minWidth: 0,
+                      }}
+                    >
+                      {result.thread.subject || "Untitled email"}
+                    </strong>
+                    <span style={{ fontSize: "0.66rem", color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
+                      {formatTime(result.thread.lastMessageAt)}
+                    </span>
+                  </span>
+                  <span
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "28px minmax(0, 1fr)",
+                      gap: "8px",
+                      minWidth: 0,
+                      fontSize: "0.68rem",
+                      color: "var(--color-text-muted)",
+                    }}
+                  >
+                    <span />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {sender?.name || sender?.email || "Unknown sender"} · {sourceLabel}
+                    </span>
+                  </span>
+                  {(result.evidenceSnippets?.[0] || result.snippet) && (
+                    <span
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "28px minmax(0, 1fr)",
+                        gap: "8px",
+                        minWidth: 0,
+                        fontSize: "0.68rem",
+                        color: "var(--color-text-secondary)",
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      <span />
+                      <span
+                        style={{
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {result.evidenceSnippets?.[0] || result.snippet}
+                      </span>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderAskInbox = () => (
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div
+        ref={askInboxScrollRef}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          padding: "14px 14px 10px",
+        }}
+      >
+        {askInboxRuns.length ? (
+          askInboxRuns.map((run) => renderAskInboxRun(run))
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              placeItems: "center",
+              gap: "10px",
+              minHeight: "100%",
+              color: "var(--color-text-muted)",
+              textAlign: "center",
+              padding: "28px 16px",
+            }}
+          >
+            <Sparkles size={30} strokeWidth={1.25} />
+            <div style={{ fontSize: "0.82rem", lineHeight: 1.5 }}>
+              Ask about payments, follow-ups, statements, people, or anything in your inbox.
+            </div>
+          </div>
+        )}
+      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void runMailboxAsk(askInboxQuery);
+        }}
+        style={{
+          padding: "10px 12px 12px",
+          borderTop: "1px solid var(--color-border-subtle)",
+          background: "var(--color-bg-elevated)",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) 34px",
+          gap: "8px",
+          alignItems: "end",
+        }}
+      >
+        <textarea
+          value={askInboxQuery}
+          onChange={(event) => setAskInboxQuery(event.target.value)}
+          placeholder="Ask your inbox…"
+          rows={2}
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            minHeight: 38,
+            maxHeight: 92,
+            resize: "vertical",
+            borderRadius: "var(--radius-sm, 8px)",
+            border: "1px solid var(--color-border)",
+            background: "var(--color-bg-input)",
+            color: "var(--color-text-primary)",
+            padding: "8px 10px",
+            fontSize: "0.78rem",
+            fontFamily: "var(--font-ui)",
+            lineHeight: 1.4,
+            outline: "none",
+          }}
+        />
+        <button
+          type="submit"
+          disabled={askBusy || !askInboxQuery.trim()}
+          aria-label="Ask inbox"
+          title="Ask inbox"
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: "var(--radius-sm, 8px)",
+            border: "1px solid var(--color-border-subtle)",
+            background: askBusy || !askInboxQuery.trim() ? "var(--color-bg-secondary)" : "var(--color-accent)",
+            color: askBusy || !askInboxQuery.trim() ? "var(--color-text-muted)" : "#fff",
+            display: "grid",
+            placeItems: "center",
+            cursor: askBusy || !askInboxQuery.trim() ? "not-allowed" : "pointer",
+            padding: 0,
+          }}
+        >
+          {askBusy ? <RefreshCcw size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={14} />}
+        </button>
+      </form>
+    </div>
+  );
 
   // ─── render ───────────────────────────────────────────────────────────────
 
@@ -2970,170 +3453,6 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
               disabled={askBusy || !askQuery.trim()}
             />
           </div>
-
-          {askResult && (
-            <div
-              style={{
-                marginBottom: "8px",
-                padding: "9px 10px",
-                borderRadius: "var(--radius-md, 10px)",
-                border: "1px solid var(--color-border-subtle)",
-                background: "var(--color-bg-secondary)",
-                fontSize: "0.72rem",
-                color: "var(--color-text-secondary)",
-                lineHeight: 1.45,
-                position: "relative",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setAskResult(null)}
-                aria-label="Close mailbox answer"
-                title="Close"
-                style={{
-                  position: "absolute",
-                  top: "7px",
-                  right: "7px",
-                  width: 22,
-                  height: 22,
-                  borderRadius: "999px",
-                  border: "1px solid var(--color-border-subtle)",
-                  background: "var(--color-bg-elevated)",
-                  color: "var(--color-text-muted)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  padding: 0,
-                }}
-              >
-                <X size={12} />
-              </button>
-              {askResult.answer ? (
-                <div
-                  className="markdown-content"
-                  style={
-                    {
-                      "--color-text": "var(--color-text-primary)",
-                      paddingRight: "22px",
-                    } as CSSProperties
-                  }
-                >
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      p: ({ children }) => <p style={{ margin: "0 0 6px" }}>{children}</p>,
-                      strong: ({ children }) => (
-                        <strong style={{ color: "var(--color-text-primary)", fontWeight: 700 }}>
-                          {children}
-                        </strong>
-                      ),
-                      code: ({ children }) => (
-                        <code
-                          style={{
-                            fontFamily: "var(--font-ui)",
-                            fontSize: "0.95em",
-                            background: "transparent",
-                            padding: 0,
-                            color: "var(--color-text-primary)",
-                          }}
-                        >
-                          {children}
-                        </code>
-                      ),
-                      a: ({ href, children }) => (
-                        <a
-                          href={href}
-                          onClick={(event) => event.preventDefault()}
-                          style={{ color: "var(--color-accent)", textDecoration: "none" }}
-                        >
-                          {children}
-                        </a>
-                      ),
-                    }}
-                  >
-                    {askResult.answer}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <span style={{ display: "block", paddingRight: "22px" }}>
-                  {askResult.results.length} mailbox result{askResult.results.length === 1 ? "" : "s"} matched.
-                </span>
-              )}
-              {askResult.results.length > 1 && (
-                <div
-                  style={{
-                    marginTop: "9px",
-                    paddingTop: "8px",
-                    borderTop: "1px solid var(--color-border-subtle)",
-                    display: "grid",
-                    gap: "5px",
-                  }}
-                >
-                  {askResult.results.map((result, index) => {
-                    const sender = result.thread.participants[0];
-                    const active = selectedThreadId === result.thread.id;
-                    return (
-                      <button
-                        key={`${result.thread.id}-${index}`}
-                        type="button"
-                        onClick={() => openThread(result.thread)}
-                        style={{
-                          width: "100%",
-                          border: `1px solid ${active ? "rgba(124, 92, 191, 0.34)" : "var(--color-border-subtle)"}`,
-                          borderRadius: "var(--radius-sm, 8px)",
-                          background: active ? "var(--color-accent-subtle)" : "var(--color-bg-elevated)",
-                          color: "var(--color-text-secondary)",
-                          padding: "7px 8px",
-                          cursor: "pointer",
-                          textAlign: "left",
-                          fontFamily: "var(--font-ui)",
-                          display: "grid",
-                          gap: "2px",
-                        }}
-                      >
-                        <span
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "8px",
-                            minWidth: 0,
-                          }}
-                        >
-                          <strong
-                            style={{
-                              color: "var(--color-text-primary)",
-                              fontSize: "0.72rem",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {index + 1}. {result.thread.subject || "Untitled email"}
-                          </strong>
-                          <span style={{ fontSize: "0.64rem", color: "var(--color-text-muted)", flexShrink: 0 }}>
-                            {formatTime(result.thread.lastMessageAt)}
-                          </span>
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "0.66rem",
-                            color: "var(--color-text-muted)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {sender?.name || sender?.email || "Unknown sender"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Filters */}
           <div
@@ -4461,6 +4780,55 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
             borderBottom: "1px solid var(--color-border-subtle)",
           }}
         >
+          <div
+            role="tablist"
+            aria-label="Inbox side panel"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "6px",
+              marginBottom: "12px",
+              padding: "3px",
+              borderRadius: "var(--radius-sm, 8px)",
+              background: "var(--color-bg-secondary)",
+              border: "1px solid var(--color-border-subtle)",
+            }}
+          >
+            {[
+              ["agent_rail", "Agent Rail"],
+              ["ask_inbox", "Ask Inbox"],
+            ].map(([tab, label]) => {
+              const active = rightRailTab === tab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setRightRailTab(tab as RightRailTab)}
+                  style={{
+                    minWidth: 0,
+                    border: "1px solid transparent",
+                    borderRadius: "var(--radius-xs, 6px)",
+                    background: active ? "var(--color-bg-elevated)" : "transparent",
+                    color: active ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                    boxShadow: active ? "0 1px 2px rgba(15, 23, 42, 0.08)" : "none",
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                    fontFamily: "var(--font-ui)",
+                    fontSize: "0.72rem",
+                    fontWeight: 800,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {rightRailTab === "agent_rail" ? (
+            <>
           <div style={{ marginBottom: "12px" }}>
             <div
               style={{
@@ -4556,9 +4924,28 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
               disabled={busy || !selectedThread}
             />
           </div>
+            </>
+          ) : (
+            <div style={{ marginBottom: "2px" }}>
+              <div
+                style={{
+                  fontSize: "0.92rem",
+                  fontWeight: 700,
+                  color: "var(--color-text-primary)",
+                  marginBottom: "2px",
+                }}
+              >
+                Ask Inbox
+              </div>
+              <div style={{ fontSize: "0.74rem", color: "var(--color-text-muted)", lineHeight: 1.35 }}>
+                Questions, live mailbox steps, answers &amp; evidence
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Rail content */}
+        {rightRailTab === "agent_rail" ? (
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 14px 18px" }}>
           {/* Error */}
           {error && (
@@ -6241,6 +6628,9 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
               </div>
             )}
         </div>
+        ) : (
+          renderAskInbox()
+        )}
       </section>
 
       {labelSimilarOpen && selectedThread && (

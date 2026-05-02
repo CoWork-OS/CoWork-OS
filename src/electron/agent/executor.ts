@@ -85,6 +85,7 @@ import type {
 import { createVerificationRuntime } from "./runtime/VerificationRuntime";
 import { buildWorkerRolePrompt, resolveWorkerRoleKind } from "./runtime/worker-role-registry";
 import { enrichToolEventPayload } from "./runtime/tool-event-enrichment";
+import { resolveSkillSlashAlias } from "./skill-slash-aliases";
 import { SandboxRunner } from "./sandbox/runner";
 import {
   LLMProvider,
@@ -2627,6 +2628,7 @@ export class TaskExecutor {
     this.emitEvent("executing", { message: `Processing follow-up via ${runtimeAgentName} ACP runtime` });
     this.emitEvent("user_message", {
       message,
+      ...this.buildIntegrationMentionEventPayload(),
       ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
     });
     await runner.ensureSession();
@@ -3772,6 +3774,27 @@ export class TaskExecutor {
     } catch {
       return "";
     }
+  }
+
+  private hasUploadedPdfAttachmentContext(prompt = this.getContractPrompt()): boolean {
+    const text = [
+      prompt,
+      this.task?.prompt,
+      this.task?.rawPrompt,
+      this.task?.userPrompt,
+      this.lastUserMessage,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return /PDF attachment:\s*[^\n]*\.pdf\b/i.test(text) && /^\s*Path:\s*[^\n]*\.pdf\b/im.test(text);
+  }
+
+  private shouldUseReadOnlyPdfAttachmentMode(): boolean {
+    const agentConfig = this.task?.agentConfig;
+    if (agentConfig?.executionMode !== "chat") return false;
+    const source = agentConfig.executionModeSource;
+    const explicitlyUserSelected = source === "user" || !source;
+    return explicitlyUserSelected && this.hasUploadedPdfAttachmentContext();
   }
 
   private isExplicitChatExecutionMode(): boolean {
@@ -8566,6 +8589,7 @@ ${transcript}
     const canonical = canonicalizeToolNameUtil(toolName);
     return (
       isFileMutationToolNameUtil(canonical) ||
+      canonical === "generate_image" ||
       canonical === "create_diagram" ||
       canonical === "canvas_create" ||
       canonical === "canvas_push" ||
@@ -9771,6 +9795,9 @@ ${transcript}
     const descriptionRaw = String(step.description || "");
     const description = descriptionRaw.toLowerCase();
     const requiredTools = this.extractRequiredToolsFromStepDescription(description);
+    if (this.isTerminalImageGenerationTask()) {
+      requiredTools.add(canonicalizeToolNameUtil("generate_image"));
+    }
     const verificationMode = this.resolveVerificationModeForStep(step);
     const verificationStep = this.isVerificationStep(step);
     const taskPresentationArtifactIntent = this.taskRequestsPresentationArtifactOutput();
@@ -9876,6 +9903,7 @@ ${transcript}
         requiredTools.has("generate_spreadsheet") ||
         requiredTools.has("create_presentation") ||
         requiredTools.has("generate_presentation") ||
+        requiredTools.has("generate_image") ||
         requiredTools.has("generate_video") ||
         requiredTools.has("get_video_generation_job") ||
         requiredTools.has("canvas_create") ||
@@ -11994,6 +12022,9 @@ ${transcript}
   }
 
   private getEffectiveExecutionMode(): ExecutionMode {
+    if (this.shouldUseReadOnlyPdfAttachmentMode()) {
+      return "analyze";
+    }
     const agentConfig = this.task?.agentConfig;
     return normalizeExecutionMode(
       agentConfig?.executionMode,
@@ -12142,6 +12173,9 @@ ${transcript}
   }
 
   private getEffectiveExecutionModeSource(): ExecutionModeSource {
+    if (this.shouldUseReadOnlyPdfAttachmentMode()) {
+      return "auto_promote";
+    }
     const source = this.task.agentConfig?.executionModeSource;
     if (source === "user" || source === "strategy" || source === "auto_promote") {
       return source;
@@ -12546,6 +12580,11 @@ ${transcript}
       "- Gather information yourself with the available tools whenever possible.",
       "- Do not ask the user to fetch URLs, page content, or local data that your tools can retrieve directly.",
       "- If the user asks to add or change a tool capability, treat it as actionable work: implement the minimal safe change or take the best fallback path and report the limitation clearly.",
+      "",
+      "ATTACHED PDFS:",
+      "- Uploaded PDFs may include only a compact excerpt in the user message.",
+      "- If the user asks to summarize, answer questions from, extract from, compare, or transform an attached PDF and the answer depends on more than the excerpt, call parse_document with the attached workspace-relative path before answering.",
+      "- Use read_pdf_visual only for layout, formatting, page appearance, visual scan, chart/diagram appearance, or other explicitly visual PDF questions.",
       "",
       "COMMUNICATION:",
       "- Use plain-language progress and outcomes unless the user asks for deeper technical detail.",
@@ -13108,6 +13147,25 @@ ${transcript}
       transcriptContext,
       sectionCache: this.promptSectionCache,
     });
+  }
+
+  private buildIntegrationMentionGuidancePrompt(): string {
+    const mentions = this.task.agentConfig?.integrationMentions;
+    if (!Array.isArray(mentions) || mentions.length === 0) return "";
+
+    const lines = mentions.slice(0, 12).map((mention) => {
+      const tools = Array.isArray(mention.tools)
+        ? mention.tools.filter((tool) => typeof tool === "string" && tool.trim()).slice(0, 12)
+        : [];
+      const toolText = tools.length ? ` Tools: ${tools.join(", ")}.` : "";
+      return `- ${mention.label}: ${mention.promptHint}${toolText}`;
+    });
+
+    return [
+      "User-selected integrations:",
+      ...lines,
+      "Treat these as soft routing hints for this turn. Do not treat them as permissions or as a hard allow-list.",
+    ].join("\n");
   }
 
   /**
@@ -19855,6 +19913,14 @@ You are continuing a previous conversation. The context from the previous conver
       .trim();
   }
 
+  private resolveSkillSlashCommandName(commandName: string): string | null {
+    return resolveSkillSlashAlias(commandName);
+  }
+
+  private getSkillForSlashCommand(skillId: string): CustomSkill | undefined {
+    return getCustomSkillLoader().getSkill(skillId);
+  }
+
   private escapeSkillInvocationPattern(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -19871,12 +19937,16 @@ You are continuing a previous conversation. The context from the previous conver
       return { matched: false };
     }
 
-    const skillId = String(match[1] || "").trim();
-    if (!skillId || skillId === "simplify" || skillId === "batch") {
+    const commandName = String(match[1] || "").trim();
+    if (!commandName || commandName === "simplify" || commandName === "batch") {
       return { matched: false };
     }
 
-    const skill = getCustomSkillLoader().getSkill(skillId);
+    const skillId = this.resolveSkillSlashCommandName(commandName);
+    if (!skillId) {
+      return { matched: false };
+    }
+    const skill = this.getSkillForSlashCommand(skillId);
     if (!skill) {
       return { matched: false };
     }
@@ -19907,12 +19977,16 @@ You are continuing a previous conversation. The context from the previous conver
       return { matched: false };
     }
 
-    const skillId = String(match[1] || "").trim();
-    if (!skillId || skillId === "simplify" || skillId === "batch") {
+    const commandName = String(match[1] || "").trim();
+    if (!commandName || commandName === "simplify" || commandName === "batch") {
       return { matched: false };
     }
 
-    const skill = getCustomSkillLoader().getSkill(skillId);
+    const skillId = this.resolveSkillSlashCommandName(commandName);
+    if (!skillId) {
+      return { matched: false };
+    }
+    const skill = this.getSkillForSlashCommand(skillId);
     if (!skill) {
       return { matched: false };
     }
@@ -21197,7 +21271,10 @@ You are continuing a previous conversation. The context from the previous conver
       // Emit user_message for the initial prompt so it appears in session history when reopened
       const initialPrompt = this.getContractPrompt().trim();
       if (initialPrompt && !isTransientRetryAttempt) {
-        this.emitEvent("user_message", { message: initialPrompt });
+        this.emitEvent("user_message", {
+          message: initialPrompt,
+          ...this.buildIntegrationMentionEventPayload(),
+        });
       }
 
       // Security: Analyze task prompt for potential injection attempts
@@ -21957,6 +22034,7 @@ Return ONLY a JSON object:
           planningGuidance,
           kitContext: [kitContext, automaticDesignSystemContext].filter(Boolean).join("\n\n"),
         }),
+        this.buildIntegrationMentionGuidancePrompt(),
         this.buildCodeFirstUiGuidancePrompt(planTextPrompt),
         adaptiveRecoveryGuidance,
       ]
@@ -23456,6 +23534,12 @@ Return ONLY a JSON object:
       this.getExecutionTaskPrompt(),
       { includePlaybook: false },
     );
+    const executionTurnGuidance = [
+      this.buildIntegrationMentionGuidancePrompt(),
+      adaptiveRecoveryGuidance,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const builtPrompt = await this.buildExecutionSystemPrompt({
       taskPrompt: this.getExecutionTaskPrompt(),
       identityPrompt,
@@ -23471,7 +23555,7 @@ Return ONLY a JSON object:
       executionMode: effectiveExecutionMode,
       taskDomain: effectiveTaskDomain,
       memoryFeatures: memoryFeatureSettings,
-      turnGuidancePrompt: adaptiveRecoveryGuidance || undefined,
+      turnGuidancePrompt: executionTurnGuidance || undefined,
     });
     this.systemPrompt = this.setPromptCacheContext({
       surface: "executor",
@@ -29840,8 +29924,14 @@ Return ONLY a JSON object:
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
+    integrationMentions?: TaskFollowUpInput["integrationMentions"],
   ): void {
-    this.getSessionRuntime().queueFollowUp(message, images, quotedAssistantMessage);
+    this.getSessionRuntime().queueFollowUp(
+      message,
+      images,
+      quotedAssistantMessage,
+      integrationMentions,
+    );
     logger.info(
       `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,
     );
@@ -29908,6 +29998,14 @@ Return ONLY a JSON object:
    */
   suppressNextUserMessageEvent(): void {
     this._suppressNextUserMessageEvent = true;
+  }
+
+  private buildIntegrationMentionEventPayload(): Pick<
+    TaskFollowUpInput,
+    "integrationMentions"
+  > | Record<string, never> {
+    const mentions = this.task.agentConfig?.integrationMentions;
+    return mentions && mentions.length > 0 ? { integrationMentions: mentions } : {};
   }
 
   private isVerificationTaskRoute(): boolean {
@@ -30165,23 +30263,16 @@ Return ONLY a JSON object:
   }
 
   /**
-   * Refreshes the active provider/model route from current settings and the
-   * executor's current runtime profile. This lets planning stay on the strong
-   * model while execution steps switch to the cheap model within the same task.
-   * Tasks with explicit per-task model overrides are still respected.
+   * Refreshes the active provider/model route from current settings.
+   * Runtime profiles may affect logging and planning metadata, but they do not
+   * select a different model from the globally configured provider/model.
    */
   private refreshProviderIfSettingsChanged(forceProfile?: LlmProfile): void {
-    const explicitProviderOverride = this.task.agentConfig?.providerType;
-    if (explicitProviderOverride != null) return;
-
     const currentSettings = LLMProviderFactory.loadSettings();
     this.cachedLlmSettings = currentSettings;
     const currentSettingsProvider = String(currentSettings.providerType || "").trim();
     const providerChangedInSettings =
       currentSettingsProvider.length > 0 && currentSettingsProvider !== this.provider.type;
-
-    const explicitModelOverride = String(this.task.agentConfig?.modelKey || "").trim();
-    if (explicitModelOverride && !providerChangedInSettings) return;
 
     const selectionConfig = providerChangedInSettings
       ? {
@@ -30381,6 +30472,7 @@ Return ONLY a JSON object:
       if (!suppressUserMessageEvent && !recoveredFromTurnLimit) {
         this.emitEvent("user_message", {
           message,
+          ...this.buildIntegrationMentionEventPayload(),
           ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
         });
       }
@@ -30402,6 +30494,7 @@ Return ONLY a JSON object:
       if (!handledPendingSkillReply && !suppressUserMessageEvent && !recoveredFromTurnLimit) {
         this.emitEvent("user_message", {
           message,
+          ...this.buildIntegrationMentionEventPayload(),
           ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
         });
       }
@@ -30431,6 +30524,7 @@ Return ONLY a JSON object:
     if (!handledPendingSkillReply && !suppressUserMessageEvent && !recoveredFromTurnLimit) {
       this.emitEvent("user_message", {
         message,
+        ...this.buildIntegrationMentionEventPayload(),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
       });
     }
@@ -30514,6 +30608,7 @@ Return ONLY a JSON object:
     });
     const followUpTurnGuidance = [
       this.buildFollowUpTurnGuidancePrompt(executionMessage, quotedAssistantMessage),
+      this.buildIntegrationMentionGuidancePrompt(),
       adaptiveRecoveryGuidance,
     ]
       .filter(Boolean)

@@ -24,6 +24,7 @@ import { SpreadsheetArtifactViewer } from "./components/SpreadsheetArtifactViewe
 import type { SpreadsheetTurnContext } from "./components/SpreadsheetArtifactViewer";
 import { DocumentArtifactViewer } from "./components/DocumentArtifactViewer";
 import { PresentationArtifactViewer } from "./components/PresentationArtifactViewer";
+import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
 import { WebArtifactViewer } from "./components/WebArtifactViewer";
 import { BrowserWorkbenchView } from "./components/BrowserWorkbenchView";
 import { DisclaimerModal } from "./components/DisclaimerModal";
@@ -66,6 +67,7 @@ import {
   PermissionMode,
   LLMProviderType,
   LLMReasoningEffort,
+  IntegrationMentionSelection,
 } from "../shared/types";
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { applyPersistedLanguage } from "./i18n";
@@ -529,9 +531,14 @@ type SelectedTaskWorkspaceViewProps = {
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: { permissionMode?: PermissionMode; shellAccess?: boolean },
+    options?: {
+      permissionMode?: PermissionMode;
+      shellAccess?: boolean;
+      integrationMentions?: IntegrationMentionSelection[];
+    },
   ) => Promise<void>;
   onStartOnboarding: () => void;
+  onStartFreshSession?: () => void;
   onCreateTask: (
     title: string,
     prompt: string,
@@ -539,6 +546,7 @@ type SelectedTaskWorkspaceViewProps = {
     images?: ImageAttachment[],
     workspace?: Workspace,
   ) => Promise<void>;
+  onAskInbox: (query: string) => void;
   onChangeWorkspace: () => void;
   onSelectWorkspace: (workspace: Workspace) => void;
   onOpenSettings: (tab?: string) => void;
@@ -553,6 +561,7 @@ type SelectedTaskWorkspaceViewProps = {
   onDismissInputRequest: (requestId: string) => void;
   onOpenBrowserView?: (url?: string) => void;
   onViewTaskOutputs: (taskId: string, primaryOutputPath?: string) => void;
+  onTasksChanged: () => void | Promise<void>;
   onCancelTaskById: (taskId: string) => Promise<void>;
   onHighlightConsumed: () => void;
   onModelChange: (selection: {
@@ -564,7 +573,17 @@ type SelectedTaskWorkspaceViewProps = {
 
 function getAppTaskSignature(task: Task | undefined): string {
   if (!task) return "none";
-  return [task.id, task.status, task.terminalStatus ?? "", task.updatedAt, task.completedAt ?? ""].join(":");
+  return [
+    task.id,
+    task.title,
+    task.status,
+    task.terminalStatus ?? "",
+    task.updatedAt,
+    task.completedAt ?? "",
+    task.pinned ? "pinned" : "unpinned",
+    task.sessionId ?? "",
+    task.worktreePath ?? "",
+  ].join(":");
 }
 
 function getInputRequestSignature(inputRequest: InputRequest | null): string {
@@ -596,7 +615,9 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
   onSelectTask,
   onSendMessage,
   onStartOnboarding,
+  onStartFreshSession,
   onCreateTask,
+  onAskInbox,
   onChangeWorkspace,
   onSelectWorkspace,
   onOpenSettings,
@@ -608,6 +629,7 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
   onDismissInputRequest,
   onOpenBrowserView,
   onViewTaskOutputs,
+  onTasksChanged,
   onCancelTaskById,
   onHighlightConsumed,
   onModelChange,
@@ -1095,7 +1117,9 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
         onSelectTask={onSelectTask}
         onSendMessage={onSendMessage}
         onStartOnboarding={onStartOnboarding}
+        onStartFreshSession={onStartFreshSession}
         onCreateTask={onCreateTask}
+        onAskInbox={onAskInbox}
         onChangeWorkspace={onChangeWorkspace}
         onSelectWorkspace={onSelectWorkspace}
         onOpenSettings={onOpenSettings as Any}
@@ -1108,6 +1132,7 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
         onDismissInputRequest={onDismissInputRequest}
         onOpenBrowserView={onOpenBrowserView}
         onViewTaskOutputs={onViewTaskOutputs}
+        onTasksChanged={onTasksChanged}
         selectedModel={selectedModel}
         selectedProvider={selectedProvider}
         selectedReasoningEffort={selectedReasoningEffort}
@@ -1128,10 +1153,10 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
       />
       {(spreadsheetArtifact || browserWorkbench) && workspace?.path && !remoteTaskView ? (
         <>
-          <div
+          <ResizableDividerHandle
             className="spreadsheet-sidebar-resize-handle"
             role="separator"
-            aria-orientation="vertical"
+            orientation="vertical"
             aria-label="Resize workbench sidebar"
             aria-valuemin={SPREADSHEET_SIDEBAR_MIN_WIDTH}
             aria-valuenow={Math.round(spreadsheetSidebarWidth)}
@@ -1521,6 +1546,10 @@ export function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [remoteTaskView, setRemoteTaskView] = useState<RemoteTaskView | null>(null);
   const [currentView, setCurrentView] = useState<AppView>("main");
+  const [inboxAgentAskRequest, setInboxAgentAskRequest] = useState<{
+    id: number;
+    query: string;
+  } | null>(null);
   const [missionControlInitialCompanyId, setMissionControlInitialCompanyId] = useState<string | null>(
     null,
   );
@@ -1652,6 +1681,7 @@ export function App() {
   const pendingInputRequestsRef = useRef<Map<string, InputRequest>>(new Map());
   const eventsRef = useRef<TaskEvent[]>([]);
   const selectedTaskIdRef = useRef<string | null>(null);
+  const fetchedFullTaskForMentionMetadataRef = useRef<Set<string>>(new Set());
   const currentViewRef = useRef<AppView>("main");
   const rightSidebarCollapsedRef = useRef(false);
   const currentWorkspaceRef = useRef<Workspace | null>(null);
@@ -3261,6 +3291,7 @@ export function App() {
       videoGenerationMode?: boolean;
       llmProfile?: LlmProfile;
       llmProfileForced?: boolean;
+      integrationMentions?: IntegrationMentionSelection[];
     },
     images?: ImageAttachment[],
     workspaceOverride?: Workspace,
@@ -3310,6 +3341,10 @@ export function App() {
     const shellAccess = options?.shellAccess === true;
     const llmProfile = options?.llmProfile;
     const llmProfileForced = options?.llmProfileForced;
+    const integrationMentions =
+      options?.integrationMentions && options.integrationMentions.length > 0
+        ? options.integrationMentions
+        : undefined;
     const trimmedSessionModelOverride = sessionModelOverride.trim();
     const hasSelectedModelInCurrentProvider = availableModels.some((m) => m.key === trimmedSessionModelOverride);
     const effectiveSessionModelOverride = hasSelectedModelInCurrentProvider ? trimmedSessionModelOverride : "";
@@ -3328,6 +3363,7 @@ export function App() {
       videoGenerationMode ||
       permissionMode ||
       shellAccess ||
+      integrationMentions ||
       effectiveLlmProfile
         ? {
             ...(effectiveSessionModelOverride ? { modelKey: effectiveSessionModelOverride } : {}),
@@ -3343,6 +3379,7 @@ export function App() {
             ...(videoGenerationMode ? { videoGenerationMode: true } : {}),
             ...(permissionMode ? { permissionMode } : {}),
             ...(shellAccess ? { shellAccess: true } : {}),
+            ...(integrationMentions ? { integrationMentions } : {}),
             ...(effectiveLlmProfile ? { llmProfile: effectiveLlmProfile } : {}),
             ...(effectiveLlmProfileForced ? { llmProfileForced: true } : {}),
           }
@@ -3382,6 +3419,13 @@ export function App() {
       }
     }
   };
+
+  const handleAskInboxFromComposer = useCallback((query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    setInboxAgentAskRequest({ id: Date.now(), query: trimmed });
+    setCurrentView("inboxAgent");
+  }, []);
 
   const replayControls = useReplayMode(events, selectedTask);
   const sharedTaskEventUi = useMemo(
@@ -3543,7 +3587,11 @@ export function App() {
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: { permissionMode?: PermissionMode; shellAccess?: boolean },
+    options?: {
+      permissionMode?: PermissionMode;
+      shellAccess?: boolean;
+      integrationMentions?: IntegrationMentionSelection[];
+    },
   ) => {
     if (!selectedTaskId) return;
 
@@ -3602,7 +3650,13 @@ export function App() {
         await window.electronAPI?.deviceProxyRequest?.({
           deviceId: remoteTaskView.deviceId,
           method: "task.sendMessage",
-          params: { taskId: selectedTaskId, message: nextMessage, images, quotedAssistantMessage },
+          params: {
+            taskId: selectedTaskId,
+            message: nextMessage,
+            images,
+            quotedAssistantMessage,
+            ...(options || {}),
+          },
         });
       } else {
         await window.electronAPI.sendMessage(
@@ -3735,6 +3789,13 @@ export function App() {
     } catch (error) {
       console.error("Failed to switch to temp workspace for new session:", error);
     }
+  };
+
+  const handleClearTaskView = () => {
+    setCurrentView("main");
+    setSelectedTaskId(null);
+    setEvents([]);
+    clearRemoteTaskView();
   };
 
   const handleModelChange = async (selection: {
@@ -3907,13 +3968,24 @@ export function App() {
     if (!selectedTaskId || remoteTaskView || !window.electronAPI?.getTask) return;
 
     const hasPrompt = selectedTask && (selectedTask.rawPrompt || selectedTask.userPrompt || selectedTask.prompt);
-    if (hasPrompt) return;
+    const displayPrompt = [
+      selectedTask?.rawPrompt,
+      selectedTask?.userPrompt,
+      selectedTask?.prompt,
+    ].find((value) => typeof value === "string" && value.trim().length > 0);
+    const mayNeedMentionMetadata =
+      typeof displayPrompt === "string" &&
+      displayPrompt.includes("@") &&
+      !selectedTask?.agentConfig?.integrationMentions &&
+      !fetchedFullTaskForMentionMetadataRef.current.has(selectedTaskId);
+    if (hasPrompt && !mayNeedMentionMetadata) return;
 
     let cancelled = false;
     const fetchTask = async () => {
       try {
         const fullTask = (await window.electronAPI.getTask(selectedTaskId)) as Task | null;
         if (cancelled || !fullTask) return;
+        fetchedFullTaskForMentionMetadataRef.current.add(selectedTaskId);
         setTasks((prev) =>
           upsertTaskPreservingIdentity(prev, fullTask, { prependIfMissing: true }),
         );
@@ -4523,6 +4595,7 @@ export function App() {
                 <IdeasPanel onCreateTaskFromPrompt={handleCreateTaskFromIdea} />
               ) : currentView === "inboxAgent" ? (
                 <InboxAgentPanel
+                  externalAskRequest={inboxAgentAskRequest}
                   onOpenMissionControlIssue={(companyId, issueId) => {
                     setMissionControlInitialCompanyId(companyId);
                     setMissionControlInitialIssueId(issueId);
@@ -4580,7 +4653,9 @@ export function App() {
                 onSelectTask={handleSelectTaskFromShell}
                 onSendMessage={handleSendMessage}
                 onStartOnboarding={handleShowOnboarding}
+                onStartFreshSession={handleClearTaskView}
                 onCreateTask={handleCreateTask}
+                onAskInbox={handleAskInboxFromComposer}
                 onChangeWorkspace={handleChangeWorkspace}
                 onSelectWorkspace={setCurrentWorkspace}
                 onOpenSettings={(tab) => {
@@ -4595,6 +4670,7 @@ export function App() {
                 onDismissInputRequest={handleDismissInputRequestFromMainContent}
                 onOpenBrowserView={handleOpenBrowserView}
                 onViewTaskOutputs={handleViewTaskOutputsFromMainContent}
+                onTasksChanged={loadTasks}
                 onCancelTaskById={handleCancelTaskById}
                 onHighlightConsumed={handleRightPanelHighlightConsumed}
                 onModelChange={handleModelChange}

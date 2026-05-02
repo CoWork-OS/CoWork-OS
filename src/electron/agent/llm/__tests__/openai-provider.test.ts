@@ -62,7 +62,7 @@ describe("OpenAIProvider structured errors", () => {
     });
   });
 
-  it("uses Responses API with reasoning, verbosity, tools, prompt cache, and replayed phase for API-key GPT-5.5", async () => {
+  it("uses Responses API with reasoning, verbosity, tools, prompt cache, and replayed phase for API-key GPT-5 models", async () => {
     responsesCreateMock.mockResolvedValue({
       output: [
         {
@@ -216,6 +216,42 @@ describe("OpenAIProvider structured errors", () => {
     });
   });
 
+  it("uses Responses API controls for other GPT-5-family OpenAI API-key models", async () => {
+    responsesCreateMock.mockResolvedValue({
+      output: [
+        {
+          type: "message",
+          content: [{ type: "output_text", text: "ok" }],
+        },
+      ],
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.4",
+      openaiApiKey: "sk-test",
+      openaiReasoningEffort: "low",
+      openaiTextVerbosity: "high",
+    });
+
+    await provider.createMessage({
+      model: "gpt-5.4",
+      maxTokens: 64,
+      messages: [{ role: "user", content: "test" }],
+    });
+
+    expect(chatCompletionsCreateMock).not.toHaveBeenCalled();
+    expect(responsesCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-5.4",
+        reasoning: { effort: "low" },
+        text: { verbosity: "high" },
+      }),
+      undefined,
+    );
+  });
+
   it("sends prompt_cache_key with a split stable/turn system prefix for API-key requests", async () => {
     chatCompletionsCreateMock.mockResolvedValue({
       choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
@@ -231,12 +267,12 @@ describe("OpenAIProvider structured errors", () => {
 
     const provider = new OpenAIProvider({
       type: "openai",
-      model: "gpt-5.4",
+      model: "gpt-4o",
       openaiApiKey: "sk-test",
     });
 
     const response = await provider.createMessage({
-      model: "gpt-5.4",
+      model: "gpt-4o",
       maxTokens: 128,
       system: "Stable instructions\n\nCurrent time: 2026-04-04T10:00:00Z",
       systemBlocks: [
@@ -265,7 +301,7 @@ describe("OpenAIProvider structured errors", () => {
 
     expect(chatCompletionsCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: "gpt-5.4",
+        model: "gpt-4o",
         prompt_cache_key: "stable-prefix-hash",
         prompt_cache_retention: "24h",
         messages: [
@@ -295,12 +331,12 @@ describe("OpenAIProvider structured errors", () => {
 
     const provider = new OpenAIProvider({
       type: "openai",
-      model: "gpt-5.4",
+      model: "o1",
       openaiApiKey: "sk-test",
     });
 
     await provider.createMessage({
-      model: "gpt-5.4",
+      model: "o1",
       maxTokens: 128,
       system: "system",
       messages: [{ role: "user", content: "hello" }],
@@ -325,12 +361,12 @@ describe("OpenAIProvider structured errors", () => {
 
     const provider = new OpenAIProvider({
       type: "openai",
-      model: "gpt-5.4",
+      model: "gpt-4o",
       openaiApiKey: "sk-test",
     });
 
     await provider.createMessage({
-      model: "gpt-5.4",
+      model: "gpt-4o",
       maxTokens: 128,
       system: "system",
       messages: [{ role: "user", content: "hello" }],

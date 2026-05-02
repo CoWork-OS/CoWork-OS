@@ -978,8 +978,14 @@ export class SessionRuntime {
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
+    integrationMentions?: TaskFollowUpInput["integrationMentions"],
   ): void {
-    this.state.queues.pendingFollowUps.push({ message, images, quotedAssistantMessage });
+    this.state.queues.pendingFollowUps.push({
+      message,
+      images,
+      quotedAssistantMessage,
+      ...(integrationMentions !== undefined ? { integrationMentions } : {}),
+    });
   }
 
   get hasPendingFollowUps(): boolean {

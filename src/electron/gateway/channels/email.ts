@@ -6,7 +6,7 @@
  *
  * Features:
  * - Real-time email receiving via IMAP
- * - Email sending via SMTP
+ * - Receive-only channel routing; automatic SMTP replies are suppressed
  * - Reply threading support
  * - Subject filtering
  * - Sender allowlist
@@ -41,6 +41,74 @@ import {
   normalizeEmailProtocol,
 } from "../../utils/loom";
 import { getUnsupportedManualEmailSetupMessage } from "../../../shared/email-provider-support";
+
+function getEmailHeader(email: EmailMessage, headerName: string): string {
+  const headers = email.headers;
+  if (!headers) return "";
+
+  const direct = headers.get(headerName) || headers.get(headerName.toLowerCase());
+  if (direct) return direct;
+
+  const normalizedHeaderName = headerName.toLowerCase();
+  for (const [key, value] of headers) {
+    if (key.toLowerCase() === normalizedHeaderName) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function isAutomatedEmailIdentity(address: string, name = ""): boolean {
+  const normalizedAddress = address.toLowerCase();
+  const normalizedIdentity = `${name} ${normalizedAddress}`.toLowerCase();
+
+  return (
+    normalizedAddress.startsWith("postmaster@") ||
+    normalizedAddress.startsWith("mailer-daemon@") ||
+    normalizedAddress.startsWith("mail-daemon@") ||
+    normalizedAddress.includes("no-reply@") ||
+    normalizedAddress.includes("noreply@") ||
+    normalizedAddress.includes("do-not-reply@") ||
+    normalizedAddress.includes("donotreply@") ||
+    normalizedIdentity.includes("mail delivery subsystem")
+  );
+}
+
+function isBounceOrAutoresponseSubject(subject: string): boolean {
+  return /\b(undeliverable|delivery status notification|delivery failure|mail delivery failed|returned mail|message not delivered|failure notice|delivery has failed|automatic reply|auto-?reply|autoreply|out of office)\b/.test(
+    subject.toLowerCase(),
+  );
+}
+
+function isAutomatedOrBounceEmail(email: EmailMessage): boolean {
+  const fromAddress = email.from?.address?.toLowerCase() || "";
+  const fromName = email.from?.name?.toLowerCase() || "";
+  const subject = email.subject?.toLowerCase() || "";
+  const body = `${email.text || ""} ${email.html || ""}`.toLowerCase();
+
+  const autoSubmitted = getEmailHeader(email, "auto-submitted").toLowerCase();
+  if (autoSubmitted && autoSubmitted !== "no") {
+    return true;
+  }
+
+  const contentType = getEmailHeader(email, "content-type").toLowerCase();
+  if (contentType.includes("delivery-status")) {
+    return true;
+  }
+
+  if (isAutomatedEmailIdentity(fromAddress, fromName)) {
+    return true;
+  }
+
+  if (isBounceOrAutoresponseSubject(subject)) {
+    return true;
+  }
+
+  return /\b(this email address is not monitored|do not reply|please do not reply|this is an automated message|could not be delivered|was not delivered|wasn't delivered|recipient address rejected)\b/.test(
+    body,
+  );
+}
 
 export class EmailAdapter implements ChannelAdapter {
   readonly type = "email" as const;
@@ -281,43 +349,17 @@ export class EmailAdapter implements ChannelAdapter {
   }
 
   /**
-   * Send an email (reply or new)
+   * Email gateway channels are receive-only. Sending is handled by explicit mailbox actions,
+   * not by automatic channel routing, so inbound email can never trigger an SMTP reply.
    */
   async sendMessage(message: OutgoingMessage): Promise<string> {
     if (!this.client || this._status !== "connected") {
       throw new Error("Email client is not connected");
     }
 
-    // Add response prefix if configured
-    let text = message.text;
-    if (this.config.responsePrefix) {
-      text = `${this.config.responsePrefix}\n\n${text}`;
-    }
-
-    // Determine subject
-    let subject = "Message from CoWork";
-    let inReplyTo: string | undefined;
-    let references: string[] = [];
-
-    // Check for reply context
-    const context = this.replyContext.get(message.chatId);
-    if (context) {
-      inReplyTo = context.messageId;
-      references = [...context.references, context.messageId];
-      // Assume original subject with Re: prefix
-      subject = `Re: ${message.chatId.split("|")[1] || "Message"}`;
-    }
-
-    // Send email
-    const messageId = await this.client.sendEmail({
-      to: message.chatId.split("|")[0], // chatId format: "email@address.com|subject"
-      subject,
-      text,
-      inReplyTo,
-      references,
-    });
-
-    return messageId;
+    const recipient = message.chatId.split("|")[0].trim();
+    console.log(`Email: Suppressing outbound channel message to ${recipient}`);
+    return `suppressed:${Date.now()}`;
   }
 
   /**
@@ -414,6 +456,13 @@ export class EmailAdapter implements ChannelAdapter {
     // Mark as processed
     if (this.config.deduplicationEnabled) {
       this.markMessageProcessed(email.messageId);
+    }
+
+    if (isAutomatedOrBounceEmail(email)) {
+      console.log(
+        `Email: Ignoring automated or bounce message from ${email.from.address}: ${email.subject}`,
+      );
+      return;
     }
 
     // Check sender allowlist if configured

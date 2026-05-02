@@ -420,6 +420,73 @@ describe("AzureOpenAIProvider", () => {
     expect(body.reasoning).toEqual({ effort: "xhigh" });
   });
 
+  it("shortens replayed tool call IDs in Responses API fallback requests", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        createErrorResponse(400, "Bad Request", {
+          error: {
+            message: "The chatCompletion operation does not work with the specified model.",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createErrorResponse(400, "Bad Request", {
+          error: {
+            message: "The chatCompletion operation does not work with the specified model.",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createOkResponse({
+          output: [{ type: "message", content: [{ type: "output_text", text: "done" }] }],
+          usage: { input_tokens: 2, output_tokens: 1 },
+        }),
+      );
+
+    const longId =
+      "call_tIpjfKtELPSrT9Cc5ZV9t0va|fc_0a5e58a782cd28e40169f60c7528788191bcd4eada3db47309";
+    const provider = new AzureOpenAIProvider(baseConfig);
+
+    await provider.createMessage({
+      model: "gpt-5.5",
+      maxTokens: 20,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: longId,
+              name: "gmail_action",
+              input: { action: "list_messages" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: longId,
+              content: "Google Workspace authorization error",
+            },
+          ],
+        },
+      ],
+    });
+
+    const [, responsesOptions] = mockFetch.mock.calls[2];
+    const body = JSON.parse(responsesOptions.body);
+    const functionCall = body.input.find((item: Any) => item.type === "function_call");
+    const functionOutput = body.input.find(
+      (item: Any) => item.type === "function_call_output",
+    );
+
+    expect(functionCall.call_id).not.toBe(longId);
+    expect(functionCall.call_id.length).toBeLessThanOrEqual(64);
+    expect(functionOutput.call_id).toBe(functionCall.call_id);
+  });
+
   it("falls back to Responses API when chat completions reject tools with reasoning effort", async () => {
     const unsupportedToolsWithReasoning = {
       error: {

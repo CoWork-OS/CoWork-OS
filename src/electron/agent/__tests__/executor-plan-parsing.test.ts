@@ -196,6 +196,31 @@ describe("TaskExecutor plan parsing", () => {
     expect(scoped.map((tool: Any) => tool.name)).toEqual(["generate_image"]);
   });
 
+  it("requires generate_image instead of write_file for terminal image generation contracts", () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [],
+    });
+    executor.task.title = "Create image";
+    executor.task.prompt = "create a similar image as a snow leopard";
+    executor.task.rawPrompt = "create a similar image as a snow leopard";
+    executor.plan = {
+      description: "Create image",
+      steps: [
+        {
+          id: "1",
+          description: "Generate the requested image and share the resulting file.",
+          status: "pending",
+        },
+      ],
+    };
+
+    const contract = executor.resolveStepExecutionContract(executor.plan.steps[0]);
+
+    expect(Array.from(contract.requiredTools)).toContain("generate_image");
+    expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+  });
+
   it("keeps dashboard UI polish prompts on code tools unless live verification is requested", () => {
     const executor = createPlanExecutor({
       usage: { inputTokens: 1, outputTokens: 2 },

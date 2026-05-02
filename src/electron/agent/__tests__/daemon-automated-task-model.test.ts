@@ -93,7 +93,7 @@ describe("AgentDaemon automated task model selection", () => {
     ).toBe(false);
   });
 
-  it("forces llmProfileHint to cheap for automated tasks when profile routing and cheap model are defined", () => {
+  it("does not force cheap profile routing for automated tasks", () => {
     const daemonLike = createDaemonLike();
     vi.mocked(LLMProviderFactory.loadSettings).mockReturnValue({
       providerType: "openai",
@@ -121,8 +121,9 @@ describe("AgentDaemon automated task model selection", () => {
 
     const result = applyRuntimeTaskStrategy(daemonLike, task);
 
-    expect(result.agentConfigChanged).toBe(true);
-    expect(result.task.agentConfig?.llmProfileHint).toBe("cheap");
+    expect(result.agentConfigChanged).toBe(false);
+    expect(result.task.agentConfig?.llmProfileHint).toBeUndefined();
+    expect(result.task.agentConfig?.modelKey).toBeUndefined();
   });
 
   it("does not inject a default maxTurns for ordinary routed tasks", () => {
@@ -139,7 +140,7 @@ describe("AgentDaemon automated task model selection", () => {
     expect(result.agentConfig.turnBudgetPolicy).toBeUndefined();
   });
 
-  it("uses automatedTaskModelKey when set, bypassing cheap profile", () => {
+  it("does not use automatedTaskModelKey for automated tasks", () => {
     const daemonLike = createDaemonLike();
     vi.mocked(LLMProviderFactory.loadSettings).mockReturnValue({
       providerType: "openai",
@@ -167,8 +168,8 @@ describe("AgentDaemon automated task model selection", () => {
 
     const result = applyRuntimeTaskStrategy(daemonLike, task);
 
-    expect(result.agentConfigChanged).toBe(true);
-    expect(result.task.agentConfig?.modelKey).toBe("gpt-4o-nano");
+    expect(result.agentConfigChanged).toBe(false);
+    expect(result.task.agentConfig?.modelKey).toBeUndefined();
     expect(result.task.agentConfig?.llmProfileHint).toBeUndefined();
   });
 

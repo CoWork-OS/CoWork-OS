@@ -1,8 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import type { Task, TaskEvent } from "../../../shared/types";
+import type { Task, TaskEvent, Workspace } from "../../../shared/types";
 import {
+  collectLatestEndOfTaskArtifactCards,
   collectInlineRunCommandSessionIds,
+  buildTaskAutomationCronJobCreate,
+  buildTaskAutomationSchedule,
+  composeMessageWithAttachments,
   deriveAgentReasoningPanelState,
   deriveTaskHeaderPresentation,
   estimateTaskFeedRowHeight,
@@ -16,10 +22,30 @@ import {
   isTaskActivelyWorking,
   pruneStringSetToActiveIds,
   selectVisibleTaskFeedRows,
+  shouldCreateFreshTaskForSend,
   shouldRenderOpenArtifactCardAtEvent,
   shouldShowBootstrapProgressRow,
   shouldScheduleAutoScrollWrite,
+  TaskAutomationModal,
+  TASK_AUTOMATION_TEMPLATES,
 } from "../MainContent";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("shouldCreateFreshTaskForSend", () => {
+  it("forces a fresh task for deterministic app shortcut handling even when a task is selected", () => {
+    expect(
+      shouldCreateFreshTaskForSend({
+        executionMode: "execute",
+        selectedTaskId: "task-1",
+        selectedTaskExecutionMode: "execute",
+        forceFreshTask: true,
+      }),
+    ).toBe(true);
+  });
+});
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -49,7 +75,169 @@ function makeEvent(
   } as TaskEvent;
 }
 
+function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    id: "workspace-1",
+    name: "Workspace",
+    path: "/workspace",
+    createdAt: 1,
+    permissions: {
+      read: true,
+      write: true,
+      delete: false,
+      network: false,
+      shell: false,
+    },
+    ...overrides,
+  };
+}
+
+describe("task automation creation", () => {
+  it("renders the modal with task-derived defaults", () => {
+    const task = makeTask({
+      id: "task-123",
+      title: "Task menu automation",
+      prompt: "Turn this task into a recurring check",
+      workspaceId: "workspace-1",
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(TaskAutomationModal, {
+        task,
+        workspace: makeWorkspace(),
+        defaultName: "Task menu automation",
+        defaultPrompt: "Turn this task into a recurring check",
+        deeplink: "cowork://tasks/task-123",
+        onClose: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Add automation");
+    expect(html).toContain("Task menu automation");
+    expect(html).toContain("Turn this task into a recurring check");
+    expect(html).toContain("Every 30m");
+  });
+
+  it("builds the default Every 30m scheduled job payload from a task", () => {
+    const before = Date.now();
+    const task = makeTask({
+      id: "task-123",
+      title: "Review recent failures",
+      prompt: "Look at the failing tests",
+      workspaceId: "workspace-1",
+    });
+    const schedule = buildTaskAutomationSchedule("every30m", "");
+
+    expect(schedule).toMatchObject({
+      kind: "every",
+      everyMs: 30 * 60 * 1000,
+    });
+    expect(schedule?.kind === "every" ? schedule.anchorMs : null).toBeGreaterThanOrEqual(before);
+    expect(
+      buildTaskAutomationCronJobCreate({
+        task,
+        workspace: makeWorkspace(),
+        name: "Review recent failures",
+        prompt: "Look at the failing tests",
+        runMode: "chat",
+        schedule: schedule!,
+        deeplink: "cowork://tasks/task-123",
+      }),
+    ).toMatchObject({
+      name: "Review recent failures",
+      description: "Created from task task-123 (cowork://tasks/task-123)",
+      enabled: true,
+      shellAccess: false,
+      allowUserInput: false,
+      deleteAfterRun: false,
+      schedule,
+      workspaceId: "workspace-1",
+      taskTitle: "Review recent failures",
+    });
+  });
+
+  it("enables shell access for Local run mode", () => {
+    const task = makeTask({ workspaceId: "workspace-1" });
+    const schedule = buildTaskAutomationSchedule("hourly", "")!;
+    const job = buildTaskAutomationCronJobCreate({
+      task,
+      workspace: makeWorkspace(),
+      name: "Local check",
+      prompt: "Run the local health check",
+      runMode: "local",
+      schedule,
+      deeplink: "cowork://tasks/task-1",
+    });
+
+    expect(job.shellAccess).toBe(true);
+  });
+
+  it("templates provide prompt, name, and schedule defaults", () => {
+    const template = TASK_AUTOMATION_TEMPLATES.find((item) => item.id === "ci-failures");
+
+    expect(template).toMatchObject({
+      name: "CI failure summary",
+      schedulePreset: "hourly",
+    });
+    expect(template?.prompt).toContain("CI failures");
+  });
+});
+
 describe("isTaskActivelyWorking", () => {
+  it("composes uploaded PDF prompts with path and parse_document guidance", async () => {
+    const readFileForViewer = vi.fn().mockResolvedValue({
+      success: true,
+      data: {
+        path: "/workspace/.cowork/uploads/123/report.pdf",
+        fileName: "report.pdf",
+        fileType: "pdf",
+        content: null,
+        size: 1024,
+        pdfReviewSummary: {
+          pageCount: 4,
+          nativeTextPages: 4,
+          ocrPages: 0,
+          scannedPages: 0,
+          truncatedPages: false,
+          extractionMode: "native",
+          pages: [
+            {
+              pageIndex: 0,
+              text: "This contract renews annually unless cancelled.",
+              usedOcr: false,
+              truncated: false,
+            },
+          ],
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      electronAPI: {
+        readFileForViewer,
+      },
+    });
+
+    const result = await composeMessageWithAttachments("/workspace", "Summarize this PDF", [
+      {
+        relativePath: ".cowork/uploads/123/report.pdf",
+        fileName: "report.pdf",
+        size: 1024,
+        mimeType: "application/pdf",
+      },
+    ]);
+
+    expect(readFileForViewer).toHaveBeenCalledWith(
+      ".cowork/uploads/123/report.pdf",
+      "/workspace",
+      expect.objectContaining({ imageOcrMaxChars: 6000 }),
+    );
+    expect(result.extractionWarnings).toEqual([]);
+    expect(result.message).toContain("- report.pdf (.cowork/uploads/123/report.pdf)");
+    expect(result.message).toContain("PDF attachment: report.pdf");
+    expect(result.message).toContain("Path: .cowork/uploads/123/report.pdf");
+    expect(result.message).toContain("call parse_document with the Path above");
+    expect(result.message).toContain("Untrusted PDF content follows");
+  });
+
   it("classifies generated html outputs as live html previews", () => {
     expect(
       getInlinePreviewKindForGeneratedFile({
@@ -142,6 +330,50 @@ describe("isTaskActivelyWorking", () => {
         eventStream,
       }),
     ).toBe(true);
+  });
+
+  it("collects the latest office artifact cards for bottom rendering", () => {
+    const created = makeEvent("created", 100, "file_created", {
+      path: "artifacts/sample.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const assistant = makeEvent("assistant", 200, "assistant_message", {
+      message: "Done: artifacts/sample.xlsx",
+    });
+    const laterUser = makeEvent("user", 300, "user_message", {
+      message: "change Lisbon to Porto",
+    });
+
+    expect(collectLatestEndOfTaskArtifactCards([created, assistant, laterUser])).toEqual([
+      {
+        path: "artifacts/sample.xlsx",
+        kind: "spreadsheet",
+        eventId: "assistant",
+        lastReferenceIndex: 1,
+        lastReferenceTimestamp: 200,
+      },
+    ]);
+  });
+
+  it("collapses matching artifact filenames to one bottom card", () => {
+    const relative = makeEvent("relative", 100, "artifact_created", {
+      path: "cowork-os-presentation.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    });
+    const absolute = makeEvent("absolute", 200, "assistant_message", {
+      message:
+        "Updated /Users/mesut/Downloads/app/cowork/cowork-os-presentation.pptx and verified the deck.",
+    });
+
+    expect(collectLatestEndOfTaskArtifactCards([relative, absolute])).toEqual([
+      {
+        path: "/Users/mesut/Downloads/app/cowork/cowork-os-presentation.pptx",
+        kind: "presentation",
+        eventId: "absolute",
+        lastReferenceIndex: 1,
+        lastReferenceTimestamp: 200,
+      },
+    ]);
   });
 
   it("continues to render image artifact cards inline", () => {
@@ -579,6 +811,22 @@ describe("isTaskActivelyWorking", () => {
           event: makeEvent("assistant-1", 400, "assistant_message", { message: "Created sample.xlsx" }),
         },
       },
+      {
+        kind: "artifact-stack",
+        key: "end-artifact-stack",
+        estimatedHeight: 114,
+        artifacts: [
+          {
+            path: "sample.xlsx",
+            kind: "spreadsheet",
+            eventId: "assistant-1",
+            lastReferenceIndex: 2,
+            lastReferenceTimestamp: 400,
+          },
+        ],
+        revision: "sample.xlsx:spreadsheet:assistant-1",
+        visiblePerfEventId: null,
+      },
     ] as Any[];
 
     const result = selectVisibleTaskFeedRows(rows, "delivery");
@@ -586,6 +834,7 @@ describe("isTaskActivelyWorking", () => {
     expect(result.visibleFeedRows.map((row) => row.key)).toEqual([
       "delivery-event:complete-1:2",
       "assistant-1",
+      "end-artifact-stack",
     ]);
     const completionRow = result.visibleFeedRows[0];
     expect(completionRow?.kind).toBe("timeline");

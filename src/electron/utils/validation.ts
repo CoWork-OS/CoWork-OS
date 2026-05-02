@@ -152,6 +152,22 @@ export const AgentConfigSchema = z
     gatewayContext: z.enum(["private", "group", "public"]).optional(),
     toolRestrictions: z.array(z.string().min(1).max(200)).max(50).optional(),
     allowedTools: z.array(z.string().min(1).max(200)).max(120).optional(),
+    integrationMentions: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(200),
+            label: z.string().min(1).max(120),
+            source: z.enum(["builtin", "gateway", "mcp"]),
+            providerKey: z.string().min(1).max(120),
+            iconKey: z.string().min(1).max(80),
+            tools: z.array(z.string().min(1).max(200)).max(50),
+            promptHint: z.string().min(1).max(1000),
+          })
+          .strict(),
+      )
+      .max(12)
+      .optional(),
     originChannel: OriginChannelSchema.optional(),
     maxTurns: z.number().int().min(1).max(250).optional(),
     lifetimeMaxTurns: z.number().int().min(1).max(5000).optional(),
@@ -383,6 +399,22 @@ export const TaskMessageSchema = z
       .optional(),
     permissionMode: PermissionModeSchema.optional(),
     shellAccess: z.boolean().optional(),
+    integrationMentions: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(200),
+            label: z.string().min(1).max(120),
+            source: z.enum(["builtin", "gateway", "mcp"]),
+            providerKey: z.string().min(1).max(120),
+            iconKey: z.string().min(1).max(80),
+            tools: z.array(z.string().min(1).max(200)).max(50),
+            promptHint: z.string().min(1).max(1000),
+          })
+          .strict(),
+      )
+      .max(12)
+      .optional(),
   })
   .superRefine((data, ctx) => {
     if (!data.images || data.images.length === 0) {

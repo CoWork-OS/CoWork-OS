@@ -74,6 +74,10 @@ Descriptions are intentionally capped so provider tool arrays do not grow withou
 
 `compile_latex` is the source-first PDF path for explicit LaTeX, TeX, TikZ, `.tex`, and "write a paper and compile PDF" requests. The executor guidance tells the model to write the `.tex` source with file tools first, then compile that source with `compile_latex`, instead of using the markdown/HTML-backed `generate_document` path.
 
+`parse_document` is the ordinary PDF reading path. Uploaded PDFs are not fully injected into the initial user message; the renderer includes a compact attachment block with filename, workspace-relative path, page count, extraction status, OCR/scan metadata, and a short excerpt. When a task asks to summarize, answer questions from, extract from, compare, or transform the PDF beyond that excerpt, executor guidance tells the model to call `parse_document` on the attached path. `read_pdf_visual` stays reserved for visual layout, formatting, chart/diagram appearance, scanned-page appearance, and similar page-image analysis.
+
+Explicit chat mode normally bypasses the task pipeline. A narrow exception auto-promotes chat turns with uploaded PDF attachment metadata into read-only analysis mode when deeper PDF reading is required, so `parse_document` can run without enabling mutating tools.
+
 ## Provenance-Aware Tool Results
 
 Execution is now provenance-aware as well as tool-aware.
@@ -81,6 +85,7 @@ Execution is now provenance-aware as well as tool-aware.
 - file and document reads can attach source provenance to the result
 - imported files, drag-and-drop data, and channel attachments are treated as untrusted external content
 - when those sources are read, the returned content is prefixed with an explicit banner telling the model to treat it as data, not instructions
+- uploaded PDF excerpts carry the same instruction boundary before the excerpt, because prompt-time attachment previews are also untrusted document data
 - `SessionRuntime` keeps a rolling list of recent sensitive sources read during the task
 
 That provenance is then reused by the approval layer:

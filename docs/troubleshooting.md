@@ -92,6 +92,41 @@ Unread is provider-backed. Opening a thread may mark it read when provider permi
 
 The visible action is enabled only when the app has enough local context, but the provider mutation can still fail if the account token or channel connection expired. Reconnect the mailbox integration, then retry. Gmail server actions require Google Workspace to be enabled; IMAP/SMTP accounts have more limited server action support.
 
+### Ask Inbox does not find an email I can see
+
+Ask Inbox searches local synced evidence first, then adds semantic mailbox matches, provider-native search where available, and attachment text when relevant. If a visible email is missing from Ask results:
+
+1. Confirm the thread exists in the Inbox Agent `All` view, not only in the external mail client.
+2. Use the Inbox Agent refresh button to sync the latest recent batch.
+3. If the answer is inside an attachment, open the thread and extract the attachment text, then retry the question.
+4. Check the Ask Inbox step feed to see which sources ran: local FTS, semantic index, provider search, attachment text, shortlist/read evidence, and answer generation.
+5. Inspect `logs/dev-latest.log` for mailbox ask/search errors if a step stops or reports an error.
+
+Provider-native search is additive. If Gmail or Outlook/Microsoft Graph search fails, Ask Inbox should still fall back to local mailbox evidence and report related results when it has them.
+
+See [Ask Inbox Architecture](ask-inbox-architecture.md).
+
+### `@Gmail` or `@Inbox` says Google Workspace authorization failed
+
+The composer `@` menu uses local configured state, so a stale Google token can still appear until the next provider call proves it is invalid. If a Gmail or Inbox request reports a Google Workspace token refresh bad request, CoWork clears the stale access/refresh tokens and requires a reconnect.
+
+Fix:
+
+1. Open **Settings > Integrations > Google Workspace**.
+2. Confirm the client id, client secret, and scopes match the OAuth client you want to use.
+3. Click **Connect** again and finish the Google OAuth flow.
+4. Retry the `@Gmail` or `@inbox` prompt.
+
+If you recently changed the Google OAuth client id, client secret, or scopes, reconnect even if the integration previously worked. Changed OAuth configuration invalidates the old token set.
+
+### The `@` menu does not show an integration
+
+The composer only shows configured integrations that are locally usable. It does not run live health checks while typing.
+
+Check that the integration is enabled and has local credentials. For Google Workspace, the menu should show Gmail, Google Drive, and Google Calendar instead of a single Google Workspace item. For gateway channels such as Slack, the channel must be connected and enabled. For MCP connectors, the connector must be connected/configured.
+
+See [Composer Mentions](composer-mentions.md).
+
 ### Microphone next to Search threads fails after permission is allowed
 
 The desktop app does not rely on Chromium's Web Speech service because it can request microphone permission but still fail when the speech-recognition backend is unavailable. Configure OpenAI or Azure speech-to-text in **Settings > Voice**. After that, Inbox Agent voice search and `Speak reply` use provider transcription.
@@ -233,6 +268,23 @@ Then inspect:
 logs/dev-latest.log
 ```
 
+## Task automation creation issues
+
+If `... > Add automation...` is missing from task view:
+
+1. Confirm you are viewing a local task, not a remote-session shadow task.
+2. Confirm the task belongs to a workspace. The save path requires a `workspaceId`.
+3. Reopen the task; the task title and three-dot menu are part of the selected task header.
+
+If the modal opens but **Save** is disabled:
+
+1. Confirm the automation name is not empty.
+2. Confirm the prompt is not empty.
+3. Confirm the schedule is valid. `Custom` requires a non-empty cron expression.
+4. Use `Chat` or `Local`; `Worktree` is currently disabled until scheduled tasks can preserve task worktree context.
+
+If **Save** returns an inline error, the modal is showing the `addCronJob` failure from the scheduler API. Check `Settings > Automations > Scheduled Tasks` after a successful save; task-sourced automations are stored there like any other cron job.
+
 ## Chronicle desktop screen context issues
 
 If Chronicle never seems to help with prompts like `what is this on the right side` or `why is this failing`, check these in order:
@@ -362,6 +414,14 @@ If you see `sh: 1: tsc: not found` right after `npx coworkd-node`, you are on an
 ```bash
 npm install cowork-os@latest --no-audit --no-fund
 ```
+
+For production VPS installs, prefer the packaged Linux server release from GitHub Releases instead of the npm quick-start path. The package is named `cowork-os-server-linux-x64-v<version>.tar.gz`, includes built daemon assets, resources, connectors, and runtime dependencies, and runs with:
+
+```bash
+node bin/coworkd-node.js --print-control-plane-token
+```
+
+See [Linux VPS](vps-linux.md) for the full tarball + checksum + systemd flow.
 
 ## "Tool-call budget exhausted: 42/42"
 

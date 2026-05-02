@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { PersonalityConfigV2, PersonaDefinition } from "../../shared/types";
 import { PersonalityIdentityTab } from "./personality/PersonalityIdentityTab";
 import { PersonalityTraitsTab } from "./personality/PersonalityTraitsTab";
@@ -14,6 +14,10 @@ interface PersonalitySettingsProps {
 
 export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsProps) {
   const [config, setConfig] = useState<PersonalityConfigV2 | null>(null);
+  const configRef = useRef<PersonalityConfigV2 | null>(null);
+  const saveInFlightRef = useRef(false);
+  const saveQueuedRef = useRef(false);
+  const reloadAfterSaveRef = useRef(false);
   const [personas, setPersonas] = useState<PersonaDefinition[]>([]);
   const [presets, setPresets] = useState<Record<string, { name: string; description: string; icon: string; traits: Record<string, number> }>>({});
   const [relationshipStats, setRelationshipStats] = useState<{
@@ -34,6 +38,10 @@ export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsPr
   useEffect(() => {
     if (!window.electronAPI?.onPersonalitySettingsChanged) return;
     const unsub = window.electronAPI.onPersonalitySettingsChanged(() => {
+      if (saveInFlightRef.current) {
+        reloadAfterSaveRef.current = true;
+        return;
+      }
       loadData();
       onSettingsChanged?.();
     });
@@ -49,7 +57,9 @@ export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsPr
         window.electronAPI.getPersonalityTraitPresets?.(),
         window.electronAPI.getRelationshipStats?.(),
       ]);
-      setConfig(loadedConfig as PersonalityConfigV2);
+      const nextConfig = loadedConfig as PersonalityConfigV2;
+      configRef.current = nextConfig;
+      setConfig(nextConfig);
       setPersonas((loadedPersonas as PersonaDefinition[]) ?? []);
       setPresets((loadedPresets as Record<string, { name: string; description: string; icon: string; traits: Record<string, number> }>) ?? {});
       setRelationshipStats(stats as typeof relationshipStats);
@@ -61,20 +71,44 @@ export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsPr
   };
 
   const handleUpdate = (updates: Partial<PersonalityConfigV2>) => {
-    if (!config) return;
-    setConfig({ ...config, ...updates });
+    const current = configRef.current;
+    if (!current) return;
+    const nextConfig = { ...current, ...updates };
+    configRef.current = nextConfig;
+    setConfig(nextConfig);
   };
 
   const handleSave = async () => {
-    if (!config) return;
+    if (!configRef.current) return;
+    if (saveInFlightRef.current) {
+      saveQueuedRef.current = true;
+      setSaving(true);
+      return;
+    }
+
+    saveInFlightRef.current = true;
+    let saved = false;
     try {
       setSaving(true);
-      await window.electronAPI.savePersonalityConfigV2(config);
-      onSettingsChanged?.();
+      do {
+        saveQueuedRef.current = false;
+        const configToSave = configRef.current;
+        if (!configToSave) break;
+        await window.electronAPI.savePersonalityConfigV2(configToSave);
+        saved = true;
+      } while (saveQueuedRef.current);
+      if (saved) {
+        onSettingsChanged?.();
+      }
     } catch (err) {
       console.error("Failed to save personality settings:", err);
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
+      if (reloadAfterSaveRef.current) {
+        reloadAfterSaveRef.current = false;
+        void loadData();
+      }
     }
   };
 

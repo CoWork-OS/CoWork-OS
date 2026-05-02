@@ -19,11 +19,12 @@ If you need the desktop app UI on macOS or Windows, that’s a separate mode.
 
 Typical flow on a new VPS:
 
-1. Start the daemon (Node-only recommended).
-2. SSH tunnel the Control Plane port to your laptop.
-3. Open the minimal Control Plane Web UI in your browser.
-4. Create a workspace (or bootstrap one at startup).
-5. Create a task and watch events.
+1. Install the packaged Linux server release, or use Docker/source when you need that path.
+2. Start the Node daemon.
+3. SSH tunnel the Control Plane port to your laptop.
+4. Open the minimal Control Plane Web UI in your browser.
+5. Create a workspace (or bootstrap one at startup).
+6. Create a task and watch events.
 
 Where the “UI” lives:
 
@@ -36,8 +37,8 @@ Pick one of these. They all run the same underlying agent runtime, DB, and setti
 
 | Option | Best For | What You Get | What You Don’t |
 |---|---|---|---|
-| **Packaged server release** | Production VPS installs | Prebuilt Node-only daemon tarball, systemd templates, no source build | Linux x64/glibc only in the first release |
-| **Node-only daemon** (recommended) | VPS/headless | No GUI deps, simplest ops | Desktop-only features (Live Canvas, clipboard, desktop screenshots, etc.) |
+| **Packaged server release** (recommended) | Production VPS installs | Prebuilt Linux x64 tarball, Node daemon entrypoint, systemd templates, full resources/connectors, no source build | Linux x64/glibc only in the first release; not a desktop app package |
+| **Node-only daemon from source/npm** | VPS/headless | No desktop window or Xvfb, source-build flexibility | Desktop-only features (Live Canvas, clipboard, desktop screenshots, etc.) |
 | **Headless Electron daemon** | Max parity with desktop runtime | More desktop parity | Heavier deps (Electron + Xvfb on Linux) |
 | **Docker** (Node-only or Electron) | “Just run it” installs | Easy persistence via volumes | You still access it via Control Plane (web/CLI) |
 
@@ -56,6 +57,18 @@ On a VPS, users typically interact in one of these ways:
 3. **Messaging channels**: configure Telegram/Discord/Slack/etc and treat that as the UI.
 
 There is no requirement to have a macOS machine running.
+
+## Packaged Server Release
+
+For production VPS installs, prefer the GitHub release tarball:
+
+- artifact name: `cowork-os-server-linux-x64-v<version>.tar.gz`
+- checksum: `cowork-os-server-linux-x64-v<version>.tar.gz.sha256`
+- target: Linux x64 on glibc-based distributions
+- runtime: `node bin/coworkd-node.js`
+- install layout: extract to `/opt/cowork-os`, set `COWORK_USER_DATA_DIR=/var/lib/cowork-os`, and use `deploy/systemd/cowork-os-node.service`
+
+The tarball includes built daemon output, the full `resources/` tree, bundled connector runtimes, systemd templates, and runtime `node_modules`. It does not launch the desktop UI and does not require Xvfb. Keep Node.js 24 installed on the server.
 
 ## Headless-Friendly Channels
 

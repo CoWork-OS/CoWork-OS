@@ -168,7 +168,7 @@ describe("buildSavedLLMSettings", () => {
     expect(saved.fallbackProviders).toEqual(validated.fallbackProviders);
   });
 
-  it("persists OpenAI GPT-5.5 reasoning and verbosity settings", () => {
+  it("persists OpenAI reasoning and verbosity settings", () => {
     const existingSettings: LLMSettingsData = {
       providerType: "openai",
       modelKey: "gpt-5.5",

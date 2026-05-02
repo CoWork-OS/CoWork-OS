@@ -74,6 +74,7 @@ export default defineConfig({
         items: [
           { text: 'Channel Integrations', link: '/channels' },
           { text: 'Channel Comparison', link: '/channel-comparison' },
+          { text: 'Composer Mentions', link: '/composer-mentions' },
           { text: 'Inbox Agent', link: '/inbox-agent' },
           { text: 'Skill Store & External Skills', link: '/skill-store-and-external-skills' },
           { text: 'manim-video skill', link: '/skills/manim-video' },

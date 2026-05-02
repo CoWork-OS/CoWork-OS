@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Plug, Zap, Package, Dna } from "lucide-react";
 import type { CapabilitySecurityReport, QuarantinedImportRecord } from "../../shared/types";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { MESSAGE_SHORTCUTS_UPDATED_EVENT } from "../utils/message-slash-options";
 import { PluginStore } from "./PluginStore";
 
 interface PluginPackData {
@@ -138,6 +139,7 @@ export function CustomizePanel({
           p.name === packName ? { ...p, enabled, state: enabled ? "registered" : "disabled" } : p,
         ),
       );
+      window.dispatchEvent(new Event(MESSAGE_SHORTCUTS_UPDATED_EVENT));
     } catch {
       // Toggle failed
     }
@@ -156,6 +158,7 @@ export function CustomizePanel({
             : p,
         ),
       );
+      window.dispatchEvent(new Event(MESSAGE_SHORTCUTS_UPDATED_EVENT));
     } catch {
       // Skill toggle failed
     }

@@ -700,7 +700,7 @@ Triage email in the Inbox Agent workspace, work Today lanes, ask mailbox questio
 - Inbox / Sent / All views plus Recent / Priority sorting, saved views, account filters, and domain chips
 - Manual reply, reply-all, and forward with To/Cc/Bcc, subject, and editable body
 - Editable AI-generated replies with explicit send/discard review
-- Mailbox Ask over local threads, attachment filenames, and indexed attachment text
+- Ask Inbox sidebar chat with live mailbox-agent steps, hybrid local/provider/attachment search, final answers, matched evidence, and `@Inbox` main-composer routing
 - Sender cleanup suggestions for newsletters, promotions, and noisy senders
 - Follow-up reminder creation and real commitment tracking
 - Provider-backed read/unread where supported, background autosync, and thread intelligence refresh
@@ -708,6 +708,11 @@ Triage email in the Inbox Agent workspace, work Today lanes, ask mailbox questio
 **Example prompt:**
 ```
 Open Inbox Agent, switch to Today mode, and show what needs action before I start replying.
+```
+
+**Main-composer shortcut:**
+```
+@inbox when do I need to make payment for my QNB credit card?
 ```
 
 See [Inbox Agent](inbox-agent.md) for the full feature workflow.
@@ -914,11 +919,12 @@ Send me a summary when done.
 
 ### Headless & Server Deployment
 
-Run CoWork OS as a headless daemon on Linux servers with remote access via Tailscale, SSH, or WebSocket.
+Run CoWork OS as a headless daemon on Linux servers with remote access via Tailscale, SSH, or WebSocket. The recommended production path is the packaged Linux x64 server release tarball, which includes built daemon assets, bundled resources, connector runtimes, and systemd templates.
 
 **What it handles:**
-- Headless mode on Ubuntu/Debian/CentOS via systemd
+- Packaged Linux x64 VPS installs via systemd
 - Docker containerized deployment
+- Source-build fallback for custom hosts
 - Remote WebSocket API for programmatic access
 - Tailscale mesh networking for secure remote access
 - SSH tunnel configuration

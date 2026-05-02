@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import hljs from "highlight.js/lib/core";
+import { Download } from "lucide-react";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
 import javascript from "highlight.js/lib/languages/javascript";
@@ -734,6 +735,17 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
               alt={fileData.fileName}
               className="file-viewer-image"
             />
+            {fileData.content && (
+              <a
+                className="file-viewer-image-download-button"
+                href={fileData.content}
+                download={fileData.fileName || "image.png"}
+                title="Download image"
+                aria-label={`Download ${fileData.fileName || "image"}`}
+              >
+                <Download size={18} strokeWidth={2.2} aria-hidden="true" />
+              </a>
+            )}
           </div>
         );
 

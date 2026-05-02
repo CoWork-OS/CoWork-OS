@@ -249,10 +249,7 @@ export class ToolBatchSummaryGenerator {
       const provider = LLMProviderFactory.createProvider({
         type: LLMProviderFactory.loadSettings().providerType,
       });
-      const selection = LLMProviderFactory.resolveTaskModelSelection(
-        { llmProfile: "cheap" },
-        { forceProfile: "cheap" },
-      );
+      const selection = LLMProviderFactory.resolveTaskModelSelection();
       const response = await provider.createMessage({
         model: selection.modelId,
         maxTokens: 32,

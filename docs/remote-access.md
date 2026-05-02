@@ -70,13 +70,14 @@ SSH tunnels provide secure remote access using standard SSH port forwarding. Thi
 ### Prerequisites
 
 - SSH access to the remote machine running CoWork
-- Control Plane enabled (desktop Settings UI, or headless flags/env like `node bin/coworkd.js` or `node bin/coworkd-node.js`)
+- Control Plane enabled. For a packaged Linux server release or source Node daemon, start `node bin/coworkd-node.js`; for headless Electron, start `node bin/coworkd.js`; for desktop, use Settings UI.
 - Authentication token available (printed on first generation, or via `--print-control-plane-token`)
 
 ### Setup
 
 1. **Enable Control Plane** in CoWork Settings > Control Plane
-   - Headless: start with `node bin/coworkd.js` (headless Electron) or `node bin/coworkd-node.js` (Node-only)
+   - Packaged Linux server release: run `node bin/coworkd-node.js --print-control-plane-token` from the extracted package directory.
+   - Source/headless: start with `node bin/coworkd-node.js` (Node daemon) or `node bin/coworkd.js` (headless Electron).
 2. **Note your token** (copy it for client configuration)
 3. **Create SSH tunnel** from your local machine:
 

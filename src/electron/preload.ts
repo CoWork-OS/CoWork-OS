@@ -134,6 +134,8 @@ import type {
   SymphonyConfig,
   SymphonyConfigUpdate,
   SymphonyStatus,
+  IntegrationMentionOption,
+  IntegrationMentionSelection,
 } from "../shared/types";
 import type {
   SubconsciousBrainSummary,
@@ -166,6 +168,7 @@ import type {
   MailboxApplyActionInput,
   MailboxAskInput,
   MailboxAskResult,
+  MailboxAskRunEvent,
   MailboxAttachmentRecord,
   MailboxAutomationRecord,
   MailboxAutomationStatus,
@@ -2029,6 +2032,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SENDER_CLEANUP_DIGEST, input || {}) as Promise<MailboxSenderCleanupDigest>,
   askMailbox: (input: MailboxAskInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ASK, input) as Promise<MailboxAskResult>,
+  onMailboxAskEvent: (callback: (event: MailboxAskRunEvent) => void) => {
+    const subscription = (_: Any, data: MailboxAskRunEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.MAILBOX_ASK_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MAILBOX_ASK_EVENT, subscription);
+  },
   extractMailboxAttachmentText: (attachmentId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ATTACHMENT_EXTRACT_TEXT, { attachmentId }) as Promise<MailboxAttachmentRecord>,
   createMailboxDraft: (input: MailboxComposeDraftInput) =>
@@ -2218,7 +2226,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: { permissionMode?: PermissionMode; shellAccess?: boolean },
+    options?: {
+      permissionMode?: PermissionMode;
+      shellAccess?: boolean;
+      integrationMentions?: IntegrationMentionSelection[];
+    },
   ) => {
     const validatedImages = validateSendMessageAttachments(images);
     return ipcRenderer.invoke(IPC_CHANNELS.TASK_SEND_MESSAGE, {
@@ -2228,6 +2240,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
       quotedAssistantMessage,
       ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
       ...(options?.shellAccess !== undefined ? { shellAccess: options.shellAccess } : {}),
+      ...(options && Object.prototype.hasOwnProperty.call(options, "integrationMentions")
+        ? { integrationMentions: options.integrationMentions ?? [] }
+        : {}),
     });
   },
 
@@ -2554,6 +2569,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Gateway / Channel APIs
   getGatewayChannels: () => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GET_CHANNELS),
+  listIntegrationMentionOptions: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.INTEGRATION_MENTION_OPTIONS) as Promise<
+      IntegrationMentionOption[]
+    >,
   addGatewayChannel: (data: AddChannelRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, data),
   updateGatewayChannel: (data: Any) =>
@@ -4587,6 +4606,7 @@ export interface ElectronAPI {
   getMailboxTodayDigest: (input?: { limitPerBucket?: number }) => Promise<MailboxTodayDigest>;
   getMailboxSenderCleanupDigest: (input?: { limit?: number }) => Promise<MailboxSenderCleanupDigest>;
   askMailbox: (input: MailboxAskInput) => Promise<MailboxAskResult>;
+  onMailboxAskEvent: (callback: (event: MailboxAskRunEvent) => void) => () => void;
   extractMailboxAttachmentText: (attachmentId: string) => Promise<MailboxAttachmentRecord>;
   createMailboxDraft: (input: MailboxComposeDraftInput) => Promise<MailboxComposeDraft>;
   updateMailboxDraft: (draftId: string, patch: MailboxComposeDraftPatch) => Promise<MailboxComposeDraft>;
@@ -4731,7 +4751,11 @@ export interface ElectronAPI {
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: { permissionMode?: PermissionMode; shellAccess?: boolean },
+    options?: {
+      permissionMode?: PermissionMode;
+      shellAccess?: boolean;
+      integrationMentions?: IntegrationMentionSelection[];
+    },
   ) => Promise<void>;
   sendStepFeedback: (
     taskId: string,
@@ -5018,6 +5042,7 @@ export interface ElectronAPI {
   }) => Promise<Array<{ id: string; name: string; provider: string; description: string }>>;
   // Gateway / Channel APIs
   getGatewayChannels: () => Promise<Any[]>;
+  listIntegrationMentionOptions: () => Promise<IntegrationMentionOption[]>;
   addGatewayChannel: (data: AddChannelRequest) => Promise<Any>;
   updateGatewayChannel: (data: {
     id: string;

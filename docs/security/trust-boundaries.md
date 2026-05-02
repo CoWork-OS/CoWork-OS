@@ -75,6 +75,18 @@ When `unrestrictedFileAccess` is enabled:
 
 Imported skills, plugin packs, declarative connector manifests, and bundled scripts are treated as a separate trust boundary from built-in content.
 
+## Imported File Content Boundary
+
+User-imported files, drag-and-drop data, pasted file data, channel attachments, and uploaded PDFs are also separate trust boundaries from the user's actual request.
+
+- external files copied into a workspace are treated as untrusted unless they already live inside the workspace
+- document parser results include provenance-aware banners when untrusted external sources are read
+- uploaded PDF attachment previews include an explicit "untrusted PDF content" notice before the excerpt
+- instructions, role claims, tool requests, or system-prompt-like text inside imported documents must be treated as document data, not as directives
+- ordinary PDF content tasks use `parse_document`; `read_pdf_visual` is reserved for page-image/layout analysis and is treated as data export
+
+This lets CoWork use uploaded PDFs automatically while preserving the boundary between "what the user asked" and "what a document says."
+
 ### Managed Imports
 
 For imported skills and imported packs that CoWork installs into managed storage:

@@ -400,7 +400,24 @@ export class SkillTools {
    */
   async createPresentation(input: {
     filename: string;
-    slides: Array<{ title: string; content: string[] }>;
+    title?: string;
+    author?: string;
+    audience?: string;
+    tone?: string;
+    visualMode?: "work" | "editorial" | "playful" | "premium" | "technical";
+    styleBrief?: string;
+    themeColor?: string;
+    accentColor?: string;
+    slides: Array<{
+      title: string;
+      content?: string[];
+      subtitle?: string;
+      imagePath?: string;
+      layout?: "title" | "titleContent" | "twoColumn" | "imageOnly" | "blank" | "section" | "quote" | "timeline" | "comparison" | "process" | "chart" | "table" | "product" | "metric" | "closing";
+      slideType?: "cover" | "content" | "image" | "quote" | "timeline" | "comparison" | "process" | "chart" | "table" | "section" | "product" | "metric" | "closing" | "blank";
+      visualBrief?: string;
+      notes?: string;
+    }>;
   }): Promise<{ success: boolean; path: string }> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted");
@@ -410,7 +427,16 @@ export class SkillTools {
 
     const outputPath = path.join(this.workspace.path, filename);
 
-    await this.presentationBuilder.create(outputPath, input.slides);
+    await this.presentationBuilder.create(outputPath, input.slides, {
+      title: input.title,
+      author: input.author,
+      audience: input.audience,
+      tone: input.tone,
+      visualMode: input.visualMode,
+      styleBrief: input.styleBrief,
+      themeColor: input.themeColor,
+      accentColor: input.accentColor,
+    });
 
     this.daemon.logEvent(this.taskId, "file_created", {
       path: filename,

@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { describe, expect, it, vi } from "vitest";
 import { DocumentTools } from "../document-tools";
 import { compileLatex } from "../../../utils/document-generators/latex-compiler";
+import { generatePPTX } from "../../../utils/document-generators/pptx-generator";
 
 // Mock the generator modules since they depend on external packages
 vi.mock("../../../utils/document-generators/pdf-generator", () => ({
@@ -203,6 +204,75 @@ describe("DocumentTools", () => {
     expect(result.success).toBe(true);
     expect(result.slideCount).toBe(5);
     expect(registerArtifact).toHaveBeenCalled();
+  });
+
+  it("generatePresentation exposes richer design fields and passes them through", async () => {
+    const defs = DocumentTools.getToolDefinitions();
+    const presentationDef = defs.find((def) => def.name === "generate_presentation");
+    expect(presentationDef?.input_schema.properties).toEqual(
+      expect.objectContaining({
+        audience: expect.any(Object),
+        visualMode: expect.any(Object),
+        styleBrief: expect.any(Object),
+        brand: expect.any(Object),
+        template: expect.any(Object),
+        assets: expect.any(Object),
+      }),
+    );
+
+    const tools = new DocumentTools("/workspace", "task-1");
+    await tools.generatePresentation({
+      filename: "designed-deck.pptx",
+      title: "Designed Deck",
+      audience: "executive buyers",
+      tone: "premium",
+      visualMode: "premium",
+      styleBrief: "Use a restrained editorial rhythm with varied slide structures.",
+      brand: { name: "Acme", primaryColor: "#111111", accentColor: "#14B8A6" },
+      template: { id: "presenton-like", description: "Reusable design system" },
+      assets: [{ id: "hero", path: "/workspace/hero.png", alt: "Hero image" }],
+      slides: [
+        { title: "A sharper opener", slideType: "cover" },
+        {
+          title: "The data has a shape",
+          slideType: "chart",
+          data: {
+            categories: ["A", "B"],
+            series: [{ name: "Growth", values: [2, 5] }],
+          },
+        },
+        {
+          title: "The table stays editable",
+          slideType: "table",
+          data: {
+            headers: ["Item", "Status"],
+            rows: [["Narrative", "Clear"]],
+          },
+        },
+        {
+          title: "Show the product",
+          slideType: "product",
+          image: { id: "hero" },
+        },
+      ],
+    });
+
+    expect(generatePPTX).toHaveBeenLastCalledWith(
+      "/workspace/designed-deck.pptx",
+      expect.objectContaining({
+        audience: "executive buyers",
+        visualMode: "premium",
+        styleBrief: expect.stringContaining("editorial rhythm"),
+        brand: expect.objectContaining({ name: "Acme" }),
+        template: expect.objectContaining({ id: "presenton-like" }),
+        assets: [expect.objectContaining({ id: "hero" })],
+        slides: expect.arrayContaining([
+          expect.objectContaining({ slideType: "chart" }),
+          expect.objectContaining({ slideType: "table" }),
+          expect.objectContaining({ slideType: "product" }),
+        ]),
+      }),
+    );
   });
 
   // ── generateSpreadsheet ───────────────────────────────────────

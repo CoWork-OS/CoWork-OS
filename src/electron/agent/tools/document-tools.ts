@@ -120,6 +120,50 @@ export class DocumentTools {
             },
             title: { type: "string", description: "Presentation title" },
             author: { type: "string", description: "Author name (optional)" },
+            audience: { type: "string", description: "Audience or viewing context" },
+            tone: { type: "string", description: "Tone for the deck, such as work, editorial, playful, premium, or technical" },
+            visualMode: {
+              type: "string",
+              enum: ["work", "editorial", "playful", "premium", "technical"],
+              description: "Visual direction for the deck",
+            },
+            styleBrief: {
+              type: "string",
+              description: "Short design brief describing desired look, rhythm, and anti-patterns",
+            },
+            brand: {
+              type: "object",
+              description: "Optional brand hints for color, type, and naming",
+              properties: {
+                name: { type: "string" },
+                primaryColor: { type: "string" },
+                secondaryColor: { type: "string" },
+                accentColor: { type: "string" },
+                fontFace: { type: "string" },
+              },
+            },
+            template: {
+              type: "object",
+              description: "Optional template/design-system hint; v1 uses this as design guidance",
+              properties: {
+                id: { type: "string" },
+                name: { type: "string" },
+                description: { type: "string" },
+              },
+            },
+            assets: {
+              type: "array",
+              description: "Reusable local or remote raster assets that slides can reference by id",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  path: { type: "string" },
+                  url: { type: "string" },
+                  alt: { type: "string" },
+                },
+              },
+            },
             slides: {
               type: "array",
               description: "Array of slide definitions",
@@ -128,17 +172,106 @@ export class DocumentTools {
                 properties: {
                   title: { type: "string", description: "Slide title" },
                   subtitle: { type: "string", description: "Slide subtitle (title slides only)" },
+                  intent: { type: "string", description: "The single job this slide should perform" },
+                  visualBrief: { type: "string", description: "Slide-specific design or imagery guidance" },
+                  slideType: {
+                    type: "string",
+                    enum: [
+                      "cover",
+                      "content",
+                      "image",
+                      "quote",
+                      "timeline",
+                      "comparison",
+                      "process",
+                      "chart",
+                      "table",
+                      "section",
+                      "product",
+                      "metric",
+                      "closing",
+                      "blank",
+                    ],
+                    description: "Specific editable layout family to use",
+                  },
+                  layoutHint: { type: "string", description: "Natural-language layout hint" },
                   bullets: {
                     type: "array",
                     items: { type: "string" },
                     description: "Bullet points for content slides",
                   },
                   content: { type: "string", description: "Free-text content paragraph" },
+                  quote: { type: "string", description: "Large quote text for quote slides" },
+                  attribution: { type: "string", description: "Quote attribution or source label" },
+                  image: {
+                    type: "object",
+                    description: "Optional local/remote raster image or reusable asset reference",
+                    properties: {
+                      id: { type: "string" },
+                      path: { type: "string" },
+                      url: { type: "string" },
+                      width: { type: "number" },
+                      height: { type: "number" },
+                      alt: { type: "string" },
+                    },
+                  },
+                  data: {
+                    type: "object",
+                    description: "Structured data for editable chart, table, timeline, or metric slides",
+                    properties: {
+                      categories: { type: "array", items: { type: "string" } },
+                      series: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            name: { type: "string" },
+                            values: { type: "array", items: { type: "number" } },
+                          },
+                        },
+                      },
+                      headers: { type: "array", items: { type: "string" } },
+                      rows: {
+                        type: "array",
+                        items: {
+                          type: "array",
+                          items: {},
+                        },
+                      },
+                      items: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            label: { type: "string" },
+                            value: {},
+                            detail: { type: "string" },
+                          },
+                        },
+                      },
+                    },
+                  },
                   notes: { type: "string", description: "Speaker notes" },
                   layout: {
                     type: "string",
-                    enum: ["title", "content", "section", "blank"],
-                    description: "Slide layout type (default: content)",
+                    enum: [
+                      "title",
+                      "content",
+                      "section",
+                      "blank",
+                      "cover",
+                      "image",
+                      "quote",
+                      "timeline",
+                      "comparison",
+                      "process",
+                      "chart",
+                      "table",
+                      "product",
+                      "metric",
+                      "closing",
+                    ],
+                    description: "Backward-compatible layout type or richer slide layout family",
                   },
                 },
               },
@@ -359,7 +492,15 @@ export class DocumentTools {
     const result = await generatePPTX(outputPath, {
       title: input.title,
       author: input.author,
+      audience: input.audience,
+      tone: input.tone,
+      visualMode: input.visualMode,
+      styleBrief: input.styleBrief,
+      brand: input.brand,
+      template: input.template,
+      assets: input.assets,
       slides: input.slides || [],
+      theme: input.theme,
     });
 
     if (result.success && this.registerArtifact) {

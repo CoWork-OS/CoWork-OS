@@ -31,6 +31,16 @@ rm -rf ~/cowork-run
 rm -rf /path/to/CoWork-OS
 ```
 
+### Packaged Linux server release
+
+```bash
+sudo systemctl stop cowork-os-node
+sudo systemctl disable cowork-os-node
+sudo rm -f /etc/systemd/system/cowork-os-node.service
+sudo systemctl daemon-reload
+sudo rm -rf /opt/cowork-os
+```
+
 ### VPS/headless Docker install
 
 ```bash
@@ -56,7 +66,8 @@ Choose the one used by your install:
 - Linux desktop/Electron: `~/.config/cowork-os/`
 - Linux daemon/headless fallback: `~/.cowork/`
 - Node daemon custom path: value passed in `COWORK_USER_DATA_DIR` or `--user-data-dir`
-- Docker/systemd example paths: named volume `cowork_data`, `/var/lib/cowork-os`, and any host bind mount in `/workspace`
+- Packaged/systemd example paths: `/var/lib/cowork-os`, `/srv/cowork/workspace`, and any custom path in `/etc/cowork-os.env`
+- Docker example paths: named volume `cowork_data`, named volume `cowork_workspace`, and any host bind mount in `/workspace`
 
 ## Option 2: Full uninstall + data deletion (database included) — irrecoverable
 
@@ -90,6 +101,7 @@ docker compose rm -f
 
 ```bash
 sudo rm -rf /var/lib/cowork-os
+sudo rm -rf /srv/cowork/workspace
 ```
 
 After the data wipe, also remove remaining app binaries/shell package entries from Option 1 if you haven't already.

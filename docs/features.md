@@ -34,9 +34,12 @@
 - **Everything Workbench**: Generated documents, spreadsheets, presentations, web pages, PDFs, and previews share one artifact model: compact output card, sidebar open, fullscreen artifact workspace, follow-up composer, and refresh after the agent completes requested edits. This reduces the need to switch into separate office apps for generated review and light editing while keeping external app actions available for advanced native workflows. See [Everything Workbench](everything-workbench.md).
 - **Browser Workbench**: live website and local-app testing opens in a visible right-sidebar/fullscreen browser by default. Browser-use tools target the same webview the user can see, with functional navigation controls, screenshots, annotation, and visible cursor movement during agent actions. See [Browser Workbench](browser-workbench.md).
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
+- **Task Overflow Actions**: task view title menus expose supported task actions in place: pin/unpin, rename, archive, copy working directory, copy task ID, copy `cowork://tasks/<taskId>` deeplink, copy Markdown, fork session, view outputs, and create a scheduled automation from the current task. See [Task Automations](task-automations.md).
 - **Managed Agents**: versioned managed agents, reusable local environments, and durable managed sessions exposed through the control plane, with backing tasks and team runs still visible in the normal app surfaces. See [Managed Agents](managed-agents.md).
 - **Runtime Orchestration**: SessionRuntime owns task-session state, session checklists, resume snapshots, recovery state, and task projection while the turn kernel handles each individual step, follow-up, or text turn; metadata-driven tool scheduling, graph-backed delegation, typed worker roles, verifier verdicts, semantic tool-batch summaries, and terminal-state reconciliation keep delegated work coherent across tasks, follow-ups, teams, and ACP runs.
 - **Prompt-Aware Tooling**: visible tools receive concise prompt-local guidance after policy filtering, and planning plus execution share the same render source for compact tool text and provider-facing tool descriptions.
+- **Composer Mentions**: type `@` in the main composer to choose Agents, configured Integrations, or Files. Integration mentions render as icon+name chips and add soft runtime routing guidance without changing permissions. See [Composer Mentions](composer-mentions.md).
+- **Message Box Shortcuts**: type `/` in the main composer to search deterministic app commands and skill-backed workflow shortcuts in one picker. App commands include `/schedule`, `/clear`, `/plan`, `/cost`, `/compact`, `/doctor`, and `/undo`; plugin-pack aliases resolve to their target skills through the existing skills runtime. See [Message Box Shortcuts](message-box-shortcuts.md).
 - **Sectioned Prompt Stack**: execution and follow-up prompts are built from named session- and turn-scoped sections with explicit budgets, memoization of stable sections, provider-aware prompt caching, and truncation/drop reporting when token pressure rises.
 - **Provider-Aware Prompt Caching**: CoWork keeps stable system blocks cacheable and dynamic turn context uncached, prefers Anthropic automatic caching where supported, uses explicit Claude breakpoints on OpenRouter, and derives stable OpenAI-family cache keys for GPT routes.
 - **Session Checklist Primitive**: execution-style tasks can create a session-local ordered checklist with `task_list_create`, maintain it with `task_list_update`, inspect it with `task_list_list`, and surface it read-only in the task UI. The runtime can issue a non-blocking verification nudge when implementation items are done but no verification item exists yet.
@@ -44,12 +47,13 @@
 - **Permission Engine**: layered tool approvals combine explicit modes, per-tool/path/command-prefix/MCP-server rules, session grants, workspace-local rules, profile rules, and hard guardrails; `dangerous_only` adds a lower-friction mode that still prompts on destructive, privacy-sensitive, side-effecting, or ambiguous actions.
 - **Live Terminal**: Shell commands run in a real-time terminal view — see output as it happens, stop execution, or provide interactive input (e.g. `y`/`n` prompts)
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
-- **140 Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, financial analysis, and more. Bundled workflows now include [LLM Wiki](llm-wiki.md) for persistent research vaults, [manim-video](skills/manim-video.md) for deterministic technical animation, [kami](skills/kami.md) for editorial PDFs and slide decks, and `taste-skill` for high-agency frontend design. Optional CLI-based skills (e.g. [aurl](skills/aurl.md) for OpenAPI/GraphQL APIs) appear when the binary is installed.
+- **147 Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, financial analysis, and more. Bundled workflows now include [LLM Wiki](llm-wiki.md) for persistent research vaults, [manim-video](skills/manim-video.md) for deterministic technical animation, [kami](skills/kami.md) for editorial PDFs and slide decks, [react-best-practices](skills/react-best-practices.md) for React and Next.js implementation work, and `taste-skill` for high-agency frontend design. Optional CLI-based skills (e.g. [aurl](skills/aurl.md) for OpenAPI/GraphQL APIs) appear when the binary is installed.
 - **Additive Skill Runtime**: Skills can still be proactively shortlisted from task semantics, but they now apply as additive context and scoped runtime directives. They never replace the original task prompt. See [Skills Runtime Model](skills-runtime-model.md).
-- **Chat Mode**: Direct LLM chat with no tools, no step timeline, same-session follow-ups, chat-only streaming for supported providers, and a fixed high output budget for explicit `executionMode: "chat"` sessions. See [Chat Mode](chat-mode.md).
+- **Chat Mode**: Direct LLM chat with no tools by default, no step timeline, same-session follow-ups, chat-only streaming for supported providers, and a fixed high output budget for explicit `executionMode: "chat"` sessions. Uploaded PDF turns that need deeper document reading are narrowly promoted into read-only analysis so the document parser can run. See [Chat Mode](chat-mode.md).
 - **Document Creation**: Excel, Word, PDF, PowerPoint, HTML, and React-style outputs with professional formatting, first-class LaTeX/TikZ `.tex` -> PDF compilation when a system TeX engine is installed, plus the bundled [kami](skills/kami.md) workflow for editorial PDFs, resumes, one-pagers, and slide decks
 - **Document Artifact Workbench**: task-created Word-style files use compact artifact cards in the task feed. `.docx` opens directly into a resizable right-sidebar editor with a Google Docs-style toolbar, direct text editing, copy, save, external-open, and folder actions. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related formats are recognized as document artifacts and use best-effort preview or external-app/folder actions depending on parser support. Fullscreen mode expands editable documents across the app and keeps a functional follow-up composer with the main task model picker, voice input, attachments, send behavior, latest-turn/working context, and automatic preview refresh after follow-up edits. See [Document Artifacts](document-artifacts.md).
 - **Format-Aware File Preview Popup**: clicking a file link in chat opens a single in-app preview modal that adapts its layout, header metadata, and per-format affordances to the file type. Supported formats: HTML (sandboxed iframe), Markdown, code with `highlight.js` syntax highlighting, plain text, JSON / JSONL / GeoJSON (collapsible tree with raw/tree toggle and parse-error fallback), CSV / TSV (RFC-4180 quoted-field parser feeding a sortable-style table), XLSX, DOCX, PDF (with page/native-text/OCR summary and inline document surface), images (with fit/actual-size toggle, dimension readout, and an alpha checkerboard for PNG/SVG/WebP/GIF/ICO), video, audio (mp3/wav/ogg/m4a/flac/aac with duration metadata), and LaTeX. Modal width and padding are driven by a single `data-format` attribute, so HTML/PDF/image/video get more horizontal room while text/code stay compact and audio renders narrow. The header shows a format-specific subtitle (e.g. `PNG · 1920×1080 · 240 KB`, `PDF · 12 pages · 1.4 MB`, `CSV · 412 rows · 24 KB`) and a unified action bar — Copy path (with copied flash), Show in Finder, Open externally, Close — plus contextual buttons such as the image fit toggle and the JSON tree/raw toggle. Theme tokens replace the previously hardcoded modal background and PDF summary colors, so the popup renders consistently in light and dark themes.
+- **Smart PDF Attachments**: uploaded PDFs are saved into the workspace and represented in the prompt with stable metadata: filename, workspace-relative path, page count, extraction mode/status, OCR/scan counts, and a compact excerpt. If the user asks about PDF contents beyond that excerpt, the runtime calls `parse_document` on the attached path instead of inlining the whole PDF. PDF excerpts are marked as untrusted document data so instructions inside the PDF cannot override the user or system prompt.
 - **Spreadsheet Artifact Workbench**: task-created spreadsheet files use compact artifact cards in the task feed. `.xlsx`, `.xls`, `.xlsm`, `.csv`, and `.tsv` open a resizable right-sidebar spreadsheet viewer with sheet tabs, sticky headers, working zoom, cell/range/row/column selection, copy with a short `Copied` flash, inline editing, add row/column, and save back to the file. `.numbers`, `.gsheet`, `.ods`, and `.xlsb` are recognized as spreadsheet artifacts and use external-app/folder actions. Fullscreen mode expands editable sheets across the app and keeps a functional follow-up composer with the main task model picker, voice input, attachments, and send behavior. See [Spreadsheet Artifacts](spreadsheet-artifacts.md).
 - **Presentation Artifact Workbench**: PPTX artifacts render as compact task-feed cards and open by default in the resizable right-sidebar presentation viewer. The viewer includes slide thumbnails, previous/next controls, zoom, a white slide canvas, extracted slide text, speaker notes, fast text-first loading, cached rendered slide images, fullscreen follow-up context, external-app/folder actions, and preview refresh after follow-up edits. Legacy PowerPoint formats are recognized with external actions. See [Presentation Artifacts and PPTX Preview](pptx-generation-and-preview.md).
 - **Web Page Artifact Workbench**: generated `.html` / `.htm` files and built React output entrypoints render as compact task-feed cards and open by default in the resizable right-sidebar web viewer. The viewer uses a sandboxed iframe with local assets inlined where possible, browser/folder/copy actions, fullscreen follow-up context, and preview refresh after matching file/build-output updates. React-style projects without built output show a build-output-needed state instead of auto-starting a dev server. See [Web Page Artifacts](web-page-artifacts.md).
@@ -81,6 +85,7 @@
 - **Video Generation**: Text-to-video and image-to-video via new video generation providers. Configure preferred video model in Settings > LLM. Generated videos render inline in the task feed.
 - **Programmatic Technical Animation**: The bundled [manim-video](skills/manim-video.md) skill scaffolds Manim CE projects for math explainers, algorithm walkthroughs, architecture animations, and data stories with local project files, dependency preflight, and draft-first render helpers.
 - **Editorial Document Design**: The bundled [kami](skills/kami.md) skill scaffolds workspace-local source projects for resumes, one-pagers, white papers, letters, portfolios, diagrams, and slide decks, with PDF/PPTX render helpers and a preserved editorial design system.
+- **React/Next.js Implementation Guidance**: The bundled [react-best-practices](skills/react-best-practices.md) skill applies React and Next.js performance guidance during feature work, enhancements, refactors, reviews, data-fetching changes, bundle-size checks, and rendering-performance fixes.
 - **High-Agency Frontend Design**: The bundled `taste-skill` workflow adds a stricter anti-slop frontend option for React/Next.js-style UI work, with stronger layout variance, typography, motion, dependency-check, and responsive-quality rules than the default frontend guidance.
 - **Visual Annotation**: Iterative image refinement with the Visual Annotator
 - **Context Summarization**: Automatic context compression surfaced in the task timeline
@@ -147,7 +152,9 @@ Local-first inbox workspace for email triage, normal email handling, follow-up, 
 - **Mailbox views**: `Inbox`, `Sent`, and `All`, with `Recent` and `Priority` sorting, saved views, account filters, and domain filters
 - **Normal email actions**: manual reply, reply-all, forward, To/Cc/Bcc, editable subject/body, and provider-backed send
 - **AI draft review**: generated replies can be edited before sending, and the draft card clears after successful send
-- **Mailbox Ask**: search local thread evidence, attachment filenames, and on-demand indexed attachment text, with LLM summaries when configured
+- **Ask Inbox**: right-sidebar mailbox chat with live agentic steps, final answers, matched email evidence, and click-to-open results
+- **Hybrid mailbox search**: Ask Inbox searches local FTS, semantic mailbox embeddings, provider-native Gmail/Outlook search when available, and attachment text for statements, invoices, extracts, PDFs, payment notices, and similar evidence
+- **`@Inbox` composer routing**: type `@Inbox` or `@inbox ...` in the main composer to open Inbox Agent, switch to Ask Inbox, and route the remaining query there
 - **Action rail**: cleanup, follow-up, reply, forward, mark done, thread prep, todo extraction, scheduling, and intel refresh
 - **Thread visibility**: received and sent message content are both shown in the thread detail view
 - **Cross-channel replies**: reply directly via linked Slack, Teams, WhatsApp, Signal, or iMessage targets when email is not the best channel
@@ -161,7 +168,7 @@ Local-first inbox workspace for email triage, normal email handling, follow-up, 
 - **Safer review**: sensitive-content warnings, editable drafts, blocked scripts, and provider-permission gates keep outbound actions visible before anything leaves the app
 - **Local persistence**: cached mail remains visible after restart while background sync refreshes new mail
 
-See the full workflow guide in [Inbox Agent](inbox-agent.md).
+See the full workflow guide in [Inbox Agent](inbox-agent.md) and the retrieval/IPC contract in [Ask Inbox Architecture](ask-inbox-architecture.md).
 
 ### Managed Devices & Remote Operations
 
@@ -184,7 +191,7 @@ Automation features are now grouped together in `Settings > Automations`:
 - **Workflow Intelligence**: Memory, Heartbeat, internal Reflection, and reviewable Suggestions form one always-on runtime owned by automation profiles
 - **Task Queue**: concurrency, queueing, and background execution policy
 - **Workflow Intelligence settings**: target-scoped evidence, hypotheses, critique, winner selection, suggestion dispatch, feedback learning, and guarded auto-create policy
-- **Scheduled Tasks**: recurring time-based task execution; now also used as a compiled backend for routine schedule triggers
+- **Scheduled Tasks**: recurring time-based task execution; now also used as a compiled backend for routine schedule triggers and as the backend for task-sourced `Add automation...` flows
 - **Webhooks**: inbound automation entry points; now also used as a compiled backend for routine API triggers
 - **Event Triggers**: condition-based actions triggered by channel, webhook, or runtime events; now also used as a compiled backend for routine event triggers
 - **Daily Briefing**: scheduled summaries with workspace, memory, and evolution context
@@ -199,6 +206,8 @@ Ownership model:
 - `Digital Twins` are optional persona presets and are not direct cognition owners
 
 The home dashboard also surfaces recent automation runs so background work is visible without opening Settings. See [Core Automation](core-automation.md).
+
+Task view can also create a low-level scheduled task directly from the selected task with `... > Add automation...`. That popup is prefilled from the task title/prompt, appends a source task reference and `cowork://tasks/<taskId>` deeplink to the saved prompt, and calls the existing cron scheduled-task API. See [Task Automations](task-automations.md).
 
 ### Routines
 
@@ -334,7 +343,8 @@ The task creation UI also includes higher-level toggles that change how tasks ar
 
 Chat mode is the direct assistant conversation surface. It is designed for normal Q&A, not task execution.
 
-- **No tools**: the assistant does not plan or call tools in chat mode
+- **No tools by default**: the assistant does not plan or call tools in normal chat mode
+- **PDF exception**: chat turns with uploaded PDF attachment metadata are auto-promoted to read-only analysis when deeper PDF content is needed, so `parse_document` can read the file without enabling mutating tools
 - **No step timeline**: chat turns do not render execution steps
 - **Same-session follow-ups**: later questions stay in the current conversation thread
 - **Explicit only**: chat behavior is enabled only when `executionMode` is explicitly set to `chat`
@@ -378,10 +388,10 @@ Access from **Mission Control** > **Add Digital Twin**. See [Digital Twins](digi
 
 ## Plugin Packs & Customize
 
-Role-specific bundles that group skills, agent roles, connectors, and slash commands into installable packs. Each pack targets a job function and can optionally link to a Digital Twin Persona as an optional role preset.
+Role-specific and workflow bundles that group skills, agent roles, connectors, and slash commands into installable packs. Each pack targets a job function or workflow area and can optionally link to a Digital Twin Persona as an optional role preset.
 
-- **18 bundled packs**: Engineering, Engineering Management, Product Management, DevOps, Mobile Development, Game Development, Data Analysis, QA & Testing, Sales CRM, Customer Support, Content & Marketing, Technical Writing, Equity Research, Financial Analysis, Investment Banking, Private Equity, Wealth Management, and Geo SEO
-- **55+ built-in skills**: Code review prep, sprint health, feature triage, incident response, prospect research, DCF modeling, LBO analysis, and more
+- **19 bundled packs**: Engineering, Engineering Management, Product Management, DevOps, Mobile Development, Game Development, Data Analysis, QA & Testing, Sales CRM, Customer Support, Content & Marketing, Technical Writing, Equity Research, Financial Analysis, Investment Banking, Private Equity, Wealth Management, Geo SEO, and CoWork Shortcuts
+- **100+ pack skills and shortcuts**: Code review prep, sprint health, feature triage, incident response, prospect research, DCF modeling, LBO analysis, `/strategy`, `/batch-rename`, `/gmail-summary-drive`, `/multi-source-report`, and more
 - **Unified Customize panel**: Browse, enable/disable packs, view skills/commands/agents, click "Try asking" prompts
 - **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
 - **Per-skill toggles**: Enable or disable individual skills within a pack without toggling the entire pack
@@ -390,6 +400,7 @@ Role-specific bundles that group skills, agent roles, connectors, and slash comm
 - **Recommended connectors**: Packs display clickable connector chips that navigate to connector settings
 - **Update detection**: Background check against the remote registry with orange dot indicators on packs with newer versions
 - **"Try asking" in chat**: Empty chat state shows randomized prompt suggestions from enabled packs for one-click task creation
+- **Message-box slash aliases**: Plugin-pack `slashCommands` appear in the main `/` picker and invoke their mapped skill IDs. Alias enable/disable state follows pack and per-skill toggles.
 - **Plugin Store**: In-app marketplace for discovering, installing, and creating packs (from Git repos, URLs, or scaffold)
 - **Managed import scanning**: Git and URL pack installs are staged and scanned before activation, with install results surfaced as installed, installed with warning, or quarantined
 - **Quarantine & report UX**: blocked imported packs move into a dedicated quarantine area with stored reports, retry scan, and removal actions in the Customize panel
@@ -400,7 +411,7 @@ Role-specific bundles that group skills, agent roles, connectors, and slash comm
 - **Skill conflict detection**: Warns when multiple packs register the same skill ID, preventing silent overwrites
 - **Admin Policies**: Organization-level controls for allowed/blocked/required packs, installation permissions, and agent limits
 
-Access from **Settings** > **Customize**. See [Plugin Packs](plugin-packs.md) for full documentation.
+Access from **Settings** > **Customize**. See [Plugin Packs](plugin-packs.md) for pack management and [Message Box Shortcuts](message-box-shortcuts.md) for the composer shortcut model.
 
 ---
 
@@ -421,7 +432,7 @@ CoWork OS supports external skill installation through the desktop GUI, not just
 - **Cross-ecosystem support**: Other external skill stores are supported when they expose Git repos, raw manifests, or raw `SKILL.md` bundle entry points
 - **Shared runtime contract**: Once loaded, external skills follow the same additive execution model as bundled skills. They can add context and scoped directives, but they cannot replace the canonical task prompt.
 
-Access from **Settings** > **Skills** > **Skill Store**. Users can start with bundled global skills such as `llm-wiki`, `kami`, and `taste-skill`, then add third-party skills through the same runtime model. See [Skill Store & External Skills](skill-store-and-external-skills.md) for install/import behavior and [Skills Runtime Model](skills-runtime-model.md) for execution semantics.
+Access from **Settings** > **Skills** > **Skill Store**. Users can start with bundled global skills such as `llm-wiki`, `kami`, `react-best-practices`, and `taste-skill`, then add third-party skills through the same runtime model. See [Skill Store & External Skills](skill-store-and-external-skills.md) for install/import behavior and [Skills Runtime Model](skills-runtime-model.md) for execution semantics.
 
 ---
 
@@ -1016,6 +1027,7 @@ Multi-provider image and PDF analysis with caching and optimization.
 |------|-------------|
 | `analyze_image` | Analyze any image with the active non-Gemini vision LLM (OpenAI, Anthropic, Azure OpenAI, Bedrock) |
 | `read_pdf_visual` | Convert PDF pages to images and analyze layout/design |
+| `parse_document` | Extract text from PDFs and other document formats; this is the preferred path for ordinary PDF summaries, Q&A, extraction, comparison, and transformation |
 
 | Feature | Description |
 |---------|-------------|
@@ -1023,7 +1035,8 @@ Multi-provider image and PDF analysis with caching and optimization.
 | **Auto-downscaling** | Images >2MB automatically downscaled to 1600×1200 at 80% quality |
 | **Active-provider routing** | Image analysis uses the active non-Gemini image-capable provider; otherwise the user is asked to switch models |
 | **Retry logic** | Transient errors (429, 5xx, timeouts) trigger single retry |
-| **PDF conversion** | Uses `pdftoppm` to convert PDF pages to PNG at 72 DPI (5-page max) |
+| **PDF text reading** | Uploaded PDFs use compact prompt excerpts first, then `parse_document` for deeper content; normal text PDFs use embedded text, while weak/scanned PDFs can fall back to OCR-aware extraction |
+| **PDF visual conversion** | `read_pdf_visual` uses `pdftoppm` to convert PDF pages to PNG for layout/design/page-appearance analysis |
 
 ---
 
@@ -1390,6 +1403,8 @@ See [Integration Setup, Skill Proposals, and Bootstrap Lifecycle](integration-sk
 
 ## Cloud Integrations
 
+The main composer supports grouped `@` mentions for **Agents**, **Integrations**, and **Files**. The Integrations section only shows configured, locally usable integrations. Google Workspace splits into **Gmail**, **Google Drive**, and **Google Calendar**; gateway channels and MCP connectors appear only when connected/configured. Selecting an integration inserts an icon+name chip, preserves clean prompt text such as `@Gmail`, and sends `integrationMentions` metadata as soft routing guidance without granting permissions or restricting tools. See [Composer Mentions](composer-mentions.md).
+
 | Service | Tool | Actions |
 |---------|------|---------|
 | **Notion** | `notion_action` | Search, read, create, update, query data sources |
@@ -1511,6 +1526,9 @@ Configure in **Settings** > **Appearance**.
 Schedule recurring tasks with cron expressions and optional channel delivery.
 
 - Standard cron syntax with workspace binding
+- Create from an existing task with task view `... > Add automation...`
+- Task-sourced jobs preserve a source task title, task ID, and `cowork://tasks/<taskId>` deeplink in the scheduled prompt/description
+- Run mode presets: `Chat` for no-shell unattended work, `Local` for shell-enabled workspace work; task worktree mode is shown disabled until cron jobs can preserve worktree context
 - Channel delivery to any of the 17 channels
 - Conditional delivery (`deliverOnlyIfResult`)
 - Template variables: `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`
@@ -1532,7 +1550,7 @@ Run multiple tasks concurrently with configurable limits (1-10, default: 3). Tas
 
 ---
 
-## Built-in Skills (139)
+## Built-in Skills (147)
 
 | Category | Skills |
 |----------|--------|
@@ -1542,7 +1560,7 @@ Run multiple tasks concurrently with configurable limits (1-10, default: 3). Tas
 | **Media** | Spotify, YouTube, SoundCloud |
 | **Image** | Image Generation (Gemini/OpenAI/Azure), Agentic Image Loop |
 | **Documents** | Excel, Word, PDF, PowerPoint |
-| **Frontend** | Frontend Design, React Native Best Practices |
+| **Frontend** | Frontend Design, React Best Practices, React Native Best Practices, Taste Skill |
 | **Mobile** | iOS Development, Android Development |
 | **Game Dev** | Unity Development, Unreal Engine Development, Game Performance Optimization |
 | **IaC / DevOps** | Terraform Operations, Kubernetes Operations, Cloud Migration, Docker Compose Operations |

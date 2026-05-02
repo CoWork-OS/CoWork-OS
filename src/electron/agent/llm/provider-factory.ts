@@ -67,6 +67,19 @@ const ENCRYPTED_PREFIX = "encrypted:";
 let llmCallLogCounter = 0;
 const observedModelMaxTokens = new Map<string, number>();
 const logger = createLogger("LLMProviderFactory");
+const OPENAI_OAUTH_DEFAULT_MODEL = "gpt-5.5";
+const OPENAI_OAUTH_SUPPORTED_MODELS = new Set([
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+  "gpt-5.3-codex-spark",
+  "gpt-5.3-codex",
+  "gpt-5.2",
+  "gpt-5.2-codex",
+  "gpt-5.1",
+  "gpt-5.1-codex-max",
+]);
 const CUSTOM_PROVIDER_ALIASES: Partial<
   Record<LLMProviderType, LLMProviderType>
 > = {
@@ -81,6 +94,18 @@ function safeContentLength(value: unknown): number {
   } catch {
     return 0;
   }
+}
+
+function normalizeOpenAIModelForAuth(
+  model: string | undefined,
+  authMethod?: "api_key" | "oauth",
+): string | undefined {
+  const normalized = normalizeModelKey(model);
+  if (authMethod !== "oauth") return normalized || undefined;
+  if (!normalized) return OPENAI_OAUTH_DEFAULT_MODEL;
+  return OPENAI_OAUTH_SUPPORTED_MODELS.has(normalized)
+    ? normalized
+    : OPENAI_OAUTH_DEFAULT_MODEL;
 }
 
 function summarizeLLMRequest(request: LLMRequest): Record<string, unknown> {
@@ -1417,7 +1442,10 @@ export class LLMProviderFactory {
         settings.ollama?.model,
         settings.gemini?.model,
         settings.openrouter?.model,
-        settings.openai?.model,
+        normalizeOpenAIModelForAuth(
+          settings.openai?.model,
+          settings.openai?.authMethod,
+        ),
         azureDeployment,
         settings.azureAnthropic?.deployment ||
           settings.azureAnthropic?.deployments?.[0],
@@ -1439,7 +1467,10 @@ export class LLMProviderFactory {
         settings.ollama?.model,
         settings.gemini?.model,
         settings.openrouter?.model,
-        settings.openai?.model,
+        normalizeOpenAIModelForAuth(
+          settings.openai?.model,
+          settings.openai?.authMethod,
+        ),
         azureDeployment,
         settings.azureAnthropic?.deployment ||
           settings.azureAnthropic?.deployments?.[0],
@@ -1448,6 +1479,13 @@ export class LLMProviderFactory {
         settings.kimi?.model,
         settings.customProviders,
         source === "provider_default" ? settings.bedrock?.model : undefined,
+      );
+    }
+
+    if (providerType === "openai") {
+      return (
+        normalizeOpenAIModelForAuth(modelKey, settings.openai?.authMethod) ||
+        modelKey
       );
     }
 
@@ -1468,11 +1506,16 @@ export class LLMProviderFactory {
     options?: {
       forceProfile?: LlmProfile;
       isVerificationTask?: boolean;
+      allowProviderOverride?: boolean;
+      allowModelOverride?: boolean;
+      allowCapabilityRouting?: boolean;
+      allowProfileRouting?: boolean;
     },
   ): ResolvedTaskModelSelection {
     const settings = this.loadSettings();
-    const providerType = (taskAgentConfig?.providerType ||
-      settings.providerType) as LLMProviderType;
+    const providerType = (options?.allowProviderOverride
+      ? taskAgentConfig?.providerType || settings.providerType
+      : settings.providerType) as LLMProviderType;
     const routing = this.getProviderRoutingSettings(settings, providerType);
     const warnings: string[] = [];
 
@@ -1493,7 +1536,9 @@ export class LLMProviderFactory {
       llmProfileUsed = "strong";
     }
 
-    const explicitModelOverride = normalizeModelKey(taskAgentConfig?.modelKey);
+    const explicitModelOverride = options?.allowModelOverride
+      ? normalizeModelKey(taskAgentConfig?.modelKey)
+      : undefined;
     const profileForced =
       taskAgentConfig?.llmProfileForced === true &&
       Boolean(taskAgentConfig?.llmProfile || options?.forceProfile);
@@ -1507,7 +1552,7 @@ export class LLMProviderFactory {
     if (allowExplicitModelOverride && explicitModelOverride) {
       modelSource = "explicit_override";
       resolvedModelKey = explicitModelOverride;
-    } else if (taskAgentConfig?.capabilityHint) {
+    } else if (options?.allowCapabilityRouting && taskAgentConfig?.capabilityHint) {
       const capabilityModelKey = resolveModelPreferenceToModelKey(
         ModelCapabilityRegistry.selectForCapability(
           taskAgentConfig.capabilityHint,
@@ -1517,7 +1562,7 @@ export class LLMProviderFactory {
         modelSource = "profile_model";
         resolvedModelKey = capabilityModelKey;
       }
-    } else if (routing.profileRoutingEnabled) {
+    } else if (options?.allowProfileRouting && routing.profileRoutingEnabled) {
       const profileModelKey =
         llmProfileUsed === "strong"
           ? routing.strongModelKey
@@ -1625,7 +1670,11 @@ export class LLMProviderFactory {
           providerType,
           modelKey: normalizeModelKey(entry.modelKey),
         },
-        options,
+        {
+          ...options,
+          allowProviderOverride: true,
+          allowModelOverride: true,
+        },
       );
       const dedupeKey = `${resolveCustomProviderId(selection.providerType)}:${normalizeModelKey(selection.modelKey) || ""}`;
       if (seen.has(dedupeKey)) {
@@ -1913,15 +1962,20 @@ export class LLMProviderFactory {
     const config: LLMProviderConfig = {
       type: providerType,
       model:
-        normalizeModelKey(overrideConfig?.model) ||
+        normalizeOpenAIModelForAuth(
+          overrideConfig?.model,
+          providerType === "openai" ? settings.openai?.authMethod : undefined,
+        ) ||
         this.getModelId(
           settings.modelKey,
           providerType,
           settings.ollama?.model,
           settings.gemini?.model,
           settings.openrouter?.model,
-          settings.openai?.model ||
-            (settings.openai?.authMethod === "oauth" ? "gpt-5.5" : undefined),
+          normalizeOpenAIModelForAuth(
+            settings.openai?.model,
+            settings.openai?.authMethod,
+          ),
           azureDeployment,
           azureAnthropicDeployment,
           settings.groq?.model,
@@ -2615,8 +2669,10 @@ export class LLMProviderFactory {
 
       case "openai": {
         const currentModel =
-          settings.openai?.model ||
-          (settings.openai?.authMethod === "oauth" ? "gpt-5.5" : "gpt-4o-mini");
+          normalizeOpenAIModelForAuth(
+            settings.openai?.model,
+            settings.openai?.authMethod,
+          ) || "gpt-4o-mini";
         const defaultOpenAIModels =
           settings.openai?.authMethod === "oauth"
             ? [
@@ -3758,11 +3814,6 @@ export class LLMProviderFactory {
             id: "gpt-5.3-codex-spark",
             name: "GPT-5.3 Codex Spark",
             description: "Entitlement-dependent Codex Spark model",
-          },
-          {
-            id: "gpt-5.1-codex-mini",
-            name: "GPT-5.1 Codex Mini",
-            description: "Fast and efficient for most tasks",
           },
           {
             id: "gpt-5.1-codex-max",

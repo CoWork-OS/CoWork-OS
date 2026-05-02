@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from "react";
 import type { CanvasSession } from "../../shared/types";
 import { useAgentContext } from "../hooks/useAgentContext";
+import { ResizableDividerHandle } from "./ResizableDividerHandle";
 
 interface CanvasPreviewProps {
   session: CanvasSession;
@@ -1443,13 +1444,12 @@ export function CanvasPreview({
           )}
 
           {/* Resize handle */}
-          <div
+          <ResizableDividerHandle
             className="canvas-resize-handle"
+            orientation="horizontal"
             onMouseDown={handleResizeStart}
             title="Drag to resize"
-          >
-            <div className="resize-handle-bar"></div>
-          </div>
+          />
         </>
       )}
     </div>

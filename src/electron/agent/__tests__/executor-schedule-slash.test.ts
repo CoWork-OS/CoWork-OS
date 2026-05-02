@@ -418,6 +418,56 @@ describe("TaskExecutor /simplify and /batch normalization", () => {
     );
   });
 
+  it("resolves plugin slash aliases to their target skill", async () => {
+    const executor = createExecutor("/geo-quick https://example.com", (name, input) => {
+      expect(name).toBe("Skill");
+      expect(input).toEqual({
+        skill: "geo-quick-audit",
+        args: "https://example.com",
+        trigger: "slash",
+      });
+      return buildSkillToolSuccess({
+          skillId: "geo-quick-audit",
+          skillName: "GEO Quick Audit",
+          trigger: "slash",
+          args: "https://example.com",
+          parameters: {},
+          content: "GEO audit prompt expanded",
+          reason: "Applied via /geo-quick",
+          appliedAt: Date.now(),
+        });
+    }) as Any;
+    executor.resolveSkillSlashCommandName = vi.fn((name: string) =>
+      name === "geo-quick" ? "geo-quick-audit" : null,
+    );
+    executor.getSkillForSlashCommand = vi.fn((skillId: string) =>
+      skillId === "geo-quick-audit"
+        ? {
+            id: "geo-quick-audit",
+            name: "GEO Quick Audit",
+            description: "Audit a URL",
+            icon: "🌐",
+            prompt: "Audit {{url}}",
+          }
+        : undefined,
+    );
+
+    const handled = await (TaskExecutor as Any).prototype.maybeHandleSkillSlashCommandOrInlineChain.call(
+      executor,
+    );
+
+    expect(handled).toBe(true);
+    expect(executor.appliedSkills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          skillId: "geo-quick-audit",
+          trigger: "slash",
+          content: "GEO audit prompt expanded",
+        }),
+      ]),
+    );
+  });
+
   it("rejects `/batch` without an objective", async () => {
     const executor = createExecutor("/batch", (_name, _input) => {
       throw new Error("Skill should not be called");

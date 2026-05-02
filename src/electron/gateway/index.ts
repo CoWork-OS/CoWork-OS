@@ -1291,6 +1291,7 @@ export class ChannelGateway {
             loomMailboxFolder: options?.loomMailboxFolder ?? "INBOX",
             loomPollInterval: options?.loomPollInterval ?? 30000,
             displayName,
+            silentUnauthorized: true,
           }
         : {
             protocol: "imap-smtp",
@@ -1314,6 +1315,7 @@ export class ChannelGateway {
             displayName,
             allowedSenders,
             subjectFilter,
+            silentUnauthorized: true,
           };
 
     // Create channel record

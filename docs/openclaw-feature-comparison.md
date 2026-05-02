@@ -114,7 +114,7 @@ Both repos clearly have a real skill system.
 
 **CoWork OS**
 
-- README advertises 140 built-in skills.
+- README advertises 147 built-in skills.
 - `resources/skills/` contains bundled skills.
 - Plugin packs can expose and toggle individual skills.
 

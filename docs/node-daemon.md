@@ -1,12 +1,15 @@
-# Node-Only Daemon (No Electron)
+# Node-Only Daemon
 
-Goal: run CoWork OS on Linux servers (VPS/headless) **without Electron/Xvfb**, as a pure Node.js daemon.
+Goal: run CoWork OS on Linux servers (VPS/headless) as a Node.js daemon with no desktop window and no Xvfb.
 
 This is an alternative to the Linux “headless Electron” mode. It’s designed for:
 
+- packaged Linux server releases
 - VPS/systemd installs
 - headless Docker installs
 - a CLI/web-dashboard driven workflow (no desktop UI required)
+
+Important naming detail: “Node-only” describes the process entrypoint (`node bin/coworkd-node.js`) and the absence of a desktop UI/Xvfb. The packaged server tarball can still include the `electron` npm package as a compatibility dependency while shared runtime helpers are being decoupled; users do not launch Electron from this package.
 
 ## What It Runs
 
@@ -19,7 +22,22 @@ The Node daemon (`coworkd-node`) wires up:
 - optional channel gateway (Telegram/Discord/Slack/etc)
 - optional MCP + cron (best-effort)
 
-## Quick Start (Source Install)
+## Recommended Install (Packaged Server Release)
+
+For production VPS installs, use the GitHub release tarball documented in [Linux VPS](vps-linux.md):
+
+```bash
+version=<version>
+curl -LO "https://github.com/CoWork-OS/CoWork-OS/releases/download/v${version}/cowork-os-server-linux-x64-v${version}.tar.gz"
+curl -LO "https://github.com/CoWork-OS/CoWork-OS/releases/download/v${version}/cowork-os-server-linux-x64-v${version}.tar.gz.sha256"
+sha256sum --check "cowork-os-server-linux-x64-v${version}.tar.gz.sha256"
+sudo mkdir -p /opt/cowork-os
+sudo tar -xzf "cowork-os-server-linux-x64-v${version}.tar.gz" -C /opt/cowork-os --strip-components=1
+```
+
+The package includes built daemon assets, runtime dependencies, resources, connectors, and systemd templates.
+
+## Source Install
 
 ```bash
 npm ci

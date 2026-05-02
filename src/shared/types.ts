@@ -1896,6 +1896,25 @@ export type ReviewPolicy = "off" | "balanced" | "strict";
 export type EntropySweepPolicy = "off" | "balanced" | "strict";
 export type TaskRiskLevel = "low" | "medium" | "high";
 
+export type IntegrationMentionSource = "builtin" | "gateway" | "mcp";
+export type IntegrationMentionStatus = "configured" | "connected";
+
+export interface IntegrationMentionSelection {
+  id: string;
+  label: string;
+  source: IntegrationMentionSource;
+  providerKey: string;
+  iconKey: string;
+  tools: string[];
+  promptHint: string;
+}
+
+export interface IntegrationMentionOption extends IntegrationMentionSelection {
+  description: string;
+  aliases: string[];
+  status: IntegrationMentionStatus;
+}
+
 /**
  * Per-task agent configuration for customizing LLM and personality
  * Allows spawning agents with different models/personalities than the global settings
@@ -1926,6 +1945,8 @@ export interface AgentConfig {
    * When provided, only tools in this list are exposed to the model.
    */
   allowedTools?: string[];
+  /** User-selected integration mentions for soft tool-routing guidance. */
+  integrationMentions?: IntegrationMentionSelection[];
   /** Optional origin channel that created the task (used for channel-aware gating) */
   originChannel?: ChannelType;
   /** Explicit maximum number of LLM turns before forcing completion. Unset means no window cap for normal main-task routing. */
@@ -2896,6 +2917,7 @@ export interface TaskFollowUpInput {
   quotedAssistantMessage?: QuotedAssistantMessage;
   permissionMode?: PermissionMode;
   shellAccess?: boolean;
+  integrationMentions?: IntegrationMentionSelection[];
 }
 
 export interface TaskEvent {
@@ -6414,6 +6436,7 @@ export const IPC_CHANNELS = {
   MAILBOX_TODAY_DIGEST: "mailbox:todayDigest",
   MAILBOX_SENDER_CLEANUP_DIGEST: "mailbox:senderCleanupDigest",
   MAILBOX_ASK: "mailbox:ask",
+  MAILBOX_ASK_EVENT: "mailbox:askEvent",
   MAILBOX_ATTACHMENT_EXTRACT_TEXT: "mailbox:attachmentExtractText",
   MAILBOX_CREATE_DRAFT: "mailbox:createDraft",
   MAILBOX_UPDATE_DRAFT: "mailbox:updateDraft",
@@ -6650,6 +6673,7 @@ export const IPC_CHANNELS = {
   PLUGIN_PACK_TOGGLE: "pluginPack:toggle",
   PLUGIN_PACK_GET_CONTEXT: "pluginPack:getContext",
   PLUGIN_PACK_TOGGLE_SKILL: "pluginPack:toggleSkill",
+  INTEGRATION_MENTION_OPTIONS: "integrations:listMentionOptions",
 
   // Plugin Pack Distribution (scaffold, install, registry)
   PLUGIN_PACK_SCAFFOLD: "pluginPack:scaffold",

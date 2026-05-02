@@ -900,6 +900,53 @@ function toErrorMessage(reason: unknown): string {
 // WebSocket close codes that are transient network events, not bugs.
 // 1006 = abnormal closure (connection dropped without close frame, common in WhatsApp Web reconnects).
 const TRANSIENT_WS_CLOSE_CODES = new Set([1006]);
+const TASK_DEEPLINK_PROTOCOL = "cowork";
+const TASK_DEEPLINK_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+let pendingTaskDeeplinkId: string | null = null;
+
+function parseTaskDeeplink(value: string): string | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== `${TASK_DEEPLINK_PROTOCOL}:`) return null;
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+    const taskId =
+      parsed.hostname === "tasks"
+        ? pathParts[0]
+        : parsed.hostname === "task"
+          ? pathParts[0]
+          : parsed.hostname;
+    if (!taskId || !TASK_DEEPLINK_UUID_RE.test(taskId)) return null;
+    return taskId;
+  } catch {
+    return null;
+  }
+}
+
+function extractTaskDeeplinkArg(argv: string[]): string | null {
+  for (const arg of argv) {
+    const taskId = parseTaskDeeplink(arg);
+    if (taskId) return taskId;
+  }
+  return null;
+}
+
+function registerTaskDeeplinkProtocol(): void {
+  try {
+    if (process.defaultApp && process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(TASK_DEEPLINK_PROTOCOL, process.execPath, [
+        path.resolve(process.argv[1]),
+      ]);
+      return;
+    }
+    app.setAsDefaultProtocolClient(TASK_DEEPLINK_PROTOCOL);
+  } catch (error) {
+    logger.warn(`Failed to register ${TASK_DEEPLINK_PROTOCOL}:// deeplink handler: ${toErrorMessage(error)}`);
+  }
+}
 
 function isTransientMainProcessError(reason: unknown): boolean {
   if (typeof reason === "number" && TRANSIENT_WS_CLOSE_CODES.has(reason)) {
@@ -950,6 +997,7 @@ app.commandLine.appendSwitch("ignore-gpu-blocklist");
 // Register canvas:// protocol scheme (must be called before app.ready)
 registerCanvasScheme();
 registerMediaScheme();
+registerTaskDeeplinkProtocol();
 
 if (process.platform === "win32") {
   app.setAppUserModelId("com.cowork-os.app");
@@ -980,8 +1028,43 @@ function isForegroundUserTask(task: Task): boolean {
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  function flushPendingTaskDeeplink(): void {
+    const taskId = pendingTaskDeeplinkId;
+    if (!taskId || !mainWindow || mainWindow.isDestroyed()) return;
+    pendingTaskDeeplinkId = null;
+    mainWindow.webContents.send(IPC_CHANNELS.NAVIGATE_TO_TASK, taskId);
+  }
+
+  function openTaskDeeplink(taskId: string): void {
     if (HEADLESS) return;
+    pendingTaskDeeplinkId = taskId;
+    if (!revealWindow(mainWindow)) {
+      createWindow();
+      return;
+    }
+    if (mainWindow?.webContents.isLoadingMainFrame()) {
+      mainWindow.webContents.once("did-finish-load", flushPendingTaskDeeplink);
+      return;
+    }
+    flushPendingTaskDeeplink();
+  }
+
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    const taskId = parseTaskDeeplink(url);
+    if (taskId) {
+      openTaskDeeplink(taskId);
+    }
+  });
+  pendingTaskDeeplinkId = extractTaskDeeplinkArg(process.argv);
+
+  app.on("second-instance", (_event, argv) => {
+    if (HEADLESS) return;
+    const taskId = extractTaskDeeplinkArg(argv);
+    if (taskId) {
+      openTaskDeeplink(taskId);
+      return;
+    }
     // Focus the existing window instead of starting a second instance.
     if (revealWindow(mainWindow)) {
       return;
@@ -1122,6 +1205,7 @@ if (!gotTheLock) {
 
     mainWindow.webContents.on("did-finish-load", () => {
       rendererRecoveryAttempts = 0;
+      flushPendingTaskDeeplink();
     });
 
     mainWindow.webContents.on(
@@ -3310,11 +3394,28 @@ if (!gotTheLock) {
               let images:
                 | import("../shared/types").ImageAttachment[]
                 | undefined;
+              let quotedAssistantMessage:
+                | import("../shared/types").QuotedAssistantMessage
+                | undefined;
+              let options:
+                | Pick<
+                    import("../shared/types").TaskFollowUpInput,
+                    "permissionMode" | "shellAccess" | "integrationMentions"
+                  >
+                | undefined;
               try {
                 const sanitized = sanitizeTaskMessageParams(payload);
                 taskId = sanitized.taskId;
                 message = sanitized.message;
                 images = sanitized.images;
+                quotedAssistantMessage = sanitized.quotedAssistantMessage;
+                options = {
+                  ...(sanitized.permissionMode ? { permissionMode: sanitized.permissionMode } : {}),
+                  ...(sanitized.shellAccess !== undefined ? { shellAccess: sanitized.shellAccess } : {}),
+                  ...(sanitized.integrationMentions !== undefined
+                    ? { integrationMentions: sanitized.integrationMentions }
+                    : {}),
+                };
               } catch (err) {
                 throw new Error(
                   err instanceof Error
@@ -3322,7 +3423,7 @@ if (!gotTheLock) {
                     : "taskId and message are required.",
                 );
               }
-              return agentDaemon.sendMessage(taskId, message, images);
+              return agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, options);
             }
             case "task:events": {
               const taskId = typeof args[0] === "string" ? args[0].trim() : "";

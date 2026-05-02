@@ -406,6 +406,23 @@ describe("EmailAdapter", () => {
         }),
       ).rejects.toThrow("Email client is not connected");
     });
+
+    it("should suppress all outbound channel messages", async () => {
+      const sendEmail = vi.fn().mockResolvedValue("msg-should-not-send@example.com");
+      (adapter as Any)._status = "connected";
+      (adapter as Any).client = {
+        sendEmail,
+        stopReceiving: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const messageId = await adapter.sendMessage({
+        chatId: "person@example.com|Question about billing",
+        text: "Automatic channel response",
+      });
+
+      expect(messageId).toMatch(/^suppressed:/);
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
   });
 
   describe("editMessage", () => {
@@ -585,6 +602,54 @@ describe("EmailAdapter edge cases", () => {
           channel: "email",
           userId: "person@company.com",
           text: expect.stringContaining("Should pass"),
+        }),
+      );
+    });
+  });
+
+  describe("automated message filtering", () => {
+    it("should ignore Outlook undeliverable responses before notifying handlers", async () => {
+      const onMessage = vi.fn();
+      adapter.onMessage(onMessage);
+
+      await (adapter as Any).handleIncomingMessage({
+        messageId: "<bounce-001@outlook.com>",
+        uid: 1,
+        from: { address: "postmaster@outlook.com", name: "The Outlook.com Team" },
+        to: [{ address: "bot@example.com", name: "Bot" }],
+        subject: "Undeliverable: Re: Amazon Web Services Billing Statement",
+        text: "This email address is not monitored. Please visit http://postmaster.outlook.com for information about sending email to Outlook.com.",
+        date: new Date("2026-05-02T02:31:02Z"),
+        isRead: false,
+        headers: new Map([["auto-submitted", "auto-generated"]]),
+      });
+
+      expect(onMessage).not.toHaveBeenCalled();
+      expect((adapter as Any).replyContext.size).toBe(0);
+    });
+
+    it("should still pass regular inbound emails to handlers", async () => {
+      const onMessage = vi.fn();
+      adapter.onMessage(onMessage);
+
+      await (adapter as Any).handleIncomingMessage({
+        messageId: "<human-001@example.com>",
+        uid: 2,
+        from: { address: "person@example.com", name: "Person" },
+        to: [{ address: "bot@example.com", name: "Bot" }],
+        subject: "Question about billing",
+        text: "Can you help me understand this invoice?",
+        date: new Date("2026-05-02T03:00:00Z"),
+        isRead: false,
+        headers: new Map([["auto-submitted", "no"]]),
+      });
+
+      expect(onMessage).toHaveBeenCalledTimes(1);
+      expect(onMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: "email",
+          userId: "person@example.com",
+          text: expect.stringContaining("Can you help me understand this invoice?"),
         }),
       );
     });

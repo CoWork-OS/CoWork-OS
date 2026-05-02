@@ -142,7 +142,7 @@ This is a good fit if you already live in the terminal and want a lightweight in
 
 ### 3. Run it headless on a VPS
 
-If you want CoWork OS running continuously without depending on your laptop, use the Linux daemon path.
+If you want CoWork OS running continuously without depending on your laptop, use the packaged Linux server release. It is a Linux x64 tarball from GitHub Releases that runs `coworkd-node`, serves the Control Plane Web UI, and can be installed as a systemd service.
 
 Start with:
 

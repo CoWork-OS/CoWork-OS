@@ -282,22 +282,22 @@ const OPENAI_REASONING_EFFORT_OPTIONS: Array<{
   {
     value: "low",
     label: "Low",
-    description: "Faster GPT-5.5 reasoning for routine tool work.",
+    description: "Faster reasoning for routine tool work.",
   },
   {
     value: "medium",
     label: "Medium",
-    description: "Balanced GPT-5.5 quality, latency, and cost.",
+    description: "Balanced quality, latency, and cost.",
   },
   {
     value: "high",
     label: "High",
-    description: "More thorough GPT-5.5 reasoning for complex work.",
+    description: "More thorough reasoning for complex work.",
   },
   {
     value: "xhigh",
     label: "Extra High",
-    description: "Maximum GPT-5.5 effort for the hardest asynchronous tasks.",
+    description: "Maximum effort for the hardest asynchronous tasks.",
   },
 ];
 
@@ -5105,11 +5105,12 @@ export function Settings({
               )}
             </div>
 
-            <div className="settings-section">
-              <h3>GPT-5.5 Controls</h3>
+            <div className="settings-section openai-request-controls">
+              <h3>OpenAI Request Controls</h3>
               <p className="settings-description">
-                Applies to OpenAI API-key GPT-5.5 requests. Other OpenAI models
-                keep their existing request behavior.
+                Applies to OpenAI models that support reasoning effort and
+                response verbosity. Unsupported models keep their existing
+                request behavior.
               </p>
               <div className="settings-form-grid two-columns">
                 <label className="settings-field">

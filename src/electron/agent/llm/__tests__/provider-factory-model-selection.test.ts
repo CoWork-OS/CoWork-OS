@@ -139,6 +139,58 @@ describe("LLMProviderFactory model status", () => {
     expect(status.models.map((model) => model.key)).toContain("gpt-5.4");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.3-codex-spark");
   });
+
+  it("normalizes stale OpenAI API model settings for ChatGPT OAuth", () => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: "gpt-4o-mini",
+      openai: {
+        authMethod: "oauth",
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        model: "gpt-4o-mini",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection({
+      modelKey: "gpt-4o-mini",
+      llmProfile: "cheap",
+    });
+
+    expect(resolved.modelSource).toBe("provider_default");
+    expect(resolved.modelKey).toBe("gpt-5.5");
+    expect(resolved.modelId).toBe("gpt-5.5");
+  });
+
+  it("normalizes explicitly allowed stale OpenAI OAuth model overrides", () => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: "gpt-4o-mini",
+      openai: {
+        authMethod: "oauth",
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        model: "gpt-5.4",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection(
+      {
+        providerType: "openai",
+        modelKey: "gpt-4o-mini",
+      },
+      {
+        allowProviderOverride: true,
+        allowModelOverride: true,
+      },
+    );
+
+    expect(resolved.modelSource).toBe("explicit_override");
+    expect(resolved.modelKey).toBe("gpt-4o-mini");
+    expect(resolved.modelId).toBe("gpt-5.5");
+  });
 });
 
 describe("LLMProviderFactory model selection persistence", () => {
@@ -224,7 +276,7 @@ describe("LLMProviderFactory model selection persistence", () => {
 });
 
 describe("LLMProviderFactory profile-based task model routing", () => {
-  it("prefers explicit task model override when profile is not forced", () => {
+  it("uses the configured provider model instead of task model overrides by default", () => {
     const settings: LLMSettings = {
       providerType: "openai",
       modelKey: "sonnet-4-5",
@@ -243,12 +295,12 @@ describe("LLMProviderFactory profile-based task model routing", () => {
       llmProfile: "cheap",
     });
 
-    expect(resolved.modelSource).toBe("explicit_override");
-    expect(resolved.modelId).toBe("gpt-4.1-mini");
-    expect(resolved.modelKey).toBe("gpt-4.1-mini");
+    expect(resolved.modelSource).toBe("provider_default");
+    expect(resolved.modelId).toBe("gpt-4o-mini");
+    expect(resolved.modelKey).toBe("gpt-4o-mini");
   });
 
-  it("uses profile model when routing is enabled and no explicit override exists", () => {
+  it("uses profile model only when legacy profile routing is explicitly allowed", () => {
     const settings: LLMSettings = {
       providerType: "openai",
       modelKey: "sonnet-4-5",
@@ -261,17 +313,20 @@ describe("LLMProviderFactory profile-based task model routing", () => {
     };
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
 
-    const resolved = LLMProviderFactory.resolveTaskModelSelection({
-      providerType: "openai",
-      llmProfileHint: "strong",
-    });
+    const resolved = LLMProviderFactory.resolveTaskModelSelection(
+      {
+        providerType: "openai",
+        llmProfileHint: "strong",
+      },
+      { allowProfileRouting: true },
+    );
 
     expect(resolved.modelSource).toBe("profile_model");
     expect(resolved.modelId).toBe("gpt-4o");
     expect(resolved.modelKey).toBe("gpt-4o");
   });
 
-  it("falls back to provider default model when profile model is invalid", () => {
+  it("ignores invalid profile models by default", () => {
     const settings: LLMSettings = {
       providerType: "anthropic",
       modelKey: "sonnet-4-5",
@@ -291,7 +346,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
     expect(resolved.modelSource).toBe("provider_default");
     expect(resolved.modelKey).toBe("sonnet-4-5");
     expect(resolved.modelId).toBe("claude-sonnet-4-5");
-    expect(resolved.warnings.length).toBeGreaterThan(0);
+    expect(resolved.warnings).toHaveLength(0);
   });
 
   it("normalizes legacy Claude snapshot IDs to current direct API IDs", () => {
@@ -327,10 +382,10 @@ describe("LLMProviderFactory profile-based task model routing", () => {
     );
 
     expect(resolved.llmProfileUsed).toBe("strong");
-    expect(resolved.modelKey).toBe("gpt-4o");
+    expect(resolved.modelKey).toBe("gpt-4o-mini");
   });
 
-  it("respects forced profile routing over explicit model override", () => {
+  it("keeps forced profiles from changing the configured provider model by default", () => {
     const settings: LLMSettings = {
       providerType: "openai",
       modelKey: "sonnet-4-5",
@@ -350,7 +405,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
       llmProfileForced: true,
     });
 
-    expect(resolved.modelSource).toBe("profile_model");
+    expect(resolved.modelSource).toBe("provider_default");
     expect(resolved.modelId).toBe("gpt-4o-mini");
   });
 });
@@ -409,9 +464,12 @@ describe("LLMProviderFactory provider failover chain", () => {
     };
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
 
-    const openaiPrimary = LLMProviderFactory.resolveTaskModelSelection({
-      providerType: "openai",
-    });
+    const openaiPrimary = LLMProviderFactory.resolveTaskModelSelection(
+      {
+        providerType: "openai",
+      },
+      { allowProviderOverride: true },
+    );
     const openaiChain =
       LLMProviderFactory.resolveProviderFailoverChain(openaiPrimary);
     const openaiFailover = LLMProviderFactory.getProviderFailoverSettings(
@@ -425,9 +483,12 @@ describe("LLMProviderFactory provider failover chain", () => {
     ]);
     expect(openaiFailover.failoverPrimaryRetryCooldownSeconds).toBe(15);
 
-    const azurePrimary = LLMProviderFactory.resolveTaskModelSelection({
-      providerType: "azure",
-    });
+    const azurePrimary = LLMProviderFactory.resolveTaskModelSelection(
+      {
+        providerType: "azure",
+      },
+      { allowProviderOverride: true },
+    );
     const azureChain =
       LLMProviderFactory.resolveProviderFailoverChain(azurePrimary);
     const azureFailover = LLMProviderFactory.getProviderFailoverSettings(
@@ -467,7 +528,7 @@ describe("LLMProviderFactory provider failover chain", () => {
     });
 
     expect(chain).toHaveLength(1);
-    expect(chain[0]?.modelKey).toBe("gpt-4.1-mini");
+    expect(chain[0]?.modelKey).toBe("gpt-4o-mini");
   });
 
   it("filters known text-only OpenRouter fallbacks for image-bearing requests", () => {

@@ -7,6 +7,8 @@ import { GoogleWorkspaceSettingsManager } from "../settings/google-workspace-man
 
 const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const TOKEN_REFRESH_BUFFER_MS = 2 * 60 * 1000;
+const RECONNECT_HINT =
+  "Reconnect Google Workspace in Settings > Integrations > Google Workspace.";
 
 function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
@@ -60,9 +62,35 @@ export async function refreshGoogleWorkspaceAccessToken(
   const data = rawText ? parseJsonSafe(rawText) : undefined;
 
   if (!response.ok) {
+    const oauthError = typeof data?.error === "string" ? data.error : undefined;
     const message =
-      data?.error_description || data?.error || response.statusText || "Token refresh failed";
-    throw new Error(`Google Workspace token refresh failed: ${message}`);
+      data?.error_description || oauthError || response.statusText || "Token refresh failed";
+    const normalizedMessage = String(message).trim().replace(/[.\s]+$/u, "");
+    const shouldClearBrokenTokens =
+      response.status === 400 &&
+      (!oauthError ||
+        oauthError === "invalid_grant" ||
+        oauthError === "invalid_client" ||
+        oauthError === "unauthorized_client");
+
+    if (shouldClearBrokenTokens) {
+      const nextSettings: GoogleWorkspaceSettingsData = {
+        ...settings,
+        accessToken: undefined,
+        refreshToken: undefined,
+        tokenExpiresAt: undefined,
+      };
+      GoogleWorkspaceSettingsManager.saveSettings(nextSettings);
+      GoogleWorkspaceSettingsManager.clearCache();
+    }
+
+    throw Object.assign(
+      new Error(`Google Workspace token refresh failed: ${normalizedMessage}. ${RECONNECT_HINT}`),
+      {
+        status: response.status,
+        oauthError,
+      },
+    );
   }
 
   const accessToken = data?.access_token as string | undefined;

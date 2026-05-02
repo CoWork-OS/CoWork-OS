@@ -264,6 +264,14 @@
         "dmg",
         "zip"
       ],
+      "protocols": [
+        {
+          "name": "CoWork OS Task Link",
+          "schemes": [
+            "cowork"
+          ]
+        }
+      ],
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "gatekeeperAssess": true,
@@ -275,6 +283,14 @@
     "win": {
       "target": [
         "nsis"
+      ],
+      "protocols": [
+        {
+          "name": "CoWork OS Task Link",
+          "schemes": [
+            "cowork"
+          ]
+        }
       ],
       "icon": "build/icon.ico"
     },

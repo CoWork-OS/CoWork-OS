@@ -5,18 +5,9 @@ import type { LLMMessage } from "../agent/llm/types";
 const QUICK_REPLY_MAX_TOKENS = 500;
 const SIMILAR_THREADS_MAX_TOKENS = 1400;
 
-function chooseCheapMailboxModel(): { providerType: string; modelKey: string; modelId: string } | null {
+function chooseMailboxModel(): { providerType: string; modelKey: string; modelId: string } | null {
   try {
-    const settings = LLMProviderFactory.loadSettings();
-    const providerType = settings.providerType;
-    const routing = LLMProviderFactory.getProviderRoutingSettings(settings, providerType);
-    const preferredKey =
-      routing.automatedTaskModelKey || routing.cheapModelKey || settings.modelKey || "";
-    if (!preferredKey) return null;
-    const selection = LLMProviderFactory.resolveTaskModelSelection({
-      providerType,
-      modelKey: preferredKey,
-    });
+    const selection = LLMProviderFactory.resolveTaskModelSelection();
     return {
       providerType: selection.providerType,
       modelKey: selection.modelKey,
@@ -41,7 +32,7 @@ export async function mailboxLlmQuickReplies(input: {
   summary: string;
   latestSnippet: string;
 }): Promise<{ suggestions: string[]; error?: string }> {
-  const modelSelection = chooseCheapMailboxModel();
+  const modelSelection = chooseMailboxModel();
   if (!modelSelection) {
     return {
       suggestions: [],
@@ -135,7 +126,7 @@ export async function mailboxLlmSimilarThreadIds(input: {
   instructions: string;
   candidates: SimilarThreadCandidate[];
 }): Promise<{ threadIds: string[]; rationale?: string; error?: string }> {
-  const modelSelection = chooseCheapMailboxModel();
+  const modelSelection = chooseMailboxModel();
   if (!modelSelection) {
     return {
       threadIds: [],

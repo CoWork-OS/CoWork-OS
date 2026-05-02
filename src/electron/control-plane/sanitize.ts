@@ -6,7 +6,12 @@
 import os from "os";
 import path from "path";
 import * as fs from "fs/promises";
-import type { ImageAttachment, QuotedAssistantMessage } from "../../shared/types";
+import type {
+  ImageAttachment,
+  IntegrationMentionSelection,
+  PermissionMode,
+  QuotedAssistantMessage,
+} from "../../shared/types";
 import { ErrorCodes } from "./protocol";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { z } from "zod";
@@ -25,6 +30,9 @@ export function sanitizeTaskMessageParams(params: unknown): {
   message: string;
   images?: ImageAttachment[];
   quotedAssistantMessage?: QuotedAssistantMessage;
+  permissionMode?: PermissionMode;
+  shellAccess?: boolean;
+  integrationMentions?: IntegrationMentionSelection[];
 } {
   const p = (params ?? {}) as Record<string, unknown>;
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
@@ -61,7 +69,59 @@ export function sanitizeTaskMessageParams(params: unknown): {
     quotedAssistantMessage = parsed.data as QuotedAssistantMessage;
   }
 
-  return { taskId, message, images, quotedAssistantMessage };
+  let permissionMode: PermissionMode | undefined;
+  if (typeof p.permissionMode === "string") {
+    const PermissionModeSchema = z.enum([
+      "default",
+      "plan",
+      "dangerous_only",
+      "accept_edits",
+      "dont_ask",
+      "bypass_permissions",
+    ]);
+    const parsed = PermissionModeSchema.safeParse(p.permissionMode);
+    if (!parsed.success) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "Invalid permissionMode" };
+    }
+    permissionMode = parsed.data;
+  }
+
+  const shellAccess = typeof p.shellAccess === "boolean" ? p.shellAccess : undefined;
+
+  let integrationMentions: IntegrationMentionSelection[] | undefined;
+  if (Array.isArray(p.integrationMentions)) {
+    const IntegrationMentionSchema = z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(200),
+            label: z.string().min(1).max(120),
+            source: z.enum(["builtin", "gateway", "mcp"]),
+            providerKey: z.string().min(1).max(120),
+            iconKey: z.string().min(1).max(80),
+            tools: z.array(z.string().min(1).max(200)).max(50),
+            promptHint: z.string().min(1).max(1000),
+          })
+          .strict(),
+      )
+      .max(12);
+    const parsed = IntegrationMentionSchema.safeParse(p.integrationMentions);
+    if (!parsed.success) {
+      const msg = parsed.error.issues.map((issue: { message: string }) => issue.message).join("; ");
+      throw { code: ErrorCodes.INVALID_PARAMS, message: `Invalid integration mentions: ${msg}` };
+    }
+    integrationMentions = parsed.data;
+  }
+
+  return {
+    taskId,
+    message,
+    images,
+    quotedAssistantMessage,
+    permissionMode,
+    shellAccess,
+    integrationMentions,
+  };
 }
 
 /**

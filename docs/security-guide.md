@@ -533,6 +533,8 @@ Tools are categorized by risk level for policy-based access control:
 | **Network** | `web_search`, `browser_*` | External network operations |
 | **Export / Egress** | mutating `http_request`, `analyze_image`, `read_pdf_visual` | Outbound transfer of local bytes or payloads; reviewed separately from ordinary network reads |
 
+Ordinary uploaded-PDF reading uses the local `parse_document` extraction path. The extracted text is still treated as untrusted document data, but it is not an export/egress operation unless the task uses `read_pdf_visual` or another tool that sends local bytes to an external provider.
+
 High-autonomy modes and session "Approve all" do not silently bypass this export/egress lane.
 
 The computer-use family (`screenshot`, `click`, `type_text`, `keypress`, and related tools on macOS) is **not** low-risk read-only automation: it can drive arbitrary UI the operator can reach. Treat it as **high trust** and keep the `computer_use` built-in category disabled unless you need it. See [Computer use (macOS)](computer-use.md).

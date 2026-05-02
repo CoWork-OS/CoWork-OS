@@ -1285,6 +1285,20 @@ export class DatabaseManager {
         FOREIGN KEY (attachment_id) REFERENCES mailbox_attachments(id)
       );
 
+      CREATE TABLE IF NOT EXISTS mailbox_search_embeddings (
+        record_type TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        account_id TEXT,
+        thread_id TEXT NOT NULL,
+        message_id TEXT,
+        attachment_id TEXT,
+        source_text_hash TEXT NOT NULL,
+        embedding_json TEXT NOT NULL,
+        snippet TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (record_type, record_id)
+      );
+
       CREATE TABLE IF NOT EXISTS mailbox_folders (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -1736,6 +1750,8 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_thread ON mailbox_attachments(thread_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_message ON mailbox_attachments(message_id);
       CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_status ON mailbox_attachments(extraction_status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_search_embeddings_thread ON mailbox_search_embeddings(thread_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_search_embeddings_account ON mailbox_search_embeddings(account_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_mailbox_folders_account ON mailbox_folders(account_id, role, name);
       CREATE INDEX IF NOT EXISTS idx_mailbox_labels_account ON mailbox_labels(account_id, name);
       CREATE INDEX IF NOT EXISTS idx_mailbox_identities_account ON mailbox_identities(account_id, is_default DESC);
@@ -4979,11 +4995,26 @@ export class DatabaseManager {
           extracted_at INTEGER NOT NULL,
           FOREIGN KEY (attachment_id) REFERENCES mailbox_attachments(id)
         );
+        CREATE TABLE IF NOT EXISTS mailbox_search_embeddings (
+          record_type TEXT NOT NULL,
+          record_id TEXT NOT NULL,
+          account_id TEXT,
+          thread_id TEXT NOT NULL,
+          message_id TEXT,
+          attachment_id TEXT,
+          source_text_hash TEXT NOT NULL,
+          embedding_json TEXT NOT NULL,
+          snippet TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (record_type, record_id)
+        );
         CREATE INDEX IF NOT EXISTS idx_mailbox_threads_today_bucket ON mailbox_threads(today_bucket, last_message_at DESC);
         CREATE INDEX IF NOT EXISTS idx_mailbox_threads_domain_category ON mailbox_threads(domain_category, last_message_at DESC);
         CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_thread ON mailbox_attachments(thread_id, updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_message ON mailbox_attachments(message_id);
         CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_status ON mailbox_attachments(extraction_status, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_search_embeddings_thread ON mailbox_search_embeddings(thread_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mailbox_search_embeddings_account ON mailbox_search_embeddings(account_id, updated_at DESC);
 
         CREATE TABLE IF NOT EXISTS mailbox_folders (
           id TEXT PRIMARY KEY,

@@ -121,6 +121,9 @@ Once the app opens, the most important places to know are:
 
 - **Home**: quick launch plus recent sessions and recent automation activity
 - **Everything Workbench**: generated documents, spreadsheets, decks, web pages, PDFs, and previews open from task output cards into resizable sidebar or fullscreen artifact workspaces. Use this as the first stop for generated knowledge work: review or lightly edit the file, then ask the agent for changes without switching to a separate office app. See [Everything Workbench](everything-workbench.md).
+- **Uploaded PDFs**: attach a PDF to a task or chat turn when you want CoWork to summarize it, answer questions from it, extract clauses, or transform it. The first prompt includes only a compact PDF excerpt plus page/extraction metadata and the workspace-relative path; CoWork reads the full PDF on demand with the document parser. PDF excerpts are treated as untrusted document data, and visual layout questions use the visual PDF reader instead.
+- **Message box shortcuts**: type `/` in the main message box to search app commands and skill-backed workflow shortcuts in one menu. Use `/schedule` for scheduled tasks, `/clear` to clear the current task view without deleting history, `/plan <task>` for Plan mode, `/cost <task>` for estimates, or shortcuts such as `/strategy`, `/batch-rename`, and `/gmail-summary-drive` from the bundled CoWork Shortcuts pack. See [Message Box Shortcuts](message-box-shortcuts.md).
+- **Task menu**: open a task and use the three-dot menu beside the title for pin/rename/archive, copy working directory/task ID/deeplink/Markdown, fork session, view outputs, or turn the current task into a scheduled automation. See [Task Automations](task-automations.md).
 - **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
 - **Settings > Automations**: Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing
 - **Settings > Profiles**: create, switch, export, and import isolated app profiles
@@ -205,6 +208,7 @@ Rule of thumb:
 
 - use `Routines` for saved automation with policy, outputs, and run history
 - use `Scheduled Tasks`, `Webhooks`, or `Event Triggers` directly only when you specifically need the advanced underlying engine
+- use a task's three-dot menu and `Add automation...` when a task you just ran should become a recurring scheduled task; this creates a real cron job and preserves a source task/deeplink reference
 
 ## Zero-Human Company Quick Start
 
@@ -435,6 +439,10 @@ Open **Settings** > **Integrations** and click any card to configure productivit
 - **Google Workspace** (Gmail, Calendar, Drive) — shared OAuth
 - **Dropbox** — list, search, and manage files
 - **SharePoint** — search sites and manage drive items
+
+After an integration is configured, type `@` in the main message box to pick it from the grouped **Agents**, **Integrations**, and **Files** menu. Google Workspace appears as Gmail, Google Drive, and Google Calendar. Selecting an integration inserts an icon+name chip and sends soft routing metadata with the prompt. See [Composer Mentions](composer-mentions.md).
+
+For slash-searchable app commands and workflow shortcuts, type `/` in the same message box. The `/` picker is separate from `@` mentions and uses the skills/plugin-pack system for workflow aliases. See [Message Box Shortcuts](message-box-shortcuts.md).
 
 ### Enterprise MCP Connectors (Optional)
 

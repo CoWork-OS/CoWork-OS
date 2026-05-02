@@ -23,6 +23,7 @@ Use cases:
 - Inbox-aware briefing and Heartbeat follow-up
 - Chief-of-staff briefing (morning executive brief)
 - Dev task queue management (agent-ready backlog execution)
+- Turn a successful one-off task into a recurring scheduled check from the task menu
 - Founder-directed autonomous company operations ("zero-human company" loop)
 - Everything Workbench for generated docs, sheets, decks, web pages, PDFs, and previews
 - Smart-home orchestration via integrations
@@ -30,9 +31,10 @@ Use cases:
 
 Cowork OS supports these via:
 - Channels: Slack, iMessage, WhatsApp, Telegram, Email, etc.
-- Scheduling: `/schedule ...` and `schedule_task`
+- Scheduling: `/schedule ...`, `schedule_task`, and task view `... > Add automation...`
 - Inbox + briefing commands: `/inbox`, `/brief [morning|today|tomorrow|week]`
-- Slash skill workflows: `/simplify [objective] ...` for quality passes, `/batch <objective> ...` for parallelizable migration/transform workflows, and `/llm-wiki <objective> ...` for persistent research vaults
+- Message box shortcuts: one `/` picker for app commands such as `/schedule`, `/clear`, `/plan`, and `/cost`, plus skill-backed workflow aliases from plugin packs
+- Slash skill workflows: `/simplify [objective] ...` for quality passes, `/batch <objective> ...` for parallelizable migration/transform workflows, `/llm-wiki <objective> ...` for persistent research vaults, and CoWork Shortcuts aliases such as `/strategy`, `/batch-rename`, `/gmail-summary-drive`, `/multi-source-report`, and `/end-of-day-log`
 - Integrations: Notion, Gmail/Google Calendar (if configured), Apple Calendar/Reminders (macOS)
 - Web automation: visible Browser Workbench for normal-user site testing, with browser tools, screenshots, annotation, and fallback browser modes when explicitly needed
 - Company-ops primitives: venture workspace kit, digital twin operators, strategic planner, and Mission Control ops monitoring
@@ -41,6 +43,8 @@ Cowork OS supports these via:
 For the full founder-operated company recipe, see [Zero-Human Company Operations](zero-human-company.md).
 For the unified artifact workflow, see [Everything Workbench](everything-workbench.md).
 For live website testing inside the app, see [Browser Workbench](browser-workbench.md).
+For turning existing tasks into scheduled checks, see [Task Automations](task-automations.md).
+For message-box app commands and skill-backed workflow shortcuts, see [Message Box Shortcuts](message-box-shortcuts.md).
 
 ## Test Prompts (Copy/Paste)
 
@@ -179,16 +183,21 @@ For each lane, summarize the top threads and explain why they belong there.
 Do not archive, mark done, send, or trash anything. Ask me which lane to work through first.
 ```
 
-### 7A.2) Ask Mailbox Evidence Search
+### 7A.2) Ask Inbox Evidence Search
 
 Prompt:
 ```
-Use Ask Mailbox to find the invoice, receipt, contract, or attachment I mention below.
-Search local mailbox evidence first, including attachment filenames and indexed attachment text.
+Use Ask Inbox to find the invoice, receipt, contract, or attachment I mention below.
+Search broadly first, including local mailbox FTS, semantic mailbox matches, provider-native search if available, attachment filenames, and indexed attachment text.
 If attachment text is not indexed yet, explain which result needs extraction before relying on it.
-Return a concise answer plus the evidence threads.
+Return a concise answer plus the evidence threads, and keep the Ask Inbox step feed visible.
 
 Query: <describe what to find>
+```
+
+Main-composer shortcut:
+```
+@inbox when do I need to make payment for my QNB credit card?
 ```
 
 ### 7A.3) Manual Reply Or Forward

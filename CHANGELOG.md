@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Composer `@` mentions for integrations**: added a grouped autocomplete above the message box with Agents, configured Integrations, and Files. Integration mentions render as icon+name chips in prompts and user message bubbles, restore from task/session history, and submit `integrationMentions` as soft runtime guidance. See [Composer Mentions](docs/composer-mentions.md).
+- **`@Inbox` main-composer routing**: `@Inbox` / `@inbox ...` now opens Inbox Agent and runs the remaining query through the Ask Inbox module instead of starting a normal task run.
+- **Ask Inbox sidebar chat**: Inbox Agent now has right-sidebar tabs for Agent Rail and Ask Inbox. Ask Inbox shows the user question, live mailbox-agent steps, final answer, and matched email evidence, with a pinned composer for follow-up questions. See [Ask Inbox Architecture](docs/ask-inbox-architecture.md).
+- **Hybrid mailbox retrieval for Ask Inbox**: Ask Inbox now plans broad mailbox searches across local FTS, semantic mailbox embeddings, provider-native search, and attachment text, then shortlists and reads evidence before answering.
+- **Bundled `react-best-practices` skill**: added React and Next.js implementation guidance for feature work, enhancements, refactors, reviews, data fetching, bundle-size checks, and rendering-performance fixes. See [React Best Practices Skill](docs/skills/react-best-practices.md).
+
+### Changed
+- **Right sidebar polish**: refined the task right sidebar with keyboard-accessible section headers, cleaner compact spacing, stable row grids, clearer in-progress/checklist states, tighter truncation, a four-row scroll cap for Tools used, and lighter feedback/file/context surfaces.
+- **Files panel type icons**: the right-sidebar Files section now shows format-aware Lucide icons beside created/modified/deleted file rows, distinguishing markdown/text, code, JSON, spreadsheets, images, presentations, media, archives, folders, and generic files while preserving the existing action color states.
+- **Integration mention resolver**: Google Workspace now appears as Gmail, Google Drive, and Google Calendar in the composer; gateway channels and MCP connectors appear only when locally connected/configured; multi-service MCP connectors can split by service tool groups.
+- **Bundled-skill docs**: README, Features, Skill Store, development guidance, docs home, and status docs now reflect the `react-best-practices` addition and the built-in skill count increase to 147.
+- **Inbox Agent docs**: Inbox Agent, Features, Composer Mentions, troubleshooting, use cases, showcase, and implementation docs now describe Ask Inbox as a sidebar mailbox-agent chat with transient progress events and hybrid evidence retrieval.
+
+### Fixed
+- **Rich composer mention editing**: fixed duplicate `@` rendering and the React `removeChild` crash when deleting a raw mention or integration chip.
+- **Google Workspace reconnect recovery**: stale Google Workspace refresh tokens are cleared after refresh bad-request failures, and changing Google OAuth client credentials or scopes clears old tokens before reconnect.
+- **Azure OpenAI tool-result replay**: normalized long Responses fallback tool-call ids so Azure OpenAI does not reject integration-heavy turns with a `call_id` length error.
+
 ## [0.5.42] - 2026-04-30
 
 ### Fixed

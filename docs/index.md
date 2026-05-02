@@ -21,6 +21,9 @@ hero:
       text: Core Automation
       link: /core-automation
     - theme: alt
+      text: Task Automations
+      link: /task-automations
+    - theme: alt
       text: Workflow Intelligence
       link: /workflow-intelligence
     - theme: alt
@@ -32,6 +35,15 @@ hero:
     - theme: alt
       text: Managed Agents
       link: /managed-agents
+    - theme: alt
+      text: Composer Mentions
+      link: /composer-mentions
+    - theme: alt
+      text: Message Box Shortcuts
+      link: /message-box-shortcuts
+    - theme: alt
+      text: Ask Inbox Architecture
+      link: /ask-inbox-architecture
     - theme: alt
       text: Execution Runtime
       link: /execution-runtime-model
@@ -99,18 +111,22 @@ features:
     details: Generated documents, spreadsheets, decks, web pages, PDFs, and file outputs live beside the agent. Open artifacts in the app, edit or review them, and ask for follow-up changes with fewer switches into separate office apps.
   - title: Production Runtime
     details: Local-first runtime with approvals, guardrails, and governance controls for production agent workflows.
+  - title: Linux Server Package
+    details: GitHub Releases can ship a Linux x64 server tarball for VPS/systemd installs, with built daemon assets, full resources, connector runtimes, checksum verification, and a Control Plane smoke test. It runs `coworkd-node` without launching the desktop UI.
   - title: 30+ LLM Providers
     details: Connect to Claude, GPT, Gemini, Ollama, and more. Bring your own keys, switch models per task or workflow phase, and get default-on prompt caching on supported routes.
   - title: 17 Messaging Channels
     details: WhatsApp, Telegram, Discord, Slack, iMessage, Teams, Google Chat, Feishu/Lark, WeCom, and more. Chat with your AI from anywhere.
   - title: Chat Mode
-    details: Direct LLM chat with no tools, same-session follow-ups, and chat-only streaming for supported providers.
+    details: Direct LLM chat with no tools by default, same-session follow-ups, chat-only streaming for supported providers, and a narrow read-only analysis exception for uploaded PDF turns that need deeper document reading.
   - title: Runtime Visibility
     details: Visible learning progression after each task, unified recall across tasks/messages/files, persistent shell sessions, and live provider routing/fallback status.
   - title: Structured Memory
     details: Local archive memories now have inspectable observation metadata, progressive index/timeline/detail recall tools, Memory Hub privacy controls, deterministic rebuild status, and soft-delete suppression.
   - title: Rich Artifact Previews
     details: Format-aware in-app preview popup for HTML, Markdown, code (with syntax highlighting), JSON tree view, CSV/TSV tables, XLSX, DOCX, PDF, images (fit/actual-size toggle, dimensions, alpha checkerboard), video, audio (with duration), LaTeX, and PPTX. Each format adapts the modal width, header subtitle metadata, and per-format actions; Copy path / Show in Finder / Open externally / Close are unified across every format.
+  - title: Smart PDF Attachments
+    details: Uploaded PDFs are copied into the workspace, summarized with page/extraction/OCR metadata and an untrusted-content boundary, then read on demand with parse_document for summaries, Q&A, extraction, comparison, and transformation. Visual PDF layout questions stay on read_pdf_visual.
   - title: Spreadsheet Artifacts
     details: Task-created spreadsheet files render as compact artifact cards. Excel workbooks and CSV/TSV open into a persisted resizable right sidebar by default; Numbers, Google Sheets shortcut, ODS, and XLSB outputs keep external-app/folder actions. Editable sheets can expand into a fullscreen spreadsheet workbench with selection, copy, zoom, add row/column, save, model picker, voice input, attachments, and follow-up task context.
   - title: Document Artifacts
@@ -129,20 +145,24 @@ features:
     details: SessionRuntime owns task-session state, session checklists, visible-tool render caching, prompt-cache state, resume snapshots, and task projection while the turn kernel handles each active turn; sectioned prompts, stable-prefix prompt caching, graph-backed delegation, typed worker roles, semantic batch summaries, and terminal-state-safe resume logic keep execution, verification, and follow-up work coherent.
   - title: Managed Agents
     details: Versioned managed agents, reusable local environments, and durable managed sessions now sit on top of the existing task runtime through the control plane, while Mission Control and task surfaces observe the same backing tasks and team runs.
+  - title: Composer Mentions
+    details: Type `@` in the composer to pick Agents, configured Integrations, or Files. Integration chips render with icon and label in prompts and user message history, and selected integration metadata reaches the runtime as soft routing guidance rather than tool restrictions.
+  - title: Message Box Shortcuts
+    details: Type `/` in the composer to pick deterministic app commands and skill-backed workflow shortcuts from one menu, including `/schedule`, `/clear`, `/plan`, `/cost`, `/compact`, `/doctor`, `/undo`, direct skill IDs, plugin aliases, and the bundled CoWork Shortcuts pack.
   - title: Latest Release 0.5.42
-    details: Windows installer hotfix for the Everything Workbench release. The Windows app package is rebuilt as x64 so standard Windows PCs install CoWork OS.exe correctly.
+    details: Windows installer hotfix plus composer-routing refresh. The Windows app package is rebuilt as x64, grouped `@` mentions can target configured integrations, and `@Inbox` routes mailbox questions into Inbox Agent.
   - title: Inbox Agent
-    details: Local-first email workspace with Classic and Today modes, AI triage, Mailbox Ask, manual reply/reply-all/forward, editable AI drafts, commitment queues, sender cleanup, attachment indexing, and resync-safe background sync.
+    details: Local-first email workspace with Classic and Today modes, AI triage, Ask Inbox sidebar chat with live agentic steps and hybrid evidence retrieval, `@Inbox` main-composer routing, manual reply/reply-all/forward, editable AI drafts, commitment queues, sender cleanup, attachment indexing, and resync-safe background sync.
   - title: Managed Devices
     details: Connect local and remote CoWork nodes, inspect device summaries, browse remote workspaces, and launch tasks against selected machines from one Devices tab.
   - title: Core Automation
     details: Workflow Intelligence now forms the strict always-on core: Memory is the source of truth, Heartbeat schedules reflection, Suggestions are reviewable outputs, and Mission Control remains the cockpit.
   - title: Automations
-    details: The automations surface now separates core automation from trigger ingress, device routing, schedules, webhooks, and optional twin features.
+    details: The automations surface now separates core automation from trigger ingress, device routing, schedules, webhooks, and optional twin features. Existing tasks can also become cron scheduled tasks from the task overflow menu with source task references preserved.
   - title: Heartbeat V3
     details: Default two-lane background automation with cheap Pulse checks, selective Dispatch escalation, signal compression, automation-profile ownership, and truthful Mission Control state.
-  - title: 140 Built-in Skills
-    details: Document creation, web research, code generation, image analysis, and specialized bundled workflows such as `llm-wiki` for persistent research vaults, `manim-video` for technical animation, `kami` for editorial PDFs and slide decks, and `taste-skill` for high-agency frontend design. Extensible via custom skills, ClawHub installs, external skill imports, and optional read-only external skill directories, with staged scanning and warning/quarantine handling for managed imports.
+  - title: 147 Built-in Skills
+    details: Document creation, web research, code generation, image analysis, React/Next.js implementation guidance, and specialized bundled workflows such as `llm-wiki` for persistent research vaults, `manim-video` for technical animation, `kami` for editorial PDFs and slide decks, `react-best-practices` for React workspace changes, and `taste-skill` for high-agency frontend design. The bundled CoWork Shortcuts pack adds slash-searchable workflow aliases on top of the same skills runtime. Extensible via custom skills, ClawHub installs, external skill imports, and optional read-only external skill directories, with staged scanning and warning/quarantine handling for managed imports.
   - title: LaTeX PDF Artifacts
     details: Source-first `.tex` workflows compile with installed system TeX engines and render paired source/PDF artifact workbenches in task output surfaces.
   - title: Additive Skill Routing
@@ -152,7 +172,7 @@ features:
   - title: Agent Teams
     details: Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and performance reviews.
   - title: Enterprise Connectors
-    details: 44 MCP connectors including Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, and more, with connector notifications available to automations.
+    details: 44 MCP connectors including Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, and more, with connector notifications available to automations and configured connector mentions available from the composer.
   - title: Federated Agents
     details: Discover ACP agents, delegate to local or remote specialists, persist ACP task state locally, and invoke A2A-compatible endpoints under shared approvals and endpoint-validation rules.
   - title: Security First

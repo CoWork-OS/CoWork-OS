@@ -52,6 +52,9 @@ import {
   PermissionMode,
   ProactiveSuggestion,
   UserProfile,
+  AppNotification,
+  IntegrationMentionOption,
+  IntegrationMentionSelection,
 } from "../../shared/types";
 import {
   getLlmModelReasoningEfforts,
@@ -59,9 +62,16 @@ import {
 } from "../../shared/llm-model-selection";
 import { parseLeadingSkillSlashCommand } from "../../shared/skill-slash-commands";
 import {
-  ONBOARDING_COMMAND_OPTIONS,
   parseOnboardingSlashCommand,
 } from "../../shared/onboarding";
+import { parseLeadingMessageAppShortcut } from "../../shared/message-shortcuts";
+import {
+  MESSAGE_SHORTCUTS_UPDATED_EVENT,
+  buildMessageSlashOptions,
+  resolveSlashSelectedIndex,
+  type PluginSlashCommandAlias,
+  type SlashCommandOption,
+} from "../utils/message-slash-options";
 import {
   LLM_WIKI_AUDIT_GUI_PROMPT,
   LLM_WIKI_BRIEF_GUI_PROMPT,
@@ -103,6 +113,7 @@ import { getMessage } from "../utils/agentMessages";
 import {
   hasTaskOutputs,
   resolveTaskOutputSummaryFromCompletionEvent,
+  resolveTaskOutputSummaryFromTask,
 } from "../utils/task-outputs";
 import { shouldShowPersistentNeedsUserActionBanner } from "../utils/task-completion-ux";
 import {
@@ -125,6 +136,7 @@ import {
   ATTACHMENT_CONTENT_START_MARKER,
   MAX_IMAGE_OCR_CHARS,
   buildImageAttachmentViewerOptions,
+  buildPdfAttachmentContent,
   extractAttachmentNames,
   stripHtmlForText,
   stripPptxBubbleContent,
@@ -143,11 +155,22 @@ import {
 } from "../utils/task-event-derived";
 import {
   ArrowUp,
+  Archive as ArchiveIcon,
   Check as CheckIcon,
   ChevronDown,
+  ClipboardCopy,
+  Copy,
+  Ellipsis,
+  FileText,
+  Folder,
+  GitFork,
+  Link as LinkIcon,
   Loader2,
   MessageCircle,
   Mic,
+  Pencil,
+  Pin,
+  PinOff,
   Play,
   Plus,
   Square,
@@ -176,6 +199,10 @@ import { MarkdownImagePreview } from "./MarkdownImagePreview";
 import { ReplayControlsBar } from "./ReplayControls";
 import { DebugSessionPanel } from "./DebugSessionPanel";
 import { TaskPauseBanner } from "./TaskPauseBanner";
+import {
+  IntegrationMentionText,
+  hasRenderableIntegrationMentions,
+} from "./IntegrationMentionText";
 import type { ReplayControls } from "../hooks/useReplayMode";
 import { useVirtualList } from "../hooks/useVirtualList";
 import { useTaskDuration } from "../hooks/useTaskDuration";
@@ -422,6 +449,49 @@ function buildHeartbeatWelcomeSuggestion(
   };
 }
 
+function buildCompanionNotificationWelcomeSuggestion(
+  notification: AppNotification,
+  matchingSuggestion?: ProactiveSuggestion,
+): WelcomeTaskSuggestion | null {
+  if (notification.type !== "companion_suggestion") return null;
+  const title = normalizeSuggestionText(notification.title);
+  const message = normalizeSuggestionText(notification.message);
+  if (!title && !message) return null;
+
+  const prompt =
+    normalizeSuggestionText(matchingSuggestion?.actionPrompt) ||
+    `Review this Workflow Intelligence recommendation and decide the next action.\n\nTitle: ${
+      title || "Companion suggestion"
+    }\nContext: ${message || "No additional context provided."}`;
+  const isNudge = notification.recommendedDelivery === "nudge";
+  const modules: WelcomeTaskSuggestionModule[] = ["Heartbeat", "Reflection"];
+  if (/mail|inbox|reply/i.test(`${title} ${message}`)) modules.push("Inbox");
+
+  return {
+    id: `notification:${notification.suggestionId || notification.id}`,
+    title: truncateSuggestionText(title || message),
+    description: truncateSuggestionText(message, 120),
+    whyNow: isNudge
+      ? "Workflow Intelligence sent this as a timely nudge."
+      : "A recent companion signal is waiting in the automation inbox.",
+    prompt,
+    confidence: matchingSuggestion?.confidence ?? (isNudge ? 0.82 : 0.68),
+    evidence: message ? [message] : undefined,
+    source: "heartbeat",
+    modules: formatWelcomeModules(modules),
+    priority: (isNudge ? 285 : 235) + (notification.read ? 0 : 10),
+    createdAt: notification.createdAt,
+    feedback:
+      notification.workspaceId && notification.suggestionId
+        ? {
+            kind: "proactive",
+            workspaceId: notification.workspaceId,
+            suggestionId: notification.suggestionId,
+          }
+        : undefined,
+  };
+}
+
 function buildMemoryCommitmentSuggestion(
   item: unknown,
   index: number,
@@ -545,6 +615,14 @@ const END_OF_TASK_ARTIFACT_KINDS = new Set<GeneratedInlinePreviewKind>([
   "document",
 ]);
 
+export interface EndOfTaskArtifactCard {
+  path: string;
+  kind: GeneratedInlinePreviewKind;
+  eventId?: string;
+  lastReferenceIndex: number;
+  lastReferenceTimestamp: number;
+}
+
 const GENERATED_ARTIFACT_LINK_EXTENSIONS =
   "html?|xlsx?|xlsm|xlsb|csv|tsv|ods|numbers|gsheet|docx|docm|dotx|dotm|doc|rtf|odt|ott|pages|pptx|pptm?|potx|potm|ppsx|ppsm";
 
@@ -663,6 +741,12 @@ function normalizeArtifactCardKey(filePath: string): string {
   return filePath.trim().replace(/\\/g, "/").toLowerCase();
 }
 
+function getArtifactCardDisplayKey(filePath: string, kind: GeneratedInlinePreviewKind): string {
+  const normalized = normalizeArtifactCardKey(filePath);
+  const fileName = normalized.split("/").filter(Boolean).pop() || normalized;
+  return `${kind}:${fileName}`;
+}
+
 function getTaskEventArtifactPaths(event: TaskEvent, eventStream?: TaskEvent[]): string[] {
   const effectiveType = getEffectiveTaskEventType(event);
   const paths: unknown[] = [];
@@ -682,6 +766,11 @@ function getTaskEventArtifactPaths(event: TaskEvent, eventStream?: TaskEvent[]):
   if (effectiveType === "follow_up_completed") {
     const message =
       typeof event.payload?.followUpMessage === "string" ? event.payload.followUpMessage : "";
+    paths.push(...extractGeneratedArtifactPathsFromText(message));
+  }
+
+  if (effectiveType === "assistant_message") {
+    const message = typeof event.payload?.message === "string" ? event.payload.message : "";
     paths.push(...extractGeneratedArtifactPathsFromText(message));
   }
 
@@ -734,6 +823,36 @@ export function shouldRenderOpenArtifactCardAtEvent(args: {
   }
 
   return currentIndex >= 0 && currentIndex === lastReferenceIndex;
+}
+
+export function collectLatestEndOfTaskArtifactCards(
+  eventStream: TaskEvent[],
+  limit = 8,
+): EndOfTaskArtifactCard[] {
+  if (!Array.isArray(eventStream) || eventStream.length === 0 || limit <= 0) return [];
+
+  const byKey = new Map<string, EndOfTaskArtifactCard>();
+  eventStream.forEach((event, index) => {
+    for (const artifactPath of getTaskEventArtifactPaths(event, eventStream)) {
+      const kind = getInlinePreviewKindForGeneratedFile({ path: artifactPath });
+      if (!kind || !END_OF_TASK_ARTIFACT_KINDS.has(kind)) continue;
+      byKey.set(getArtifactCardDisplayKey(artifactPath, kind), {
+        path: artifactPath,
+        kind,
+        eventId: event.id,
+        lastReferenceIndex: index,
+        lastReferenceTimestamp: event.timestamp,
+      });
+    }
+  });
+
+  const cards = Array.from(byKey.values()).sort((a, b) => {
+    if (a.lastReferenceIndex !== b.lastReferenceIndex) {
+      return a.lastReferenceIndex - b.lastReferenceIndex;
+    }
+    return a.lastReferenceTimestamp - b.lastReferenceTimestamp;
+  });
+  return cards.slice(Math.max(0, cards.length - limit));
 }
 
 function isActiveWorkSignal(event: TaskEvent, effectiveType: string): boolean {
@@ -1061,7 +1180,9 @@ export function shouldCreateFreshTaskForSend(params: {
   executionMode: ExecutionMode;
   selectedTaskId: string | null;
   selectedTaskExecutionMode?: ExecutionMode | null;
+  forceFreshTask?: boolean;
 }): boolean {
+  if (params.forceFreshTask) return true;
   if (!params.selectedTaskId) return true;
   if (params.executionMode === "chat") return false;
   return false;
@@ -1083,7 +1204,7 @@ type PendingAttachment = SelectedFileInfo & {
   dataBase64?: string;
 };
 
-type ImportedAttachment = {
+export type ImportedAttachment = {
   relativePath: string;
   fileName: string;
   size: number;
@@ -1098,7 +1219,7 @@ const formatFileSize = (size: number): string => {
   return `${mb.toFixed(1)} MB`;
 };
 
-const composeMessageWithAttachments = async (
+export const composeMessageWithAttachments = async (
   workspacePath: string | undefined,
   text: string,
   attachments: ImportedAttachment[],
@@ -1129,15 +1250,11 @@ const composeMessageWithAttachments = async (
         if (fileType === "image") {
           content = result.data.ocrText ?? null;
         } else if (fileType === "pdf" && result.data.pdfReviewSummary) {
-          const summary = result.data.pdfReviewSummary;
-          const lines = [
-            `PDF review summary: pages=${summary.pageCount}, native=${summary.nativeTextPages}, ocr=${summary.ocrPages}, scanned=${summary.scannedPages}`,
-          ];
-          for (const page of summary.pages) {
-            lines.push(`[Page ${page.pageIndex + 1}]${page.usedOcr ? " [OCR]" : ""}`);
-            lines.push(page.text);
-          }
-          content = lines.join("\n");
+          content = buildPdfAttachmentContent({
+            fileName: attachment.fileName,
+            relativePath: attachment.relativePath,
+            summary: result.data.pdfReviewSummary,
+          });
         } else {
           content = result.data.content;
         }
@@ -1183,34 +1300,14 @@ const composeMessageWithAttachments = async (
 };
 
 type MentionOption = {
-  type: "agent" | "everyone";
+  type: "agent" | "everyone" | "integration";
   id: string;
   label: string;
   description?: string;
   icon?: string;
   color?: string;
+  integration?: IntegrationMentionOption;
 };
-
-type SkillSlashCommandOption = {
-  kind: "skill";
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  hasParams: boolean;
-  skill: CustomSkill;
-};
-
-type BuiltinSlashCommandOption = {
-  kind: "builtin";
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  command: string;
-};
-
-type SlashCommandOption = SkillSlashCommandOption | BuiltinSlashCommandOption;
 
 const normalizeMentionSearch = (value: string): string =>
   value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1222,6 +1319,12 @@ import {
 import { buildSlashSkillPrompt } from "./skill-parameter-utils";
 import { DocumentAwareFileModal } from "./DocumentAwareFileModal";
 import { ThemeIcon } from "./ThemeIcon";
+import { IntegrationMentionIcon } from "./IntegrationMentionIcon";
+import {
+  PromptComposerInput,
+  type IntegrationMentionSpan,
+  type PromptComposerInputHandle,
+} from "./PromptComposerInput";
 import {
   BookIcon,
   CalendarIcon,
@@ -1240,6 +1343,44 @@ import {
   ZapIcon,
 } from "./LineIcons";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
+
+const INBOX_AGENT_MENTION_ID = "builtin:inbox-agent";
+
+function isInboxAgentMention(mention: IntegrationMentionSelection): boolean {
+  return mention.id === INBOX_AGENT_MENTION_ID || mention.providerKey === "inbox-agent";
+}
+
+function extractInboxAskQuery(
+  value: string,
+  mentionSpans: IntegrationMentionSpan[],
+): string | null {
+  const inboxSpans = mentionSpans
+    .filter((span) => isInboxAgentMention(span.mention))
+    .sort((a, b) => b.start - a.start);
+  const rawStartsWithInbox = /^\s*@inbox(?:\s+agent)?\b/i.test(value);
+  if (inboxSpans.length === 0 && !rawStartsWithInbox) return null;
+
+  let query = value;
+  for (const span of inboxSpans) {
+    query = `${query.slice(0, span.start)}${query.slice(span.end)}`;
+  }
+  query = query.replace(/^\s*@inbox(?:\s+agent)?\b[\s,:;-]*/i, "");
+  return query.replace(/\s+/g, " ").trim();
+}
+
+function getIntegrationMentionSearchRank(
+  option: IntegrationMentionOption,
+  query: string,
+): number {
+  if (!query) return 0;
+  const label = normalizeMentionSearch(option.label);
+  if (label === query) return 0;
+  if (label.startsWith(query)) return 1;
+  const aliases = option.aliases.map(normalizeMentionSearch);
+  if (aliases.some((alias) => alias === query)) return 2;
+  if (aliases.some((alias) => alias.startsWith(query))) return 3;
+  return 4;
+}
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
 import { CitationBadge } from "./CitationPanel";
 import { CommandOutput } from "./CommandOutput";
@@ -2690,6 +2831,30 @@ const buildMarkdownComponents = (options: {
 
 const userMarkdownPlugins = [remarkGfm, remarkBreaks];
 
+function UserMessageText({
+  text,
+  integrationMentions,
+  markdownComponents,
+}: {
+  text: string;
+  integrationMentions?: IntegrationMentionSelection[];
+  markdownComponents: Any;
+}) {
+  if (hasRenderableIntegrationMentions(text, integrationMentions)) {
+    return <IntegrationMentionText text={text} mentions={integrationMentions} />;
+  }
+
+  return (
+    <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
+      {text}
+    </ReactMarkdown>
+  );
+}
+
+function getIntegrationMentionsSignature(mentions?: IntegrationMentionSelection[]): string {
+  return mentions?.map((mention) => `${mention.id}:${mention.label}:${mention.iconKey}`).join("|") ?? "";
+}
+
 // Searchable Model Dropdown Component
 interface ModelDropdownProps {
   models: LLMModelInfo[];
@@ -2879,11 +3044,14 @@ export function ModelDropdown({
 
   return (
     <div
-      className={`model-dropdown-container ${align === "right" ? "align-right" : ""}`}
+      className={`model-dropdown-container ${align === "right" ? "align-right" : ""} ${variant === "label" ? "model-dropdown-container-label" : ""}`}
       ref={containerRef}
     >
       <button
         className={`${variant === "label" ? "model-label-subtle" : "model-selector"} ${isOpen ? "open" : ""}`}
+        title={`Model: ${selectedModelLabel}`}
+        aria-label={`Change model, currently ${selectedModelLabel}`}
+        aria-expanded={isOpen}
         onClick={() => {
           setIsOpen(!isOpen);
           if (!isOpen) {
@@ -2894,8 +3062,11 @@ export function ModelDropdown({
         }}
         onKeyDown={handleKeyDown}
       >
-        {variant !== "label" && (
+        {variant === "label" ? (
+          <Sparkles className="model-label-icon" size={14} aria-hidden="true" />
+        ) : (
           <svg
+            className="model-selector-icon"
             width="14"
             height="14"
             viewBox="0 0 24 24"
@@ -2909,7 +3080,7 @@ export function ModelDropdown({
             <path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
           </svg>
         )}
-        <span>{selectedModelLabel}</span>
+        <span className="model-label-text">{selectedModelLabel}</span>
         {effectiveReasoningEffort && (
           <span className="model-selector-effort">
             {
@@ -2926,7 +3097,7 @@ export function ModelDropdown({
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
-          className={isOpen ? "chevron-up" : ""}
+          className={`model-dropdown-chevron ${isOpen ? "chevron-up" : ""}`}
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -3455,6 +3626,7 @@ interface CreateTaskOptions {
   taskDomain?: TaskDomain;
   chronicleMode?: import("../../shared/types").ChronicleTaskMode;
   videoGenerationMode?: boolean;
+  integrationMentions?: IntegrationMentionSelection[];
 }
 
 const EXECUTION_MODE_ORDER: ExecutionMode[] = ["chat", "execute", "plan", "analyze", "debug", "verified"];
@@ -4092,6 +4264,477 @@ function pickFocusedCards(pool: FocusedCard[], count: number): FocusedCard[] {
   return shuffleArray(picked);
 }
 
+export type TaskAutomationRunMode = "chat" | "local" | "worktree";
+export type TaskAutomationSchedulePreset =
+  | "every30m"
+  | "hourly"
+  | "daily"
+  | "weekdays"
+  | "weekly"
+  | "custom";
+
+export type TaskAutomationSchedule =
+  | { kind: "at"; atMs: number }
+  | { kind: "every"; everyMs: number; anchorMs?: number }
+  | { kind: "cron"; expr: string; tz?: string };
+
+export interface TaskAutomationTemplate {
+  id: string;
+  name: string;
+  prompt: string;
+  schedulePreset: Exclude<TaskAutomationSchedulePreset, "custom">;
+  icon: LucideIcon;
+}
+
+export const TASK_AUTOMATION_TEMPLATES: TaskAutomationTemplate[] = [
+  {
+    id: "daily-summary",
+    name: "Daily summary",
+    prompt: "Summarize yesterday's workspace activity and list the follow-up actions that need attention.",
+    schedulePreset: "daily",
+    icon: ListTodo,
+  },
+  {
+    id: "recent-changes",
+    name: "Scan recent changes",
+    prompt:
+      "Scan recent commits since the last run, or the last 24 hours, for likely bugs and propose minimal fixes.",
+    schedulePreset: "daily",
+    icon: Bug,
+  },
+  {
+    id: "ci-failures",
+    name: "CI failure summary",
+    prompt: "Summarize CI failures and flaky tests from the last CI window; suggest the highest-impact fixes.",
+    schedulePreset: "hourly",
+    icon: ShieldAlert,
+  },
+  {
+    id: "weekly-update",
+    name: "Weekly update",
+    prompt: "Synthesize this week's PRs, rollouts, incidents, and reviews into a concise weekly update.",
+    schedulePreset: "weekly",
+    icon: BookOpen,
+  },
+  {
+    id: "inbox-checkin",
+    name: "Inbox check-in",
+    prompt: "Check for urgent inbox or integration updates and summarize anything that needs my attention.",
+    schedulePreset: "every30m",
+    icon: MessageCircle,
+  },
+  {
+    id: "regression-watch",
+    name: "Regression watch",
+    prompt: "Compare recent changes to available benchmarks, traces, or logs and flag regressions early.",
+    schedulePreset: "daily",
+    icon: Sparkles,
+  },
+];
+
+const TASK_AUTOMATION_SCHEDULE_LABEL: Record<TaskAutomationSchedulePreset, string> = {
+  every30m: "Every 30m",
+  hourly: "Hourly",
+  daily: "Daily",
+  weekdays: "Weekdays",
+  weekly: "Weekly",
+  custom: "Custom",
+};
+
+export function buildTaskAutomationSchedule(
+  preset: TaskAutomationSchedulePreset,
+  customCron: string,
+): TaskAutomationSchedule | null {
+  const anchorMs = Date.now();
+  switch (preset) {
+    case "every30m":
+      return { kind: "every", everyMs: 30 * 60 * 1000, anchorMs };
+    case "hourly":
+      return { kind: "every", everyMs: 60 * 60 * 1000, anchorMs };
+    case "daily":
+      return { kind: "cron", expr: "0 9 * * *" };
+    case "weekdays":
+      return { kind: "cron", expr: "0 9 * * 1-5" };
+    case "weekly":
+      return { kind: "cron", expr: "0 9 * * 1" };
+    case "custom": {
+      const expr = customCron.trim();
+      return expr ? { kind: "cron", expr } : null;
+    }
+  }
+}
+
+export function buildTaskAutomationPrompt(prompt: string, task: Task, deeplink: string): string {
+  const sourceLines = [
+    "",
+    "---",
+    `Source task: ${task.title}`,
+    `Source task ID: ${task.id}`,
+    deeplink ? `Source link: ${deeplink}` : null,
+  ].filter((line): line is string => line !== null);
+  return `${prompt.trim()}${sourceLines.join("\n")}`;
+}
+
+export interface BuildTaskAutomationCronJobCreateParams {
+  task: Task;
+  workspace: Workspace | null;
+  name: string;
+  prompt: string;
+  runMode: TaskAutomationRunMode;
+  schedule: TaskAutomationSchedule;
+  deeplink: string;
+}
+
+export function buildTaskAutomationCronJobCreate({
+  task,
+  workspace,
+  name,
+  prompt,
+  runMode,
+  schedule,
+  deeplink,
+}: BuildTaskAutomationCronJobCreateParams) {
+  const workspaceId = task.workspaceId || workspace?.id || "";
+  return {
+    name: name.trim(),
+    description: `Created from task ${task.id}${deeplink ? ` (${deeplink})` : ""}`,
+    enabled: true,
+    shellAccess: runMode === "local",
+    allowUserInput: false,
+    deleteAfterRun: false,
+    schedule,
+    workspaceId,
+    taskTitle: task.title,
+    taskPrompt: buildTaskAutomationPrompt(prompt, task, deeplink),
+  };
+}
+
+interface TaskAutomationModalProps {
+  task: Task;
+  workspace: Workspace | null;
+  defaultName: string;
+  defaultPrompt: string;
+  deeplink: string;
+  onClose: () => void;
+  onCreated?: () => void | Promise<void>;
+}
+
+export function TaskAutomationModal({
+  task,
+  workspace,
+  defaultName,
+  defaultPrompt,
+  deeplink,
+  onClose,
+  onCreated,
+}: TaskAutomationModalProps) {
+  const [name, setName] = useState(defaultName);
+  const [prompt, setPrompt] = useState(defaultPrompt);
+  const [runMode, setRunMode] = useState<TaskAutomationRunMode>("chat");
+  const [schedulePreset, setSchedulePreset] = useState<TaskAutomationSchedulePreset>("every30m");
+  const [customCron, setCustomCron] = useState("*/30 * * * *");
+  const [openMenu, setOpenMenu] = useState<"run" | "schedule" | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const hasWorktree = Boolean(task.worktreePath);
+  const selectedSchedule = buildTaskAutomationSchedule(schedulePreset, customCron);
+  const workspaceId = task.workspaceId || workspace?.id || "";
+  const canSave =
+    name.trim().length > 0 &&
+    prompt.trim().length > 0 &&
+    workspaceId.trim().length > 0 &&
+    selectedSchedule !== null &&
+    !saving;
+
+  useEffect(() => {
+    setName(defaultName);
+    setPrompt(defaultPrompt);
+    setError(null);
+    setSchedulePreset("every30m");
+    setCustomCron("*/30 * * * *");
+    setRunMode("chat");
+    setShowTemplates(false);
+    setOpenMenu(null);
+  }, [defaultName, defaultPrompt, task.id]);
+
+  const handleBackdropClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget && !saving) {
+      onClose();
+    }
+  }, [onClose, saving]);
+
+  const handleTemplateSelect = useCallback((template: TaskAutomationTemplate) => {
+    setName(template.name);
+    setPrompt(template.prompt);
+    setSchedulePreset(template.schedulePreset);
+    setShowTemplates(false);
+    setError(null);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!canSave || !selectedSchedule) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await window.electronAPI.addCronJob(
+        buildTaskAutomationCronJobCreate({
+          task,
+          workspace,
+          name,
+          prompt,
+          runMode,
+          schedule: selectedSchedule,
+          deeplink,
+        }),
+      );
+      if (!result.ok) {
+        setError(result.error || "Could not create automation.");
+        return;
+      }
+      await onCreated?.();
+      onClose();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not create automation.");
+    } finally {
+      setSaving(false);
+    }
+  }, [canSave, deeplink, name, onClose, onCreated, prompt, runMode, selectedSchedule, task, workspace]);
+
+  const scheduleOptions: TaskAutomationSchedulePreset[] = [
+    "every30m",
+    "hourly",
+    "daily",
+    "weekdays",
+    "weekly",
+    "custom",
+  ];
+
+  return (
+    <div
+      className="task-automation-modal-backdrop"
+      role="presentation"
+      onMouseDown={handleBackdropClick}
+    >
+      <section
+        className="task-automation-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={showTemplates ? "Automation templates" : "Add automation"}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="task-automation-modal-header">
+          <h2>{showTemplates ? "Automation templates" : "Add automation"}</h2>
+          <div className="task-automation-modal-header-actions">
+            {!showTemplates && (
+              <button
+                type="button"
+                className="task-automation-header-btn muted"
+                onClick={() => {
+                  setName(defaultName);
+                  setPrompt("");
+                  setError(null);
+                }}
+                disabled={saving}
+              >
+                Clear
+              </button>
+            )}
+            <button
+              type="button"
+              className="task-automation-header-btn"
+              onClick={() => {
+                setShowTemplates((value) => !value);
+                setOpenMenu(null);
+              }}
+              disabled={saving}
+            >
+              {showTemplates ? "Create new" : "Use template"}
+            </button>
+            <button
+              type="button"
+              className="task-automation-close-btn"
+              aria-label="Close"
+              onClick={onClose}
+              disabled={saving}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
+        </header>
+
+        {showTemplates ? (
+          <div className="task-automation-template-grid">
+            {TASK_AUTOMATION_TEMPLATES.map((template) => {
+              const Icon = template.icon;
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  className="task-automation-template-card"
+                  onClick={() => handleTemplateSelect(template)}
+                >
+                  <Icon size={22} aria-hidden="true" />
+                  <span>{template.prompt}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <>
+            <div className="task-automation-modal-body">
+              <textarea
+                className="task-automation-prompt-input"
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="Add prompt e.g. look for crashes in $sentry"
+                disabled={saving}
+              />
+              {schedulePreset === "custom" && (
+                <label className="task-automation-custom-schedule">
+                  <span>Cron expression</span>
+                  <input
+                    value={customCron}
+                    onChange={(event) => setCustomCron(event.target.value)}
+                    placeholder="*/30 * * * *"
+                    disabled={saving}
+                  />
+                </label>
+              )}
+              {error && <div className="task-automation-error">{error}</div>}
+            </div>
+
+            <footer className="task-automation-modal-footer">
+              <div className="task-automation-footer-controls">
+                <div className="task-automation-select-wrap">
+                  <button
+                    type="button"
+                    className="task-automation-pill-control"
+                    aria-haspopup="menu"
+                    aria-expanded={openMenu === "run"}
+                    onClick={() => setOpenMenu((value) => (value === "run" ? null : "run"))}
+                    disabled={saving}
+                  >
+                    {runMode === "chat" && <MessageCircle size={16} aria-hidden="true" />}
+                    {runMode === "local" && <Folder size={16} aria-hidden="true" />}
+                    {runMode === "worktree" && <GitFork size={16} aria-hidden="true" />}
+                    <span>{runMode === "chat" ? "Chat" : runMode === "local" ? "Local" : "Worktree"}</span>
+                    <ChevronDown size={15} aria-hidden="true" />
+                  </button>
+                  {openMenu === "run" && (
+                    <div className="task-automation-popover" role="menu">
+                      <div className="task-automation-popover-title">Run in</div>
+                      <button
+                        type="button"
+                        className={`task-automation-popover-item ${runMode === "chat" ? "selected" : ""}`}
+                        onClick={() => {
+                          setRunMode("chat");
+                          setOpenMenu(null);
+                        }}
+                      >
+                        <MessageCircle size={16} aria-hidden="true" />
+                        <span>Chat</span>
+                        {runMode === "chat" && <CheckIcon size={16} aria-hidden="true" />}
+                      </button>
+                      <button
+                        type="button"
+                        className={`task-automation-popover-item ${runMode === "local" ? "selected" : ""}`}
+                        onClick={() => {
+                          setRunMode("local");
+                          setOpenMenu(null);
+                        }}
+                      >
+                        <Folder size={16} aria-hidden="true" />
+                        <span>Local</span>
+                        {runMode === "local" && <CheckIcon size={16} aria-hidden="true" />}
+                      </button>
+                      {hasWorktree && (
+                        <button
+                          type="button"
+                          className="task-automation-popover-item disabled"
+                          disabled
+                          title="Scheduled tasks cannot preserve task worktrees yet."
+                        >
+                          <GitFork size={16} aria-hidden="true" />
+                          <span>Worktree</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <label className="task-automation-name-pill">
+                  <Pin size={16} aria-hidden="true" />
+                  <input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Automation name"
+                    disabled={saving}
+                    aria-label="Automation name"
+                  />
+                </label>
+
+                <div className="task-automation-select-wrap">
+                  <button
+                    type="button"
+                    className="task-automation-pill-control"
+                    aria-haspopup="menu"
+                    aria-expanded={openMenu === "schedule"}
+                    onClick={() => setOpenMenu((value) => (value === "schedule" ? null : "schedule"))}
+                    disabled={saving}
+                  >
+                    <Clock size={16} aria-hidden="true" />
+                    <span>{TASK_AUTOMATION_SCHEDULE_LABEL[schedulePreset]}</span>
+                    <ChevronDown size={15} aria-hidden="true" />
+                  </button>
+                  {openMenu === "schedule" && (
+                    <div className="task-automation-popover schedule" role="menu">
+                      <div className="task-automation-popover-title">Schedule</div>
+                      {scheduleOptions.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className={`task-automation-popover-item ${schedulePreset === option ? "selected" : ""}`}
+                          onClick={() => {
+                            setSchedulePreset(option);
+                            setOpenMenu(null);
+                          }}
+                        >
+                          <span>{TASK_AUTOMATION_SCHEDULE_LABEL[option]}</span>
+                          {schedulePreset === option && <CheckIcon size={16} aria-hidden="true" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="task-automation-footer-actions">
+                <button
+                  type="button"
+                  className="task-automation-secondary-btn"
+                  onClick={onClose}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="task-automation-save-btn"
+                  onClick={() => void handleSave()}
+                  disabled={!canSave}
+                >
+                  {saving ? "Saving" : "Save"}
+                </button>
+              </div>
+            </footer>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
 interface MainContentProps {
   task: Task | undefined;
   selectedTaskId: string | null; // Added to distinguish "no task" from "task not in list"
@@ -4101,20 +4744,26 @@ interface MainContentProps {
   childTasks?: Task[];
   childEvents?: TaskEvent[];
   onSelectChildTask?: (taskId: string) => void;
-  onSelectTask?: (taskId: string) => void;
+  onSelectTask?: (taskId: string | null) => void;
   onSendMessage: (
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: { permissionMode?: PermissionMode; shellAccess?: boolean },
+    options?: {
+      permissionMode?: PermissionMode;
+      shellAccess?: boolean;
+      integrationMentions?: IntegrationMentionSelection[];
+    },
   ) => void;
   onStartOnboarding?: () => void;
+  onStartFreshSession?: () => void;
   onCreateTask?: (
     title: string,
     prompt: string,
     options?: CreateTaskOptions,
     images?: ImageAttachment[],
   ) => void;
+  onAskInbox?: (query: string) => void;
   onChangeWorkspace?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
   onOpenSettings?: (tab?: SettingsTab) => void;
@@ -4130,6 +4779,7 @@ interface MainContentProps {
   onDismissInputRequest?: (requestId: string) => void;
   onOpenBrowserView?: (url?: string) => void;
   onViewTaskOutputs?: (taskId: string, primaryOutputPath?: string) => void;
+  onTasksChanged?: () => void | Promise<void>;
   onOpenSpreadsheetArtifact?: (path: string) => void;
   onOpenDocumentArtifact?: (path: string) => void;
   onOpenPresentationArtifact?: (path: string) => void;
@@ -4163,6 +4813,14 @@ type TaskFeedRow =
       visiblePerfEventId: null;
     }
   | {
+      kind: "artifact-stack";
+      key: string;
+      estimatedHeight: number;
+      artifacts: EndOfTaskArtifactCard[];
+      revision: string;
+      visiblePerfEventId: null;
+    }
+  | {
       kind: "timeline";
       key: string;
       estimatedHeight: number;
@@ -4177,16 +4835,19 @@ type SkillModalLaunchMode = "skill_menu" | "slash";
 type SelectedSkillModalState = {
   skill: CustomSkill;
   launchMode: SkillModalLaunchMode;
+  commandName?: string;
 };
 
 export type TranscriptMode = "live" | "inspect" | "delivery";
 
 function getTaskFeedRowEventType(row: TaskFeedRow): string | null {
+  if (row.kind === "artifact-stack") return null;
   if (row.kind !== "timeline" || row.item.kind !== "event") return null;
   return getEffectiveTaskEventType(row.item.event as TaskEvent);
 }
 
 function getTaskFeedRowEvent(row: TaskFeedRow): TaskEvent | null {
+  if (row.kind === "artifact-stack") return null;
   if (row.kind !== "timeline" || row.item.kind !== "event") return null;
   return row.item.event as TaskEvent;
 }
@@ -4375,6 +5036,7 @@ function getTaskFeedRowEvents(row: TaskFeedRow): Array<{
   eventIndex?: number;
   eventOrder: number;
 }> {
+  if (row.kind === "artifact-stack") return [];
   if (row.kind !== "timeline") return [];
   if (row.item.kind === "event") {
     return [{ event: row.item.event as TaskEvent, eventIndex: row.item.eventIndex, eventOrder: 0 }];
@@ -4553,6 +5215,10 @@ export function selectVisibleTaskFeedRows(
     };
 
     for (const [rowIndex, row] of feedRows.entries()) {
+      if (row.kind === "artifact-stack") {
+        pushCandidate(rowIndex, row);
+        continue;
+      }
       const rowEvents = getTaskFeedRowEvents(row);
       for (const { event, eventIndex, eventOrder } of rowEvents) {
         const order = rowIndex + eventOrder / 1000;
@@ -5519,6 +6185,20 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       });
     });
 
+    const endArtifactCards = collectLatestEndOfTaskArtifactCards(events);
+    if (endArtifactCards.length > 0) {
+      rows.push({
+        kind: "artifact-stack",
+        key: "end-artifact-stack",
+        estimatedHeight: 28 + endArtifactCards.length * 86,
+        artifacts: endArtifactCards,
+        revision: endArtifactCards
+          .map((artifact) => `${artifact.path}:${artifact.kind}:${artifact.eventId ?? "none"}`)
+          .join("|"),
+        visiblePerfEventId: null,
+      });
+    }
+
     return rows;
   }, [
     childEvents,
@@ -5536,6 +6216,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     isTaskWorking,
     isReplayMode,
     getActionBlockRenderState,
+    events,
   ]);
   const { visibleFeedRows, hiddenLiveFeedRowCount } = useMemo(
     () => selectVisibleTaskFeedRows(feedRows, transcriptMode),
@@ -5605,6 +6286,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   if (row.kind === "leading-command-outputs") {
                     return row.revision;
                   }
+                  if (row.kind === "artifact-stack") {
+                    return row.revision;
+                  }
 
                   const { item, timelineIndex } = row;
                   if (item.kind === "canvas" || item.kind === "cli-agent-frame") {
@@ -5659,6 +6343,56 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 const renderFeedRow = (row: TaskFeedRow) => {
                   if (row.kind === "leading-command-outputs") {
                     return renderCommandOutputs(row.sessions);
+                  }
+                  if (row.kind === "artifact-stack") {
+                    if (!workspace?.path) return null;
+                    return (
+                      <div className="conversation-artifact-stack assistant-artifact-cards">
+                        {row.artifacts.map((artifact) => {
+                          if (artifact.kind === "spreadsheet") {
+                            return (
+                              <SpreadsheetArtifactCard
+                                key={artifact.path}
+                                filePath={artifact.path}
+                                workspacePath={workspace.path}
+                                onOpenViewer={onOpenSpreadsheetArtifact || setViewerFilePath}
+                              />
+                            );
+                          }
+                          if (artifact.kind === "document") {
+                            return (
+                              <DocumentArtifactCard
+                                key={artifact.path}
+                                filePath={artifact.path}
+                                workspacePath={workspace.path}
+                                onOpenViewer={onOpenDocumentArtifact || setViewerFilePath}
+                              />
+                            );
+                          }
+                          if (artifact.kind === "presentation") {
+                            return (
+                              <PresentationArtifactCard
+                                key={artifact.path}
+                                filePath={artifact.path}
+                                workspacePath={workspace.path}
+                                onOpenViewer={onOpenPresentationArtifact || setViewerFilePath}
+                              />
+                            );
+                          }
+                          if (artifact.kind === "html") {
+                            return (
+                              <WebArtifactCard
+                                key={artifact.path}
+                                filePath={artifact.path}
+                                workspacePath={workspace.path}
+                                onOpenViewer={onOpenWebArtifact || setViewerFilePath}
+                              />
+                            );
+                          }
+                          return null;
+                        })}
+                      </div>
+                    );
                   }
 
                   const { item, timelineIndex } = row;
@@ -6036,6 +6770,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                   commandOutputSessions:
                                     commandOutputSessionsByInsertIndex.get(eventIndex) ?? [],
                                   renderCommandOutput: renderCommandOutputs,
+                                  deferEndOfTaskArtifactCards: true,
                                 })
                               : undefined;
 
@@ -6166,6 +6901,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   }
                   const rawMessage = event.payload?.message || "User message";
                   const messageText = stripStrategyContextBlock(stripPptxBubbleContent(rawMessage));
+                  const messageIntegrationMentions =
+                    Array.isArray(event.payload?.integrationMentions)
+                      ? (event.payload.integrationMentions as IntegrationMentionSelection[])
+                      : task?.agentConfig?.integrationMentions;
                   const quotedAssistantMessage = event.payload?.quotedAssistantMessage as
                     | QuotedAssistantMessage
                     | undefined;
@@ -6182,12 +6921,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               </span>
                             </div>
                             <div className="quoted-follow-up-reply markdown-content">
-                              <ReactMarkdown
-                                remarkPlugins={userMarkdownPlugins}
-                                components={markdownComponents}
-                              >
-                                {messageText}
-                              </ReactMarkdown>
+                              <UserMessageText
+                                text={messageText}
+                                integrationMentions={messageIntegrationMentions}
+                                markdownComponents={markdownComponents}
+                              />
                             </div>
                             {attachmentNames.length > 0 && (
                               <div className="bubble-attachments quoted-follow-up-attachments">
@@ -6214,12 +6952,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           </div>
                         ) : (
                           <CollapsibleUserBubble>
-                            <ReactMarkdown
-                              remarkPlugins={userMarkdownPlugins}
-                              components={markdownComponents}
-                            >
-                              {messageText}
-                            </ReactMarkdown>
+                            <UserMessageText
+                              text={messageText}
+                              integrationMentions={messageIntegrationMentions}
+                              markdownComponents={markdownComponents}
+                            />
                             {attachmentNames.length > 0 && (
                               <div className="bubble-attachments">
                                 {attachmentNames.map((name, i) => (
@@ -6576,6 +7313,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               childTasks,
                               commandOutputSessions: commandOutputsAfterEvent ?? [],
                               renderCommandOutput: renderCommandOutputs,
+                              deferEndOfTaskArtifactCards: true,
                             })
                           : undefined
                       }
@@ -6743,6 +7481,8 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.task?.prompt === next.task?.prompt &&
     prev.task?.userPrompt === next.task?.userPrompt &&
     prev.task?.rawPrompt === next.task?.rawPrompt &&
+    getIntegrationMentionsSignature(prev.task?.agentConfig?.integrationMentions) ===
+      getIntegrationMentionsSignature(next.task?.agentConfig?.integrationMentions) &&
     prev.timelineItems === next.timelineItems &&
     prev.timelineRef === next.timelineRef &&
     prev.toggledEvents === next.toggledEvents &&
@@ -6901,7 +7641,9 @@ function MainContentComponent({
   onSelectTask,
   onSendMessage,
   onStartOnboarding,
+  onStartFreshSession,
   onCreateTask,
+  onAskInbox,
   onChangeWorkspace,
   onSelectWorkspace,
   onOpenSettings,
@@ -6914,6 +7656,7 @@ function MainContentComponent({
   onDismissInputRequest,
   onOpenBrowserView,
   onViewTaskOutputs,
+  onTasksChanged,
   onOpenSpreadsheetArtifact,
   onOpenDocumentArtifact,
   onOpenPresentationArtifact,
@@ -6967,6 +7710,12 @@ function MainContentComponent({
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [isPreparingMessage, setIsPreparingMessage] = useState(false);
   const [agentRoles, setAgentRoles] = useState<AgentRoleData[]>([]);
+  const [integrationMentionOptions, setIntegrationMentionOptions] = useState<
+    IntegrationMentionOption[]
+  >([]);
+  const [integrationMentionSpans, setIntegrationMentionSpans] = useState<
+    IntegrationMentionSpan[]
+  >([]);
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionTarget, setMentionTarget] = useState<{ start: number; end: number } | null>(null);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -6975,6 +7724,10 @@ function MainContentComponent({
   const [slashQuery, setSlashQuery] = useState("");
   const [slashTarget, setSlashTarget] = useState<{ start: number; end: number } | null>(null);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const [showTaskHeaderMenu, setShowTaskHeaderMenu] = useState(false);
+  const [showTaskAutomationModal, setShowTaskAutomationModal] = useState(false);
+  const taskHeaderMenuRef = useRef<HTMLDivElement>(null);
+  const taskHeaderMenuButtonRef = useRef<HTMLButtonElement>(null);
   // Focused mode card pool - pick random cards on mount
   const focusedCards = useMemo(() => pickFocusedCards(FOCUSED_CARD_POOL, CARDS_TO_SHOW), []);
 
@@ -6986,7 +7739,21 @@ function MainContentComponent({
 
   useEffect(() => {
     setQuotedAssistantMessage(null);
+    setShowTaskHeaderMenu(false);
+    setShowTaskAutomationModal(false);
   }, [task?.id]);
+
+  useEffect(() => {
+    if (!showTaskHeaderMenu) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (taskHeaderMenuRef.current && !taskHeaderMenuRef.current.contains(target)) {
+        setShowTaskHeaderMenu(false);
+      }
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [showTaskHeaderMenu]);
 
   // Gather all user signals, run persona detection, and build the playlist
   useEffect(() => {
@@ -7174,6 +7941,7 @@ function MainContentComponent({
   const [expandedActionBlocks, setExpandedActionBlocks] = useState<Set<string>>(new Set());
   const [appVersion, setAppVersion] = useState<string>("");
   const [customSkills, setCustomSkills] = useState<CustomSkill[]>([]);
+  const [pluginSlashCommands, setPluginSlashCommands] = useState<PluginSlashCommandAlias[]>([]);
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
   const [skillsSearchQuery, setSkillsSearchQuery] = useState("");
   const [selectedSkillForParams, setSelectedSkillForParams] =
@@ -7438,42 +8206,54 @@ function MainContentComponent({
         : undefined;
 
     const loadWelcomeTaskSuggestions = async () => {
-      const [
-        rawSuggestions,
-        dueSoonCommitments,
-        profile,
-        recentMemories,
-      ] = await Promise.all([
-        (async () => {
-          if (validWorkspaceId) {
-            return window.electronAPI.listSuggestions(validWorkspaceId).catch(() => []);
-          }
-          const workspaces = await window.electronAPI
-            .listWorkspaces()
-            .catch(() => [] as Workspace[]);
-          const workspaceIds = workspaces
+      const workspaceIds = validWorkspaceId
+        ? [validWorkspaceId]
+        : (
+            await window.electronAPI
+              .listWorkspaces()
+              .catch(() => [] as Workspace[])
+          )
             .filter((item) => !item.isTemp && !isTempWorkspaceId(item.id))
             .map((item) => item.id)
             .slice(0, 8);
-          if (workspaceIds.length === 0) return [];
-          const result = await window.electronAPI
-            .listSuggestionsForWorkspaces(workspaceIds)
-            .catch(() => []);
-          return result.flatMap((entry) => entry.suggestions || []);
-        })(),
+      const loadStoredSuggestions = async (): Promise<ProactiveSuggestion[]> => {
+        if (validWorkspaceId) {
+          return window.electronAPI.listSuggestions(validWorkspaceId).catch(() => []);
+        }
+        if (workspaceIds.length === 0) return [];
+        const result = await window.electronAPI
+          .listSuggestionsForWorkspaces(workspaceIds)
+          .catch(() => []);
+        return result.flatMap((entry) => entry.suggestions || []) as ProactiveSuggestion[];
+      };
+
+      const rawSuggestions = await loadStoredSuggestions();
+
+      const [
+        dueSoonCommitments,
+        openCommitments,
+        profile,
+        recentMemories,
+        notifications,
+      ] = await Promise.all([
         window.electronAPI.getDueSoonCommitments(96).catch(() => ({ items: [] })),
+        window.electronAPI.getOpenCommitments(8).catch(() => []),
         window.electronAPI.getUserProfile().catch(() => null as UserProfile | null),
         validWorkspaceId
           ? window.electronAPI
               .getRecentMemories({ workspaceId: validWorkspaceId, limit: 3 })
               .catch(() => [])
           : Promise.resolve([]),
+        window.electronAPI.listNotifications().catch(() => [] as AppNotification[]),
       ]);
 
       const collected: WelcomeTaskSuggestion[] = [];
       const proactiveSuggestions = Array.isArray(rawSuggestions)
         ? (rawSuggestions as ProactiveSuggestion[])
         : [];
+      const proactiveById = new Map(
+        proactiveSuggestions.map((suggestion) => [suggestion.id, suggestion] as const),
+      );
       proactiveSuggestions
         .filter((suggestion) => !suggestion.dismissed && !suggestion.actedOn)
         .slice(0, 6)
@@ -7489,6 +8269,45 @@ function MainContentComponent({
         const suggestion = buildMemoryCommitmentSuggestion(item, index);
         if (suggestion) collected.push(suggestion);
       });
+      const dueCommitmentIds = new Set(
+        commitmentItems
+          .map((item) => asRecord(item))
+          .map((record) => record && getRecordString(record, ["id"]))
+          .filter((value): value is string => Boolean(value)),
+      );
+      const openCommitmentItems = Array.isArray(openCommitments) ? openCommitments : [];
+      openCommitmentItems
+        .filter((item) => {
+          const record = asRecord(item);
+          const id = record && getRecordString(record, ["id"]);
+          return !id || !dueCommitmentIds.has(id);
+        })
+        .slice(0, 3)
+        .forEach((item, index) => {
+          const suggestion = buildMemoryCommitmentSuggestion(
+            item,
+            index + commitmentItems.length,
+          );
+          if (suggestion) collected.push(suggestion);
+        });
+
+      (Array.isArray(notifications) ? notifications : [])
+        .filter((notification) => notification.type === "companion_suggestion")
+        .filter(
+          (notification) =>
+            !validWorkspaceId ||
+            !notification.workspaceId ||
+            notification.workspaceId === validWorkspaceId,
+        )
+        .sort((a, b) => Number(a.read) - Number(b.read) || b.createdAt - a.createdAt)
+        .slice(0, 3)
+        .forEach((notification) => {
+          const suggestion = buildCompanionNotificationWelcomeSuggestion(
+            notification,
+            notification.suggestionId ? proactiveById.get(notification.suggestionId) : undefined,
+          );
+          if (suggestion) collected.push(suggestion);
+        });
 
       const normalizedRecentMemories = Array.isArray(recentMemories) ? recentMemories : [];
       const profileSuggestion = buildProfileWelcomeSuggestion(profile, normalizedRecentMemories);
@@ -7504,13 +8323,16 @@ function MainContentComponent({
       }
     };
 
-    void loadWelcomeTaskSuggestions().catch((error) => {
-      console.error("Failed to load welcome task suggestions:", error);
-      if (!cancelled) setWelcomeTaskSuggestions([]);
-    });
+    const timeout = window.setTimeout(() => {
+      void loadWelcomeTaskSuggestions().catch((error) => {
+        console.error("Failed to load welcome task suggestions:", error);
+        if (!cancelled) setWelcomeTaskSuggestions([]);
+      });
+    }, 250);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
     };
   }, [task, workspace?.id, workspace?.isTemp]);
 
@@ -8359,13 +9181,60 @@ function MainContentComponent({
     }
   }, [events, voiceEnabled, voiceResponseMode]);
 
-  // Load custom skills (task skills only, excludes guidelines)
-  useEffect(() => {
-    window.electronAPI
-      .listTaskSkills()
-      .then((skills) => setCustomSkills(skills.filter((s) => s.enabled !== false)))
-      .catch((err) => console.error("Failed to load custom skills:", err));
+  const loadMessageShortcuts = useCallback(async () => {
+    const [skills, packs] = await Promise.all([
+      window.electronAPI.listTaskSkills(),
+      window.electronAPI.listPluginPacks().catch(() => []),
+    ]);
+    const enabledSkills = skills.filter((s) => s.enabled !== false);
+    const enabledSkillIds = new Set(enabledSkills.map((skill) => skill.id));
+    const aliases: PluginSlashCommandAlias[] = Array.isArray(packs)
+      ? packs.flatMap((pack) => {
+          if (!pack?.enabled || !Array.isArray(pack.slashCommands)) return [];
+          const packEnabledSkills = new Set(
+            (pack.skills || [])
+              .filter((skill) => skill.enabled !== false)
+              .map((skill) => skill.id),
+          );
+          return pack.slashCommands
+            .filter(
+              (command) =>
+                enabledSkillIds.has(command.skillId) &&
+                (packEnabledSkills.size === 0 || packEnabledSkills.has(command.skillId)),
+            )
+            .map((command) => ({
+              name: command.name,
+              description: command.description,
+              skillId: command.skillId,
+            }));
+        })
+      : [];
+    return { enabledSkills, aliases };
   }, []);
+
+  // Load custom skills and plugin-pack slash aliases (task skills only, excludes guidelines)
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      loadMessageShortcuts()
+        .then(({ enabledSkills, aliases }) => {
+          if (cancelled) return;
+          setCustomSkills(enabledSkills);
+          setPluginSlashCommands(aliases);
+        })
+        .catch((err) => {
+          if (!cancelled) console.error("Failed to load custom skills:", err);
+        });
+    };
+    refresh();
+    window.addEventListener(MESSAGE_SHORTCUTS_UPDATED_EVENT, refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(MESSAGE_SHORTCUTS_UPDATED_EVENT, refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [loadMessageShortcuts]);
 
   // Load active agent roles for @mention autocomplete
   useEffect(() => {
@@ -8374,6 +9243,25 @@ function MainContentComponent({
       .then((roles) => setAgentRoles(roles.filter((role) => role.isActive)))
       .catch((err) => console.error("Failed to load agent roles:", err));
   }, []);
+
+  const loadIntegrationMentionOptions = useCallback(async () => {
+    const options = await window.electronAPI.listIntegrationMentionOptions().catch(() => []);
+    startTransition(() => {
+      setIntegrationMentionOptions(Array.isArray(options) ? options : []);
+    });
+  }, []);
+
+  useEffect(() => {
+    void loadIntegrationMentionOptions();
+    const interval = window.setInterval(() => {
+      void loadIntegrationMentionOptions();
+    }, 30000);
+    window.addEventListener("focus", loadIntegrationMentionOptions);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", loadIntegrationMentionOptions);
+    };
+  }, [loadIntegrationMentionOptions]);
 
   // Pre-normalize agent role search strings once when roles change (avoids per-keystroke string ops)
   const normalizedRoleIndex = useMemo(() => {
@@ -8386,6 +9274,44 @@ function MainContentComponent({
     }
     return index;
   }, [agentRoles]);
+
+  const normalizedIntegrationMentionIndex = useMemo(() => {
+    const index = new Map<string, string>();
+    for (const option of integrationMentionOptions) {
+      index.set(
+        option.id,
+        normalizeMentionSearch(
+          [
+            option.label,
+            option.description,
+            option.providerKey,
+            ...option.aliases,
+            ...option.tools,
+          ].join(" "),
+        ),
+      );
+    }
+    return index;
+  }, [integrationMentionOptions]);
+
+  useEffect(() => {
+    setIntegrationMentionSpans((current) => {
+      const next = current.filter(
+        (span) =>
+          span.end <= inputValue.length &&
+          inputValue.slice(span.start, span.end) === `@${span.mention.label}`,
+      );
+      return next.length === current.length ? current : next;
+    });
+  }, [inputValue]);
+
+  const selectedIntegrationMentions = useMemo<IntegrationMentionSelection[]>(() => {
+    const byId = new Map<string, IntegrationMentionSelection>();
+    for (const span of integrationMentionSpans) {
+      byId.set(span.mention.id, span.mention);
+    }
+    return Array.from(byId.values());
+  }, [integrationMentionSpans]);
 
   // Load canvas sessions when task changes
   useEffect(() => {
@@ -8898,8 +9824,9 @@ function MainContentComponent({
     if (!modalState) return;
     if (onCreateTask) {
       if (modalState.launchMode === "slash") {
-        const slashPrompt = buildSlashSkillPrompt(modalState.skill.id, values);
-        const title = buildTaskTitle(`Run /${modalState.skill.id}`);
+        const commandName = modalState.commandName || modalState.skill.id;
+        const slashPrompt = buildSlashSkillPrompt(commandName, values);
+        const title = buildTaskTitle(`Run /${commandName}`);
         onCreateTask(title, slashPrompt);
         return;
       }
@@ -8913,8 +9840,9 @@ function MainContentComponent({
     const modalState = selectedSkillForParams;
     setSelectedSkillForParams(null);
     if (!modalState || modalState.launchMode !== "slash" || !onCreateTask) return;
-    const slashPrompt = buildSlashSkillPrompt(modalState.skill.id, values);
-    const title = buildTaskTitle(`Run /${modalState.skill.id}`);
+    const commandName = modalState.commandName || modalState.skill.id;
+    const slashPrompt = buildSlashSkillPrompt(commandName, values);
+    const title = buildTaskTitle(`Run /${commandName}`);
     onCreateTask(title, slashPrompt);
   };
 
@@ -9179,7 +10107,7 @@ function MainContentComponent({
   const autoScrollFrameRef = useRef<number | null>(null);
   const lastAutoScrollTargetRef = useRef<number | null>(null);
   const activeScrollbarTimeoutRef = useRef<number | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const promptInputRef = useRef<PromptComposerInputHandle>(null);
   const mentionContainerRef = useRef<HTMLDivElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
   const cliInputWrapperRef = useRef<HTMLDivElement>(null);
@@ -9190,19 +10118,10 @@ function MainContentComponent({
   // effect/layout cycle on every keypress in long sessions.
   const resizeRafRef = useRef<number>(0);
   const pendingProgrammaticResizeRef = useRef(false);
-  const autoResizeTextarea = useCallback((textarea?: HTMLTextAreaElement | null, shrink = false) => {
+  const autoResizeTextarea = useCallback((_input?: unknown, shrink = false) => {
     if (resizeRafRef.current) cancelAnimationFrame(resizeRafRef.current);
     resizeRafRef.current = requestAnimationFrame(() => {
-      const target = textarea ?? textareaRef.current;
-      if (!target) return;
-      if (shrink) {
-        target.style.height = "auto";
-      }
-      const nextHeight = Math.min(target.scrollHeight, 200);
-      const nextHeightPx = `${nextHeight}px`;
-      if (target.style.height !== nextHeightPx) {
-        target.style.height = nextHeightPx;
-      }
+      promptInputRef.current?.resize(shrink);
     });
   }, []);
 
@@ -9217,13 +10136,11 @@ function MainContentComponent({
 
   const handleQuoteAssistantMessage = useCallback((quote: QuotedAssistantMessage) => {
     setQuotedAssistantMessage(quote);
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.focus();
-      const cursorPosition = textarea.value.length;
-      textarea.setSelectionRange(cursorPosition, cursorPosition);
-    }
-  }, []);
+    const input = promptInputRef.current;
+    input?.focus();
+    const cursorPosition = inputValue.length;
+    input?.setSelectionRange(cursorPosition, cursorPosition);
+  }, [inputValue.length]);
 
   // Programmatic input updates still need a resize pass.
   useEffect(() => {
@@ -9588,8 +10505,31 @@ function MainContentComponent({
     const trimmedInput = inputValue.trim();
     const hasAttachments = pendingAttachments.length > 0;
     const onboardingSlashCommand = parseOnboardingSlashCommand(trimmedInput);
+    const appSlashCommand = parseLeadingMessageAppShortcut(trimmedInput);
 
     if (!trimmedInput && !hasAttachments) return;
+    if (
+      appSlashCommand.matched &&
+      appSlashCommand.shortcut?.action === "clear" &&
+      !hasAttachments
+    ) {
+      pendingProgrammaticResizeRef.current = true;
+      setInputValue("");
+      setPendingAttachments([]);
+      setMentionOpen(false);
+      setMentionQuery("");
+      setMentionTarget(null);
+      setSlashOpen(false);
+      setSlashQuery("");
+      setSlashTarget(null);
+      setModeSuggestions([]);
+      if (onStartFreshSession) {
+        onStartFreshSession();
+      } else {
+        onSelectTask?.(null);
+      }
+      return;
+    }
     if (onboardingSlashCommand.matched && !hasAttachments && onStartOnboarding) {
       pendingProgrammaticResizeRef.current = true;
       setInputValue("");
@@ -9602,6 +10542,34 @@ function MainContentComponent({
       setSlashTarget(null);
       setModeSuggestions([]);
       onStartOnboarding();
+      return;
+    }
+
+    const inboxAskQuery = extractInboxAskQuery(inputValue, integrationMentionSpans);
+    if (inboxAskQuery !== null && onAskInbox) {
+      if (hasAttachments) {
+        setAttachmentError("Inbox Agent Ask Inbox only accepts a text question.");
+        return;
+      }
+      if (!inboxAskQuery) {
+        setAttachmentError("Add a question after @Inbox.");
+        return;
+      }
+      pendingProgrammaticResizeRef.current = true;
+      setInputValue("");
+      setPendingAttachments([]);
+      setIntegrationMentionSpans([]);
+      setMentionOpen(false);
+      setMentionQuery("");
+      setMentionTarget(null);
+      setSlashOpen(false);
+      setSlashQuery("");
+      setSlashTarget(null);
+      setModeSuggestions([]);
+      setActiveWelcomeSuggestionDraft(null);
+      setQuotedAssistantMessage(null);
+      setAttachmentError(null);
+      onAskInbox(inboxAskQuery);
       return;
     }
 
@@ -9644,9 +10612,15 @@ function MainContentComponent({
       const imagePayload = nativeImageAttachments.length > 0 ? nativeImageAttachments : undefined;
 
       // Compose text message (with OCR fallback for non-image files)
+      const appSlashMessageText =
+        appSlashCommand.matched &&
+        appSlashCommand.shortcut?.action !== "insert" &&
+        appSlashCommand.shortcut?.action !== "clear"
+          ? appSlashCommand.args || ""
+          : trimmedInput;
       const composeResult = await composeMessageWithAttachments(
         workspace?.path,
-        trimmedInput,
+        appSlashMessageText,
         importedAttachments,
       );
       const hasExtractionWarnings = composeResult.extractionWarnings.length > 0;
@@ -9657,14 +10631,71 @@ function MainContentComponent({
         );
       }
       const message = composeResult.message;
+      const createIntegrationMentionOptions =
+        selectedIntegrationMentions.length > 0
+          ? { integrationMentions: selectedIntegrationMentions }
+          : {};
+
+      if (
+        appSlashCommand.matched &&
+        appSlashCommand.shortcut &&
+        appSlashCommand.shortcut.action !== "insert" &&
+        appSlashCommand.shortcut.action !== "clear"
+      ) {
+        if (!onCreateTask) return;
+        const shortcut = appSlashCommand.shortcut;
+        const promptText = message.trim();
+        const hasTaskText = Boolean(appSlashCommand.args?.trim() || hasAttachments);
+        if ((shortcut.action === "plan" || shortcut.action === "cost") && !hasTaskText) {
+          setAttachmentError(`Add the task after /${shortcut.name}.`);
+          sendFailed = true;
+          return;
+        }
+
+        const prompt =
+          shortcut.action === "plan"
+            ? promptText
+            : shortcut.action === "cost"
+              ? `Estimate the likely token usage, model cost, runtime, and risk for this task without executing it:\n\n${promptText}`
+              : shortcut.name === "doctor"
+                ? `Run a CoWork OS diagnostic for this workspace. Check available app state, integrations, permissions, skills, commands, and obvious setup issues. Do not make changes unless I explicitly ask.\n\nAdditional context:\n${promptText || "No additional context."}`
+                : shortcut.name === "undo"
+                  ? `Review the latest task or workspace changes and prepare a safe undo plan. Do not modify files, delete data, or run rollback commands unless I explicitly approve.\n\nContext:\n${promptText || "Use the current workspace and recent task context."}`
+                  : `Create a compact continuation brief for this context. Preserve goals, decisions, open questions, constraints, and next actions without executing new work.\n\nContext:\n${promptText || "Use the current conversation and workspace context."}`;
+
+        const title = buildTaskTitle(`/${shortcut.name} ${appSlashCommand.args || ""}`.trim());
+        const options: CreateTaskOptions =
+          shortcut.action === "plan"
+            ? { executionMode: "plan", taskDomain, ...createIntegrationMentionOptions }
+            : shortcut.action === "cost" || shortcut.action === "diagnostic"
+              ? { executionMode: "analyze", taskDomain, ...createIntegrationMentionOptions }
+              : { executionMode: "plan", taskDomain, ...createIntegrationMentionOptions };
+        onCreateTask(title, prompt, options, imagePayload);
+
+        pendingProgrammaticResizeRef.current = true;
+        setInputValue("");
+        setActiveWelcomeSuggestionDraft(null);
+        setQuotedAssistantMessage(null);
+        setPendingAttachments([]);
+        setMentionOpen(false);
+        setMentionQuery("");
+        setMentionTarget(null);
+        setSlashOpen(false);
+        setSlashQuery("");
+        setSlashTarget(null);
+        setModeSuggestions([]);
+        return;
+      }
 
       // Chat mode reuses the current chat task when one exists, but creates a new
       // task for the first message or when the selected task is not a chat session.
-      const shouldCreateFreshTask = shouldCreateFreshTaskForSend({
-        executionMode,
-        selectedTaskId,
-        selectedTaskExecutionMode: task?.agentConfig?.executionMode,
-      });
+      const shouldCreateFreshTask =
+        shouldCreateFreshTaskForSend({
+          executionMode,
+          selectedTaskId,
+          selectedTaskExecutionMode: task?.agentConfig?.executionMode,
+          forceFreshTask: appSlashCommand.shortcut?.name === "schedule",
+        });
 
       if (shouldCreateFreshTask && onCreateTask) {
         // Fresh task - create new task with optional autonomy enabled.
@@ -9677,6 +10708,7 @@ function MainContentComponent({
           taskDomain,
           chronicleMode: chronicleEnabledForTask ? "inherit" : "disabled",
           videoGenerationMode: taskDomain === "media" ? true : undefined,
+          ...createIntegrationMentionOptions,
           ...(permissionAccessMode === "full"
             ? { permissionMode: "bypass_permissions", shellAccess: true }
             : {}),
@@ -9707,9 +10739,12 @@ function MainContentComponent({
           message,
           imagePayload,
           quotedAssistantMessage ?? undefined,
-          permissionAccessMode === "full"
-            ? { permissionMode: "bypass_permissions", shellAccess: true }
-            : undefined,
+          {
+            integrationMentions: selectedIntegrationMentions,
+            ...(permissionAccessMode === "full"
+              ? { permissionMode: "bypass_permissions", shellAccess: true }
+              : {}),
+          },
         );
       }
 
@@ -9819,14 +10854,51 @@ function MainContentComponent({
       });
     });
 
+    integrationMentionOptions
+      .filter((option) => {
+        if (!query) return true;
+        return (normalizedIntegrationMentionIndex.get(option.id) ?? "").includes(query);
+      })
+      .sort((a, b) => {
+        const rankDelta =
+          getIntegrationMentionSearchRank(a, query) - getIntegrationMentionSearchRank(b, query);
+        return rankDelta || a.label.localeCompare(b.label);
+      })
+      .forEach((integration) => {
+        options.push({
+          type: "integration",
+          id: integration.id,
+          label: integration.label,
+          description: integration.description,
+          integration,
+        });
+      });
+
     return options;
-  }, [mentionOpen, mentionQuery, agentRoles, normalizedRoleIndex]);
+  }, [
+    mentionOpen,
+    mentionQuery,
+    agentRoles,
+    normalizedRoleIndex,
+    integrationMentionOptions,
+    normalizedIntegrationMentionIndex,
+  ]);
 
   useEffect(() => {
     if (mentionSelectedIndex >= mentionOptions.length) {
       setMentionSelectedIndex(0);
     }
   }, [mentionOptions, mentionSelectedIndex]);
+
+  useEffect(() => {
+    if (!mentionOpen) return;
+    const dropdown = mentionDropdownRef.current;
+    if (!dropdown) return;
+    const selected = dropdown.querySelector<HTMLElement>(
+      `[data-mention-option-index="${mentionSelectedIndex}"]`,
+    );
+    selected?.scrollIntoView({ block: "nearest" });
+  }, [mentionOpen, mentionSelectedIndex, mentionOptions]);
 
   useEffect(() => {
     if (!mentionOpen) return;
@@ -9901,49 +10973,18 @@ function MainContentComponent({
 
   const slashOptions = useMemo<SlashCommandOption[]>(() => {
     if (!slashOpen) return [];
-    const query = slashQuery.toLowerCase();
-    const builtinOptions: SlashCommandOption[] = onStartOnboarding
-      ? ONBOARDING_COMMAND_OPTIONS.filter((option) => {
-          if (!query) return true;
-          return (
-            option.name.toLowerCase().includes(query) ||
-            option.description.toLowerCase().includes(query)
-          );
-        }).map((option) => ({
-          kind: "builtin",
-          id: option.id,
-          name: option.name,
-          description: option.description,
-          icon: option.icon,
-          command: `/${option.name}`,
-        }))
-      : [];
+    return buildMessageSlashOptions({
+      query: slashQuery,
+      customSkills,
+      pluginSlashCommands,
+      includeOnboarding: Boolean(onStartOnboarding),
+    });
+  }, [slashOpen, slashQuery, customSkills, pluginSlashCommands, onStartOnboarding]);
 
-    const skillOptions: SlashCommandOption[] = customSkills
-      .filter((skill) => {
-        if (!query) return true;
-        return (
-          skill.name.toLowerCase().includes(query) ||
-          skill.id.toLowerCase().includes(query) ||
-          (skill.description || "").toLowerCase().includes(query)
-        );
-      })
-      .slice(0, 10)
-      .map((skill) => ({
-        kind: "skill",
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        icon: skill.icon,
-        hasParams: !!(skill.parameters && skill.parameters.length > 0),
-        skill,
-      }));
-
-    return [...builtinOptions, ...skillOptions].slice(0, 10);
-  }, [slashOpen, slashQuery, customSkills, onStartOnboarding]);
-
-  const effectiveSlashSelectedIndex =
-    slashOptions.length > 0 ? Math.min(slashSelectedIndex, slashOptions.length - 1) : 0;
+  const effectiveSlashSelectedIndex = resolveSlashSelectedIndex(
+    slashOptions.length,
+    slashSelectedIndex,
+  );
 
   const updateMentionState = useCallback((value: string, cursor: number | null) => {
     const mention = findMentionAtCursor(value, cursor);
@@ -9990,6 +11031,39 @@ function MainContentComponent({
     setSlashQuery("");
     setSlashTarget(null);
 
+    if (option.kind === "app") {
+      pendingProgrammaticResizeRef.current = true;
+      setModeSuggestions([]);
+      if (option.shortcut.action === "clear") {
+        setInputValue("");
+        setPendingAttachments([]);
+        setMentionOpen(false);
+        setMentionQuery("");
+        setMentionTarget(null);
+        if (onStartFreshSession) {
+          onStartFreshSession();
+        } else {
+          onSelectTask?.(null);
+        }
+        return;
+      }
+
+      const before = inputValue.slice(0, slashTarget.start);
+      const after = inputValue.slice(slashTarget.end);
+      const insertText = `/${option.commandName} `;
+      const nextValue = `${before}${insertText}${after}`;
+      setInputValue(nextValue);
+      requestAnimationFrame(() => {
+        const input = promptInputRef.current;
+        if (input) {
+          const cursorPosition = before.length + insertText.length;
+          input.focus();
+          input.setSelectionRange(cursorPosition, cursorPosition);
+        }
+      });
+      return;
+    }
+
     if (option.kind === "builtin") {
       pendingProgrammaticResizeRef.current = true;
       setPendingAttachments([]);
@@ -10001,28 +11075,52 @@ function MainContentComponent({
       return;
     }
 
-    if (option.hasParams) {
+    if (option.hasRequiredParams) {
       // Show parameter modal
       pendingProgrammaticResizeRef.current = true;
       setInputValue("");
-      setSelectedSkillForParams({ skill: option.skill, launchMode: "slash" });
+      setSelectedSkillForParams({
+        skill: option.skill,
+        launchMode: "slash",
+        commandName: option.commandName,
+      });
+    } else if (option.hasOptionalParams) {
+      pendingProgrammaticResizeRef.current = true;
+      setModeSuggestions([]);
+      const before = inputValue.slice(0, slashTarget.start);
+      const after = inputValue.slice(slashTarget.end);
+      const insertText = `/${option.commandName} `;
+      const nextValue = `${before}${insertText}${after}`;
+      setInputValue(nextValue);
+      requestAnimationFrame(() => {
+        const input = promptInputRef.current;
+        if (input) {
+          const cursorPosition = before.length + insertText.length;
+          input.focus();
+          input.setSelectionRange(cursorPosition, cursorPosition);
+        }
+      });
     } else {
       // No parameters — create task directly from slash invocation
       pendingProgrammaticResizeRef.current = true;
       setInputValue("");
       if (onCreateTask) {
-        const slashPrompt = buildSlashSkillPrompt(option.skill.id);
-        const title = buildTaskTitle(`Run /${option.skill.id}`);
+        const slashPrompt = buildSlashSkillPrompt(option.commandName);
+        const title = buildTaskTitle(`Run /${option.commandName}`);
         onCreateTask(title, slashPrompt);
       }
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    const cursor = e.target.selectionStart;
-    autoResizeTextarea(e.target, value.length < inputValue.length);
+  const handleInputChange = (
+    value: string,
+    cursor: number,
+    nextIntegrationMentionSpans: IntegrationMentionSpan[],
+    shrink: boolean,
+  ) => {
+    autoResizeTextarea(undefined, shrink || value.length < inputValue.length);
     setInputValue(value);
+    setIntegrationMentionSpans(nextIntegrationMentionSpans);
     // Defer mention/slash autocomplete updates so typing stays responsive
     startTransition(() => {
       updateMentionState(value, cursor);
@@ -10046,17 +11144,24 @@ function MainContentComponent({
     }, 300);
   };
 
-  const handleInputClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
-    updateMentionState(inputValue, e.currentTarget.selectionStart);
-    updateSlashState(inputValue, e.currentTarget.selectionStart);
+  const handleInputCursorChange = (cursor: number) => {
+    updateMentionState(inputValue, cursor);
+    updateSlashState(inputValue, cursor);
   };
 
-  const handleInputKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) {
-      const cursor = (e.currentTarget as HTMLTextAreaElement).selectionStart;
-      updateMentionState(inputValue, cursor);
-      updateSlashState(inputValue, cursor);
-    }
+  const replaceIntegrationMentionRange = (
+    start: number,
+    end: number,
+    insertText: string,
+    newSpan?: IntegrationMentionSpan,
+  ): IntegrationMentionSpan[] => {
+    const delta = insertText.length - (end - start);
+    const shifted = integrationMentionSpans.flatMap((span) => {
+      if (span.end <= start) return [span];
+      if (span.start >= end) return [{ ...span, start: span.start + delta, end: span.end + delta }];
+      return [];
+    });
+    return newSpan ? [...shifted, newSpan].sort((a, b) => a.start - b.start) : shifted;
   };
 
   const handleMentionSelect = (option: MentionOption) => {
@@ -10066,6 +11171,26 @@ function MainContentComponent({
     const after = inputValue.slice(mentionTarget.end);
     const needsSpace = after.length === 0 ? true : !after.startsWith(" ");
     const nextValue = `${before}${insertText}${needsSpace ? " " : ""}${after}`;
+    const nextSpan =
+      option.type === "integration" && option.integration
+        ? {
+            spanId: `${option.integration.id}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+            start: mentionTarget.start,
+            end: mentionTarget.start + insertText.length,
+            mention: {
+              id: option.integration.id,
+              label: option.integration.label,
+              source: option.integration.source,
+              providerKey: option.integration.providerKey,
+              iconKey: option.integration.iconKey,
+              tools: option.integration.tools,
+              promptHint: option.integration.promptHint,
+            },
+          }
+        : undefined;
+    setIntegrationMentionSpans(
+      replaceIntegrationMentionRange(mentionTarget.start, mentionTarget.end, insertText, nextSpan),
+    );
     pendingProgrammaticResizeRef.current = true;
     setInputValue(nextValue);
     setMentionOpen(false);
@@ -10073,11 +11198,11 @@ function MainContentComponent({
     setMentionTarget(null);
 
     requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (textarea) {
+      const input = promptInputRef.current;
+      if (input) {
         const cursorPosition = before.length + insertText.length + (needsSpace ? 1 : 0);
-        textarea.focus();
-        textarea.setSelectionRange(cursorPosition, cursorPosition);
+        input.focus();
+        input.setSelectionRange(cursorPosition, cursorPosition);
       }
     });
   };
@@ -10123,35 +11248,70 @@ function MainContentComponent({
 
   const renderMentionDropdown = () => {
     if (!mentionOpen || mentionOptions.length === 0) return null;
+    const agentOptions = mentionOptions.filter(
+      (option) => option.type === "agent" || option.type === "everyone",
+    );
+    const integrationOptions = mentionOptions.filter((option) => option.type === "integration");
+    let optionIndex = 0;
+    const renderOption = (option: MentionOption) => {
+      const index = optionIndex++;
+      const displayLabel = option.type === "everyone" ? "Everybody" : option.label;
+      const isIntegration = option.type === "integration" && option.integration;
+      return (
+        <button
+          key={`${option.type}-${option.id}`}
+          className={`mention-autocomplete-item ${index === mentionSelectedIndex ? "selected" : ""}`}
+          data-mention-option-index={index}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            handleMentionSelect(option);
+          }}
+          onMouseEnter={() => setMentionSelectedIndex(index)}
+        >
+          {isIntegration ? (
+            <IntegrationMentionIcon
+              iconKey={option.integration?.iconKey}
+              label={option.label}
+              size="sm"
+            />
+          ) : (
+            <span
+              className="mention-autocomplete-icon"
+              style={{ backgroundColor: option.color || "#64748b" }}
+            >
+              <ThemeIcon emoji={option.icon || "👥"} icon={<UsersIcon size={16} />} />
+            </span>
+          )}
+          <div className="mention-autocomplete-details">
+            <span className="mention-autocomplete-name">{displayLabel}</span>
+            {option.description && (
+              <span className="mention-autocomplete-desc">{option.description}</span>
+            )}
+          </div>
+        </button>
+      );
+    };
     return (
       <div className="mention-autocomplete-dropdown" ref={mentionDropdownRef}>
-        {mentionOptions.map((option, index) => {
-          const displayLabel = option.type === "everyone" ? "@everybody" : `@${option.label}`;
-          return (
-            <button
-              key={`${option.type}-${option.id}`}
-              className={`mention-autocomplete-item ${index === mentionSelectedIndex ? "selected" : ""}`}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                handleMentionSelect(option);
-              }}
-              onMouseEnter={() => setMentionSelectedIndex(index)}
-            >
-              <span
-                className="mention-autocomplete-icon"
-                style={{ backgroundColor: option.color || "#64748b" }}
-              >
-                <ThemeIcon emoji={option.icon || "👥"} icon={<UsersIcon size={16} />} />
-              </span>
-              <div className="mention-autocomplete-details">
-                <span className="mention-autocomplete-name">{displayLabel}</span>
-                {option.description && (
-                  <span className="mention-autocomplete-desc">{option.description}</span>
-                )}
-              </div>
-            </button>
-          );
-        })}
+        {agentOptions.length > 0 && (
+          <div className="mention-autocomplete-section">
+            <div className="mention-autocomplete-section-label">Agents</div>
+            <div className="mention-autocomplete-section-list">
+              {agentOptions.map(renderOption)}
+            </div>
+          </div>
+        )}
+        {integrationOptions.length > 0 && (
+          <div className="mention-autocomplete-section">
+            <div className="mention-autocomplete-section-label">Integrations</div>
+            <div className="mention-autocomplete-section-list">
+              {integrationOptions.map(renderOption)}
+            </div>
+          </div>
+        )}
+        <div className="mention-autocomplete-section">
+          <div className="mention-autocomplete-section-label">Files</div>
+        </div>
       </div>
     );
   };
@@ -10173,9 +11333,9 @@ function MainContentComponent({
             }}
             onMouseEnter={() => setSlashSelectedIndex(index)}
           >
-            <span className="mention-autocomplete-icon slash-command-icon">{option.icon}</span>
+              <span className="mention-autocomplete-icon slash-command-icon">{option.icon}</span>
             <div className="mention-autocomplete-details">
-              <span className="mention-autocomplete-name">/{option.name}</span>
+              <span className="mention-autocomplete-name">/{option.commandName}</span>
               {option.description && (
                 <span className="mention-autocomplete-desc">{option.description}</span>
               )}
@@ -10245,6 +11405,7 @@ function MainContentComponent({
   const handleQuickAction = (action: string) => {
     pendingProgrammaticResizeRef.current = true;
     setInputValue(action);
+    setIntegrationMentionSpans([]);
     setActiveWelcomeSuggestionDraft(null);
   };
 
@@ -10261,9 +11422,9 @@ function MainContentComponent({
     );
     setWelcomeTaskSuggestions((current) => current.filter((item) => item.id !== suggestion.id));
     window.setTimeout(() => {
-      textareaRef.current?.focus();
+      promptInputRef.current?.focus();
       const position = suggestion.prompt.length;
-      textareaRef.current?.setSelectionRange(position, position);
+      promptInputRef.current?.setSelectionRange(position, position);
     }, 0);
   };
 
@@ -10520,8 +11681,8 @@ function MainContentComponent({
   };
 
   useEffect(() => {
-    if (task?.status === "paused" && textareaRef.current) {
-      const inputEl = textareaRef.current;
+    if (task?.status === "paused" && promptInputRef.current) {
+      const inputEl = promptInputRef.current;
       window.requestAnimationFrame(() => {
         inputEl.focus();
       });
@@ -10553,6 +11714,162 @@ function MainContentComponent({
     headerTooltip,
     showHeaderTitle,
   } = useMemo(() => deriveTaskHeaderPresentation(task), [task]);
+
+  const taskWorkingDirectory = task?.worktreePath || workspace?.path || "";
+  const taskIdCopyValue = task?.id || "";
+  const taskDeeplink = task ? `cowork://tasks/${task.id}` : "";
+  const taskOutputSummary = useMemo(
+    () => resolveTaskOutputSummaryFromTask(task, events),
+    [events, task],
+  );
+  const taskMarkdown = useMemo(() => {
+    if (!task) return "";
+    const promptText =
+      cleanedDisplayPrompt ||
+      task.userPrompt ||
+      task.rawPrompt ||
+      task.prompt ||
+      "";
+    return [
+      `# ${task.title}`,
+      "",
+      `- Status: ${task.status}`,
+      `- Task ID: ${task.id}`,
+      task.sessionId ? `- Session ID: ${task.sessionId}` : null,
+      taskWorkingDirectory ? `- Working directory: ${taskWorkingDirectory}` : null,
+      `- Link: ${taskDeeplink}`,
+      task.semanticSummary ? `- Summary: ${task.semanticSummary}` : null,
+      "",
+      "## Prompt",
+      "",
+      promptText.trim() || "_No prompt available._",
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n");
+  }, [cleanedDisplayPrompt, task, taskDeeplink, taskWorkingDirectory]);
+  const taskAutomationDefaultPrompt = useMemo(() => {
+    if (!task) return "";
+    return (
+      cleanedDisplayPrompt ||
+      task.userPrompt ||
+      task.rawPrompt ||
+      task.prompt ||
+      task.title ||
+      ""
+    ).trim();
+  }, [cleanedDisplayPrompt, task]);
+
+  const closeTaskHeaderMenu = useCallback(() => {
+    setShowTaskHeaderMenu(false);
+  }, []);
+
+  const copyTaskHeaderMenuText = useCallback(async (text: string) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      console.error("Failed to copy task menu value:", error);
+    }
+  }, []);
+
+  const handleTaskHeaderMenuKeyDown = useCallback((event: React.KeyboardEvent) => {
+    const menu = taskHeaderMenuRef.current;
+    if (!menu) return;
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeTaskHeaderMenu();
+      taskHeaderMenuButtonRef.current?.focus();
+      return;
+    }
+
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+
+    event.preventDefault();
+    const options = Array.from(
+      menu.querySelectorAll<HTMLButtonElement>("button[data-task-header-menu-option]:not(:disabled)"),
+    );
+    if (options.length === 0) return;
+    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
+    const offset = event.key === "ArrowDown" ? 1 : -1;
+    const nextIndex = currentIndex >= 0
+      ? (currentIndex + offset + options.length) % options.length
+      : event.key === "ArrowDown"
+        ? 0
+        : options.length - 1;
+    options[nextIndex]?.focus();
+  }, [closeTaskHeaderMenu]);
+
+  const handleTaskHeaderMenuButtonKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    setShowTaskHeaderMenu(true);
+    requestAnimationFrame(() => {
+      const firstOption = taskHeaderMenuRef.current?.querySelector<HTMLButtonElement>(
+        "button[data-task-header-menu-option]:not(:disabled)",
+      );
+      firstOption?.focus();
+    });
+  }, []);
+
+  const handleTaskHeaderPin = useCallback(async () => {
+    if (!task || remoteSession) return;
+    closeTaskHeaderMenu();
+    try {
+      await window.electronAPI.toggleTaskPin(task.id);
+      await onTasksChanged?.();
+    } catch (error) {
+      console.error("Failed to toggle task pin from header:", error);
+    }
+  }, [closeTaskHeaderMenu, onTasksChanged, remoteSession, task]);
+
+  const handleTaskHeaderRename = useCallback(async () => {
+    if (!task || remoteSession) return;
+    closeTaskHeaderMenu();
+    const nextTitle = window.prompt("Rename task", task.title)?.trim();
+    if (!nextTitle || nextTitle === task.title) return;
+    try {
+      await window.electronAPI.renameTask(task.id, nextTitle);
+      await onTasksChanged?.();
+    } catch (error) {
+      console.error("Failed to rename task from header:", error);
+    }
+  }, [closeTaskHeaderMenu, onTasksChanged, remoteSession, task]);
+
+  const handleTaskHeaderArchive = useCallback(async () => {
+    if (!task || remoteSession) return;
+    closeTaskHeaderMenu();
+    try {
+      await window.electronAPI.deleteTask(task.id);
+      onSelectTask?.(null);
+      await onTasksChanged?.();
+    } catch (error) {
+      console.error("Failed to archive task from header:", error);
+    }
+  }, [closeTaskHeaderMenu, onSelectTask, onTasksChanged, remoteSession, task]);
+
+  const handleTaskHeaderFork = useCallback(async () => {
+    if (!task || remoteSession) return;
+    closeTaskHeaderMenu();
+    try {
+      const forkedTask = await window.electronAPI.forkTaskSession({
+        taskId: task.id,
+        branchLabel: "side-chat",
+      });
+      await onTasksChanged?.();
+      if (forkedTask?.id) {
+        onSelectTask?.(forkedTask.id);
+      }
+    } catch (error) {
+      console.error("Failed to fork task session from header:", error);
+    }
+  }, [closeTaskHeaderMenu, onSelectTask, onTasksChanged, remoteSession, task]);
+
+  const handleTaskHeaderAddAutomation = useCallback(() => {
+    if (!task || remoteSession) return;
+    closeTaskHeaderMenu();
+    setShowTaskAutomationModal(true);
+  }, [closeTaskHeaderMenu, remoteSession, task]);
 
   const initialPromptEventId = useMemo(() => {
     if (!trimmedPrompt) return null;
@@ -10626,12 +11943,15 @@ function MainContentComponent({
   }, [events, isChatTask]);
   const initialPromptBubble = useMemo(() => {
     if (!trimmedPrompt) return null;
+    const initialIntegrationMentions = task?.agentConfig?.integrationMentions;
     return (
       <div className="chat-message user-message">
         <CollapsibleUserBubble>
-          <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
-            {cleanedDisplayPrompt}
-          </ReactMarkdown>
+          <UserMessageText
+            text={cleanedDisplayPrompt}
+            integrationMentions={initialIntegrationMentions}
+            markdownComponents={markdownComponents}
+          />
           {promptAttachmentNames.length > 0 && (
             <div className="bubble-attachments">
               {promptAttachmentNames.map((name, i) => (
@@ -10658,7 +11978,13 @@ function MainContentComponent({
         <MessageCopyButton text={cleanedDisplayPrompt} />
       </div>
     );
-  }, [cleanedDisplayPrompt, markdownComponents, promptAttachmentNames, trimmedPrompt]);
+  }, [
+    cleanedDisplayPrompt,
+    markdownComponents,
+    promptAttachmentNames,
+    task?.agentConfig?.integrationMentions,
+    trimmedPrompt,
+  ]);
   const hasActiveStructuredInputRequest = Boolean(
     task &&
       inputRequest &&
@@ -10993,7 +12319,7 @@ function MainContentComponent({
                   ) {
                     return;
                   }
-                  textareaRef.current?.focus();
+                  promptInputRef.current?.focus();
                 }}
               >
                 <span className="cli-input-prompt">~$</span>
@@ -11001,20 +12327,20 @@ function MainContentComponent({
                   {showCliPlaceholder && (
                     <TypewriterPlaceholder phrases={placeholderPlaylist} />
                   )}
-                  <textarea
-                    ref={textareaRef}
+                  <PromptComposerInput
+                    ref={promptInputRef}
                     className={`welcome-input cli-input input-textarea${
                       !inputValue ? " input-textarea-empty-placeholder" : ""
                     }`}
                     value={inputValue}
+                    mentions={integrationMentionSpans}
+                    ariaLabel="Message"
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
                     onPaste={handlePaste}
                     onFocus={() => setIsCliInputFocused(true)}
                     onBlur={() => setIsCliInputFocused(false)}
-                    onClick={handleInputClick}
-                    onKeyUp={handleInputKeyUp}
-                    rows={1}
+                    onCursorChange={handleInputCursorChange}
                   />
                   {renderMentionDropdown()}
                   {renderSlashDropdown()}
@@ -12067,11 +13393,171 @@ function MainContentComponent({
             <span>Parent thread</span>
           </button>
         )}
-        {showHeaderTitle && (
-          <div className="main-header-title" title={headerTooltip}>
-            {headerTitle}
-          </div>
-        )}
+        <div className="main-header-title-group">
+          {(showHeaderTitle || task) && headerTitle.trim().length > 0 && (
+            <div className="main-header-title" title={headerTooltip}>
+              {headerTitle}
+            </div>
+          )}
+          {task && (
+            <div className="main-header-task-menu-container" ref={taskHeaderMenuRef}>
+              <button
+                type="button"
+                ref={taskHeaderMenuButtonRef}
+                className={`main-header-task-menu-btn ${showTaskHeaderMenu ? "active" : ""}`}
+                aria-haspopup="menu"
+                aria-expanded={showTaskHeaderMenu}
+                aria-controls="main-header-task-menu"
+                aria-label="Task actions"
+                title="Task actions"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowTaskHeaderMenu((open) => !open);
+                }}
+                onKeyDown={handleTaskHeaderMenuButtonKeyDown}
+              >
+                <Ellipsis size={18} strokeWidth={2.4} aria-hidden="true" />
+              </button>
+              {showTaskHeaderMenu && (
+                <div
+                  id="main-header-task-menu"
+                  className="main-header-task-menu"
+                  role="menu"
+                  aria-label="Task actions"
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={handleTaskHeaderMenuKeyDown}
+                >
+                  <button
+                    type="button"
+                    className="main-header-task-menu-item"
+                    role="menuitem"
+                    data-task-header-menu-option
+                    disabled={Boolean(remoteSession)}
+                    onClick={handleTaskHeaderPin}
+                  >
+                    {task.pinned ? <PinOff size={17} aria-hidden="true" /> : <Pin size={17} aria-hidden="true" />}
+                    <span>{task.pinned ? "Unpin task" : "Pin task"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="main-header-task-menu-item"
+                    role="menuitem"
+                    data-task-header-menu-option
+                    disabled={Boolean(remoteSession)}
+                    onClick={handleTaskHeaderRename}
+                  >
+                    <Pencil size={17} aria-hidden="true" />
+                    <span>Rename task</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="main-header-task-menu-item"
+                    role="menuitem"
+                    data-task-header-menu-option
+                    disabled={Boolean(remoteSession)}
+                    onClick={handleTaskHeaderArchive}
+                  >
+                    <ArchiveIcon size={17} aria-hidden="true" />
+                    <span>Archive task</span>
+                  </button>
+                  <div className="main-header-task-menu-divider" role="separator" />
+                  <button
+                    type="button"
+                    className="main-header-task-menu-item"
+                    role="menuitem"
+                    data-task-header-menu-option
+                    disabled={!taskWorkingDirectory}
+                    onClick={() => {
+                      closeTaskHeaderMenu();
+                      void copyTaskHeaderMenuText(taskWorkingDirectory);
+                    }}
+                  >
+                    <Folder size={17} aria-hidden="true" />
+                    <span>Copy working directory</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="main-header-task-menu-item"
+                    role="menuitem"
+                    data-task-header-menu-option
+                    disabled={!taskIdCopyValue}
+                    onClick={() => {
+                      closeTaskHeaderMenu();
+                      void copyTaskHeaderMenuText(taskIdCopyValue);
+                    }}
+                  >
+                    <Copy size={17} aria-hidden="true" />
+                    <span>Copy task ID</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="main-header-task-menu-item"
+                    role="menuitem"
+                    data-task-header-menu-option
+                    onClick={() => {
+                      closeTaskHeaderMenu();
+                      void copyTaskHeaderMenuText(taskDeeplink);
+                    }}
+                  >
+                    <LinkIcon size={17} aria-hidden="true" />
+                    <span>Copy deeplink</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="main-header-task-menu-item"
+                    role="menuitem"
+                    data-task-header-menu-option
+                    onClick={() => {
+                      closeTaskHeaderMenu();
+                      void copyTaskHeaderMenuText(taskMarkdown);
+                    }}
+                  >
+                    <ClipboardCopy size={17} aria-hidden="true" />
+                    <span>Copy as Markdown</span>
+                  </button>
+                  <div className="main-header-task-menu-divider" role="separator" />
+                  <button
+                    type="button"
+                    className="main-header-task-menu-item"
+                    role="menuitem"
+                    data-task-header-menu-option
+                    disabled={Boolean(remoteSession)}
+                    onClick={handleTaskHeaderFork}
+                  >
+                    <GitFork size={17} aria-hidden="true" />
+                    <span>Fork session</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="main-header-task-menu-item"
+                    role="menuitem"
+                    data-task-header-menu-option
+                    disabled={Boolean(remoteSession) || !workspace?.id}
+                    onClick={handleTaskHeaderAddAutomation}
+                  >
+                    <Clock size={17} aria-hidden="true" />
+                    <span>Add automation...</span>
+                  </button>
+                  {hasTaskOutputs(taskOutputSummary) && onViewTaskOutputs && (
+                    <button
+                      type="button"
+                      className="main-header-task-menu-item"
+                      role="menuitem"
+                      data-task-header-menu-option
+                      onClick={() => {
+                        closeTaskHeaderMenu();
+                        onViewTaskOutputs(task.id, taskOutputSummary.primaryOutputPath);
+                      }}
+                    >
+                      <FileText size={17} aria-hidden="true" />
+                      <span>View outputs</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       {/* Body */}
       <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
@@ -12488,17 +13974,17 @@ function MainContentComponent({
                 </div>
             )}
             <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
-              <textarea
-                ref={textareaRef}
+              <PromptComposerInput
+                ref={promptInputRef}
                 className="input-field input-textarea"
                 placeholder={agentContext.getMessage("placeholderActive")}
                 value={inputValue}
+                mentions={integrationMentionSpans}
+                ariaLabel="Message"
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                onClick={handleInputClick}
-                onKeyUp={handleInputKeyUp}
-                rows={1}
+                onCursorChange={handleInputCursorChange}
               />
               {renderMentionDropdown()}
               {renderSlashDropdown()}
@@ -12897,6 +14383,18 @@ function MainContentComponent({
         <div className="footer-disclaimer">{agentContext.getMessage("disclaimer")}</div>
       </div>
 
+      {showTaskAutomationModal && task && (
+        <TaskAutomationModal
+          task={task}
+          workspace={workspace}
+          defaultName={headerTitle.trim() || task.title}
+          defaultPrompt={taskAutomationDefaultPrompt}
+          deeplink={taskDeeplink}
+          onClose={() => setShowTaskAutomationModal(false)}
+          onCreated={onTasksChanged}
+        />
+      )}
+
       {selectedSkillForParams && (
         <SkillParameterModal
           skill={selectedSkillForParams.skill}
@@ -12924,10 +14422,14 @@ function getMainContentTaskSignature(task: Task | undefined): string {
   if (!task) return "none";
   return [
     task.id,
+    task.title,
     task.status,
     task.terminalStatus ?? "",
     task.updatedAt,
     task.completedAt ?? "",
+    task.pinned ? "pinned" : "unpinned",
+    task.sessionId ?? "",
+    task.worktreePath ?? "",
     task.prompt,
     task.userPrompt ?? "",
     task.rawPrompt ?? "",
@@ -13673,6 +15175,7 @@ function renderEventDetails(
     childTasks?: Task[];
     commandOutputSessions?: CommandOutputSession[];
     renderCommandOutput?: (sessions: CommandOutputSession[]) => React.ReactNode;
+    deferEndOfTaskArtifactCards?: boolean;
   },
 ) {
   const workspacePath = options?.workspacePath;
@@ -13691,12 +15194,21 @@ function renderEventDetails(
       : options?.childTasks?.find((t) => t.id === event.taskId) ?? options?.task;
   const effectiveType = getEffectiveTaskEventType(event);
   const stepCompletionPreviewPath = getStepCompletionPreviewPath(event);
-  const shouldRenderOpenArtifactCard = (artifactPath: string) =>
-    shouldRenderOpenArtifactCardAtEvent({
+  const shouldRenderOpenArtifactCard = (artifactPath: string) => {
+    const previewKind = getInlinePreviewKindForGeneratedFile({ path: artifactPath });
+    if (
+      options?.deferEndOfTaskArtifactCards &&
+      previewKind &&
+      END_OF_TASK_ARTIFACT_KINDS.has(previewKind)
+    ) {
+      return false;
+    }
+    return shouldRenderOpenArtifactCardAtEvent({
       path: artifactPath,
       event,
       eventStream,
     });
+  };
   const renderLinkedArtifactCards = (text: string) => {
     if (!workspacePath) return null;
     const artifactPaths = extractGeneratedArtifactPathsFromText(text)

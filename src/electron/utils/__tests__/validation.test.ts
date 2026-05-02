@@ -12,6 +12,7 @@ import {
   AddDiscordChannelSchema,
   AddFeishuChannelSchema,
   AddWeComChannelSchema,
+  PersonalityConfigV2Schema,
 } from "../validation";
 import { z } from "zod";
 
@@ -42,6 +43,60 @@ describe("validateInput", () => {
     } catch (e: Any) {
       expect(e.message).toContain("age");
     }
+  });
+});
+
+describe("PersonalityConfigV2Schema", () => {
+  it("accepts every communication style value exposed by the Personality UI", () => {
+    const result = PersonalityConfigV2Schema.safeParse({
+      version: 2,
+      style: {
+        emojiUsage: "expressive",
+        responseLength: "detailed",
+        codeCommentStyle: "verbose",
+        explanationDepth: "teaching",
+        formality: "formal",
+        structurePreference: "headers",
+        proactivity: "proactive",
+        errorHandling: "detailed",
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("normalizes legacy communication style values before saving", () => {
+    const result = PersonalityConfigV2Schema.safeParse({
+      version: 2,
+      style: {
+        codeCommentStyle: "thorough",
+        explanationDepth: "minimal",
+        structurePreference: "prose",
+        errorHandling: "technical",
+      },
+      contextOverrides: [
+        {
+          mode: "coding",
+          styleOverrides: {
+            explanationDepth: "thorough",
+            structurePreference: "mixed",
+          },
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.style).toMatchObject({
+      codeCommentStyle: "verbose",
+      explanationDepth: "expert",
+      structurePreference: "freeform",
+      errorHandling: "detailed",
+    });
+    expect(result.data.contextOverrides?.[0]?.styleOverrides).toMatchObject({
+      explanationDepth: "teaching",
+      structurePreference: "structured",
+    });
   });
 });
 

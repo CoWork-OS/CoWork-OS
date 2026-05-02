@@ -9,6 +9,7 @@
 {"prompt":"Monitor this competitor blog weekly and report changes.","expectedSkillIds":["content-monitor"],"forbiddenSkillIds":["git-commit"]}
 {"prompt":"Review this pull request for bugs and security issues.","expectedSkillIds":["code-review","code-reviewer"],"forbiddenSkillIds":["weather"]}
 {"prompt":"Write unit tests for this module.","expectedSkillIds":["write-tests"],"forbiddenSkillIds":["translate"]}
+{"prompt":"Add a new feature to this React workspace and keep the component changes performant.","expectedSkillIds":["react-best-practices"],"forbiddenSkillIds":["react-native-skills","write-tests"]}
 {"prompt":"Check dependency vulnerabilities in this project.","expectedSkillIds":["dependency-check","security-audit"],"forbiddenSkillIds":["youtube"]}
 {"prompt":"Generate a clean git commit message from current diff.","expectedSkillIds":["git-commit"],"forbiddenSkillIds":["proofread"]}
 {"prompt":"Create a changelog entry from these merged commits.","expectedSkillIds":["create-changelog"],"forbiddenSkillIds":["translate"]}

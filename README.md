@@ -27,7 +27,7 @@
   <a href="docs/everything-workbench.md">Everything Workbench</a> &middot;
   <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.42.md">Release Notes 0.5.42</a> &middot;
+  <a href="docs/release-notes-0.5.43.md">Release Notes 0.5.43</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -103,7 +103,7 @@ See [Workflow Intelligence](docs/workflow-intelligence.md), [Core Automation](do
 
 ### Latest Release
 
-**`0.5.42`** is a Windows installer hotfix plus a composer-routing refresh. It rebuilds the Windows installer as an x64 app package, adds grouped `@` mentions for configured integrations, routes `@Inbox` prompts into Inbox Agent, and unifies app commands plus skill-backed workflow shortcuts in the message box `/` picker. Start with [Release Notes 0.5.42](docs/release-notes-0.5.42.md), then [Message Box Shortcuts](docs/message-box-shortcuts.md), [Composer Mentions](docs/composer-mentions.md), [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Everything Workbench](docs/everything-workbench.md), [Browser Workbench](docs/browser-workbench.md), and the [Changelog](CHANGELOG.md).
+**`0.5.43`** adds the Ask Inbox sidebar workflow, richer composer integration mentions, bundled React/Next.js implementation guidance, and desktop release artifact smoke tests for macOS DMGs and Windows installers while preserving the Linux server package smoke gate. Start with [Release Notes 0.5.43](docs/release-notes-0.5.43.md), then [Message Box Shortcuts](docs/message-box-shortcuts.md), [Composer Mentions](docs/composer-mentions.md), [Features](docs/features.md), [Getting Started](docs/getting-started.md), [Everything Workbench](docs/everything-workbench.md), [Browser Workbench](docs/browser-workbench.md), and the [Changelog](CHANGELOG.md).
 
 ## Quick Start
 
@@ -470,7 +470,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Beginner's Guide](docs/cowork-school.md) | Practical guide to what CoWork OS is for and which workflows to try first |
-| [Release Notes 0.5.42](docs/release-notes-0.5.42.md) | What is new in the latest release |
+| [Release Notes 0.5.43](docs/release-notes-0.5.43.md) | What is new in the latest release |
 | [Composer Mentions](docs/composer-mentions.md) | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing |
 | [Message Box Shortcuts](docs/message-box-shortcuts.md) | `/` picker for deterministic app commands and skill-backed workflow shortcuts |
 | [Use Case Showcase](docs/showcase.md) | Comprehensive guide to what you can build and automate |

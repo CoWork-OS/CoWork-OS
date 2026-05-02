@@ -1,4 +1,4 @@
-name: Windows Installer Smoke
+name: macOS DMG Smoke
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ permissions:
 
 jobs:
   smoke:
-    name: Build and smoke Windows installer
-    runs-on: windows-latest
+    name: Build and smoke macOS DMG
+    runs-on: macos-latest
     timeout-minutes: 90
 
     steps:
@@ -37,15 +37,17 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Verify release version
-        shell: pwsh
+        shell: bash
         run: |
-          $version = node -p "require('./package.json').version"
-          if ($version -ne "${{ inputs.expected_version }}") {
-            throw "Expected version ${{ inputs.expected_version }}, found $version"
-          }
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          if [ "${version}" != "${{ inputs.expected_version }}" ]; then
+            echo "Expected version ${{ inputs.expected_version }}, found ${version}" >&2
+            exit 1
+          fi
 
-      - name: Package Windows installer
-        run: npm run package
+      - name: Package macOS app
+        run: npm run package:mac:unsigned
 
-      - name: Smoke Windows installer
-        run: npm run package:win:smoke -- --expected-version=${{ inputs.expected_version }}
+      - name: Smoke macOS DMG
+        run: npm run package:mac:smoke -- --expected-version=${{ inputs.expected_version }}

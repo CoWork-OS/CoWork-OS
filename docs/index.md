@@ -84,8 +84,8 @@ hero:
       text: Supermemory
       link: /supermemory
     - theme: alt
-      text: Release Notes 0.5.42
-      link: /release-notes-0.5.42
+      text: Release Notes 0.5.43
+      link: /release-notes-0.5.43
     - theme: alt
       text: Heartbeat v3
       link: /heartbeat-v3
@@ -149,8 +149,8 @@ features:
     details: Type `@` in the composer to pick Agents, configured Integrations, or Files. Integration chips render with icon and label in prompts and user message history, and selected integration metadata reaches the runtime as soft routing guidance rather than tool restrictions.
   - title: Message Box Shortcuts
     details: Type `/` in the composer to pick deterministic app commands and skill-backed workflow shortcuts from one menu, including `/schedule`, `/clear`, `/plan`, `/cost`, `/compact`, `/doctor`, `/undo`, direct skill IDs, plugin aliases, and the bundled CoWork Shortcuts pack.
-  - title: Latest Release 0.5.42
-    details: Windows installer hotfix plus composer-routing refresh. The Windows app package is rebuilt as x64, grouped `@` mentions can target configured integrations, and `@Inbox` routes mailbox questions into Inbox Agent.
+  - title: Latest Release 0.5.43
+    details: Ask Inbox sidebar workflow, richer composer integration mentions, bundled React/Next.js implementation guidance, and release artifact smoke tests for macOS DMGs, Windows installers, and Linux server tarballs.
   - title: Inbox Agent
     details: Local-first email workspace with Classic and Today modes, AI triage, Ask Inbox sidebar chat with live agentic steps and hybrid evidence retrieval, `@Inbox` main-composer routing, manual reply/reply-all/forward, editable AI drafts, commitment queues, sender cleanup, attachment indexing, and resync-safe background sync.
   - title: Managed Devices

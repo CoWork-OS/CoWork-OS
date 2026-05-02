@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.43] - 2026-05-02
+
 ### Added
 - **Composer `@` mentions for integrations**: added a grouped autocomplete above the message box with Agents, configured Integrations, and Files. Integration mentions render as icon+name chips in prompts and user message bubbles, restore from task/session history, and submit `integrationMentions` as soft runtime guidance. See [Composer Mentions](docs/composer-mentions.md).
 - **`@Inbox` main-composer routing**: `@Inbox` / `@inbox ...` now opens Inbox Agent and runs the remaining query through the Ask Inbox module instead of starting a normal task run.
 - **Ask Inbox sidebar chat**: Inbox Agent now has right-sidebar tabs for Agent Rail and Ask Inbox. Ask Inbox shows the user question, live mailbox-agent steps, final answer, and matched email evidence, with a pinned composer for follow-up questions. See [Ask Inbox Architecture](docs/ask-inbox-architecture.md).
 - **Hybrid mailbox retrieval for Ask Inbox**: Ask Inbox now plans broad mailbox searches across local FTS, semantic mailbox embeddings, provider-native search, and attachment text, then shortlists and reads evidence before answering.
 - **Bundled `react-best-practices` skill**: added React and Next.js implementation guidance for feature work, enhancements, refactors, reviews, data fetching, bundle-size checks, and rendering-performance fixes. See [React Best Practices Skill](docs/skills/react-best-practices.md).
+- **Desktop artifact smoke tests**: release packaging now runs shared macOS DMG and Windows installer smoke checks, while the release workflow continues to build and smoke-test the Linux server tarball before publishing artifacts.
 
 ### Changed
 - **Right sidebar polish**: refined the task right sidebar with keyboard-accessible section headers, cleaner compact spacing, stable row grids, clearer in-progress/checklist states, tighter truncation, a four-row scroll cap for Tools used, and lighter feedback/file/context surfaces.
@@ -1433,7 +1436,8 @@ This release is the first recommended Windows install baseline for normal users 
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.42...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.43...HEAD
+[0.5.43]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.42...v0.5.43
 [0.5.42]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.41...v0.5.42
 [0.5.41]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.40...v0.5.41
 [0.5.40]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.35...v0.5.40

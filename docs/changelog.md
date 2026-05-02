@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.43] - 2026-05-02
+
 ### Added
 - **Linux server release package**: GitHub Releases can now publish `cowork-os-server-linux-x64-v<version>.tar.gz` plus a `.sha256` checksum for production VPS/systemd deployments. The package includes built daemon assets, full resources, connector runtimes, runtime dependencies, systemd templates, and a Linux smoke test that boots `coworkd-node` and checks `/health`. See [Linux VPS](vps-linux.md).
 - **Task-sourced scheduled automations**: task view now has `... > Add automation...`, which opens a Codex-style modal prefilled from the current task and creates a real cron scheduled task through the existing scheduler API. The saved job keeps the source task title, task ID, and `cowork://tasks/<taskId>` deeplink for traceability. See [Task Automations](task-automations.md).
@@ -17,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ask Inbox sidebar chat**: Inbox Agent now has right-sidebar tabs for Agent Rail and Ask Inbox. Ask Inbox shows the user question, live mailbox-agent steps, final answer, and matched email evidence, with a pinned composer for follow-up questions. See [Ask Inbox Architecture](ask-inbox-architecture.md).
 - **Hybrid mailbox retrieval for Ask Inbox**: Ask Inbox now plans broad mailbox searches across local FTS, semantic mailbox embeddings, provider-native search, and attachment text, then shortlists and reads evidence before answering.
 - **Bundled `react-best-practices` skill**: added React and Next.js implementation guidance for feature work, enhancements, refactors, reviews, data fetching, bundle-size checks, and rendering-performance fixes. See [React Best Practices Skill](skills/react-best-practices.md).
+- **Desktop artifact smoke tests**: release packaging now runs shared macOS DMG and Windows installer smoke checks, while the release workflow continues to build and smoke-test the Linux server tarball before publishing artifacts.
 
 ### Changed
 - **Right sidebar polish**: refined the task right sidebar with keyboard-accessible section headers, cleaner compact spacing, stable row grids, clearer in-progress/checklist states, tighter truncation, a four-row scroll cap for Tools used, and lighter feedback/file/context surfaces.
@@ -1026,7 +1029,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.42...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.43...HEAD
+[0.5.43]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.42...v0.5.43
 [0.5.42]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.41...v0.5.42
 [0.5.41]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.40...v0.5.41
 [0.5.40]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.35...v0.5.40

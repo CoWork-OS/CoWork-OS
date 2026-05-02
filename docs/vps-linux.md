@@ -127,13 +127,13 @@ node -v
 3. Download the Linux server tarball and checksum from the GitHub release:
 
 ```bash
-version=0.5.42
+version=0.5.43
 curl -LO "https://github.com/CoWork-OS/CoWork-OS/releases/download/v${version}/cowork-os-server-linux-x64-v${version}.tar.gz"
 curl -LO "https://github.com/CoWork-OS/CoWork-OS/releases/download/v${version}/cowork-os-server-linux-x64-v${version}.tar.gz.sha256"
 sha256sum --check "cowork-os-server-linux-x64-v${version}.tar.gz.sha256"
 ```
 
-Replace `0.5.42` with the version you are installing.
+Replace `0.5.43` with the version you are installing.
 
 4. Install under `/opt/cowork-os`:
 

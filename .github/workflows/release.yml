@@ -248,6 +248,9 @@ jobs:
             printf '  %s\n' "${mac_artifacts[@]}"
           fi
 
+      - name: Smoke desktop release artifacts
+        run: npm run package:desktop:smoke -- --expected-version=${{ steps.release_metadata.outputs.npm_version }}
+
       - name: Upload release artifacts explicitly
         shell: bash
         env:

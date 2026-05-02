@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.5.42",
+  "version": "0.5.43",
   "description": "CoWork OS - Local-first personal agentic OS and everything app for coding, knowledge work, web design, automations, and artifacts",
   "overrides": {
     "@whiskeysockets/baileys": {
@@ -106,6 +106,9 @@
     "package:win:x64": "node scripts/run_electron_builder.mjs --win --x64 --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
     "package:mac": "node scripts/package-mac-with-env.mjs",
     "package:mac:unsigned": "cross-env COWORK_MAC_UNSIGNED=1 node scripts/package-mac-with-env.mjs",
+    "package:desktop:smoke": "node scripts/smoke-desktop-artifacts.mjs",
+    "package:mac:smoke": "node scripts/smoke-desktop-artifacts.mjs --platform=mac",
+    "package:win:smoke": "node scripts/smoke-desktop-artifacts.mjs --platform=win",
     "package:linux:server": "npm run build:daemon && npm run build:connectors && node scripts/package-linux-server.mjs",
     "package:linux:server:smoke": "node scripts/smoke-linux-server-package.mjs",
     "fmt": "oxfmt --write src",

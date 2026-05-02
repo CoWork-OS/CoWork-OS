@@ -105,15 +105,6 @@ function run(command, args, options = {}) {
   return result;
 }
 
-async function exists(targetPath) {
-  try {
-    await fs.access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function listFiles(dir) {
   const names = await fs.readdir(dir);
   const entries = await Promise.all(
@@ -275,6 +266,16 @@ Write-Output $app.FullName
   return String(result.stdout || "").trim();
 }
 
+function resolveWindowsProgramsDir() {
+  const candidates = [
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Programs") : null,
+    process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "AppData", "Local", "Programs") : null,
+    path.join(os.homedir(), "AppData", "Local", "Programs"),
+  ].filter(Boolean);
+
+  return candidates[0];
+}
+
 async function uninstallWindowsApp(programsDir) {
   const script = `
 $uninstaller = Get-ChildItem -Path '${programsDir.replaceAll("'", "''")}' -Filter 'Uninstall CoWork OS.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -313,9 +314,9 @@ async function smokeWindows({ releaseDir, expectedVersion, skipLaunch }) {
 
   validateUpdaterMetadata(releaseDir);
 
-  const programsDir = path.join(process.env.LOCALAPPDATA || "", "Programs");
-  if (!programsDir || !(await exists(programsDir))) {
-    throw new Error("Could not resolve LOCALAPPDATA\\Programs for installer smoke test.");
+  const programsDir = resolveWindowsProgramsDir();
+  if (!programsDir) {
+    throw new Error("Could not resolve the per-user Windows Programs directory for installer smoke test.");
   }
 
   for (const dirName of ["CoWork OS", "cowork-os"]) {

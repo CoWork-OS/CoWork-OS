@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   ArrowRight,
   Building2,
@@ -32,6 +32,14 @@ interface CompaniesPanelProps {
 
 type CompaniesMode = "library" | "org" | "ops";
 type ImportTargetMode = "selected" | "new";
+
+const COMPANY_TABS: Array<{ id: CompaniesMode; label: string }> = [
+  { id: "library", label: "Library" },
+  { id: "org", label: "Org Builder" },
+  { id: "ops", label: "Ops" },
+];
+const EMPTY_GRAPH_NODES: CompanyGraphNode[] = [];
+const EMPTY_GRAPH_EDGES: CompanyGraphEdge[] = [];
 
 interface CompanyDraft {
   name: string;
@@ -160,6 +168,30 @@ function buildAgentHierarchy(nodes: CompanyGraphNode[], edges: CompanyGraphEdge[
   };
 }
 
+function summarizeRuntimeCounts(nodes: CompanyGraphNode[], states: CompanySyncState[]) {
+  let desiredAgents = 0;
+  let desiredProjects = 0;
+  let linkedOperators = 0;
+  let seededIssues = 0;
+
+  for (const node of nodes) {
+    if (node.kind === "agent") desiredAgents += 1;
+    if (node.kind === "project") desiredProjects += 1;
+  }
+
+  for (const state of states) {
+    if (state.runtimeEntityKind === "agent_role") linkedOperators += 1;
+    if (state.runtimeEntityKind === "issue") seededIssues += 1;
+  }
+
+  return {
+    desiredAgents,
+    desiredProjects,
+    linkedOperators,
+    seededIssues,
+  };
+}
+
 function renderAgentChartNode(
   node: CompanyGraphNode,
   children: Map<string, CompanyGraphNode[]>,
@@ -212,13 +244,18 @@ export function CompaniesPanel({
   const [pendingRoleLinks, setPendingRoleLinks] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isModePending, startModeTransition] = useTransition();
 
   const selectedCompany = useMemo(
     () => companies.find((company) => company.id === selectedCompanyId) ?? null,
     [companies, selectedCompanyId],
   );
-  const graphNodes = graph?.nodes || [];
-  const graphEdges = graph?.edges || [];
+  const graphNodes = graph?.nodes ?? EMPTY_GRAPH_NODES;
+  const graphEdges = graph?.edges ?? EMPTY_GRAPH_EDGES;
+  const graphNodeById = useMemo(
+    () => new Map(graphNodes.map((node) => [node.id, node])),
+    [graphNodes],
+  );
   const syncByOrgNode = useMemo(
     () => new Map(syncStates.filter((state) => state.orgNodeId).map((state) => [state.orgNodeId as string, state])),
     [syncStates],
@@ -241,6 +278,14 @@ export function CompaniesPanel({
   const linkedRoleIds = useMemo(
     () => new Set(syncStates.filter((state) => state.runtimeEntityKind === "agent_role").map((state) => state.runtimeEntityId)),
     [syncStates],
+  );
+  const selectedCompanyRoles = useMemo(
+    () => (selectedCompanyId ? roles.filter((role) => role.companyId === selectedCompanyId) : []),
+    [roles, selectedCompanyId],
+  );
+  const runtimeCounts = useMemo(
+    () => summarizeRuntimeCounts(graphNodes, syncStates),
+    [graphNodes, syncStates],
   );
 
   const loadCompanies = useCallback(async (preferredCompanyId?: string | null) => {
@@ -265,24 +310,21 @@ export function CompaniesPanel({
       setSources([]);
       setGraph(null);
       setSyncStates([]);
-      if (!includeOps) setSummary(null);
+      setSummary(null);
       return;
     }
 
-    const [loadedSources, loadedGraph, loadedSyncStates] = await Promise.all([
+    const [loadedSources, loadedGraph, loadedSyncStates, loadedSummary] = await Promise.all([
       window.electronAPI.listCompanyPackageSources(companyId),
       window.electronAPI.getCompanyGraph(companyId).catch(() => null),
       window.electronAPI.listCompanySyncStates(companyId).catch(() => []),
+      includeOps ? window.electronAPI.getCommandCenterSummary(companyId).catch(() => null) : Promise.resolve(null),
     ]);
 
     setSources(loadedSources);
     setGraph(loadedGraph);
     setSyncStates(loadedSyncStates);
-
-    if (includeOps) {
-      const loadedSummary = await window.electronAPI.getCommandCenterSummary(companyId).catch(() => null);
-      setSummary(loadedSummary);
-    }
+    setSummary(loadedSummary);
   }, []);
 
   const refreshAll = useCallback(
@@ -290,8 +332,10 @@ export function CompaniesPanel({
       setRefreshing(true);
       setError(null);
       try {
-        const loadedCompanies = await loadCompanies(preferredCompanyId);
-        await loadRoles();
+        const [loadedCompanies] = await Promise.all([
+          loadCompanies(preferredCompanyId),
+          loadRoles(),
+        ]);
         const resolvedCompanyId =
           preferredCompanyId && loadedCompanies.some((company) => company.id === preferredCompanyId)
             ? preferredCompanyId
@@ -430,13 +474,17 @@ export function CompaniesPanel({
     selectedNodeSync?.runtimeEntityKind === "agent_role"
       ? roles.find((role) => role.id === selectedNodeSync.runtimeEntityId)
       : null;
+  const linkableRoles = useMemo(
+    () => roles.filter((role) => !linkedRoleIds.has(role.id) || role.id === selectedLinkedRole?.id),
+    [linkedRoleIds, roles, selectedLinkedRole?.id],
+  );
 
   if (loading) {
     return <div className="settings-empty">Loading companies…</div>;
   }
 
   return (
-    <div className="companies-v2 settings-page">
+    <div className={`companies-v2 settings-page ${isModePending ? "is-mode-pending" : ""}`}>
       <section className="co-v2-header">
         <div>
           <h2>Companies</h2>
@@ -559,20 +607,16 @@ export function CompaniesPanel({
               </div>
               <div className="co-v2-summary-card">
                 <span>Operators</span>
-                <strong>{selectedCompany ? roles.filter((role) => role.companyId === selectedCompany.id).length : 0}</strong>
+                <strong>{selectedCompanyRoles.length}</strong>
               </div>
             </div>
             <div className="co-v2-tabs">
-              {([
-                { id: "library", label: "Library" },
-                { id: "org", label: "Org Builder" },
-                { id: "ops", label: "Ops" },
-              ] as const).map((tab) => (
+              {COMPANY_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   className={`co-v2-tab ${mode === tab.id ? "is-active" : ""}`}
-                  onClick={() => setMode(tab.id)}
+                  onClick={() => startModeTransition(() => setMode(tab.id))}
                 >
                   {tab.label}
                 </button>
@@ -868,9 +912,7 @@ export function CompaniesPanel({
                         <div className="co-v2-rel-list">
                           {relatedEdges.map((edge) => {
                             const target =
-                              graphNodes.find((node) =>
-                                edge.fromNodeId === selectedNode.id ? node.id === edge.toNodeId : node.id === edge.fromNodeId,
-                              ) || null;
+                              graphNodeById.get(edge.fromNodeId === selectedNode.id ? edge.toNodeId : edge.fromNodeId) || null;
                             return (
                               <div key={edge.id} className="co-v2-rel-item">
                                 <span className="settings-badge settings-badge--outline">{edge.kind}</span>
@@ -896,13 +938,11 @@ export function CompaniesPanel({
                             }
                           >
                             <option value="">No linked operator</option>
-                            {roles
-                              .filter((role) => !linkedRoleIds.has(role.id) || role.id === selectedLinkedRole?.id)
-                              .map((role) => (
-                                <option key={role.id} value={role.id}>
-                                  {role.displayName || role.name}
-                                </option>
-                              ))}
+                            {linkableRoles.map((role) => (
+                              <option key={role.id} value={role.id}>
+                                {role.displayName || role.name}
+                              </option>
+                            ))}
                           </select>
                           <button
                             type="button"
@@ -983,19 +1023,19 @@ export function CompaniesPanel({
                 <div className="co-v2-runtime-comparison">
                   <div className="co-v2-summary-card">
                     <span>Desired agents</span>
-                    <strong>{graphNodes.filter((node) => node.kind === "agent").length}</strong>
+                    <strong>{runtimeCounts.desiredAgents}</strong>
                   </div>
                   <div className="co-v2-summary-card">
                     <span>Linked operators</span>
-                    <strong>{syncStates.filter((state) => state.runtimeEntityKind === "agent_role").length}</strong>
+                    <strong>{runtimeCounts.linkedOperators}</strong>
                   </div>
                   <div className="co-v2-summary-card">
                     <span>Desired projects</span>
-                    <strong>{graphNodes.filter((node) => node.kind === "project").length}</strong>
+                    <strong>{runtimeCounts.desiredProjects}</strong>
                   </div>
                   <div className="co-v2-summary-card">
                     <span>Seeded runtime issues</span>
-                    <strong>{syncStates.filter((state) => state.runtimeEntityKind === "issue").length}</strong>
+                    <strong>{runtimeCounts.seededIssues}</strong>
                   </div>
                 </div>
               </section>
@@ -1052,9 +1092,45 @@ export function CompaniesPanel({
 
       <style>{`
         .companies-v2 {
+          --co-v2-card-bg: var(--color-bg-glass);
+          --co-v2-card-bg-strong: var(--color-bg-secondary);
+          --co-v2-item-bg: var(--color-bg-secondary);
+          --co-v2-item-bg-hover: var(--color-bg-hover);
+          --co-v2-input-bg: var(--color-bg-input);
+          --co-v2-selected-bg: var(--color-accent-subtle);
+          --co-v2-shadow: var(--shadow-sm);
+          color: var(--color-text-primary);
           display: flex;
           flex-direction: column;
           gap: 16px;
+        }
+        .companies-v2.settings-page {
+          background: transparent;
+          height: auto;
+          padding-top: 0;
+        }
+        .theme-light .companies-v2 {
+          --co-v2-card-bg: var(--color-bg-glass);
+          --co-v2-card-bg-strong: var(--color-bg-glass);
+          --co-v2-item-bg: var(--color-bg-glass);
+          --co-v2-input-bg: var(--color-bg-input);
+        }
+        .companies-v2 h2,
+        .companies-v2 h3,
+        .companies-v2 h4,
+        .companies-v2 p {
+          margin: 0;
+        }
+        .companies-v2 svg {
+          flex-shrink: 0;
+        }
+        .companies-v2 .provider-save-button,
+        .companies-v2 .provider-test-button {
+          align-items: center;
+          display: inline-flex;
+          gap: 8px;
+          justify-content: center;
+          white-space: nowrap;
         }
         .co-v2-header,
         .co-v2-topbar,
@@ -1082,10 +1158,20 @@ export function CompaniesPanel({
           justify-content: space-between;
           gap: 12px;
         }
+        .co-v2-header,
+        .co-v2-card-header {
+          align-items: flex-start;
+          flex-wrap: wrap;
+        }
+        .co-v2-header > div,
+        .co-v2-card-header > div {
+          min-width: 0;
+        }
         .co-v2-layout {
           display: grid;
           grid-template-columns: 280px minmax(0, 1fr);
           gap: 16px;
+          align-items: start;
           min-height: 0;
         }
         .co-v2-sidebar,
@@ -1118,18 +1204,26 @@ export function CompaniesPanel({
         }
         .co-v2-main {
           gap: 16px;
+          min-width: 0;
+          transition: opacity 140ms ease;
+        }
+        .companies-v2.is-mode-pending .co-v2-main {
+          opacity: 0.86;
         }
         .co-v2-card {
           padding: 16px;
-          border: 1px solid var(--color-border, rgba(0,0,0,0.1));
-          border-radius: 16px;
-          background: var(--color-surface, rgba(255,255,255,0.72));
-          box-shadow: 0 8px 28px rgba(15, 23, 42, 0.06);
+          border: 1px solid var(--color-border-subtle);
+          border-radius: var(--radius-md);
+          background: var(--co-v2-card-bg);
+          box-shadow: var(--co-v2-shadow);
+          min-width: 0;
+          overflow: hidden;
         }
         .co-v2-panel-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 16px;
+          align-items: stretch;
         }
         .co-v2-panel-grid--org {
           grid-template-columns: 280px minmax(0, 1.4fr) minmax(300px, 0.8fr);
@@ -1138,15 +1232,38 @@ export function CompaniesPanel({
           flex-direction: column;
           gap: 8px;
         }
+        .co-v2-sidebar > .co-v2-card:first-child {
+          background: transparent;
+          box-shadow: none;
+        }
+        .co-v2-topbar {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: start;
+          gap: 16px;
+        }
+        .co-v2-summary-strip {
+          min-width: 0;
+          width: 100%;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
         .co-v2-company-item,
         .co-v2-chip,
         .co-v2-tab,
         .co-org-card,
         .co-v2-tree-node {
           border: 1px solid var(--color-border, rgba(0,0,0,0.1));
-          border-radius: 12px;
-          background: rgba(255,255,255,0.8);
+          border-radius: var(--radius-md);
+          background: var(--co-v2-item-bg);
+          color: var(--color-text-primary);
           transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+        }
+        .co-v2-company-item:hover,
+        .co-v2-chip:hover:not(:disabled),
+        .co-v2-tab:hover,
+        .co-org-card:hover,
+        .co-v2-tree-node:hover {
+          background: var(--co-v2-item-bg-hover);
         }
         .co-v2-company-item,
         .co-v2-tree-node {
@@ -1154,13 +1271,52 @@ export function CompaniesPanel({
           text-align: left;
           padding: 10px 12px;
         }
+        .co-v2-company-item {
+          display: grid;
+          gap: 8px;
+          padding: 12px;
+        }
+        .co-v2-company-item-row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: start;
+          gap: 8px;
+          min-width: 0;
+        }
+        .co-v2-company-item-row strong {
+          font-size: 14px;
+          line-height: 1.35;
+        }
+        .co-v2-company-item-row .settings-badge {
+          margin-top: 1px;
+          white-space: nowrap;
+        }
+        .co-v2-company-item-meta {
+          align-items: center;
+          flex-wrap: wrap;
+          min-width: 0;
+        }
+        .co-v2-company-item-meta > span:not(.settings-badge) {
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+        .co-v2-company-item-row strong,
+        .co-v2-source-item strong,
+        .co-v2-preview-item strong,
+        .co-v2-list-row strong,
+        .co-v2-detail-grid strong,
+        .co-org-card strong {
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
         .co-v2-company-item.is-selected,
         .co-v2-tab.is-active,
         .co-v2-chip.is-selected,
         .co-org-card.is-selected,
         .co-v2-tree-node.is-selected {
-          border-color: #2563eb;
-          box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
+          border-color: var(--color-accent);
+          background: var(--co-v2-selected-bg);
+          box-shadow: 0 0 0 1px var(--color-accent-subtle);
         }
         .co-v2-company-item-meta,
         .co-v2-source-meta,
@@ -1168,6 +1324,8 @@ export function CompaniesPanel({
           color: var(--color-text-secondary, rgba(15, 23, 42, 0.68));
           font-size: 12px;
           gap: 8px;
+          line-height: 1.35;
+          overflow-wrap: anywhere;
         }
         .co-v2-summary-strip,
         .co-v2-preview-summary,
@@ -1177,14 +1335,20 @@ export function CompaniesPanel({
           grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
           gap: 10px;
         }
+        .co-v2-summary-strip {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
         .co-v2-summary-card {
           padding: 12px;
-          border-radius: 12px;
-          background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.9));
-          border: 1px solid rgba(148, 163, 184, 0.18);
+          border-radius: var(--radius-md);
+          background: var(--co-v2-card-bg-strong);
+          border: 1px solid var(--color-border-subtle);
           display: flex;
           flex-direction: column;
           gap: 6px;
+          justify-content: center;
+          min-height: 72px;
+          min-width: 0;
         }
         .co-v2-summary-card span {
           font-size: 12px;
@@ -1192,21 +1356,35 @@ export function CompaniesPanel({
         }
         .co-v2-summary-card strong {
           font-size: 20px;
+          color: var(--color-text-primary);
         }
         .co-v2-tabs {
           display: inline-flex;
           gap: 8px;
           padding: 4px;
-          border-radius: 14px;
-          background: rgba(148, 163, 184, 0.12);
+          border-radius: var(--radius-md);
+          background: var(--co-v2-card-bg-strong);
+          border: 1px solid var(--color-border-subtle);
+          justify-self: end;
         }
         .co-v2-tab {
+          align-items: center;
+          display: inline-flex;
+          font-weight: 600;
+          justify-content: center;
+          min-height: 34px;
           padding: 8px 12px;
+          white-space: nowrap;
         }
         .co-v2-field {
           display: flex;
           flex-direction: column;
           gap: 6px;
+        }
+        .co-v2-field > span {
+          color: var(--color-text-secondary);
+          font-size: 12px;
+          font-weight: 600;
         }
         .co-v2-field input,
         .co-v2-field textarea,
@@ -1214,8 +1392,14 @@ export function CompaniesPanel({
           width: 100%;
           border-radius: 10px;
           border: 1px solid var(--color-border, rgba(0,0,0,0.12));
-          background: rgba(255,255,255,0.86);
+          background: var(--co-v2-input-bg);
+          color: var(--color-text-primary);
+          font: inherit;
           padding: 10px 12px;
+        }
+        .co-v2-field input::placeholder,
+        .co-v2-field textarea::placeholder {
+          color: var(--color-text-muted);
         }
         .co-v2-preview-meta,
         .co-v2-detail-grid,
@@ -1225,14 +1409,26 @@ export function CompaniesPanel({
           flex-wrap: wrap;
           gap: 8px;
         }
+        .co-v2-source-meta {
+          display: flex;
+          flex-wrap: wrap;
+        }
         .co-v2-source-item,
         .co-v2-preview-item,
         .co-v2-list-row,
         .co-v2-rel-item {
           padding: 12px;
-          border-radius: 12px;
-          border: 1px solid rgba(148, 163, 184, 0.18);
-          background: rgba(248, 250, 252, 0.88);
+          border-radius: var(--radius-md);
+          border: 1px solid var(--color-border-subtle);
+          background: var(--co-v2-card-bg-strong);
+          min-width: 0;
+          content-visibility: auto;
+          contain-intrinsic-size: 0 72px;
+        }
+        .co-v2-source-item > div,
+        .co-v2-preview-item > div,
+        .co-v2-list-row > div {
+          min-width: 0;
         }
         .co-v2-tree {
           overflow: auto;
@@ -1241,7 +1437,7 @@ export function CompaniesPanel({
         .co-v2-tree-children {
           margin-left: 18px;
           padding-left: 12px;
-          border-left: 1px solid rgba(148, 163, 184, 0.22);
+          border-left: 1px solid var(--color-border-subtle);
           display: flex;
           flex-direction: column;
           gap: 8px;
@@ -1261,6 +1457,7 @@ export function CompaniesPanel({
         .co-v2-org-chart {
           overflow: auto;
           padding: 8px;
+          min-height: 220px;
         }
         .co-org-branch {
           display: flex;
@@ -1285,6 +1482,11 @@ export function CompaniesPanel({
           gap: 6px;
           text-align: center;
         }
+        .co-org-card span:not(.co-org-card-kind) {
+          color: var(--color-text-secondary);
+          font-size: 12px;
+          line-height: 1.35;
+        }
         .co-org-card-kind {
           font-size: 11px;
           letter-spacing: 0.08em;
@@ -1301,11 +1503,39 @@ export function CompaniesPanel({
           color: var(--color-text-secondary, rgba(15, 23, 42, 0.68));
         }
         .co-v2-chip {
+          align-items: center;
+          display: inline-flex;
+          justify-content: center;
+          max-width: 100%;
           padding: 8px 10px;
           font-size: 12px;
+          font-weight: 600;
+          overflow-wrap: anywhere;
+        }
+        .co-v2-chip:disabled {
+          cursor: not-allowed;
+          opacity: 0.55;
+        }
+        .companies-v2 .settings-empty {
+          background: var(--co-v2-card-bg-strong);
+          color: var(--color-text-muted);
+          min-width: 0;
+        }
+        .co-v2-detail,
+        .co-v2-detail-section {
+          gap: 12px;
+        }
+        .co-v2-detail-section {
+          display: flex;
+          flex-direction: column;
+        }
+        .co-v2-detail-kind {
+          align-items: center;
+          gap: 6px;
         }
         .co-v2-detail-title h3 {
           margin: 0;
+          overflow-wrap: anywhere;
         }
         .co-v2-detail-grid {
           display: grid;
@@ -1319,6 +1549,7 @@ export function CompaniesPanel({
         .co-v2-linker {
           display: grid;
           grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
         }
         .co-v2-output-columns {
           display: grid;
@@ -1329,14 +1560,43 @@ export function CompaniesPanel({
           .co-v2-layout,
           .co-v2-panel-grid,
           .co-v2-panel-grid--org,
+          .co-v2-topbar,
           .co-v2-output-columns {
             grid-template-columns: 1fr;
+          }
+          .co-v2-tabs {
+            justify-self: start;
           }
           .co-v2-sidebar {
             order: 2;
           }
           .co-v2-main {
             order: 1;
+          }
+        }
+        @media (max-width: 760px) {
+          .co-v2-summary-strip,
+          .co-v2-preview-summary,
+          .co-v2-ops-overview,
+          .co-v2-runtime-comparison,
+          .co-v2-detail-grid {
+            grid-template-columns: 1fr;
+          }
+          .co-v2-header > .provider-test-button,
+          .co-v2-card-header > .provider-save-button,
+          .co-v2-card-header > .provider-test-button,
+          .co-v2-linker .provider-save-button {
+            width: 100%;
+            justify-content: center;
+          }
+          .co-v2-tabs {
+            width: 100%;
+          }
+          .co-v2-tab {
+            flex: 1 1 0;
+          }
+          .co-v2-linker {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>

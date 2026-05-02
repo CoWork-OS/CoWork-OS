@@ -2660,16 +2660,50 @@ const BehavioralRuleSchema = z.object({
   enabled: z.boolean(),
   context: z.array(ContextModeSchema).max(10).optional(),
 });
-const CommunicationStyleSchema = z.object({
+
+function normalizeCommunicationStyleInput(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const style = { ...(value as Record<string, unknown>) };
+  if (style.codeCommentStyle === "thorough") {
+    style.codeCommentStyle = "verbose";
+  }
+  if (style.explanationDepth === "minimal") {
+    style.explanationDepth = "expert";
+  } else if (style.explanationDepth === "thorough") {
+    style.explanationDepth = "teaching";
+  }
+  if (style.structurePreference === "prose") {
+    style.structurePreference = "freeform";
+  } else if (style.structurePreference === "mixed") {
+    style.structurePreference = "structured";
+  }
+  if (style.errorHandling === "technical") {
+    style.errorHandling = "detailed";
+  }
+  return style;
+}
+
+const CommunicationStyleObjectSchema = z.object({
   emojiUsage: z.enum(["none", "minimal", "moderate", "expressive"]).optional(),
   responseLength: z.enum(["terse", "balanced", "detailed"]).optional(),
-  codeCommentStyle: z.enum(["minimal", "moderate", "thorough"]).optional(),
-  explanationDepth: z.enum(["minimal", "balanced", "thorough"]).optional(),
+  codeCommentStyle: z.enum(["minimal", "moderate", "verbose"]).optional(),
+  explanationDepth: z.enum(["expert", "balanced", "teaching"]).optional(),
   formality: z.enum(["casual", "balanced", "formal"]).optional(),
-  structurePreference: z.enum(["prose", "bullets", "mixed"]).optional(),
+  structurePreference: z.enum(["freeform", "bullets", "structured", "headers"]).optional(),
   proactivity: z.enum(["reactive", "balanced", "proactive"]).optional(),
-  errorHandling: z.enum(["gentle", "direct", "technical"]).optional(),
+  errorHandling: z.enum(["gentle", "direct", "detailed"]).optional(),
 });
+const CommunicationStyleSchema = z.preprocess(
+  normalizeCommunicationStyleInput,
+  CommunicationStyleObjectSchema,
+);
+const CommunicationStyleOverrideSchema = z.preprocess(
+  normalizeCommunicationStyleInput,
+  CommunicationStyleObjectSchema.partial(),
+);
 const ExpertiseAreaSchema = z.object({
   id: z.string().max(100),
   domain: z.string().max(200),
@@ -2688,7 +2722,7 @@ const ContextOverrideSchema = z.object({
     .record(z.string(), z.number().int().min(0).max(100))
     .optional(),
   additionalRules: z.array(BehavioralRuleSchema).max(20).optional(),
-  styleOverrides: CommunicationStyleSchema.partial().optional(),
+  styleOverrides: CommunicationStyleOverrideSchema.optional(),
 });
 const CustomInstructionsSchema = z.object({
   aboutUser: z.string().max(20000).optional(),

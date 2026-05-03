@@ -11,6 +11,7 @@ describe("message shortcuts", () => {
     expect(result.matched).toBe(true);
     expect(result.shortcut?.name).toBe("plan");
     expect(result.args).toBe("migrate the docs");
+    expect(parseLeadingMessageAppShortcut("/goal ship the release").shortcut?.name).toBe("goal");
   });
 
   it("does not match unknown slash commands", () => {

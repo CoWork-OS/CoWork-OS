@@ -42,6 +42,7 @@ import {
   CanvasSession,
   isTempWorkspaceId,
   ImageAttachment,
+  AgentConfig,
   AgentTeamRun,
   MultiLlmConfig,
   StepFeedbackAction,
@@ -65,6 +66,11 @@ import {
   parseOnboardingSlashCommand,
 } from "../../shared/onboarding";
 import { parseLeadingMessageAppShortcut } from "../../shared/message-shortcuts";
+import {
+  buildPersistentGoalAgentConfig,
+  buildPersistentGoalPrompt,
+  parseLeadingGoalSlashCommand,
+} from "../../shared/goal-slash-command";
 import {
   MESSAGE_SHORTCUTS_UPDATED_EVENT,
   buildMessageSlashOptions,
@@ -3626,6 +3632,7 @@ interface CreateTaskOptions {
   taskDomain?: TaskDomain;
   chronicleMode?: import("../../shared/types").ChronicleTaskMode;
   videoGenerationMode?: boolean;
+  agentConfig?: AgentConfig;
   integrationMentions?: IntegrationMentionSelection[];
 }
 
@@ -10506,6 +10513,7 @@ function MainContentComponent({
     const hasAttachments = pendingAttachments.length > 0;
     const onboardingSlashCommand = parseOnboardingSlashCommand(trimmedInput);
     const appSlashCommand = parseLeadingMessageAppShortcut(trimmedInput);
+    const goalSlashCommand = parseLeadingGoalSlashCommand(trimmedInput);
 
     if (!trimmedInput && !hasAttachments) return;
     if (
@@ -10636,6 +10644,54 @@ function MainContentComponent({
           ? { integrationMentions: selectedIntegrationMentions }
           : {};
 
+      if (goalSlashCommand.matched && goalSlashCommand.action === "start" && onCreateTask) {
+        const objective = String(goalSlashCommand.objective || "").trim();
+        if (!objective) {
+          setAttachmentError("Add the goal after /goal.");
+          sendFailed = true;
+          return;
+        }
+        const goalAgentConfig = buildPersistentGoalAgentConfig(
+          goalSlashCommand,
+          Date.now(),
+          createIntegrationMentionOptions,
+        );
+        const prompt = buildPersistentGoalPrompt(objective, hasAttachments ? message : undefined);
+        const title = buildTaskTitle(`/goal ${objective}`);
+        onCreateTask(
+          title,
+          prompt,
+          {
+            executionMode: "execute",
+            taskDomain,
+            agentConfig: goalAgentConfig,
+            ...createIntegrationMentionOptions,
+          },
+          imagePayload,
+        );
+
+        pendingProgrammaticResizeRef.current = true;
+        setInputValue("");
+        setActiveWelcomeSuggestionDraft(null);
+        setQuotedAssistantMessage(null);
+        setPendingAttachments([]);
+        setMentionOpen(false);
+        setMentionQuery("");
+        setMentionTarget(null);
+        setSlashOpen(false);
+        setSlashQuery("");
+        setSlashTarget(null);
+        setModeSuggestions([]);
+        setAutonomousModeEnabled(false);
+        setCollaborativeModeEnabled(false);
+        setMultiLlmModeEnabled(false);
+        setChronicleEnabledForTask(true);
+        setPermissionAccessMode(defaultPermissionAccessMode);
+        setMultiLlmConfig(null);
+        setVerificationAgentEnabled(false);
+        return;
+      }
+
       if (
         appSlashCommand.matched &&
         appSlashCommand.shortcut &&
@@ -10694,7 +10750,9 @@ function MainContentComponent({
           executionMode,
           selectedTaskId,
           selectedTaskExecutionMode: task?.agentConfig?.executionMode,
-          forceFreshTask: appSlashCommand.shortcut?.name === "schedule",
+          forceFreshTask:
+            appSlashCommand.shortcut?.name === "schedule" ||
+            goalSlashCommand.action === "start",
         });
 
       if (shouldCreateFreshTask && onCreateTask) {

@@ -265,6 +265,23 @@ export const AgentConfigSchema = z
     entropySweepPolicy: z.enum(["off", "balanced", "strict"]).optional(),
     stepIntentAlignmentPolicy: z.enum(["off", "balanced", "strict"]).optional(),
     stepDecompositionPolicy: z.enum(["off", "balanced", "strict"]).optional(),
+    deepWorkMode: z.boolean().optional(),
+    goalMode: z
+      .object({
+        objective: z.string().min(1).max(MAX_PROMPT_LENGTH),
+        status: z.enum(["active", "paused", "completed", "cleared"]),
+        createdAt: z.number().int().nonnegative(),
+        updatedAt: z.number().int().nonnegative(),
+        completedAt: z.number().int().nonnegative().optional(),
+        pausedAt: z.number().int().nonnegative().optional(),
+        clearedAt: z.number().int().nonnegative().optional(),
+        maxAutoContinuations: z.number().int().min(0).max(20).optional(),
+        lifetimeMaxTurns: z.number().int().min(1).max(5000).optional(),
+      })
+      .strict()
+      .optional(),
+    autoReportEnabled: z.boolean().optional(),
+    progressJournalEnabled: z.boolean().optional(),
     autoContinueOnTurnLimit: z.boolean().optional(),
     maxAutoContinuations: z.number().int().min(0).max(20).optional(),
     minProgressScoreForAutoContinue: z.number().min(-1).max(1).optional(),

@@ -718,6 +718,16 @@ export class TaskRepository {
       );
       clearMemoryTaskId.run(taskId);
 
+      const clearCuratedMemoryTaskId = this.db.prepare(
+        "UPDATE curated_memory_entries SET task_id = NULL WHERE task_id = ?",
+      );
+      clearCuratedMemoryTaskId.run(taskId);
+
+      const clearMemoryObservationTaskId = this.db.prepare(
+        "UPDATE memory_observation_metadata SET task_id = NULL WHERE task_id = ?",
+      );
+      clearMemoryObservationTaskId.run(taskId);
+
       // Nullify task_id in channel_sessions rather than deleting the session
       const clearSessionTaskId = this.db.prepare(
         "UPDATE channel_sessions SET task_id = NULL WHERE task_id = ?",
@@ -737,6 +747,25 @@ export class TaskRepository {
         "UPDATE eval_cases SET source_task_id = NULL WHERE source_task_id = ?",
       );
       clearEvalCaseSource.run(taskId);
+
+      const clearManagedSessionBackingTask = this.db.prepare(
+        "UPDATE managed_sessions SET backing_task_id = NULL WHERE backing_task_id = ?",
+      );
+      clearManagedSessionBackingTask.run(taskId);
+
+      const clearManagedSessionEventSourceTask = this.db.prepare(
+        "UPDATE managed_session_events SET source_task_id = NULL WHERE source_task_id = ?",
+      );
+      clearManagedSessionEventSourceTask.run(taskId);
+
+      const clearManagedSessionBackingTeamRun = this.db.prepare(`
+        UPDATE managed_sessions
+        SET backing_team_run_id = NULL
+        WHERE backing_team_run_id IN (
+          SELECT id FROM agent_team_runs WHERE root_task_id = ?
+        )
+      `);
+      clearManagedSessionBackingTeamRun.run(taskId);
 
       // Delete agent_team_runs where this task is the root (cascades to items/thoughts)
       const deleteTeamRuns = this.db.prepare(

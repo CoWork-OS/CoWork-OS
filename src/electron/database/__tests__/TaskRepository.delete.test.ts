@@ -215,6 +215,159 @@ describeWithSqlite("TaskRepository.delete", () => {
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
+  it("archives tasks that have memory and managed-session history", () => {
+    const now = Date.now();
+    const workspace = insertWorkspace();
+
+    const task = taskRepo.create({
+      title: "Task with retained history",
+      prompt: "archive me without breaking history",
+      status: "completed",
+      workspaceId: workspace.id,
+    });
+
+    const memoryId = randomUUID();
+    db.prepare(
+      `
+        INSERT INTO memories (
+          id, workspace_id, task_id, type, content, summary, tokens,
+          is_compressed, is_private, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    ).run(
+      memoryId,
+      workspace.id,
+      task.id,
+      "task_result",
+      "Retained memory content",
+      "Retained memory",
+      12,
+      0,
+      0,
+      now,
+      now,
+    );
+
+    db.prepare(
+      `
+        INSERT INTO curated_memory_entries (
+          id, workspace_id, task_id, target, kind, content, normalized_key,
+          source, confidence, status, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    ).run(
+      randomUUID(),
+      workspace.id,
+      task.id,
+      "workspace",
+      "preference",
+      "A curated memory tied to the archived task",
+      "workspace:preference:test",
+      "task",
+      0.9,
+      "active",
+      now,
+      now,
+    );
+
+    db.prepare(
+      `
+        INSERT INTO memory_observation_metadata (
+          memory_id, workspace_id, task_id, origin, observation_type, title,
+          narrative, content_hash, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    ).run(
+      memoryId,
+      workspace.id,
+      task.id,
+      "task",
+      "summary",
+      "Retained observation",
+      "Observation metadata tied to the archived task",
+      "hash-archive-task",
+      now,
+      now,
+    );
+
+    const agentId = randomUUID();
+    const environmentId = randomUUID();
+    const managedSessionId = randomUUID();
+    db.prepare(
+      `
+        INSERT INTO managed_agents (id, name, description, status, current_version, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+    ).run(agentId, "Archive Test Agent", null, "active", 1, now, now);
+    db.prepare(
+      `
+        INSERT INTO managed_environments (id, name, kind, revision, status, config_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    ).run(environmentId, "Archive Test Env", "local", 1, "active", "{}", now, now);
+    db.prepare(
+      `
+        INSERT INTO managed_sessions (
+          id, agent_id, agent_version, environment_id, title, status, workspace_id,
+          backing_task_id, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    ).run(
+      managedSessionId,
+      agentId,
+      1,
+      environmentId,
+      "Managed archive session",
+      "completed",
+      workspace.id,
+      task.id,
+      now,
+      now,
+    );
+    db.prepare(
+      `
+        INSERT INTO managed_session_events (
+          id, session_id, seq, timestamp, type, payload_json, source_task_id, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    ).run(randomUUID(), managedSessionId, 1, now, "task_event", "{}", task.id, now);
+
+    taskRepo.delete(task.id);
+
+    expect(taskRepo.findById(task.id)).toBeUndefined();
+    expect(
+      db.prepare("SELECT task_id FROM memories WHERE id = ?").get(memoryId) as {
+        task_id: string | null;
+      },
+    ).toEqual({ task_id: null });
+    expect(
+      db.prepare("SELECT task_id FROM curated_memory_entries").get() as {
+        task_id: string | null;
+      },
+    ).toEqual({ task_id: null });
+    expect(
+      db.prepare("SELECT task_id FROM memory_observation_metadata WHERE memory_id = ?").get(memoryId) as {
+        task_id: string | null;
+      },
+    ).toEqual({ task_id: null });
+    expect(
+      db.prepare("SELECT backing_task_id FROM managed_sessions WHERE id = ?").get(managedSessionId) as {
+        backing_task_id: string | null;
+      },
+    ).toEqual({ backing_task_id: null });
+    expect(
+      db.prepare("SELECT source_task_id FROM managed_session_events WHERE session_id = ?").get(managedSessionId) as {
+        source_task_id: string | null;
+      },
+    ).toEqual({ source_task_id: null });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
   it("prunes only stale remote shadow tasks covered by the fetched window", () => {
     const workspace = insertWorkspace();
     const now = Date.now();

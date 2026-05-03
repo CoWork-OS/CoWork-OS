@@ -32,6 +32,11 @@ The built-in app command catalog is:
 | `/clear` | Clears the current task/chat view without deleting history and without switching the current workspace. |
 | `/plan <task>` | Creates a new task in Plan execution mode using `<task>` as the prompt. |
 | `/cost <task>` | Creates an Analyze-mode estimate request for token usage, model cost, runtime, and risk without executing the requested task. |
+| `/goal <objective>` | Starts a fresh persistent-goal task. The task stores the objective in its agent configuration, enables deep-work continuations, and keeps working until the goal is complete, blocked, paused, or cleared. |
+| `/goal` | Reports the selected task's persistent-goal status. |
+| `/goal pause` | Pauses the selected task's persistent goal. |
+| `/goal resume` | Resumes the selected task's persistent goal and continues work from the current task state. |
+| `/goal clear` | Clears the selected task's persistent goal metadata. |
 | `/compact [context]` | Starts a safe continuation-brief workflow that summarizes context, decisions, open questions, constraints, and next actions. |
 | `/doctor [context]` | Starts a diagnostic workflow for workspace/app state, integrations, permissions, skills, commands, and setup issues. It should not make changes unless explicitly asked. |
 | `/undo [context]` | Starts a safe undo-planning workflow. It does not roll back, delete, or modify anything unless the user explicitly approves a follow-up action. |

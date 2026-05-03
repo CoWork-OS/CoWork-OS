@@ -63,6 +63,7 @@ import {
   QuotedAssistantMessage,
   ExecutionMode,
   TaskDomain,
+  AgentConfig,
   LlmProfile,
   PermissionMode,
   LLMProviderType,
@@ -3321,6 +3322,7 @@ export function App() {
       videoGenerationMode?: boolean;
       llmProfile?: LlmProfile;
       llmProfileForced?: boolean;
+      agentConfig?: AgentConfig;
       integrationMentions?: IntegrationMentionSelection[];
     },
     images?: ImageAttachment[],
@@ -3371,6 +3373,7 @@ export function App() {
     const shellAccess = options?.shellAccess === true;
     const llmProfile = options?.llmProfile;
     const llmProfileForced = options?.llmProfileForced;
+    const explicitAgentConfig = options?.agentConfig;
     const integrationMentions =
       options?.integrationMentions && options.integrationMentions.length > 0
         ? options.integrationMentions
@@ -3394,8 +3397,10 @@ export function App() {
       permissionMode ||
       shellAccess ||
       integrationMentions ||
-      effectiveLlmProfile
+      effectiveLlmProfile ||
+      explicitAgentConfig
         ? {
+            ...explicitAgentConfig,
             ...(effectiveSessionModelOverride ? { modelKey: effectiveSessionModelOverride } : {}),
             ...(autonomousMode ? { allowUserInput: false, autonomousMode: true } : {}),
             ...(collaborativeMode ? { collaborativeMode: true } : {}),

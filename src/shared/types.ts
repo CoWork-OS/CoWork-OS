@@ -1895,6 +1895,19 @@ export type ReviewPolicy = "off" | "balanced" | "strict";
  */
 export type EntropySweepPolicy = "off" | "balanced" | "strict";
 export type TaskRiskLevel = "low" | "medium" | "high";
+export type PersistentTaskGoalStatus = "active" | "paused" | "completed" | "cleared";
+
+export interface PersistentTaskGoalConfig {
+  objective: string;
+  status: PersistentTaskGoalStatus;
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+  pausedAt?: number;
+  clearedAt?: number;
+  maxAutoContinuations?: number;
+  lifetimeMaxTurns?: number;
+}
 
 export type IntegrationMentionSource = "builtin" | "gateway" | "mcp";
 export type IntegrationMentionStatus = "configured" | "connected";
@@ -2087,6 +2100,8 @@ export interface AgentConfig {
   preflightRequired?: boolean;
   /** Enable deep work mode: long-running autonomous execution with research-retry, journaling, auto-report */
   deepWorkMode?: boolean;
+  /** Persistent `/goal` lifecycle metadata for long-running task objectives. */
+  goalMode?: PersistentTaskGoalConfig;
   /** Enable auto-report generation on completion (markdown summary of what was done) */
   autoReportEnabled?: boolean;
   /** Enable periodic progress journaling for fire-and-forget visibility */

@@ -55,6 +55,11 @@ import {
   type ParsedSkillSlashCommand,
   type SkillSlashExternalMode,
 } from "../../shared/skill-slash-commands";
+import {
+  buildPersistentGoalAgentConfig,
+  buildPersistentGoalPrompt,
+  parseLeadingGoalSlashCommand,
+} from "../../shared/goal-slash-command";
 import { parseNaturalLlmWikiPrompt } from "../../shared/llm-wiki-prompt-routing";
 import { parseOnboardingSlashCommand } from "../../shared/onboarding";
 import * as fs from "fs";
@@ -1296,6 +1301,7 @@ export class TaskExecutor {
     if (trimmedSummary) {
       this.task.resultSummary = trimmedSummary;
     }
+    const goalAgentConfig = this.applyGoalTerminalState(trimmedSummary, "ok");
 
     this.daemon.updateTask(this.task.id, {
       status: "completed",
@@ -1304,6 +1310,7 @@ export class TaskExecutor {
       ...(clearTerminalFailure ? { terminalStatus: undefined, failureClass: undefined } : {}),
       ...(trimmedSummary ? { resultSummary: trimmedSummary } : {}),
       ...(this.bestKnownOutcome ? { bestKnownOutcome: this.bestKnownOutcome } : {}),
+      ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
       ...runtimeProjection,
       ...this.getCompletionProjectionFields(),
     });
@@ -11201,6 +11208,7 @@ ${transcript}
     this.task.resultSummary = summary;
     const outputSummary = this.buildTaskOutputSummary();
     this.persistBestKnownOutcome(summary, terminalStatus, failureClass);
+    const goalAgentConfig = this.applyGoalTerminalState(summary, terminalStatus);
     const verificationMetadata =
       this.verificationOutcomeV2Enabled && this.completionVerificationMetadata
         ? {
@@ -11219,6 +11227,7 @@ ${transcript}
     this.daemon.completeTask(this.task.id, summary, {
       terminalStatus,
       failureClass: this.task.failureClass,
+      ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
       ...runtimeProjection,
       outputSummary,
       bestKnownOutcome: this.bestKnownOutcome,
@@ -11319,6 +11328,7 @@ ${transcript}
     this.task.resultSummary = summary;
     const outputSummary = this.buildTaskOutputSummary();
     this.persistBestKnownOutcome(summary, this.task.terminalStatus, this.task.failureClass, reason);
+    const goalAgentConfig = this.applyGoalTerminalState(summary, this.task.terminalStatus);
     const verificationMetadata =
       this.verificationOutcomeV2Enabled && this.completionVerificationMetadata
         ? {
@@ -11335,6 +11345,7 @@ ${transcript}
     this.daemon.completeTask(this.task.id, summary, {
       terminalStatus: this.task.terminalStatus,
       failureClass: this.task.failureClass,
+      ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
       ...runtimeProjection,
       outputSummary,
       bestKnownOutcome: this.bestKnownOutcome,
@@ -18987,6 +18998,224 @@ You are continuing a previous conversation. The context from the previous conver
     return true;
   }
 
+  private emitGoalAssistantMessage(raw: string, message: string): void {
+    this.emitEvent("assistant_message", { message });
+    this.updateConversationHistory([
+      { role: "user", content: [{ type: "text", text: raw }] },
+      { role: "assistant", content: [{ type: "text", text: message }] },
+    ]);
+    this.lastAssistantOutput = message;
+    this.lastNonVerificationOutput = message;
+  }
+
+  private updateGoalAgentConfig(agentConfig: AgentConfig): void {
+    this.task.agentConfig = agentConfig;
+    this.daemon.updateTask(this.task.id, { agentConfig });
+  }
+
+  private withGoalRuntimeDefaults(agentConfig: AgentConfig): AgentConfig {
+    return {
+      ...agentConfig,
+      executionMode: "execute",
+      deepWorkMode: true,
+      autoReportEnabled: agentConfig.autoReportEnabled ?? true,
+      progressJournalEnabled: agentConfig.progressJournalEnabled ?? true,
+      autoContinueOnTurnLimit: true,
+      maxAutoContinuations: agentConfig.maxAutoContinuations ?? 12,
+      lifetimeMaxTurns: agentConfig.lifetimeMaxTurns ?? 1200,
+      minProgressScoreForAutoContinue: agentConfig.minProgressScoreForAutoContinue ?? -0.05,
+      continuationStrategy: "adaptive_progress",
+      compactOnContinuation: true,
+      globalNoProgressCircuitBreaker: agentConfig.globalNoProgressCircuitBreaker ?? 4,
+      loopWarningThreshold: agentConfig.loopWarningThreshold ?? 3,
+      loopCriticalThreshold: agentConfig.loopCriticalThreshold ?? 5,
+    };
+  }
+
+  private formatGoalStatusMessage(): string {
+    const goalMode = this.task.agentConfig?.goalMode;
+    if (!goalMode || goalMode.status === "cleared") {
+      return "No persistent goal is attached to this task.";
+    }
+
+    const statusLabel =
+      goalMode.status === "active"
+        ? "active"
+        : goalMode.status === "paused"
+          ? "paused"
+          : "completed";
+    return [
+      `Goal status: ${statusLabel}.`,
+      "",
+      `Objective: ${goalMode.objective}`,
+      "",
+      "Use `/goal pause`, `/goal resume`, or `/goal clear` to manage it.",
+    ].join("\n");
+  }
+
+  private async maybePrepareInitialGoalSlashCommand(): Promise<boolean> {
+    const raw = String(this.getContractPrompt() || this.task.title || "").trim();
+    const parsed = parseLeadingGoalSlashCommand(raw);
+    if (!parsed.matched) return false;
+
+    if (parsed.action === "start" && parsed.objective) {
+      const now = Date.now();
+      const agentConfig = buildPersistentGoalAgentConfig(parsed, now, this.task.agentConfig);
+      const prompt = buildPersistentGoalPrompt(parsed.objective);
+      this.task.agentConfig = agentConfig;
+      this.task.rawPrompt = prompt;
+      this.task.userPrompt = raw;
+      this.daemon.updateTask(this.task.id, {
+        agentConfig,
+        rawPrompt: prompt,
+        userPrompt: raw,
+      });
+      this.emitEvent("log", { message: `Persistent goal started: ${parsed.objective}` });
+      return false;
+    }
+
+    const message = this.formatGoalStatusMessage();
+    this.emitGoalAssistantMessage(raw, message);
+    this.finalizeTask(message);
+    return true;
+  }
+
+  private applyGoalTerminalState(
+    summary: string,
+    terminalStatus?: Task["terminalStatus"],
+  ): AgentConfig | undefined {
+    const goalMode = this.task.agentConfig?.goalMode;
+    if (!goalMode || goalMode.status !== "active") return undefined;
+
+    const now = Date.now();
+    const normalizedSummary = String(summary || "").trim();
+    const isBlocked =
+      /^GOAL BLOCKED:/i.test(normalizedSummary) || terminalStatus === "needs_user_action";
+    const isCompleted =
+      /^GOAL COMPLETE:/i.test(normalizedSummary) ||
+      (!isBlocked && (terminalStatus === "ok" || terminalStatus === undefined));
+
+    if (!isBlocked && !isCompleted) return undefined;
+
+    const nextGoalMode =
+      isBlocked
+        ? {
+            ...goalMode,
+            status: "paused" as const,
+            pausedAt: now,
+            updatedAt: now,
+          }
+        : {
+            ...goalMode,
+            status: "completed" as const,
+            completedAt: now,
+            updatedAt: now,
+          };
+    const nextAgentConfig = {
+      ...this.task.agentConfig,
+      goalMode: nextGoalMode,
+    };
+    this.task.agentConfig = nextAgentConfig;
+    return nextAgentConfig;
+  }
+
+  private handleGoalSlashFollowUp(message: string): { handled: boolean; executionMessage?: string } {
+    const parsed = parseLeadingGoalSlashCommand(message);
+    if (!parsed.matched) return { handled: false };
+
+    const now = Date.now();
+    const currentGoal = this.task.agentConfig?.goalMode;
+
+    if (parsed.action === "status") {
+      const statusMessage = this.formatGoalStatusMessage();
+      this.emitGoalAssistantMessage(message, statusMessage);
+      this.finalizeFollowUpCompletion("Goal status reported");
+      return { handled: true };
+    }
+
+    if (parsed.action === "pause") {
+      if (!currentGoal || currentGoal.status === "cleared") {
+        const statusMessage = "No persistent goal is attached to this task.";
+        this.emitGoalAssistantMessage(message, statusMessage);
+        this.finalizeFollowUpCompletion("No goal to pause");
+        return { handled: true };
+      }
+      const goalMode = {
+        ...currentGoal,
+        status: "paused" as const,
+        pausedAt: now,
+        updatedAt: now,
+      };
+      this.updateGoalAgentConfig({
+        ...this.task.agentConfig,
+        goalMode,
+      });
+      const statusMessage = `Goal paused.\n\nObjective: ${goalMode.objective}`;
+      this.emitGoalAssistantMessage(message, statusMessage);
+      this.finalizeFollowUpCompletion("Goal paused");
+      return { handled: true };
+    }
+
+    if (parsed.action === "clear") {
+      if (!currentGoal || currentGoal.status === "cleared") {
+        const statusMessage = "No persistent goal is attached to this task.";
+        this.emitGoalAssistantMessage(message, statusMessage);
+        this.finalizeFollowUpCompletion("No goal to clear");
+        return { handled: true };
+      }
+      const goalMode = {
+        ...currentGoal,
+        status: "cleared" as const,
+        clearedAt: now,
+        updatedAt: now,
+      };
+      this.updateGoalAgentConfig({
+        ...this.task.agentConfig,
+        goalMode,
+      });
+      const statusMessage = "Goal cleared for this task.";
+      this.emitGoalAssistantMessage(message, statusMessage);
+      this.finalizeFollowUpCompletion("Goal cleared");
+      return { handled: true };
+    }
+
+    if (parsed.action === "resume") {
+      if (!currentGoal || currentGoal.status === "cleared") {
+        const statusMessage = "No persistent goal is attached to this task.";
+        this.emitGoalAssistantMessage(message, statusMessage);
+        this.finalizeFollowUpCompletion("No goal to resume");
+        return { handled: true };
+      }
+      const goalMode = {
+        ...currentGoal,
+        status: "active" as const,
+        updatedAt: now,
+      };
+      delete goalMode.pausedAt;
+      this.updateGoalAgentConfig(
+        this.withGoalRuntimeDefaults({
+          ...this.task.agentConfig,
+          goalMode,
+        }),
+      );
+      return {
+        handled: false,
+        executionMessage: `${buildPersistentGoalPrompt(goalMode.objective)}\n\nResume from the current task state and continue useful work toward the goal.`,
+      };
+    }
+
+    if (parsed.action === "start" && parsed.objective) {
+      const agentConfig = buildPersistentGoalAgentConfig(parsed, now, this.task.agentConfig);
+      this.updateGoalAgentConfig(agentConfig);
+      return {
+        handled: false,
+        executionMessage: buildPersistentGoalPrompt(parsed.objective),
+      };
+    }
+
+    return { handled: false };
+  }
+
   /**
    * Handle `/schedule ...` commands locally to ensure the cron job is actually created.
    *
@@ -21341,6 +21570,10 @@ You are continuing a previous conversation. The context from the previous conver
       // Handle local slash-commands (e.g. /schedule ...) deterministically without relying on the LLM.
       // This prevents "plan-only" runs that never create the underlying cron job.
       if (await this.maybeHandleOnboardingSlashCommand()) {
+        return;
+      }
+
+      if (await this.maybePrepareInitialGoalSlashCommand()) {
         return;
       }
 
@@ -30424,8 +30657,15 @@ Return ONLY a JSON object:
     this.waitingForUserInput = false;
     this.paused = false;
     this.lastUserMessage = message;
+    const goalFollowUp = this.handleGoalSlashFollowUp(message);
+    if (goalFollowUp.handled) {
+      return;
+    }
+    if (goalFollowUp.executionMessage) {
+      executionMessage = goalFollowUp.executionMessage;
+    }
     const followUpConversationMessage = this.buildQuotedAssistantContextMessage(
-      message,
+      executionMessage,
       quotedAssistantMessage,
     );
     this.getSessionRuntime().setRecoveryRequestActive(this.isRecoveryIntent(message));

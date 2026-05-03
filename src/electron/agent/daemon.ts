@@ -6293,6 +6293,9 @@ export class AgentDaemon extends EventEmitter {
         | "noProgressStreak"
         | "lastLoopFingerprint"
         | "bestKnownOutcome"
+        | "agentConfig"
+        | "rawPrompt"
+        | "userPrompt"
       >
     >,
   ): void {
@@ -7045,6 +7048,7 @@ export class AgentDaemon extends EventEmitter {
       semanticSummary?: string;
       verificationVerdict?: VerificationVerdict;
       verificationReport?: string;
+      agentConfig?: AgentConfig;
     },
   ): void {
     const existingTask = this.taskRepo.findById(taskId);
@@ -7672,6 +7676,7 @@ export class AgentDaemon extends EventEmitter {
       ...(typeof metadata?.verificationReport === "string" && metadata.verificationReport.trim().length > 0
         ? { verificationReport: metadata.verificationReport.trim() }
         : {}),
+      ...(metadata?.agentConfig ? { agentConfig: metadata.agentConfig } : {}),
     };
     this.taskRepo.update(taskId, updates);
     this.clearRetryState(taskId);

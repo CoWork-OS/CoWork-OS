@@ -3,6 +3,7 @@ export type MessageAppShortcutName =
   | "clear"
   | "plan"
   | "cost"
+  | "goal"
   | "compact"
   | "doctor"
   | "undo";
@@ -46,6 +47,12 @@ export const MESSAGE_APP_SHORTCUTS: MessageAppShortcut[] = [
     description: "Estimate effort and model cost before running a task.",
     icon: "💳",
     action: "cost",
+  },
+  {
+    name: "goal",
+    description: "Start or manage a persistent objective.",
+    icon: "🎯",
+    action: "insert",
   },
   {
     name: "compact",

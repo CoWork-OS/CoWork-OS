@@ -578,6 +578,7 @@ function getAppTaskSignature(task: Task | undefined): string {
     task.title,
     task.status,
     task.terminalStatus ?? "",
+    task.workspaceId,
     task.updatedAt,
     task.completedAt ?? "",
     task.pinned ? "pinned" : "unpinned",
@@ -3231,6 +3232,35 @@ export function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleSelectWorkspace = useCallback(
+    async (workspace: Workspace) => {
+      if (selectedTaskId && !remoteTaskView && window.electronAPI?.updateTaskWorkspace) {
+        try {
+          const updatedTask = (await window.electronAPI.updateTaskWorkspace(
+            selectedTaskId,
+            workspace.id,
+          )) as Task | undefined;
+          setTasks((prev) =>
+            updateTaskPreservingIdentity(prev, selectedTaskId, (task) =>
+              mergeTaskPreservingIdentity(task, updatedTask ?? { workspaceId: workspace.id }),
+            ),
+          );
+        } catch (error) {
+          console.error("Failed to update task workspace:", error);
+          addToast({
+            type: "error",
+            title: "Workspace Error",
+            message: error instanceof Error ? error.message : "Could not apply the workspace to this chat.",
+          });
+          return;
+        }
+      }
+
+      setCurrentWorkspace(workspace);
+    },
+    [addToast, remoteTaskView, selectedTaskId],
+  );
+
   // Handle workspace change - opens folder selection dialog directly
   const handleChangeWorkspace = async () => {
     try {
@@ -3249,12 +3279,12 @@ export function App() {
       // Check if this folder is already a workspace
       const existingWorkspace = existingWorkspaces.find((w: Workspace) => w.path === folderPath);
       if (existingWorkspace) {
-        setCurrentWorkspace(existingWorkspace);
+        await handleSelectWorkspace(existingWorkspace);
         return;
       }
 
       // Create a new workspace for this folder
-      const folderName = folderPath.split("/").pop() || "Workspace";
+      const folderName = folderPath.split(/[\\/]/).filter(Boolean).pop() || "Workspace";
       const permissionSettings = await window.electronAPI.getPermissionSettings().catch(() => null);
       const workspace = await window.electronAPI.createWorkspace({
         name: folderName,
@@ -3268,7 +3298,7 @@ export function App() {
         },
       });
 
-      setCurrentWorkspace(workspace);
+      await handleSelectWorkspace(workspace);
     } catch (error) {
       console.error("Failed to change workspace:", error);
     }
@@ -4657,7 +4687,7 @@ export function App() {
                 onCreateTask={handleCreateTask}
                 onAskInbox={handleAskInboxFromComposer}
                 onChangeWorkspace={handleChangeWorkspace}
-                onSelectWorkspace={setCurrentWorkspace}
+                onSelectWorkspace={handleSelectWorkspace}
                 onOpenSettings={(tab) => {
                   setSettingsTab((tab as typeof settingsTab | undefined) || "appearance");
                   setCurrentView("settings");

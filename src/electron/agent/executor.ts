@@ -13724,6 +13724,15 @@ You are continuing a previous conversation. The context from the previous conver
     logger.info(`Workspace updated for task ${this.task.id}, permissions:`, workspace.permissions);
   }
 
+  updateTaskWorkspace(task: Task, workspace: Workspace): void {
+    this.task = {
+      ...this.task,
+      workspaceId: task.workspaceId,
+      updatedAt: task.updatedAt,
+    };
+    this.updateWorkspace(workspace);
+  }
+
   updateTaskAgentConfig(agentConfig: AgentConfig | undefined): void {
     this.task = {
       ...this.task,

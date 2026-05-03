@@ -2192,6 +2192,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.TASK_KILL_COMMAND, { taskId, force }),
   renameTask: (id: string, title: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_RENAME, { id, title }),
+  updateTaskWorkspace: (taskId: string, workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, { taskId, workspaceId }),
   deleteTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_DELETE, id),
 
   // Task event streaming
@@ -4739,6 +4741,7 @@ export interface ElectronAPI {
   sendStdin: (taskId: string, input: string) => Promise<boolean>;
   killCommand: (taskId: string, force?: boolean) => Promise<boolean>;
   renameTask: (id: string, title: string) => Promise<void>;
+  updateTaskWorkspace: (taskId: string, workspaceId: string) => Promise<Any>;
   deleteTask: (id: string) => Promise<void>;
   onTaskEvent: (callback: (event: Any) => void) => () => void;
   onTaskLearningEvent: (callback: (event: TaskLearningProgress) => void) => () => void;

@@ -163,6 +163,7 @@ import {
   WorkspaceCreateSchema,
   TaskCreateSchema,
   TaskRenameSchema,
+  TaskWorkspaceUpdateSchema,
   TaskMessageSchema,
   FileImportSchema,
   FileImportDataSchema,
@@ -857,6 +858,7 @@ rateLimiter.configure(
   IPC_CHANNELS.TASK_FORK_SESSION,
   RATE_LIMIT_CONFIGS.limited,
 );
+rateLimiter.configure(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(
   IPC_CHANNELS.TASK_EXPORT_JSON,
@@ -4248,6 +4250,12 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_RENAME, async (_, data) => {
     const validated = validateInput(TaskRenameSchema, data, "task rename");
     taskRepo.update(validated.id, { title: validated.title });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, async (_, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_UPDATE_WORKSPACE);
+    const validated = validateInput(TaskWorkspaceUpdateSchema, data, "task workspace update");
+    return agentDaemon.updateTaskWorkspace(validated.taskId, validated.workspaceId);
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_PIN, async (_, id: string) => {

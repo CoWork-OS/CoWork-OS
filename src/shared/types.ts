@@ -6748,6 +6748,7 @@ export const IPC_CHANNELS = {
   TASK_STEP_FEEDBACK: "task:stepFeedback", // Send feedback on an in-progress step
   TASK_SEND_STDIN: "task:sendStdin", // Send stdin input to running command
   TASK_KILL_COMMAND: "task:killCommand", // Kill running command (Ctrl+C)
+  TASK_UPDATE_WORKSPACE: "task:updateWorkspace",
   SHELL_SESSION_EVENT: "shell:sessionEvent",
   SHELL_SESSION_GET: "shell:sessionGet",
   SHELL_SESSION_LIST: "shell:sessionList",

@@ -49,10 +49,14 @@ When a user reports a failure, error, or unexpected behavior that likely involve
 
 - Use `npm run package` for standard local installer packaging after a full build.
 - Use `npm run package:win:x64` to produce a Windows x64 installer build.
+- Use `npm run package:linux:server` to produce a Linux server bundle (daemon/connectors plus launcher assets).
 - `npm run package` also runs `scripts/release-artifact-names.mjs` and `scripts/release-artifact-names.mjs --check` to align and verify updater metadata artifact filenames in `release/`.
 - On macOS distribution/signing flows, use `npm run package:mac`; it loads optional repo-root `.env.mac` (see `scripts/mac-notarize.env.example`) before running build + `electron-builder --mac --publish never`.
 - Use `npm run package:mac:unsigned` to force an unsigned macOS fallback build (sets `COWORK_MAC_UNSIGNED=1` and disables certificate auto-discovery).
 - `npm run package:mac` also respects `CSC_IDENTITY_AUTO_DISCOVERY=false`; when set, packaging uses unsigned macOS fallback settings (`identity: null`, notarization off, Gatekeeper assess off).
+- Use `npm run package:desktop:smoke` for a cross-platform packaged desktop artifact smoke check.
+- Use `npm run package:mac:smoke` or `npm run package:win:smoke` to isolate macOS/Windows packaged artifact smoke checks.
+- Use `npm run package:linux:server:smoke` to validate the Linux server package output.
 - Packaging icons are now sourced from `build/icon.png` (macOS) and `build/icon.ico` (Windows); update those files for release branding changes.
 - Packaged builds now include skill asset folders via `resources/skills/**/assets/**`; place runtime skill media under each skill's `assets/` directory.
 

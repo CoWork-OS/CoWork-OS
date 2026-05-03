@@ -41,7 +41,7 @@ Release `0.5.41` is the Everything Workbench release. It turns generated documen
 - **File Hub and IPC support**: File Hub, preload, and IPC handlers now understand the new artifact preview/edit APIs and format-specific viewer payloads.
 - **Documentation refresh**: README, docs index, Features, Getting Started, Use Cases, Showcase, Architecture, Development, Troubleshooting, GTM, Project Status, and artifact docs now frame generated files as a unified local-first workbench.
 - **Bundled skill metadata**: frontend, frontend-design, Kami, Karpathy Guidelines, memory-kit, and routing eval metadata were refreshed.
-- **App branding**: macOS app/Dock icons and dark-mode renderer assets now use `resources/branding/cowork-os-app-logo-dark.png`; Windows and light-mode renderer assets continue to use `resources/branding/cowork-os-app-logo.png`.
+- **App branding**: macOS app/Dock icons and dark-mode renderer assets now use `resources/branding/cowork-os-app-logo-dark.png`; Windows and light-mode renderer assets use `resources/branding/cowork-os-app-logo-light.png`.
 
 ## Fixes
 

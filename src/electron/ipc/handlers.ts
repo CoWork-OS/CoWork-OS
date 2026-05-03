@@ -5426,6 +5426,7 @@ export async function setupIpcHandlers(
         validatedConfig.ollama?.model,
         validatedConfig.gemini?.model,
         validatedConfig.openrouter?.model,
+        validatedConfig.deepseek?.model,
         validatedConfig.openai?.model,
         azureDeployment,
         azureAnthropicDeployment,

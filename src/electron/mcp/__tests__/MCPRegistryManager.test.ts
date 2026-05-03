@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockState = vi.hoisted(() => ({
   addServerMock: vi.fn(),
+  execFileMock: vi.fn(),
   loadSettingsMock: vi.fn(),
   mockInstalledServers: [] as Any[],
 }));
@@ -19,6 +20,10 @@ vi.mock("fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
 }));
 
+vi.mock("child_process", () => ({
+  execFile: mockState.execFileMock,
+}));
+
 vi.mock("../settings", () => ({
   MCPSettingsManager: {
     loadSettings: mockState.loadSettingsMock,
@@ -34,6 +39,10 @@ describe("MCPRegistryManager install defaults", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.mockInstalledServers = [];
+    mockState.execFileMock.mockImplementation(
+      (_file: string, _args: string[], _options: Any, callback: Any) =>
+        callback(null, "2026.1.14\n", ""),
+    );
     mockState.loadSettingsMock.mockImplementation(() => ({
       servers: mockState.mockInstalledServers,
       autoConnect: true,
@@ -91,5 +100,30 @@ describe("MCPRegistryManager install defaults", () => {
     expect(ids).not.toContain("slack");
     expect(ids).not.toContain("docusign");
     expect(ids).not.toContain("outreach");
+  });
+
+  it("verifies npm packages with fixed argv instead of a shell command", async () => {
+    const result = await MCPRegistryManager.verifyNpmPackage(
+      "@modelcontextprotocol/server-postgres",
+    );
+
+    expect(result).toEqual({ exists: true, version: "2026.1.14" });
+    expect(mockState.execFileMock).toHaveBeenCalledTimes(1);
+    expect(mockState.execFileMock).toHaveBeenCalledWith(
+      "npm",
+      ["view", "@modelcontextprotocol/server-postgres", "version"],
+      { timeout: 15000 },
+      expect.any(Function),
+    );
+  });
+
+  it("rejects malicious npm package names before spawning npm", async () => {
+    const result = await MCPRegistryManager.verifyNpmPackage(
+      "--version; printf COWORK_INJECTED",
+    );
+
+    expect(result.exists).toBe(false);
+    expect(result.error).toContain("Invalid npm package name");
+    expect(mockState.execFileMock).not.toHaveBeenCalled();
   });
 });

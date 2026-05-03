@@ -11194,7 +11194,7 @@ ${transcript}
     const summary =
       typeof resultSummary === "string" && resultSummary.trim()
         ? resultSummary.trim()
-        : this.buildResultSummary();
+        : this.buildResultSummary() || "";
     const runtimeProjection = this.applyRuntimeTaskProjectionToTask();
     this.task.status = "completed";
     this.task.completedAt = Date.now();
@@ -11283,7 +11283,7 @@ ${transcript}
     const summary =
       typeof resultSummary === "string" && resultSummary.trim()
         ? resultSummary.trim()
-        : this.buildResultSummary();
+        : this.buildResultSummary() || "";
     this.task.status = "completed";
     this.task.completedAt = Date.now();
     const fallbackTerminalStatus: NonNullable<Task["terminalStatus"]> =

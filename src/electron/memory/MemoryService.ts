@@ -1887,6 +1887,7 @@ export class MemoryService {
         settings.ollama?.model,
         settings.gemini?.model,
         settings.openrouter?.model,
+        settings.deepseek?.model,
         settings.openai?.model,
         azureDeployment,
         azureAnthropicDeployment,

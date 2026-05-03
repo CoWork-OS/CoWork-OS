@@ -38,6 +38,7 @@ import { sanitizeTaskMessageParams } from "../electron/control-plane/sanitize";
 import { registerControlPlaneCoreMethods } from "../electron/control-plane/registerControlPlaneCoreMethods";
 import { registerStrategicPlannerMethods } from "../electron/control-plane/registerStrategicPlannerMethods";
 import { getStrategicPlannerService } from "../electron/control-plane/StrategicPlannerService";
+import { resolvePathWithinRoot } from "../electron/control-plane/path-containment";
 
 export interface ControlPlaneMethodDeps {
   agentDaemon: AgentDaemon;
@@ -881,9 +882,8 @@ export function registerControlPlaneMethods(
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Workspace not found: ${workspaceId}` };
     }
 
-    const fullPath = path.join(workspace.path, relativePath);
-    const resolved = path.resolve(fullPath);
-    if (!resolved.startsWith(path.resolve(workspace.path))) {
+    const resolved = resolvePathWithinRoot(workspace.path, relativePath);
+    if (!resolved) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: "Path escapes workspace" };
     }
 

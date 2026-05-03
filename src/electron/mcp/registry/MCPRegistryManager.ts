@@ -9,8 +9,7 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { execFile } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import {
@@ -22,10 +21,10 @@ import {
 } from "../types";
 import { MCPSettingsManager } from "../settings";
 
-const execAsync = promisify(exec);
-
 // Cache duration in milliseconds (15 minutes)
 const REGISTRY_CACHE_DURATION = 15 * 60 * 1000;
+const MAX_NPM_PACKAGE_NAME_LENGTH = 214;
+const NPM_PACKAGE_PART_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 // Built-in registry of common MCP servers
 // This is used as a fallback when the remote registry is unavailable.
@@ -2203,6 +2202,55 @@ function validateManualEntry(entry: MCPRegistryEntry): void {
   }
 }
 
+function isValidNpmPackagePart(part: string): boolean {
+  return (
+    part.length > 0 &&
+    !part.startsWith(".") &&
+    !part.startsWith("_") &&
+    !part.startsWith("-") &&
+    NPM_PACKAGE_PART_PATTERN.test(part)
+  );
+}
+
+function isValidNpmPackageName(packageName: string): boolean {
+  if (
+    packageName.length === 0 ||
+    packageName.length > MAX_NPM_PACKAGE_NAME_LENGTH ||
+    packageName.trim() !== packageName
+  ) {
+    return false;
+  }
+
+  if (packageName.startsWith("@")) {
+    const parts = packageName.split("/");
+    return (
+      parts.length === 2 &&
+      parts[0].length > 1 &&
+      isValidNpmPackagePart(parts[0].slice(1)) &&
+      isValidNpmPackagePart(parts[1])
+    );
+  }
+
+  return !packageName.includes("/") && isValidNpmPackagePart(packageName);
+}
+
+function npmViewVersion(packageName: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "npm",
+      ["view", packageName, "version"],
+      { timeout: 15000 },
+      (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+  });
+}
+
 export class MCPRegistryManager {
   private static registryCache: MCPRegistry | null = null;
   private static cacheTimestamp: number = 0;
@@ -2333,11 +2381,13 @@ export class MCPRegistryManager {
   static async verifyNpmPackage(
     packageName: string,
   ): Promise<{ exists: boolean; version?: string; error?: string }> {
+    if (!isValidNpmPackageName(packageName)) {
+      return { exists: false, error: `Invalid npm package name: "${packageName}"` };
+    }
+
     try {
       console.log(`[MCPRegistryManager] Verifying npm package: ${packageName}`);
-      const { stdout } = await execAsync(`npm view ${packageName} version`, {
-        timeout: 15000, // 15 second timeout
-      });
+      const stdout = await npmViewVersion(packageName);
       const version = stdout.trim();
       console.log(`[MCPRegistryManager] Package ${packageName} exists, version: ${version}`);
       return { exists: true, version };

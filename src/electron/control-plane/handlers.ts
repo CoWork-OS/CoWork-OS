@@ -95,6 +95,7 @@ import {
   buildTaskEventHistoryForTransport,
   serializeTaskEventForTransport,
 } from "./task-event-transport";
+import { resolvePathWithinRoot } from "./path-containment";
 
 // Server instance
 let controlPlaneServer: ControlPlaneServer | null = null;
@@ -2761,9 +2762,8 @@ function registerTaskAndWorkspaceMethods(
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Workspace not found: ${workspaceId}` };
     }
 
-    const fullPath = path.join(workspace.path, relativePath);
-    const resolved = path.resolve(fullPath);
-    if (!resolved.startsWith(path.resolve(workspace.path))) {
+    const resolved = resolvePathWithinRoot(workspace.path, relativePath);
+    if (!resolved) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: "Path escapes workspace" };
     }
 

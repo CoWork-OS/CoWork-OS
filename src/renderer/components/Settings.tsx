@@ -1003,6 +1003,7 @@ const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
   "azure-anthropic": <Cloud {...S} />,
   gemini: <Star {...S} />,
   openrouter: <Globe {...S} />,
+  deepseek: <Hexagon {...S} />,
   ollama: <Box {...S} />,
   groq: <Crosshair {...S} />,
   xai: <AtSign {...S} />,
@@ -1011,6 +1012,8 @@ const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
   pi: <Pi {...S} />,
   "hf-agents": <Zap {...S} />,
 };
+
+const DEFAULT_DEEPSEEK_MODELS = [{ id: "deepseek-chat", name: "DeepSeek Chat" }];
 
 const getLLMProviderIcon = (
   providerType: string,
@@ -1443,6 +1446,15 @@ export function Settings({
   >([]);
   const [loadingXaiModels, setLoadingXaiModels] = useState(false);
 
+  // DeepSeek state
+  const [deepseekApiKey, setDeepseekApiKey] = useState("");
+  const [deepseekBaseUrl, setDeepseekBaseUrl] = useState("");
+  const [deepseekModel, setDeepseekModel] = useState("deepseek-chat");
+  const [deepseekModels, setDeepseekModels] = useState<
+    Array<{ id: string; name: string }>
+  >(DEFAULT_DEEPSEEK_MODELS);
+  const [loadingDeepseekModels, setLoadingDeepseekModels] = useState(false);
+
   // Kimi state
   const [kimiApiKey, setKimiApiKey] = useState("");
   const [kimiBaseUrl, setKimiBaseUrl] = useState("");
@@ -1755,6 +1767,8 @@ export function Settings({
         return settings.groq || {};
       case "xai":
         return settings.xai || {};
+      case "deepseek":
+        return settings.deepseek || {};
       case "kimi":
         return settings.kimi || {};
       case "pi":
@@ -1814,6 +1828,8 @@ export function Settings({
             return settings.groq;
           case "xai":
             return settings.xai;
+          case "deepseek":
+            return settings.deepseek;
           case "kimi":
             return settings.kimi;
           case "pi":
@@ -1897,6 +1913,9 @@ export function Settings({
       case "xai":
         patchSettings("xai");
         return;
+      case "deepseek":
+        patchSettings("deepseek");
+        return;
       case "kimi":
         patchSettings("kimi");
         return;
@@ -1951,6 +1970,8 @@ export function Settings({
         return groqModel || settings.groq?.model || "";
       case "xai":
         return xaiModel || settings.xai?.model || "";
+      case "deepseek":
+        return deepseekModel || settings.deepseek?.model || "";
       case "kimi":
         return kimiModel || settings.kimi?.model || "";
       case "pi":
@@ -2368,6 +2389,17 @@ export function Settings({
         setXaiModel(loadedSettings.xai.model);
       }
 
+      // Set DeepSeek form state
+      if (loadedSettings.deepseek?.apiKey) {
+        setDeepseekApiKey(loadedSettings.deepseek.apiKey);
+      }
+      if (loadedSettings.deepseek?.baseUrl) {
+        setDeepseekBaseUrl(loadedSettings.deepseek.baseUrl);
+      }
+      if (loadedSettings.deepseek?.model) {
+        setDeepseekModel(loadedSettings.deepseek.model);
+      }
+
       // Set Kimi form state
       if (loadedSettings.kimi?.apiKey) {
         setKimiApiKey(loadedSettings.kimi.apiKey);
@@ -2736,6 +2768,30 @@ export function Settings({
     }
   };
 
+  const loadDeepSeekModels = async (apiKey?: string) => {
+    try {
+      setLoadingDeepseekModels(true);
+      const models = await window.electronAPI.getDeepSeekModels(
+        apiKey || deepseekApiKey,
+        deepseekBaseUrl || undefined,
+      );
+      const availableModels = models && models.length > 0 ? models : DEFAULT_DEEPSEEK_MODELS;
+      setDeepseekModels(availableModels);
+      if (
+        availableModels.length > 0 &&
+        !availableModels.some((m) => m.id === deepseekModel)
+      ) {
+        setDeepseekModel(availableModels[0].id);
+      }
+      onSettingsChanged?.();
+    } catch (error) {
+      console.error("Failed to load DeepSeek models:", error);
+      setDeepseekModels(DEFAULT_DEEPSEEK_MODELS);
+    } finally {
+      setLoadingDeepseekModels(false);
+    }
+  };
+
   const loadKimiModels = async (apiKey?: string) => {
     try {
       setLoadingKimiModels(true);
@@ -2925,6 +2981,8 @@ export function Settings({
       loadGroqModels();
     } else if (providerType === "xai") {
       loadXAIModels();
+    } else if (providerType === "deepseek") {
+      loadDeepSeekModels();
     } else if (providerType === "kimi") {
       loadKimiModels();
     } else if (providerType === "pi") {
@@ -3187,6 +3245,12 @@ export function Settings({
         setXaiModel("grok-4-fast-non-reasoning");
         setXaiModels([]);
         break;
+      case "deepseek":
+        setDeepseekApiKey("");
+        setDeepseekBaseUrl("");
+        setDeepseekModel("deepseek-chat");
+        setDeepseekModels(DEFAULT_DEEPSEEK_MODELS);
+        break;
       case "kimi":
         setKimiApiKey("");
         setKimiBaseUrl("");
@@ -3428,6 +3492,14 @@ export function Settings({
           baseUrl: xaiBaseUrl || undefined,
           ...routingFor("xai"),
           ...failoverFor("xai"),
+        },
+        // Always include DeepSeek settings
+        deepseek: {
+          apiKey: deepseekApiKey || undefined,
+          model: deepseekModel || undefined,
+          baseUrl: deepseekBaseUrl || undefined,
+          ...routingFor("deepseek"),
+          ...failoverFor("deepseek"),
         },
         // Always include Kimi settings
         kimi: {
@@ -3690,6 +3762,14 @@ export function Settings({
                 apiKey: xaiApiKey || undefined,
                 model: xaiModel || undefined,
                 baseUrl: xaiBaseUrl || undefined,
+              }
+            : undefined,
+        deepseek:
+          settings.providerType === "deepseek"
+            ? {
+                apiKey: deepseekApiKey || undefined,
+                model: deepseekModel || undefined,
+                baseUrl: deepseekBaseUrl || undefined,
               }
             : undefined,
         kimi:
@@ -5532,6 +5612,82 @@ export function Settings({
                   placeholder="grok-4-fast-non-reasoning"
                   value={xaiModel}
                   onChange={(e) => setXaiModel(e.target.value)}
+                />
+              )}
+            </div>
+          </>
+        )}
+
+        {settings.providerType === "deepseek" && (
+          <>
+            <div className="settings-section">
+              <h3>DeepSeek API Key</h3>
+              <p className="settings-description">
+                Enter your API key from{" "}
+                <a
+                  href="https://platform.deepseek.com/api_keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  DeepSeek Platform
+                </a>
+              </p>
+              <div className="settings-input-group">
+                <input
+                  type="password"
+                  className="settings-input"
+                  placeholder="sk-..."
+                  value={deepseekApiKey}
+                  onChange={(e) => setDeepseekApiKey(e.target.value)}
+                />
+                <button
+                  className="button-small button-secondary"
+                  onClick={() => loadDeepSeekModels(deepseekApiKey)}
+                  disabled={loadingDeepseekModels}
+                >
+                  {loadingDeepseekModels ? "Loading..." : "Refresh Models"}
+                </button>
+              </div>
+            </div>
+
+            <div className="settings-section">
+              <h3>Base URL</h3>
+              <p className="settings-description">
+                Optional override for the DeepSeek API endpoint.
+              </p>
+              <input
+                type="text"
+                className="settings-input"
+                placeholder="https://api.deepseek.com"
+                value={deepseekBaseUrl}
+                onChange={(e) => setDeepseekBaseUrl(e.target.value)}
+              />
+            </div>
+
+            <div className="settings-section">
+              <h3>Model</h3>
+              <p className="settings-description">
+                DeepSeek Chat is enabled for agentic tool use. DeepSeek
+                Reasoner is hidden until thinking-mode tool continuation is
+                supported.
+              </p>
+              {deepseekModels.length > 0 ? (
+                <SearchableSelect
+                  options={deepseekModels.map((model) => ({
+                    value: model.id,
+                    label: model.name,
+                  }))}
+                  value={deepseekModel}
+                  onChange={setDeepseekModel}
+                  placeholder="Select a model..."
+                />
+              ) : (
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder="deepseek-chat"
+                  value={deepseekModel}
+                  onChange={(e) => setDeepseekModel(e.target.value)}
                 />
               )}
             </div>

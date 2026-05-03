@@ -9,6 +9,7 @@ export { AzureOpenAIProvider } from "./azure-openai-provider";
 export { GroqProvider } from "./groq-provider";
 export { XAIProvider } from "./xai-provider";
 export { KimiProvider } from "./kimi-provider";
+export { DeepSeekProvider } from "./deepseek-provider";
 export { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 export { GitHubCopilotProvider } from "./github-copilot-provider";
 export { OpenAIOAuth, OpenAIOAuthTokens } from "./openai-oauth";

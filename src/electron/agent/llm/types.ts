@@ -37,6 +37,9 @@ export interface LLMProviderConfig {
   // OpenRouter-specific
   openrouterApiKey?: string;
   openrouterBaseUrl?: string;
+  // DeepSeek-specific
+  deepseekApiKey?: string;
+  deepseekBaseUrl?: string;
   // OpenAI-specific
   openaiApiKey?: string;
   openaiReasoningEffort?: OpenAIReasoningEffort;
@@ -191,6 +194,7 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
     maxImageBytes: 20 * 1024 * 1024,
     supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
   },
+  deepseek: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   xai: {
     supportsImages: true,
     maxImageBytes: 20 * 1024 * 1024,
@@ -594,6 +598,16 @@ export const KIMI_MODELS = {
 } as const;
 
 export type KimiModelKey = keyof typeof KIMI_MODELS;
+
+export const DEEPSEEK_MODELS = {
+  "deepseek-chat": {
+    id: "deepseek-chat",
+    displayName: "DeepSeek Chat",
+    description: "DeepSeek's OpenAI-compatible non-thinking chat model",
+  },
+} as const;
+
+export type DeepSeekModelKey = keyof typeof DEEPSEEK_MODELS;
 
 /**
  * Pi provider backends

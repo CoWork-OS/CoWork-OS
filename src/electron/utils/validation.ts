@@ -648,6 +648,15 @@ export const OpenRouterSettingsSchema = z
   })
   .optional();
 
+export const DeepSeekSettingsSchema = z
+  .object({
+    apiKey: z.string().max(500).optional(),
+    model: z.string().max(200).optional(),
+    baseUrl: z.string().max(500).optional(),
+    ...ProviderRoutingSettingsSchema,
+  })
+  .optional();
+
 export const OpenAISettingsSchema = z
   .object({
     apiKey: z.string().max(500).optional(),
@@ -846,6 +855,7 @@ export const LLMSettingsSchema = z.object({
   ollama: OllamaSettingsSchema,
   gemini: GeminiSettingsSchema,
   openrouter: OpenRouterSettingsSchema,
+  deepseek: DeepSeekSettingsSchema,
   openai: OpenAISettingsSchema,
   azure: AzureSettingsSchema,
   azureAnthropic: AzureAnthropicSettingsSchema,

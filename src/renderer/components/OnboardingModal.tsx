@@ -21,6 +21,7 @@ type LLMProviderType =
   | "bedrock"
   | "groq"
   | "xai"
+  | "deepseek"
   | "kimi";
 
 interface ProviderOption {
@@ -191,6 +192,27 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
     requiresApiKey: true,
     apiKeyPlaceholder: "xai-...",
     apiKeyLink: "https://console.x.ai/",
+  },
+  {
+    type: "deepseek",
+    name: "DeepSeek",
+    description: "DeepSeek Chat for agentic runs",
+    icon: (
+      <svg
+        width="24"
+        height="24"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M12 3l8 9-8 9-8-9 8-9z" />
+        <path d="M8 12h8" />
+      </svg>
+    ),
+    requiresApiKey: true,
+    apiKeyPlaceholder: "sk-...",
+    apiKeyLink: "https://platform.deepseek.com/api_keys",
   },
   {
     type: "kimi",
@@ -423,6 +445,8 @@ export function OnboardingModal({
         testConfig.groq = { apiKey };
       } else if (selectedProvider === "xai") {
         testConfig.xai = { apiKey };
+      } else if (selectedProvider === "deepseek") {
+        testConfig.deepseek = { apiKey, model: "deepseek-chat" };
       } else if (selectedProvider === "kimi") {
         testConfig.kimi = { apiKey };
       }
@@ -461,6 +485,8 @@ export function OnboardingModal({
           settings.groq = { apiKey, model: "llama-3.1-8b-instant" };
         } else if (selectedProvider === "xai") {
           settings.xai = { apiKey, model: "grok-4-fast-non-reasoning" };
+        } else if (selectedProvider === "deepseek") {
+          settings.deepseek = { apiKey, model: "deepseek-chat" };
         } else if (selectedProvider === "kimi") {
           settings.kimi = { apiKey, model: "kimi-k2.5" };
         }
@@ -511,6 +537,8 @@ export function OnboardingModal({
         return "llama-3.1-8b-instant";
       case "xai":
         return "grok-4-fast-non-reasoning";
+      case "deepseek":
+        return "deepseek-chat";
       case "kimi":
         return "kimi-k2.5";
       default:

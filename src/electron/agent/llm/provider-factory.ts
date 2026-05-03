@@ -14,6 +14,7 @@ import {
   GROQ_MODELS,
   XAI_MODELS,
   KIMI_MODELS,
+  DEEPSEEK_MODELS,
   ModelKey,
   DEFAULT_MODEL,
   DEFAULT_PI_MODEL,
@@ -33,6 +34,7 @@ import { AzureAnthropicProvider } from "./azure-anthropic-provider";
 import { GroqProvider } from "./groq-provider";
 import { XAIProvider } from "./xai-provider";
 import { KimiProvider } from "./kimi-provider";
+import { DeepSeekProvider } from "./deepseek-provider";
 import { PiProvider } from "./pi-provider";
 import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider";
@@ -638,6 +640,8 @@ function normalizeProviderConfig(config: LLMProviderConfig): LLMProviderConfig {
     geminiApiKey: normalizeSecret(config.geminiApiKey),
     openrouterApiKey: normalizeSecret(config.openrouterApiKey),
     openrouterBaseUrl: normalizeOptionalString(config.openrouterBaseUrl),
+    deepseekApiKey: normalizeSecret(config.deepseekApiKey),
+    deepseekBaseUrl: normalizeOptionalString(config.deepseekBaseUrl),
     openaiApiKey: normalizeSecret(config.openaiApiKey),
     openaiAccessToken: normalizeSecret(config.openaiAccessToken),
     openaiRefreshToken: normalizeSecret(config.openaiRefreshToken),
@@ -733,6 +737,13 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     sanitized.openrouter = {
       ...sanitized.openrouter,
       apiKey: decryptSecret(sanitized.openrouter.apiKey),
+    };
+  }
+
+  if (sanitized.deepseek) {
+    sanitized.deepseek = {
+      ...sanitized.deepseek,
+      apiKey: decryptSecret(sanitized.deepseek.apiKey),
     };
   }
 
@@ -887,6 +898,11 @@ export interface LLMSettings {
     model?: string;
     baseUrl?: string;
   } & ProviderRoutingSettings;
+  deepseek?: {
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+  } & ProviderRoutingSettings;
   openai?: {
     apiKey?: string;
     model?: string;
@@ -1030,6 +1046,7 @@ export interface LLMSettings {
   cachedGroqModels?: CachedModelInfo[];
   cachedXaiModels?: CachedModelInfo[];
   cachedKimiModels?: CachedModelInfo[];
+  cachedDeepSeekModels?: CachedModelInfo[];
   cachedPiModels?: CachedModelInfo[];
   cachedOpenAICompatibleModels?: CachedModelInfo[];
 }
@@ -1076,6 +1093,17 @@ export class LLMProviderFactory {
           model: legacyOpenAICompat.model,
         };
         delete settings.customProviders["openai-compatible"];
+      }
+
+      // Migrate DeepSeek from earlier custom-provider settings to built-in.
+      const legacyDeepSeek = settings.customProviders["deepseek"];
+      if (legacyDeepSeek && !settings.deepseek) {
+        settings.deepseek = {
+          apiKey: legacyDeepSeek.apiKey,
+          baseUrl: legacyDeepSeek.baseUrl,
+          model: legacyDeepSeek.model,
+        };
+        delete settings.customProviders["deepseek"];
       }
     }
 
@@ -1134,6 +1162,7 @@ export class LLMProviderFactory {
     normalizeNode(settings.ollama);
     normalizeNode(settings.gemini);
     normalizeNode(settings.openrouter);
+    normalizeNode(settings.deepseek);
     normalizeNode(settings.openai);
     normalizeNode(settings.azure);
     normalizeNode(settings.azureAnthropic);
@@ -1179,6 +1208,8 @@ export class LLMProviderFactory {
         return Boolean(settings.gemini?.apiKey);
       case "openrouter":
         return Boolean(settings.openrouter?.apiKey);
+      case "deepseek":
+        return Boolean(settings.deepseek?.apiKey);
       case "openai":
         return Boolean(settings.openai?.apiKey || settings.openai?.accessToken);
       case "azure":
@@ -1259,6 +1290,9 @@ export class LLMProviderFactory {
       case "openrouter":
         if (!settings.openrouter && createIfMissing) settings.openrouter = {};
         return settings.openrouter;
+      case "deepseek":
+        if (!settings.deepseek && createIfMissing) settings.deepseek = {};
+        return settings.deepseek;
       case "openai":
         if (!settings.openai && createIfMissing) settings.openai = {};
         return settings.openai;
@@ -1341,6 +1375,7 @@ export class LLMProviderFactory {
     if (next.ollama) applyDefaults("ollama");
     if (next.gemini) applyDefaults("gemini");
     if (next.openrouter) applyDefaults("openrouter");
+    if (next.deepseek) applyDefaults("deepseek");
     if (next.openai) applyDefaults("openai");
     if (next.azure) applyDefaults("azure");
     if (next.azureAnthropic) applyDefaults("azure-anthropic");
@@ -1442,6 +1477,7 @@ export class LLMProviderFactory {
         settings.ollama?.model,
         settings.gemini?.model,
         settings.openrouter?.model,
+        settings.deepseek?.model,
         normalizeOpenAIModelForAuth(
           settings.openai?.model,
           settings.openai?.authMethod,
@@ -1467,6 +1503,7 @@ export class LLMProviderFactory {
         settings.ollama?.model,
         settings.gemini?.model,
         settings.openrouter?.model,
+        settings.deepseek?.model,
         normalizeOpenAIModelForAuth(
           settings.openai?.model,
           settings.openai?.authMethod,
@@ -1852,6 +1889,9 @@ export class LLMProviderFactory {
     if (settings.openrouter?.apiKey) {
       return "openrouter";
     }
+    if (settings.deepseek?.apiKey) {
+      return "deepseek";
+    }
     if (settings.openai?.apiKey || settings.openai?.accessToken) {
       return "openai";
     }
@@ -1972,6 +2012,7 @@ export class LLMProviderFactory {
           settings.ollama?.model,
           settings.gemini?.model,
           settings.openrouter?.model,
+          settings.deepseek?.model,
           normalizeOpenAIModelForAuth(
             settings.openai?.model,
             settings.openai?.authMethod,
@@ -2017,6 +2058,12 @@ export class LLMProviderFactory {
         settings.openrouter?.apiKey,
       openrouterBaseUrl:
         overrideConfig?.openrouterBaseUrl || settings.openrouter?.baseUrl,
+      // DeepSeek config - from settings only
+      deepseekApiKey:
+        normalizeSecret(overrideConfig?.deepseekApiKey) ||
+        settings.deepseek?.apiKey,
+      deepseekBaseUrl:
+        overrideConfig?.deepseekBaseUrl || settings.deepseek?.baseUrl,
       // OpenAI config - from settings only
       openaiApiKey:
         normalizeSecret(overrideConfig?.openaiApiKey) ||
@@ -2130,6 +2177,9 @@ export class LLMProviderFactory {
       case "openrouter":
         provider = new OpenRouterProvider(config);
         break;
+      case "deepseek":
+        provider = new DeepSeekProvider(config);
+        break;
       case "openai":
         provider = new OpenAIProvider(config);
         break;
@@ -2176,6 +2226,7 @@ export class LLMProviderFactory {
     ollamaModel?: string,
     geminiModel?: string,
     openrouterModel?: string,
+    deepseekModel?: string,
     openaiModel?: string,
     azureDeployment?: string,
     azureAnthropicDeployment?: string,
@@ -2207,6 +2258,11 @@ export class LLMProviderFactory {
     // For OpenRouter, use the specific model if provided or default
     if (providerType === "openrouter") {
       return openrouterModel || OPENROUTER_DEFAULT_MODEL;
+    }
+
+    // For DeepSeek, use the specific model if provided or default
+    if (providerType === "deepseek") {
+      return deepseekModel || "deepseek-chat";
     }
 
     // For OpenAI, use the specific model if provided or default
@@ -2329,6 +2385,11 @@ export class LLMProviderFactory {
         type: "openrouter" as LLMProviderType,
         name: "OpenRouter",
         configured: !!settings.openrouter?.apiKey,
+      },
+      {
+        type: "deepseek" as LLMProviderType,
+        name: "DeepSeek",
+        configured: !!settings.deepseek?.apiKey,
       },
       {
         type: "anthropic" as LLMProviderType,
@@ -2570,6 +2631,7 @@ export class LLMProviderFactory {
           settings.openai?.model === storedModel ||
           settings.gemini?.model === storedModel ||
           settings.openrouter?.model === storedModel ||
+          settings.deepseek?.model === storedModel ||
           settings.ollama?.model === storedModel ||
           settings.groq?.model === storedModel ||
           settings.xai?.model === storedModel ||
@@ -2657,6 +2719,22 @@ export class LLMProviderFactory {
           settings.cachedOpenRouterModels.length > 0
             ? settings.cachedOpenRouterModels
             : Object.values(OPENROUTER_MODELS).map((value) => ({
+                key: value.id,
+                displayName: value.displayName,
+                description: value.description,
+              }));
+        return {
+          currentModel,
+          models: attachMetadata(ensureCurrentModel(modelList, currentModel)),
+        };
+      }
+
+      case "deepseek": {
+        const currentModel = settings.deepseek?.model || "deepseek-chat";
+        const modelList =
+          settings.cachedDeepSeekModels && settings.cachedDeepSeekModels.length > 0
+            ? settings.cachedDeepSeekModels
+            : Object.values(DEEPSEEK_MODELS).map((value) => ({
                 key: value.id,
                 displayName: value.displayName,
                 description: value.description,
@@ -3003,6 +3081,9 @@ export class LLMProviderFactory {
       case "openrouter":
         updated.openrouter = { ...settings.openrouter, model: modelKey };
         break;
+      case "deepseek":
+        updated.deepseek = { ...settings.deepseek, model: modelKey };
+        break;
       case "ollama":
         updated.ollama = { ...settings.ollama, model: modelKey };
         break;
@@ -3141,6 +3222,8 @@ export class LLMProviderFactory {
         return patchProviderRouting("gemini");
       case "openrouter":
         return patchProviderRouting("openrouter");
+      case "deepseek":
+        return patchProviderRouting("deepseek");
       case "openai":
         return patchProviderRouting("openai");
       case "azure-anthropic":
@@ -3977,6 +4060,45 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Fetch available DeepSeek models from the API.
+   *
+   * Only deepseek-chat is exposed for agentic routes until the adapter supports
+   * DeepSeek thinking-mode reasoning_content replay across tool continuations.
+   */
+  static async getDeepSeekModels(
+    apiKey?: string,
+    baseUrl?: string,
+  ): Promise<Array<{ id: string; name: string }>> {
+    const settings = this.loadSettings();
+    const normalizedApiKey = apiKey?.trim() || undefined;
+    const key = normalizedApiKey || settings.deepseek?.apiKey;
+    const normalizedBaseUrl = baseUrl?.trim() || undefined;
+    const resolvedBaseUrl = normalizedBaseUrl || settings.deepseek?.baseUrl;
+
+    const defaultModels = [{ id: "deepseek-chat", name: "DeepSeek Chat" }];
+
+    if (!key) {
+      return defaultModels;
+    }
+
+    try {
+      const provider = new DeepSeekProvider({
+        type: "deepseek",
+        model: "deepseek-chat",
+        deepseekApiKey: key,
+        deepseekBaseUrl: resolvedBaseUrl,
+      });
+      const models = await provider.getAvailableModels();
+      const supported = new Set(defaultModels.map((model) => model.id));
+      const filtered = models.filter((model) => supported.has(model.id));
+      return filtered.length > 0 ? filtered : defaultModels;
+    } catch (error: Any) {
+      console.error("Failed to fetch DeepSeek models:", error);
+      return defaultModels;
+    }
+  }
+
+  /**
    * Fetch available Pi models for a given Pi backend provider
    */
   static async getPiModels(
@@ -4060,6 +4182,7 @@ export class LLMProviderFactory {
       | "groq"
       | "xai"
       | "kimi"
+      | "deepseek"
       | "pi"
       | "openai-compatible",
     models: CachedModelInfo[],
@@ -4094,6 +4217,9 @@ export class LLMProviderFactory {
       case "kimi":
         settings.cachedKimiModels = models;
         break;
+      case "deepseek":
+        settings.cachedDeepSeekModels = models;
+        break;
       case "pi":
         settings.cachedPiModels = models;
         break;
@@ -4119,6 +4245,7 @@ export class LLMProviderFactory {
       | "groq"
       | "xai"
       | "kimi"
+      | "deepseek"
       | "pi"
       | "openai-compatible",
   ): CachedModelInfo[] | undefined {
@@ -4143,6 +4270,8 @@ export class LLMProviderFactory {
         return settings.cachedXaiModels;
       case "kimi":
         return settings.cachedKimiModels;
+      case "deepseek":
+        return settings.cachedDeepSeekModels;
       case "pi":
         return settings.cachedPiModels;
       case "openai-compatible":

@@ -12,6 +12,7 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 | Azure Anthropic | API key + endpoint + deployment in Settings | Pay-per-token via Azure |
 | Google Gemini | API key in Settings | Pay-per-token (free tier available) |
 | OpenRouter | API key in Settings (default provider) | Free tier available, pay-per-token for premium models |
+| DeepSeek | API key in Settings | Provider billing |
 | OpenAI (API Key) | API key in Settings | Pay-per-token |
 | OpenAI (ChatGPT OAuth) | Sign in with ChatGPT account | Uses your ChatGPT subscription |
 | AWS Bedrock | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS |

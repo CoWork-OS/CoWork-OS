@@ -5328,6 +5328,10 @@ export async function setupIpcHandlers(
           updatedSettings.xai = undefined;
           updatedSettings.cachedXaiModels = undefined;
           break;
+        case "deepseek":
+          updatedSettings.deepseek = undefined;
+          updatedSettings.cachedDeepSeekModels = undefined;
+          break;
         case "kimi":
           updatedSettings.kimi = undefined;
           updatedSettings.cachedKimiModels = undefined;
@@ -5718,6 +5722,27 @@ export async function setupIpcHandlers(
         description: "xAI model",
       }));
       LLMProviderFactory.saveCachedModels("xai", cachedModels);
+      return models;
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.LLM_GET_DEEPSEEK_MODELS,
+    async (_, apiKey?: string, baseUrl?: string) => {
+      checkRateLimit(IPC_CHANNELS.LLM_GET_DEEPSEEK_MODELS);
+      const validatedBaseUrl = await validateOptionalProviderBaseUrl(baseUrl, {
+        providerLabel: "DeepSeek",
+      });
+      const models = await LLMProviderFactory.getDeepSeekModels(
+        validateOptionalProviderApiKey(apiKey, "DeepSeek"),
+        validatedBaseUrl,
+      );
+      const cachedModels = models.map((m) => ({
+        key: m.id,
+        displayName: m.name,
+        description: "DeepSeek model",
+      }));
+      LLMProviderFactory.saveCachedModels("deepseek", cachedModels);
       return models;
     },
   );

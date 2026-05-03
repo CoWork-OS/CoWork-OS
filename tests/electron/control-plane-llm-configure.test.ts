@@ -94,4 +94,21 @@ describe('control-plane llm-configure', () => {
       expect(String(error.message)).toContain('providerType=bedrock');
     }
   });
+
+  it('configures DeepSeek as a built-in provider', () => {
+    configureLlmFromControlPlaneParams({
+      providerType: 'deepseek',
+      apiKey: 'sk-deepseek',
+      model: 'deepseek-reasoner',
+    });
+
+    expect(mockFactory.applyModelSelection).toHaveBeenCalledWith(expect.any(Object), 'deepseek-reasoner');
+    expect(mockFactory.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      providerType: 'deepseek',
+      modelKey: 'deepseek-reasoner',
+      deepseek: expect.objectContaining({
+        apiKey: 'sk-deepseek',
+      }),
+    }));
+  });
 });

@@ -2545,6 +2545,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_GROQ_MODELS, apiKey, baseUrl),
   getXAIModels: (apiKey?: string, baseUrl?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_XAI_MODELS, apiKey, baseUrl),
+  getDeepSeekModels: (apiKey?: string, baseUrl?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_DEEPSEEK_MODELS, apiKey, baseUrl),
   getKimiModels: (apiKey?: string, baseUrl?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_KIMI_MODELS, apiKey, baseUrl),
   getPiModels: (piProvider?: string) =>
@@ -4998,6 +5000,10 @@ export interface ElectronAPI {
     baseUrl?: string,
   ) => Promise<Array<{ id: string; name: string }>>;
   getXAIModels: (apiKey?: string, baseUrl?: string) => Promise<Array<{ id: string; name: string }>>;
+  getDeepSeekModels: (
+    apiKey?: string,
+    baseUrl?: string,
+  ) => Promise<Array<{ id: string; name: string }>>;
   getKimiModels: (
     apiKey?: string,
     baseUrl?: string,

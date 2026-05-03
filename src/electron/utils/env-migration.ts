@@ -79,6 +79,8 @@ function isProviderConfigured(
       return !!normalizeEnvValue(settings?.gemini?.apiKey);
     case "openrouter":
       return !!normalizeEnvValue(settings?.openrouter?.apiKey);
+    case "deepseek":
+      return !!normalizeEnvValue(settings?.deepseek?.apiKey);
     case "azure": {
       const hasKey = !!normalizeEnvValue(settings?.azure?.apiKey);
       const hasEndpoint = !!normalizeEnvValue(settings?.azure?.endpoint);
@@ -127,6 +129,7 @@ function pickProviderFromSettings(settings: Any): LLMProviderType | null {
     return "anthropic";
   if (normalizeEnvValue(settings?.gemini?.apiKey)) return "gemini";
   if (normalizeEnvValue(settings?.openrouter?.apiKey)) return "openrouter";
+  if (normalizeEnvValue(settings?.deepseek?.apiKey)) return "deepseek";
   if (
     normalizeEnvValue(settings?.azure?.apiKey) &&
     normalizeEnvValue(settings?.azure?.endpoint) &&
@@ -166,6 +169,7 @@ function validateProviderType(raw: string | undefined): LLMProviderType | null {
     "ollama",
     "gemini",
     "openrouter",
+    "deepseek",
     "openai",
     "azure",
     "groq",
@@ -302,6 +306,17 @@ export async function migrateEnvToSettings(): Promise<MigrationResult> {
         apiKey: env.OPENROUTER_API_KEY,
       };
       migratedKeys.push("OpenRouter API Key");
+      llmChanged = true;
+    }
+
+    // Migrate DeepSeek API key
+    if (env.DEEPSEEK_API_KEY && !llmSettings.deepseek?.apiKey) {
+      llmSettings.deepseek = {
+        ...llmSettings.deepseek,
+        apiKey: env.DEEPSEEK_API_KEY,
+        baseUrl: env.DEEPSEEK_BASE_URL || llmSettings.deepseek?.baseUrl,
+      };
+      migratedKeys.push("DeepSeek API Key");
       llmChanged = true;
     }
 
@@ -516,6 +531,28 @@ export async function importProcessEnvToSettings(
         apiKey: openrouterApiKey,
       };
       migratedKeys.push("OpenRouter API Key");
+      llmChanged = true;
+    }
+
+    const deepseekApiKey = normalizeEnvValue(process.env.DEEPSEEK_API_KEY);
+    const deepseekBaseUrl = normalizeEnvValue(process.env.DEEPSEEK_BASE_URL);
+    if (shouldWriteValue(llmSettings?.deepseek?.apiKey, deepseekApiKey, mode)) {
+      llmSettings.deepseek = {
+        ...llmSettings.deepseek,
+        apiKey: deepseekApiKey,
+        ...(deepseekBaseUrl ? { baseUrl: deepseekBaseUrl } : {}),
+      };
+      migratedKeys.push("DeepSeek API Key");
+      llmChanged = true;
+    } else if (
+      deepseekBaseUrl &&
+      shouldWriteValue(llmSettings?.deepseek?.baseUrl, deepseekBaseUrl, mode)
+    ) {
+      llmSettings.deepseek = {
+        ...llmSettings.deepseek,
+        baseUrl: deepseekBaseUrl,
+      };
+      migratedKeys.push("DeepSeek Base URL");
       llmChanged = true;
     }
 

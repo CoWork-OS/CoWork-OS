@@ -104,6 +104,21 @@ describe("importProcessEnvToSettings", () => {
     expect(saved.openai.apiKey).toBe("sk-new");
   });
 
+  it("imports DeepSeek key and base URL into built-in settings", async () => {
+    process.env.DEEPSEEK_API_KEY = "sk-deepseek";
+    process.env.DEEPSEEK_BASE_URL = "https://deepseek.example/v1";
+
+    mocks.llmLoad.mockReturnValue({ providerType: "anthropic", modelKey: "opus-4-5" });
+    mocks.searchLoad.mockReturnValue({ primaryProvider: null, fallbackProvider: null });
+
+    await importProcessEnvToSettings({ mode: "merge" });
+
+    const saved = mocks.llmSave.mock.calls[0][0];
+    expect(saved.deepseek.apiKey).toBe("sk-deepseek");
+    expect(saved.deepseek.baseUrl).toBe("https://deepseek.example/v1");
+    expect(saved.providerType).toBe("deepseek");
+  });
+
   it("imports Tavily key into search settings", async () => {
     process.env.TAVILY_API_KEY = "tav-test";
 

@@ -123,6 +123,7 @@ const SCRIPT = {
       bedrock: "AWS Bedrock. Enterprise-ready.",
       groq: "Groq. Speedy and efficient.",
       xai: "Grok. Let's put xAI to work.",
+      deepseek: "DeepSeek. Practical and cost-efficient.",
       kimi: "Kimi. Solid choice.",
     };
     return responses[provider] || "Good choice.";
@@ -1221,6 +1222,8 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         return "llama-3.1-8b-instant";
       case "xai":
         return "grok-4-fast-non-reasoning";
+      case "deepseek":
+        return "deepseek-chat";
       case "kimi":
         return "kimi-k2.5";
       default:
@@ -1268,6 +1271,9 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         case "xai":
           currentModel = existingSettings.xai?.model;
           break;
+        case "deepseek":
+          currentModel = existingSettings.deepseek?.model;
+          break;
         case "kimi":
           currentModel = existingSettings.kimi?.model;
           break;
@@ -1313,6 +1319,8 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           return !!existingSettings.groq?.apiKey;
         case "xai":
           return !!existingSettings.xai?.apiKey;
+        case "deepseek":
+          return !!existingSettings.deepseek?.apiKey;
         case "kimi":
           return !!existingSettings.kimi?.apiKey;
         default:
@@ -1343,6 +1351,8 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         testConfig.groq = { apiKey };
       } else if (provider === "xai") {
         testConfig.xai = { apiKey };
+      } else if (provider === "deepseek") {
+        testConfig.deepseek = { apiKey, model: "deepseek-chat" };
       } else if (provider === "kimi") {
         testConfig.kimi = { apiKey };
       }
@@ -1417,6 +1427,12 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
       } else if (provider === "xai") {
         settings.xai = {
           ...existingSettings?.xai,
+          ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
+          model: modelKey,
+        };
+      } else if (provider === "deepseek") {
+        settings.deepseek = {
+          ...existingSettings?.deepseek,
           ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
           model: modelKey,
         };

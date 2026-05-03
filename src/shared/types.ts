@@ -6838,6 +6838,7 @@ export const IPC_CHANNELS = {
   LLM_GET_OLLAMA_MODELS: "llm:getOllamaModels",
   LLM_GET_GEMINI_MODELS: "llm:getGeminiModels",
   LLM_GET_OPENROUTER_MODELS: "llm:getOpenRouterModels",
+  LLM_GET_DEEPSEEK_MODELS: "llm:getDeepSeekModels",
   LLM_GET_OPENAI_MODELS: "llm:getOpenAIModels",
   LLM_GET_GROQ_MODELS: "llm:getGroqModels",
   LLM_GET_XAI_MODELS: "llm:getXAIModels",
@@ -7485,6 +7486,7 @@ export const BUILTIN_LLM_PROVIDER_TYPES = [
   "ollama",
   "gemini",
   "openrouter",
+  "deepseek",
   "openai",
   "azure",
   "azure-anthropic",
@@ -7537,6 +7539,7 @@ export const MULTI_LLM_PROVIDER_DISPLAY: Record<
   gemini: { name: "Gemini", icon: "\u{2728}", color: "#6366f1" },
   openrouter: { name: "OpenRouter", icon: "\u{1F310}", color: "#8b5cf6" },
   openai: { name: "OpenAI", icon: "\u{1F916}", color: "#10b981" },
+  deepseek: { name: "DeepSeek", icon: "\u{25C6}", color: "#2563eb" },
   azure: { name: "Azure OpenAI", icon: "\u{1F7E6}", color: "#0078d4" },
   "azure-anthropic": {
     name: "Azure Anthropic",
@@ -7655,6 +7658,11 @@ export interface LLMSettingsData {
     model?: string;
   } & ProviderRoutingSettings;
   openrouter?: {
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+  } & ProviderRoutingSettings;
+  deepseek?: {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
@@ -7813,6 +7821,7 @@ export interface LLMSettingsData {
   cachedGroqModels?: CachedModelInfo[];
   cachedXaiModels?: CachedModelInfo[];
   cachedKimiModels?: CachedModelInfo[];
+  cachedDeepSeekModels?: CachedModelInfo[];
   cachedPiModels?: CachedModelInfo[];
   cachedOpenAICompatibleModels?: CachedModelInfo[];
   customProviders?: Record<string, CustomProviderConfig>;

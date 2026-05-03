@@ -66,6 +66,7 @@ const PROVIDERS: {
   { id: "ollama", name: "Ollama", requiresKey: false },
   { id: "groq", name: "Groq", requiresKey: true },
   { id: "xai", name: "Grok", requiresKey: true },
+  { id: "deepseek", name: "DeepSeek", requiresKey: true },
   { id: "kimi", name: "Kimi", requiresKey: true },
   { id: "bedrock", name: "AWS Bedrock", requiresKey: false },
 ];
@@ -78,6 +79,7 @@ const PROVIDER_URLS: Record<string, string> = {
   openrouter: "https://openrouter.ai/keys",
   groq: "https://console.groq.com/keys",
   xai: "https://console.x.ai/",
+  deepseek: "https://platform.deepseek.com/api_keys",
   kimi: "https://platform.moonshot.ai/",
 };
 
@@ -1690,7 +1692,9 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
                         ? "Groq Console"
                         : provider === "xai"
                           ? "xAI Console"
-                          : "Moonshot Platform"}
+                          : provider === "deepseek"
+                            ? "DeepSeek Platform"
+                            : "Moonshot Platform"}
             </a>
           </p>
         )}

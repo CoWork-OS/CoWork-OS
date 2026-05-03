@@ -175,6 +175,9 @@ export function buildSavedLLMSettings(
     openrouter: cleanProviderSettings(
       mergeProviderSettings(validated.openrouter, existingSettings.openrouter),
     ),
+    deepseek: cleanProviderSettings(
+      mergeProviderSettings(validated.deepseek, existingSettings.deepseek),
+    ),
     openai: cleanProviderSettings(openaiSettings),
     azure: normalizeAzureSettings(validated.azure, existingSettings.azure),
     azureAnthropic: normalizeAzureAnthropicSettings(
@@ -210,6 +213,7 @@ export function buildSavedLLMSettings(
     cachedGroqModels: existingSettings.cachedGroqModels,
     cachedXaiModels: existingSettings.cachedXaiModels,
     cachedKimiModels: existingSettings.cachedKimiModels,
+    cachedDeepSeekModels: existingSettings.cachedDeepSeekModels,
     cachedOpenAICompatibleModels: existingSettings.cachedOpenAICompatibleModels,
   };
 }

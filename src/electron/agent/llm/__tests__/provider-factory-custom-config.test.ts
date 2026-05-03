@@ -25,6 +25,7 @@ function getModelIdWithCustomProviders(
     undefined,
     undefined,
     undefined,
+    undefined,
     customProviders,
     undefined,
   );
@@ -79,6 +80,7 @@ describe("LLMProviderFactory custom provider config resolution", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       "my-deployment",
       undefined,
       undefined,
@@ -98,6 +100,7 @@ describe("LLMProviderFactory custom provider config resolution", () => {
       undefined, // ollamaModel
       undefined, // geminiModel
       undefined, // openrouterModel
+      undefined, // deepseekModel
       undefined, // openaiModel
       undefined, // azureDeployment
       undefined, // azureAnthropicDeployment
@@ -281,6 +284,61 @@ describe("LLMProviderFactory custom provider config resolution", () => {
         }),
       }),
     );
+  });
+
+  it("uses DeepSeek's documented OpenAI-compatible endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "ok" } }],
+      }),
+    } as Response);
+
+    const provider = LLMProviderFactory.createProviderFromConfig({
+      type: "deepseek",
+      model: "deepseek-reasoner",
+      deepseekApiKey: "deepseek-key",
+    } as Any);
+
+    await expect(provider.testConnection()).resolves.toEqual({
+      success: true,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://api.deepseek.com/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer deepseek-key",
+        }),
+      }),
+    );
+  });
+
+  it("blocks DeepSeek Reasoner for tool-using agent turns until reasoning replay is supported", async () => {
+    const provider = LLMProviderFactory.createProviderFromConfig({
+      type: "deepseek",
+      model: "deepseek-reasoner",
+      deepseekApiKey: "deepseek-key",
+    } as Any);
+
+    await expect(
+      provider.createMessage({
+        model: "deepseek-reasoner",
+        messages: [{ role: "user", content: "Use a tool" }],
+        maxTokens: 100,
+        tools: [
+          {
+            name: "example",
+            description: "Example tool",
+            input_schema: {
+              type: "object",
+              properties: {},
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/DeepSeek Reasoner is not supported/);
   });
 
   it("adds documented Z.AI coding-plan models to partial refresh results", async () => {

@@ -6081,8 +6081,39 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Update task workspace ID in database
    */
-  updateTaskWorkspace(taskId: string, workspaceId: string): void {
+  updateTaskWorkspace(taskId: string, workspaceId: string): Task {
+    const task = this.taskRepo.findById(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+
+    const workspace = this.workspaceRepo.findById(workspaceId);
+    if (!workspace) {
+      throw new Error(`Workspace ${workspaceId} not found`);
+    }
+
     this.taskRepo.update(taskId, { workspaceId });
+    const updatedTask = this.taskRepo.findById(taskId);
+    if (!updatedTask) {
+      throw new Error(`Task ${taskId} not found after workspace update`);
+    }
+
+    const effectiveWorkspace = this.applyTaskWorkspaceOverrides(updatedTask, workspace);
+    const cached = this.activeTasks.get(taskId);
+    if (cached) {
+      cached.executor.updateTaskWorkspace(updatedTask, effectiveWorkspace);
+      cached.lastAccessed = Date.now();
+      cached.status = "active";
+    }
+
+    this.logEvent(taskId, "log", {
+      message: `Workspace changed to "${workspace.name}" (${workspace.path}).`,
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      workspacePath: workspace.path,
+    });
+
+    return updatedTask;
   }
 
   /**

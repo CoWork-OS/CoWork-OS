@@ -3,6 +3,7 @@ import {
   validateInput,
   WorkspaceCreateSchema,
   TaskCreateSchema,
+  TaskWorkspaceUpdateSchema,
   TaskMessageSchema,
   ApprovalResponseSchema,
   GuardrailSettingsSchema,
@@ -213,6 +214,35 @@ describe("TaskCreateSchema", () => {
       budgetTokens: 50000,
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("TaskWorkspaceUpdateSchema", () => {
+  it("validates a task workspace update with a persistent workspace", () => {
+    const result = TaskWorkspaceUpdateSchema.safeParse({
+      taskId: "550e8400-e29b-41d4-a716-446655440000",
+      workspaceId: "550e8400-e29b-41d4-a716-446655440001",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("validates a task workspace update with a temp workspace", () => {
+    const result = TaskWorkspaceUpdateSchema.safeParse({
+      taskId: "550e8400-e29b-41d4-a716-446655440000",
+      workspaceId: "__temp_workspace__:session-123",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an invalid task ID", () => {
+    const result = TaskWorkspaceUpdateSchema.safeParse({
+      taskId: "not-a-task-id",
+      workspaceId: "550e8400-e29b-41d4-a716-446655440001",
+    });
+
+    expect(result.success).toBe(false);
   });
 });
 

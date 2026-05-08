@@ -30937,6 +30937,7 @@ Return ONLY a JSON object:
       | "verification_block"
       | "awaiting_user_input"
       | "dependency_unavailable"
+      | LoopBudgetStopReason
     >;
   } {
     this.ensureVerificationOutcomeSets();

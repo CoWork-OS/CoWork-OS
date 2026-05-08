@@ -185,6 +185,7 @@ export class TaskStrategyService {
         | "autoReportEnabled"
         | "progressJournalEnabled"
         | "llmProfileHint"
+        | "snapshot"
       >
     > = {
       chat: {

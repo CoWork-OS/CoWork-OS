@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES } from "../../../shared/microsoft-email";
 
 type Any = any;
 
@@ -1452,6 +1453,10 @@ describeWithSqlite("MailboxService", () => {
       enabled: true,
       config: {
         protocol: "imap-smtp",
+        authMethod: "oauth",
+        oauthProvider: "microsoft",
+        oauthClientId: "client-id",
+        refreshToken: "refresh-token",
       },
     } as never);
     const markMessageIdAsRead = vi.fn().mockResolvedValue(901);
@@ -1601,6 +1606,58 @@ describeWithSqlite("MailboxService", () => {
     } finally {
       createStandardEmailClientSpy.mockRestore();
       findByTypeSpy.mockRestore();
+    }
+  });
+
+  it("refreshes Microsoft Graph read-state tokens without requesting send scope", async () => {
+    const findByIdSpy = vi.spyOn((service as Any).channelRepo, "findById").mockReturnValue({
+      id: "email-channel",
+      type: "email",
+      enabled: true,
+      config: {
+        authMethod: "oauth",
+        oauthProvider: "microsoft",
+        oauthClientId: "client-id",
+        refreshToken: "refresh-token",
+        oauthTenant: "consumers",
+      },
+    } as never);
+    const updateSpy = vi.spyOn((service as Any).channelRepo, "update").mockReturnValue(undefined as never);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          access_token: "graph-token",
+          refresh_token: "next-refresh-token",
+          expires_in: 3600,
+          scope: MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES.join(" "),
+        }),
+    } as Response);
+
+    try {
+      await expect(
+        (service as Any).getMicrosoftGraphAccessToken(
+          "email-channel",
+          MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES,
+        ),
+      ).resolves.toBe("graph-token");
+
+      const body = String(fetchSpy.mock.calls[0]?.[1]?.body || "");
+      const params = new URLSearchParams(body);
+      expect(params.get("scope")).toBe(MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES.join(" "));
+      expect(params.get("scope")).not.toContain("Mail.Send");
+      expect(updateSpy).toHaveBeenCalledWith(
+        "email-channel",
+        expect.objectContaining({
+          config: expect.objectContaining({
+            microsoftGraphTokenScopes: [...MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES],
+          }),
+        }),
+      );
+    } finally {
+      fetchSpy.mockRestore();
+      updateSpy.mockRestore();
+      findByIdSpy.mockRestore();
     }
   });
 

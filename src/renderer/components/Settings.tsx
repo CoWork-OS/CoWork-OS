@@ -150,6 +150,7 @@ const CouncilSettings = lazySettingsPanel(() => import("./CouncilSettings"), "Co
 const RoutineSettingsPanel = lazySettingsPanel(() => import("./RoutineSettingsPanel"), "RoutineSettingsPanel");
 const ContactIdentitySettings = lazySettingsPanel(() => import("./ContactIdentitySettings"), "ContactIdentitySettings");
 const TaskTraceDebuggerPanel = lazySettingsPanel(() => import("./TaskTraceDebuggerPanel"), "TaskTraceDebuggerPanel");
+const EverydayAgentSettingsPanel = lazySettingsPanel(() => import("./EverydayAgentPanel"), "EverydayAgentSettingsPanel");
 
 type SettingsTab =
   | "appearance"
@@ -193,6 +194,7 @@ type SettingsTab =
   | "traces"
   | "customize"
   | "digitaltwins"
+  | "everydayAgent"
   | "triggers"
   | "briefing"
   | "subconscious"
@@ -638,6 +640,12 @@ const sidebarItems: SidebarItem[] = [
     icon: <User {...I} />,
   },
   {
+    tab: "everydayAgent",
+    label: "Everyday Agent",
+    group: "General",
+    icon: <Sparkles {...I} />,
+  },
+  {
     tab: "aimodels",
     label: "AI & Models",
     group: "AI & Models",
@@ -693,7 +701,7 @@ const sidebarItems: SidebarItem[] = [
   },
   {
     tab: "customize",
-    label: "Plugin Packs",
+    label: "Feature Packs",
     group: "Skills & Tools",
     icon: <Sparkles {...I} />,
   },
@@ -866,6 +874,8 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
           "groq",
           "xai",
           "grok",
+          "supergrok",
+          "grok oauth",
           "kimi",
           "nano-gpt",
           "nanogpt",
@@ -975,7 +985,20 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
     ],
     health: [{ terms: ["health", "healthkit", "fitness", "wellness"] }],
     customize: [
-      { terms: ["plugin packs", "plugins", "packs", "registry", "customize"] },
+      {
+        terms: [
+          "feature packs",
+          "plugin packs",
+          "plugins",
+          "packs",
+          "registry",
+          "customize",
+          "claude for legal",
+          "small business",
+          "smb",
+          "finance packs",
+        ],
+      },
     ],
     skills: [
       {
@@ -1032,6 +1055,7 @@ const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
   ollama: <Box {...S} />,
   groq: <Crosshair {...S} />,
   xai: <AtSign {...S} />,
+  "xai-oauth": <AtSign {...S} />,
   kimi: <Sparkles {...S} />,
   "nano-gpt": <Sparkles {...S} />,
   bedrock: <Hexagon {...S} />,
@@ -1468,11 +1492,13 @@ export function Settings({
   // xAI state
   const [xaiApiKey, setXaiApiKey] = useState("");
   const [xaiBaseUrl, setXaiBaseUrl] = useState("");
-  const [xaiModel, setXaiModel] = useState("grok-4-fast-non-reasoning");
+  const [xaiModel, setXaiModel] = useState("grok-4.3");
   const [xaiModels, setXaiModels] = useState<
     Array<{ id: string; name: string }>
   >([]);
   const [loadingXaiModels, setLoadingXaiModels] = useState(false);
+  const [xaiOAuthConnected, setXaiOAuthConnected] = useState(false);
+  const [xaiOAuthLoading, setXaiOAuthLoading] = useState(false);
 
   // DeepSeek state
   const [deepseekApiKey, setDeepseekApiKey] = useState("");
@@ -1794,6 +1820,7 @@ export function Settings({
       case "groq":
         return settings.groq || {};
       case "xai":
+      case "xai-oauth":
         return settings.xai || {};
       case "deepseek":
         return settings.deepseek || {};
@@ -1855,6 +1882,7 @@ export function Settings({
           case "groq":
             return settings.groq;
           case "xai":
+          case "xai-oauth":
             return settings.xai;
           case "deepseek":
             return settings.deepseek;
@@ -1939,6 +1967,7 @@ export function Settings({
         patchSettings("groq");
         return;
       case "xai":
+      case "xai-oauth":
         patchSettings("xai");
         return;
       case "deepseek":
@@ -1997,6 +2026,7 @@ export function Settings({
       case "groq":
         return groqModel || settings.groq?.model || "";
       case "xai":
+      case "xai-oauth":
         return xaiModel || settings.xai?.model || "";
       case "deepseek":
         return deepseekModel || settings.deepseek?.model || "";
@@ -2421,6 +2451,9 @@ export function Settings({
       if (loadedSettings.xai?.model) {
         setXaiModel(loadedSettings.xai.model);
       }
+      setXaiOAuthConnected(
+        !!(loadedSettings.xai?.accessToken && loadedSettings.xai?.refreshToken),
+      );
 
       // Set DeepSeek form state
       if (loadedSettings.deepseek?.apiKey) {
@@ -3012,7 +3045,7 @@ export function Settings({
       loadOpenAIModels();
     } else if (providerType === "groq") {
       loadGroqModels();
-    } else if (providerType === "xai") {
+    } else if (providerType === "xai" || providerType === "xai-oauth") {
       loadXAIModels();
     } else if (providerType === "deepseek") {
       loadDeepSeekModels();
@@ -3149,6 +3182,58 @@ export function Settings({
     }
   };
 
+  const handleXAIOAuthLogin = async () => {
+    try {
+      setXaiOAuthLoading(true);
+      setTestResult(null);
+      const result = await window.electronAPI.xaiOAuthStart();
+      if (result.success) {
+        setXaiOAuthConnected(true);
+        setXaiApiKey("");
+        setXaiModel((current) => current || "grok-4.3");
+        setSettings((prev) => ({
+          ...prev,
+          providerType: "xai-oauth",
+          modelKey: xaiModel || "grok-4.3",
+          xai: {
+            ...prev.xai,
+            authMethod: "oauth",
+            model: xaiModel || prev.xai?.model || "grok-4.3",
+            baseUrl: xaiBaseUrl || prev.xai?.baseUrl || "https://api.x.ai/v1",
+          },
+        }));
+        onSettingsChanged?.();
+        loadXAIModels();
+      } else {
+        setTestResult({
+          success: false,
+          error: result.error || "xAI OAuth failed",
+        });
+      }
+    } catch (error: Any) {
+      console.error("xAI OAuth error:", error);
+      setTestResult({
+        success: false,
+        error: error.message || "xAI OAuth failed",
+      });
+    } finally {
+      setXaiOAuthLoading(false);
+    }
+  };
+
+  const handleXAIOAuthLogout = async () => {
+    try {
+      setXaiOAuthLoading(true);
+      await window.electronAPI.xaiOAuthLogout();
+      setXaiOAuthConnected(false);
+      onSettingsChanged?.();
+    } catch (error: Any) {
+      console.error("xAI OAuth logout error:", error);
+    } finally {
+      setXaiOAuthLoading(false);
+    }
+  };
+
   const loadBedrockModels = async () => {
     try {
       setLoadingBedrockModels(true);
@@ -3275,7 +3360,12 @@ export function Settings({
       case "xai":
         setXaiApiKey("");
         setXaiBaseUrl("");
-        setXaiModel("grok-4-fast-non-reasoning");
+        setXaiModel("grok-4.3");
+        setXaiModels([]);
+        break;
+      case "xai-oauth":
+        setXaiOAuthConnected(false);
+        setXaiModel("grok-4.3");
         setXaiModels([]);
         break;
       case "deepseek":
@@ -3447,6 +3537,12 @@ export function Settings({
         subscriptionToken: anthropicSubscriptionToken || undefined,
         authMethod: anthropicAuthMethod,
       };
+      const xaiAuthMethod =
+        currentSettings.providerType === "xai"
+          ? "api_key"
+          : currentSettings.providerType === "xai-oauth"
+            ? "oauth"
+            : currentSettings.xai?.authMethod;
       const imageTimeoutSeconds = (value: string): number | undefined => {
         const parsed = Number(value);
         if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
@@ -3552,6 +3648,7 @@ export function Settings({
           apiKey: xaiApiKey || undefined,
           model: xaiModel || undefined,
           baseUrl: xaiBaseUrl || undefined,
+          authMethod: xaiAuthMethod,
           ...routingFor("xai"),
           ...failoverFor("xai"),
         },
@@ -3831,11 +3928,16 @@ export function Settings({
               }
             : undefined,
         xai:
-          settings.providerType === "xai"
+          settings.providerType === "xai" || settings.providerType === "xai-oauth"
             ? {
-                apiKey: xaiApiKey || undefined,
+                apiKey:
+                  settings.providerType === "xai"
+                    ? xaiApiKey || undefined
+                    : undefined,
                 model: xaiModel || undefined,
                 baseUrl: xaiBaseUrl || undefined,
+                authMethod:
+                  settings.providerType === "xai-oauth" ? "oauth" : "api_key",
               }
             : undefined,
         deepseek:
@@ -5657,20 +5759,84 @@ export function Settings({
           </>
         )}
 
-        {settings.providerType === "xai" && (
+        {(settings.providerType === "xai" ||
+          settings.providerType === "xai-oauth") && (
           <>
             <div className="settings-section">
-              <h3>xAI API Key</h3>
+              <h3>Grok Authentication</h3>
               <p className="settings-description">
-                Enter your API key from{" "}
-                <a
-                  href="https://console.x.ai/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  xAI Console
-                </a>
+                Use your SuperGrok subscription with browser OAuth, or use a
+                direct xAI API key.
               </p>
+              <div className="auth-method-tabs">
+                <button
+                  type="button"
+                  className={`auth-method-tab ${settings.providerType === "xai-oauth" ? "active" : ""}`}
+                  onClick={() => handleProviderSelect("xai-oauth")}
+                >
+                  SuperGrok Subscription
+                </button>
+                <button
+                  type="button"
+                  className={`auth-method-tab ${settings.providerType === "xai" ? "active" : ""}`}
+                  onClick={() => handleProviderSelect("xai")}
+                >
+                  xAI API Key
+                </button>
+              </div>
+            </div>
+
+            {settings.providerType === "xai-oauth" ? (
+              <div className="settings-section">
+                <h3>Grok Account</h3>
+                {xaiOAuthConnected ? (
+                  <div className="oauth-connected">
+                    <div className="oauth-status">
+                      <span>Connected to Grok</span>
+                    </div>
+                    <p className="settings-description">
+                      Your Grok account is connected. CoWork OS will refresh
+                      the OAuth session automatically before model calls.
+                    </p>
+                    <button
+                      className="button-small button-secondary"
+                      onClick={handleXAIOAuthLogout}
+                      disabled={xaiOAuthLoading}
+                    >
+                      {xaiOAuthLoading
+                        ? "Disconnecting..."
+                        : "Disconnect Account"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="oauth-login">
+                    <p className="settings-description">
+                      Sign in through xAI to use Grok 4.3 and related
+                      subscription models without an API key.
+                    </p>
+                    <button
+                      className="button-primary oauth-login-btn"
+                      onClick={handleXAIOAuthLogin}
+                      disabled={xaiOAuthLoading}
+                    >
+                      {xaiOAuthLoading ? "Connecting..." : "Sign in with Grok"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="settings-section">
+                <h3>xAI API Key</h3>
+                <p className="settings-description">
+                  Enter your API key from{" "}
+                  <a
+                    href="https://console.x.ai/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    xAI Console
+                  </a>
+                </p>
               <div className="settings-input-group">
                 <input
                   type="password"
@@ -5688,11 +5854,13 @@ export function Settings({
                 </button>
               </div>
             </div>
+            )}
 
             <div className="settings-section">
               <h3>Base URL</h3>
               <p className="settings-description">
-                Optional override for the xAI API endpoint.
+                Optional override for the xAI API endpoint. OAuth defaults to
+                the same Responses-compatible endpoint used by Hermes.
               </p>
               <input
                 type="text"
@@ -5706,8 +5874,7 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                Select a Grok model. Enter your API key and click "Refresh
-                Models" to load available models.
+                Select a Grok model. OAuth defaults to Grok 4.3.
               </p>
               {xaiModels.length > 0 ? (
                 <SearchableSelect
@@ -5723,7 +5890,7 @@ export function Settings({
                 <input
                   type="text"
                   className="settings-input"
-                  placeholder="grok-4-fast-non-reasoning"
+                  placeholder="grok-4.3"
                   value={xaiModel}
                   onChange={(e) => setXaiModel(e.target.value)}
                 />
@@ -7560,6 +7727,11 @@ export function Settings({
                 initialCompanyId={digitalTwinsCompanyId}
                 onOpenAgents={onNavigateToAgents}
               />
+            ) : activeTab === "everydayAgent" ? (
+              <EverydayAgentSettingsPanel
+                workspaceId={workspaceId}
+                onCreateTask={onCreateTask}
+              />
             ) : activeTab === "health" ? (
               <HealthPanel compact onCreateTask={onCreateTask} />
             ) : activeTab === "system" ? (
@@ -7778,7 +7950,9 @@ export function Settings({
                   ))}
                 </div>
                 <div className="more-channels-content">
-                  {activeAutomationsSubTab === "routines" && <RoutineSettingsPanel />}
+                  {activeAutomationsSubTab === "routines" && (
+                    <RoutineSettingsPanel onOpenTask={onOpenTask} />
+                  )}
                   {activeAutomationsSubTab === "queue" && <QueueSettings />}
                   {activeAutomationsSubTab === "council" && (
                     <CouncilSettings

@@ -69,7 +69,11 @@ import {
 } from "../../shared/channelMessages";
 import { DEFAULT_QUIRKS } from "../../shared/types";
 import { getUnsupportedManualEmailSetupMessage } from "../../shared/email-provider-support";
-import { MICROSOFT_EMAIL_DEFAULT_TENANT } from "../../shared/microsoft-email";
+import {
+  MICROSOFT_EMAIL_DEFAULT_TENANT,
+  MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES,
+  normalizeMicrosoftEmailReadScopes,
+} from "../../shared/microsoft-email";
 import { createLogger } from "../utils/logger";
 import { refreshMicrosoftEmailAccessToken } from "../utils/microsoft-email-oauth";
 import {
@@ -606,6 +610,7 @@ export class ChannelGateway {
 
     // Auto-connect if configured
     if (this.config.autoConnect) {
+      await this.connectMicrosoftEmailGraphChannels();
       await this.router.connectAll();
     }
 
@@ -625,6 +630,7 @@ export class ChannelGateway {
     if (!this.initialized) {
       await this.initialize();
     }
+    await this.connectMicrosoftEmailGraphChannels();
     await this.router.connectAll();
   }
 
@@ -1251,7 +1257,7 @@ export class ChannelGateway {
     displayName?: string,
     allowedSenders?: string[],
     subjectFilter?: string,
-    securityMode: "open" | "allowlist" | "pairing" = "pairing",
+    _securityMode: "open" | "allowlist" | "pairing" = "open",
     options?: {
       protocol?: "imap-smtp" | "loom";
       authMethod?: "password" | "oauth";
@@ -1336,8 +1342,8 @@ export class ChannelGateway {
       enabled: false, // Don't enable until connected
       config,
       securityConfig: {
-        mode: securityMode,
-        allowedUsers: protocol === "loom" ? [] : allowedSenders || [],
+        mode: "open",
+        allowedUsers: [],
         pairingCodeTTL: 300,
         maxPairingAttempts: 5,
         rateLimitPerMinute: 30,
@@ -1496,6 +1502,13 @@ export class ChannelGateway {
       (this.channelRepo.findAllByType(channel.type).length === 1
         ? this.router.getAdapter(channel.type as ChannelType)
         : undefined);
+    if (this.isMicrosoftEmailOAuthChannel(channel)) {
+      if (adapter) {
+        void adapter.disconnect().catch(() => undefined);
+      }
+      this.router.unregisterAdapter(channelId);
+      return;
+    }
     if (adapter?.updateConfig) {
       adapter.updateConfig(channel.config as ChannelConfig);
     }
@@ -1508,6 +1521,11 @@ export class ChannelGateway {
     const channel = this.channelRepo.findById(channelId);
     if (!channel) {
       throw new Error("Channel not found");
+    }
+
+    if (this.isMicrosoftEmailOAuthChannel(channel)) {
+      await this.connectMicrosoftEmailGraphChannel(channel);
+      return;
     }
 
     // Create and register adapter if not already done
@@ -1690,10 +1708,22 @@ export class ChannelGateway {
     }
 
     try {
+      if (channel.type === "email" && this.isMicrosoftEmailOAuthChannel(channel)) {
+        await this.validateMicrosoftEmailGraphReadAccess(channel);
+        return {
+          success: true,
+          botUsername: this.getMicrosoftEmailIdentity(channel),
+        };
+      }
+
       const adapter = this.createAdapterForChannel(channel);
-      await adapter.connect();
-      const info = await adapter.getInfo();
-      await adapter.disconnect();
+      let info: Awaited<ReturnType<ChannelAdapter["getInfo"]>>;
+      try {
+        await adapter.connect();
+        info = await adapter.getInfo();
+      } finally {
+        await adapter.disconnect().catch(() => undefined);
+      }
 
       return {
         success: true,
@@ -1902,6 +1932,9 @@ export class ChannelGateway {
 
     for (const channel of channels) {
       try {
+        if (this.isMicrosoftEmailOAuthChannel(channel)) {
+          continue;
+        }
         const adapter = this.createAdapterForChannel(channel);
         this.attachDiscordSupervisorHandler(adapter);
         this.router.registerAdapter(adapter, channel.id);
@@ -1918,6 +1951,137 @@ export class ChannelGateway {
     adapter.onMessage(async (message) => {
       await this.discordSupervisorService?.handleIncomingDiscordMessage(adapter, message);
     });
+  }
+
+  private isMicrosoftEmailOAuthChannel(channel: Channel): boolean {
+    if (channel.type !== "email") return false;
+    return (
+      (channel.config.authMethod as string | undefined) === "oauth" &&
+      (channel.config.oauthProvider as string | undefined) === "microsoft"
+    );
+  }
+
+  private getMicrosoftEmailIdentity(channel: Channel): string | undefined {
+    const email = channel.config.email as string | undefined;
+    return email?.trim() || undefined;
+  }
+
+  private async connectMicrosoftEmailGraphChannels(): Promise<void> {
+    const channels = this.channelRepo
+      .findEnabled()
+      .filter((channel) => this.isMicrosoftEmailOAuthChannel(channel));
+
+    for (const channel of channels) {
+      try {
+        await this.connectMicrosoftEmailGraphChannel(channel);
+      } catch (error) {
+        console.error("Failed to connect Microsoft Outlook email channel:", error);
+      }
+    }
+  }
+
+  private async connectMicrosoftEmailGraphChannel(channel: Channel): Promise<void> {
+    this.router.unregisterAdapter(channel.id);
+    this.channelRepo.update(channel.id, { enabled: true, status: "connecting" });
+
+    try {
+      await this.validateMicrosoftEmailGraphReadAccess(channel);
+      this.channelRepo.update(channel.id, {
+        enabled: true,
+        status: "connected",
+        botUsername: this.getMicrosoftEmailIdentity(channel),
+      });
+    } catch (error) {
+      this.channelRepo.update(channel.id, { status: "error" });
+      throw error;
+    }
+  }
+
+  private async validateMicrosoftEmailGraphReadAccess(channel: Channel): Promise<void> {
+    const oauthClientId = channel.config.oauthClientId as string | undefined;
+    const refreshToken = channel.config.refreshToken as string | undefined;
+    const accessToken =
+      (channel.config.microsoftGraphAccessToken as string | undefined) ||
+      (channel.config.accessToken as string | undefined);
+    const tokenExpiresAt =
+      (channel.config.microsoftGraphTokenExpiresAt as number | undefined) ||
+      (channel.config.tokenExpiresAt as number | undefined);
+    const tokenScopes = Array.isArray(channel.config.microsoftGraphTokenScopes)
+      ? (channel.config.microsoftGraphTokenScopes as string[])
+      : Array.isArray(channel.config.scopes)
+        ? (channel.config.scopes as string[])
+        : undefined;
+    if (
+      accessToken &&
+      (!tokenExpiresAt || Date.now() < tokenExpiresAt - 2 * 60 * 1000) &&
+      tokenScopes?.includes("https://graph.microsoft.com/Mail.ReadWrite")
+    ) {
+      await this.probeMicrosoftGraphReadAccess(accessToken);
+      return;
+    }
+
+    if (!oauthClientId || !refreshToken) {
+      if (
+        accessToken &&
+        (!tokenExpiresAt || Date.now() < tokenExpiresAt - 2 * 60 * 1000)
+      ) {
+        await this.probeMicrosoftGraphReadAccess(accessToken);
+        return;
+      }
+      throw new Error(
+        "Outlook sync test failed: reconnect the Outlook email channel so CoWork can request Microsoft Graph Mail.ReadWrite access.",
+      );
+    }
+
+    const refreshed = await refreshMicrosoftEmailAccessToken({
+      clientId: oauthClientId,
+      clientSecret: channel.config.oauthClientSecret as string | undefined,
+      refreshToken,
+      tenant: (channel.config.oauthTenant as string | undefined) || MICROSOFT_EMAIL_DEFAULT_TENANT,
+      scopes: [...MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES],
+    });
+    await this.probeMicrosoftGraphReadAccess(refreshed.accessToken);
+
+    this.channelRepo.update(channel.id, {
+      config: {
+        ...channel.config,
+        microsoftGraphAccessToken: refreshed.accessToken,
+        microsoftGraphTokenExpiresAt: refreshed.expiresIn
+          ? Date.now() + refreshed.expiresIn * 1000
+          : (channel.config.microsoftGraphTokenExpiresAt as number | undefined),
+        microsoftGraphTokenScopes: normalizeMicrosoftEmailReadScopes(
+          refreshed.scopes || MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES,
+        ),
+        refreshToken: refreshed.refreshToken || refreshToken,
+        scopes: normalizeMicrosoftEmailReadScopes(
+          refreshed.scopes || (channel.config.scopes as string[] | undefined),
+        ),
+      },
+    });
+  }
+
+  private async probeMicrosoftGraphReadAccess(accessToken: string): Promise<void> {
+    const url = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages");
+    url.searchParams.set("$top", "1");
+    url.searchParams.set("$select", "id");
+    const response = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (response.ok) return;
+
+    const rawText = typeof response.text === "function" ? await response.text() : "";
+    let graphMessage = response.statusText || "Microsoft Graph request failed";
+    if (rawText) {
+      try {
+        const data = JSON.parse(rawText) as { error?: { message?: string }; message?: string };
+        graphMessage = data.error?.message || data.message || graphMessage;
+      } catch {
+        graphMessage = rawText;
+      }
+    }
+    throw new Error(
+      `Outlook sync test failed (${response.status}): ${graphMessage}. Reconnect with Microsoft Graph Mail.ReadWrite access.`,
+    );
   }
 
   private async getEmailOAuthAccessToken(channelId: string): Promise<string> {
@@ -1962,7 +2126,9 @@ export class ChannelGateway {
       accessToken: refreshed.accessToken,
       refreshToken: refreshed.refreshToken || refreshToken,
       tokenExpiresAt: refreshed.expiresIn ? Date.now() + refreshed.expiresIn * 1000 : tokenExpiresAt,
-      scopes: refreshed.scopes || (channel.config.scopes as string[] | undefined),
+      scopes: normalizeMicrosoftEmailReadScopes(
+        refreshed.scopes || (channel.config.scopes as string[] | undefined),
+      ),
     };
 
     this.channelRepo.update(channelId, { config: nextConfig });

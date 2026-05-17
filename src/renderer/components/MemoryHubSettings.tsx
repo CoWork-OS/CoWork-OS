@@ -35,6 +35,13 @@ const DEFAULT_FEATURES: MemoryFeaturesSettings = {
   structuredObservationsEnabled: true,
   progressiveRecallToolsEnabled: true,
   memoryInspectorEnabled: true,
+  transcriptStoreEnabled: false,
+  durableContextEnabled: false,
+  durableContextMode: "off",
+  durableContextThreshold: 0.75,
+  durableContextFreshTailCount: 64,
+  durableContextLargePayloadThreshold: 25000,
+  durableContextSummaryModel: "",
 };
 
 type BadgeTone = "neutral" | "success" | "warning" | "error";
@@ -814,6 +821,40 @@ export function MemoryHubSettings(props?: {
                 type="checkbox"
                 checked={features.progressiveRecallToolsEnabled !== false}
                 onChange={(e) => saveFeatures({ progressiveRecallToolsEnabled: e.target.checked })}
+                disabled={saving}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+        </div>
+
+        <div className="settings-form-group">
+          <div className="memory-hub-toggle-row">
+            <div className="memory-hub-grow">
+              <div className="memory-hub-primary-label">
+                Enable Durable Runtime Context
+              </div>
+              <p className="settings-form-hint memory-hub-hint-tight">
+                Stores compacted task context with source links and exposes read-only context_grep
+                and context_describe tools.
+              </p>
+            </div>
+            <label className="settings-toggle memory-hub-toggle">
+              <input
+                type="checkbox"
+                checked={features.durableContextEnabled === true}
+                onChange={(e) =>
+                  saveFeatures({
+                    durableContextEnabled: e.target.checked,
+                    durableContextMode: e.target.checked ? "experimental" : "off",
+                    checkpointCaptureEnabled: e.target.checked
+                      ? true
+                      : features.checkpointCaptureEnabled,
+                    transcriptStoreEnabled: e.target.checked
+                      ? true
+                      : features.transcriptStoreEnabled,
+                  })
+                }
                 disabled={saving}
               />
               <span className="toggle-slider" />

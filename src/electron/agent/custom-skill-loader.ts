@@ -490,6 +490,24 @@ export class CustomSkillLoader {
     logger.debug(`Plugin skill registered: ${skill.id}`);
   }
 
+  /**
+   * Remove in-memory skills registered by a plugin pack.
+   * Workspace skills with the same IDs are preserved because they are user-owned.
+   */
+  unregisterPluginSkills(pluginName: string): number {
+    let removed = 0;
+    for (const [skillId, skill] of this.skills) {
+      if (skill.source === "workspace") continue;
+      if (skill.metadata?.pluginSource !== pluginName) continue;
+      this.skills.delete(skillId);
+      removed++;
+    }
+    if (removed > 0) {
+      logger.debug(`Plugin skills unregistered for ${pluginName}: ${removed}`);
+    }
+    return removed;
+  }
+
   getLoadStats(): {
     bundled: number;
     external: number;

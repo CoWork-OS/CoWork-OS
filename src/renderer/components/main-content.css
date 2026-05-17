@@ -1277,7 +1277,7 @@
 
 .home-automation-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 
@@ -5323,6 +5323,28 @@
   color: var(--color-text-muted);
 }
 
+.action-block-kind-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-muted);
+  opacity: 0.86;
+}
+
+.action-block-kind-icon svg {
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+}
+
+.action-block-header:hover .action-block-kind-icon {
+  color: var(--color-text-secondary);
+  opacity: 1;
+}
+
 .action-block-summary {
   flex: 0 1 auto;
   min-width: 0;
@@ -5511,6 +5533,28 @@
   overflow-wrap: anywhere;
 }
 
+.event-details.event-details-failure {
+  padding: 7px 10px 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-error) 24%, transparent);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  color: color-mix(in srgb, var(--color-error) 76%, var(--color-text));
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.step-feed-card .event-details.event-details-failure {
+  margin-top: 6px;
+  padding: 7px 10px 7px 12px;
+}
+
+.theme-light .event-details.event-details-failure {
+  background: color-mix(in srgb, var(--color-error) 7%, #ffffff);
+  color: color-mix(in srgb, var(--color-error) 70%, #3f3f46);
+}
+
 .event-details pre {
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -5685,6 +5729,28 @@
 
 .conversation-artifact-stack {
   margin: 4px 0 14px;
+}
+
+.conversation-artifact-stack-show-more {
+  display: inline-flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--color-border-subtle, var(--color-border));
+  border-radius: 8px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.conversation-artifact-stack-show-more:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
 .inline-image-preview {
@@ -6001,11 +6067,28 @@
   margin: 12px 0;
 }
 
+.assistant-rich-frame-embed {
+  margin: 8px 0 14px;
+}
+
 .chat-message.assistant-message:has(.assistant-html-embed) .chat-bubble.assistant-bubble {
   width: min(100%, 1180px);
 }
 
+.chat-message.assistant-message:has(.assistant-rich-frame-embed) .chat-bubble.assistant-bubble {
+  width: min(100%, 1180px);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  overflow: visible;
+}
+
 .chat-message.assistant-message:has(.assistant-html-embed) .chat-bubble-content {
+  word-break: normal;
+}
+
+.chat-message.assistant-message:has(.assistant-rich-frame-embed) .chat-bubble-content {
   word-break: normal;
 }
 
@@ -6147,8 +6230,35 @@
   background: white;
 }
 
+.inline-html-preview-frame {
+  --inline-html-frame-height: clamp(360px, 56vh, 720px);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.inline-html-preview-frame .inline-html-frame-wrap {
+  padding: 0;
+  height: var(--inline-html-frame-height);
+  aspect-ratio: var(--inline-html-frame-aspect-ratio, auto);
+  background: transparent;
+}
+
+.inline-html-preview-frame .inline-html-frame {
+  min-height: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .inline-html-preview-embedded .inline-html-frame {
   min-height: clamp(560px, 72vh, 860px);
+}
+
+.inline-html-preview-frame.inline-html-preview-embedded .inline-html-frame {
+  min-height: 100%;
 }
 
 .inline-html-preview-source .inline-html-frame {
@@ -6160,13 +6270,32 @@
     margin: 10px -4px;
   }
 
+  .assistant-rich-frame-embed {
+    margin: 10px -4px;
+  }
+
   .inline-html-frame-wrap {
     padding: 8px;
+  }
+
+  .inline-html-preview-frame {
+    border-radius: 0;
+  }
+
+  .inline-html-preview-frame .inline-html-frame-wrap {
+    padding: 0;
+    height: var(--inline-html-frame-height);
+    max-height: 72vh;
   }
 
   .inline-html-preview-embedded .inline-html-frame,
   .inline-html-preview-source .inline-html-frame {
     min-height: 70vh;
+  }
+
+  .inline-html-preview-frame.inline-html-preview-embedded .inline-html-frame,
+  .inline-html-preview-frame.inline-html-preview-source .inline-html-frame {
+    min-height: 100%;
   }
 }
 

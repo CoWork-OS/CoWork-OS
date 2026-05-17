@@ -34,6 +34,9 @@ type UserFactCategory =
   | "bio"
   | "work"
   | "goal"
+  | "operating"
+  | "voice"
+  | "accountability"
   | "constraint"
   | "other";
 
@@ -892,6 +895,9 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                 <option value="bio">Profile</option>
                 <option value="work">Work</option>
                 <option value="goal">Goal</option>
+                <option value="operating">Operating Style</option>
+                <option value="voice">Voice</option>
+                <option value="accountability">Accountability</option>
                 <option value="constraint">Constraint</option>
                 <option value="other">Other</option>
               </select>

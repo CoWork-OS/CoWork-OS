@@ -50,6 +50,12 @@ describe("MemoryFeaturesManager", () => {
     expect(settings.promptStackV2Enabled).toBe(false);
     expect(settings.layeredMemoryEnabled).toBe(false);
     expect(settings.transcriptStoreEnabled).toBe(false);
+    expect(settings.durableContextEnabled).toBe(false);
+    expect(settings.durableContextMode).toBe("off");
+    expect(settings.durableContextThreshold).toBe(0.75);
+    expect(settings.durableContextFreshTailCount).toBe(64);
+    expect(settings.durableContextLargePayloadThreshold).toBe(25000);
+    expect(settings.durableContextSummaryModel).toBe("");
     expect(settings.backgroundConsolidationEnabled).toBe(false);
     expect(settings.queryOrchestratorEnabled).toBe(false);
     expect(settings.sessionLineageEnabled).toBe(false);
@@ -71,6 +77,12 @@ describe("MemoryFeaturesManager", () => {
       promptStackV2Enabled: true,
       layeredMemoryEnabled: true,
       transcriptStoreEnabled: true,
+      durableContextEnabled: true,
+      durableContextMode: "on",
+      durableContextThreshold: 0.9,
+      durableContextFreshTailCount: 48,
+      durableContextLargePayloadThreshold: 12000,
+      durableContextSummaryModel: "summary-model",
       backgroundConsolidationEnabled: true,
       queryOrchestratorEnabled: true,
       sessionLineageEnabled: true,
@@ -86,13 +98,19 @@ describe("MemoryFeaturesManager", () => {
 
     expect(settings.contextPackInjectionEnabled).toBe(false);
     expect(settings.heartbeatMaintenanceEnabled).toBe(true);
-    expect(settings.checkpointCaptureEnabled).toBe(false);
+    expect(settings.checkpointCaptureEnabled).toBe(true);
     expect(settings.verbatimRecallEnabled).toBe(false);
     expect(settings.wakeUpLayersEnabled).toBe(false);
     expect(settings.temporalKnowledgeEnabled).toBe(false);
     expect(settings.promptStackV2Enabled).toBe(true);
     expect(settings.layeredMemoryEnabled).toBe(true);
     expect(settings.transcriptStoreEnabled).toBe(true);
+    expect(settings.durableContextEnabled).toBe(true);
+    expect(settings.durableContextMode).toBe("on");
+    expect(settings.durableContextThreshold).toBe(0.9);
+    expect(settings.durableContextFreshTailCount).toBe(48);
+    expect(settings.durableContextLargePayloadThreshold).toBe(12000);
+    expect(settings.durableContextSummaryModel).toBe("summary-model");
     expect(settings.backgroundConsolidationEnabled).toBe(true);
     expect(settings.queryOrchestratorEnabled).toBe(true);
     expect(settings.sessionLineageEnabled).toBe(true);
@@ -121,6 +139,12 @@ describe("MemoryFeaturesManager", () => {
       promptStackV2Enabled: false,
       layeredMemoryEnabled: false,
       transcriptStoreEnabled: false,
+      durableContextEnabled: false,
+      durableContextMode: "off",
+      durableContextThreshold: 0.75,
+      durableContextFreshTailCount: 64,
+      durableContextLargePayloadThreshold: 25000,
+      durableContextSummaryModel: "",
       backgroundConsolidationEnabled: false,
       queryOrchestratorEnabled: false,
       sessionLineageEnabled: false,
@@ -129,6 +153,24 @@ describe("MemoryFeaturesManager", () => {
       topicMemoryEnabled: true,
       defaultArchiveInjectionEnabled: false,
       autoPromoteToCuratedMemoryEnabled: false,
+      structuredObservationsEnabled: true,
+      progressiveRecallToolsEnabled: true,
+      memoryInspectorEnabled: true,
+    });
+  });
+
+  it("enabling durable context enables required capture features", () => {
+    MemoryFeaturesManager.saveSettings({
+      durableContextEnabled: true,
+      checkpointCaptureEnabled: false,
+      transcriptStoreEnabled: false,
+    });
+
+    expect(mocks.storedSettings).toMatchObject({
+      durableContextEnabled: true,
+      durableContextMode: "experimental",
+      checkpointCaptureEnabled: true,
+      transcriptStoreEnabled: true,
     });
   });
 });

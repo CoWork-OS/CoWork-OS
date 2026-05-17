@@ -1,4 +1,6 @@
 const WORD_DOCUMENT_ARTIFACT_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
   ".docx",
   ".docm",
   ".dotx",
@@ -11,6 +13,8 @@ const WORD_DOCUMENT_ARTIFACT_EXTENSIONS = new Set([
 ]);
 
 const IN_APP_DOCUMENT_PREVIEW_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
   ".docx",
   ".docm",
   ".dotx",
@@ -26,6 +30,8 @@ const EDITABLE_DOCUMENT_EXTENSIONS = new Set([".docx"]);
 const WORD_DOCUMENT_MIME_TYPES = new Set([
   "application/msword",
   "application/rtf",
+  "text/markdown",
+  "text/x-markdown",
   "application/vnd.apple.pages",
   "application/vnd.oasis.opendocument.text",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -44,6 +50,10 @@ export function getDocumentFileExtension(filePath: string): string {
 export function getDocumentFormatLabel(filePath: string): string {
   const extension = getDocumentFileExtension(filePath);
   switch (extension) {
+    case ".md":
+      return "MD";
+    case ".markdown":
+      return "Markdown";
     case ".docx":
       return "DOCX";
     case ".docm":

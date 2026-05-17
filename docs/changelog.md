@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **xAI Grok OAuth / SuperGrok provider docs**: documented the new `xai-oauth` provider option, SuperGrok browser sign-in flow, `grok-4.3` default model, token-refresh behavior, xAI API-key alternative, and related provider-count updates across README, getting started, provider, migration, status, feature, and positioning docs.
+- **Durable Runtime Context docs**: documented opt-in active-task durable recall, `context_grep` / `context_describe`, summary DAG parent links, clear-memory behavior, enable/disable expectations, diagnostics, edge cases, validation commands, and manual test prompts.
+
+### Changed
+- **First-run onboarding docs and UX**: documented the staged first-run setup flow, ChatGPT subscription sign-in path, local Ollama detection, free-option provider badges for OpenRouter/Gemini/Groq, and the fixed-frame onboarding recap with a scrollable review body.
+
 ## [0.5.45] - 2026-05-14
 
 ### Added

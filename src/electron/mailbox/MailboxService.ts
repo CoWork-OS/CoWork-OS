@@ -7884,7 +7884,27 @@ export class MailboxService {
 
   private chooseMailboxClassifierModel(): { providerType: string; modelKey: string; modelId: string } | null {
     try {
-      const selection = LLMProviderFactory.resolveTaskModelSelection();
+      let selection = LLMProviderFactory.resolveTaskModelSelection(undefined, {
+        forceProfile: "cheap",
+        allowProfileRouting: true,
+      });
+      if (selection.providerType === "openai" && selection.modelSource === "provider_default") {
+        const settings = LLMProviderFactory.loadSettings();
+        if (settings.openai?.authMethod === "oauth") {
+          selection = LLMProviderFactory.resolveTaskModelSelection(
+            {
+              providerType: "openai",
+              modelKey: "gpt-5.4-mini",
+              llmProfile: "cheap",
+            },
+            {
+              forceProfile: "cheap",
+              allowProviderOverride: true,
+              allowModelOverride: true,
+            },
+          );
+        }
+      }
       return {
         providerType: selection.providerType,
         modelKey: selection.modelKey,

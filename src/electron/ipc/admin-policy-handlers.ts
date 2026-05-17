@@ -2,17 +2,44 @@ import { ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
 import {
   loadPolicies,
+  loadPoliciesStrict,
   savePolicies,
+  watchPolicies,
   validatePolicies,
   isPackAllowed,
   isPackRequired,
 } from "../admin/policies";
 import type { AdminPolicies } from "../admin/policies";
 
+let policyWatcherCleanup: (() => void) | null = null;
+let policyReconcileQueue: Promise<void> = Promise.resolve();
+
+function reconcilePluginPackPolicies(): Promise<void> {
+  policyReconcileQueue = policyReconcileQueue.then(
+    async () => {
+      const { getPluginRegistry } = await import("../extensions/registry");
+      await getPluginRegistry().reconcilePackRuntimeState();
+    },
+    async () => {
+      const { getPluginRegistry } = await import("../extensions/registry");
+      await getPluginRegistry().reconcilePackRuntimeState();
+    },
+  );
+  return policyReconcileQueue;
+}
+
 /**
  * Set up Admin Policy IPC handlers
  */
 export function setupAdminPolicyHandlers(): void {
+  if (!policyWatcherCleanup) {
+    policyWatcherCleanup = watchPolicies(() => {
+      void reconcilePluginPackPolicies().catch((error) => {
+        console.warn("[AdminPolicies] Failed to reconcile plugin pack policy file change:", error);
+      });
+    });
+  }
+
   // Get current admin policies
   ipcMain.handle(IPC_CHANNELS.ADMIN_POLICIES_GET, async () => {
     return loadPolicies();
@@ -38,6 +65,30 @@ export function setupAdminPolicyHandlers(): void {
         ...current.agents,
         ...updates.agents,
       },
+      everydayAgent: {
+        ...current.everydayAgent,
+        ...updates.everydayAgent,
+        activeHours: {
+          ...current.everydayAgent.activeHours,
+          ...updates.everydayAgent?.activeHours,
+        },
+      },
+      runtime: {
+        ...current.runtime,
+        ...updates.runtime,
+        network: {
+          ...current.runtime.network,
+          ...updates.runtime?.network,
+        },
+        autoReview: {
+          ...current.runtime.autoReview,
+          ...updates.runtime?.autoReview,
+        },
+        telemetry: {
+          ...current.runtime.telemetry,
+          ...updates.runtime?.telemetry,
+        },
+      },
       general: {
         ...current.general,
         ...updates.general,
@@ -50,6 +101,18 @@ export function setupAdminPolicyHandlers(): void {
     }
 
     savePolicies(merged);
+    try {
+      await reconcilePluginPackPolicies();
+    } catch (error) {
+      console.warn("[AdminPolicies] Failed to reconcile plugin pack runtime state:", error);
+      try {
+        savePolicies(current);
+        await reconcilePluginPackPolicies();
+      } catch (rollbackError) {
+        console.warn("[AdminPolicies] Failed to roll back plugin pack policy update:", rollbackError);
+      }
+      throw error;
+    }
     return merged;
   });
 
@@ -58,7 +121,14 @@ export function setupAdminPolicyHandlers(): void {
     if (!packId || typeof packId !== "string") {
       throw new Error("Pack ID is required");
     }
-    const policies = loadPolicies();
+    const policies = loadPoliciesStrict();
+    if (!policies) {
+      return {
+        packId,
+        allowed: false,
+        required: false,
+      };
+    }
     return {
       packId,
       allowed: isPackAllowed(packId, policies),

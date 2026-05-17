@@ -1,7 +1,7 @@
 {
   "name": "cowork-os",
   "version": "0.5.45",
-  "description": "CoWork OS - Local-first personal agentic OS and everything app for coding, knowledge work, web design, automations, and artifacts",
+  "description": "CoWork OS - GUI-first local AI super app and everything app for coding, email, agents, documents, spreadsheets, presentations, web design, automations, and agentic work",
   "overrides": {
     "@whiskeysockets/baileys": {
       "libsignal": "https://codeload.github.com/WhiskeySockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67",

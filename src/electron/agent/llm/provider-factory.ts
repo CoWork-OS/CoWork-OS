@@ -1990,7 +1990,7 @@ export class LLMProviderFactory {
       repository.save("llm", normalizedSettings);
       this.cachedSettings = normalizedSettings;
 
-      console.log("[LLMProviderFactory] Settings saved to encrypted database");
+      logger.debug("Settings saved to encrypted database");
     } catch (error) {
       console.error("[LLMProviderFactory] Failed to save settings:", error);
       throw error;
@@ -3916,7 +3916,7 @@ export class LLMProviderFactory {
 
     // For OAuth users, use pi-ai SDK's model list directly
     if (accessToken && refreshToken && !key) {
-      console.log("[OpenAI] Using OAuth - fetching models from pi-ai SDK...");
+      logger.debug("Using OpenAI OAuth - fetching models from pi-ai SDK...");
       try {
         const provider = new OpenAIProvider({
           type: "openai",
@@ -3926,10 +3926,10 @@ export class LLMProviderFactory {
           openaiTokenExpiresAt: settings.openai?.tokenExpiresAt,
         });
         const models = await provider.getAvailableModels();
-        console.log(`[OpenAI] Found ${models.length} models via pi-ai SDK`);
+        logger.debug(`Found ${models.length} OpenAI models via pi-ai SDK`);
         return models;
       } catch (error) {
-        console.error("[OpenAI] Failed to get models from pi-ai SDK:", error);
+        logger.error("Failed to get OpenAI models from pi-ai SDK:", error);
         // Return ChatGPT-specific defaults for OAuth users
         return [
           {

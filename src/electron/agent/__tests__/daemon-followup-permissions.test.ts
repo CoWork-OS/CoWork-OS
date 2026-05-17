@@ -84,6 +84,7 @@ describe("AgentDaemon follow-up permission overrides", () => {
       "Continue with full access",
       undefined,
       undefined,
+      undefined,
     );
   });
 });

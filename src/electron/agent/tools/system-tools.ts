@@ -12,6 +12,7 @@ import { MemoryObservationService } from "../../memory/MemoryObservationService"
 import { SessionRecallService } from "../../memory/SessionRecallService";
 import { LayeredMemoryIndexService } from "../../memory/LayeredMemoryIndexService";
 import { QuoteRecallService } from "../../memory/QuoteRecallService";
+import { DurableContextService } from "../../memory/DurableContextService";
 import { MemoryFeaturesManager } from "../../settings/memory-features-manager";
 import { getUserDataDir } from "../../utils/user-data-dir";
 import {
@@ -39,6 +40,10 @@ function verbatimRecallEnabled(): boolean {
 
 function progressiveRecallEnabled(): boolean {
   return MemoryFeaturesManager.loadSettings().progressiveRecallToolsEnabled !== false;
+}
+
+function durableContextEnabled(): boolean {
+  return DurableContextService.isEnabled();
 }
 
 const PROTECTED_SYSTEM_PATHS = [
@@ -155,6 +160,70 @@ function buildQuoteRecallTool(description: string): LLMTool {
         },
       },
       required: ["query"],
+    },
+  };
+}
+
+function buildDurableContextGrepTool(description: string): LLMTool {
+  return {
+    name: "context_grep",
+    description,
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Keywords or phrase fragments to search in durable compacted runtime context.",
+        },
+        taskId: {
+          type: "string",
+          description:
+            "Explicit task ID to search only when the user asked to inspect that task. Omit for active-task scope.",
+        },
+        explicitUserRequest: {
+          type: "boolean",
+          description:
+            "Set true only when the user explicitly asked to inspect the provided taskId. Otherwise taskId is ignored.",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of matches to return (default: 10, max: 50).",
+        },
+      },
+      required: ["query"],
+    },
+  };
+}
+
+function buildDurableContextDescribeTool(description: string): LLMTool {
+  return {
+    name: "context_describe",
+    description,
+    input_schema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "A durable context result ID returned by context_grep.",
+        },
+        taskId: {
+          type: "string",
+          description:
+            "Explicit task ID to resolve only when the user asked to inspect that task. Omit for active-task scope.",
+        },
+        explicitUserRequest: {
+          type: "boolean",
+          description:
+            "Set true only when the user explicitly asked to inspect the provided taskId. Otherwise taskId is ignored.",
+        },
+        sourceLimit: {
+          type: "number",
+          description:
+            "For summaries, maximum linked source messages to include (default: 8, max: 25).",
+        },
+      },
+      required: ["id"],
     },
   };
 }
@@ -1276,6 +1345,167 @@ export class SystemTools {
     }
   }
 
+  async contextGrep(input: {
+    query: string;
+    taskId?: string;
+    explicitUserRequest?: boolean;
+    limit?: number;
+  }): Promise<{
+    results: Array<{
+      id: string;
+      kind: "message" | "summary";
+      taskId: string;
+      timestamp: string;
+      snippet: string;
+      depth?: number;
+      sourceMessageCount?: number;
+    }>;
+    totalFound: number;
+  }> {
+    this.daemon.logEvent(this.taskId, "tool_call", {
+      tool: "context_grep",
+      query: input.query,
+      requestedTaskId: input.taskId || "",
+      explicitUserRequest: input.explicitUserRequest === true,
+      effectiveTaskId:
+        input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
+    });
+
+    if (!durableContextEnabled()) {
+      const error = "Durable context is disabled in Memory settings.";
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "context_grep",
+        success: false,
+        error,
+      });
+      throw new Error(error);
+    }
+
+    try {
+      const results = DurableContextService.search({
+        workspaceId: this.workspace.id,
+        taskId:
+          input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
+        query: input.query,
+        limit: Math.min(input.limit || 10, 50),
+      });
+      const mapped = results.map((entry) => ({
+        id: entry.id,
+        kind: entry.kind,
+        taskId: entry.taskId,
+        timestamp: new Date(entry.timestamp).toISOString(),
+        snippet: entry.snippet,
+        ...(typeof entry.depth === "number" ? { depth: entry.depth } : {}),
+        ...(typeof entry.sourceMessageCount === "number"
+          ? { sourceMessageCount: entry.sourceMessageCount }
+          : {}),
+      }));
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "context_grep",
+        success: true,
+        resultCount: mapped.length,
+        effectiveTaskId:
+          input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
+      });
+      return { results: mapped, totalFound: mapped.length };
+    } catch (error) {
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "context_grep",
+        success: false,
+        error: String(error),
+      });
+      return { results: [], totalFound: 0 };
+    }
+  }
+
+  async contextDescribe(input: {
+    id: string;
+    taskId?: string;
+    explicitUserRequest?: boolean;
+    sourceLimit?: number;
+  }): Promise<{
+    result: {
+      id: string;
+      kind: "message" | "summary";
+      taskId: string;
+      timestamp: string;
+      text: string;
+      depth?: number;
+      sourceMessages?: Array<{
+        id: string;
+        seq: number;
+        role: string;
+        timestamp: string;
+        text: string;
+      }>;
+    } | null;
+  }> {
+    this.daemon.logEvent(this.taskId, "tool_call", {
+      tool: "context_describe",
+      id: input.id,
+      requestedTaskId: input.taskId || "",
+      explicitUserRequest: input.explicitUserRequest === true,
+      effectiveTaskId:
+        input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
+    });
+
+    if (!durableContextEnabled()) {
+      const error = "Durable context is disabled in Memory settings.";
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "context_describe",
+        success: false,
+        error,
+      });
+      throw new Error(error);
+    }
+
+    try {
+      const result = DurableContextService.describe({
+        workspaceId: this.workspace.id,
+        taskId:
+          input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
+        id: input.id,
+        sourceLimit: input.sourceLimit,
+      });
+      const mapped = result
+        ? {
+            id: result.id,
+            kind: result.kind,
+            taskId: result.taskId,
+            timestamp: new Date(result.timestamp).toISOString(),
+            text: result.text,
+            ...(typeof result.depth === "number" ? { depth: result.depth } : {}),
+            ...(result.sourceMessages
+              ? {
+                  sourceMessages: result.sourceMessages.map((message) => ({
+                    id: message.id,
+                    seq: message.seq,
+                    role: message.role,
+                    timestamp: new Date(message.timestamp).toISOString(),
+                    text: message.text,
+                  })),
+                }
+              : {}),
+          }
+        : null;
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "context_describe",
+        success: true,
+        found: mapped !== null,
+        effectiveTaskId:
+          input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
+      });
+      return { result: mapped };
+    } catch (error) {
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "context_describe",
+        success: false,
+        error: String(error),
+      });
+      return { result: null };
+    }
+  }
+
   /**
    * Static method to get tool definitions
    */
@@ -1284,6 +1514,7 @@ export class SystemTools {
     const enableSessionRecall = sessionRecallEnabled();
     const enableTopicMemory = topicMemoryEnabled();
     const enableVerbatimRecall = verbatimRecallEnabled();
+    const enableDurableContext = durableContextEnabled();
     const sessionRecallTools: LLMTool[] = enableSessionRecall
       ? [
           buildSessionRecallTool(
@@ -1308,6 +1539,18 @@ export class SystemTools {
           ),
         ]
       : [];
+    const durableContextTools: LLMTool[] = enableDurableContext
+      ? [
+          buildDurableContextGrepTool(
+            "Search durable compacted runtime context for the active task. " +
+              "Use this when recent conversation turns were compacted and exact prompt context is no longer visible. " +
+              "Do not pass taskId unless the user explicitly asks to inspect another task.",
+          ),
+          buildDurableContextDescribeTool(
+            "Expand a durable context result returned by context_grep, including linked source messages for summaries.",
+          ),
+        ]
+      : [];
     const conciseSessionRecallTools: LLMTool[] = enableSessionRecall
       ? [
           buildSessionRecallTool(
@@ -1324,6 +1567,12 @@ export class SystemTools {
       : [];
     const conciseTopicMemoryTools: LLMTool[] = enableTopicMemory
       ? [buildTopicMemoryTool("Load topical memory packs from `.cowork/memory/topics` for the current query.")]
+      : [];
+    const conciseDurableContextTools: LLMTool[] = enableDurableContext
+      ? [
+          buildDurableContextGrepTool("Search durable compacted runtime context for the active task."),
+          buildDurableContextDescribeTool("Expand a durable context result returned by context_grep."),
+        ]
       : [];
     const progressiveMemoryTools: LLMTool[] = progressiveRecallEnabled()
       ? [
@@ -1453,6 +1702,7 @@ export class SystemTools {
             required: ["query"],
           },
         },
+        ...durableContextTools,
         ...quoteRecallTools,
         ...sessionRecallTools,
         ...topicMemoryTools,
@@ -1642,6 +1892,7 @@ export class SystemTools {
         },
       },
       ...progressiveMemoryTools,
+      ...conciseDurableContextTools,
       ...conciseQuoteRecallTools,
       ...conciseSessionRecallTools,
       ...conciseTopicMemoryTools,

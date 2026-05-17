@@ -1002,6 +1002,26 @@ image_generation_contract:
     );
   });
 
+  it("does not infer browser QA from Electron renderer Vite details alone", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    expect(
+      executor.detectVisualQARequirement(
+        "CoWork OS is an Electron app with a Vite renderer. Make sure the app works correctly.",
+      ),
+    ).toBe(false);
+  });
+
+  it("still infers browser QA for explicit Vite web app shipping prompts", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    expect(
+      executor.detectVisualQARequirement(
+        "Build a Vite app for the customer dashboard and test it before shipping.",
+      ),
+    ).toBe(true);
+  });
+
   it("sanitizes contradictory novelist franchise plans instead of reframing to original IP", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.workspace = { path: "/tmp/workspace" };

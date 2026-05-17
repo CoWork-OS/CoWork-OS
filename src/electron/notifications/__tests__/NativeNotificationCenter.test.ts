@@ -15,6 +15,8 @@ const mockState = vi.hoisted(() => ({
 }));
 
 vi.mock("electron", () => {
+  const mockIcon = { isEmpty: () => false };
+
   class MockNotification {
     static isSupported = vi.fn(() => mockState.isSupported);
     private readonly instance: (typeof mockState.instances)[number];
@@ -43,9 +45,21 @@ vi.mock("electron", () => {
     }
   }
   return {
+    app: {
+      getAppPath: () => "/app",
+    },
+    nativeImage: {
+      createFromPath: vi.fn(() => mockIcon),
+    },
     Notification: MockNotification,
   };
 });
+
+vi.mock("fs", () => ({
+  default: {
+    existsSync: vi.fn((filePath: string) => filePath === "/app/build/icon.png"),
+  },
+}));
 
 async function loadNotificationCenter() {
   const mod = await import("../NativeNotificationCenter");
@@ -91,9 +105,9 @@ describe("NativeNotificationCenter", () => {
     expect(mockState.instances[0]?.options).toMatchObject({
       title: "Task complete",
       body: "Report finished",
+      icon: expect.any(Object),
       timeoutType: "default",
     });
-    expect(mockState.instances[0]?.options).not.toHaveProperty("icon");
     expect(mockState.instances[0]?.show).toHaveBeenCalledOnce();
 
     mockState.instances[0]?.emit("click");

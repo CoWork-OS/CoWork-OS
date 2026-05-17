@@ -280,4 +280,16 @@ describe("ToolFailureTracker browser HTTP status handling", () => {
     ).toBe(true);
     expect(tracker.isDisabled("monty_run")).toBe(true);
   });
+
+  it("treats write_file runtime timeouts as systemic failures", () => {
+    const tracker = new ToolFailureTracker();
+    const message =
+      "write_file timed out during enforce symlink safe access for PRIORITIES.md after 29500ms";
+
+    expect(tracker.recordFailure("write_file", message)).toBe(false);
+    expect(tracker.isDisabled("write_file")).toBe(false);
+
+    expect(tracker.recordFailure("write_file", message)).toBe(true);
+    expect(tracker.isDisabled("write_file")).toBe(true);
+  });
 });

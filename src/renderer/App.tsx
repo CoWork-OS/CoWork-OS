@@ -70,6 +70,7 @@ import {
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { applyPersistedLanguage } from "./i18n";
 import { getEffectiveTaskEventType } from "./utils/task-event-compat";
+import { isLlmRequestCancelledEvent } from "./utils/task-event-visibility";
 import { invalidateGlobalMeasurer } from "./utils/pretext-adapter";
 import {
   hasTaskOutputs,
@@ -92,6 +93,10 @@ import { isSynthesisChildTask } from "../shared/synthesis-agent-detection";
 import { classifyShellPermissionDecision } from "../shared/shell-permission-intents";
 import { isAutomatedTaskLike } from "../shared/automated-task-detection";
 import { resolveTaskStatusUpdateFromEvent } from "../shared/task-status";
+import {
+  getFirstRunReadiness,
+  getFirstRunReadinessActionLabel,
+} from "../shared/first-run-readiness";
 import {
   noteRendererTaskEventQueued,
   noteRendererTaskEventReceived,
@@ -175,6 +180,11 @@ const InboxAgentPanel = lazy(() =>
 );
 const AgentsHubPanel = lazy(() =>
   import("./components/AgentsHubPanel").then((module) => ({ default: module.AgentsHubPanel })),
+);
+const EverydayAgentPanel = lazy(() =>
+  import("./components/EverydayAgentPanel").then((module) => ({
+    default: module.EverydayAgentPanel,
+  })),
 );
 const MissionControlPanel = lazy(() =>
   import("./components/mission-control").then((module) => ({
@@ -463,25 +473,23 @@ function LazyViewFallback({ className = "main-content" }: { className?: string }
   );
 }
 
+function SnowLeopardLoadingLogo({ decorative = false }: { decorative?: boolean }) {
+  return (
+    <div
+      className="task-view-loading-logo"
+      role={decorative ? undefined : "status"}
+      aria-label={decorative ? undefined : "Loading main area"}
+      aria-hidden={decorative ? true : undefined}
+    >
+      <img src="./cowork-os-app-logo-light.png" alt="" aria-hidden="true" />
+    </div>
+  );
+}
+
 function TaskViewSkeleton() {
   return (
     <main className="main-content task-view-skeleton" aria-busy="true">
-      <div className="task-view-skeleton-header">
-        <div className="task-view-skeleton-title" />
-        <div className="task-view-skeleton-actions">
-          <span />
-          <span />
-        </div>
-      </div>
-      <div className="task-view-skeleton-transcript">
-        <div className="task-view-skeleton-row user" />
-        <div className="task-view-skeleton-row assistant wide" />
-        <div className="task-view-skeleton-row assistant" />
-      </div>
-      <div className="task-view-skeleton-composer">
-        <div />
-        <span />
-      </div>
+      <SnowLeopardLoadingLogo />
     </main>
   );
 }
@@ -501,6 +509,14 @@ function RightPanelFallback() {
         borderLeft: "1px solid var(--color-border-subtle)",
       }}
     >
+      <div className="loading">Loading...</div>
+    </aside>
+  );
+}
+
+function ArtifactSidebarFallback() {
+  return (
+    <aside className="spreadsheet-viewer spreadsheet-viewer-sidebar" aria-busy="true">
       <div className="loading">Loading...</div>
     </aside>
   );
@@ -569,6 +585,7 @@ type AppView =
   | "ideas"
   | "inboxAgent"
   | "agents"
+  | "everydayAgent"
   | "missionControl";
 type RemoteTaskView = {
   deviceId: string;
@@ -587,6 +604,7 @@ type SelectedTaskWorkspaceViewProps = {
   childTasks: Task[];
   childEvents: TaskEvent[];
   activeInputRequest: InputRequest | null;
+  pendingInputRequests: InputRequest[];
   selectedModel: string;
   selectedProvider: LLMProviderType;
   selectedReasoningEffort?: LLMReasoningEffort;
@@ -675,6 +693,15 @@ function getInputRequestSignature(inputRequest: InputRequest | null): string {
   return [inputRequest.id, inputRequest.taskId, inputRequest.status, inputRequest.requestedAt].join(":");
 }
 
+function getInputRequestsSignature(inputRequests: InputRequest[]): string {
+  if (inputRequests.length === 0) return "none";
+  return inputRequests
+    .map((request) =>
+      [request.id, request.taskId, request.status, request.requestedAt, request.questions.length].join(":"),
+    )
+    .join("|");
+}
+
 const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
   task,
   selectedTaskId,
@@ -685,6 +712,7 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
   childTasks,
   childEvents,
   activeInputRequest,
+  pendingInputRequests,
   selectedModel,
   selectedProvider,
   selectedReasoningEffort,
@@ -748,23 +776,27 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
   const openSpreadsheetArtifact = useCallback((path: string) => {
     setBrowserWorkbench(null);
     setSpawnedAgentSidebar(null);
+    onRevealRightSidebar?.();
     setSpreadsheetArtifact({ kind: "spreadsheet", path, mode: "sidebar" });
-  }, []);
+  }, [onRevealRightSidebar]);
   const openDocumentArtifact = useCallback((path: string) => {
     setBrowserWorkbench(null);
     setSpawnedAgentSidebar(null);
+    onRevealRightSidebar?.();
     setSpreadsheetArtifact({ kind: "document", path, mode: "sidebar" });
-  }, []);
+  }, [onRevealRightSidebar]);
   const openPresentationArtifact = useCallback((path: string) => {
     setBrowserWorkbench(null);
     setSpawnedAgentSidebar(null);
+    onRevealRightSidebar?.();
     setSpreadsheetArtifact({ kind: "presentation", path, mode: "sidebar" });
-  }, []);
+  }, [onRevealRightSidebar]);
   const openWebArtifact = useCallback((path: string) => {
     setBrowserWorkbench(null);
     setSpawnedAgentSidebar(null);
+    onRevealRightSidebar?.();
     setSpreadsheetArtifact({ kind: "webpage", path, mode: "sidebar" });
-  }, []);
+  }, [onRevealRightSidebar]);
   const closeSpreadsheetArtifact = useCallback(() => {
     setSpreadsheetArtifact(null);
   }, []);
@@ -848,6 +880,12 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
     },
     [openBrowserWorkbenchSidebar],
   );
+  const openEmptyBrowserWorkbenchSidebar = useCallback(() => {
+    openBrowserWorkbenchSidebar({
+      sessionId: "default",
+      requestId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+  }, [openBrowserWorkbenchSidebar]);
   const sendSpreadsheetFullscreenMessage = useCallback(
     async (message: string, images?: ImageAttachment[]) => {
       const startedAt = Date.now();
@@ -925,6 +963,9 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
       const rect = splitLayoutRef.current?.getBoundingClientRect();
       if (!rect) return;
       event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      const resizeHandle = event.currentTarget;
+      const pointerId = event.pointerId;
       const maxWidth = Math.max(
         SPREADSHEET_SIDEBAR_MIN_WIDTH,
         rect.width - SPREADSHEET_MAIN_MIN_WIDTH,
@@ -932,12 +973,20 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
       const clampWidth = (width: number) =>
         Math.min(Math.max(width, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth);
       setIsSpreadsheetResizing(true);
+      setSpreadsheetSidebarWidth(clampWidth(rect.right - event.clientX));
 
       const handlePointerMove = (moveEvent: PointerEvent) => {
         setSpreadsheetSidebarWidth(clampWidth(rect.right - moveEvent.clientX));
       };
+      let finished = false;
       const handlePointerUp = () => {
+        if (finished) return;
+        finished = true;
         setIsSpreadsheetResizing(false);
+        resizeHandle.removeEventListener("lostpointercapture", handlePointerUp);
+        if (resizeHandle.hasPointerCapture?.(pointerId)) {
+          resizeHandle.releasePointerCapture?.(pointerId);
+        }
         window.removeEventListener("pointermove", handlePointerMove);
         window.removeEventListener("pointerup", handlePointerUp);
         window.removeEventListener("pointercancel", handlePointerUp);
@@ -946,6 +995,7 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
       window.addEventListener("pointermove", handlePointerMove);
       window.addEventListener("pointerup", handlePointerUp);
       window.addEventListener("pointercancel", handlePointerUp);
+      resizeHandle.addEventListener("lostpointercapture", handlePointerUp);
     },
     [],
   );
@@ -1269,6 +1319,7 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
           onContinueWithoutShellForPausedTask={onContinueWithoutShellForPausedTask}
           onWrapUpTask={onWrapUpTask}
           inputRequest={activeInputRequest}
+          pendingInputRequests={pendingInputRequests}
           onSubmitInputRequest={onSubmitInputRequest}
           onDismissInputRequest={onDismissInputRequest}
           onOpenBrowserView={onOpenBrowserView}
@@ -1291,6 +1342,9 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
           onOpenDocumentArtifact={openDocumentArtifact}
           onOpenPresentationArtifact={openPresentationArtifact}
           onOpenWebArtifact={openWebArtifact}
+          onOpenBrowserWorkbenchSidebar={
+            task && workspace?.path && !remoteTaskView ? openEmptyBrowserWorkbenchSidebar : undefined
+          }
           onOpenWebLinkInSidebar={
             task && workspace?.path && !remoteTaskView ? openWebLinkInBrowserSidebar : undefined
           }
@@ -1316,87 +1370,89 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
             className="spreadsheet-resizable-sidebar"
             style={{ width: `${spreadsheetSidebarWidth}px` }}
           >
-            {spawnedAgentSidebar && task ? (
-              <SpawnedAgentSidebar
-                parentTask={task}
-                childTasks={childTasks}
-                childEvents={childEvents}
-                selectedTaskId={spawnedAgentSidebar.taskId}
-                workspace={workspace}
-                selectedModel={selectedModel}
-                selectedProvider={selectedProvider}
-                selectedReasoningEffort={selectedReasoningEffort}
-                availableModels={availableModels}
-                availableProviders={availableProviders}
-                uiDensity={uiDensity}
-                rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-                inputRequest={activeInputRequest}
-                onSelectTask={selectSpawnedAgentSidebarTask}
-                onClose={closeSpawnedAgentSidebar}
-                onCancelTask={onCancelTaskById}
-                onTasksChanged={onTasksChanged}
-                onOpenSettings={onOpenSettings}
-                onModelChange={onModelChange}
-                onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
-                onOpenDocumentArtifact={openDocumentArtifact}
-                onOpenPresentationArtifact={openPresentationArtifact}
-                onOpenWebArtifact={openWebArtifact}
-              />
-            ) : browserWorkbench && task ? (
-              <BrowserWorkbenchView
-                key={browserWorkbench.requestId || browserWorkbench.sessionId}
-                taskId={task.id}
-                sessionId={browserWorkbench.sessionId}
-                initialUrl={browserWorkbench.url}
-                workspaceId={workspace.id}
-                workspacePath={workspace.path}
-                mode="sidebar"
-                onClose={closeBrowserWorkbench}
-                onFullscreen={showBrowserFullscreen}
-                onExitFullscreen={showBrowserSidebar}
-                onStatusChange={updateBrowserWorkbenchStatus}
-                onSendMessage={sendSpreadsheetFullscreenMessage}
-              />
-            ) : spreadsheetArtifact?.kind === "document" ? (
-              <DocumentArtifactViewer
-                filePath={spreadsheetArtifact.path}
-                workspacePath={workspace.path}
-                mode="sidebar"
-                onClose={closeSpreadsheetArtifact}
-                onFullscreen={showSpreadsheetFullscreen}
-                onExitFullscreen={showSpreadsheetSidebar}
-                refreshKey={artifactRefreshKey}
-              />
-            ) : spreadsheetArtifact?.kind === "presentation" ? (
-              <PresentationArtifactViewer
-                filePath={spreadsheetArtifact.path}
-                workspacePath={workspace.path}
-                mode="sidebar"
-                onClose={closeSpreadsheetArtifact}
-                onFullscreen={showSpreadsheetFullscreen}
-                onExitFullscreen={showSpreadsheetSidebar}
-                refreshKey={artifactRefreshKey}
-              />
-            ) : spreadsheetArtifact?.kind === "webpage" ? (
-              <WebArtifactViewer
-                filePath={spreadsheetArtifact.path}
-                workspacePath={workspace.path}
-                mode="sidebar"
-                onClose={closeSpreadsheetArtifact}
-                onFullscreen={showSpreadsheetFullscreen}
-                onExitFullscreen={showSpreadsheetSidebar}
-                refreshKey={artifactRefreshKey}
-              />
-            ) : (
-              spreadsheetArtifact ? <SpreadsheetArtifactViewer
-                filePath={spreadsheetArtifact.path}
-                workspacePath={workspace.path}
-                mode="sidebar"
-                onClose={closeSpreadsheetArtifact}
-                onFullscreen={showSpreadsheetFullscreen}
-                onExitFullscreen={showSpreadsheetSidebar}
-              /> : null
-            )}
+            <Suspense fallback={<ArtifactSidebarFallback />}>
+              {spawnedAgentSidebar && task ? (
+                <SpawnedAgentSidebar
+                  parentTask={task}
+                  childTasks={childTasks}
+                  childEvents={childEvents}
+                  selectedTaskId={spawnedAgentSidebar.taskId}
+                  workspace={workspace}
+                  selectedModel={selectedModel}
+                  selectedProvider={selectedProvider}
+                  selectedReasoningEffort={selectedReasoningEffort}
+                  availableModels={availableModels}
+                  availableProviders={availableProviders}
+                  uiDensity={uiDensity}
+                  rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+                  inputRequest={activeInputRequest}
+                  onSelectTask={selectSpawnedAgentSidebarTask}
+                  onClose={closeSpawnedAgentSidebar}
+                  onCancelTask={onCancelTaskById}
+                  onTasksChanged={onTasksChanged}
+                  onOpenSettings={onOpenSettings}
+                  onModelChange={onModelChange}
+                  onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
+                  onOpenDocumentArtifact={openDocumentArtifact}
+                  onOpenPresentationArtifact={openPresentationArtifact}
+                  onOpenWebArtifact={openWebArtifact}
+                />
+              ) : browserWorkbench && task ? (
+                <BrowserWorkbenchView
+                  key={browserWorkbench.requestId || browserWorkbench.sessionId}
+                  taskId={task.id}
+                  sessionId={browserWorkbench.sessionId}
+                  initialUrl={browserWorkbench.url}
+                  workspaceId={workspace.id}
+                  workspacePath={workspace.path}
+                  mode="sidebar"
+                  onClose={closeBrowserWorkbench}
+                  onFullscreen={showBrowserFullscreen}
+                  onExitFullscreen={showBrowserSidebar}
+                  onStatusChange={updateBrowserWorkbenchStatus}
+                  onSendMessage={sendSpreadsheetFullscreenMessage}
+                />
+              ) : spreadsheetArtifact?.kind === "document" ? (
+                <DocumentArtifactViewer
+                  filePath={spreadsheetArtifact.path}
+                  workspacePath={workspace.path}
+                  mode="sidebar"
+                  onClose={closeSpreadsheetArtifact}
+                  onFullscreen={showSpreadsheetFullscreen}
+                  onExitFullscreen={showSpreadsheetSidebar}
+                  refreshKey={artifactRefreshKey}
+                />
+              ) : spreadsheetArtifact?.kind === "presentation" ? (
+                <PresentationArtifactViewer
+                  filePath={spreadsheetArtifact.path}
+                  workspacePath={workspace.path}
+                  mode="sidebar"
+                  onClose={closeSpreadsheetArtifact}
+                  onFullscreen={showSpreadsheetFullscreen}
+                  onExitFullscreen={showSpreadsheetSidebar}
+                  refreshKey={artifactRefreshKey}
+                />
+              ) : spreadsheetArtifact?.kind === "webpage" ? (
+                <WebArtifactViewer
+                  filePath={spreadsheetArtifact.path}
+                  workspacePath={workspace.path}
+                  mode="sidebar"
+                  onClose={closeSpreadsheetArtifact}
+                  onFullscreen={showSpreadsheetFullscreen}
+                  onExitFullscreen={showSpreadsheetSidebar}
+                  refreshKey={artifactRefreshKey}
+                />
+              ) : (
+                spreadsheetArtifact ? <SpreadsheetArtifactViewer
+                  filePath={spreadsheetArtifact.path}
+                  workspacePath={workspace.path}
+                  mode="sidebar"
+                  onClose={closeSpreadsheetArtifact}
+                  onFullscreen={showSpreadsheetFullscreen}
+                  onExitFullscreen={showSpreadsheetSidebar}
+                /> : null
+              )}
+            </Suspense>
           </div>
         </>
       ) : !effectiveRightCollapsed && !remoteTaskView ? (
@@ -1432,6 +1488,8 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
   prev.childTasks === next.childTasks &&
   prev.childEvents === next.childEvents &&
   getInputRequestSignature(prev.activeInputRequest) === getInputRequestSignature(next.activeInputRequest) &&
+  getInputRequestsSignature(prev.pendingInputRequests) ===
+    getInputRequestsSignature(next.pendingInputRequests) &&
   prev.selectedModel === next.selectedModel &&
   prev.selectedProvider === next.selectedProvider &&
   prev.selectedReasoningEffort === next.selectedReasoningEffort &&
@@ -1600,7 +1658,10 @@ function appendRendererTaskEvents(
 
 function isImmediateTaskAttentionEvent(event: TaskEvent): boolean {
   return (
-    event.type === "task_paused" ||
+    (event.type === "task_paused" &&
+      isNotificationWorthyPauseReason(
+        typeof event.payload?.reason === "string" ? event.payload.reason : undefined,
+      )) ||
     event.type === "approval_requested" ||
     event.type === "input_request_created"
   );
@@ -1608,6 +1669,17 @@ function isImmediateTaskAttentionEvent(event: TaskEvent): boolean {
 
 function isShellPermissionPauseReason(reasonCode: string | null | undefined): boolean {
   return reasonCode === "shell_permission_required" || reasonCode === "shell_permission_still_disabled";
+}
+
+function isNotificationWorthyPauseReason(reasonCode: string | null | undefined): boolean {
+  return (
+    reasonCode === "shell_permission_required" ||
+    reasonCode === "shell_permission_still_disabled" ||
+    reasonCode === "skill_parameters" ||
+    reasonCode === "missing_required_workspace_artifact" ||
+    reasonCode === "user_action_required_failure" ||
+    reasonCode === "user_action_required_tool"
+  );
 }
 
 function mergeUniqueTaskEvents(existing: TaskEvent[], incoming: TaskEvent[]): TaskEvent[] {
@@ -1738,6 +1810,7 @@ export function App() {
     null,
   );
   const [missionControlInitialIssueId, setMissionControlInitialIssueId] = useState<string | null>(null);
+  const [missionControlEverydayAgentFocus, setMissionControlEverydayAgentFocus] = useState(false);
   const [browserUrl, setBrowserUrl] = useState<string>("");
   const [browserWorkbenchRequest, setBrowserWorkbenchRequest] =
     useState<BrowserWorkbenchOpenRequest | null>(null);
@@ -1767,6 +1840,7 @@ export function App() {
     | "health"
     | "suggestions"
     | "traces"
+    | "everydayAgent"
   >("appearance");
   const [homeAutomationFocusTick, setHomeAutomationFocusTick] = useState(0);
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -2610,7 +2684,11 @@ export function App() {
       const event = { ...rawEvent, type: effectiveType } as TaskEvent;
       setEvents((prev) => capTaskEvents([...prev, event]));
       const newStatus =
-        event.type === "task_status" ? event.payload?.status : TASK_EVENT_STATUS_MAP[event.type];
+        isLlmRequestCancelledEvent(event)
+          ? undefined
+          : event.type === "task_status"
+            ? event.payload?.status
+            : TASK_EVENT_STATUS_MAP[event.type];
       if (newStatus) {
         setRemoteTaskView((prev) =>
           prev && prev.task.id === view.task.id
@@ -2672,7 +2750,11 @@ export function App() {
       }
 
       const newStatus =
-        event.type === "task_status" ? event.payload?.status : TASK_EVENT_STATUS_MAP[event.type];
+        isLlmRequestCancelledEvent(event)
+          ? undefined
+          : event.type === "task_status"
+            ? event.payload?.status
+            : TASK_EVENT_STATUS_MAP[event.type];
       const isAutoApprovalRequested =
         event.type === "approval_requested" && event.payload?.autoApproved === true;
       const isSessionAutoApproval =
@@ -2871,14 +2953,17 @@ export function App() {
       }
 
       if (
-        event.type === "task_paused" ||
+        (event.type === "task_paused" &&
+          isNotificationWorthyPauseReason(
+            typeof event.payload?.reason === "string" ? event.payload.reason : undefined,
+          )) ||
         (event.type === "approval_requested" && !skipBlockedStateForAutoApproval) ||
         event.type === "input_request_created"
       ) {
         const isApproval = event.type === "approval_requested";
         const isInputRequest = event.type === "input_request_created";
         const task = tasksRef.current.find((t) => t.id === event.taskId);
-        const baseTitle = isApproval ? "Approval needed" : isInputRequest ? "Input needed" : "Quick check-in";
+        const baseTitle = isApproval ? "Approval needed" : isInputRequest ? "Input needed" : "Action needed";
         const title = task?.title ? `${baseTitle} · ${task.title}` : baseTitle;
         const requestQuestion =
           isInputRequest && Array.isArray(event.payload?.request?.questions)
@@ -3706,7 +3791,9 @@ export function App() {
         ? {
             ...explicitAgentConfig,
             ...(effectiveSessionModelOverride ? { modelKey: effectiveSessionModelOverride } : {}),
-            ...(autonomousMode ? { allowUserInput: false, autonomousMode: true } : {}),
+            ...(autonomousMode
+              ? { allowUserInput: false, humanInputPolicy: "none" as const, autonomousMode: true }
+              : {}),
             ...(collaborativeMode ? { collaborativeMode: true } : {}),
             ...(isMultitaskCommand || options?.multitaskMode
               ? {
@@ -3736,6 +3823,28 @@ export function App() {
         : undefined;
 
     try {
+      if (window.electronAPI?.getLLMSettings) {
+        const llmSettings = await window.electronAPI.getLLMSettings();
+        const readiness = getFirstRunReadiness(llmSettings, { workspace: effectiveWorkspace });
+        if (!readiness.modelReady) {
+          addToast({
+            type: "error",
+            title: "Set up AI first",
+            message:
+              readiness.blockingReason ||
+              "Connect ChatGPT, local Ollama, or an API key before running AI tasks.",
+            action: {
+              label: getFirstRunReadinessActionLabel(readiness),
+              callback: () => {
+                setSettingsTab("llm");
+                setCurrentView("settings");
+              },
+            },
+          });
+          return;
+        }
+      }
+
       const task = await window.electronAPI.createTask({
         title: effectiveTitle,
         prompt: effectivePrompt,
@@ -4463,6 +4572,7 @@ export function App() {
     return (
       <div className="app">
         <div className="title-bar" />
+        <TaskViewSkeleton />
       </div>
     );
   }
@@ -4723,6 +4833,7 @@ export function App() {
         currentView === "ideas" ||
         currentView === "inboxAgent" ||
         currentView === "agents" ||
+        currentView === "everydayAgent" ||
         currentView === "missionControl") && (
         <>
           <div
@@ -4737,6 +4848,7 @@ export function App() {
                 isIdeasActive={currentView === "ideas"}
                 isInboxAgentActive={currentView === "inboxAgent"}
                 isAgentsActive={currentView === "agents"}
+                isEverydayAgentActive={currentView === "everydayAgent"}
                 isMissionControlActive={currentView === "missionControl"}
                 isHealthActive={currentView === "health"}
                 isDevicesActive={currentView === "devices"}
@@ -4747,12 +4859,15 @@ export function App() {
                 onOpenIdeas={() => setCurrentView("ideas")}
                 onOpenInboxAgent={() => setCurrentView("inboxAgent")}
                 onOpenAgents={() => setCurrentView("agents")}
+                onOpenEverydayAgent={() => setCurrentView("everydayAgent")}
                 onOpenHealth={() => setCurrentView("health")}
                 onOpenDevices={() => setCurrentView("devices")}
                 onNewSession={handleNewSession}
                 onOpenSettings={() => setCurrentView("settings")}
                 onOpenMissionControl={() => {
                   setMissionControlInitialCompanyId(null);
+                  setMissionControlInitialIssueId(null);
+                  setMissionControlEverydayAgentFocus(false);
                   setCurrentView("missionControl");
                 }}
                 onTasksChanged={loadTasks}
@@ -4768,7 +4883,11 @@ export function App() {
                 onDismissUpdate={() => setUpdateDismissed(true)}
               />
             )}
-            <Suspense fallback={currentView === "main" ? <TaskViewSkeleton /> : <LazyViewFallback />}>
+            <Suspense
+              fallback={
+                currentView === "main" ? <TaskViewSkeleton /> : <LazyViewFallback />
+              }
+            >
               {currentView === "home" ? (
                 <HomeDashboard
                   workspace={currentWorkspace}
@@ -4785,8 +4904,11 @@ export function App() {
                   }}
                   onOpenMissionControl={() => {
                     setMissionControlInitialCompanyId(null);
+                    setMissionControlInitialIssueId(null);
+                    setMissionControlEverydayAgentFocus(false);
                     setCurrentView("missionControl");
                   }}
+                  onOpenEverydayAgent={() => setCurrentView("everydayAgent")}
                   onOpenEventTriggers={() => {
                     setSettingsTab("triggers");
                     setCurrentView("settings");
@@ -4837,7 +4959,11 @@ export function App() {
                       prompt,
                       workspaceId: currentWorkspace?.id,
                       agentConfig: options ? {
-                        ...(options.autonomousMode && { autonomousMode: true }),
+                        ...(options.autonomousMode && {
+                          autonomousMode: true,
+                          allowUserInput: false,
+                          humanInputPolicy: "none" as const,
+                        }),
                         ...(options.collaborativeMode && { collaborativeMode: true }),
                         ...(options.multiLlmMode && { multiLlmMode: true, multiLlmConfig: options.multiLlmConfig }),
                         ...(options.executionMode && { executionMode: options.executionMode }),
@@ -4897,6 +5023,7 @@ export function App() {
                   onOpenMissionControlIssue={(companyId, issueId) => {
                     setMissionControlInitialCompanyId(companyId);
                     setMissionControlInitialIssueId(issueId);
+                    setMissionControlEverydayAgentFocus(false);
                     setCurrentView("missionControl");
                   }}
                 />
@@ -4906,6 +5033,7 @@ export function App() {
                     onOpenMissionControl={() => {
                       setMissionControlInitialCompanyId(null);
                       setMissionControlInitialIssueId(null);
+                      setMissionControlEverydayAgentFocus(false);
                       setCurrentView("missionControl");
                     }}
                     onOpenAgentPersonas={() => {
@@ -4923,12 +5051,31 @@ export function App() {
                     onOpenTask={handleOpenManagedAgentTask}
                   />
                 </main>
+              ) : currentView === "everydayAgent" ? (
+                <EverydayAgentPanel
+                  workspace={currentWorkspace}
+                  onOpenSettings={() => {
+                    setSettingsTab("everydayAgent");
+                    setCurrentView("settings");
+                  }}
+                  onOpenMissionControl={() => {
+                    setMissionControlInitialCompanyId(null);
+                    setMissionControlInitialIssueId(null);
+                    setMissionControlEverydayAgentFocus(true);
+                    setCurrentView("missionControl");
+                  }}
+                  onCreateTask={(title, prompt) => {
+                    setCurrentView("main");
+                    handleCreateTask(title, prompt);
+                  }}
+                />
               ) : currentView === "missionControl" ? (
                 <main className="main-content mission-control-main">
                   <MissionControlPanel
                     onOpenAgents={() => setCurrentView("agents")}
                     initialCompanyId={missionControlInitialCompanyId}
                     initialIssueId={missionControlInitialIssueId}
+                    initialEverydayAgentFocus={missionControlEverydayAgentFocus}
                   />
                 </main>
               ) : (
@@ -4942,6 +5089,7 @@ export function App() {
                 childTasks={childTasks}
                 childEvents={childEvents}
                 activeInputRequest={activeInputRequest}
+                pendingInputRequests={pendingInputRequests}
                 selectedModel={selectedModel}
                 selectedProvider={selectedProvider}
                 selectedReasoningEffort={selectedReasoningEffort}
@@ -5073,6 +5221,8 @@ export function App() {
             }}
             onNavigateToMissionControl={(companyId) => {
               setMissionControlInitialCompanyId(companyId);
+              setMissionControlInitialIssueId(null);
+              setMissionControlEverydayAgentFocus(false);
               setCurrentView("missionControl");
             }}
             onNavigateToAgents={() => {

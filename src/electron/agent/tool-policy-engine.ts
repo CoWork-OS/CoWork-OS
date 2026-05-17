@@ -3,9 +3,14 @@ import {
   ExecutionMode,
   TaskDomain,
   ToolDecision,
+  type HumanInputPolicy,
   type RuntimeToolMetadata,
 } from "../../shared/types";
 import { isComputerUseToolName } from "../../shared/computer-use-contract";
+import {
+  allowsStructuredHumanInput,
+  resolveHumanInputPolicy,
+} from "../../shared/human-input-policy";
 
 export type ToolLane =
   | "core"
@@ -45,6 +50,7 @@ export interface ToolPolicyContext {
   conversationMode?: ConversationMode;
   taskIntent?: string;
   shellEnabled?: boolean;
+  humanInputPolicy?: HumanInputPolicy;
 }
 
 export interface ToolPolicyResult {
@@ -166,6 +172,8 @@ const ALWAYS_VISIBLE_TOOLS = new Set([
   "search_quotes",
   "search_sessions",
   "memory_topics_load",
+  "context_grep",
+  "context_describe",
   "memory_save",
   "memory_curate",
   "memory_curated_read",
@@ -313,6 +321,8 @@ function inferToolExposureMetadata(
     toolName === "search_quotes" ||
     toolName === "search_sessions" ||
     toolName === "memory_topics_load" ||
+    toolName === "context_grep" ||
+    toolName === "context_describe" ||
     toolName === "memory_save" ||
     toolName === "memory_curate" ||
     toolName === "memory_curated_read" ||
@@ -615,6 +625,17 @@ function applyModeGate(toolName: string, mode: ExecutionMode): string | null {
   return `Tool "${toolName}" is blocked in analyze mode. Analyze mode is read-only by design.`;
 }
 
+function applyHumanInputGate(
+  toolName: string,
+  mode: ExecutionMode,
+  policy?: HumanInputPolicy,
+): string | null {
+  if (toolName !== "request_user_input") return null;
+  const resolved = policy ?? resolveHumanInputPolicy({ executionMode: mode });
+  if (allowsStructuredHumanInput(resolved)) return null;
+  return `Tool "${toolName}" is blocked because structured human input is disabled for this task.`;
+}
+
 function applyDomainGate(toolName: string, domain: TaskDomain, shellEnabled?: boolean): string | null {
   if (domain === "auto" || domain === "code" || domain === "operations") return null;
 
@@ -646,6 +667,11 @@ export function evaluateToolPolicy(toolName: string, ctx: ToolPolicyContext): To
   const modeReason = applyModeGate(toolName, mode);
   if (modeReason) {
     return { decision: "deny", reason: modeReason, mode, domain };
+  }
+
+  const humanInputReason = applyHumanInputGate(toolName, mode, ctx.humanInputPolicy);
+  if (humanInputReason) {
+    return { decision: "deny", reason: humanInputReason, mode, domain };
   }
 
   const domainReason = applyDomainGate(toolName, domain, ctx.shellEnabled);

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { DurableContextService } from "../../memory/DurableContextService";
 
 vi.mock("electron", () => ({
   app: {
@@ -20,6 +21,12 @@ vi.mock("../../settings/memory-features-manager", () => ({
   },
 }));
 
+vi.mock("../../memory/DurableContextService", () => ({
+  DurableContextService: {
+    recordHistory: vi.fn(),
+  },
+}));
+
 vi.mock("../../settings/personality-manager", () => ({
   PersonalityManager: {
     getPersonalityPrompt: vi.fn().mockReturnValue(""),
@@ -29,6 +36,33 @@ vi.mock("../../settings/personality-manager", () => ({
 }));
 
 describe("TaskExecutor chat mode", () => {
+  it("records executor conversation history into durable context", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "task-durable-history" };
+    executor.workspace = {
+      id: "ws-durable-history",
+      path: "/tmp",
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+    };
+    vi.mocked(DurableContextService.recordHistory).mockClear();
+
+    (TaskExecutor as Any).prototype.updateConversationHistory.call(executor, [
+      { role: "user", content: "Project codename: Lantern Harbor" },
+      { role: "assistant", content: [{ type: "text", text: "Rollback phrase: blue anchor" }] },
+    ]);
+
+    expect(DurableContextService.recordHistory).toHaveBeenCalledWith({
+      workspaceId: "ws-durable-history",
+      taskId: "task-durable-history",
+      source: "executor_history",
+      messages: [
+        { role: "user", content: "Project codename: Lantern Harbor" },
+        { role: "assistant", content: [{ type: "text", text: "Rollback phrase: blue anchor" }] },
+      ],
+    });
+    expect(executor.conversationHistory).toHaveLength(2);
+  });
+
   it("promotes explicit chat PDF attachment turns to read-only analysis mode", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = {

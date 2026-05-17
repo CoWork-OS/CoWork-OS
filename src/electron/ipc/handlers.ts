@@ -7262,7 +7262,7 @@ export async function setupIpcHandlers(
         validated.emailDisplayName,
         validated.emailAllowedSenders,
         validated.emailSubjectFilter,
-        validated.securityMode || "pairing",
+        "open",
         {
           protocol: emailProtocol,
           authMethod: validated.emailAuthMethod,
@@ -7312,17 +7312,18 @@ export async function setupIpcHandlers(
     if (validated.securityMode !== undefined) {
       updates.securityConfig = {
         ...channel.securityConfig,
-        mode: validated.securityMode,
+        mode: channel.type === "email" ? "open" : validated.securityMode,
       };
     }
     if (validated.config !== undefined) {
-      const mergedConfig = { ...channel.config, ...validated.config };
+      const compactConfig = Object.fromEntries(
+        Object.entries(validated.config).filter(([, value]) => value !== undefined),
+      );
+      const mergedConfig = { ...channel.config, ...compactConfig };
       if (
-        validated.config &&
-        typeof validated.config === "object" &&
-        "supervisor" in validated.config
+        "supervisor" in compactConfig
       ) {
-        const nextSupervisor = validated.config.supervisor;
+        const nextSupervisor = compactConfig.supervisor;
         mergedConfig.supervisor =
           nextSupervisor && typeof nextSupervisor === "object"
             ? {

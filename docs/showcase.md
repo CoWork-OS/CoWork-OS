@@ -1422,7 +1422,7 @@ Save this as "weekly-metrics-review" and schedule it for Mondays at 9am.
 Route tasks to the best model for the job — compare outputs across providers, run A/B tests, and optimize for cost, speed, or quality.
 
 **What it handles:**
-- Multi-provider support — Claude, GPT-4, Gemini, Llama, Mistral, DeepSeek, Grok
+- Multi-provider support — Claude, GPT-4, Gemini, Llama, Mistral, DeepSeek, Grok API, and Grok subscription OAuth
 - Side-by-side output comparison for the same prompt
 - Automatic model selection based on task type (coding → Claude, creative → GPT-4)
 - Cost tracking and budget management per model

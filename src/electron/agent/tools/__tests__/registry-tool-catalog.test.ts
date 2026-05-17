@@ -155,6 +155,7 @@ function createDaemon(): Any {
 describe("ToolRegistry tool catalog versioning", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     mockMcpState.version = 1;
     mockMcpState.tools = [];
     mockMcpSettings.toolNamePrefix = "mcp_";
@@ -249,6 +250,17 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(toolNames).not.toContain("supermemory_search");
     expect(toolNames).not.toContain("supermemory_remember");
     expect(toolNames).not.toContain("supermemory_forget");
+  });
+
+  it("exposes x_search only when xAI credentials exist and the opt-in toggle is enabled", () => {
+    vi.stubEnv("XAI_API_KEY", "xai-key");
+    mockBuiltinSettings.toolOverrides = {
+      x_search: { enabled: true },
+    };
+
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-x-search-enabled");
+
+    expect(registry.getTools().map((tool) => tool.name)).toContain("x_search");
   });
 
   it("exposes Supermemory tools only when the integration is configured", () => {

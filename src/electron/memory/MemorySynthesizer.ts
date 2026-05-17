@@ -124,10 +124,27 @@ function categoryLabel(cat: string): string {
     bio: "Profile",
     work: "Work",
     goal: "Goal",
+    operating: "Operating style",
+    voice: "Voice",
+    accountability: "Accountability",
     constraint: "Constraint",
     other: "Note",
   };
   return labels[cat] || "Note";
+}
+
+function isOperatingManualCategory(category?: string): boolean {
+  return category === "operating" || category === "voice" || category === "accountability";
+}
+
+function isReviewedOperatingManualFact(fact: {
+  category?: string;
+  confidence?: number;
+  source?: string;
+  pinned?: boolean;
+}): boolean {
+  if (!isOperatingManualCategory(fact.category)) return true;
+  return fact.pinned === true || fact.source === "manual" || (fact.confidence ?? 0) >= 0.85;
 }
 
 function extractCuratedFragments(workspaceId: string): MemoryFragment[] {
@@ -151,16 +168,18 @@ function extractUserProfileFragments(): MemoryFragment[] {
   try {
     const profile = UserProfileService.getProfile();
     if (!profile.facts.length) return [];
-    return profile.facts.map((fact) => ({
-      key: fingerprint(`profile:${fact.category}:${fact.value}`),
-      source: "user_profile" as const,
-      text: `[${categoryLabel(fact.category)}] ${fact.value}`,
-      relevance: 0.72,
-      confidence: fact.confidence,
-      updatedAt: fact.lastUpdatedAt,
-      estimatedTokens: estimateTokens(fact.value) + 3,
-      category: fact.category,
-    }));
+    return profile.facts
+      .filter((fact) => isReviewedOperatingManualFact(fact))
+      .map((fact) => ({
+        key: fingerprint(`profile:${fact.category}:${fact.value}`),
+        source: "user_profile" as const,
+        text: `[${categoryLabel(fact.category)}] ${fact.value}`,
+        relevance: isOperatingManualCategory(fact.category) ? 0.86 : 0.72,
+        confidence: fact.confidence,
+        updatedAt: fact.lastUpdatedAt,
+        estimatedTokens: estimateTokens(fact.value) + 3,
+        category: fact.category,
+      }));
   } catch {
     return [];
   }
@@ -338,9 +357,23 @@ export class MemorySynthesizer {
         parts.push(`- ${sanitize(fragment.text)}`);
       }
     }
-    if (grouped.user_profile.length || grouped.relationship.length) {
+    const operatingManual = grouped.user_profile.filter((fragment) =>
+      isOperatingManualCategory(fragment.category),
+    );
+    const otherUserProfile = grouped.user_profile.filter(
+      (fragment) => !isOperatingManualCategory(fragment.category),
+    );
+
+    if (operatingManual.length) {
+      parts.push("\n## Personal Operating Manual");
+      for (const fragment of operatingManual) {
+        parts.push(`- ${sanitize(fragment.text)}`);
+      }
+    }
+
+    if (otherUserProfile.length || grouped.relationship.length) {
       parts.push("\n## You & the User");
-      for (const fragment of [...grouped.user_profile, ...grouped.relationship]) {
+      for (const fragment of [...otherUserProfile, ...grouped.relationship]) {
         parts.push(`- ${sanitize(fragment.text)}`);
       }
     }
@@ -446,6 +479,15 @@ export class MemorySynthesizer {
     }
     if (features.sessionRecallEnabled !== false) {
       hints.push("- Use `search_sessions` for recent transcript/task history recall.");
+    }
+    if (
+      features.durableContextEnabled === true ||
+      features.durableContextMode === "experimental" ||
+      features.durableContextMode === "on"
+    ) {
+      hints.push(
+        "- Use `context_grep` and then `context_describe` for compacted runtime context from this task.",
+      );
     }
     hints.push("- Use `search_memories` for broader archive and imported-history recall.");
     if (features.topicMemoryEnabled !== false) {

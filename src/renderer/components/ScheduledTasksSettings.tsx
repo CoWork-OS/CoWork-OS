@@ -34,7 +34,37 @@ interface CronJobState {
   lastError?: string;
   lastDurationMs?: number;
   lastTaskId?: string;
+  runHistory?: CronRunHistoryEntry[];
   totalRuns?: number;
+  successfulRuns?: number;
+  failedRuns?: number;
+}
+
+type CronDeliveryMode = "direct" | "outbox";
+type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
+
+interface CronRunHistoryEntry {
+  runAtMs: number;
+  durationMs: number;
+  status: NonNullable<CronJobState["lastStatus"]>;
+  error?: string;
+  taskId?: string;
+  workspaceId?: string;
+  runWorkspacePath?: string;
+  deliveryStatus?: "success" | "failed" | "skipped";
+  deliveryError?: string;
+  deliveryMode?: CronDeliveryMode;
+  deliveryAttempts?: number;
+  deliverableStatus?: CronDeliverableStatus;
+}
+
+interface CronRunHistoryResult {
+  jobId: string;
+  jobName: string;
+  entries: CronRunHistoryEntry[];
+  totalRuns: number;
+  successfulRuns: number;
+  failedRuns: number;
 }
 
 interface CronJob {
@@ -60,6 +90,8 @@ interface CronStatusSummary {
   storePath: string;
   jobCount: number;
   enabledJobCount: number;
+  runningJobCount?: number;
+  maxConcurrentRuns?: number;
   nextWakeAtMs: number | null;
 }
 
@@ -363,6 +395,91 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
+function formatStatusLabel(status?: CronJobState["lastStatus"]): string {
+  switch (status) {
+    case "ok":
+      return "Completed";
+    case "partial_success":
+      return "Partial result";
+    case "needs_user_action":
+      return "Needs reply";
+    case "awaiting_approval":
+      return "Awaiting approval";
+    case "resume_available":
+      return "Resume available";
+    case "error":
+      return "Failed";
+    case "skipped":
+      return "Skipped";
+    case "timeout":
+      return "Timed out";
+    default:
+      return "No runs yet";
+  }
+}
+
+function getStatusTone(status?: CronJobState["lastStatus"]): "success" | "warning" | "error" | "muted" {
+  if (!status || status === "skipped") return "muted";
+  if (status === "ok") return "success";
+  if (isWarningLikeLastStatus(status)) return "warning";
+  return "error";
+}
+
+function getToneColors(tone: "success" | "warning" | "error" | "muted") {
+  switch (tone) {
+    case "success":
+      return {
+        bg: "var(--color-success-subtle)",
+        fg: "var(--color-success)",
+        border: "color-mix(in srgb, var(--color-success) 28%, transparent)",
+      };
+    case "warning":
+      return {
+        bg: "var(--color-warning-subtle)",
+        fg: "var(--color-warning)",
+        border: "color-mix(in srgb, var(--color-warning) 30%, transparent)",
+      };
+    case "error":
+      return {
+        bg: "var(--color-error-subtle)",
+        fg: "var(--color-error)",
+        border: "color-mix(in srgb, var(--color-error) 30%, transparent)",
+      };
+    default:
+      return {
+        bg: "var(--color-bg-secondary)",
+        fg: "var(--color-text-muted)",
+        border: "var(--color-border-subtle)",
+      };
+  }
+}
+
+function getDeliveryLabel(job: CronJob, entry?: CronRunHistoryEntry): string {
+  if (!job.delivery?.enabled) return "Delivery off";
+  if (!entry) return "Delivery configured";
+  if (entry.deliveryStatus === "success") {
+    return entry.deliverableStatus === "queued" ? "Delivery queued" : "Delivered";
+  }
+  if (entry.deliveryStatus === "failed") return "Delivery failed";
+  if (entry.deliverableStatus === "queued") return "Delivery queued";
+  if (entry.deliveryStatus === "skipped") return "Delivery skipped";
+  return "Delivery pending";
+}
+
+function getDeliveryTone(job: CronJob, entry?: CronRunHistoryEntry): "success" | "warning" | "error" | "muted" {
+  if (!job.delivery?.enabled) return "muted";
+  if (!entry) return "warning";
+  if (entry.deliveryStatus === "success") return "success";
+  if (entry.deliveryStatus === "failed") return "error";
+  if (entry.deliverableStatus === "queued" || entry.deliveryStatus === "skipped") return "warning";
+  return "warning";
+}
+
+function calculateSuccessRate(totalRuns?: number, successfulRuns?: number): number | null {
+  if (!totalRuns) return null;
+  return Math.round(((successfulRuns ?? 0) / totalRuns) * 100);
+}
+
 // Styles
 const styles = {
   container: {
@@ -395,6 +512,11 @@ const styles = {
     fontSize: "24px",
     fontWeight: 600,
     color: "var(--color-text-primary)",
+  } as React.CSSProperties,
+  statHint: {
+    fontSize: "12px",
+    color: "var(--color-text-muted)",
+    minHeight: "16px",
   } as React.CSSProperties,
   jobCard: {
     backgroundColor: "var(--color-bg-glass)",
@@ -480,6 +602,114 @@ const styles = {
     padding: "16px",
     backgroundColor: "var(--color-bg-darker)",
   } as React.CSSProperties,
+  runResults: {
+    display: "grid",
+    gridTemplateColumns: "minmax(240px, 0.9fr) minmax(0, 1.4fr)",
+    gap: "16px",
+    marginBottom: "18px",
+  } as React.CSSProperties,
+  latestRunPanel: {
+    border: "1px solid var(--color-border-subtle)",
+    borderRadius: "var(--radius-md)",
+    backgroundColor: "var(--color-bg-glass)",
+    padding: "14px",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "12px",
+  } as React.CSSProperties,
+  panelEyebrow: {
+    fontSize: "11px",
+    fontWeight: 600,
+    color: "var(--color-text-muted)",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.08em",
+  } as React.CSSProperties,
+  latestRunTitle: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+  } as React.CSSProperties,
+  resultBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    width: "fit-content",
+    padding: "4px 8px",
+    borderRadius: "999px",
+    border: "1px solid transparent",
+    fontSize: "12px",
+    fontWeight: 600,
+  } as React.CSSProperties,
+  resultMetrics: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: "8px",
+  } as React.CSSProperties,
+  resultMetric: {
+    padding: "9px",
+    borderRadius: "8px",
+    backgroundColor: "var(--color-bg-secondary)",
+    minWidth: 0,
+  } as React.CSSProperties,
+  resultMetricValue: {
+    display: "block",
+    fontSize: "16px",
+    fontWeight: 600,
+    color: "var(--color-text-primary)",
+    lineHeight: 1.2,
+  } as React.CSSProperties,
+  resultMetricLabel: {
+    display: "block",
+    marginTop: "3px",
+    fontSize: "11px",
+    color: "var(--color-text-muted)",
+  } as React.CSSProperties,
+  runHistoryPanel: {
+    border: "1px solid var(--color-border-subtle)",
+    borderRadius: "var(--radius-md)",
+    backgroundColor: "var(--color-bg-glass)",
+    overflow: "hidden",
+  } as React.CSSProperties,
+  runHistoryHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    padding: "12px 14px",
+    borderBottom: "1px solid var(--color-border-subtle)",
+  } as React.CSSProperties,
+  runHistoryList: {
+    display: "flex",
+    flexDirection: "column" as const,
+    maxHeight: "280px",
+    overflow: "auto",
+  } as React.CSSProperties,
+  runHistoryRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(92px, 0.6fr) minmax(90px, 0.7fr) minmax(100px, 0.8fr) minmax(0, 1.2fr) auto",
+    alignItems: "center",
+    gap: "10px",
+    padding: "10px 14px",
+    borderBottom: "1px solid var(--color-border-subtle)",
+    fontSize: "12px",
+  } as React.CSSProperties,
+  runHistoryCell: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+    color: "var(--color-text-secondary)",
+  } as React.CSSProperties,
+  inlineTextButton: {
+    border: "1px solid var(--color-border-subtle)",
+    backgroundColor: "transparent",
+    color: "var(--color-text-secondary)",
+    borderRadius: "6px",
+    padding: "5px 8px",
+    fontSize: "12px",
+    cursor: "pointer",
+  } as React.CSSProperties,
   detailGrid: {
     display: "grid",
     gridTemplateColumns: "120px 1fr",
@@ -538,7 +768,11 @@ const styles = {
   } as React.CSSProperties,
 };
 
-export function ScheduledTasksSettings() {
+interface ScheduledTasksSettingsProps {
+  onOpenTask?: (taskId: string) => void;
+}
+
+export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsProps) {
   const [status, setStatus] = useState<CronStatusSummary | null>(null);
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -547,6 +781,8 @@ export function ScheduledTasksSettings() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingJob, setEditingJob] = useState<CronJob | null>(null);
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [runHistoryByJobId, setRunHistoryByJobId] = useState<Record<string, CronRunHistoryResult>>({});
+  const [historyLoadingJobId, setHistoryLoadingJobId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -560,12 +796,63 @@ export function ScheduledTasksSettings() {
       setStatus(statusResult);
       setJobs(jobsResult);
       setWorkspaces(workspacesResult);
+      setRunHistoryByJobId((prev) => {
+        const next = { ...prev };
+        for (const job of jobsResult) {
+          if (next[job.id]) {
+            next[job.id] = {
+              jobId: job.id,
+              jobName: job.name,
+              entries: job.state.runHistory ?? next[job.id].entries,
+              totalRuns: job.state.totalRuns ?? next[job.id].totalRuns,
+              successfulRuns: job.state.successfulRuns ?? next[job.id].successfulRuns,
+              failedRuns: job.state.failedRuns ?? next[job.id].failedRuns,
+            };
+          }
+        }
+        return next;
+      });
     } catch (err: Any) {
       setError(err.message || "Failed to load scheduled tasks");
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const loadRunHistory = useCallback(
+    async (job: CronJob, force = false) => {
+      if (!force && runHistoryByJobId[job.id]) return;
+      try {
+        setHistoryLoadingJobId(job.id);
+        const history = await window.electronAPI.getCronRunHistory(job.id);
+        setRunHistoryByJobId((prev) => ({
+          ...prev,
+          [job.id]:
+            history ?? {
+              jobId: job.id,
+              jobName: job.name,
+              entries: job.state.runHistory ?? [],
+              totalRuns: job.state.totalRuns ?? 0,
+              successfulRuns: job.state.successfulRuns ?? 0,
+              failedRuns: job.state.failedRuns ?? 0,
+            },
+        }));
+      } catch (err: Any) {
+        setError(err.message || "Failed to load run history");
+      } finally {
+        setHistoryLoadingJobId((current) => (current === job.id ? null : current));
+      }
+    },
+    [runHistoryByJobId],
+  );
+
+  const handleExpandJob = (job: CronJob) => {
+    const nextExpanded = expandedJobId === job.id ? null : job.id;
+    setExpandedJobId(nextExpanded);
+    if (nextExpanded) {
+      void loadRunHistory(job);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -612,6 +899,7 @@ export function ScheduledTasksSettings() {
   const handleRunNow = async (job: CronJob, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
+      setExpandedJobId(job.id);
       const result = await window.electronAPI.runCronJob(job.id, "force");
       if (!result.ok) {
         setError(result.error);
@@ -621,8 +909,37 @@ export function ScheduledTasksSettings() {
         console.log(`[ScheduledTasks] Created task: ${result.taskId}`);
       }
       await loadData();
+      await loadRunHistory(job, true);
     } catch (err: Any) {
       setError(err.message);
+    }
+  };
+
+  const handleClearRunHistory = async (job: CronJob) => {
+    if (!confirm(`Clear run history for "${job.name}"?\n\nThis only clears the scheduled task history, not task sessions.`)) {
+      return;
+    }
+    try {
+      const ok = await window.electronAPI.clearCronRunHistory(job.id);
+      if (!ok) {
+        setError("Failed to clear run history");
+        return;
+      }
+      setRunHistoryByJobId((prev) => {
+        const next = { ...prev };
+        next[job.id] = {
+          jobId: job.id,
+          jobName: job.name,
+          entries: [],
+          totalRuns: 0,
+          successfulRuns: 0,
+          failedRuns: 0,
+        };
+        return next;
+      });
+      await loadData();
+    } catch (err: Any) {
+      setError(err.message || "Failed to clear run history");
     }
   };
 
@@ -641,6 +958,23 @@ export function ScheduledTasksSettings() {
     if (!latest || !latest.state.lastRunAtMs) return job;
     return job.state.lastRunAtMs > latest.state.lastRunAtMs ? job : latest;
   }, null);
+  const runStats = jobs.reduce(
+    (acc, job) => {
+      acc.totalRuns += job.state.totalRuns ?? 0;
+      acc.successfulRuns += job.state.successfulRuns ?? 0;
+      acc.failedRuns += job.state.failedRuns ?? 0;
+      if (
+        job.state.lastStatus === "error" ||
+        job.state.lastStatus === "timeout" ||
+        isWarningLikeLastStatus(job.state.lastStatus)
+      ) {
+        acc.needsAttention += 1;
+      }
+      return acc;
+    },
+    { totalRuns: 0, successfulRuns: 0, failedRuns: 0, needsAttention: 0 },
+  );
+  const aggregateSuccessRate = calculateSuccessRate(runStats.totalRuns, runStats.successfulRuns);
 
   return (
     <div style={styles.container}>
@@ -676,13 +1010,17 @@ export function ScheduledTasksSettings() {
       {/* Stats Cards */}
       <div style={styles.statsGrid}>
         <div style={styles.statCard}>
-          <span style={styles.statLabel}>Total Tasks</span>
+          <span style={styles.statLabel}>Scheduled</span>
           <span style={styles.statValue}>{status?.jobCount || 0}</span>
+          <span style={styles.statHint}>{status?.enabledJobCount || 0} active</span>
         </div>
         <div style={styles.statCard}>
-          <span style={styles.statLabel}>Active</span>
+          <span style={styles.statLabel}>Run Success</span>
           <span style={{ ...styles.statValue, color: "var(--color-success)" }}>
-            {status?.enabledJobCount || 0}
+            {aggregateSuccessRate === null ? "-" : `${aggregateSuccessRate}%`}
+          </span>
+          <span style={styles.statHint}>
+            {runStats.successfulRuns} ok / {runStats.failedRuns} failed
           </span>
         </div>
         <div style={styles.statCard}>
@@ -690,11 +1028,24 @@ export function ScheduledTasksSettings() {
           <span style={{ ...styles.statValue, fontSize: "16px" }}>
             {status?.nextWakeAtMs ? formatRelativeTime(status.nextWakeAtMs) : "-"}
           </span>
+          <span style={styles.statHint}>
+            {status?.runningJobCount ? `${status.runningJobCount} running now` : "No active run"}
+          </span>
         </div>
         <div style={styles.statCard}>
-          <span style={styles.statLabel}>Last Run</span>
-          <span style={{ ...styles.statValue, fontSize: "16px" }}>
-            {lastRunJob?.state.lastRunAtMs ? formatRelativeTime(lastRunJob.state.lastRunAtMs) : "-"}
+          <span style={styles.statLabel}>Attention</span>
+          <span
+            style={{
+              ...styles.statValue,
+              color: runStats.needsAttention ? "var(--color-warning)" : "var(--color-text-primary)",
+            }}
+          >
+            {runStats.needsAttention}
+          </span>
+          <span style={styles.statHint}>
+            {lastRunJob?.state.lastRunAtMs
+              ? `Last run ${formatRelativeTime(lastRunJob.state.lastRunAtMs)}`
+              : "No runs yet"}
           </span>
         </div>
       </div>
@@ -735,6 +1086,19 @@ export function ScheduledTasksSettings() {
             const isInboxAutomation = Boolean(job.description?.includes("mailbox-automation:"));
             const threadMatch = job.description?.match(/thread:([^·]+)/i);
             const threadId = threadMatch?.[1]?.trim();
+            const runHistory = runHistoryByJobId[job.id] ?? {
+              jobId: job.id,
+              jobName: job.name,
+              entries: job.state.runHistory ?? [],
+              totalRuns: job.state.totalRuns ?? 0,
+              successfulRuns: job.state.successfulRuns ?? 0,
+              failedRuns: job.state.failedRuns ?? 0,
+            };
+            const latestRun = runHistory.entries[0];
+            const successRate = calculateSuccessRate(runHistory.totalRuns, runHistory.successfulRuns);
+            const latestTone = getStatusTone(latestRun?.status ?? lastStatus);
+            const latestToneColors = getToneColors(latestTone);
+            const deliveryToneColors = getToneColors(getDeliveryTone(job, latestRun));
 
             return (
               <div
@@ -748,7 +1112,7 @@ export function ScheduledTasksSettings() {
                 {/* Job Header */}
                 <div
                   style={styles.jobHeader}
-                  onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
+                  onClick={() => handleExpandJob(job)}
                 >
                   {/* Status Indicator */}
                   <div
@@ -803,7 +1167,7 @@ export function ScheduledTasksSettings() {
                             : isWarningLikeLastStatus(lastStatus)
                               ? Icons.clock
                               : Icons.x}
-                          {lastStatus}
+                          {formatStatusLabel(lastStatus)}
                         </span>
                       )}
                     </div>
@@ -897,6 +1261,239 @@ export function ScheduledTasksSettings() {
                 {/* Expanded Content */}
                 {isExpanded && (
                   <div style={styles.expandedContent}>
+                    <div style={styles.runResults}>
+                      <div style={styles.latestRunPanel}>
+                        <div style={styles.latestRunTitle}>
+                          <span style={styles.panelEyebrow}>Latest result</span>
+                          <span
+                            style={{
+                              ...styles.resultBadge,
+                              backgroundColor: latestToneColors.bg,
+                              color: latestToneColors.fg,
+                              borderColor: latestToneColors.border,
+                            }}
+                          >
+                            {latestTone === "success"
+                              ? Icons.check
+                              : latestTone === "warning"
+                                ? Icons.clock
+                                : latestTone === "error"
+                                  ? Icons.x
+                                  : Icons.activity}
+                            {formatStatusLabel(latestRun?.status ?? lastStatus)}
+                          </span>
+                        </div>
+                        <div style={styles.resultMetrics}>
+                          <div style={styles.resultMetric}>
+                            <span style={styles.resultMetricValue}>
+                              {runHistory.totalRuns || 0}
+                            </span>
+                            <span style={styles.resultMetricLabel}>Total runs</span>
+                          </div>
+                          <div style={styles.resultMetric}>
+                            <span style={styles.resultMetricValue}>
+                              {successRate === null ? "-" : `${successRate}%`}
+                            </span>
+                            <span style={styles.resultMetricLabel}>Success rate</span>
+                          </div>
+                          <div style={styles.resultMetric}>
+                            <span style={styles.resultMetricValue}>
+                              {latestRun?.durationMs
+                                ? formatDuration(latestRun.durationMs)
+                                : job.state.lastDurationMs
+                                  ? formatDuration(job.state.lastDurationMs)
+                                  : "-"}
+                            </span>
+                            <span style={styles.resultMetricLabel}>Last duration</span>
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: "8px",
+                            alignItems: "center",
+                          }}
+                        >
+                          <span
+                            style={{
+                              ...styles.resultBadge,
+                              backgroundColor: deliveryToneColors.bg,
+                              color: deliveryToneColors.fg,
+                              borderColor: deliveryToneColors.border,
+                            }}
+                          >
+                            {Icons.send}
+                            {getDeliveryLabel(job, latestRun)}
+                          </span>
+                          {latestRun?.runWorkspacePath && (
+                            <span
+                              title={latestRun.runWorkspacePath}
+                              style={{
+                                ...styles.resultBadge,
+                                backgroundColor: "var(--color-bg-secondary)",
+                                color: "var(--color-text-secondary)",
+                                borderColor: "var(--color-border-subtle)",
+                                maxWidth: "100%",
+                              }}
+                            >
+                              Run folder saved
+                            </span>
+                          )}
+                        </div>
+                        {(latestRun?.error || job.state.lastError) && (
+                          <div
+                            style={{
+                              padding: "10px",
+                              borderRadius: "8px",
+                              backgroundColor: "var(--color-error-subtle)",
+                              color: "var(--color-error)",
+                              fontSize: "12px",
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            {latestRun?.error || job.state.lastError}
+                          </div>
+                        )}
+                        {onOpenTask && (latestRun?.taskId || job.state.lastTaskId) && (
+                          <button
+                            type="button"
+                            style={{
+                              ...styles.inlineTextButton,
+                              alignSelf: "flex-start",
+                              color: "var(--color-accent)",
+                              borderColor: "color-mix(in srgb, var(--color-accent) 35%, transparent)",
+                            }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenTask?.((latestRun?.taskId || job.state.lastTaskId) as string);
+                            }}
+                          >
+                            Open generated task
+                          </button>
+                        )}
+                      </div>
+
+                      <div style={styles.runHistoryPanel}>
+                        <div style={styles.runHistoryHeader}>
+                          <div>
+                            <span style={styles.panelEyebrow}>Run history</span>
+                            <div
+                              style={{
+                                marginTop: "4px",
+                                color: "var(--color-text-muted)",
+                                fontSize: "12px",
+                              }}
+                            >
+                              {runHistory.successfulRuns} completed, {runHistory.failedRuns} failed
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            <button
+                              type="button"
+                              style={styles.inlineTextButton}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void loadRunHistory(job, true);
+                              }}
+                            >
+                              Refresh
+                            </button>
+                            {runHistory.entries.length > 0 && (
+                              <button
+                                type="button"
+                                style={styles.inlineTextButton}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleClearRunHistory(job);
+                                }}
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div style={styles.runHistoryList}>
+                          {historyLoadingJobId === job.id && runHistory.entries.length === 0 ? (
+                            <div
+                              style={{
+                                padding: "18px 14px",
+                                color: "var(--color-text-muted)",
+                                fontSize: "13px",
+                              }}
+                            >
+                              Loading run history...
+                            </div>
+                          ) : runHistory.entries.length === 0 ? (
+                            <div
+                              style={{
+                                padding: "18px 14px",
+                                color: "var(--color-text-muted)",
+                                fontSize: "13px",
+                              }}
+                            >
+                              No automated runs have finished yet.
+                            </div>
+                          ) : (
+                            runHistory.entries.slice(0, 8).map((entry) => {
+                              const rowToneColors = getToneColors(getStatusTone(entry.status));
+                              const rowDeliveryColors = getToneColors(getDeliveryTone(job, entry));
+                              return (
+                                <div
+                                  key={`${entry.runAtMs}-${entry.taskId || entry.status}`}
+                                  style={styles.runHistoryRow}
+                                >
+                                  <span style={styles.runHistoryCell}>
+                                    {formatRelativeTime(entry.runAtMs)}
+                                  </span>
+                                  <span
+                                    style={{
+                                      ...styles.resultBadge,
+                                      backgroundColor: rowToneColors.bg,
+                                      color: rowToneColors.fg,
+                                      borderColor: rowToneColors.border,
+                                    }}
+                                  >
+                                    {formatStatusLabel(entry.status)}
+                                  </span>
+                                  <span style={styles.runHistoryCell}>
+                                    {formatDuration(entry.durationMs)}
+                                  </span>
+                                  <span
+                                    style={{
+                                      ...styles.resultBadge,
+                                      backgroundColor: rowDeliveryColors.bg,
+                                      color: rowDeliveryColors.fg,
+                                      borderColor: rowDeliveryColors.border,
+                                    }}
+                                    title={entry.deliveryError}
+                                  >
+                                    {getDeliveryLabel(job, entry)}
+                                  </span>
+                                  {entry.taskId && onOpenTask ? (
+                                    <button
+                                      type="button"
+                                      style={styles.inlineTextButton}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        onOpenTask?.(entry.taskId as string);
+                                      }}
+                                    >
+                                      Open
+                                    </button>
+                                  ) : (
+                                    <span style={{ ...styles.runHistoryCell, color: "var(--color-text-muted)" }}>
+                                      No task
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
                     {isInboxAutomation && (
                       <div
                         style={{

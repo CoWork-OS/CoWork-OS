@@ -37,6 +37,7 @@ import {
   type LLMRoutingReason,
   type LLMRoutingFallbackStep,
   type RuntimeToolMetadata,
+  type HumanInputPolicy,
   type CustomSkill,
   type PendingSkillParameterCollection,
   type SkillParameter,
@@ -50,6 +51,12 @@ import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { formatProviderErrorForDisplay } from "../../shared/provider-error-format";
 import { classifyShellPermissionDecision } from "../../shared/shell-permission-intents";
 import {
+  allowsClarifyingHumanInput,
+  allowsHardBlockerHumanInput,
+  allowsStructuredHumanInput,
+  resolveHumanInputPolicy,
+} from "../../shared/human-input-policy";
+import {
   parseInlineSkillSlashChain,
   parseLeadingSkillSlashCommand,
   type ParsedSkillSlashCommand,
@@ -62,6 +69,7 @@ import {
 } from "../../shared/goal-slash-command";
 import { parseNaturalLlmWikiPrompt } from "../../shared/llm-wiki-prompt-routing";
 import { parseOnboardingSlashCommand } from "../../shared/onboarding";
+import { RICH_FRAME_DESIGN_LANGUAGE_PROMPT } from "../../shared/rich-frame-design-language";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
@@ -140,10 +148,11 @@ import {
 import { assertNormalizedTurnTranscript } from "./runtime/turn-transcript-normalizer";
 import { getCustomSkillLoader } from "./custom-skill-loader";
 import { MemoryService } from "../memory/MemoryService";
+import { DurableContextService } from "../memory/DurableContextService";
 import { PlaybookService } from "../memory/PlaybookService";
 import { SessionRecallService } from "../memory/SessionRecallService";
 import { RuntimeVisibilityService } from "./RuntimeVisibilityService";
-import { SupermemoryService } from "../memory/SupermemoryService";
+import { ExternalMemoryProviderRegistry } from "../memory/ExternalMemoryProvider";
 import { UserProfileService } from "../memory/UserProfileService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
@@ -830,6 +839,7 @@ export class TaskExecutor {
    * Computed once per task in verified mode and reused for all mutation steps.
    */
   private inferredVerificationCommand: ExternalStepVerification | null | undefined = undefined;
+  private readonly humanInputPolicy: HumanInputPolicy;
   private readonly shouldPauseForQuestions: boolean;
   private readonly shouldPauseForRequiredDecision: boolean;
   private lastAwaitingUserInputReasonCode: string | null = null;
@@ -1542,6 +1552,7 @@ export class TaskExecutor {
       getToolFailureReason: (toolResult, fallback) =>
         this.getToolFailureReason(toolResult, fallback),
       includeRunCommandTerminationContext: true,
+      compactForLocalModel: this.shouldCompactToolResultsForLocalModel(),
     });
 
     this.emitToolLaneFinished(
@@ -1551,6 +1562,248 @@ export class TaskExecutor {
     );
 
     return normalizedToolResult.toolResult;
+  }
+
+  private shouldCompactToolResultsForLocalModel(): boolean {
+    return this.provider?.type === "ollama";
+  }
+
+  private applyLocalModelNetworkInputLimits(toolName: string, input: Any): void {
+    if (!this.shouldCompactToolResultsForLocalModel()) return;
+    if (!input || typeof input !== "object" || Array.isArray(input)) return;
+
+    const canonicalToolName = canonicalizeToolNameUtil(toolName);
+    if (canonicalToolName === "web_search") {
+      const currentMaxResults = Number((input as Any).maxResults);
+      if (!Number.isFinite(currentMaxResults) || currentMaxResults <= 0 || currentMaxResults > 5) {
+        (input as Any).maxResults = 5;
+        this.emitEvent("log", {
+          metric: "local_model_web_search_max_results_clamped",
+          tool: canonicalToolName,
+          maxResults: 5,
+        });
+      }
+      return;
+    }
+
+    const maxLengthCap =
+      canonicalToolName === "web_fetch"
+        ? 10_000
+        : canonicalToolName === "http_request"
+          ? 20_000
+          : null;
+    if (maxLengthCap === null) return;
+
+    const currentMaxLength = Number((input as Any).maxLength);
+    if (!Number.isFinite(currentMaxLength) || currentMaxLength <= 0 || currentMaxLength > maxLengthCap) {
+      (input as Any).maxLength = maxLengthCap;
+      this.emitEvent("log", {
+        metric: "local_model_network_max_length_clamped",
+        tool: canonicalToolName,
+        maxLength: maxLengthCap,
+      });
+    }
+  }
+
+  private getLocalModelToolBatchExecutionLimit(phase: "step" | "follow_up"): number {
+    if (!this.shouldCompactToolResultsForLocalModel()) return Number.POSITIVE_INFINITY;
+    return phase === "follow_up" ? 3 : 4;
+  }
+
+  private isLocalModelContextExpandingTool(toolName: string): boolean {
+    const canonical = canonicalizeToolNameUtil(toolName);
+    return (
+      canonical === "web_search" ||
+      canonical === "web_fetch" ||
+      canonical === "http_request" ||
+      canonical === "read_file" ||
+      canonical === "read_files" ||
+      canonical === "list_directory" ||
+      canonical === "list_directory_with_sizes" ||
+      canonical === "search_files" ||
+      canonical === "glob" ||
+      canonical === "grep" ||
+      canonical === "get_file_info" ||
+      canonical === "browser_get_content" ||
+      canonical === "browser_snapshot" ||
+      canonical === "browser_evaluate" ||
+      canonical === "task_events" ||
+      canonical === "task_history"
+    );
+  }
+
+  private buildLocalModelDeferredToolResult(params: {
+    toolUse: Any;
+    phase: "step" | "follow_up";
+    reason: "batch_limit" | "mixed_read_write_batch";
+    executedLimit: number;
+  }): LLMToolResult {
+    const toolName = String(params.toolUse?.name || "tool");
+    const isMutationTool = this.isMutationSatisfyingTool(toolName);
+    const message = isMutationTool
+      ? "This write/edit was deferred because local Ollama execution needs to see the current read/search results before creating or editing artifacts. After summarizing the completed tool results, request the write/edit again with complete content."
+      : "This tool call was deferred to keep the local Ollama context small. Summarize the completed tool results first, then request the next small batch if more evidence is still needed.";
+
+    return {
+      type: "tool_result",
+      tool_use_id: String(params.toolUse?.id || ""),
+      content: JSON.stringify({
+        success: true,
+        deferred: true,
+        reason: params.reason,
+        provider: "ollama",
+        phase: params.phase,
+        executedLimit: params.executedLimit,
+        requestedTool: toolName,
+        message,
+      }),
+      is_error: false,
+    };
+  }
+
+  private limitLocalModelToolBatch<T extends { index: number; toolUse: Any }>(
+    calls: T[],
+    phase: "step" | "follow_up",
+    stepId?: string,
+  ): { executableCalls: T[]; deferredToolResults: LLMToolResult[] } {
+    const executionLimit = this.getLocalModelToolBatchExecutionLimit(phase);
+    if (!Number.isFinite(executionLimit)) {
+      return { executableCalls: calls, deferredToolResults: [] };
+    }
+
+    const hasContextExpandingCall = calls.some((call) =>
+      this.isLocalModelContextExpandingTool(String(call.toolUse?.name || "")),
+    );
+    const hasMixedReadWriteBatch =
+      hasContextExpandingCall &&
+      calls.some((call) => this.isMutationSatisfyingTool(String(call.toolUse?.name || "")));
+    if (calls.length <= executionLimit && !hasMixedReadWriteBatch) {
+      return { executableCalls: calls, deferredToolResults: [] };
+    }
+
+    const executableCalls: T[] = [];
+    const deferredToolResults: LLMToolResult[] = [];
+
+    for (const call of calls) {
+      const toolName = String(call.toolUse?.name || "");
+      const shouldDeferMixedWrite =
+        hasContextExpandingCall && this.isMutationSatisfyingTool(toolName);
+      if (shouldDeferMixedWrite || executableCalls.length >= executionLimit) {
+        deferredToolResults.push(
+          this.buildLocalModelDeferredToolResult({
+            toolUse: call.toolUse,
+            phase,
+            reason: shouldDeferMixedWrite ? "mixed_read_write_batch" : "batch_limit",
+            executedLimit: executionLimit,
+          }),
+        );
+      } else {
+        executableCalls.push(call);
+      }
+    }
+
+    if (deferredToolResults.length > 0) {
+      this.emitEvent("log", {
+        metric: "local_model_tool_batch_deferred",
+        phase,
+        stepId,
+        requested: calls.length,
+        executed: executableCalls.length,
+        deferred: deferredToolResults.length,
+        executedLimit: executionLimit,
+      });
+    }
+
+    return { executableCalls, deferredToolResults };
+  }
+
+  private getApproxToolResultChars(messages: LLMMessage[]): number {
+    let total = 0;
+    for (const message of messages || []) {
+      const content = (message as Any)?.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        if (block?.type !== "tool_result") continue;
+        total += String(block?.content || "").length;
+      }
+    }
+    return total;
+  }
+
+  private shouldForceLocalModelStepFinalization(params: {
+    iterationCount: number;
+    stepStartedAt: number;
+    stepToolCallCount: number;
+    messages: LLMMessage[];
+    stepContract: Any;
+    isVerificationStep: boolean;
+    isSummaryStep: boolean;
+    hadAnyToolSuccess: boolean;
+  }): boolean {
+    if (!this.shouldCompactToolResultsForLocalModel()) return false;
+    if (params.isVerificationStep || params.isSummaryStep) return false;
+    if (!params.hadAnyToolSuccess) return false;
+    if (params.stepContract?.requiresMutation || params.stepContract?.mode === "mutation_required") {
+      return false;
+    }
+
+    const elapsedMs = Date.now() - params.stepStartedAt;
+    const toolResultChars = this.getApproxToolResultChars(params.messages);
+    return (
+      params.stepToolCallCount >= 8 ||
+      toolResultChars >= 20_000 ||
+      (params.iterationCount >= 4 && params.stepToolCallCount >= 4) ||
+      (elapsedMs >= 240_000 && params.stepToolCallCount >= 4)
+    );
+  }
+
+  private buildLocalModelStepFinalizationMessages(params: {
+    stepContext: string;
+    stepDescription: string;
+    messages: LLMMessage[];
+  }): LLMMessage[] {
+    const toolSummary = this.getRecentToolResultSummary(12);
+    const semanticSummary = String(this.task?.semanticSummary || "").trim();
+    const fallbackEvidence = toolSummary || semanticSummary || "Some tool evidence has been gathered.";
+    const prompt = [
+      params.stepContext,
+      "",
+      "LOCAL MODEL FINALIZATION:",
+      "- Stop calling tools for this step.",
+      "- Use the evidence already gathered below and provide the best complete answer for this step now.",
+      "- If a requested field is not present in the evidence, say it was not captured instead of starting another fetch/search.",
+      `- Current step: ${params.stepDescription}`,
+      "",
+      "COMPACT EVIDENCE FROM COMPLETED TOOLS:",
+      fallbackEvidence,
+    ].join("\n");
+
+    const finalMessages: LLMMessage[] = [{ role: "user", content: prompt }];
+    const lastAssistant = [...(params.messages || [])]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    if (lastAssistant) {
+      const text = Array.isArray((lastAssistant as Any).content)
+        ? (lastAssistant as Any).content
+            .filter((block: Any) => block?.type === "text" && typeof block.text === "string")
+            .map((block: Any) => block.text.trim())
+            .filter(Boolean)
+            .join("\n")
+        : typeof (lastAssistant as Any).content === "string"
+          ? String((lastAssistant as Any).content).trim()
+          : "";
+      if (text) {
+        finalMessages.push({
+          role: "assistant",
+          content: [{ type: "text", text: text.slice(0, 2000) }],
+        });
+        finalMessages.push({
+          role: "user",
+          content: "Finish this step now without tools, using the compact evidence above.",
+        });
+      }
+    }
+    return finalMessages;
   }
 
   private async preflightToolInvocation(params: {
@@ -1704,6 +1957,8 @@ export class TaskExecutor {
         ...(forcedToolAction ? { forcedToolAction } : {}),
       };
     }
+
+    this.applyLocalModelNetworkInputLimits(params.content.name, params.content.input);
 
     const strictRootViolation = this.detectStrictTaskRootPathViolationInInput(
       params.content.name,
@@ -3671,11 +3926,29 @@ export class TaskExecutor {
   }
 
   private updateConversationHistory(messages: LLMMessage[]): void {
-    this.conversationHistory = this.sanitizeConversationHistoryForRuntime(messages);
+    const sanitized = this.sanitizeConversationHistoryForRuntime(messages);
+    const runtimeWillRecord = Boolean(this._runtime);
+    this.conversationHistory = sanitized;
+    if (!runtimeWillRecord) {
+      this.recordDurableConversationHistory(sanitized);
+    }
   }
 
   private appendConversationHistory(message: LLMMessage): void {
     this.updateConversationHistory([...this.conversationHistory, message]);
+  }
+
+  private recordDurableConversationHistory(messages: LLMMessage[]): void {
+    try {
+      DurableContextService.recordHistory({
+        workspaceId: this.workspace.id,
+        taskId: this.task.id,
+        messages,
+        source: "executor_history",
+      });
+    } catch {
+      // Durable context is experimental; history capture must never block task execution.
+    }
   }
 
   private computeSharedContextKey(): string {
@@ -5161,7 +5434,7 @@ ${transcript}
       "conversationHistory",
       () => runtime.state.transcript.conversationHistory,
       (value) => {
-        runtime.state.transcript.conversationHistory = Array.isArray(value) ? value : [];
+        runtime.updateConversationHistory(Array.isArray(value) ? value : []);
       },
     );
     this.installRuntimeFieldProxy(
@@ -5947,15 +6220,28 @@ ${transcript}
     const allowUserInput = task.agentConfig?.allowUserInput ?? true;
     const pauseForRequiredDecision = task.agentConfig?.pauseForRequiredDecision ?? true;
     const autonomousMode = task.agentConfig?.autonomousMode === true;
-    // Only interactive main tasks should pause for user input.
+    const effectiveExecutionMode = normalizeExecutionMode(
+      task.agentConfig?.executionMode,
+      task.agentConfig?.conversationMode,
+    );
+    this.humanInputPolicy = resolveHumanInputPolicy({
+      agentConfig: task.agentConfig,
+      executionMode: effectiveExecutionMode,
+    });
+    // Only interactive main tasks should pause for concrete runtime blockers.
     this.shouldPauseForQuestions =
       allowUserInput &&
+      allowsHardBlockerHumanInput(this.humanInputPolicy) &&
       !autonomousMode &&
       !task.parentTaskId &&
       (task.agentType ?? "main") === "main";
-    // Required-input decisions must remain pausable even in autonomous/deep-work mode.
+    // Broad clarifying decisions are opt-in. Safety approvals and hard blockers are separate.
     this.shouldPauseForRequiredDecision =
-      allowUserInput && pauseForRequiredDecision && !task.parentTaskId && (task.agentType ?? "main") === "main";
+      allowUserInput &&
+      pauseForRequiredDecision &&
+      allowsClarifyingHumanInput(this.humanInputPolicy) &&
+      !task.parentTaskId &&
+      (task.agentType ?? "main") === "main";
     this.windowStartEventCount = this.daemon.getTaskEvents(this.task.id).length;
     const isVerificationTask =
       task.agentConfig?.verificationAgent === true ||
@@ -6220,13 +6506,14 @@ ${transcript}
 
   private async buildSupermemoryProfileBlock(query: string): Promise<string> {
     try {
-      const context = await SupermemoryService.buildPromptContext({
+      const results = await new ExternalMemoryProviderRegistry().prefetchAll({
         workspace: {
           id: this.workspace.id,
           name: this.workspace.name,
         },
         query,
       });
+      const context = results.map((result) => result.context).filter(Boolean).join("\n\n");
       if (!context) return "";
       return [
         TaskExecutor.PINNED_USER_PROFILE_TAG,
@@ -7027,6 +7314,7 @@ ${transcript}
     messages: LLMMessage[];
     retryLabel: string;
     operation: string;
+    forceNoTools?: boolean;
   }): Promise<{ response: Any; availableTools: Any[] }> {
     return this.getSessionRuntime().requestLLMResponseWithAdaptiveBudget(opts);
   }
@@ -10417,11 +10705,12 @@ ${transcript}
   }
 
   private getImageGenerationTaskText(): string {
+    const task = this.task || {};
     return [
-      this.task.rawPrompt,
-      this.task.userPrompt,
-      this.task.title,
-      this.task.prompt,
+      task.rawPrompt,
+      task.userPrompt,
+      task.title,
+      task.prompt,
     ]
       .map((value) =>
         typeof value === "string" ? normalizePromptForContractsUtil(value).trim() : "",
@@ -10487,6 +10776,128 @@ ${transcript}
       /\b(?:app|application)\b/.test(taskText) && !hasAppAssetIntent;
     const hasNonImageWorkIntent = this.hasNonImageGenerationWorkIntent(taskText);
     return !hasAppWorkIntent && !hasNonImageWorkIntent;
+  }
+
+  private buildSimpleFileCreationPlan(): Plan | null {
+    const targets = this.inferSimpleFileCreationTargets();
+    if (!targets) return null;
+
+    const fileKind = this.describeSimpleFileCreationKind(targets);
+    const fileLabel = targets.length === 1 ? "file" : "files";
+    return {
+      description: `Create simple ${fileKind} ${fileLabel}`,
+      steps: [
+        {
+          id: "1",
+          description:
+            `Create ${this.formatSimpleFileTargetList(targets)} as simple ${fileKind} sample ${fileLabel}.`,
+          kind: "primary",
+          status: "pending",
+        },
+      ],
+    };
+  }
+
+  private inferSimpleFileCreationTargets(): string[] | null {
+    if (this.getEffectiveExecutionMode() !== "execute") return null;
+
+    const prompt = [
+      this.task.rawPrompt,
+      this.task.userPrompt,
+      this.task.prompt,
+      this.task.title,
+    ]
+      .map((value) =>
+        typeof value === "string" ? normalizePromptForContractsUtil(value).trim() : "",
+      )
+      .filter(Boolean)
+      .join("\n");
+    if (!prompt.trim()) return null;
+
+    const normalized = normalizePromptForContractsUtil(prompt).trim();
+    const lower = normalized.toLowerCase();
+    if (normalized.length > 240) return null;
+    if (normalized.split(/\s+/).filter(Boolean).length > 36) return null;
+    if (!/\b(?:create|make|generate|write|add)\b/.test(lower)) return null;
+    if (
+      /\b(?:app|application|website|web\s*app|project|scaffold|implement|fix|debug|test|build|deploy|database|api|server|feature|refactor|compile|package|install)\b/.test(
+        lower,
+      )
+    ) {
+      return null;
+    }
+
+    const explicitTargets = Array.from(new Set(extractArtifactPathCandidates(prompt)))
+      .map((candidate) => candidate.trim())
+      .filter((candidate) => this.isSimpleTextArtifactPath(candidate));
+    if (explicitTargets.length > 0) {
+      return explicitTargets.length <= 5 ? explicitTargets : null;
+    }
+
+    if (!/\b(?:files?|docs?|documents?)\b/.test(lower)) return null;
+    const extension = this.inferSimpleFileCreationExtension(lower);
+    if (!extension) return null;
+    const count = this.inferSimpleFileCreationCount(lower);
+    if (!count || count > 5) return null;
+
+    const baseName = /\bsample\b/.test(lower) ? "sample" : "file";
+    if (count === 1) {
+      return [`${baseName}${extension}`];
+    }
+    return Array.from({ length: count }, (_, index) => `${baseName}-${index + 1}${extension}`);
+  }
+
+  private inferSimpleFileCreationExtension(lowerPrompt: string): string | null {
+    if (/\b(?:markdown|md)\b|\.md\b/.test(lowerPrompt)) return ".md";
+    if (/\b(?:text|txt)\b|\.txt\b/.test(lowerPrompt)) return ".txt";
+    if (/\bjson\b|\.json\b/.test(lowerPrompt)) return ".json";
+    if (/\bcsv\b|\.csv\b/.test(lowerPrompt)) return ".csv";
+    if (/\byaml\b|\.ya?ml\b/.test(lowerPrompt)) return ".yaml";
+    if (/\byml\b|\.yml\b/.test(lowerPrompt)) return ".yml";
+    return null;
+  }
+
+  private inferSimpleFileCreationCount(lowerPrompt: string): number | null {
+    const numericMatch = lowerPrompt.match(/\b([1-5])\b/);
+    if (numericMatch) return Number(numericMatch[1]);
+    const words: Record<string, number> = {
+      one: 1,
+      a: 1,
+      an: 1,
+      two: 2,
+      three: 3,
+      four: 4,
+      five: 5,
+    };
+    for (const [word, count] of Object.entries(words)) {
+      if (new RegExp(`\\b${word}\\b`).test(lowerPrompt)) return count;
+    }
+    return null;
+  }
+
+  private isSimpleTextArtifactPath(candidate: string): boolean {
+    const normalized = candidate.replace(/^['"`]+|['"`]+$/g, "").trim();
+    if (!normalized || /\s/.test(normalized)) return false;
+    const extension = path.extname(normalized).toLowerCase();
+    return [".md", ".markdown", ".txt", ".json", ".csv", ".yaml", ".yml"].includes(extension);
+  }
+
+  private describeSimpleFileCreationKind(targets: string[]): string {
+    const extensions = new Set(targets.map((target) => path.extname(target).toLowerCase()));
+    if (extensions.size === 1) {
+      const [extension] = Array.from(extensions);
+      if (extension === ".md" || extension === ".markdown") return "Markdown";
+      if (extension === ".json") return "JSON";
+      if (extension === ".csv") return "CSV";
+      if (extension === ".yaml" || extension === ".yml") return "YAML";
+    }
+    return "text";
+  }
+
+  private formatSimpleFileTargetList(targets: string[]): string {
+    const quoted = targets.map((target) => `\`${target}\``);
+    if (quoted.length <= 2) return quoted.join(" and ");
+    return `${quoted.slice(0, -1).join(", ")}, and ${quoted[quoted.length - 1]}`;
   }
 
   private isSimpleImageGenerationAllowedTool(toolName: string): boolean {
@@ -10926,7 +11337,8 @@ ${transcript}
   }
 
   private taskRequestsPresentationArtifactOutput(): boolean {
-    return promptRequestsPresentationArtifactOutputUtil(this.task.title, this.getContractPrompt());
+    const task: Any = this.task || {};
+    return promptRequestsPresentationArtifactOutputUtil(task.title, this.getContractPrompt());
   }
 
   private stepRequestsPresentationArtifactOutput(
@@ -10997,7 +11409,16 @@ ${transcript}
 
   private hasExecutionEvidence(): boolean {
     if (!this.plan) return true;
-    return this.planCompletedEffectively || this.plan.steps.some((step) => step.status === "completed");
+    if (this.planCompletedEffectively || this.plan.steps.some((step) => step.status === "completed")) {
+      return true;
+    }
+    if (
+      this.successfulToolUsageCounts instanceof Map &&
+      Array.from(this.successfulToolUsageCounts.values()).some((count) => count > 0)
+    ) {
+      return true;
+    }
+    return Array.isArray(this.toolResultMemory) && this.toolResultMemory.length > 0;
   }
 
   private hasArtifactEvidence(contract: CompletionContract): boolean {
@@ -12156,6 +12577,7 @@ ${transcript}
       conversationMode: this.task.agentConfig?.conversationMode,
       taskIntent: this.task.agentConfig?.taskIntent,
       shellEnabled: this.workspace.permissions.shell,
+      humanInputPolicy: this.humanInputPolicy,
     };
   }
 
@@ -12184,6 +12606,7 @@ ${transcript}
       stepDescription: currentStep?.description?.slice(0, 220) || "",
       executionMode: this.getEffectiveExecutionMode(),
       taskDomain: this.getEffectiveTaskDomain(),
+      humanInputPolicy: this.humanInputPolicy,
       taskIntent: this.task.agentConfig?.taskIntent || "",
       webSearchMode: this.webSearchMode,
       visualCanvasTask: this.isVisualCanvasTask(),
@@ -12669,6 +13092,13 @@ ${transcript}
       "- Use plain-language progress and outcomes unless the user asks for deeper technical detail.",
       "- Do not append trailing offer questions by default.",
       "",
+      "RICH INLINE SURFACES:",
+      "- When the best answer is a compact visual surface such as a chart card, metric summary, progress/status panel, comparison, calculator, timeline, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
+      "- Do not print custom frame markup in your message. Mention the result in normal prose and let the artifact/preview system display it.",
+      "- For full web pages, landing pages, websites, app designs, or user-requested standalone HTML files, keep the normal web artifact flow: create the HTML output and summarize it; do not try to force an inline frame.",
+      "- Inline surfaces may be static or animated. Use animation only when it clarifies state or progress.",
+      RICH_FRAME_DESIGN_LANGUAGE_PROMPT,
+      "",
       "HONESTY & UNCERTAINTY:",
       "- State uncertainty explicitly when it matters.",
       "- Never fabricate tool outputs or claim a tool succeeded when it did not.",
@@ -12688,6 +13118,14 @@ ${transcript}
         "- This task cannot pause for user input.",
         "- Do not ask the user to choose, confirm, or provide missing details.",
         "- When a decision is required, pick the safest reasonable default, state the assumption briefly, and continue.",
+      ].join("\n");
+    }
+    if (!allowsClarifyingHumanInput(this.humanInputPolicy)) {
+      return [
+        "USER INPUT POLICY (CRITICAL):",
+        "- Do not stop for broad preference or clarification questions.",
+        "- If a decision is required and safe defaults exist, state the assumption briefly and continue.",
+        "- Stop only for concrete runtime blockers such as missing credentials, disabled required permissions, disconnected integrations, or required files that are unavailable.",
       ].join("\n");
     }
     return [
@@ -12743,6 +13181,26 @@ ${transcript}
       "- Do not split subjective visual consistency into separate verification steps such as same sizing, same radius, same padding, or same font weight.",
       "- Prefer a compact implementation plan: inspect design system, centralize button variants/styles, update call sites, run static checks/build if available.",
       "- Verification should be code-based: changed files, class/component usage, lint/type/build checks, or exact token/class references.",
+    ].join("\n");
+  }
+
+  private buildLocalModelExecutionGuidancePrompt(scope: "planning" | "execution"): string {
+    if (this.provider?.type !== "ollama") return "";
+    if (scope === "planning") {
+      return [
+        "LOCAL MODEL PLANNING:",
+        "- Use smaller, atomic steps because local Ollama models are slower on long tool-result contexts.",
+        "- Split repository identification, current stats, contributors, releases, star history, event research, dashboard creation, and verification into separate steps.",
+        "- Each step should have one objective that can usually finish after a few tool calls.",
+      ].join("\n");
+    }
+
+    return [
+      "LOCAL MODEL EXECUTION:",
+      "- Work only on the current plan step. If later-step information appears useful, leave it for its own step unless it is strictly required now.",
+      "- Prefer small network batches. Do not fetch many long pages in one turn; collect the minimum evidence needed, then summarize or finish the step.",
+      "- For web_fetch/http_request, keep maxLength modest unless exact raw data is essential. Refetch targeted URLs later if omitted text is needed.",
+      "- When enough evidence exists for the current step, answer the step directly instead of continuing to gather adjacent research.",
     ].join("\n");
   }
 
@@ -13266,19 +13724,23 @@ ${transcript}
   private static readonly LOW_SIGNAL_EXPLORATION_BUFFER = 20;
 
   private getToolCountCaps(): { baseCap: number; softCap: number } {
+    const defaultBase =
+      this.provider?.type === "ollama" ? 40 : TaskExecutor.BASE_MAX_TOOLS_OFFERED;
+    const defaultSoft =
+      this.provider?.type === "ollama" ? 56 : TaskExecutor.SOFT_MAX_TOOLS_OFFERED;
     const configuredBase = Number(
-      process.env.COWORK_LLM_MAX_TOOLS_BASE ?? TaskExecutor.BASE_MAX_TOOLS_OFFERED,
+      process.env.COWORK_LLM_MAX_TOOLS_BASE ?? defaultBase,
     );
     const configuredSoft = Number(
-      process.env.COWORK_LLM_MAX_TOOLS_SOFT ?? TaskExecutor.SOFT_MAX_TOOLS_OFFERED,
+      process.env.COWORK_LLM_MAX_TOOLS_SOFT ?? defaultSoft,
     );
 
     let baseCap = Number.isFinite(configuredBase)
       ? Math.max(20, Math.min(200, Math.floor(configuredBase)))
-      : TaskExecutor.BASE_MAX_TOOLS_OFFERED;
+      : defaultBase;
     let softCap = Number.isFinite(configuredSoft)
       ? Math.max(baseCap, Math.min(260, Math.floor(configuredSoft)))
-      : TaskExecutor.SOFT_MAX_TOOLS_OFFERED;
+      : defaultSoft;
     if (softCap < baseCap) softCap = baseCap;
 
     // Action-heavy intents need slightly broader tool recall.
@@ -16267,6 +16729,93 @@ You are continuing a previous conversation. The context from the previous conver
       return null;
     }
 
+    if (toolName === "http_request") {
+      const url = typeof result.url === "string" ? result.url : String(input?.url || "");
+      const status = typeof result.status === "number" ? result.status : undefined;
+      const body = typeof result.body === "string" ? result.body : "";
+      const parsed = (() => {
+        try {
+          return body ? JSON.parse(body) : null;
+        } catch {
+          return null;
+        }
+      })();
+      const statusPrefix = status ? `status=${status}` : "status=unknown";
+
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const repoFullName = typeof parsed.full_name === "string" ? parsed.full_name : "";
+        if (repoFullName && /api\.github\.com\/repos\//i.test(url)) {
+          return [
+            `${url}: ${statusPrefix}`,
+            `repo=${repoFullName}`,
+            typeof parsed.stargazers_count === "number"
+              ? `stars=${parsed.stargazers_count}`
+              : "",
+            typeof parsed.forks_count === "number" ? `forks=${parsed.forks_count}` : "",
+            typeof parsed.open_issues_count === "number"
+              ? `open_issues=${parsed.open_issues_count}`
+              : "",
+            typeof parsed.created_at === "string" ? `created=${parsed.created_at}` : "",
+            typeof parsed.pushed_at === "string" ? `pushed=${parsed.pushed_at}` : "",
+            typeof parsed.html_url === "string" ? `html=${parsed.html_url}` : "",
+          ]
+            .filter(Boolean)
+            .join(", ");
+        }
+
+        if (
+          /api\.github\.com\/repos\/.+\/releases(?:\/latest)?/i.test(url) &&
+          (typeof parsed.tag_name === "string" || typeof parsed.name === "string")
+        ) {
+          return [
+            `${url}: ${statusPrefix}`,
+            `release=${String(parsed.name || parsed.tag_name || "").trim()}`,
+            typeof parsed.tag_name === "string" ? `tag=${parsed.tag_name}` : "",
+            typeof parsed.published_at === "string" ? `published=${parsed.published_at}` : "",
+            typeof parsed.html_url === "string" ? `html=${parsed.html_url}` : "",
+          ]
+            .filter(Boolean)
+            .join(", ");
+        }
+      }
+
+      if (Array.isArray(parsed)) {
+        if (/api\.github\.com\/repos\/.+\/contributors/i.test(url)) {
+          const logins = parsed
+            .slice(0, 5)
+            .map((entry: Any) => (typeof entry?.login === "string" ? entry.login : ""))
+            .filter(Boolean);
+          return [
+            `${url}: ${statusPrefix}`,
+            `contributors_returned=${parsed.length}`,
+            logins.length > 0 ? `sample=${logins.join(",")}` : "",
+            result.headers?.link ? "pagination=present" : "",
+          ]
+            .filter(Boolean)
+            .join(", ");
+        }
+        if (/api\.github\.com\/repos\/.+\/releases/i.test(url)) {
+          const releases = parsed
+            .slice(0, 3)
+            .map((entry: Any) =>
+              [entry?.tag_name, entry?.published_at].filter(Boolean).join("@"),
+            )
+            .filter(Boolean);
+          return [
+            `${url}: ${statusPrefix}`,
+            `releases_returned=${parsed.length}`,
+            releases.length > 0 ? `sample=${releases.join("; ")}` : "",
+          ]
+            .filter(Boolean)
+            .join(", ");
+        }
+      }
+
+      const snippet = body ? body.replace(/\s+/g, " ").slice(0, 240) : "";
+      if (url && snippet) return `${url}: ${statusPrefix}, ${snippet}`;
+      if (url) return `${url}: ${statusPrefix}`;
+    }
+
     if (toolName === "search_files") {
       const totalFound = typeof result.totalFound === "number" ? result.totalFound : undefined;
       if (totalFound !== undefined) return `matches found: ${totalFound}`;
@@ -18898,6 +19447,7 @@ You are continuing a previous conversation. The context from the previous conver
 
   private finalCandidateNeedsUserInput(): boolean {
     if (this.task.parentTaskId && this.task.agentType === "sub") return false;
+    if (!this.shouldPauseForRequiredDecision) return false;
     const candidate = this.getOutstandingRequiredDecisionCandidate();
     if (!candidate) return false;
     if (this.isBlockingRequiredDecisionQuestion(candidate)) return true;
@@ -21302,10 +21852,44 @@ You are continuing a previous conversation. The context from the previous conver
       progressLine,
       blockedLine,
       reasonLine,
-      "I can continue from the exact point of failure and finish the task.",
+      "The remaining work was not completed before the time limit.",
     ]
       .filter(Boolean)
       .join(" ");
+  }
+
+  private buildDeterministicTimeoutRecoveryAnswer(error: Any): string {
+    const candidates = [
+      this.lastNonVerificationOutput,
+      this.lastAssistantOutput,
+      this.lastAssistantText,
+      this.buildResultSummary(),
+      this.buildTimeoutFallbackSummary(error),
+    ]
+      .map((value) => String(value || "").trim())
+      .filter((value) => value.length > 0);
+
+    const toolEvidence = Array.isArray(this.toolResultMemory)
+      ? this.toolResultMemory
+          .slice(-6)
+          .map((entry) => {
+            const tool = String(entry?.tool || "").trim();
+            const summary = String(entry?.summary || "").trim();
+            if (!tool && !summary) return "";
+            return `- ${tool || "tool"}: ${summary || "completed successfully"}`;
+          })
+          .filter(Boolean)
+      : [];
+
+    const uniqueSections: string[] = [];
+    for (const candidate of candidates) {
+      if (uniqueSections.includes(candidate)) continue;
+      uniqueSections.push(candidate);
+    }
+    if (toolEvidence.length > 0) {
+      uniqueSections.push(`Captured tool progress:\n${toolEvidence.join("\n")}`);
+    }
+    return uniqueSections.join("\n\n").trim();
   }
 
   private async buildTimeoutRecoveryAnswer(error: Any): Promise<string> {
@@ -21906,9 +22490,12 @@ You are continuing a previous conversation. The context from the previous conver
         if (this.cancelled) break;
 
         if (this.softDeadlineTriggered) {
-          const recoveryAnswer = await this.buildTimeoutRecoveryAnswer(
-            new Error(this.wrapUpRequested ? "User requested wrap-up" : "Soft deadline reached"),
+          const recoveryError = new Error(
+            this.wrapUpRequested ? "User requested wrap-up" : "Soft deadline reached",
           );
+          const recoveryAnswer = this.wrapUpRequested
+            ? await this.buildTimeoutRecoveryAnswer(recoveryError)
+            : this.buildDeterministicTimeoutRecoveryAnswer(recoveryError);
           if (recoveryAnswer) {
             const trimmed = String(recoveryAnswer).trim();
             if (trimmed) {
@@ -21955,6 +22542,20 @@ You are continuing a previous conversation. The context from the previous conver
           // one successful plan execution is sufficient.
           break;
         }
+      }
+
+      if (this.softDeadlineTriggered && !this.wrapUpRequested) {
+        const reason = "Soft deadline reached during execution. Finalizing with best-effort answer.";
+        const finalText =
+          this.buildDeterministicTimeoutRecoveryAnswer(new Error("Soft deadline reached")) ||
+          "Execution reached the step time limit before the task could be completed.";
+        this.lastAssistantOutput = finalText;
+        this.lastNonVerificationOutput = finalText;
+        this.lastAssistantText = finalText;
+        this.emitEvent("assistant_message", { message: finalText });
+        this.emitEvent("log", { message: reason });
+        this.finalizeTaskBestEffort(finalText, reason);
+        return;
       }
 
       if (this.cancelled) return;
@@ -22198,6 +22799,16 @@ You are continuing a previous conversation. The context from the previous conver
       return;
     }
 
+    const simpleFileCreationPlan = this.buildSimpleFileCreationPlan();
+    if (simpleFileCreationPlan) {
+      this.plan = simpleFileCreationPlan;
+      this.emitEvent("log", {
+        message: "Using direct one-step plan for simple file creation.",
+      });
+      this.emitEvent("plan_created", { plan: this.plan });
+      return;
+    }
+
     const planStrongRouting =
       !this.hasExplicitTaskRouteOverride() &&
       !(this.task.agentConfig?.llmProfileForced === true && this.task.agentConfig?.llmProfile === "cheap");
@@ -22268,6 +22879,7 @@ You are continuing a previous conversation. The context from the previous conver
           agentType: this.task.agentType ?? "main",
           workerRole: this.task.workerRole ?? null,
           allowUserInput: this.task.agentConfig?.allowUserInput !== false,
+          humanInputPolicy: this.humanInputPolicy,
         },
         skillRoutingQuery,
       },
@@ -22358,6 +22970,7 @@ Return ONLY a JSON object:
           kitContext: [kitContext, automaticDesignSystemContext].filter(Boolean).join("\n\n"),
         }),
         this.buildIntegrationMentionGuidancePrompt(),
+        this.buildLocalModelExecutionGuidancePrompt("planning"),
         this.buildCodeFirstUiGuidancePrompt(planTextPrompt),
         adaptiveRecoveryGuidance,
       ]
@@ -22460,6 +23073,13 @@ Return ONLY a JSON object:
 
       logger.info(`[Task ${this.task.id}] LLM response received in ${Date.now() - startTime}ms`);
     } catch (llmError: Any) {
+      if (this.cancelled && this.isAbortLikeError(llmError)) {
+        logger.info(
+          `[Task ${this.task.id}] LLM request cancelled during plan creation (reason: ${this.cancelReason || "unknown"})`,
+        );
+        throw llmError;
+      }
+
       logger.error(`[Task ${this.task.id}] LLM API call failed:`, llmError);
       // Note: Don't log 'error' event here - just re-throw. The error will be caught
       // by execute()'s catch block which logs the final error notification.
@@ -22518,7 +23138,7 @@ Return ONLY a JSON object:
           this.emitEvent("plan_created", { plan: this.plan });
         } else {
           // Fallback: recover structured steps from plain text output
-          const recoveredSteps = this.extractPlanStepsFromText(planParsingText);
+          const recoveredSteps = this.recoverPlanStepsFromTextWithPromptFallback(planParsingText);
           this.plan = this.sanitizePlan({
             description: "Execution plan",
             steps:
@@ -22886,6 +23506,65 @@ Return ONLY a JSON object:
       });
     }
     return deduped.slice(0, 10);
+  }
+
+  private recoverTaskPromptPlanSteps(): Array<{ id: string; description: string }> {
+    const candidates = [
+      this.getExecutionTaskPrompt(),
+      this.getContractPrompt(),
+      this.task?.prompt,
+      this.task?.title,
+    ];
+    const seen = new Set<string>();
+    for (const candidate of candidates) {
+      const text = String(candidate || "").trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      const steps = this.extractPlanStepsFromText(text);
+      if (steps.length > 0) return steps;
+    }
+    return [];
+  }
+
+  private localModelRecoveredTextPlanLooksMalformed(
+    recoveredSteps: Array<{ id: string; description: string }>,
+    rawPlanText: string,
+  ): boolean {
+    if (this.provider?.type !== "ollama") return false;
+    if (recoveredSteps.length !== 1) return false;
+    const description = String(recoveredSteps[0]?.description || "").trim();
+    const combined = `${rawPlanText}\n${description}`;
+    const wordCount = description.split(/\s+/).filter(Boolean).length;
+    return (
+      description.includes("\n") ||
+      wordCount >= 70 ||
+      /\b(?:i['’]?ll|i will|let'?s get started|searching for|first,\s*i['’]?ll)\b/i.test(
+        combined,
+      )
+    );
+  }
+
+  private recoverPlanStepsFromTextWithPromptFallback(
+    planText: string,
+  ): Array<{ id: string; description: string }> {
+    const recoveredSteps = this.extractPlanStepsFromText(planText);
+    const shouldTryTaskPromptFallback =
+      recoveredSteps.length === 0 ||
+      this.localModelRecoveredTextPlanLooksMalformed(recoveredSteps, planText);
+    if (!shouldTryTaskPromptFallback) return recoveredSteps;
+
+    const promptSteps = this.recoverTaskPromptPlanSteps();
+    if (promptSteps.length > 0) {
+      this.emitEvent("log", {
+        metric: "plan_text_fallback_used_task_steps",
+        provider: this.provider?.type,
+        recoveredStepCount: recoveredSteps.length,
+        promptStepCount: promptSteps.length,
+      });
+      return promptSteps;
+    }
+
+    return recoveredSteps;
   }
 
   /**
@@ -23859,6 +24538,7 @@ Return ONLY a JSON object:
     );
     const executionTurnGuidance = [
       this.buildIntegrationMentionGuidancePrompt(),
+      this.buildLocalModelExecutionGuidancePrompt("execution"),
       adaptiveRecoveryGuidance,
     ]
       .filter(Boolean)
@@ -24208,6 +24888,7 @@ Return ONLY a JSON object:
       let mutationStarvationExploratoryStreak = 0;
       let mutationStarvationEscalated = false;
       let mutationStarvationToolGateTurnsRemaining = 0;
+      let localModelStepFinalizationForced = false;
       const MUTATION_STARVATION_THRESHOLD = 3;
       // Varied failure detection: non-resetting per-tool failure counter (not reset on success)
       const persistentToolFailures = new Map<string, number>();
@@ -24436,6 +25117,38 @@ Return ONLY a JSON object:
                 `toolCalls=${stepToolCallCount} | maxTokensRecoveries=${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}`,
             );
 
+            if (
+              !localModelStepFinalizationForced &&
+              this.shouldForceLocalModelStepFinalization({
+                iterationCount,
+                stepStartedAt: stepStartTime,
+                stepToolCallCount,
+                messages,
+                stepContract,
+                isVerificationStep: isVerifyStep,
+                isSummaryStep,
+                hadAnyToolSuccess,
+              })
+            ) {
+              localModelStepFinalizationForced = true;
+              messages = this.buildLocalModelStepFinalizationMessages({
+                stepContext,
+                stepDescription: step.description,
+                messages,
+              });
+              this.emitEvent("log", {
+                metric: "local_model_step_finalization_forced",
+                stepId: step.id,
+                iteration: iterationCount,
+                stepToolCallCount,
+                toolResultChars: this.getApproxToolResultChars(state.messages),
+              });
+              logger.info(
+                `${this.logTag} Local model step finalization forced | stepId=${step.id} | ` +
+                  `iteration=${iterationCount} | toolCalls=${stepToolCallCount}`,
+              );
+            }
+
             ({
               messages,
               lastTurnMemoryRecallQuery,
@@ -24464,6 +25177,7 @@ Return ONLY a JSON object:
                 messages,
                 retryLabel: `Step execution (iteration ${iterationCount})`,
                 operation: "LLM execution step",
+                forceNoTools: localModelStepFinalizationForced,
               });
             } catch (llmError: Any) {
               const recovery = this.recoverFromContextCapacityOverflow({
@@ -24837,7 +25551,8 @@ Return ONLY a JSON object:
         let simpleImageGenerationStopAfterTool = false;
         const mutationStarvationToolGateActive = mutationStarvationToolGateTurnsRemaining > 0;
         const forceFinalizeWithoutTools =
-          this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0;
+          (this.guardrailPhaseAEnabled && responseHasToolUse && remainingTurnsAfterResponse <= 0) ||
+          (localModelStepFinalizationForced && responseHasToolUse);
         let skippedToolCallsByPolicy = 0;
         let hasDisabledToolAttempt = false;
         let hasDuplicateToolAttempt = false;
@@ -24859,10 +25574,18 @@ Return ONLY a JSON object:
               index,
               toolUse,
             }));
+          const limitedToolBatch = this.limitLocalModelToolBatch(
+            scheduledToolCalls,
+            "step",
+            step.id,
+          );
+          if (limitedToolBatch.deferredToolResults.length > 0) {
+            toolResults.push(...limitedToolBatch.deferredToolResults);
+          }
 
-          if (scheduledToolCalls.length > 0) {
+          if (limitedToolBatch.executableCalls.length > 0) {
             const scheduledOutcome = await this.getToolScheduler().executeBatch({
-              calls: scheduledToolCalls,
+              calls: limitedToolBatch.executableCalls,
               maxParallel:
                 this.toolBatchParallelEnabled && this.toolBatchParallelMax > 1
                   ? this.toolBatchParallelMax
@@ -28443,9 +29166,11 @@ Return ONLY a JSON object:
         // Exception: capability upgrade requests should not stop on limitation-style questions.
         const requiredDecisionDetected =
           assistantAskedQuestion && this.isBlockingRequiredDecisionQuestion(assistantText || "");
+        const effectiveExecutionModeForInput = this.getEffectiveExecutionMode();
         const shouldEnforceStructuredInputTool =
           requiredDecisionDetected &&
-          this.getEffectiveExecutionMode() === "plan" &&
+          (effectiveExecutionModeForInput === "plan" || effectiveExecutionModeForInput === "debug") &&
+          allowsStructuredHumanInput(this.humanInputPolicy) &&
           !responseHasToolUse &&
           availableToolNames.has("request_user_input") &&
           structuredInputEnforcementAttempts < 2;
@@ -28469,7 +29194,7 @@ Return ONLY a JSON object:
         }
         const shouldPauseForQuestion =
           requiredDecisionDetected &&
-          (this.shouldPauseForQuestions || this.shouldPauseForRequiredDecision) &&
+          this.shouldPauseForRequiredDecision &&
           !(this.capabilityUpgradeRequested && capabilityRefusalDetected);
         if (shouldPauseForQuestion) {
           logger.info(`${this.logTag} Assistant asked a question, pausing for user input`);
@@ -31412,21 +32137,29 @@ Return ONLY a JSON object:
           followUpToolUseCount,
           "follow_up",
         );
-	        if (followUpBatchGroupId) {
-	          this.currentToolBatchGroupId = followUpBatchGroupId;
-	        }
+        if (followUpBatchGroupId) {
+          this.currentToolBatchGroupId = followUpBatchGroupId;
+        }
 
-	        try {
-            const scheduledToolCalls = (response.content || [])
-              .filter((content: Any) => content?.type === "tool_use")
-              .map((toolUse: Any, index: number) => ({
-                index,
-                toolUse,
-              }));
+        try {
+          const scheduledToolCalls = (response.content || [])
+            .filter((content: Any) => content?.type === "tool_use")
+            .map((toolUse: Any, index: number) => ({
+              index,
+              toolUse,
+            }));
+          const limitedToolBatch = this.limitLocalModelToolBatch(
+            scheduledToolCalls,
+            "follow_up",
+            this.currentStepId || "follow_up",
+          );
+          if (limitedToolBatch.deferredToolResults.length > 0) {
+            toolResults.push(...limitedToolBatch.deferredToolResults);
+          }
 
-            if (scheduledToolCalls.length > 0) {
+          if (limitedToolBatch.executableCalls.length > 0) {
             const scheduledOutcome = await this.getToolScheduler().executeBatch({
-              calls: scheduledToolCalls,
+              calls: limitedToolBatch.executableCalls,
               maxParallel:
                 this.toolBatchParallelEnabled && this.toolBatchParallelMax > 1
                   ? this.toolBatchParallelMax
@@ -32621,9 +33354,12 @@ Return ONLY a JSON object:
 
         const followupRequiredDecisionDetected =
           assistantAskedQuestion && this.isBlockingRequiredDecisionQuestion(assistantText || "");
+        const effectiveFollowupExecutionModeForInput = this.getEffectiveExecutionMode();
         const shouldEnforceStructuredInputTool =
           followupRequiredDecisionDetected &&
-          this.getEffectiveExecutionMode() === "plan" &&
+          (effectiveFollowupExecutionModeForInput === "plan" ||
+            effectiveFollowupExecutionModeForInput === "debug") &&
+          allowsStructuredHumanInput(this.humanInputPolicy) &&
           !responseHasToolUse &&
           availableToolNames.has("request_user_input") &&
           structuredInputEnforcementAttempts < 2;
@@ -32648,7 +33384,7 @@ Return ONLY a JSON object:
         const shouldPauseForFollowupQuestion =
           followupRequiredDecisionDetected &&
           shouldResumeAfterFollowup &&
-          (this.shouldPauseForQuestions || this.shouldPauseForRequiredDecision) &&
+          this.shouldPauseForRequiredDecision &&
           !(this.capabilityUpgradeRequested && capabilityRefusalDetected);
         if (shouldPauseForFollowupQuestion) {
           logger.info(

@@ -111,7 +111,7 @@ export class OpenAIProvider implements LLMProvider {
             : 0,
       };
       this.authMethod = "oauth";
-      logger.info(
+      logger.debug(
         `Using OAuth authentication with pi-ai SDK (token expires: ${
           this.oauthTokens.expires_at
             ? new Date(this.oauthTokens.expires_at).toISOString()
@@ -122,7 +122,7 @@ export class OpenAIProvider implements LLMProvider {
       // Use API key - standard OpenAI SDK
       this.client = new OpenAI({ apiKey });
       this.authMethod = "api_key";
-      logger.info("Using API key authentication");
+      logger.debug("Using API key authentication");
     } else {
       throw new Error("OpenAI authentication required. Use API key or sign in with ChatGPT.");
     }
@@ -213,7 +213,7 @@ export class OpenAIProvider implements LLMProvider {
 
     const template =
       availableModels.find((m) => m.id === DEFAULT_CODEX_MODEL) || availableModels[0];
-    logger.info(
+    logger.debug(
       `Model ${normalizedId} not found in pi-ai registry; using OpenAI Codex model compatibility shim.`,
     );
     return {
@@ -714,7 +714,7 @@ export class OpenAIProvider implements LLMProvider {
   async getAvailableModels(): Promise<Array<{ id: string; name: string; description: string }>> {
     // For OAuth authentication, use pi-ai SDK's model list
     if (this.authMethod === "oauth") {
-      logger.info("Using OAuth - fetching models from pi-ai SDK...");
+      logger.debug("Using OAuth - fetching models from pi-ai SDK...");
 
       try {
         const { getModels } = await loadPiAiModule();
@@ -747,7 +747,7 @@ export class OpenAIProvider implements LLMProvider {
           return priority(a.id) - priority(b.id);
         });
 
-        logger.info(`Found ${models.length} models via pi-ai SDK`);
+        logger.debug(`Found ${models.length} models via pi-ai SDK`);
         return models;
       } catch (error) {
         logger.error("Failed to get models from pi-ai SDK:", error);

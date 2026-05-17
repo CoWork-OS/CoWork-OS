@@ -1749,24 +1749,26 @@ const validateEmailChannelConfigByProtocol = (
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: [fieldMap.email],
-      message: "Email address is required for IMAP/SMTP mode",
+      message: "Email address is required for email mode",
     });
   }
 
   const authMethod = getOptionalString(data[fieldMap.authMethod]) || "password";
+  const oauthProvider = getOptionalString(data[fieldMap.oauthProvider]);
+  const isMicrosoftOAuth = authMethod === "oauth" && oauthProvider === "microsoft";
   if (authMethod === "oauth") {
-    if (!getOptionalString(data[fieldMap.oauthProvider])) {
+    if (!oauthProvider) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [fieldMap.oauthProvider],
-        message: "OAuth provider is required for IMAP/SMTP OAuth mode",
+        message: "OAuth provider is required for email OAuth mode",
       });
     }
     if (!getOptionalString(data[fieldMap.oauthClientId])) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [fieldMap.oauthClientId],
-        message: "OAuth client ID is required for IMAP/SMTP OAuth mode",
+        message: "OAuth client ID is required for email OAuth mode",
       });
     }
     if (
@@ -1776,7 +1778,7 @@ const validateEmailChannelConfigByProtocol = (
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [fieldMap.accessToken],
-        message: "OAuth tokens are required for IMAP/SMTP OAuth mode",
+        message: "OAuth tokens are required for email OAuth mode",
       });
     }
   } else if (!getOptionalString(data[fieldMap.password])) {
@@ -1786,6 +1788,8 @@ const validateEmailChannelConfigByProtocol = (
       message: "Email password is required for IMAP/SMTP mode",
     });
   }
+  if (isMicrosoftOAuth) return;
+
   if (!getOptionalString(data[fieldMap.imapHost])) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -2534,6 +2538,7 @@ export const MCPConnectorOAuthSchema = z.object({
   teamDomain: z.string().max(200).optional(),
   tenant: z.string().max(200).optional(),
   loginHint: z.string().max(500).optional(),
+  prompt: z.enum(["select_account", "consent"]).optional(),
 });
 
 // ============ Health Platform Schemas ============

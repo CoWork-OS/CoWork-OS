@@ -92,7 +92,22 @@ export class RoutineService {
              LIMIT ?`,
           )
           .all(limit)) as Any[];
-    return rows.map((row) => this.mapRunRow(row));
+    return dedupeRoutineRuns(rows.map((row) => this.mapRunRecord(row)));
+  }
+
+  async refreshRunsForTask(taskId: string): Promise<void> {
+    const normalizedTaskId = taskId.trim();
+    if (!normalizedTaskId || !this.deps.getTaskSnapshot) return;
+    const rows = this.deps.db
+      .prepare(
+        `SELECT * FROM routine_runs
+         WHERE backing_task_id = ? AND status IN ('queued', 'running')
+         ORDER BY updated_at DESC`,
+      )
+      .all(normalizedTaskId) as Any[];
+    for (const row of rows) {
+      await this.refreshTaskBackedRun(this.mapRunRecord(row));
+    }
   }
 
   async create(input: RoutineCreate): Promise<Routine> {
@@ -856,7 +871,7 @@ export class RoutineService {
           .all()) as Any[];
 
     for (const row of rows) {
-      const run = this.mapRunRow(row);
+      const run = this.mapRunRecord(row);
       if (run.backingManagedSessionId && this.deps.getManagedSessionSnapshot) {
         const snapshot = await this.deps.getManagedSessionSnapshot(run.backingManagedSessionId);
         if (!snapshot) continue;
@@ -878,30 +893,37 @@ export class RoutineService {
       }
 
       if (run.backingTaskId && this.deps.getTaskSnapshot) {
-        const snapshot = await this.deps.getTaskSnapshot(run.backingTaskId);
-        if (!snapshot) continue;
-        const status = mapTaskSnapshotStatus(snapshot.status, snapshot.terminalStatus);
-        this.upsertRun({
-          ...run,
-          status,
-          finishedAt:
-            status === "queued" || status === "running"
-              ? run.finishedAt
-              : snapshot.completedAt || run.finishedAt || this.deps.now(),
-          errorSummary: snapshot.error || run.errorSummary,
-          artifactsSummary: snapshot.resultSummary || run.artifactsSummary,
-        });
+        await this.refreshTaskBackedRun(run);
       }
     }
   }
 
+  private async refreshTaskBackedRun(run: RoutineRunRecord): Promise<void> {
+    if (!run.backingTaskId || !this.deps.getTaskSnapshot) return;
+    const snapshot = await this.deps.getTaskSnapshot(run.backingTaskId);
+    if (!snapshot) return;
+    const status = mapTaskSnapshotStatus(snapshot.status, snapshot.terminalStatus);
+    this.upsertRun({
+      ...run,
+      status,
+      finishedAt:
+        status === "queued" || status === "running"
+          ? run.finishedAt
+          : snapshot.completedAt || run.finishedAt || this.deps.now(),
+      errorSummary: snapshot.error || run.errorSummary,
+      artifactsSummary: snapshot.resultSummary || run.artifactsSummary,
+    });
+  }
+
   private upsertRun(input: {
+    id?: string;
     runKey?: string;
     routineId: string;
     triggerId: string;
     triggerType: RoutineTrigger["type"];
     status: RoutineRunStatus;
     startedAt: number;
+    createdAt?: number;
     finishedAt?: number;
     sourceEventSummary?: string;
     backingTaskId?: string;
@@ -911,9 +933,13 @@ export class RoutineService {
     artifactsSummary?: string;
   }): RoutineRun {
     const now = this.deps.now();
-    const existing = input.runKey ? this.findRunByKey(input.runKey) : null;
-    const id = existing?.id || randomUUID();
-    const createdAt = existing?.createdAt || now;
+    const existing = input.runKey
+      ? this.findRunByKey(input.runKey)
+      : input.id
+        ? this.findRunById(input.id)
+        : null;
+    const id = existing?.id || input.id || randomUUID();
+    const createdAt = existing?.createdAt || input.createdAt || now;
     this.deps.db
       .prepare(
         `INSERT OR REPLACE INTO routine_runs
@@ -964,7 +990,17 @@ export class RoutineService {
     const row = this.deps.db
       .prepare("SELECT * FROM routine_runs WHERE run_key = ? ORDER BY updated_at DESC LIMIT 1")
       .get(runKey) as Any | undefined;
-    if (!row) return null;
+    return row ? this.mapRunRecord(row) : null;
+  }
+
+  private findRunById(id: string): RoutineRunRecord | null {
+    const row = this.deps.db.prepare("SELECT * FROM routine_runs WHERE id = ?").get(id) as
+      | Any
+      | undefined;
+    return row ? this.mapRunRecord(row) : null;
+  }
+
+  private mapRunRecord(row: Any): RoutineRunRecord {
     return {
       ...this.mapRunRow(row),
       runKey: row.run_key ? String(row.run_key) : undefined,
@@ -1553,6 +1589,49 @@ function mapTaskSnapshotStatus(
   if (terminalStatus === "partial_success") return "partial_success";
   if (status === "completed" || terminalStatus === "ok") return "completed";
   return "running";
+}
+
+function dedupeRoutineRuns(runs: RoutineRunRecord[]): RoutineRun[] {
+  const out: RoutineRunRecord[] = [];
+  const seen = new Map<string, number>();
+  for (const run of runs) {
+    const key = routineRunDedupeKey(run);
+    if (!key) {
+      out.push(run);
+      continue;
+    }
+
+    const existingIndex = seen.get(key);
+    if (existingIndex === undefined) {
+      seen.set(key, out.length);
+      out.push(run);
+      continue;
+    }
+
+    out[existingIndex] = preferRoutineRun(out[existingIndex], run);
+  }
+  return out;
+}
+
+function routineRunDedupeKey(run: RoutineRunRecord): string | null {
+  if (run.backingTaskId) return `task:${run.routineId}:${run.backingTaskId}`;
+  if (run.backingManagedSessionId) return `managed:${run.routineId}:${run.backingManagedSessionId}`;
+  if (run.runKey) return `key:${run.routineId}:${run.runKey}`;
+  return null;
+}
+
+function preferRoutineRun(a: RoutineRunRecord, b: RoutineRunRecord): RoutineRunRecord {
+  const score = (run: RoutineRunRecord) => {
+    const terminal = run.status === "completed" || run.status === "failed" ? 4 : 0;
+    const needsUser = run.status === "needs_user_action" ? 3 : 0;
+    const partial = run.status === "partial_success" ? 2 : 0;
+    const hasEvidence = run.errorSummary || run.artifactsSummary ? 1 : 0;
+    return terminal + needsUser + partial + hasEvidence;
+  };
+  const aScore = score(a);
+  const bScore = score(b);
+  if (aScore !== bScore) return bScore > aScore ? b : a;
+  return b.updatedAt > a.updatedAt ? b : a;
 }
 
 function normalizeInstructions(value: unknown): string {

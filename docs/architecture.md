@@ -1,11 +1,11 @@
 # CoWork OS Architecture
 
-CoWork OS is a local-first desktop runtime and AI workbench for task execution, generated knowledge-work artifacts, background operator loops, and multi-surface automation.
+CoWork OS is a GUI-first local AI super app, everything app, and desktop runtime for task execution, many-agent orchestration, generated knowledge-work artifacts, background operator loops, and multi-surface automation.
 
 ## Core Architecture
 
 - **Electron main process**: task orchestration, agent runtime, heartbeat orchestration, IPC, and tool execution
-- **React renderer**: desktop UI, Mission Control, task timeline, settings, and monitoring surfaces
+- **React renderer**: desktop UI, Agents Hub, Mission Control, task timeline, settings, task boards, approval dialogs, and monitoring surfaces for managing many agents without a terminal-first workflow
 - **Tool and connector layer**: file, shell, browser, web, native integrations, document generation/compilation tools including source-first LaTeX PDF compilation, MCP connectors, remote execution, and **computer use** (`screenshot`, `click`, `type_text`, and related tools) as a governed desktop-GUI lane (platform helper, single-session lock, policy-gated routing). See [Computer use](computer-use.md).
 - **Composer mention layer**: the renderer and Electron preload expose a grouped `@` autocomplete for Agents, configured Integrations, and Files. Integration mentions are resolved locally, render as rich chips, persist in task/session metadata, and inject soft routing guidance into the executor without changing permissions or `allowedTools`. See [Composer Mentions](composer-mentions.md).
 - **Message shortcut layer**: the renderer exposes one `/` picker for deterministic app commands and skill-backed workflow shortcuts. Shared app command parsing handles `/schedule`, `/clear`, `/plan`, `/cost`, `/multitask`, `/compact`, `/doctor`, and `/undo`; plugin-pack aliases resolve to target skill IDs before generic skill slash execution. Skill-backed picker selections insert editable slash tokens before launch, and Claude-for-Legal workflows can surface structured main-view matter intake cards. See [Message Box Shortcuts](message-box-shortcuts.md) and [Claude-for-Legal Workflows](claude-for-legal.md).

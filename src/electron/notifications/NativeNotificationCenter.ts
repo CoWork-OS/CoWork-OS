@@ -1,4 +1,5 @@
 import { Notification } from "electron";
+import { getDesktopIconImage } from "../branding";
 
 interface NativeNotificationInput {
   id: string;
@@ -37,9 +38,11 @@ export class NativeNotificationCenter {
     }
 
     try {
+      const icon = getDesktopIconImage();
       const nativeNotification = new Notification({
         title: notification.title,
         body: notification.message,
+        ...(icon ? { icon } : {}),
         silent: false,
         timeoutType: "default",
       });

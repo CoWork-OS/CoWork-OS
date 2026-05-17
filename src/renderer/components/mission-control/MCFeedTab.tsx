@@ -58,6 +58,7 @@ export function MCFeedTab({ data }: MCFeedTabProps) {
     selectedAgent,
     setSelectedAgent,
     agents,
+    everydayAgentFocus,
     formatRelativeTime,
     toggleMissionControlEvidence,
     setDetailPanel,
@@ -94,6 +95,11 @@ export function MCFeedTab({ data }: MCFeedTabProps) {
           </div>
         </div>
         <div className="mc-v2-feed-agent-chips">
+          {everydayAgentFocus && (
+            <button className="mc-v2-agent-chip active" type="button" disabled>
+              Everyday Agent
+            </button>
+          )}
           {activeAgents.map((agent) => (
             <button
               key={agent.id}

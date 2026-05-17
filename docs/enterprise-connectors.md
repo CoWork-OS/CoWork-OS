@@ -2,6 +2,11 @@
 
 This document describes the current shipped MCP connector surface in CoWork OS. The goal is to expose enterprise integrations through a consistent MCP interface while keeping the app decoupled from connector implementation details and avoiding overlap with stronger native integrations.
 
+<p align="center">
+  <img src="../resources/branding/images/cowork-os-11.webp" alt="Connector catalog" width="700">
+  <br><em>The connector catalog exposes CRM, support, productivity, analytics, and payment integrations through one setup surface.</em>
+</p>
+
 ## Phase 1 Goals
 
 - Define a connector contract (naming, inputs, outputs, errors).

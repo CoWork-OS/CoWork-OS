@@ -579,6 +579,31 @@ describe("SessionRuntime", () => {
     }
   });
 
+  it("can force an adaptive-budget request to run without tools", async () => {
+    const harness = createHarness();
+    harness.setToolRegistry({
+      getTools: vi.fn(() => [{ name: "web_search", description: "Search web" }]),
+      getDeferredTools: vi.fn(() => []),
+      getToolCatalogVersion: vi.fn(() => "catalog:v1"),
+      cleanup: vi.fn(async () => undefined),
+    });
+    harness.createMessageWithTimeout.mockResolvedValueOnce({
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "done" }],
+      usage: { inputTokens: 10, outputTokens: 3, cachedTokens: 0 },
+    });
+
+    const result = await harness.runtime.requestLLMResponseWithAdaptiveBudget({
+      messages: [{ role: "user", content: "Finish" }],
+      retryLabel: "no tools",
+      operation: "No tools test",
+      forceNoTools: true,
+    });
+
+    expect(result.availableTools).toEqual([]);
+    expect(harness.createMessageWithTimeout.mock.calls[0][0].tools).toEqual([]);
+  });
+
   it("refreshes base tool discovery and still invalidates on catalog or workspace changes", () => {
     const harness = createHarness();
     let catalogVersion = "catalog:v1";
@@ -982,6 +1007,30 @@ describe("SessionRuntime", () => {
     expect(renderToolsForContext).toHaveBeenCalledTimes(1);
 
     harness.setExecutionMode("verified");
+    harness.runtime.getAvailableTools();
+
+    expect(renderToolsForContext).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates available tools when the active step changes", () => {
+    const harness = createHarness();
+    const renderToolsForContext = vi.fn((tools: Any[]) => tools);
+    harness.setToolRegistry({
+      getTools: vi.fn(() => [
+        { name: "run_command", description: "Run command" },
+        { name: "web_search", description: "Search web" },
+      ]),
+      getDeferredTools: vi.fn(() => []),
+      getToolCatalogVersion: vi.fn(() => "catalog:v1"),
+      renderToolsForContext,
+      cleanup: vi.fn(async () => undefined),
+    });
+
+    harness.runtime.getAvailableTools();
+    harness.runtime.getAvailableTools();
+    expect(renderToolsForContext).toHaveBeenCalledTimes(1);
+
+    harness.runtime.state.loop.currentStepId = "step-1";
     harness.runtime.getAvailableTools();
 
     expect(renderToolsForContext).toHaveBeenCalledTimes(2);

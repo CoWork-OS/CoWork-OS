@@ -149,6 +149,12 @@ const TOOL_PROMPT_METADATA_BY_NAME: Record<string, LLMToolPromptMetadata> = {
         ? "Broad discovery first. Then use web_fetch for a specific page. In cached mode, verify freshness from fetched pages."
         : "Broad discovery first. Then use web_fetch for a specific page. Use browser tools for interactive pages.",
   })),
+  x_search: createPromptMetadata(() => ({
+    appendDescription:
+      "Use for X/Twitter-native research: posts, profiles, threads, source reactions, and current discourse on X. Prefer web_search for general web pages and web_fetch for known URLs.",
+    compactDescription:
+      "Search X/Twitter posts and threads via xAI. Use for X-native discourse, not general web pages.",
+  })),
   web_fetch: createPromptMetadata((context) => ({
     appendDescription:
       context.webSearchMode === "cached"

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildUnavailableToolResult,
   buildNormalizedToolResult,
+  compactNetworkToolResultForLocalModel,
   getToolFailureReason,
   getToolInputValidationError,
   isAdvisoryToolFailureResult,
@@ -177,6 +178,19 @@ describe("tool failure normalization", () => {
     ).toBe("Request timed out");
   });
 
+  it("reports non-zero normal run_command termination as an exit code", () => {
+    expect(
+      getToolFailureReason(
+        {
+          success: false,
+          terminationReason: "normal",
+          exitCode: 2,
+        },
+        "unknown error",
+      ),
+    ).toBe("exit code 2");
+  });
+
   it("does not classify non-blocking vision config failures as hard failures", () => {
     expect(
       isHardToolFailure(
@@ -255,5 +269,81 @@ describe("tool failure normalization", () => {
       expect.objectContaining({ type: "text" }),
       { type: "image", data: "ZmFrZQ==", mimeType: "image/png" },
     ]);
+  });
+
+  it("compacts large network JSON results for local models while preserving source facts", () => {
+    const releases = Array.from({ length: 60 }, (_, index) => ({
+      id: index + 1,
+      node_id: `node-${index}`,
+      tag_name: `v1.${index}`,
+      name: `Release ${index}`,
+      html_url: `https://github.com/example/project/releases/tag/v1.${index}`,
+      published_at: `2026-01-${String((index % 28) + 1).padStart(2, "0")}T00:00:00Z`,
+      body: `Important release notes ${index}\n${"feature detail ".repeat(500)}`,
+      author: {
+        login: "maintainer",
+        avatar_url: "https://avatars.example/maintainer.png",
+      },
+    }));
+    const rawResult = JSON.stringify({
+      success: true,
+      url: "https://api.github.com/repos/example/project/releases?per_page=100",
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        link: '<https://api.github.com/repositories/1/releases?page=2>; rel="next", <https://api.github.com/repositories/1/releases?page=5>; rel="last"',
+        server: "github.com",
+      },
+      body: JSON.stringify(releases, null, 2),
+      contentLength: 120000,
+    });
+
+    const compacted = compactNetworkToolResultForLocalModel({
+      toolName: "http_request",
+      result: {},
+      rawResult,
+    });
+
+    expect(compacted.length).toBeLessThan(4_000);
+    expect(compacted).toContain("_cowork_compacted_for_local_model");
+    expect(compacted).toContain("https://api.github.com/repos/example/project/releases");
+    expect(compacted).toContain("v1.0");
+    expect(compacted).toContain("published_at");
+    expect(compacted).toContain("rel=\\\"last\\\"");
+    expect(compacted).not.toContain("avatar_url");
+    expect(compacted).toContain("omittedItems");
+  });
+
+  it("uses local-model network compaction only when requested", () => {
+    const largeReadme = `# Project\n\n${"Details about the project.\n".repeat(5000)}`;
+    const rawResult = JSON.stringify({
+      success: true,
+      url: "https://raw.githubusercontent.com/example/project/main/README.md",
+      status: 200,
+      body: largeReadme,
+      contentLength: largeReadme.length,
+    });
+
+    const normal = buildNormalizedToolResult({
+      toolName: "http_request",
+      toolUseId: "tool-normal",
+      result: { success: true },
+      rawResult,
+      sanitizeToolResult: (_toolName, resultText) => resultText,
+      getToolFailureReason,
+    });
+    const compacted = buildNormalizedToolResult({
+      toolName: "http_request",
+      toolUseId: "tool-local",
+      result: { success: true },
+      rawResult,
+      sanitizeToolResult: (_toolName, resultText) => resultText,
+      getToolFailureReason,
+      compactForLocalModel: true,
+    });
+
+    expect(normal.toolResult.content.length).toBeGreaterThan(compacted.toolResult.content.length);
+    expect(compacted.toolResult.content).toContain("_cowork_compacted_for_local_model");
+    expect(compacted.toolResult.content).toContain("https://raw.githubusercontent.com/example/project/main/README.md");
   });
 });

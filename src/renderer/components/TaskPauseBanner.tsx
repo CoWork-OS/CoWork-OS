@@ -98,8 +98,8 @@ function getPauseBannerCopy(
     };
   }
   return {
-    title: "Quick check-in - I'm at a decision point.",
-    instruction: "Type anything below to continue, or stop this task here.",
+    title: "Task paused.",
+    instruction: "Reply below with the missing detail or next instruction, or stop this task here.",
   };
 }
 
@@ -278,7 +278,7 @@ export function TaskPauseBanner({
             aria-labelledby={detailsTitleId}
           >
             <div className="modal-header">
-              <h2 id={detailsTitleId}>Quick check-in details</h2>
+              <h2 id={detailsTitleId}>Pause details</h2>
               <button
                 type="button"
                 className="modal-close"

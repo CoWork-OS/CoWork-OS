@@ -1,12 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ExternalLink } from "lucide-react";
 import type { FileViewerResult } from "../../electron/preload";
+import {
+  applyRichFrameDesignLanguage,
+  type RichFrameDesignOptions,
+  type RichFrameTheme,
+} from "../../shared/rich-frame-design-language";
+
+type InlineHtmlPreviewVariant = "default" | "frame";
 
 type InlineHtmlPreviewProps = {
   filePath: string;
   workspacePath: string;
   title?: string;
   className?: string;
+  variant?: InlineHtmlPreviewVariant;
+  frameHeight?: string;
+  aspectRatio?: string;
+  showChrome?: boolean;
   onOpenViewer?: (path: string) => void;
 };
 
@@ -14,6 +25,10 @@ type InlineHtmlSourcePreviewProps = {
   htmlContent: string;
   title?: string;
   className?: string;
+  variant?: InlineHtmlPreviewVariant;
+  frameHeight?: string;
+  aspectRatio?: string;
+  showChrome?: boolean;
 };
 
 const formatFileSize = (bytes: number): string => {
@@ -39,6 +54,75 @@ function extractHtmlTitle(htmlContent: string): string {
     .replace(/\s+/g, " ")
     .trim();
   return heading || "Interactive HTML";
+}
+
+function normalizeCssLength(value?: string): string | undefined {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return undefined;
+  if (/^\d{2,4}$/.test(trimmed)) return `${trimmed}px`;
+  if (/^\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%)$/.test(trimmed)) return trimmed;
+  if (/^clamp\([a-z0-9.,\s%()+\-*/]{1,120}\)$/i.test(trimmed)) return trimmed;
+  return undefined;
+}
+
+function normalizeAspectRatio(value?: string): string | undefined {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return undefined;
+  if (/^\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?$/.test(trimmed)) return trimmed;
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) return trimmed;
+  return undefined;
+}
+
+function getCurrentRichFrameTheme(): RichFrameTheme {
+  if (typeof document === "undefined") return "light";
+  return document.documentElement.classList.contains("theme-light") ? "light" : "dark";
+}
+
+function getCurrentRichFrameHostBackground(): string {
+  return "transparent";
+}
+
+function useRichFrameDesignOptions(enabled: boolean): RichFrameDesignOptions {
+  const [options, setOptions] = useState<RichFrameDesignOptions>(() => ({
+    theme: getCurrentRichFrameTheme(),
+    hostBackground: getCurrentRichFrameHostBackground(),
+  }));
+
+  useEffect(() => {
+    if (!enabled || typeof document === "undefined") return;
+
+    const root = document.documentElement;
+    const updateOptions = () =>
+      setOptions({
+        theme: getCurrentRichFrameTheme(),
+        hostBackground: getCurrentRichFrameHostBackground(),
+      });
+    updateOptions();
+
+    const observer = new MutationObserver(updateOptions);
+    observer.observe(root, { attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, [enabled]);
+
+  return options;
+}
+
+function buildFrameStyle({
+  frameHeight,
+  aspectRatio,
+}: {
+  frameHeight?: string;
+  aspectRatio?: string;
+}): CSSProperties | undefined {
+  const height = normalizeCssLength(frameHeight);
+  const ratio = normalizeAspectRatio(aspectRatio);
+  if (!height && !ratio) return undefined;
+  return {
+    ...(height || ratio
+      ? ({ "--inline-html-frame-height": height || "auto" } as CSSProperties)
+      : {}),
+    ...(ratio ? ({ "--inline-html-frame-aspect-ratio": ratio } as CSSProperties) : {}),
+  };
 }
 
 function InlineHtmlHeader({
@@ -93,16 +177,31 @@ export function InlineHtmlSourcePreview({
   htmlContent,
   title,
   className = "",
+  variant = "default",
+  frameHeight,
+  aspectRatio,
+  showChrome = false,
 }: InlineHtmlSourcePreviewProps) {
   const displayTitle = title || extractHtmlTitle(htmlContent);
+  const isFrame = variant === "frame";
+  const hideChrome = isFrame && !showChrome;
+  const style = buildFrameStyle({ frameHeight, aspectRatio });
+  const frameDesignOptions = useRichFrameDesignOptions(isFrame);
+  const previewHtmlContent = useMemo(
+    () => (isFrame ? applyRichFrameDesignLanguage(htmlContent, frameDesignOptions) : htmlContent),
+    [frameDesignOptions, htmlContent, isFrame],
+  );
 
   return (
-    <div className={`inline-html-preview inline-html-preview-source ${className}`.trim()}>
-      <InlineHtmlHeader displayTitle={displayTitle} subtitle="HTML form" />
+    <div
+      className={`inline-html-preview inline-html-preview-source ${isFrame ? "inline-html-preview-frame" : ""} ${className}`.trim()}
+      style={style}
+    >
+      {!hideChrome && <InlineHtmlHeader displayTitle={displayTitle} subtitle={isFrame ? "Frame" : "HTML form"} />}
       <div className="inline-html-frame-wrap">
         <iframe
           className="inline-html-frame"
-          srcDoc={htmlContent}
+          srcDoc={previewHtmlContent}
           sandbox="allow-scripts allow-forms"
           title={displayTitle}
         />
@@ -116,6 +215,10 @@ export function InlineHtmlPreview({
   workspacePath,
   title,
   className = "",
+  variant = "default",
+  frameHeight,
+  aspectRatio,
+  showChrome = false,
   onOpenViewer,
 }: InlineHtmlPreviewProps) {
   const [loading, setLoading] = useState(true);
@@ -128,6 +231,14 @@ export function InlineHtmlPreview({
   }, [result]);
 
   const displayTitle = title || result?.fileName || filePath.split("/").pop() || filePath;
+  const isFrame = variant === "frame";
+  const hideChrome = isFrame && !showChrome;
+  const style = buildFrameStyle({ frameHeight, aspectRatio });
+  const frameDesignOptions = useRichFrameDesignOptions(isFrame);
+  const previewHtmlContent = useMemo(() => {
+    const htmlContent = result?.htmlContent || "";
+    return isFrame ? applyRichFrameDesignLanguage(htmlContent, frameDesignOptions) : htmlContent;
+  }, [frameDesignOptions, isFrame, result?.htmlContent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,19 +292,24 @@ export function InlineHtmlPreview({
   };
 
   return (
-    <div className={`inline-html-preview ${className}`.trim()}>
+    <div
+      className={`inline-html-preview ${isFrame ? "inline-html-preview-frame" : ""} ${className}`.trim()}
+      style={style}
+    >
       {loading && <div className="inline-html-loading">Loading HTML preview…</div>}
 
       {!loading && error && <div className="inline-html-error">{error}</div>}
 
-      {!loading && !error && result?.htmlContent && (
+      {!loading && !error && previewHtmlContent && (
         <>
-          <InlineHtmlHeader displayTitle={displayTitle} subtitle={subtitle} onOpen={handleOpen} />
+          {!hideChrome && (
+            <InlineHtmlHeader displayTitle={displayTitle} subtitle={subtitle} onOpen={handleOpen} />
+          )}
 
           <div className="inline-html-frame-wrap">
             <iframe
               className="inline-html-frame"
-              srcDoc={result.htmlContent}
+              srcDoc={previewHtmlContent}
               sandbox="allow-scripts allow-forms"
               title={displayTitle}
             />

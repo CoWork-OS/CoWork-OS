@@ -53,7 +53,7 @@ The grid preserves enough workbook information for review and light editing:
 - basic font/fill/alignment styles used for headers and table-like sheets
 - column widths
 
-This is not intended to replace every Excel, Numbers, or Google Sheets feature. It is the local artifact review/edit path for generated spreadsheet outputs that can be represented as workbook or delimited table data.
+For everyday generated workbook and table work, this makes CoWork the default spreadsheet workspace instead of a separate Excel, Numbers, or Google Sheets session. Advanced native-only spreadsheet behavior such as macros, complex pivot modeling, and deep cloud collaboration still belongs in external apps through the provided open actions.
 
 ## Fullscreen Follow-Up Flow
 

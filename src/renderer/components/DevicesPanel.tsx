@@ -47,6 +47,7 @@ import { isTempWorkspaceId, LOCAL_MANAGED_DEVICE_ID } from "../../shared/types";
 import { isActiveSessionStatus, isAwaitingSessionStatus } from "./Sidebar";
 import { getPlatformVisualIcon } from "./DeviceIcons";
 import { RemoteFilePicker } from "./RemoteFilePicker";
+import { RemoteDeviceControlVisual } from "./RemoteDeviceControlVisual";
 
 export interface DeviceTaskOptions {
   shellAccess?: boolean;
@@ -1966,7 +1967,7 @@ function DeviceConnectionOverlay({
   return (
     <ModalShell
       title="Add new device"
-      subtitle="Pair a remote Cowork OS once, then manage it from here."
+      subtitle="Pair a remote CoWork OS once, then manage it from here."
       onClose={onClose}
     >
       {loadingConfig ? (
@@ -1976,6 +1977,8 @@ function DeviceConnectionOverlay({
         </div>
       ) : (
         <>
+          <RemoteDeviceControlVisual />
+
           {remoteDevices.length > 0 ? (
             <div className="devices-remote-saved">
               <div className="devices-remote-saved-header">

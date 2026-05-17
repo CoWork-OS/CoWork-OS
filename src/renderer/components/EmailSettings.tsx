@@ -1,17 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import {
-  ChannelData,
-  ChannelUserData,
-  SecurityMode,
-  ContextType,
-  ContextPolicy,
-} from "../../shared/types";
+import { ChannelData } from "../../shared/types";
 import {
   MICROSOFT_EMAIL_DEFAULT_TENANT,
+  MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES,
   MICROSOFT_EMAIL_OAUTH_DEFAULT_SCOPES,
+  normalizeMicrosoftEmailReadScopes,
 } from "../../shared/microsoft-email";
-import { PairingCodeDisplay } from "./PairingCodeDisplay";
-import { ContextPolicySettings } from "./ContextPolicySettings";
 
 interface EmailSettingsProps {
   onStatusChange?: (connected: boolean) => void;
@@ -31,6 +25,7 @@ type EmailProvider =
   | "loom";
 
 type EmailAuthMethod = "password" | "oauth";
+type EmailTestResult = { success: boolean; error?: string; message?: string };
 
 interface EmailProviderDef {
   id: EmailProvider;
@@ -198,12 +193,8 @@ interface EmailProviderModalProps {
   setSmtpPort: (v: number) => void;
   displayName: string;
   setDisplayName: (v: string) => void;
-  allowedSenders: string;
-  setAllowedSenders: (v: string) => void;
   subjectFilter: string;
   setSubjectFilter: (v: string) => void;
-  securityMode: SecurityMode;
-  setSecurityMode: (v: SecurityMode) => void;
   loomBaseUrl: string;
   setLoomBaseUrl: (v: string) => void;
   loomAccessToken: string;
@@ -215,7 +206,7 @@ interface EmailProviderModalProps {
   loomPollInterval: number;
   setLoomPollInterval: (v: number) => void;
   saving: boolean;
-  testResult: { success: boolean; error?: string } | null;
+  testResult: EmailTestResult | null;
   oauthBusy: boolean;
   oauthError: string | null;
   oauthConnected: boolean;
@@ -228,15 +219,13 @@ interface EmailProviderModalProps {
 
 export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
   const [channel, setChannel] = useState<ChannelData | null>(null);
-  const [users, setUsers] = useState<ChannelUserData[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<EmailTestResult | null>(null);
 
   // Form state
   const [channelName, setChannelName] = useState("Email");
-  const [securityMode, setSecurityMode] = useState<SecurityMode>("pairing");
   const [emailProtocol, setEmailProtocol] = useState<"imap-smtp" | "loom">("imap-smtp");
   const [email, setEmail] = useState("");
   const [emailAuthMethod, setEmailAuthMethod] = useState<EmailAuthMethod>("password");
@@ -253,7 +242,6 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
   const [smtpHost, setSmtpHost] = useState("");
   const [smtpPort, setSmtpPort] = useState(587);
   const [displayName, setDisplayName] = useState("");
-  const [allowedSenders, setAllowedSenders] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
   const [loomBaseUrl, setLoomBaseUrl] = useState("http://127.0.0.1:8787");
   const [loomAccessToken, setLoomAccessToken] = useState("");
@@ -266,16 +254,6 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
 
-  // Pairing code state
-  const [pairingCode, setPairingCode] = useState<string | null>(null);
-  const [pairingExpiresAt, setPairingExpiresAt] = useState<number>(0);
-  const [generatingCode, setGeneratingCode] = useState(false);
-
-  // Context policy state
-  const [contextPolicies, setContextPolicies] = useState<Record<ContextType, ContextPolicy>>(
-    {} as Record<ContextType, ContextPolicy>,
-  );
-  const [savingPolicy, setSavingPolicy] = useState(false);
   const clearMicrosoftOAuthState = useCallback(() => {
     setEmailAccessToken("");
     setEmailRefreshToken("");
@@ -292,7 +270,6 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
       if (emailChannel) {
         setChannel(emailChannel);
         setChannelName(emailChannel.name);
-        setSecurityMode(emailChannel.securityMode);
         onStatusChange?.(emailChannel.status === "connected");
 
         // Load config settings
@@ -313,15 +290,13 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
           setEmailRefreshToken((emailChannel.config.refreshToken as string) || "");
           setEmailTokenExpiresAt(emailChannel.config.tokenExpiresAt as number | undefined);
           setEmailScopes(
-            ((emailChannel.config.scopes as string[]) || [...MICROSOFT_EMAIL_OAUTH_DEFAULT_SCOPES]).slice(),
+            normalizeMicrosoftEmailReadScopes(emailChannel.config.scopes as string[] | undefined),
           );
           setImapHost((emailChannel.config.imapHost as string) || "");
           setImapPort((emailChannel.config.imapPort as number) || 993);
           setSmtpHost((emailChannel.config.smtpHost as string) || "");
           setSmtpPort((emailChannel.config.smtpPort as number) || 587);
           setDisplayName((emailChannel.config.displayName as string) || "");
-          const senders = (emailChannel.config.allowedSenders as string[]) || [];
-          setAllowedSenders(senders.join(", "));
           setSubjectFilter((emailChannel.config.subjectFilter as string) || "");
           setLoomBaseUrl((emailChannel.config.loomBaseUrl as string) || "http://127.0.0.1:8787");
           setLoomAccessToken((emailChannel.config.loomAccessToken as string) || "");
@@ -330,20 +305,6 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
           setLoomPollInterval((emailChannel.config.loomPollInterval as number) || 30000);
         }
 
-        // Load users for this channel
-        const channelUsers = await window.electronAPI.getGatewayUsers(emailChannel.id);
-        setUsers(channelUsers);
-
-        // Load context policies
-        const policies = await window.electronAPI.listContextPolicies(emailChannel.id);
-        const policyMap: Record<ContextType, ContextPolicy> = {} as Record<
-          ContextType,
-          ContextPolicy
-        >;
-        for (const policy of policies) {
-          policyMap[policy.contextType as ContextType] = policy;
-        }
-        setContextPolicies(policyMap);
       }
     } catch (error) {
       console.error("Failed to load Email channel:", error);
@@ -356,17 +317,6 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
     loadChannel();
   }, [loadChannel]);
 
-  useEffect(() => {
-    const unsubscribe = window.electronAPI?.onGatewayUsersUpdated?.((data) => {
-      if (data?.channelType !== "email") return;
-      if (channel && data?.channelId && data.channelId !== channel.id) return;
-      loadChannel();
-    });
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
-  }, [channel?.id, loadChannel]);
-
   const handleAddChannel = async () => {
     if (emailProtocol === "loom") {
       if (!loomBaseUrl.trim() || !loomAccessToken.trim()) {
@@ -375,17 +325,15 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
       }
     } else if (
       !email.trim() ||
-      !imapHost.trim() ||
-      !smtpHost.trim() ||
       (emailAuthMethod === "oauth"
         ? !emailOauthClientId.trim() || (!emailAccessToken.trim() && !emailRefreshToken.trim())
-        : !password.trim())
+        : !password.trim() || !imapHost.trim() || !smtpHost.trim())
     ) {
       setTestResult({
         success: false,
         error:
           emailAuthMethod === "oauth"
-            ? "Email, OAuth client ID, OAuth tokens, IMAP host, and SMTP host are required"
+            ? "Email, OAuth client ID, and OAuth tokens are required"
             : "Email, password, IMAP host, and SMTP host are required",
       });
       return;
@@ -395,15 +343,10 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
       setSaving(true);
       setTestResult(null);
 
-      const senderList = allowedSenders
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-
       await window.electronAPI.addGatewayChannel({
         type: "email",
         name: channelName,
-        securityMode,
+        securityMode: "open",
         emailProtocol,
         emailAuthMethod: emailProtocol === "imap-smtp" ? emailAuthMethod : undefined,
         emailOauthProvider:
@@ -439,13 +382,17 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
           emailProtocol === "imap-smtp" && emailAuthMethod === "password"
             ? password.trim()
             : undefined,
-        emailImapHost: emailProtocol === "imap-smtp" ? imapHost.trim() : undefined,
+        emailImapHost:
+          emailProtocol === "imap-smtp" && emailAuthMethod !== "oauth"
+            ? imapHost.trim()
+            : undefined,
         emailImapPort: emailProtocol === "imap-smtp" ? imapPort : undefined,
-        emailSmtpHost: emailProtocol === "imap-smtp" ? smtpHost.trim() : undefined,
+        emailSmtpHost:
+          emailProtocol === "imap-smtp" && emailAuthMethod !== "oauth"
+            ? smtpHost.trim()
+            : undefined,
         emailSmtpPort: emailProtocol === "imap-smtp" ? smtpPort : undefined,
         emailDisplayName: displayName.trim() || undefined,
-        emailAllowedSenders:
-          emailProtocol === "imap-smtp" && senderList.length > 0 ? senderList : undefined,
         emailSubjectFilter:
           emailProtocol === "imap-smtp" ? subjectFilter.trim() || undefined : undefined,
         emailLoomBaseUrl: emailProtocol === "loom" ? loomBaseUrl.trim() : undefined,
@@ -464,7 +411,7 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
     }
   };
 
-  const handleMicrosoftOAuthConnect = async () => {
+  const handleMicrosoftOAuthConnect = async (options?: { persistToChannel?: boolean }) => {
     try {
       if (!emailOauthClientId.trim()) {
         setOauthError("Client ID is required to start Microsoft OAuth.");
@@ -473,24 +420,68 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
 
       setOauthBusy(true);
       setOauthError(null);
+      setTestResult(null);
 
       const result = await window.electronAPI.startConnectorOAuth({
         provider: "microsoft-email",
         clientId: emailOauthClientId.trim(),
         clientSecret: emailOauthClientSecret.trim() || undefined,
         tenant: emailOauthTenant.trim() || MICROSOFT_EMAIL_DEFAULT_TENANT,
-        scopes: emailScopes,
+        scopes: [...MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES],
         loginHint: email.trim() || undefined,
+        prompt: options?.persistToChannel ? "consent" : undefined,
       });
 
+      const tokenExpiresAt = result.expiresIn ? Date.now() + result.expiresIn * 1000 : undefined;
+      const scopes = normalizeMicrosoftEmailReadScopes(
+        result.scopes && result.scopes.length > 0 ? result.scopes : emailScopes,
+      );
+      const refreshToken = result.refreshToken || emailRefreshToken;
+
       setEmailAccessToken(result.accessToken);
-      setEmailRefreshToken(result.refreshToken || "");
-      setEmailTokenExpiresAt(result.expiresIn ? Date.now() + result.expiresIn * 1000 : undefined);
-      if (result.scopes && result.scopes.length > 0) {
-        setEmailScopes(result.scopes);
+      setEmailRefreshToken(refreshToken);
+      setEmailTokenExpiresAt(tokenExpiresAt);
+      setEmailScopes(scopes);
+
+      if (options?.persistToChannel && channel) {
+        const nextConfig: Record<string, unknown> = {
+          oauthClientId: emailOauthClientId.trim(),
+          oauthTenant: emailOauthTenant.trim() || MICROSOFT_EMAIL_DEFAULT_TENANT,
+          accessToken: result.accessToken,
+          tokenExpiresAt,
+          scopes,
+          microsoftGraphAccessToken: result.accessToken,
+          microsoftGraphTokenExpiresAt: tokenExpiresAt,
+          microsoftGraphTokenScopes: scopes,
+        };
+        if (refreshToken) {
+          nextConfig.refreshToken = refreshToken;
+        }
+        const clientSecret = emailOauthClientSecret.trim();
+        if (clientSecret) {
+          nextConfig.oauthClientSecret = clientSecret;
+        }
+        await window.electronAPI.updateGatewayChannel({
+          id: channel.id,
+          config: nextConfig,
+        });
+        await loadChannel();
+        const test = await window.electronAPI.testGatewayChannel(channel.id);
+        if (!test.success) {
+          throw new Error(test.error || "Microsoft Graph validation failed");
+        }
+        setTestResult({
+          success: true,
+          message: refreshToken
+            ? "Microsoft account reauthenticated"
+            : "Microsoft account reauthenticated for this session",
+        });
       }
     } catch (error: Any) {
       setOauthError(error.message || "Microsoft OAuth failed");
+      if (options?.persistToChannel) {
+        setTestResult({ success: false, error: error.message || "Microsoft OAuth failed" });
+      }
     } finally {
       setOauthBusy(false);
     }
@@ -541,74 +532,11 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
       setSaving(true);
       await window.electronAPI.removeGatewayChannel(channel.id);
       setChannel(null);
-      setUsers([]);
       onStatusChange?.(false);
     } catch (error: Any) {
       setTestResult({ success: false, error: error.message });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleUpdateSecurityMode = async (newMode: SecurityMode) => {
-    if (!channel) return;
-
-    try {
-      await window.electronAPI.updateGatewayChannel({
-        id: channel.id,
-        securityMode: newMode,
-      });
-      setSecurityMode(newMode);
-      setChannel({ ...channel, securityMode: newMode });
-    } catch (error: Any) {
-      console.error("Failed to update security mode:", error);
-    }
-  };
-
-  const handleGeneratePairingCode = async () => {
-    if (!channel) return;
-
-    try {
-      setGeneratingCode(true);
-      const code = await window.electronAPI.generateGatewayPairing(channel.id, "");
-      setPairingCode(code);
-      // Default TTL is 5 minutes (300 seconds)
-      setPairingExpiresAt(Date.now() + 5 * 60 * 1000);
-    } catch (error: Any) {
-      console.error("Failed to generate pairing code:", error);
-    } finally {
-      setGeneratingCode(false);
-    }
-  };
-
-  const handlePolicyChange = async (contextType: ContextType, updates: Partial<ContextPolicy>) => {
-    if (!channel) return;
-
-    try {
-      setSavingPolicy(true);
-      const updated = await window.electronAPI.updateContextPolicy(channel.id, contextType, {
-        securityMode: updates.securityMode,
-        toolRestrictions: updates.toolRestrictions,
-      });
-      setContextPolicies((prev) => ({
-        ...prev,
-        [contextType]: updated,
-      }));
-    } catch (error: Any) {
-      console.error("Failed to update context policy:", error);
-    } finally {
-      setSavingPolicy(false);
-    }
-  };
-
-  const handleRevokeAccess = async (channelUserId: string) => {
-    if (!channel) return;
-
-    try {
-      await window.electronAPI.revokeGatewayAccess(channel.id, channelUserId);
-      await loadChannel();
-    } catch (error: Any) {
-      console.error("Failed to revoke access:", error);
     }
   };
 
@@ -666,6 +594,11 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
     (typeof channel?.config?.loomIdentity === "string" && channel.config.loomIdentity) ||
     (typeof channel?.config?.loomBaseUrl === "string" && channel.config.loomBaseUrl) ||
     null;
+  const isConfiguredMicrosoftOAuth =
+    channel?.type === "email" &&
+    channel.config?.protocol !== "loom" &&
+    channel.config?.authMethod === "oauth" &&
+    channel.config?.oauthProvider === "microsoft";
 
   if (loading) {
     return <div className="settings-loading">Loading Email settings...</div>;
@@ -721,12 +654,8 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
             setSmtpPort={setSmtpPort}
             displayName={displayName}
             setDisplayName={setDisplayName}
-            allowedSenders={allowedSenders}
-            setAllowedSenders={setAllowedSenders}
             subjectFilter={subjectFilter}
             setSubjectFilter={setSubjectFilter}
-            securityMode={securityMode}
-            setSecurityMode={setSecurityMode}
             loomBaseUrl={loomBaseUrl}
             setLoomBaseUrl={setLoomBaseUrl}
             loomAccessToken={loomAccessToken}
@@ -771,6 +700,15 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
             </div>
           </div>
           <div className="channel-actions">
+            {isConfiguredMicrosoftOAuth && (
+              <button
+                className="button-secondary"
+                onClick={() => handleMicrosoftOAuthConnect({ persistToChannel: true })}
+                disabled={oauthBusy || saving}
+              >
+                {oauthBusy ? "Reauthenticating..." : "Reauthenticate"}
+              </button>
+            )}
             <button
               className={channel.enabled ? "button-secondary" : "button-primary"}
               onClick={handleToggleEnabled}
@@ -793,92 +731,15 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
 
         {testResult && (
           <div className={`test-result ${testResult.success ? "success" : "error"}`}>
-            {testResult.success ? <>✓ Connection successful</> : <>✗ {testResult.error}</>}
+            {testResult.success ? (
+              <>✓ {testResult.message || "Connection successful"}</>
+            ) : (
+              <>✗ {testResult.error}</>
+            )}
           </div>
         )}
       </div>
 
-      <div className="settings-section">
-        <h4>Security Mode</h4>
-        <select
-          className="settings-select"
-          value={securityMode}
-          onChange={(e) => handleUpdateSecurityMode(e.target.value as SecurityMode)}
-        >
-          <option value="pairing">Pairing Code</option>
-          <option value="allowlist">Allowlist Only</option>
-          <option value="open">Open</option>
-        </select>
-      </div>
-
-      {securityMode === "pairing" && (
-        <div className="settings-section">
-          <h4>Generate Pairing Code</h4>
-          <p className="settings-description">
-            Generate a one-time code for a user to enter in their email to gain access.
-          </p>
-          {pairingCode && pairingExpiresAt > 0 ? (
-            <PairingCodeDisplay
-              code={pairingCode}
-              expiresAt={pairingExpiresAt}
-              onRegenerate={handleGeneratePairingCode}
-              isRegenerating={generatingCode}
-            />
-          ) : (
-            <button
-              className="button-secondary"
-              onClick={handleGeneratePairingCode}
-              disabled={generatingCode}
-            >
-              {generatingCode ? "Generating..." : "Generate Code"}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Per-Context Security Policies */}
-      <div className="settings-section">
-        <h4>Context Policies</h4>
-        <p className="settings-description">
-          Configure different security settings for direct emails vs group/thread emails.
-        </p>
-        <ContextPolicySettings
-          channelId={channel.id}
-          channelType="email"
-          policies={contextPolicies}
-          onPolicyChange={handlePolicyChange}
-          isSaving={savingPolicy}
-        />
-      </div>
-
-      <div className="settings-section">
-        <h4>Authorized Users</h4>
-        {users.length === 0 ? (
-          <p className="settings-description">No users have connected yet.</p>
-        ) : (
-          <div className="users-list">
-            {users.map((user) => (
-              <div key={user.id} className="user-item">
-                <div className="user-info">
-                  <span className="user-name">{user.displayName}</span>
-                  {user.username && <span className="user-username">{user.username}</span>}
-                  <span className={`user-status ${user.allowed ? "allowed" : "pending"}`}>
-                    {user.allowed ? "✓ Allowed" : "○ Pending"}
-                  </span>
-                </div>
-                {user.allowed && (
-                  <button
-                    className="button-small button-danger"
-                    onClick={() => handleRevokeAccess(user.channelUserId)}
-                  >
-                    Revoke
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -910,12 +771,8 @@ function EmailProviderModal({
   setSmtpPort,
   displayName,
   setDisplayName,
-  allowedSenders,
-  setAllowedSenders,
   subjectFilter,
   setSubjectFilter,
-  securityMode,
-  setSecurityMode,
   loomBaseUrl,
   setLoomBaseUrl,
   loomAccessToken,
@@ -942,13 +799,7 @@ function EmailProviderModal({
     (isLoom
       ? Boolean(loomBaseUrl.trim() && loomAccessToken.trim())
       : isMicrosoftOAuth
-        ? Boolean(
-            email.trim() &&
-              emailOauthClientId.trim() &&
-              imapHost.trim() &&
-              smtpHost.trim() &&
-              oauthConnected,
-          )
+        ? Boolean(email.trim() && emailOauthClientId.trim() && oauthConnected)
         : Boolean(email.trim() && password.trim() && imapHost.trim() && smtpHost.trim()));
 
   return (
@@ -1035,8 +886,8 @@ function EmailProviderModal({
                           native/public client PKCE app.
                         </li>
                         <li>
-                          Under API permissions, grant delegated{" "}
-                          Microsoft Graph <code>Mail.ReadWrite</code> and <code>Mail.Send</code>.
+                          Under API permissions, grant delegated Microsoft Graph{" "}
+                          <code>Mail.ReadWrite</code>.
                         </li>
                         <li>
                           Paste the Application (client) ID here, keep tenant{" "}
@@ -1117,7 +968,7 @@ function EmailProviderModal({
                     </button>
                     <p className="settings-hint">
                       CoWork opens the Microsoft sign-in flow in your browser and stores the
-                      refresh token for IMAP and SMTP access.
+                      refresh token for Microsoft Graph mail access.
                     </p>
                     {oauthConnected && (
                       <p className="settings-hint">Microsoft account authorized successfully.</p>
@@ -1127,62 +978,50 @@ function EmailProviderModal({
                 </>
               )}
 
-              <div className="email-modal-host-grid">
-                <div className="settings-field">
-                  <label>IMAP Host *</label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    placeholder="imap.example.com"
-                    value={imapHost}
-                    onChange={(e) => setImapHost(e.target.value)}
-                  />
+              {!isMicrosoftOAuth && (
+                <div className="email-modal-host-grid">
+                  <div className="settings-field">
+                    <label>IMAP Host *</label>
+                    <input
+                      type="text"
+                      className="settings-input"
+                      placeholder="imap.example.com"
+                      value={imapHost}
+                      onChange={(e) => setImapHost(e.target.value)}
+                    />
+                  </div>
+                  <div className="settings-field">
+                    <label>IMAP Port</label>
+                    <input
+                      type="number"
+                      className="settings-input"
+                      placeholder="993"
+                      value={imapPort}
+                      onChange={(e) => setImapPort(parseInt(e.target.value) || 993)}
+                    />
+                  </div>
+                  <div className="settings-field">
+                    <label>SMTP Host *</label>
+                    <input
+                      type="text"
+                      className="settings-input"
+                      placeholder="smtp.example.com"
+                      value={smtpHost}
+                      onChange={(e) => setSmtpHost(e.target.value)}
+                    />
+                  </div>
+                  <div className="settings-field">
+                    <label>SMTP Port</label>
+                    <input
+                      type="number"
+                      className="settings-input"
+                      placeholder="587"
+                      value={smtpPort}
+                      onChange={(e) => setSmtpPort(parseInt(e.target.value) || 587)}
+                    />
+                  </div>
                 </div>
-                <div className="settings-field">
-                  <label>IMAP Port</label>
-                  <input
-                    type="number"
-                    className="settings-input"
-                    placeholder="993"
-                    value={imapPort}
-                    onChange={(e) => setImapPort(parseInt(e.target.value) || 993)}
-                  />
-                </div>
-                <div className="settings-field">
-                  <label>SMTP Host *</label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    placeholder="smtp.example.com"
-                    value={smtpHost}
-                    onChange={(e) => setSmtpHost(e.target.value)}
-                  />
-                </div>
-                <div className="settings-field">
-                  <label>SMTP Port</label>
-                  <input
-                    type="number"
-                    className="settings-input"
-                    placeholder="587"
-                    value={smtpPort}
-                    onChange={(e) => setSmtpPort(parseInt(e.target.value) || 587)}
-                  />
-                </div>
-              </div>
-
-              <div className="settings-field">
-                <label>Allowed Senders (optional)</label>
-                <input
-                  type="text"
-                  className="settings-input"
-                  placeholder="user@example.com, other@example.com"
-                  value={allowedSenders}
-                  onChange={(e) => setAllowedSenders(e.target.value)}
-                />
-                <p className="settings-hint">
-                  Comma-separated addresses to accept messages from (leave empty for all)
-                </p>
-              </div>
+              )}
 
               <div className="settings-field">
                 <label>Subject Filter (optional)</label>
@@ -1275,28 +1114,13 @@ function EmailProviderModal({
             <p className="settings-hint">Name shown in outgoing messages</p>
           </div>
 
-          <div className="settings-field">
-            <label>Security Mode</label>
-            <select
-              className="settings-select"
-              value={securityMode}
-              onChange={(e) => setSecurityMode(e.target.value as SecurityMode)}
-            >
-              <option value="pairing">Pairing Code (Recommended)</option>
-              <option value="allowlist">Allowlist Only</option>
-              <option value="open">Open (Anyone can use)</option>
-            </select>
-            <p className="settings-hint">
-              {securityMode === "pairing" &&
-                "Users must enter a code generated in this app to use the bot"}
-              {securityMode === "allowlist" && "Only pre-approved email addresses can use the bot"}
-              {securityMode === "open" && "Anyone who emails the bot can use it (not recommended)"}
-            </p>
-          </div>
-
           {testResult && (
             <div className={`test-result ${testResult.success ? "success" : "error"}`}>
-              {testResult.success ? <>✓ Channel added successfully</> : <>✗ {testResult.error}</>}
+              {testResult.success ? (
+                <>✓ {testResult.message || "Channel added successfully"}</>
+              ) : (
+                <>✗ {testResult.error}</>
+              )}
             </div>
           )}
         </div>

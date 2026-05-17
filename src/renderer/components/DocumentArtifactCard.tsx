@@ -19,6 +19,7 @@ function getFileName(filePath: string): string {
 
 function getDocumentIconLabel(filePath: string): string {
   const extension = getDocumentFileExtension(filePath);
+  if (extension === ".md" || extension === ".markdown") return "M";
   if (extension === ".pages") return "P";
   if (extension === ".rtf") return "R";
   if (extension === ".odt" || extension === ".ott") return "O";

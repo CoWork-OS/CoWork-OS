@@ -14,7 +14,6 @@ import {
   nativeTheme,
   Menu,
   screen,
-  nativeImage,
   type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
@@ -131,6 +130,7 @@ import { MemoryService } from "./memory/MemoryService";
 import { CuratedMemoryService } from "./memory/CuratedMemoryService";
 import { DreamingRepository } from "./memory/DreamingRepository";
 import { DreamingService } from "./memory/DreamingService";
+import { MemoryPressureService } from "./memory/MemoryPressureService";
 import { ChronicleCaptureService, ChronicleMemoryService, ChronicleSettingsManager } from "./chronicle";
 import { revealWindow } from "./utils/window-visibility";
 import { KnowledgeGraphService } from "./knowledge-graph/KnowledgeGraphService";
@@ -227,6 +227,12 @@ import { createLogger } from "./utils/logger";
 import { registerMediaProtocol, registerMediaScheme } from "./media";
 import { rememberApprovedImportFiles } from "./security/file-import-approvals";
 import { healMovedDesktopWorkspacePaths } from "./utils/workspace-path-healer";
+import {
+  APP_DISPLAY_NAME,
+  applyApplicationIdentity,
+  getDesktopIconImage,
+  getDesktopIconPath,
+} from "./branding";
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -307,7 +313,6 @@ const MAIN_WINDOW_MIN_WIDTH = 1200;
 const MAIN_WINDOW_MIN_HEIGHT = 800;
 const MAIN_WINDOW_DEFAULT_WIDTH = 1600;
 const MAIN_WINDOW_DEFAULT_HEIGHT = 1000;
-const APP_DISPLAY_NAME = "CoWork OS";
 let startupUserDataDir: string | null = null;
 
 interface MainWindowState {
@@ -694,12 +699,18 @@ function getInitialMainWindowBounds(): Pick<
   };
 }
 
-function writeMainWindowState(window: BrowserWindow): void {
-  if (window.isDestroyed()) {
-    return;
+function writeMainWindowState(
+  window: BrowserWindow,
+  options: { allowMinimized?: boolean } = {},
+): Electron.Rectangle | null {
+  if (
+    window.isDestroyed() ||
+    (window.isMinimized() && options.allowMinimized !== true)
+  ) {
+    return null;
   }
   try {
-    const bounds = window.getBounds();
+    const bounds = window.getNormalBounds();
     const state: MainWindowState = {
       x: bounds.x,
       y: bounds.y,
@@ -711,20 +722,23 @@ function writeMainWindowState(window: BrowserWindow): void {
     const statePath = getMainWindowStatePath();
     fsSync.mkdirSync(path.dirname(statePath), { recursive: true });
     fsSync.writeFileSync(statePath, JSON.stringify(state, null, 2));
+    return bounds;
   } catch (error) {
     logger.warn("Failed to save main window state:", error);
+    return null;
   }
 }
 
 function installMainWindowStatePersistence(window: BrowserWindow): void {
   let saveTimer: NodeJS.Timeout | null = null;
+  let lastNormalBounds: Electron.Rectangle | null = window.getNormalBounds();
   const scheduleSave = () => {
     if (saveTimer) {
       clearTimeout(saveTimer);
     }
     saveTimer = setTimeout(() => {
       saveTimer = null;
-      writeMainWindowState(window);
+      lastNormalBounds = writeMainWindowState(window) ?? lastNormalBounds;
     }, 400);
   };
 
@@ -734,6 +748,32 @@ function installMainWindowStatePersistence(window: BrowserWindow): void {
   window.on("unmaximize", scheduleSave);
   window.on("enter-full-screen", scheduleSave);
   window.on("leave-full-screen", scheduleSave);
+  window.on("minimize", () => {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    lastNormalBounds =
+      writeMainWindowState(window, { allowMinimized: true }) ??
+      lastNormalBounds;
+  });
+  window.on("restore", () => {
+    if (
+      !lastNormalBounds ||
+      window.isDestroyed() ||
+      window.isMaximized() ||
+      window.isFullScreen()
+    ) {
+      return;
+    }
+    const currentBounds = window.getBounds();
+    if (
+      currentBounds.width !== lastNormalBounds.width ||
+      currentBounds.height !== lastNormalBounds.height
+    ) {
+      window.setBounds(lastNormalBounds);
+    }
+  });
   window.on("close", () => {
     if (saveTimer) {
       clearTimeout(saveTimer);
@@ -845,28 +885,13 @@ function installNativeApplicationMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function getDesktopIconPath(): string | undefined {
-  const candidates =
-    process.platform === "win32"
-      ? ["build/icon.ico", "build/icon.png"]
-      : ["build/icon.png"];
-
-  for (const candidate of candidates) {
-    const resolved = path.join(app.getAppPath(), candidate);
-    if (fsSync.existsSync(resolved)) {
-      return resolved;
-    }
-  }
-  return undefined;
-}
-
 function installDevelopmentBranding(): void {
   if (process.platform === "darwin") {
     const iconPath = getDesktopIconPath();
     if (iconPath) {
       try {
-        const icon = nativeImage.createFromPath(iconPath);
-        if (icon.isEmpty()) {
+        const icon = getDesktopIconImage();
+        if (!icon) {
           logger.warn(`Development Dock icon is empty: ${iconPath}`);
         } else {
           app.dock?.setIcon(icon);
@@ -1035,10 +1060,7 @@ registerCanvasScheme();
 registerMediaScheme();
 registerTaskDeeplinkProtocol();
 
-if (process.platform === "win32") {
-  app.setAppUserModelId("com.cowork-os.app");
-}
-
+applyApplicationIdentity();
 applyStableUserDataPath();
 
 // Ensure only one CoWork OS instance runs at a time.
@@ -2525,6 +2547,9 @@ if (!gotTheLock) {
           signalCount,
           heartbeatRunId,
         }) => {
+          const pressureInstructions = MemoryPressureService.buildCompactionInstructions(
+            MemoryPressureService.analyze(workspacePath),
+          );
           const result = await new DreamingService(
             new DreamingRepository(dbManager.getDatabase()),
           ).run({
@@ -2532,7 +2557,12 @@ if (!gotTheLock) {
             workspacePath,
             triggerSource: "heartbeat",
             triggerHeartbeatRunId: heartbeatRunId,
-            instructions: `Heartbeat saw ${signalCount} memory signal(s): ${reason}`,
+            instructions: [
+              `Heartbeat saw ${signalCount} memory signal(s): ${reason}`,
+              pressureInstructions,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
           });
           return {
             id: result.run.id,
@@ -3191,6 +3221,16 @@ if (!gotTheLock) {
         onTriggerMutation: syncMcpTriggerSubscriptions,
       });
       setupRoutineHandlers(routineService);
+      const refreshRoutineRunsForTask = (payload: { taskId?: string }) => {
+        const taskId = typeof payload?.taskId === "string" ? payload.taskId : "";
+        if (!taskId) return;
+        void routineService?.refreshRunsForTask(taskId).catch((error) => {
+          logger.debug("[Routines] Failed to refresh routine task run:", error);
+        });
+      };
+      agentDaemon.on("task_completed", refreshRoutineRunsForTask);
+      agentDaemon.on("task_cancelled", refreshRoutineRunsForTask);
+      agentDaemon.on("task_status", refreshRoutineRunsForTask);
       setHookAgentDispatchObserver((payload) => {
         routineService?.recordApiTriggerDispatch(payload);
       });

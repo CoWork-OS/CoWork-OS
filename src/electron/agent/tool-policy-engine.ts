@@ -344,7 +344,12 @@ function inferToolExposureMetadata(
   if (isComputerUseToolName(toolName)) {
     return { lane: "system", exposure: "conditional", overlapGroup: "computer_use" };
   }
-  if (toolName === "web_search" || toolName === "web_fetch" || toolName === "http_request") {
+  if (
+    toolName === "web_search" ||
+    toolName === "x_search" ||
+    toolName === "web_fetch" ||
+    toolName === "http_request"
+  ) {
     return { lane: "research", exposure: "always", overlapGroup: "web_access" };
   }
   if (toolName === "glob" || toolName === "grep") {

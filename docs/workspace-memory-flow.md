@@ -360,6 +360,11 @@ Prompt synthesis now builds separate sections instead of one monolithic synthesi
 
 `L2 Topic Packs` and `L3 Deep Recall` are not injected into the live prompt by default. They stay explicit and tool-driven.
 
+Durable Runtime Context is another explicit, tool-driven lane. It is not part of the default
+`L0/L1` prompt payload and is not workspace-wide memory. When enabled, it stores task-scoped runtime
+messages and source-linked compaction summaries so `context_grep` and `context_describe` can recover
+facts from the active task after compaction.
+
 Workspace kit context is still injected separately and placed before the memory sections.
 
 ### Budgeting
@@ -420,5 +425,6 @@ Feedback reason values: `incorrect`, `too_verbose`, `ignored_instructions`, `wro
 - [Execution Runtime Model](execution-runtime-model.md)
 - [Features](features.md)
 - [Integration Setup, Skill Proposals, and Bootstrap Lifecycle](integration-skill-bootstrap-lifecycle.md)
+- [Durable Runtime Context](durable-runtime-context.md)
 - [Structured Memory Observations](memory-observations.md)
 - [Supermemory Integration](supermemory.md)

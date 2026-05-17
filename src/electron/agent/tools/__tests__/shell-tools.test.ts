@@ -13,6 +13,7 @@ const {
   isProcessOwnedByCurrentUser,
   resolveCommandCwd,
   shouldUsePersistentShell,
+  buildSafeShellPath,
 } =
   _testUtils;
 
@@ -315,6 +316,24 @@ describe("ShellTools Integration", () => {
 
     it("routes interactive commands to the direct shell path", () => {
       expect(shouldUsePersistentShell("vim README.md")).toBe(false);
+    });
+  });
+
+  describe("safe shell PATH", () => {
+    it("prioritizes Homebrew and system paths before inherited macOS app runtime paths", () => {
+      const built = buildSafeShellPath(
+        "darwin",
+        "/Applications/Codex.app/Contents/Resources:/usr/bin:/opt/homebrew/bin",
+      );
+
+      expect(built.split(":").slice(0, 5)).toEqual([
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+      ]);
+      expect(built.indexOf("/opt/homebrew/bin")).toBe(built.lastIndexOf("/opt/homebrew/bin"));
     });
   });
 

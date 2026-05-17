@@ -917,6 +917,20 @@ export class ToolFailureTracker {
     return this.maxInputDependentFailures;
   }
 
+  private isToolRuntimeTimeoutFailure(toolName: string, errorMessage: string): boolean {
+    if (toolName !== "write_file") return false;
+    return /Tool write_file timed out|write_file timed out during|write_file aborted during/i.test(
+      errorMessage,
+    );
+  }
+
+  private getMaxSystemicFailures(toolName: string, errorMessage: string): number {
+    if (this.isToolRuntimeTimeoutFailure(toolName, errorMessage)) {
+      return 2;
+    }
+    return MAX_TOOL_FAILURES;
+  }
+
   private extractSearchProvider(errorMessage: string): string | null {
     const lower = String(errorMessage || "").toLowerCase();
     if (lower.includes("tavily")) return "tavily";
@@ -957,9 +971,11 @@ export class ToolFailureTracker {
       return true;
     }
 
+    const runtimeTimeoutFailure = this.isToolRuntimeTimeoutFailure(toolName, errorMessage);
+
     // Input-dependent errors (missing params, file not found, etc.)
     // These are tracked separately with a higher threshold
-    if (browserHttpStatusFailure || isInputDependentError(errorMessage)) {
+    if (!runtimeTimeoutFailure && (browserHttpStatusFailure || isInputDependentError(errorMessage))) {
       const existing = this.inputDependentFailures.get(toolName) || { count: 0, lastError: "" };
       existing.count++;
       existing.lastError = errorMessage;
@@ -989,9 +1005,10 @@ export class ToolFailureTracker {
     existing.count++;
     existing.lastError = errorMessage;
     this.failures.set(toolName, existing);
+    const maxFailuresForTool = this.getMaxSystemicFailures(toolName, errorMessage);
 
     // If we've hit max failures for systemic issues, disable the tool
-    if (existing.count >= MAX_TOOL_FAILURES) {
+    if (existing.count >= maxFailuresForTool) {
       this.disabledTools.set(toolName, { disabledAt: Date.now(), reason: errorMessage });
       console.log(
         `[ToolFailureTracker] Tool ${toolName} disabled after ${existing.count} consecutive systemic failures`,

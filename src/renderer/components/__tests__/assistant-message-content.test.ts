@@ -60,6 +60,87 @@ describe("AssistantMessageContent", () => {
     ]);
   });
 
+  it("splits markdown and rich frame directives", () => {
+    const segments = parseAssistantMessageSegments(
+      "Here is the portfolio view.\n\n::frame{path=\"artifacts/portfolio.html\" title=\"Portfolio distribution\" kind=\"chart\" height=\"560\" aspectRatio=\"16 / 9\" chrome=true}\n\nThe concentration is visible.",
+    );
+
+    expect(segments).toHaveLength(3);
+    expect(segments[0]).toMatchObject({ type: "markdown" });
+    expect(segments[1]).toMatchObject({
+      type: "frame",
+      directive: {
+        path: "artifacts/portfolio.html",
+        title: "Portfolio distribution",
+        kind: "chart",
+        height: "560",
+        aspectRatio: "16 / 9",
+        chrome: true,
+      },
+    });
+    expect(segments[2]).toMatchObject({ type: "markdown" });
+  });
+
+  it("renders inline html after a frame directive as a rich frame source", () => {
+    const html = [
+      "<!doctype html>",
+      "<html>",
+      "<head><title>Sync status</title></head>",
+      "<body>",
+      "<div>Bank of America synced</div>",
+      "</body>",
+      "</html>",
+    ].join("\n");
+    const segments = parseAssistantMessageSegments(
+      `Sync details:\n\n::frame{title=\"Provider status\" kind=\"progress\" height=\"420\"}\n\`\`\`html\n${html}\n\`\`\`\n\nDone.`,
+    );
+
+    expect(segments).toHaveLength(3);
+    expect(segments[0]).toMatchObject({ type: "markdown", content: "Sync details:\n" });
+    expect(segments[1]).toMatchObject({
+      type: "frame_source",
+      html,
+      directive: {
+        title: "Provider status",
+        kind: "progress",
+        height: "420",
+      },
+    });
+    expect(segments[2]).toMatchObject({ type: "markdown", content: "\nDone." });
+  });
+
+  it("returns a compact error segment for malformed frame directives", () => {
+    const segments = parseAssistantMessageSegments("::frame{title=\"Missing path\"}");
+    expect(segments).toEqual([
+      {
+        type: "html_error",
+        raw: "::frame{title=\"Missing path\"}",
+        error: "Frame embed requires a path",
+      },
+    ]);
+  });
+
+  it("renders rich-frame tags as frame directives instead of markdown", () => {
+    const segments = parseAssistantMessageSegments(
+      '<rich-frame src="artifacts/investment-performance.html" kind="chart" height="720" title="Investment performance">\n</rich-frame>',
+    );
+
+    expect(segments).toEqual([
+      {
+        type: "frame",
+        raw: '<rich-frame src="artifacts/investment-performance.html" kind="chart" height="720" title="Investment performance">',
+        directive: {
+          path: "artifacts/investment-performance.html",
+          title: "Investment performance",
+          kind: "chart",
+          height: "720",
+          aspectRatio: undefined,
+          chrome: false,
+        },
+      },
+    ]);
+  });
+
   it("renders full html form fences as interactive source previews", () => {
     const html = [
       "<!doctype html>",

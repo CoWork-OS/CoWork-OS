@@ -243,6 +243,7 @@ export function isTaskStaleForUi(
 export function useMissionControlData(
   initialCompanyId: string | null = null,
   initialIssueId: string | null = null,
+  initialEverydayAgentFocus = false,
 ) {
   // ── Core state ──
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -1215,6 +1216,14 @@ export function useMissionControlData(
 
   const lastAppliedInitialIssueIdRef = useRef<string | null>(null);
   useEffect(() => {
+    if (!initialEverydayAgentFocus) return;
+    setActiveTab("feed");
+    setFeedFilter("attention");
+    setFeedSeverityFilter("all");
+    setSelectedAgent(null);
+  }, [initialEverydayAgentFocus]);
+
+  useEffect(() => {
     if (!initialIssueId) {
       lastAppliedInitialIssueIdRef.current = null;
       return;
@@ -1298,6 +1307,7 @@ export function useMissionControlData(
     selectedAgent, setSelectedAgent,
     feedFilter, setFeedFilter,
     feedSeverityFilter, setFeedSeverityFilter,
+    everydayAgentFocus: initialEverydayAgentFocus,
     dragOverColumn, setDragOverColumn,
     currentTime,
 

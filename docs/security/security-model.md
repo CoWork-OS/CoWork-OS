@@ -221,6 +221,25 @@ All sensitive settings including API keys, preferences, and configurations are s
 | Settings changes | 5/minute |
 | Standard operations | 60/minute |
 
+## Security Harness
+
+CoWork OS includes a deterministic security harness for changed high-risk code paths:
+
+`prepare -> scan -> validate/debate -> dedup -> prove -> eval coverage`
+
+Run it with `npm run qa:security:harness`. It scans changed files in sensitive boundaries such as
+tool policy, agent tools, sandboxing, Browser Workbench automation, Electron IPC, connector source,
+and regression policy. Confirmed findings are deduped into a Mission Control payload, and runs with
+`--db --profile-id` also write Core Harness trace/failure rows for Mission Control.
+
+The harness is advisory by default. It does not change ordinary task verification, agent step
+completion, or runtime approval behavior unless a developer explicitly runs it with
+`--fail-on-findings`.
+
+Confirmed security or production-policy fixes should run the harness with `--confirmed-fix` so
+`scripts/qa/eval-cases/security-harness-regressions.json` is created or updated with durable
+regression coverage. See [Security Harness](security-harness.md).
+
 ## Brute-Force Protection
 
 For pairing codes:

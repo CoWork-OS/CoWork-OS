@@ -22,6 +22,10 @@ function cleanString(value: string | undefined): string | undefined {
 const PROVIDER_STRING_KEYS = [
   "apiKey",
   "subscriptionToken",
+  "accessToken",
+  "refreshToken",
+  "idToken",
+  "tokenEndpoint",
   "baseUrl",
   "model",
   "provider",
@@ -144,6 +148,32 @@ export function buildSavedLLMSettings(
     };
   }
 
+  const existingXAISettings = existingSettings.xai;
+  const incomingXAISettings = validated.xai;
+  let xaiSettings = mergeProviderSettings(incomingXAISettings, existingXAISettings);
+  const shouldPreserveXAIOAuthTokens =
+    existingXAISettings?.authMethod === "oauth" &&
+    validated.xai?.authMethod !== "api_key";
+  if (validated.xai?.authMethod === "api_key" && xaiSettings) {
+    delete xaiSettings.accessToken;
+    delete xaiSettings.refreshToken;
+    delete xaiSettings.tokenExpiresAt;
+    delete xaiSettings.tokenEndpoint;
+    delete xaiSettings.idToken;
+  }
+  if (shouldPreserveXAIOAuthTokens && existingXAISettings) {
+    xaiSettings = {
+      ...xaiSettings,
+      accessToken: existingXAISettings.accessToken,
+      refreshToken: existingXAISettings.refreshToken,
+      tokenExpiresAt: existingXAISettings.tokenExpiresAt,
+      tokenEndpoint: existingXAISettings.tokenEndpoint,
+      idToken: existingXAISettings.idToken,
+      authMethod:
+        incomingXAISettings?.authMethod || existingXAISettings.authMethod,
+    };
+  }
+
   return {
     providerType: validated.providerType,
     modelKey: validated.modelKey,
@@ -187,9 +217,7 @@ export function buildSavedLLMSettings(
     groq: cleanProviderSettings(
       mergeProviderSettings(validated.groq, existingSettings.groq),
     ),
-    xai: cleanProviderSettings(
-      mergeProviderSettings(validated.xai, existingSettings.xai),
-    ),
+    xai: cleanProviderSettings(xaiSettings),
     kimi: cleanProviderSettings(
       mergeProviderSettings(validated.kimi, existingSettings.kimi),
     ),

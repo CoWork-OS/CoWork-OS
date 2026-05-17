@@ -44,31 +44,27 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
           </div>
 
           <div className="disclaimer-card-body">
-            <p className="disclaimer-intro">Please read carefully before proceeding.</p>
+            <p className="disclaimer-intro">
+              CoWork can help with real work, so it uses explicit workspace boundaries and approvals.
+            </p>
 
             <div className="disclaimer-section">
-              <h4>What CoWork OS agents can do</h4>
+              <h4>Default safety model</h4>
               <ul>
-                <li>Execute shell commands on your system</li>
-                <li>Read, write, and delete files in your workspace</li>
-                <li>Access the network and external services</li>
-                <li>Control browser automation</li>
-                <li>
-                  Send and receive messages on connected channels (WhatsApp, Telegram, Slack, etc.)
-                </li>
-                <li>Access connected enterprise services and cloud storage</li>
-                <li>Run skills, plugins, and any tools you enable</li>
+                <li>CoWork works inside selected workspaces and a private starter workspace.</li>
+                <li>Destructive actions and sensitive external actions ask first.</li>
+                <li>Shell commands are off by default for new workspaces.</li>
+                <li>Connected apps require separate setup and approval.</li>
               </ul>
             </div>
 
             <div className="disclaimer-section">
-              <h4>Risks to understand</h4>
+              <h4>Power-user capabilities</h4>
               <ul>
-                <li>AI agents can make mistakes or be manipulated</li>
-                <li>Commands may have unintended side effects</li>
-                <li>Agents may send messages or take actions on your behalf</li>
-                <li>Sensitive data could be exposed if not careful</li>
-                <li>Always review commands before approving them</li>
+                <li>Execute shell commands when enabled.</li>
+                <li>Read, write, and delete files in allowed workspace paths.</li>
+                <li>Access the network, browser automation, skills, plugins, and connected services you enable.</li>
+                <li>Send or receive messages through configured channels such as WhatsApp, Telegram, Slack, or email.</li>
               </ul>
             </div>
 

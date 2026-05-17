@@ -32,6 +32,7 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
   messages: LLMMessage[];
   retryLabel: string;
   operation: string;
+  forceNoTools?: boolean;
   llmTimeoutMs: number;
   providerType: string;
   modelId: string;
@@ -81,7 +82,7 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
   emitEvent?: (type: string, payload: Record<string, unknown>) => void;
   log: (message: string) => void;
 }): Promise<{ response: Any; availableTools: Any[]; outputBudget: AdaptiveOutputBudgetState }> {
-  const availableTools = opts.getAvailableTools();
+  const availableTools = opts.forceNoTools ? [] : opts.getAvailableTools();
   const promptCacheExtras = opts.buildPromptCacheRequestExtras
     ? opts.buildPromptCacheRequestExtras({
         systemPrompt: opts.systemPrompt,
@@ -100,13 +101,14 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
     phase: "initial",
   });
   const adaptiveMode = isAdaptiveOutputTokenPolicyEnabled();
+  const hasTools = availableTools.length > 0;
   const applyTokenCap = (
     budget: number,
     attempt: number,
     timeoutMs: number,
-    hasTools = true,
+    requestHasTools = hasTools,
   ): number =>
-    adaptiveMode ? budget : opts.applyRetryTokenCap(budget, attempt, timeoutMs, hasTools);
+    adaptiveMode ? budget : opts.applyRetryTokenCap(budget, attempt, timeoutMs, requestHasTools);
 
   const recordUsage = (response: Any) => {
     if (!response?.usage) return;
@@ -124,11 +126,11 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
   ): Promise<{ response: Any; effectiveMaxTokens: number; requestTimeoutMs: number }> => {
     const retryLabel = labelSuffix ? `${opts.retryLabel} ${labelSuffix}` : opts.retryLabel;
     const response = await opts.callLLMWithRetry((attempt) => {
-      const effectiveMaxTokens = applyTokenCap(budget, attempt, opts.llmTimeoutMs, true);
+      const effectiveMaxTokens = applyTokenCap(budget, attempt, opts.llmTimeoutMs, hasTools);
       const requestTimeoutMs = opts.getRetryTimeoutMs(
         opts.llmTimeoutMs,
         attempt,
-        true,
+        hasTools,
         effectiveMaxTokens,
       );
       return opts.createMessageWithTimeout(
@@ -145,8 +147,8 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
       );
     }, retryLabel);
 
-    const effectiveMaxTokens = applyTokenCap(budget, 0, opts.llmTimeoutMs, true);
-    const requestTimeoutMs = opts.getRetryTimeoutMs(opts.llmTimeoutMs, 0, true, effectiveMaxTokens);
+    const effectiveMaxTokens = applyTokenCap(budget, 0, opts.llmTimeoutMs, hasTools);
+    const requestTimeoutMs = opts.getRetryTimeoutMs(opts.llmTimeoutMs, 0, hasTools, effectiveMaxTokens);
     return { response, effectiveMaxTokens, requestTimeoutMs };
   };
 
@@ -155,12 +157,12 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
     initialBudget.transport.value,
     0,
     opts.llmTimeoutMs,
-    true,
+    hasTools,
   );
   const effectiveTimeoutLog = opts.getRetryTimeoutMs(
     opts.llmTimeoutMs,
     0,
-    true,
+    hasTools,
     effectiveMaxTokensLog,
   );
   opts.log(

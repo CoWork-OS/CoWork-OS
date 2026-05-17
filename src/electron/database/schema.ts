@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { createLogger } from "../utils/logger";
+import { ensureEverydayAgentSchema } from "../everyday-agent/schema";
 
 const schemaLogger = createLogger("DatabaseManager");
 
@@ -1857,6 +1858,7 @@ export class DatabaseManager {
     // Run migrations for task-retry tracking columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
     this.runMigrations();
     this.initializeKnowledgeGraphFTS();
+    ensureEverydayAgentSchema(this.db);
 
     // Seed default models if table is empty
     this.seedDefaultModels();

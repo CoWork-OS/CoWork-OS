@@ -129,6 +129,28 @@ Saving calls `window.electronAPI.addCronJob` with a `CronJobCreate` payload:
 
 The resulting job appears in `Settings > Automations > Scheduled Tasks` and uses the normal cron runtime, history, enable/disable behavior, and scheduler persistence.
 
+## Monitoring Results
+
+`Settings > Automations > Scheduled Tasks` is also the main place to inspect what automated runs actually did.
+
+The panel summarizes:
+
+- total scheduled tasks and active tasks
+- aggregate run success rate
+- the next scheduler wake-up and any currently running job
+- jobs needing attention because their latest run failed, timed out, or needs user action
+
+Expanding a scheduled task shows a results view with:
+
+- the latest run status in plain language
+- total run count, success rate, and latest duration
+- delivery state for channel-backed scheduled outputs
+- latest error text when a run or delivery failed
+- a run-folder indicator when the scheduler created a dedicated run workspace
+- a direct `Open generated task` link when the run created a task session
+
+The run-history ledger keeps recent runs together with status, duration, delivery outcome, and an `Open` action for each generated task. `Refresh` reloads scheduler history from the cron service, while `Clear` removes the scheduler history counters for that job without deleting the generated task sessions.
+
 ## Current Limitations
 
 - Task automations create cron scheduled tasks directly; they do not create a high-level `Routine`.

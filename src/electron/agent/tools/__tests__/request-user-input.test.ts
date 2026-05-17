@@ -51,6 +51,23 @@ describe("ToolRegistry request_user_input", () => {
     ).rejects.toThrow(/only available in plan or debug mode/i);
   });
 
+  it("rejects request_user_input when human input policy only allows hard blockers", async () => {
+    const fakeThis = {
+      taskId: "task-policy",
+      daemon: {
+        getTaskById: vi.fn().mockResolvedValue({
+          agentConfig: { executionMode: "plan", humanInputPolicy: "hard_blockers" },
+        }),
+        requestUserInput: vi.fn(),
+      },
+    } as Any;
+
+    await expect(
+      (ToolRegistry as Any).prototype.requestUserInput.call(fakeThis, { questions: validQuestions }),
+    ).rejects.toThrow(/disabled for this task/i);
+    expect(fakeThis.daemon.requestUserInput).not.toHaveBeenCalled();
+  });
+
   it("accepts valid payload in debug mode", async () => {
     const daemon = {
       getTaskById: vi.fn().mockResolvedValue({ agentConfig: { executionMode: "debug" } }),

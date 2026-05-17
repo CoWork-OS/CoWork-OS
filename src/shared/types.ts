@@ -63,6 +63,18 @@ export interface MemoryFeaturesSettings {
   layeredMemoryEnabled?: boolean;
   /** Persist append-only transcript spans and lightweight checkpoints. */
   transcriptStoreEnabled?: boolean;
+  /** Persist compacted runtime context in a source-linked durable context store. */
+  durableContextEnabled?: boolean;
+  /** Rollout mode for durable context. */
+  durableContextMode?: "off" | "experimental" | "on";
+  /** Fraction of model context that should trigger durable compaction. */
+  durableContextThreshold?: number;
+  /** Number of recent messages protected from durable compaction. */
+  durableContextFreshTailCount?: number;
+  /** Token threshold above which large payloads should be stored by reference. */
+  durableContextLargePayloadThreshold?: number;
+  /** Optional model override key for durable context summaries. */
+  durableContextSummaryModel?: string;
   /** Run background memory consolidation after meaningful task activity. */
   backgroundConsolidationEnabled?: boolean;
   /** Route execution turns through the extracted query orchestrator. */
@@ -555,6 +567,9 @@ export type UserFactCategory =
   | "bio"
   | "work"
   | "goal"
+  | "operating"
+  | "voice"
+  | "accountability"
   | "constraint"
   | "other";
 
@@ -2052,6 +2067,14 @@ export interface AgentConfig {
   bypassQueue?: boolean;
   /** Whether this task may pause and wait for user input (default: true) */
   allowUserInput?: boolean;
+  /**
+   * Controls when the runtime may stop a task for human input.
+   * - none: no human-input pauses.
+   * - hard_blockers: only concrete runtime blockers such as shell/auth/missing files.
+   * - structured_plan: allow structured request_user_input in plan/debug mode.
+   * - legacy_interactive: allow broad model-requested clarification pauses.
+   */
+  humanInputPolicy?: HumanInputPolicy;
   /** Override Chronicle availability for this task. */
   chronicleMode?: ChronicleTaskMode;
   /** Allow shell tools for this task via an in-memory workspace permission override. */
@@ -5097,6 +5120,7 @@ export interface ManagedAgentRuntimeDefaults {
   autonomousMode?: boolean;
   requireWorktree?: boolean;
   allowUserInput?: boolean;
+  humanInputPolicy?: HumanInputPolicy;
   allowedTools?: string[];
   toolRestrictions?: string[];
   /** Optional explicit turn cap for managed sessions created from this agent version. */
@@ -6776,6 +6800,519 @@ export interface ProactiveSuggestion {
   actedOn: boolean;
 }
 
+export const EVERYDAY_AGENT_CONSENT_VERSION = 1;
+export const EVERYDAY_AGENT_DEFAULT_PROFILE_ID = "default";
+export const EVERYDAY_AGENT_DEFAULT_MANAGED_AGENT_ID = "cowork-everyday-agent";
+export const EVERYDAY_AGENT_DEFAULT_MANAGED_ENVIRONMENT_ID =
+  "cowork-everyday-agent-local";
+
+export type EverydayCapabilityBundle =
+  | "inbox"
+  | "calendar"
+  | "browser"
+  | "files"
+  | "docs"
+  | "messages"
+  | "github_work"
+  | "memory"
+  | "screen_context"
+  | "remote_devices"
+  | "automations";
+
+export type EverydayActionRisk =
+  | "read"
+  | "draft"
+  | "stage"
+  | "execute_low_risk"
+  | "execute_sensitive"
+  | "destructive"
+  | "data_export"
+  | "spend"
+  | "credential_sensitive";
+
+export type EverydayApprovalPosture =
+  | "review_first"
+  | "trusted_patterns"
+  | "review_only";
+
+export type EverydayReceiptStatus =
+  | "executed"
+  | "skipped"
+  | "blocked"
+  | "paused"
+  | "failed"
+  | "previewed"
+  | "approved";
+
+export type EverydayPreviewStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "blocked";
+
+export interface EverydayCapabilityBundleDefinition {
+  id: EverydayCapabilityBundle;
+  label: string;
+  description: string;
+  surfaces: string[];
+  defaultEnabled: boolean;
+  sensitiveRisks: EverydayActionRisk[];
+}
+
+export const EVERYDAY_AGENT_CAPABILITY_BUNDLES: EverydayCapabilityBundleDefinition[] =
+  [
+    {
+      id: "inbox",
+      label: "Inbox",
+      description: "Triage, summarize, draft, and schedule email work.",
+      surfaces: ["Inbox Agent", "Home", "Mission Control"],
+      defaultEnabled: true,
+      sensitiveRisks: ["execute_sensitive", "data_export"],
+    },
+    {
+      id: "calendar",
+      label: "Calendar",
+      description:
+        "Prepare for events, suggest follow-ups, and draft scheduling changes.",
+      surfaces: ["Mission Control", "Routines"],
+      defaultEnabled: true,
+      sensitiveRisks: ["execute_sensitive", "data_export"],
+    },
+    {
+      id: "browser",
+      label: "Browser",
+      description:
+        "Use the visible Browser Workbench for online tasks and evidence review.",
+      surfaces: ["Browser Workbench", "Task Timeline"],
+      defaultEnabled: true,
+      sensitiveRisks: ["credential_sensitive", "data_export"],
+    },
+    {
+      id: "files",
+      label: "Files",
+      description: "Read local workspace files and suggest cleanup or organization.",
+      surfaces: ["Task Timeline", "Home"],
+      defaultEnabled: false,
+      sensitiveRisks: ["destructive", "data_export"],
+    },
+    {
+      id: "docs",
+      label: "Docs",
+      description:
+        "Summarize and draft document changes through connected document tools.",
+      surfaces: ["Documents", "Task Timeline"],
+      defaultEnabled: true,
+      sensitiveRisks: ["execute_sensitive", "data_export"],
+    },
+    {
+      id: "messages",
+      label: "Messages",
+      description:
+        "Draft replies and coordinate work in private or approved channels.",
+      surfaces: ["Channels", "Inbox Agent"],
+      defaultEnabled: false,
+      sensitiveRisks: ["execute_sensitive", "data_export"],
+    },
+    {
+      id: "github_work",
+      label: "GitHub / Work",
+      description: "Track issues, pull requests, and work-system next actions.",
+      surfaces: ["Mission Control", "Managed Agents"],
+      defaultEnabled: false,
+      sensitiveRisks: ["execute_sensitive", "destructive"],
+    },
+    {
+      id: "memory",
+      label: "Memory",
+      description: "Propose reviewable memories from accepted work and outcomes.",
+      surfaces: ["Memory", "Home"],
+      defaultEnabled: true,
+      sensitiveRisks: ["data_export"],
+    },
+    {
+      id: "screen_context",
+      label: "Screen Context",
+      description:
+        "Use explicitly enabled local screen context as untrusted evidence.",
+      surfaces: ["Chronicle", "Task Timeline"],
+      defaultEnabled: false,
+      sensitiveRisks: ["credential_sensitive", "data_export"],
+    },
+    {
+      id: "remote_devices",
+      label: "Remote Devices",
+      description:
+        "Dispatch approved work to connected devices and inspect their status.",
+      surfaces: ["Devices", "Control Plane"],
+      defaultEnabled: false,
+      sensitiveRisks: ["execute_sensitive", "credential_sensitive"],
+    },
+    {
+      id: "automations",
+      label: "Automations",
+      description: "Create, dry-run, monitor, pause, and revoke trusted routines.",
+      surfaces: ["Routines", "Home"],
+      defaultEnabled: true,
+      sensitiveRisks: ["execute_sensitive", "destructive"],
+    },
+  ];
+
+export interface EverydayCapabilitySetting {
+  enabled: boolean;
+  paused?: boolean;
+  revokedAt?: number;
+  lastChangedAt?: number;
+}
+
+export interface EverydayConnectorAllowlistEntry {
+  enabled: boolean;
+  connectorId: string;
+  accountIds?: string[];
+  scopes?: string[];
+  paused?: boolean;
+}
+
+export interface EverydayActiveHours {
+  enabled: boolean;
+  timezone: string;
+  windows: Array<{
+    days: number[];
+    start: string;
+    end: string;
+  }>;
+}
+
+export interface EverydayMemoryPolicy {
+  reviewRequired: boolean;
+  allowPromptVisibleMemory: boolean;
+  suppressPrivateContent: boolean;
+  allowExternalMirror: boolean;
+  retentionDays: number;
+  allowedWorkspaceIds: string[];
+}
+
+export interface EverydayRetentionSettings {
+  receiptsDays: number;
+  previewsDays: number;
+  connectorCacheDays: number;
+  memoryCandidateDays: number;
+  routineProvenanceDays: number;
+}
+
+export interface EverydayBrowserProfilePolicy {
+  mode: "visible_existing" | "visible_ephemeral" | "isolated_ephemeral";
+  preferVisibleBrowser: boolean;
+  allowRealBrowserAttach: boolean;
+  retainProfileMetadata: boolean;
+}
+
+export interface EverydayPauseScope {
+  id?: string;
+  kind:
+    | "global"
+    | "capability"
+    | "connector"
+    | "workspace"
+    | "device"
+    | "channel";
+  capability?: EverydayCapabilityBundle;
+  targetId?: string;
+  reason?: string;
+  pausedAt: number;
+  expiresAt?: number;
+}
+
+export interface EverydayAgentProfile {
+  id: string;
+  enabled: boolean;
+  acceptedConsentVersion: number;
+  consentAcceptedAt?: number;
+  declinedConsentVersion?: number;
+  consentDeclinedAt?: number;
+  managedAgentId?: string;
+  managedEnvironmentId?: string;
+  capabilitySettings: Record<EverydayCapabilityBundle, EverydayCapabilitySetting>;
+  connectorAllowlists: Record<string, EverydayConnectorAllowlistEntry>;
+  workspaceScopes: string[];
+  accountScopes: Record<string, string[]>;
+  approvalPosture: EverydayApprovalPosture;
+  memoryPolicy: EverydayMemoryPolicy;
+  activeHours: EverydayActiveHours;
+  retention: EverydayRetentionSettings;
+  browserProfilePolicy: EverydayBrowserProfilePolicy;
+  pauseScopes: EverydayPauseScope[];
+  revokedCapabilities: EverydayCapabilityBundle[];
+  heartbeatCadenceMinutes: number;
+  maxConcurrentBackgroundWork: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface EverydayAdminPolicySnapshot {
+  blocked: boolean;
+  blockedBundles: EverydayCapabilityBundle[];
+  forceReviewOnly: boolean;
+  maxHeartbeatCadenceMinutes: number;
+  maxConcurrentBackgroundWork: number;
+  activeHours?: Partial<EverydayActiveHours>;
+  reason?: string;
+}
+
+export interface EverydayCompiledPolicy {
+  enabled: boolean;
+  profileId: string;
+  managedAgentId?: string;
+  managedEnvironmentId?: string;
+  allowedCapabilities: EverydayCapabilityBundle[];
+  blockedCapabilities: EverydayCapabilityBundle[];
+  pausedScopes: EverydayPauseScope[];
+  approvalPosture: EverydayApprovalPosture;
+  reviewOnly: boolean;
+  visibleBrowserRequired: boolean;
+  allowRealBrowserAttach: boolean;
+  alwaysRequireApproval: EverydayActionRisk[];
+  permissionRules: Array<{
+    scope:
+      | "tool"
+      | "connector"
+      | "browser_profile"
+      | "channel"
+      | "workspace"
+      | "device";
+    target: string;
+    decision: "allow" | "deny" | "prompt";
+    reason: string;
+  }>;
+  workflowTargets: string[];
+  routineEligibility: Array<{
+    capability: EverydayCapabilityBundle;
+    eligible: boolean;
+    reason?: string;
+  }>;
+  adminPolicy: EverydayAdminPolicySnapshot;
+}
+
+export interface EverydayAgentProfileResult {
+  profile: EverydayAgentProfile;
+  compiledPolicy: EverydayCompiledPolicy;
+}
+
+export interface EverydayAgentUpdateProfileRequest {
+  enabled?: boolean;
+  capabilitySettings?: Partial<
+    Record<EverydayCapabilityBundle, Partial<EverydayCapabilitySetting>>
+  >;
+  connectorAllowlists?: Record<string, Partial<EverydayConnectorAllowlistEntry>>;
+  workspaceScopes?: string[];
+  accountScopes?: Record<string, string[]>;
+  approvalPosture?: EverydayApprovalPosture;
+  memoryPolicy?: Partial<EverydayMemoryPolicy>;
+  activeHours?: Partial<EverydayActiveHours>;
+  retention?: Partial<EverydayRetentionSettings>;
+  browserProfilePolicy?: Partial<EverydayBrowserProfilePolicy>;
+  heartbeatCadenceMinutes?: number;
+  maxConcurrentBackgroundWork?: number;
+}
+
+export interface EverydayActionTargetBinding {
+  workspaceId?: string;
+  connectorId?: string;
+  connectorAccountId?: string;
+  browserProfileId?: string;
+  channelId?: string;
+  deviceId?: string;
+  targetIdentity?: string;
+  destination?: string;
+}
+
+export interface EverydayActionPreviewInput {
+  profileId?: string;
+  workspaceId?: string;
+  capability?: EverydayCapabilityBundle;
+  title: string;
+  action: string;
+  toolName?: string;
+  connectorId?: string;
+  connectorAccountId?: string;
+  browserProfileId?: string;
+  channelId?: string;
+  deviceId?: string;
+  targetIdentity?: string;
+  destination?: string;
+  sourceEvidence?: string[];
+  proposedMutation?: string;
+  affectedObjects?: string[];
+  rollbackAvailable?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface EverydayActionPreview {
+  id: string;
+  profileId: string;
+  workspaceId?: string;
+  capability: EverydayCapabilityBundle;
+  riskClass: EverydayActionRisk;
+  title: string;
+  action: string;
+  sourceEvidence: string[];
+  target: EverydayActionTargetBinding;
+  proposedMutation: string;
+  affectedObjects: string[];
+  rollbackAvailable: boolean;
+  approvalRequired: boolean;
+  approvalReason: string;
+  idempotencyKey: string;
+  status: EverydayPreviewStatus;
+  createdAt: number;
+  expiresAt: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface EverydayActionReceipt {
+  id: string;
+  profileId: string;
+  workspaceId?: string;
+  capability: EverydayCapabilityBundle;
+  riskClass: EverydayActionRisk;
+  status: EverydayReceiptStatus;
+  title: string;
+  summary: string;
+  sourceSignals: string[];
+  approvalId?: string;
+  previewId?: string;
+  toolCalls: Array<{
+    toolName: string;
+    argumentsPreview?: string;
+    resultPreview?: string;
+    startedAt?: number;
+    completedAt?: number;
+  }>;
+  externalIds: string[];
+  retryState?: {
+    attempt: number;
+    nextRetryAt?: number;
+    lastError?: string;
+  };
+  idempotencyKey: string;
+  result?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface EverydayTrustPattern {
+  id: string;
+  profileId: string;
+  capability: EverydayCapabilityBundle;
+  workspaceId?: string;
+  connectorId?: string;
+  connectorAccountId?: string;
+  actionClass: EverydayActionRisk;
+  destination?: string;
+  status: "candidate" | "trusted" | "paused" | "revoked";
+  sourceSuggestionIds: string[];
+  provenance: string;
+  acceptedCount: number;
+  rejectedCount: number;
+  lastUsedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface EverydayAgentListReceiptsRequest {
+  profileId?: string;
+  workspaceId?: string;
+  capability?: EverydayCapabilityBundle;
+  limit?: number;
+  offset?: number;
+}
+
+export interface EverydayAgentClearDataRequest {
+  profile?: boolean;
+  receipts?: boolean;
+  previews?: boolean;
+  trustPatterns?: boolean;
+  consentHistory?: boolean;
+  pauseScopes?: boolean;
+  memoryCandidates?: boolean;
+  routineProvenance?: boolean;
+  cachedConnectorSummaries?: boolean;
+  browserProfileMetadata?: boolean;
+}
+
+export interface EverydayAgentApproveActionRequest {
+  previewId: string;
+  approvalId?: string;
+  note?: string;
+}
+
+export const EVERYDAY_AGENT_ALWAYS_APPROVAL_RISKS: EverydayActionRisk[] = [
+  "execute_sensitive",
+  "destructive",
+  "data_export",
+  "spend",
+  "credential_sensitive",
+];
+
+export const DEFAULT_EVERYDAY_CAPABILITY_SETTINGS: Record<
+  EverydayCapabilityBundle,
+  EverydayCapabilitySetting
+> = EVERYDAY_AGENT_CAPABILITY_BUNDLES.reduce(
+  (acc, bundle) => {
+    acc[bundle.id] = {
+      enabled: false,
+      paused: false,
+    };
+    return acc;
+  },
+  {} as Record<EverydayCapabilityBundle, EverydayCapabilitySetting>,
+);
+
+export const DEFAULT_EVERYDAY_AGENT_PROFILE: EverydayAgentProfile = {
+  id: EVERYDAY_AGENT_DEFAULT_PROFILE_ID,
+  enabled: false,
+  acceptedConsentVersion: 0,
+  managedAgentId: EVERYDAY_AGENT_DEFAULT_MANAGED_AGENT_ID,
+  managedEnvironmentId: EVERYDAY_AGENT_DEFAULT_MANAGED_ENVIRONMENT_ID,
+  capabilitySettings: DEFAULT_EVERYDAY_CAPABILITY_SETTINGS,
+  connectorAllowlists: {},
+  workspaceScopes: [],
+  accountScopes: {},
+  approvalPosture: "review_first",
+  memoryPolicy: {
+    reviewRequired: true,
+    allowPromptVisibleMemory: false,
+    suppressPrivateContent: true,
+    allowExternalMirror: false,
+    retentionDays: 90,
+    allowedWorkspaceIds: [],
+  },
+  activeHours: {
+    enabled: false,
+    timezone: "local",
+    windows: [],
+  },
+  retention: {
+    receiptsDays: 180,
+    previewsDays: 30,
+    connectorCacheDays: 30,
+    memoryCandidateDays: 90,
+    routineProvenanceDays: 180,
+  },
+  browserProfilePolicy: {
+    mode: "visible_ephemeral",
+    preferVisibleBrowser: true,
+    allowRealBrowserAttach: false,
+    retainProfileMetadata: true,
+  },
+  pauseScopes: [],
+  revokedCapabilities: [],
+  heartbeatCadenceMinutes: 30,
+  maxConcurrentBackgroundWork: 1,
+  createdAt: 0,
+  updatedAt: 0,
+};
+
 // IPC Channel names
 export const IPC_CHANNELS = {
   // Task operations
@@ -7091,6 +7628,17 @@ export const IPC_CHANNELS = {
   ADMIN_POLICIES_UPDATE: "admin:policiesUpdate",
   ADMIN_POLICIES_CHECK_PACK: "admin:checkPack",
 
+  // Everyday Agent
+  EVERYDAY_AGENT_GET_PROFILE: "everydayAgent:getProfile",
+  EVERYDAY_AGENT_UPDATE_PROFILE: "everydayAgent:updateProfile",
+  EVERYDAY_AGENT_ACCEPT_CONSENT: "everydayAgent:acceptConsent",
+  EVERYDAY_AGENT_PAUSE: "everydayAgent:pause",
+  EVERYDAY_AGENT_REVOKE_CAPABILITY: "everydayAgent:revokeCapability",
+  EVERYDAY_AGENT_LIST_RECEIPTS: "everydayAgent:listReceipts",
+  EVERYDAY_AGENT_CLEAR_DATA: "everydayAgent:clearData",
+  EVERYDAY_AGENT_PREVIEW_ACTION: "everydayAgent:previewAction",
+  EVERYDAY_AGENT_APPROVE_ACTION: "everydayAgent:approveAction",
+
   // Workspace Kit (.cowork)
   KIT_GET_STATUS: "kit:getStatus",
   KIT_INIT: "kit:init",
@@ -7230,6 +7778,8 @@ export const IPC_CHANNELS = {
   LLM_GET_OPENAI_MODELS: "llm:getOpenAIModels",
   LLM_GET_GROQ_MODELS: "llm:getGroqModels",
   LLM_GET_XAI_MODELS: "llm:getXAIModels",
+  LLM_XAI_OAUTH_START: "llm:xaiOAuthStart",
+  LLM_XAI_OAUTH_LOGOUT: "llm:xaiOAuthLogout",
   LLM_GET_KIMI_MODELS: "llm:getKimiModels",
   LLM_GET_PI_MODELS: "llm:getPiModels",
   LLM_GET_PI_PROVIDERS: "llm:getPiProviders",
@@ -7883,6 +8433,7 @@ export const BUILTIN_LLM_PROVIDER_TYPES = [
   "azure-anthropic",
   "groq",
   "xai",
+  "xai-oauth",
   "kimi",
   "pi",
   "openai-compatible",
@@ -7940,6 +8491,7 @@ export const MULTI_LLM_PROVIDER_DISPLAY: Record<
   },
   groq: { name: "Groq", icon: "\u{26A1}", color: "#f97316" },
   xai: { name: "xAI", icon: "\u{1F4A0}", color: "#ef4444" },
+  "xai-oauth": { name: "Grok OAuth", icon: "\u{1F4A0}", color: "#ef4444" },
   kimi: { name: "Kimi", icon: "\u{1F319}", color: "#a855f7" },
   pi: { name: "Pi", icon: "\u{1F7E3}", color: "#ec4899" },
   "openai-compatible": {
@@ -8096,6 +8648,12 @@ export interface LLMSettingsData {
   } & ProviderRoutingSettings;
   xai?: {
     apiKey?: string;
+    accessToken?: string;
+    refreshToken?: string;
+    tokenExpiresAt?: number;
+    tokenEndpoint?: string;
+    idToken?: string;
+    authMethod?: "api_key" | "oauth";
     model?: string;
     baseUrl?: string;
   } & ProviderRoutingSettings;
@@ -12022,12 +12580,18 @@ export interface CompanyPackageImportResult {
 }
 
 export type AutonomyPolicyPreset = "manual" | "safe_autonomy" | "founder_edge";
+export type HumanInputPolicy =
+  | "none"
+  | "hard_blockers"
+  | "structured_plan"
+  | "legacy_interactive";
 
 export interface OperationalAutonomyPolicy {
   preset: AutonomyPolicyPreset;
   autonomousMode?: boolean;
   autoApproveTypes?: ApprovalType[];
   allowUserInput?: boolean;
+  humanInputPolicy?: HumanInputPolicy;
   pauseForRequiredDecision?: boolean;
   requireWorktree?: boolean;
 }

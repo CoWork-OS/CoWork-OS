@@ -1,8 +1,12 @@
 import React from "react";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { Sidebar, truncateSidebarTitleAtWordBoundary } from "../Sidebar";
+
+const stylesPath = fileURLToPath(new URL("../../styles/index.css", import.meta.url));
 
 describe("Sidebar top-level destinations", () => {
   it("truncates sidebar titles at whole words", () => {
@@ -49,6 +53,7 @@ describe("Sidebar top-level destinations", () => {
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
+        onOpenEverydayAgent: () => {},
         onOpenHealth: () => {},
         onNewSession: () => {},
         onOpenSettings: () => {},
@@ -59,6 +64,7 @@ describe("Sidebar top-level destinations", () => {
     );
 
     expect(markup).toContain("Agents");
+    expect(markup).toContain("Everyday");
     expect(markup).toContain("More");
     expect(markup).not.toContain("Mission Control");
     expect(markup).toContain("aria-pressed=\"true\"");
@@ -76,6 +82,7 @@ describe("Sidebar top-level destinations", () => {
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
+        onOpenEverydayAgent: () => {},
         onOpenHealth: () => {},
         onNewSession: () => {},
         onOpenSettings: () => {},
@@ -110,6 +117,7 @@ describe("Sidebar top-level destinations", () => {
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
+        onOpenEverydayAgent: () => {},
         onOpenHealth: () => {},
         onNewSession: () => {},
         onOpenSettings: () => {},
@@ -151,6 +159,7 @@ describe("Sidebar top-level destinations", () => {
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
+        onOpenEverydayAgent: () => {},
         onOpenHealth: () => {},
         onNewSession: () => {},
         onOpenSettings: () => {},
@@ -164,6 +173,21 @@ describe("Sidebar top-level destinations", () => {
     expect(markup).toContain("task-completion-unread-dot");
     expect(markup.indexOf("task-completion-unread-dot")).toBeLessThan(
       markup.indexOf("class=\"cli-task-time\""),
+    );
+  });
+
+  it("uses compact container-query rules when the sidebar is narrow", () => {
+    const source = readFileSync(stylesPath, "utf8");
+
+    expect(source).toMatch(
+      /\.sidebar\s*\{[\s\S]*container-type:\s*inline-size;[\s\S]*\}/,
+    );
+    expect(source).toMatch(/@container\s*\(max-width:\s*240px\)/);
+    expect(source).toMatch(
+      /@container\s*\(max-width:\s*240px\)\s*\{[\s\S]*\.cli-task-time\s*\{[\s\S]*display:\s*none;[\s\S]*\}/,
+    );
+    expect(source).toMatch(
+      /@container\s*\(max-width:\s*240px\)\s*\{[\s\S]*\.cli-task-item\s*\{[\s\S]*gap:\s*4px;[\s\S]*padding-right:\s*6px\s*!important;[\s\S]*\}/,
     );
   });
 });

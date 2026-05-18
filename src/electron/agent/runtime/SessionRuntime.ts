@@ -565,7 +565,10 @@ export class SessionRuntime {
         mode: "step",
         messages: input.messages,
         maxIterations: input.maxIterations,
+        maxLlmCalls: input.maxLlmCalls,
         maxEmptyResponses: input.maxEmptyResponses,
+        maxRecoveredResponses: input.maxRecoveredResponses,
+        maxRepeatedIterations: input.maxRepeatedIterations,
       },
       input.policy,
     ).run();
@@ -577,7 +580,10 @@ export class SessionRuntime {
         mode: "follow_up",
         messages: input.messages,
         maxIterations: input.maxIterations,
+        maxLlmCalls: input.maxLlmCalls,
         maxEmptyResponses: input.maxEmptyResponses,
+        maxRecoveredResponses: input.maxRecoveredResponses,
+        maxRepeatedIterations: input.maxRepeatedIterations,
       },
       input.policy,
     ).run();

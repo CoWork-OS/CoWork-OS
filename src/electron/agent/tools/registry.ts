@@ -16,6 +16,7 @@ import {
   TaskEvent,
   TOOL_GROUPS,
   ToolGroupName,
+  RuntimeToolApprovalKind,
   WorkspacePathAliasPolicy,
   WorkerRoleKind,
 } from "../../../shared/types";
@@ -193,6 +194,23 @@ const MCP_PAYMENT_AMOUNT_PATHS = [
   ["request", "maxAmount"],
 ];
 const MCP_PAYMENT_MAX_AMOUNT_USD = 100;
+
+function getApprovalTypeForRuntimeKind(
+  approvalKind: RuntimeToolApprovalKind | undefined,
+): ApprovalType | null {
+  switch (approvalKind) {
+    case "external_service":
+      return "external_service";
+    case "data_export":
+      return "data_export";
+    case "destructive":
+      return "delete_file";
+    case "shell_sensitive":
+      return "run_command";
+    default:
+      return null;
+  }
+}
 
 const MCP_PAYMENT_AMOUNT_TYPES = new Set(["number", "integer", "string"]);
 
@@ -1577,7 +1595,12 @@ export class ToolRegistry {
         context.request.name,
         context.request.input,
       );
-      const effectiveApprovalType = browserUseApproval ? "network_access" : approvalType;
+      const runtimeApprovalType = getApprovalTypeForRuntimeKind(runtime.approvalKind);
+      // Prefer tool/input-derived approval types because they are more specific
+      // than broad runtime metadata kinds for the same tool call.
+      const effectiveApprovalType = browserUseApproval
+        ? "network_access"
+        : approvalType ?? runtimeApprovalType;
       const permissionEvaluation = (this.daemon as Any)?.evaluateToolPermission;
       const serverName = this.getMcpServerName(context.request.name);
       const approvalDetails = {
@@ -1586,23 +1609,27 @@ export class ToolRegistry {
         ...(serverName ? { serverName } : {}),
         ...browserUseApproval,
       };
+      const runtimeApprovalRequired =
+        runtime.approvalKind !== "none" && runtime.approvalKind !== "workspace_policy";
       const pipeline = await evaluateToolPolicyPipeline({
         workspace: this.workspace,
         toolName: context.request.name,
         toolInput: context.request.input,
         gatewayContext: this.gatewayContext,
         policyContext: context.request.runtime?.toolPolicyContext as Any,
-        approvalRequired: runtime.approvalKind !== "none" && runtime.approvalKind !== "workspace_policy"
-          ? false
-          : false,
+        approvalRequired: runtimeApprovalRequired,
+        runtimeApprovalType: runtimeApprovalRequired ? runtimeApprovalType : null,
+        permissionApprovalType: effectiveApprovalType,
         permissionEvaluation:
           typeof permissionEvaluation === "function"
-            ? () =>
-                permissionEvaluation.call(this.daemon, this.taskId, {
-                  ...(effectiveApprovalType ? { approvalType: effectiveApprovalType } : {}),
+            ? (policy) => {
+                const approvalTypeForPermission = policy?.approvalType ?? effectiveApprovalType;
+                return permissionEvaluation.call(this.daemon, this.taskId, {
+                  ...(approvalTypeForPermission ? { approvalType: approvalTypeForPermission } : {}),
                   toolName: context.request.name,
                   details: approvalDetails,
-                })
+                });
+              }
             : undefined,
       });
 

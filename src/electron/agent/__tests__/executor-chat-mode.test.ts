@@ -184,6 +184,29 @@ describe("TaskExecutor chat mode", () => {
     expect((TaskExecutor as Any).prototype.shouldShortCircuitSimpleNonExecuteAnswer.call(executor)).toBe(false);
   });
 
+  it("prefers the latest follow-up assistant text over stale prior summaries", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    executor.task = {
+      id: "task-follow-up-summary",
+      title: "Research Analyst run",
+      prompt: "Research prompt",
+      resultSummary: "Research Analyst - Awaiting Input",
+    };
+    executor.bestKnownOutcome = {
+      resultSummary: "Yo! What's up? How can I help you today?",
+    };
+    executor.lastNonVerificationOutput = "Research Analyst - Awaiting Input";
+    executor.lastAssistantOutput = "Research Analyst - Awaiting Input";
+    executor.lastAssistantText =
+      "Premier League fixtures: Liverpool vs Chelsea; Brentford vs Manchester City.";
+    executor.getContentFallback = vi.fn().mockReturnValue("");
+
+    expect((TaskExecutor as Any).prototype.buildFollowUpResultSummary.call(executor)).toBe(
+      "Premier League fixtures: Liverpool vs Chelsea; Brentford vs Manchester City.",
+    );
+  });
+
   it("only exposes the last non-verification step as an assistant bubble", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.plan = {

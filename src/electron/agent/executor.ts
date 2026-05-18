@@ -1295,8 +1295,7 @@ export class TaskExecutor {
     const completedAt = Date.now();
     const clearError = opts?.clearError !== false;
     const clearTerminalFailure = opts?.clearTerminalFailure === true;
-    const summary =
-      this.buildResultSummary() || this.getContentFallback() || this.task.resultSummary || "";
+    const summary = this.buildFollowUpResultSummary();
     const trimmedSummary = typeof summary === "string" ? summary.trim() : "";
 
     this.task.status = "completed";
@@ -1330,6 +1329,27 @@ export class TaskExecutor {
       ...runtimeProjection,
       ...this.getCompletionProjectionFields(),
     });
+  }
+
+  private buildFollowUpResultSummary(): string {
+    const bestKnownSummary = String(this.bestKnownOutcome?.resultSummary || "").trim();
+    const candidates = [
+      this.lastAssistantText,
+      this.lastNonVerificationOutput,
+      this.lastAssistantOutput,
+      this.getContentFallback(),
+      bestKnownSummary,
+      this.task.resultSummary,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const trimmed = String(candidate).trim();
+      if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
+      return trimmed.length > 4000 ? `${trimmed.slice(0, 4000)}...` : trimmed;
+    }
+
+    return "";
   }
 
   private finalizeFollowUpFailure(error: Any): void {

@@ -6,6 +6,7 @@ import {
   TaskDomain,
 } from "../../../shared/types";
 import { IntentRoute } from "./IntentRouter";
+import type { DirectResponseMode, PreflightGate, TaskStrategySnapshot } from "./TaskStrategySnapshot";
 
 export interface DerivedTaskStrategy {
   conversationMode: ConversationMode;
@@ -25,6 +26,8 @@ export interface DerivedTaskStrategy {
   progressJournalEnabled: boolean;
   /** Strategy-derived model routing hint */
   llmProfileHint: LlmProfile;
+  /** Canonical strategy fields for downstream routing gates. */
+  snapshot: TaskStrategySnapshot;
 }
 
 export const STRATEGY_CONTEXT_OPEN = "[AGENT_STRATEGY_CONTEXT_V1]";
@@ -351,14 +354,32 @@ export class TaskStrategyService {
         previousWindowLowProgress)
         ? "strong"
         : baseLlmProfileHint;
+    const conversationMode =
+      existing?.conversationMode && existing.conversationMode !== "hybrid"
+        ? existing.conversationMode
+        : base.conversationMode;
+    const snapshot: TaskStrategySnapshot = {
+      taskIntent: route.intent,
+      conversationMode,
+      executionMode,
+      taskDomain,
+      directResponseMode: this.deriveDirectResponseMode({
+        intent: route.intent,
+        answerFirst: base.answerFirst,
+        executionMode,
+      }),
+      preflightGates: preflightRequired ? ["preflight_framing"] : [],
+      workflowMode:
+        route.intent === "workflow" || route.intent === "deep_work" ? route.intent : "none",
+      llmProfileHint,
+      confidence: route.confidence,
+      overrides: [],
+    };
     return {
       // Preserve explicit user-set modes (chat/task/think) but let intent-derived
       // strategy override the default "hybrid" so the daemon's IntentRouter decision
       // actually takes effect at execution time.
-      conversationMode:
-        existing?.conversationMode && existing.conversationMode !== "hybrid"
-          ? existing.conversationMode
-          : base.conversationMode,
+      conversationMode,
       executionMode,
       taskDomain,
       qualityPasses:
@@ -371,7 +392,22 @@ export class TaskStrategyService {
       autoReportEnabled: isWorkflowOrDeepWork,
       progressJournalEnabled: isDeepWork,
       llmProfileHint,
+      snapshot,
     };
+  }
+
+  private static deriveDirectResponseMode(params: {
+    intent: IntentRoute["intent"];
+    answerFirst: boolean;
+    executionMode: ExecutionMode;
+  }): DirectResponseMode {
+    if (params.intent === "chat" || params.intent === "thinking") {
+      return "companion";
+    }
+    if (!params.answerFirst) return "none";
+    return params.executionMode === "execute" || params.executionMode === "debug"
+      ? "brief_status_then_execute"
+      : "terminal_quick_answer";
   }
 
   static applyToAgentConfig(
@@ -379,6 +415,8 @@ export class TaskStrategyService {
     strategy: DerivedTaskStrategy,
   ): AgentConfig {
     const next: AgentConfig = existing ? { ...existing } : {};
+    (next as AgentConfig & { taskStrategySnapshot?: TaskStrategySnapshot }).taskStrategySnapshot =
+      strategy.snapshot;
     const existingExecutionMode = existing?.executionMode;
     const inferredExistingExecutionModeSource =
       existing?.executionModeSource ||

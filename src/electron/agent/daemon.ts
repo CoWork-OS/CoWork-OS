@@ -7845,6 +7845,10 @@ export class AgentDaemon extends EventEmitter {
 
     let terminalStatus: NonNullable<Task["terminalStatus"]> = metadata?.terminalStatus || "ok";
     let failureClass: Task["failureClass"] | undefined = metadata?.failureClass || undefined;
+    if (metadata?.terminalKind === "failed" && terminalStatus !== "failed") {
+      terminalStatus = "failed";
+    }
+    const explicitFailedTerminalStatus = terminalStatus === "failed";
     if (this.verificationOutcomeV2Enabled && metadata?.verificationOutcome === "pending_user_action") {
       if (terminalStatus === "ok") {
         terminalStatus = "needs_user_action";
@@ -7874,8 +7878,12 @@ export class AgentDaemon extends EventEmitter {
         verificationEvidenceBundle: metadata?.verificationEvidenceBundle,
       });
       if (!quality.passed && reviewDecision.strictCompletionContract) {
-        terminalStatus = "partial_success";
-        failureClass = "contract_error";
+        if (!explicitFailedTerminalStatus) {
+          terminalStatus = "partial_success";
+          failureClass = "contract_error";
+        } else if (!failureClass) {
+          failureClass = "unknown";
+        }
       }
     }
 
@@ -7886,8 +7894,12 @@ export class AgentDaemon extends EventEmitter {
     );
     if (!evidenceCheck.passed) {
       this.timelineMetrics.evidenceGateFails += 1;
-      terminalStatus = "partial_success";
-      failureClass = "contract_error";
+      if (!explicitFailedTerminalStatus) {
+        terminalStatus = "partial_success";
+        failureClass = "contract_error";
+      } else if (!failureClass) {
+        failureClass = "unknown";
+      }
       this.logEvent(taskId, "timeline_step_updated", {
         stepId: "evidence_gate:key_claims",
         status: "blocked",

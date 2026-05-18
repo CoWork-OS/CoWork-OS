@@ -1334,6 +1334,7 @@ export class TaskExecutor {
   private buildFollowUpResultSummary(): string {
     const bestKnownSummary = String(this.bestKnownOutcome?.resultSummary || "").trim();
     const candidates = [
+      this.getLatestAssistantConversationText(),
       this.lastAssistantText,
       this.lastNonVerificationOutput,
       this.lastAssistantOutput,
@@ -1350,6 +1351,31 @@ export class TaskExecutor {
     }
 
     return "";
+  }
+
+  private getLatestAssistantConversationText(): string {
+    const history = Array.isArray(this.conversationHistory) ? this.conversationHistory : [];
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const message = history[index];
+      if (message?.role !== "assistant") continue;
+      const text = this.extractTextFromMessageContent(message.content).trim();
+      if (text) return text;
+    }
+    return "";
+  }
+
+  private extractTextFromMessageContent(content: LLMMessage["content"]): string {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content
+      .map((block) => {
+        if (block && typeof block === "object" && "type" in block && block.type === "text") {
+          return String((block as { text?: unknown }).text || "");
+        }
+        return "";
+      })
+      .filter((text) => text.trim().length > 0)
+      .join("\n");
   }
 
   private finalizeFollowUpFailure(error: Any): void {
@@ -19653,6 +19679,7 @@ You are continuing a previous conversation. The context from the previous conver
     ]);
     this.lastAssistantOutput = message;
     this.lastNonVerificationOutput = message;
+    this.lastAssistantText = message;
   }
 
   private updateGoalAgentConfig(agentConfig: AgentConfig): void {

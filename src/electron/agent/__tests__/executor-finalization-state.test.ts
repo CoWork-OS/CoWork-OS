@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { decideTaskOutcome } from "../outcome-policy";
 import { createTerminalState } from "../runtime/TerminalState";
 
 vi.mock("electron", () => ({
@@ -90,6 +91,25 @@ function createExecutorForFinalization(overrides: Partial<Any> = {}): Any {
 }
 
 describe("TaskExecutor terminal finalization state", () => {
+  it("preserves explicit failed terminal status through completed daemon outcome normalization", () => {
+    const outcome = decideTaskOutcome({
+      requestedStatus: "completed",
+      terminalStatus: "failed",
+      failureClass: "required_verification",
+      resultSummary: "Cannot verify required evidence.",
+      outputSummary: {
+        outputCount: 1,
+        textOutputCount: 1,
+      },
+    });
+
+    expect(outcome).toEqual({
+      status: "failed",
+      terminalStatus: "failed",
+      failureClass: "required_verification",
+    });
+  });
+
   it("maps soft timeout to partial timed_out terminal state instead of ordinary ok completion", () => {
     const executor = createExecutorForFinalization({
       softDeadlineTriggered: true,

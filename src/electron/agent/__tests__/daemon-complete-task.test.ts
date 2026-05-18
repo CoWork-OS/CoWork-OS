@@ -4,6 +4,12 @@ import { AgentDaemon } from "../daemon";
 import type { TaskOutputSummary } from "../../../shared/types";
 import { PersonalityManager } from "../../settings/personality-manager";
 
+vi.mock("electron", () => ({
+  app: {
+    getPath: vi.fn().mockReturnValue("/tmp"),
+  },
+}));
+
 vi.spyOn(PersonalityManager, "recordTaskCompleted").mockImplementation(() => {});
 
 function createDaemonLike() {
@@ -595,6 +601,51 @@ describe("AgentDaemon.completeTask", () => {
     expect(daemonLike.taskRepo.update).not.toHaveBeenCalledWith(
       "task-1",
       expect.objectContaining({ status: "failed" }),
+    );
+  });
+
+  it("preserves explicit failed terminal metadata from executor finalization", () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.getUnresolvedFailedSteps.mockReturnValue([]);
+
+    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "Cannot verify required evidence.", {
+      terminalStatus: "failed",
+      terminalKind: "failed",
+      failureClass: "required_verification",
+      failedStepIds: ["step:verify"],
+      terminalStatusReason: "Task missing required verification evidence.",
+      outputSummary: {
+        outputCount: 1,
+        textOutputCount: 1,
+      },
+    });
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        terminalStatus: "failed",
+        failureClass: "required_verification",
+      }),
+    );
+    expect(daemonLike.taskRepo.update).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "completed",
+        terminalStatus: "ok",
+      }),
+    );
+    const terminalPayload = (daemonLike.logEvent as Any).mock.calls.find(
+      (call: unknown[]) => call[1] === "task_status",
+    )?.[2];
+    expect(terminalPayload).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        terminalStatus: "failed",
+        terminalKind: "failed",
+        failureClass: "required_verification",
+        failedStepIds: ["step:verify"],
+      }),
     );
   });
 

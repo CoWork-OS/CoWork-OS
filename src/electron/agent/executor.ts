@@ -4222,8 +4222,10 @@ export class TaskExecutor {
 
     const text = String(prompt || this.getContractPrompt() || "").trim();
     if (!text) return false;
+    if (this.isAcpxExternalRuntimeTask()) return false;
     if (this.promptRequiresLiveLookup(text)) return false;
-    return true;
+    if (this.promptHasExecutorRoutingCue(text)) return false;
+    return this.isClearlyTrivialCompanionPrompt(text);
   }
 
   private promptRequiresLiveLookup(prompt: string): boolean {
@@ -4231,12 +4233,6 @@ export class TaskExecutor {
       .trim()
       .toLowerCase();
     if (!normalized) return false;
-
-    const asksForInformation =
-      /\b(?:tell\s+me|which|what|when|who|where|find|search|look\s*up|check|show|list|compare|summarize)\b/.test(
-        normalized,
-      );
-    if (!asksForInformation) return false;
 
     const timeSensitiveCue =
       /\b(?:today|tomorrow|yesterday|tonight|this\s+(?:week|month|season|year)|next\s+(?:week|month|season|year)|latest|current|recent|newest|now|upcoming|live)\b/.test(
@@ -4248,6 +4244,43 @@ export class TaskExecutor {
       );
 
     return timeSensitiveCue || volatileDataCue;
+  }
+
+  private promptHasExecutorRoutingCue(prompt: string): boolean {
+    const normalized = String(prompt || "")
+      .trim()
+      .toLowerCase();
+    if (!normalized) return false;
+    if (/^\s*\/[\w-]+/.test(prompt)) return true;
+    if (/\banswer_first\s*=/.test(normalized)) return true;
+    if (/\b(?:skill|codex\s+cli\s+agent|claude\s+code|acpx)\b/.test(normalized)) return true;
+    if (
+      /\b(?:attached\s+files?|pdf\s+attachment|path:\s*|file|pdf|image|screenshot)\b/.test(
+        normalized,
+      )
+    ) {
+      return true;
+    }
+    if (/\.(?:pdf|png|jpe?g|gif|webp|csv|xlsx?|docx?|pptx?)\b/.test(normalized)) return true;
+    return /\b(?:create|write|edit|modify|build|make|generate|save|export|run|execute|fix|debug|install|open|browse|review|analyze|summarize|compare|monitor|remind|schedule)\b/.test(
+      normalized,
+    );
+  }
+
+  private isClearlyTrivialCompanionPrompt(prompt: string): boolean {
+    const normalized = String(prompt || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[.!?\s]+$/g, "");
+    if (!normalized) return false;
+
+    if (/^(?:hi|hello|hey|yo)(?:\s+there)?$/.test(normalized)) return true;
+    if (/^(?:thanks|thank\s+you|thx|ok|okay|cool|nice|great|awesome|yes|no|yep|nope|sure)$/.test(normalized)) {
+      return true;
+    }
+    return /^(?:who\s+are\s+you|what\s+are\s+you|what\s+can\s+you\s+do|how\s+are\s+you|what'?s\s+up|are\s+you\s+there)$/.test(
+      normalized,
+    );
   }
 
   private stripPinnedSummaryPrefixFromFirstUserMessage(messages: LLMMessage[]): LLMMessage[] {

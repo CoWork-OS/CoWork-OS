@@ -36,6 +36,26 @@ vi.mock("../../settings/personality-manager", () => ({
 }));
 
 describe("TaskExecutor chat mode", () => {
+  const createInferredChatExecutor = (prompt: string, agentConfig: Record<string, unknown> = {}) => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "task-inferred-chat",
+      title: prompt,
+      prompt,
+      userPrompt: prompt,
+      rawPrompt: prompt,
+      createdAt: Date.now(),
+      agentConfig: {
+        executionMode: "execute",
+        executionModeSource: "strategy",
+        conversationMode: "chat",
+        taskIntent: "chat",
+        ...agentConfig,
+      },
+    };
+    return executor;
+  };
+
   it("records executor conversation history into durable context", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { id: "task-durable-history" };
@@ -267,28 +287,56 @@ describe("TaskExecutor chat mode", () => {
   });
 
   it("does not route inferred chat live-lookup prompts through companion mode", () => {
-    const executor = Object.create(TaskExecutor.prototype) as Any;
-
-    executor.task = {
-      id: "task-inferred-chat-live",
-      title: "Premier League fixtures",
-      prompt: "please tell me which football clubs have games tomorrow in premier league",
-      userPrompt: "please tell me which football clubs have games tomorrow in premier league",
-      rawPrompt: "please tell me which football clubs have games tomorrow in premier league",
-      createdAt: Date.now(),
-      agentConfig: {
-        executionMode: "execute",
-        executionModeSource: "strategy",
-        conversationMode: "chat",
-        taskIntent: "chat",
-      },
-    };
+    const executor = createInferredChatExecutor(
+      "please tell me which football clubs have games tomorrow in premier league",
+    );
 
     expect(
       (TaskExecutor as Any).prototype.shouldHandleInitialPromptAsCompanion.call(
         executor,
         "please tell me which football clubs have games tomorrow in premier league",
       ),
+    ).toBe(false);
+  });
+
+  it("keeps ambiguous inferred chat prompts in the normal executor path", () => {
+    const prompts = [
+      "are there premier league games tomorrow",
+      "weather in paris today",
+      "is apple stock up today",
+      "/schedule tomorrow remind me to send the report",
+      "/goal keep an eye on deploy health",
+      "/skill pdf summarize report.pdf",
+      "Use the Codex CLI Agent skill to review this change",
+      "answer_first=true explain the tradeoffs before planning",
+      "summarize report.pdf",
+      "describe this image",
+      "Attached files:\n- photo.png\nWhat is in this image?",
+      "PDF attachment: report.pdf\nPath: .cowork/uploads/123/report.pdf\nSummarize it",
+    ];
+
+    for (const prompt of prompts) {
+      const executor = createInferredChatExecutor(prompt);
+
+      expect(
+        (TaskExecutor as Any).prototype.shouldHandleInitialPromptAsCompanion.call(executor, prompt),
+      ).toBe(false);
+    }
+  });
+
+  it("keeps external runtime tasks out of inferred companion routing", () => {
+    const executor = createInferredChatExecutor("hello", {
+      externalRuntime: {
+        kind: "acpx",
+        agent: "claude",
+        sessionMode: "persistent",
+        outputMode: "json",
+        permissionMode: "approve-reads",
+      },
+    });
+
+    expect(
+      (TaskExecutor as Any).prototype.shouldHandleInitialPromptAsCompanion.call(executor, "hello"),
     ).toBe(false);
   });
 

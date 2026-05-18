@@ -1,4 +1,15 @@
 import type { LLMMessage } from "../llm/types";
+import type { LoopBudgetStopReason } from "./LoopBudgetPolicy";
+
+export type TurnKernelStopReason =
+  | LoopBudgetStopReason
+  | "max_empty_responses"
+  | "context_capacity_exhausted"
+  | "cancelled"
+  | "cancelled_or_completed"
+  | "wrap_up_requested"
+  | "step_feedback_skip"
+  | "step_feedback_retry";
 
 export type TurnKernelMode = "step" | "follow_up";
 
@@ -6,7 +17,10 @@ export interface TurnKernelInput {
   mode: TurnKernelMode;
   messages: LLMMessage[];
   maxIterations: number;
+  maxLlmCalls?: number;
   maxEmptyResponses: number;
+  maxRecoveredResponses?: number;
+  maxRepeatedIterations?: number;
 }
 
 export interface TurnKernelIterationState {
@@ -31,20 +45,20 @@ export interface TurnKernelRecoveredResponse {
 export interface TurnKernelStoppedResponse {
   stopped: true;
   messages: LLMMessage[];
-  stopReason?: string;
+  stopReason?: TurnKernelStopReason;
 }
 
 export interface TurnKernelDecision {
   continueLoop?: boolean;
   emptyResponseCount?: number;
   repeatIteration?: boolean;
-  stopReason?: string;
+  stopReason?: TurnKernelStopReason;
 }
 
 export interface TurnKernelPolicy {
   shouldStopBeforeIteration?: (
     state: TurnKernelIterationState,
-  ) => { stop: boolean; reason?: string } | void;
+  ) => { stop: boolean; reason?: TurnKernelStopReason } | void;
   drainPendingMessages?: (state: TurnKernelIterationState) => Promise<void> | void;
   beforeIteration?: (state: TurnKernelIterationState) => Promise<void> | void;
   requestResponse: (
@@ -61,7 +75,8 @@ export interface TurnKernelOutcome {
   messages: LLMMessage[];
   iterations: number;
   emptyResponseCount: number;
-  stopReason?: string;
+  stopReason?: TurnKernelStopReason;
+  loopBudgetStopReason?: LoopBudgetStopReason;
 }
 
 export class TurnKernel {
@@ -78,9 +93,33 @@ export class TurnKernel {
       emptyResponseCount: 0,
       continueLoop: true,
     };
-    let stopReason: string | undefined;
+    let stopReason: TurnKernelStopReason | undefined;
+    let loopBudgetStopReason: LoopBudgetStopReason | undefined;
+    let llmCallCount = 0;
+    let recoveredResponseCount = 0;
+    let repeatedIterationCount = 0;
+    const maxLlmCalls =
+      typeof this.input.maxLlmCalls === "number" && Number.isFinite(this.input.maxLlmCalls)
+        ? Math.max(0, Math.floor(this.input.maxLlmCalls))
+        : Number.POSITIVE_INFINITY;
+    const maxRecoveredResponses =
+      typeof this.input.maxRecoveredResponses === "number" &&
+      Number.isFinite(this.input.maxRecoveredResponses)
+        ? Math.max(0, Math.floor(this.input.maxRecoveredResponses))
+        : this.input.maxIterations;
+    const maxRepeatedIterations =
+      typeof this.input.maxRepeatedIterations === "number" &&
+      Number.isFinite(this.input.maxRepeatedIterations)
+        ? Math.max(0, Math.floor(this.input.maxRepeatedIterations))
+        : this.input.maxIterations;
 
     while (state.continueLoop && state.iterationCount < this.input.maxIterations) {
+      if (llmCallCount >= maxLlmCalls) {
+        stopReason = "max_llm_calls";
+        loopBudgetStopReason = "max_llm_calls";
+        break;
+      }
+
       const stopBeforeIteration = this.policy.shouldStopBeforeIteration?.(state);
       if (stopBeforeIteration?.stop) {
         stopReason = stopBeforeIteration.reason;
@@ -97,6 +136,7 @@ export class TurnKernel {
       state.iterationCount += 1;
       await this.policy.beforeIteration?.(state);
 
+      llmCallCount += 1;
       const prepared = await this.policy.requestResponse(state);
       if (isTurnKernelStoppedResponse(prepared)) {
         state.messages = prepared.messages;
@@ -105,7 +145,13 @@ export class TurnKernel {
       }
       if (isTurnKernelRecoveredResponse(prepared)) {
         state.messages = prepared.messages;
+        recoveredResponseCount += 1;
         state.iterationCount -= 1;
+        if (recoveredResponseCount > maxRecoveredResponses) {
+          stopReason = "max_recovered_responses";
+          loopBudgetStopReason = "max_recovered_responses";
+          break;
+        }
         continue;
       }
 
@@ -126,7 +172,13 @@ export class TurnKernel {
         stopReason = decision.stopReason;
       }
       if (decision.repeatIteration) {
+        repeatedIterationCount += 1;
         state.iterationCount -= 1;
+        if (repeatedIterationCount > maxRepeatedIterations) {
+          stopReason = "max_repeated_iterations";
+          loopBudgetStopReason = "max_repeated_iterations";
+          break;
+        }
       }
 
       await this.policy.afterIteration?.(state);
@@ -137,6 +189,7 @@ export class TurnKernel {
       iterations: state.iterationCount,
       emptyResponseCount: state.emptyResponseCount,
       stopReason,
+      loopBudgetStopReason,
     };
   }
 }

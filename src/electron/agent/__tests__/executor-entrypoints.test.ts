@@ -32,6 +32,28 @@ describe("TaskExecutor entrypoint guards", () => {
     expect(executor.executeStepLegacy).not.toHaveBeenCalled();
   });
 
+  it("maps loop budget stops to precise step failure telemetry reasons", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    expect(
+      (TaskExecutor.prototype as Any).deriveStepStopReason.call(executor, {
+        stepFailed: true,
+        failureReason: "Step loop budget exhausted: reached the total LLM call limit.",
+        awaitingUserInput: false,
+        iterationCount: 4,
+        maxIterations: 32,
+        loopBudgetStopReason: "max_llm_calls",
+      }),
+    ).toBe("max_llm_calls");
+
+    expect(
+      (TaskExecutor.prototype as Any).getStepLoopBudgetFailureReason.call(
+        executor,
+        "max_recovered_responses",
+      ),
+    ).toBe("Step loop budget exhausted: reached the recovered response limit.");
+  });
+
   it("routes sendMessageUnlocked through the unified branch", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
 

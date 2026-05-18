@@ -4152,6 +4152,23 @@ export class TaskExecutor {
     );
   }
 
+  private responseLooksLikeUnexecutedToolCall(text: string): boolean {
+    const normalized = String(text || "").trim();
+    if (!normalized) return false;
+
+    return (
+      /\b(?:search_web|web_search|web_fetch|browser_search|browser_navigate|tool_call)\s*:\s*\d+\s*\{/.test(
+        normalized,
+      ) ||
+      /<invoke\b[\s\S]{0,240}<\/invoke>/i.test(normalized) ||
+      /<invoke\s+name=["'][^"']+["']\s*\/>/i.test(normalized)
+    );
+  }
+
+  private buildUnexecutedToolCallChatFallback(): string {
+    return "I did not execute a tool in this chat turn, so I cannot treat that tool-call text as a completed result.";
+  }
+
   private stripPinnedSummaryPrefixFromFirstUserMessage(messages: LLMMessage[]): LLMMessage[] {
     const cloned = messages.map((msg) => ({ ...msg })) as LLMMessage[];
 
@@ -6775,12 +6792,25 @@ ${transcript}
           ? "Could you say more about that? I'd like to explore this further with you."
           : this.generateCompanionFallbackResponse(message),
       });
-      const assistantText = turnResult.assistantText;
+      const rawAssistantText = turnResult.assistantText;
+      const assistantText = this.responseLooksLikeUnexecutedToolCall(rawAssistantText)
+        ? this.buildUnexecutedToolCallChatFallback()
+        : rawAssistantText;
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;
       this.lastNonVerificationOutput = assistantText;
       this.lastAssistantText = assistantText;
-      this.updateConversationHistory(turnResult.messages);
+      this.updateConversationHistory(
+        assistantText === rawAssistantText
+          ? turnResult.messages
+          : [
+              ...messages,
+              {
+                role: "assistant" as const,
+                content: [{ type: "text" as const, text: assistantText }],
+              },
+            ],
+      );
       this.saveConversationSnapshot();
       this.emitEvent("follow_up_completed", {
         message: "Follow-up message processed (chat mode)",
@@ -21769,7 +21799,10 @@ You are continuing a previous conversation. The context from the previous conver
       const emptyFallback = isThinkMode
         ? "I'd like to help you think through this. Could you share more about what's on your mind?"
         : this.generateCompanionFallbackResponse(rawPrompt);
-      const assistantText = String(text || "").trim() || emptyFallback;
+      const rawAssistantText = String(text || "").trim() || emptyFallback;
+      const assistantText = this.responseLooksLikeUnexecutedToolCall(rawAssistantText)
+        ? this.buildUnexecutedToolCallChatFallback()
+        : rawAssistantText;
 
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;

@@ -184,6 +184,77 @@ describe("TaskExecutor chat mode", () => {
     expect((TaskExecutor as Any).prototype.shouldShortCircuitSimpleNonExecuteAnswer.call(executor)).toBe(false);
   });
 
+  it("replaces plaintext tool-call syntax in chat mode with an honest fallback", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const createMessageWithTimeout = vi.fn().mockResolvedValue({
+      content: [
+        {
+          type: "text",
+          text: 'I will check. search_web:0{"queries":["Premier League fixtures tomorrow"]}',
+        },
+      ],
+      stopReason: "end_turn",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+
+    executor.task = {
+      id: "task-chat-fake-tool",
+      title: "Premier League fixtures",
+      prompt: "please tell me which football clubs have games tomorrow in premier league",
+      userPrompt: "please tell me which football clubs have games tomorrow in premier league",
+      rawPrompt: "please tell me which football clubs have games tomorrow in premier league",
+      createdAt: Date.now(),
+      agentConfig: {
+        executionMode: "chat",
+        executionModeSource: "user",
+        conversationMode: "chat",
+      },
+    };
+    executor.workspace = {
+      id: "ws-chat-fake-tool",
+      path: "/tmp",
+      isTemp: true,
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+    };
+    executor.daemon = {
+      updateTaskStatus: vi.fn(),
+      updateTask: vi.fn(),
+    };
+    executor.emitEvent = vi.fn();
+    executor.getRoleContextPrompt = vi.fn().mockReturnValue("");
+    executor.buildUserProfileBlock = vi.fn().mockReturnValue("");
+    executor.buildUserContent = vi.fn().mockResolvedValue("please tell me which football clubs have games tomorrow in premier league");
+    executor.callLLMWithRetry = vi.fn(async (fn: Any) => fn());
+    executor.createMessageWithTimeout = createMessageWithTimeout;
+    executor.updateTracking = vi.fn();
+    executor.extractTextFromLLMContent = vi
+      .fn()
+      .mockReturnValue('I will check. search_web:0{"queries":["Premier League fixtures tomorrow"]}');
+    executor.updateConversationHistory = vi.fn();
+    executor.saveConversationSnapshot = vi.fn();
+    executor.finalizeTaskBestEffort = vi.fn();
+    executor.generateCompanionFallbackResponse = vi.fn().mockReturnValue("fallback");
+    executor.getCumulativeInputTokens = vi.fn().mockReturnValue(0);
+    executor.getCumulativeOutputTokens = vi.fn().mockReturnValue(0);
+    executor.taskCompleted = false;
+    executor.cancelled = false;
+
+    await (TaskExecutor as Any).prototype.handleCompanionPrompt.call(executor);
+
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "assistant_message",
+      expect.objectContaining({
+        message: expect.stringContaining("did not execute a tool"),
+      }),
+    );
+    expect(executor.emitEvent).not.toHaveBeenCalledWith(
+      "assistant_message",
+      expect.objectContaining({
+        message: expect.stringContaining("search_web:0"),
+      }),
+    );
+  });
+
   it("only exposes the last non-verification step as an assistant bubble", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.plan = {

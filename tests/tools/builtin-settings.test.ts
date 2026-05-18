@@ -455,10 +455,12 @@ describe('BuiltinToolsSettingsManager', () => {
       expect(defaults.categories.image.priority).toBe('normal');
     });
 
-    it('should have empty tool overrides by default', () => {
+    it('should keep x_search disabled by default for opt-in', () => {
       const defaults = BuiltinToolsSettingsManager.getDefaultSettings();
 
-      expect(defaults.toolOverrides).toEqual({});
+      expect(defaults.toolOverrides).toEqual({
+        x_search: { enabled: false },
+      });
     });
   });
 

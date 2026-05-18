@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("fs", async () => {
+  const actual = await vi.importActual<typeof import("fs")>("fs");
+  return {
+    ...actual,
+    existsSync: vi.fn(() => true),
+  };
+});
+
 import { MCPSettingsManager } from "../../mcp/settings";
 import {
   resolveManagedAllowedMcpTools,

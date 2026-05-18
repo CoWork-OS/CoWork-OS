@@ -4152,6 +4152,54 @@ export class TaskExecutor {
     );
   }
 
+  private shouldHandleInitialPromptAsCompanion(prompt: string): boolean {
+    if (this.shouldUseReadOnlyPdfAttachmentMode()) return false;
+    if (this.isExplicitChatExecutionMode()) return true;
+
+    const agentConfig = this.task.agentConfig;
+    const source = agentConfig?.executionModeSource;
+    const userSelectedNonChatMode = source === "user" && agentConfig?.executionMode !== "chat";
+    if (userSelectedNonChatMode) return false;
+
+    const conversationMode = agentConfig?.conversationMode;
+    const taskIntent = agentConfig?.taskIntent;
+    const strategyCompanionMode =
+      conversationMode === "chat" ||
+      conversationMode === "think" ||
+      taskIntent === "chat" ||
+      taskIntent === "thinking";
+    if (!strategyCompanionMode) return false;
+
+    const text = String(prompt || this.getContractPrompt() || "").trim();
+    if (!text) return false;
+    if (this.promptRequiresLiveLookup(text)) return false;
+    return true;
+  }
+
+  private promptRequiresLiveLookup(prompt: string): boolean {
+    const normalized = String(prompt || "")
+      .trim()
+      .toLowerCase();
+    if (!normalized) return false;
+
+    const asksForInformation =
+      /\b(?:tell\s+me|which|what|when|who|where|find|search|look\s*up|check|show|list|compare|summarize)\b/.test(
+        normalized,
+      );
+    if (!asksForInformation) return false;
+
+    const timeSensitiveCue =
+      /\b(?:today|tomorrow|yesterday|tonight|this\s+(?:week|month|season|year)|next\s+(?:week|month|season|year)|latest|current|recent|newest|now|upcoming|live)\b/.test(
+        normalized,
+      );
+    const volatileDataCue =
+      /\b(?:fixture|fixtures|schedule|games?|matches?|scores?|results?|standings|table|odds|price|prices|stock|weather|forecast|news|release|version)\b/.test(
+        normalized,
+      );
+
+    return timeSensitiveCue || volatileDataCue;
+  }
+
   private stripPinnedSummaryPrefixFromFirstUserMessage(messages: LLMMessage[]): LLMMessage[] {
     const cloned = messages.map((msg) => ({ ...msg })) as LLMMessage[];
 
@@ -22201,8 +22249,8 @@ You are continuing a previous conversation. The context from the previous conver
         });
       }
 
-      // Only explicit user-selected chat mode skips the task pipeline entirely.
-      if (this.isExplicitChatExecutionMode()) {
+      // Companion turns are text-only and should not enter native planning/tool execution.
+      if (this.shouldHandleInitialPromptAsCompanion(initialPrompt)) {
         await this.handleCompanionPrompt();
         return;
       }

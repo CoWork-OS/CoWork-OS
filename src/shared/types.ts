@@ -2370,15 +2370,7 @@ export interface Task {
   coreOutcome?: "ok" | "partial" | "failed";
   dependencyOutcome?: "healthy" | "degraded" | "down";
   failureDomains?: string[];
-  stopReasons?: Array<
-    | "completed"
-    | "max_turns"
-    | "tool_error"
-    | "contract_block"
-    | "verification_block"
-    | "awaiting_user_input"
-    | "dependency_unavailable"
-  >;
+  stopReasons?: TaskStopReason[];
   riskLevel?: TaskRiskLevel;
   evalCaseId?: string;
   evalRunId?: string;
@@ -2478,6 +2470,18 @@ export type StepFailureClass =
   | "provider_quota"
   | "user_blocker"
   | "unknown";
+
+export type TaskStopReason =
+  | "completed"
+  | "max_turns"
+  | "tool_error"
+  | "contract_block"
+  | "verification_block"
+  | "awaiting_user_input"
+  | "dependency_unavailable"
+  | "max_llm_calls"
+  | "max_recovered_responses"
+  | "max_repeated_iterations";
 
 // ============ Git Worktree Types ============
 

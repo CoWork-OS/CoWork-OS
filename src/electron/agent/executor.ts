@@ -45,6 +45,7 @@ import {
   type SkillApplicationTrigger,
   type QuotedAssistantMessage,
   type TaskFollowUpInput,
+  type TaskStopReason,
 } from "../../shared/types";
 import { resolveModelPreferenceToModelKey } from "../../shared/agent-preferences";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
@@ -4945,16 +4946,7 @@ ${transcript}
   private softDeadlineTriggered: boolean = false;
   private wrapUpRequested: boolean = false;
   private completionVerificationMetadata: VerificationCompletionMetadata | null = null;
-  private stepStopReasons: Set<
-    | "completed"
-    | "max_turns"
-    | LoopBudgetStopReason
-    | "tool_error"
-    | "contract_block"
-    | "verification_block"
-    | "awaiting_user_input"
-    | "dependency_unavailable"
-  > = new Set();
+  private stepStopReasons: Set<TaskStopReason> = new Set();
   private capabilityGapSignalCount = 0;
   private capabilityGapHintInjectedTurn = -1;
   private capabilityGapHintInjectedSteps: Set<string> = new Set();
@@ -18026,15 +18018,7 @@ You are continuing a previous conversation. The context from the previous conver
 
   private ensureReliabilityTrackingSets(): void {
     if (!(this.stepStopReasons instanceof Set)) {
-      this.stepStopReasons = new Set<
-        | "completed"
-        | "max_turns"
-        | "tool_error"
-        | "contract_block"
-        | "verification_block"
-        | "awaiting_user_input"
-        | "dependency_unavailable"
-      >();
+      this.stepStopReasons = new Set<TaskStopReason>();
     }
     if (!(this.taskFailureDomains instanceof Set)) {
       this.taskFailureDomains = new Set();
@@ -30922,15 +30906,7 @@ Return ONLY a JSON object:
     iterationCount: number;
     maxIterations: number;
     loopBudgetStopReason?: LoopBudgetStopReason;
-  }):
-    | "completed"
-    | "max_turns"
-    | LoopBudgetStopReason
-    | "tool_error"
-    | "contract_block"
-    | "verification_block"
-    | "awaiting_user_input"
-    | "dependency_unavailable" {
+  }): TaskStopReason {
     if (opts.awaitingUserInput) return "awaiting_user_input";
     const lower = String(opts.failureReason || "").toLowerCase();
     if (!opts.stepFailed) return "completed";
@@ -30998,16 +30974,7 @@ Return ONLY a JSON object:
     coreOutcome: "ok" | "partial" | "failed";
     dependencyOutcome: "healthy" | "degraded" | "down";
     failureDomains: string[];
-    stopReasons: Array<
-      | "completed"
-      | "max_turns"
-      | "tool_error"
-      | "contract_block"
-      | "verification_block"
-      | "awaiting_user_input"
-      | "dependency_unavailable"
-      | LoopBudgetStopReason
-    >;
+    stopReasons: TaskStopReason[];
   } {
     this.ensureVerificationOutcomeSets();
     const domains = new Set<string>(this.taskFailureDomains);

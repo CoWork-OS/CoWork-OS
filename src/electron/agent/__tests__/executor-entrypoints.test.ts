@@ -3,6 +3,7 @@ import { TaskExecutor } from "../executor";
 import { AcpxRuntimeUnavailableError } from "../AcpxRuntimeRunner";
 import { PlaybookService } from "../../memory/PlaybookService";
 import { SessionRecallService } from "../../memory/SessionRecallService";
+import type { Task, TaskBestKnownOutcome } from "../../../shared/types";
 
 describe("TaskExecutor entrypoint guards", () => {
   it("serializes execute/sendMessage via lifecycle mutex wrappers", async () => {
@@ -34,6 +35,9 @@ describe("TaskExecutor entrypoint guards", () => {
 
   it("maps loop budget stops to precise step failure telemetry reasons", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
+    const taskStopReasons: Pick<Task, "stopReasons"> = {
+      stopReasons: ["max_llm_calls", "max_recovered_responses", "max_repeated_iterations"],
+    };
 
     expect(
       (TaskExecutor.prototype as Any).deriveStepStopReason.call(executor, {
@@ -52,6 +56,11 @@ describe("TaskExecutor entrypoint guards", () => {
         "max_recovered_responses",
       ),
     ).toBe("Step loop budget exhausted: reached the recovered response limit.");
+    expect(taskStopReasons.stopReasons).toEqual([
+      "max_llm_calls",
+      "max_recovered_responses",
+      "max_repeated_iterations",
+    ]);
   });
 
   it("routes sendMessageUnlocked through the unified branch", async () => {
@@ -311,13 +320,15 @@ describe("TaskExecutor entrypoint guards", () => {
       resultSummary: "older summary",
       semanticSummary: "Opened canvas",
     };
+    const freshSummary = "Fresh follow-up summary with useful completion details.";
     executor.bestKnownOutcome = {
-      summary: "fresh summary",
+      capturedAt: 1,
+      resultSummary: freshSummary,
       terminalStatus: "ok",
       failureClass: undefined,
       outputSummary: { outputCount: 1, fileCount: 1, files: [] },
-    };
-    executor.buildResultSummary = vi.fn(() => "fresh summary");
+    } satisfies TaskBestKnownOutcome;
+    executor.buildResultSummary = vi.fn(() => freshSummary);
     executor.getContentFallback = vi.fn(() => "");
     executor.daemon = {
       updateTask: vi.fn(),
@@ -335,7 +346,7 @@ describe("TaskExecutor entrypoint guards", () => {
     expect(executor.task.error).toBeUndefined();
     expect(executor.task.terminalStatus).toBeUndefined();
     expect(executor.task.failureClass).toBeUndefined();
-    expect(executor.task.resultSummary).toBe("fresh summary");
+    expect(executor.task.resultSummary).toBe(freshSummary);
     expect(executor.daemon.updateTask).toHaveBeenCalledWith(
       "task-follow-up",
       expect.objectContaining({
@@ -343,7 +354,7 @@ describe("TaskExecutor entrypoint guards", () => {
         error: null,
         terminalStatus: undefined,
         failureClass: undefined,
-        resultSummary: "fresh summary",
+        resultSummary: freshSummary,
         semanticSummary: "Opened canvas",
         bestKnownOutcome: executor.bestKnownOutcome,
       }),
@@ -352,7 +363,7 @@ describe("TaskExecutor entrypoint guards", () => {
       "task_completed",
       expect.objectContaining({
         message: "Follow-up completed (24 tool calls)",
-        resultSummary: "fresh summary",
+        resultSummary: freshSummary,
         semanticSummary: "Opened canvas",
       }),
     );
@@ -367,11 +378,12 @@ describe("TaskExecutor entrypoint guards", () => {
       semanticSummary: "Verified markdown targets",
     };
     executor.bestKnownOutcome = {
-      summary: "Verification failed after follow-up",
+      capturedAt: 1,
+      resultSummary: "Verification failed after follow-up",
       terminalStatus: "failed",
       failureClass: "contract_error",
       outputSummary: { outputCount: 1, fileCount: 1, files: [] },
-    };
+    } satisfies TaskBestKnownOutcome;
     executor.applyRuntimeTaskProjectionToTask = vi.fn(() => ({
       continuationCount: 1,
       continuationWindow: 1,

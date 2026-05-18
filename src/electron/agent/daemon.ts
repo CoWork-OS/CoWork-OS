@@ -7944,6 +7944,7 @@ export class AgentDaemon extends EventEmitter {
       ...this.computeTimelineTelemetryFromEvents(this.getTaskEventsForReplay(taskId)),
       telemetry_source: "runtime_v2",
     };
+    const isCompletedOutcome = resolvedOutcome.status === "completed";
 
     const updates: Partial<Task> = {
       status: resolvedOutcome.status,
@@ -7982,13 +7983,16 @@ export class AgentDaemon extends EventEmitter {
         : terminalStatus === "partial_success"
           ? "Task completed with partial results"
           : "Task completed successfully";
-    this.logEvent(taskId, resolvedOutcome.status === "completed" ? "task_completed" : "task_status", {
-      message:
-        resolvedOutcome.status === "completed"
-          ? completionMessage
+    const terminalStatusMessage =
+      resolvedOutcome.status === "completed"
+        ? completionMessage
+        : resolvedOutcome.status === "failed"
+          ? "Task failed"
           : resolvedOutcome.status === "interrupted"
             ? "Task interrupted - resume available"
-            : "Task is waiting for approval or further input",
+            : "Task is waiting for approval or further input";
+    this.logEvent(taskId, isCompletedOutcome ? "task_completed" : "task_status", {
+      message: terminalStatusMessage,
       ...(updates.resultSummary ? { resultSummary: updates.resultSummary } : {}),
       ...(resolvedOutcome.status !== "completed" ? { status: resolvedOutcome.status } : {}),
       terminalStatus,
@@ -8040,7 +8044,7 @@ export class AgentDaemon extends EventEmitter {
       telemetry: completionTelemetry,
     });
 
-    if (this.activeTimelineStageByTask.get(taskId) === "DELIVER") {
+    if (isCompletedOutcome && this.activeTimelineStageByTask.get(taskId) === "DELIVER") {
       const timeline = createTimelineEmitter(taskId, (eventType, payload) => {
         this.logEvent(taskId, eventType, payload);
       });
@@ -8060,7 +8064,7 @@ export class AgentDaemon extends EventEmitter {
       });
     }
 
-    if (reviewDecision.runVerificationAgent) {
+    if (isCompletedOutcome && reviewDecision.runVerificationAgent) {
       this.logEvent(taskId, "verification_started", {
         source: "post_completion_review_gate",
         policy: reviewPolicy,
@@ -8086,7 +8090,7 @@ export class AgentDaemon extends EventEmitter {
         inferMutationFromSummary(metadata?.outputSummary) || risk.signals.changedFileCount > 0,
       deepWorkMode: existingTask.agentConfig?.deepWorkMode === true,
     });
-    if (entropyDecision.runEntropySweep) {
+    if (isCompletedOutcome && entropyDecision.runEntropySweep) {
       this.logEvent(taskId, "entropy_sweep_started", {
         source: "post_completion_entropy_sweep",
         policy: entropyPolicy,
@@ -8103,7 +8107,7 @@ export class AgentDaemon extends EventEmitter {
 
     // === WORKTREE AUTO-COMMIT ===
     // If the task has an active worktree, auto-commit changes on completion.
-    if (existingTask?.worktreeStatus === "active" && existingTask.worktreePath) {
+    if (isCompletedOutcome && existingTask?.worktreeStatus === "active" && existingTask.worktreePath) {
       const worktreeSettings = this.worktreeManager.getSettings();
       if (worktreeSettings.autoCommitOnComplete) {
         void (async () => {
@@ -8135,7 +8139,7 @@ export class AgentDaemon extends EventEmitter {
     // Notify the comparison service when a task in a comparison session completes.
     // This must be outside the auto-commit block so it fires regardless of worktree settings.
     const comparisonSvc = this.comparisonService;
-    if (existingTask?.comparisonSessionId && comparisonSvc) {
+    if (isCompletedOutcome && existingTask?.comparisonSessionId && comparisonSvc) {
       void (async () => {
         try {
           await comparisonSvc.onTaskCompleted(taskId);
@@ -8148,7 +8152,7 @@ export class AgentDaemon extends EventEmitter {
     try {
       const isTopLevelTask =
         existingTask && !existingTask.parentTaskId && (existingTask.agentType ?? "main") === "main";
-      if (isTopLevelTask) {
+      if (isCompletedOutcome && isTopLevelTask) {
         const workspaceName = this.workspaceRepo.findById(existingTask.workspaceId)?.name;
         PersonalityManager.recordTaskCompleted(workspaceName);
         const gatewayContext = existingTask.agentConfig?.gatewayContext ?? "private";

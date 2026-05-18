@@ -645,6 +645,7 @@ describe("AgentDaemon.completeTask", () => {
         terminalKind: "failed",
         failureClass: "required_verification",
         failedStepIds: ["step:verify"],
+        message: "Task failed",
       }),
     );
   });
@@ -711,6 +712,7 @@ describe("AgentDaemon.completeTask", () => {
         terminalKind: "failed",
         failureClass: "required_verification",
         failedStepIds: ["step:verify"],
+        message: "Task failed",
       }),
     );
   });
@@ -732,6 +734,89 @@ describe("AgentDaemon.completeTask", () => {
         terminalStatus: "failed",
         failureClass: "required_verification",
       }),
+    );
+    const terminalPayload = (daemonLike.logEvent as Any).mock.calls.find(
+      (call: unknown[]) => call[1] === "task_status",
+    )?.[2];
+    expect(terminalPayload).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        terminalStatus: "failed",
+        message: "Task failed",
+      }),
+    );
+  });
+
+  it("does not run completion-only side effects for explicit failed terminal outcomes", async () => {
+    const daemonLike = createDaemonLike();
+    const onTaskCompleted = vi.fn().mockResolvedValue(undefined);
+    daemonLike.comparisonService = { onTaskCompleted };
+    daemonLike.taskRepo.findById.mockReturnValue({
+      id: "task-1",
+      title: "Task 1",
+      prompt: "Run tests, edit files, deploy production changes, verify security, and publish release",
+      status: "executing",
+      workspaceId: "workspace-1",
+      agentType: "main",
+      worktreeStatus: "active",
+      worktreePath: "/tmp/task-1",
+      comparisonSessionId: "comparison-1",
+      agentConfig: {
+        reviewPolicy: "strict",
+        entropySweepPolicy: "strict",
+      },
+    });
+    daemonLike.worktreeManager.getSettings.mockReturnValue({
+      autoCommitOnComplete: true,
+      commitMessagePrefix: "task: ",
+    });
+    daemonLike.getUnresolvedFailedSteps.mockReturnValue([]);
+    daemonLike.eventRepo.findByTaskId.mockReturnValue([
+      {
+        id: "e1",
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "tool_call",
+        payload: { tool: "run_command", input: { command: "npm test" } },
+      },
+    ]);
+
+    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "Cannot verify required evidence.", {
+      terminalStatus: "failed",
+      terminalKind: "failed",
+      failureClass: "required_verification",
+      failedStepIds: ["step:verify"],
+      outputSummary: {
+        outputCount: 1,
+        textOutputCount: 1,
+        created: ["artifacts/report.md"],
+        primaryOutputPath: "artifacts/report.md",
+      },
+    });
+    await Promise.resolve();
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        terminalStatus: "failed",
+        failureClass: "required_verification",
+      }),
+    );
+    expect(daemonLike.runPostCompletionVerification).not.toHaveBeenCalled();
+    expect(daemonLike.runPostTaskEntropySweep).not.toHaveBeenCalled();
+    expect(daemonLike.worktreeManager.commitTaskChanges).not.toHaveBeenCalled();
+    expect(onTaskCompleted).not.toHaveBeenCalled();
+    expect(PersonalityManager.recordTaskCompleted).not.toHaveBeenCalled();
+    expect(daemonLike.logEvent).not.toHaveBeenCalledWith(
+      "task-1",
+      "verification_started",
+      expect.anything(),
+    );
+    expect(daemonLike.logEvent).not.toHaveBeenCalledWith(
+      "task-1",
+      "entropy_sweep_started",
+      expect.anything(),
     );
   });
 

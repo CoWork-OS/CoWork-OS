@@ -1,4 +1,5 @@
 import type {
+  ApprovalType,
   GatewayContextType,
   PermissionEvaluationResult,
   Workspace,
@@ -23,7 +24,11 @@ export interface ToolPolicyPipelineOptions {
   deniedTools?: Set<string>;
   allowedTools?: Set<string>;
   approvalRequired?: boolean;
-  permissionEvaluation?: () => Promise<PermissionEvaluationResult>;
+  runtimeApprovalType?: ApprovalType | null;
+  permissionApprovalType?: ApprovalType | null;
+  permissionEvaluation?: (opts?: {
+    approvalType?: ApprovalType | null;
+  }) => Promise<PermissionEvaluationResult>;
 }
 
 export interface ToolPolicyPipelineResult {
@@ -49,6 +54,7 @@ export async function evaluateToolPolicyPipeline(
   opts: ToolPolicyPipelineOptions,
 ): Promise<ToolPolicyPipelineResult> {
   const trace = new ToolPolicyTraceBuilder(opts.toolName);
+  const permissionApprovalType = opts.permissionApprovalType ?? opts.runtimeApprovalType ?? null;
 
   if (opts.deniedTools?.has(opts.toolName)) {
     trace.add("task_restrictions", "deny", "tool denied by task restrictions");
@@ -132,11 +138,13 @@ export async function evaluateToolPolicyPipeline(
         trace: trace.build("deny"),
       };
     }
-    if (workspacePolicy.decision === "require_approval" || opts.approvalRequired) {
-      trace.add("approval", "require_approval", workspacePolicy.reason);
+    if (workspacePolicy.decision === "require_approval") {
+      const approvalReason =
+        workspacePolicy.reason || "approval required by workspace policy";
+      trace.add("approval", "require_approval", approvalReason);
       return {
         decision: "require_approval",
-        reason: workspacePolicy.reason,
+        reason: approvalReason,
         trace: trace.build("require_approval"),
       };
     }
@@ -156,7 +164,7 @@ export async function evaluateToolPolicyPipeline(
     });
   }
 
-  if (opts.approvalRequired) {
+  if (opts.approvalRequired && !opts.permissionEvaluation) {
     trace.add("approval", "require_approval", "approval required by runtime metadata");
     return {
       decision: "require_approval",
@@ -166,9 +174,13 @@ export async function evaluateToolPolicyPipeline(
   }
 
   if (opts.permissionEvaluation) {
-    const permission = await opts.permissionEvaluation();
+    const permission = await opts.permissionEvaluation({
+      approvalType: permissionApprovalType,
+    });
     trace.add("permissions", toStageDecision(permission.decision), permission.reason.summary, {
       reasonType: permission.reason.type,
+      runtimeApprovalType: opts.runtimeApprovalType,
+      permissionApprovalType,
       scopePreview: permission.scopePreview,
       matchedRuleSource: permission.matchedRule?.source,
       matchedScopeKind: permission.matchedRule?.scope?.kind,
@@ -189,6 +201,15 @@ export async function evaluateToolPolicyPipeline(
     }
   } else {
     trace.add("permissions", "skip");
+  }
+
+  if (opts.approvalRequired) {
+    trace.add("approval", "require_approval", "approval required by runtime metadata");
+    return {
+      decision: "require_approval",
+      reason: "approval required by runtime metadata",
+      trace: trace.build("require_approval"),
+    };
   }
 
   trace.add("approval", "allow");

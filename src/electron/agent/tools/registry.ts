@@ -1596,9 +1596,11 @@ export class ToolRegistry {
         context.request.input,
       );
       const runtimeApprovalType = getApprovalTypeForRuntimeKind(runtime.approvalKind);
+      // Prefer tool/input-derived approval types because they are more specific
+      // than broad runtime metadata kinds for the same tool call.
       const effectiveApprovalType = browserUseApproval
         ? "network_access"
-        : approvalType || runtimeApprovalType;
+        : approvalType ?? runtimeApprovalType;
       const permissionEvaluation = (this.daemon as Any)?.evaluateToolPermission;
       const serverName = this.getMcpServerName(context.request.name);
       const approvalDetails = {
@@ -1620,14 +1622,14 @@ export class ToolRegistry {
         permissionApprovalType: effectiveApprovalType,
         permissionEvaluation:
           typeof permissionEvaluation === "function"
-            ? (policy) =>
-                permissionEvaluation.call(this.daemon, this.taskId, {
-                  ...(policy?.approvalType || effectiveApprovalType
-                    ? { approvalType: policy?.approvalType || effectiveApprovalType }
-                    : {}),
+            ? (policy) => {
+                const approvalTypeForPermission = policy?.approvalType ?? effectiveApprovalType;
+                return permissionEvaluation.call(this.daemon, this.taskId, {
+                  ...(approvalTypeForPermission ? { approvalType: approvalTypeForPermission } : {}),
                   toolName: context.request.name,
                   details: approvalDetails,
-                })
+                });
+              }
             : undefined,
       });
 

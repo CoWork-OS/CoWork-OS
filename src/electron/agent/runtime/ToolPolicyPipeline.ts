@@ -54,7 +54,9 @@ export async function evaluateToolPolicyPipeline(
   opts: ToolPolicyPipelineOptions,
 ): Promise<ToolPolicyPipelineResult> {
   const trace = new ToolPolicyTraceBuilder(opts.toolName);
-  const permissionApprovalType = opts.permissionApprovalType ?? opts.runtimeApprovalType ?? null;
+  const requestedPermissionApprovalType = opts.permissionApprovalType ?? null;
+  const resolvedPermissionApprovalType =
+    requestedPermissionApprovalType ?? opts.runtimeApprovalType ?? null;
 
   if (opts.deniedTools?.has(opts.toolName)) {
     trace.add("task_restrictions", "deny", "tool denied by task restrictions");
@@ -148,6 +150,8 @@ export async function evaluateToolPolicyPipeline(
         trace: trace.build("require_approval"),
       };
     }
+    // Workspace allow/pass does not discharge runtime approval metadata; it is
+    // still evaluated by the permission engine or final runtime fallback below.
   } catch (error) {
     if (process.env.COWORK_FAIL_CLOSED_TOOL_POLICY === "1") {
       trace.add("workspace_script", "deny", "workspace policy evaluation failed", {
@@ -175,12 +179,13 @@ export async function evaluateToolPolicyPipeline(
 
   if (opts.permissionEvaluation) {
     const permission = await opts.permissionEvaluation({
-      approvalType: permissionApprovalType,
+      approvalType: resolvedPermissionApprovalType,
     });
     trace.add("permissions", toStageDecision(permission.decision), permission.reason.summary, {
       reasonType: permission.reason.type,
       runtimeApprovalType: opts.runtimeApprovalType,
-      permissionApprovalType,
+      requestedPermissionApprovalType,
+      resolvedPermissionApprovalType,
       scopePreview: permission.scopePreview,
       matchedRuleSource: permission.matchedRule?.source,
       matchedScopeKind: permission.matchedRule?.scope?.kind,

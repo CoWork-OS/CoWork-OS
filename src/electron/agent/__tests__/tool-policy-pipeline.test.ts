@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ApprovalType } from "../../../shared/types";
 
 vi.mock("../../security/policy-manager", () => ({
   isToolAllowedQuick: vi.fn(() => true),
@@ -8,6 +9,7 @@ vi.mock("../../security/monty-tool-policy", () => ({
   evaluateMontyToolPolicy: vi.fn(async () => ({ decision: "pass", reason: null })),
 }));
 
+import { evaluateMontyToolPolicy } from "../../security/monty-tool-policy";
 import { evaluateToolPolicyPipeline } from "../runtime/ToolPolicyPipeline";
 import { PermissionEngine } from "../runtime/PermissionEngine";
 
@@ -128,18 +130,28 @@ describe("ToolPolicyPipeline", () => {
       "Data export always requires an explicit prompt, even in bypass modes.",
     );
     expect(result.trace.finalDecision).toBe("require_approval");
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "permissions",
+        metadata: expect.objectContaining({
+          runtimeApprovalType: "data_export",
+          requestedPermissionApprovalType: "data_export",
+          resolvedPermissionApprovalType: "data_export",
+        }),
+      }),
+    );
     expect(permissionEvaluation).toHaveBeenCalledWith({ approvalType: "data_export" });
   });
 
   it("preserves destructive runtime approval semantics for custom tools", async () => {
-    const permissionEvaluation = vi.fn(async (opts?: { approvalType?: string | null }) =>
+    const permissionEvaluation = vi.fn(async (opts?: { approvalType?: ApprovalType | null }) =>
       PermissionEngine.evaluate({
         workspace,
         toolName: "custom_destructive_tool",
         toolInput: { target: "external-system" },
         mode: "default",
         rules: [],
-        approvalType: opts?.approvalType as Any,
+        approvalType: opts?.approvalType ?? undefined,
       }),
     );
 
@@ -229,5 +241,50 @@ describe("ToolPolicyPipeline", () => {
       }),
     );
     expect(permissionEvaluation).toHaveBeenCalled();
+  });
+
+  it("keeps runtime approval required after permissive workspace policy", async () => {
+    vi.mocked(evaluateMontyToolPolicy).mockResolvedValueOnce({
+      decision: "allow",
+      reason: "workspace policy allows this tool",
+    });
+    const permissionEvaluation = vi.fn(async () => ({
+      decision: "allow" as const,
+      reason: {
+        type: "mode" as const,
+        mode: "dont_ask",
+        summary: "Permission mode allows this tool.",
+      },
+      suggestions: [],
+      scopePreview: "custom_data_export_tool",
+    }));
+
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "custom_data_export_tool",
+      toolInput: { target: "external-system" },
+      approvalRequired: true,
+      runtimeApprovalType: "data_export",
+      permissionEvaluation,
+    });
+
+    expect(result.decision).toBe("require_approval");
+    expect(result.reason).toBe("approval required by runtime metadata");
+    expect(result.trace.finalDecision).toBe("require_approval");
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "workspace_script",
+        decision: "allow",
+        reason: "workspace policy allows this tool",
+      }),
+    );
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "approval",
+        decision: "require_approval",
+        reason: "approval required by runtime metadata",
+      }),
+    );
+    expect(permissionEvaluation).toHaveBeenCalledWith({ approvalType: "data_export" });
   });
 });

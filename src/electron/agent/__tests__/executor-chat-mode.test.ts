@@ -184,6 +184,85 @@ describe("TaskExecutor chat mode", () => {
     expect((TaskExecutor as Any).prototype.shouldShortCircuitSimpleNonExecuteAnswer.call(executor)).toBe(false);
   });
 
+  it("prefers the latest follow-up assistant text over stale prior summaries", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    executor.task = {
+      id: "task-follow-up-summary",
+      title: "Research Analyst run",
+      prompt: "Research prompt",
+      resultSummary: "Research Analyst - Awaiting Input",
+    };
+    executor.bestKnownOutcome = {
+      resultSummary: "Yo! What's up? How can I help you today?",
+    };
+    executor.lastNonVerificationOutput = "Research Analyst - Awaiting Input";
+    executor.lastAssistantOutput = "Research Analyst - Awaiting Input";
+    executor.lastAssistantText =
+      "Premier League fixtures: Liverpool vs Chelsea; Brentford vs Manchester City.";
+    executor.getContentFallback = vi.fn().mockReturnValue("");
+
+    expect((TaskExecutor as Any).prototype.buildFollowUpResultSummary.call(executor)).toBe(
+      "Premier League fixtures: Liverpool vs Chelsea; Brentford vs Manchester City.",
+    );
+  });
+
+  it("prefers the latest persisted follow-up assistant message over stale assistant text", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    executor.task = {
+      id: "task-follow-up-history-summary",
+      title: "Persistent goal",
+      prompt: "Track release blockers",
+      resultSummary: "Release blocker analysis from the prior run.",
+    };
+    executor.bestKnownOutcome = {
+      resultSummary: "Older best-known release blocker summary.",
+    };
+    executor.conversationHistory = [
+      { role: "user", content: [{ type: "text", text: "/goal status" }] },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Goal active.\n\nObjective: Track release blockers" }],
+      },
+    ];
+    executor.lastAssistantText = "A stale assistant reply from before the follow-up.";
+    executor.lastNonVerificationOutput = "Goal active.\n\nObjective: Track release blockers";
+    executor.lastAssistantOutput = "Goal active.\n\nObjective: Track release blockers";
+    executor.getContentFallback = vi.fn().mockReturnValue("");
+
+    expect((TaskExecutor as Any).prototype.buildFollowUpResultSummary.call(executor)).toBe(
+      "Goal active.\n\nObjective: Track release blockers",
+    );
+  });
+
+  it("keeps local goal follow-up messages aligned with last assistant text", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    executor.task = {
+      id: "task-goal-follow-up",
+      title: "Persistent goal",
+      prompt: "Track release blockers",
+    };
+    executor.workspace = {
+      id: "ws-goal-follow-up",
+      path: "/tmp",
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+    };
+    executor.emitEvent = vi.fn();
+
+    (TaskExecutor as Any).prototype.emitGoalAssistantMessage.call(
+      executor,
+      "/goal status",
+      "Goal active.\n\nObjective: Track release blockers",
+    );
+
+    expect(executor.lastAssistantText).toBe("Goal active.\n\nObjective: Track release blockers");
+    expect((TaskExecutor as Any).prototype.buildFollowUpResultSummary.call(executor)).toBe(
+      "Goal active.\n\nObjective: Track release blockers",
+    );
+  });
+
   it("only exposes the last non-verification step as an assistant bubble", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.plan = {

@@ -1295,8 +1295,7 @@ export class TaskExecutor {
     const completedAt = Date.now();
     const clearError = opts?.clearError !== false;
     const clearTerminalFailure = opts?.clearTerminalFailure === true;
-    const summary =
-      this.buildResultSummary() || this.getContentFallback() || this.task.resultSummary || "";
+    const summary = this.buildFollowUpResultSummary();
     const trimmedSummary = typeof summary === "string" ? summary.trim() : "";
 
     this.task.status = "completed";
@@ -1330,6 +1329,53 @@ export class TaskExecutor {
       ...runtimeProjection,
       ...this.getCompletionProjectionFields(),
     });
+  }
+
+  private buildFollowUpResultSummary(): string {
+    const bestKnownSummary = String(this.bestKnownOutcome?.resultSummary || "").trim();
+    const candidates = [
+      this.getLatestAssistantConversationText(),
+      this.lastAssistantText,
+      this.lastNonVerificationOutput,
+      this.lastAssistantOutput,
+      this.getContentFallback(),
+      bestKnownSummary,
+      this.task.resultSummary,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const trimmed = String(candidate).trim();
+      if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
+      return trimmed.length > 4000 ? `${trimmed.slice(0, 4000)}...` : trimmed;
+    }
+
+    return "";
+  }
+
+  private getLatestAssistantConversationText(): string {
+    const history = Array.isArray(this.conversationHistory) ? this.conversationHistory : [];
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const message = history[index];
+      if (message?.role !== "assistant") continue;
+      const text = this.extractTextFromMessageContent(message.content).trim();
+      if (text) return text;
+    }
+    return "";
+  }
+
+  private extractTextFromMessageContent(content: LLMMessage["content"]): string {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content
+      .map((block) => {
+        if (block && typeof block === "object" && "type" in block && block.type === "text") {
+          return String((block as { text?: unknown }).text || "");
+        }
+        return "";
+      })
+      .filter((text) => text.trim().length > 0)
+      .join("\n");
   }
 
   private finalizeFollowUpFailure(error: Any): void {
@@ -19633,6 +19679,7 @@ You are continuing a previous conversation. The context from the previous conver
     ]);
     this.lastAssistantOutput = message;
     this.lastNonVerificationOutput = message;
+    this.lastAssistantText = message;
   }
 
   private updateGoalAgentConfig(agentConfig: AgentConfig): void {

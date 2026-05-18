@@ -154,6 +154,13 @@ export function decideTaskOutcome(input: OutcomeDecisionInput): OutcomeDecision 
   }
 
   if (input.requestedStatus === "completed") {
+    if (requestedTerminalStatus === "failed") {
+      return {
+        status: "failed",
+        terminalStatus: "failed",
+        failureClass: failureClass || "unknown",
+      };
+    }
     if (requestedTerminalStatus === "partial_success") {
       return {
         status: "completed",

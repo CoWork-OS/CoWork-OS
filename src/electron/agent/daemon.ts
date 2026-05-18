@@ -1072,11 +1072,17 @@ export class AgentDaemon extends EventEmitter {
     }
     if (runtimeStrategy.promptChanged || runtimeStrategy.agentConfigChanged) {
       this.logEvent(effectiveTask.id, "log", {
+        metric: "task_strategy_selected",
         message:
           `Execution strategy active: intent=${runtimeStrategy.route.intent}, ` +
           `domain=${runtimeStrategy.strategy.taskDomain}, convoMode=${runtimeStrategy.strategy.conversationMode}, ` +
           `execMode=${runtimeStrategy.strategy.executionMode}, answerFirst=${runtimeStrategy.strategy.answerFirst}, ` +
           `llmProfileHint=${runtimeStrategy.strategy.llmProfileHint}`,
+        routingConfidence: runtimeStrategy.route.confidence,
+        directResponseMode: runtimeStrategy.strategy.snapshot.directResponseMode,
+        preflightGates: runtimeStrategy.strategy.snapshot.preflightGates,
+        workflowMode: runtimeStrategy.strategy.snapshot.workflowMode,
+        llmProfileHint: runtimeStrategy.strategy.llmProfileHint,
       });
     }
 

@@ -2378,6 +2378,9 @@ export interface Task {
     | "verification_block"
     | "awaiting_user_input"
     | "dependency_unavailable"
+    | "max_llm_calls"
+    | "max_recovered_responses"
+    | "max_repeated_iterations"
   >;
   riskLevel?: TaskRiskLevel;
   evalCaseId?: string;

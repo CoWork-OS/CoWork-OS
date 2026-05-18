@@ -92,6 +92,7 @@ import {
   type SessionRuntimeTaskProjection,
 } from "./runtime/SessionRuntime";
 import { defaultStepLoopBudget, type LoopBudgetStopReason } from "./runtime/LoopBudgetPolicy";
+import { createTerminalState, type TerminalState } from "./runtime/TerminalState";
 import type {
   TurnKernelIterationState,
   TurnKernelPolicy,
@@ -8040,10 +8041,10 @@ ${transcript}
       "Task is waiting for your approval or input before it can continue.";
     this.terminalStatus = "needs_user_action";
     this.failureClass = undefined;
-    this.finalizeTaskBestEffort(summary, "Task paused pending user approval or input.", {
-      terminalStatus: "needs_user_action",
-      failureClass: undefined,
+    const terminalState = createTerminalState("needs_user_action", {
+      reason: "Task paused pending user approval or input.",
     });
+    this.finalizeTaskBestEffort(summary, terminalState.reason, terminalState);
     return true;
   }
 
@@ -8061,10 +8062,11 @@ ${transcript}
         this.emitEvent("log", { metric: "agent_turn_limit_exceeded_total", value: 1 });
       }
     }
-    this.finalizeTaskBestEffort(partialText, this.getPartialSuccessReason(error), {
-      terminalStatus: "partial_success",
+    const terminalState = createTerminalState("partial_success", {
+      reason: this.getPartialSuccessReason(error),
       failureClass,
     });
+    this.finalizeTaskBestEffort(partialText, terminalState.reason, terminalState);
     return true;
   }
 
@@ -8076,6 +8078,22 @@ ${transcript}
       if (this.maybeFinalizeAsPartialSuccess(error)) return;
       throw error;
     }
+  }
+
+  private buildTerminalStepState(): Pick<TerminalState, "failedStepIds" | "incompleteStepIds"> {
+    const steps = this.plan?.steps || [];
+    const failedStepIds = steps
+      .filter((step) => step.status === "failed")
+      .map((step) => String(step.id || "").trim())
+      .filter(Boolean);
+    const incompleteStepIds = steps
+      .filter((step) => step.status === "pending" || step.status === "in_progress")
+      .map((step) => String(step.id || "").trim())
+      .filter(Boolean);
+    return {
+      ...(failedStepIds.length > 0 ? { failedStepIds } : {}),
+      ...(incompleteStepIds.length > 0 ? { incompleteStepIds } : {}),
+    };
   }
 
   private classifyFailure(error: unknown): NonNullable<Task["failureClass"]> {
@@ -11798,7 +11816,7 @@ ${transcript}
     metadata?: {
       terminalStatus?: Task["terminalStatus"];
       failureClass?: Task["failureClass"];
-    },
+    } & Partial<TerminalState>,
   ): void {
     if (this.getEffectiveExecutionMode() === "chat") {
       this.finalizeChatTurn(reason);
@@ -11825,6 +11843,15 @@ ${transcript}
         : this.resolveWaiverFailureClass(waivableFailedStepIds) || "contract_error";
     const implicitExecutorStatus =
       this.terminalStatus && this.terminalStatus !== "ok" ? this.terminalStatus : undefined;
+    const explicitTerminalState = metadata?.terminalKind
+      ? createTerminalState(metadata.terminalKind, {
+          terminalStatus: metadata.terminalStatus,
+          failureClass: metadata.failureClass,
+          reason: metadata.reason || reason,
+          failedStepIds: metadata.failedStepIds,
+          incompleteStepIds: metadata.incompleteStepIds,
+        })
+      : undefined;
     let computedTerminalStatus: NonNullable<Task["terminalStatus"]> =
       metadata?.terminalStatus || implicitExecutorStatus || fallbackTerminalStatus;
     let computedFailureClass: Task["failureClass"] | undefined =
@@ -11835,9 +11862,14 @@ ${transcript}
         : fallbackFailureClass || "contract_error");
     const runtimeProjection = this.applyRuntimeTaskProjectionToTask();
     const hasExplicitBestEffortOutcome =
+      explicitTerminalState !== undefined ||
       metadata?.terminalStatus !== undefined ||
       metadata?.failureClass !== undefined ||
       implicitExecutorStatus !== undefined;
+    if (explicitTerminalState) {
+      computedTerminalStatus = explicitTerminalState.terminalStatus;
+      computedFailureClass = explicitTerminalState.failureClass;
+    }
     if (!hasExplicitBestEffortOutcome) {
       const statusWithVerification = this.applyVerificationOutcomeToTerminalStatus(
         computedTerminalStatus,
@@ -11873,9 +11905,35 @@ ${transcript}
     if (reason) {
       this.emitEvent("log", { message: reason });
     }
+    if (explicitTerminalState?.terminalKind === "timed_out") {
+      const completedSteps = this.plan?.steps?.filter((step) => step.status === "completed").length || 0;
+      const totalSteps = this.plan?.steps?.length || 0;
+      this.emitEvent("progress_update", {
+        phase: "execution",
+        completedSteps,
+        totalSteps,
+        progress: totalSteps > 0 ? Math.min(99, Math.round((completedSteps / totalSteps) * 100)) : 0,
+        message: "Stopped at soft deadline; finalized with partial results.",
+        terminalKind: explicitTerminalState.terminalKind,
+        terminalStatus: this.task.terminalStatus,
+        incompleteStepIds: explicitTerminalState.incompleteStepIds,
+        failedStepIds: explicitTerminalState.failedStepIds,
+      });
+    }
     this.daemon.completeTask(this.task.id, summary, {
       terminalStatus: this.task.terminalStatus,
       failureClass: this.task.failureClass,
+      ...(explicitTerminalState
+        ? {
+            terminalKind: explicitTerminalState.terminalKind,
+            ...(explicitTerminalState.failedStepIds
+              ? { failedStepIds: explicitTerminalState.failedStepIds }
+              : {}),
+            ...(explicitTerminalState.incompleteStepIds
+              ? { incompleteStepIds: explicitTerminalState.incompleteStepIds }
+              : {}),
+          }
+        : {}),
       ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
       ...runtimeProjection,
       outputSummary,
@@ -11883,7 +11941,7 @@ ${transcript}
       waiveFailedStepIds: waivableFailedStepIds,
       failedMutationRequiredStepIds,
       waivedVerificationStepIds,
-      terminalStatusReason: reason || "executor_best_effort_finalized",
+      terminalStatusReason: explicitTerminalState?.reason || reason || "executor_best_effort_finalized",
       ...(this.verificationOutcomeV2Enabled && nonBlockingFailedStepIds.length > 0
         ? { nonBlockingFailedStepIds }
         : {}),
@@ -22003,15 +22061,12 @@ You are continuing a previous conversation. The context from the previous conver
     this.lastAssistantOutput = finalText;
     this.lastNonVerificationOutput = finalText;
     this.lastAssistantText = finalText;
-    try {
-      this.finalizeTask(finalText);
-    } catch (guardError) {
-      logger.warn(
-        `${this.logTag} Timeout recovery guard blocked strict completion, using best-effort finalization:`,
-        guardError,
-      );
-      this.finalizeTaskBestEffort(finalText, "Timeout recovery finalized with best-effort answer.");
-    }
+    const terminalState = createTerminalState("timed_out", {
+      reason: "Timeout recovery finalized with best-effort answer.",
+      failureClass: "budget_exhausted",
+      ...this.buildTerminalStepState(),
+    });
+    this.finalizeTaskBestEffort(finalText, terminalState.reason, terminalState);
     return true;
   }
 
@@ -22653,7 +22708,15 @@ You are continuing a previous conversation. The context from the previous conver
         const reason = this.wrapUpRequested
           ? "Wrap-up requested. Finalizing with best-effort answer."
           : "Soft deadline reached during execution. Finalizing with best-effort answer.";
-        this.finalizeTaskBestEffort(this.buildResultSummary(), reason);
+        const terminalState = createTerminalState(
+          this.softDeadlineTriggered && !this.wrapUpRequested ? "timed_out" : "partial_success",
+          {
+            reason,
+            failureClass: this.softDeadlineTriggered && !this.wrapUpRequested ? "budget_exhausted" : "contract_error",
+            ...this.buildTerminalStepState(),
+          },
+        );
+        this.finalizeTaskBestEffort(this.buildResultSummary(), terminalState.reason, terminalState);
       } else {
         this.finalizeTaskWithFallback(this.buildResultSummary());
       }
@@ -22669,6 +22732,11 @@ You are continuing a previous conversation. The context from the previous conver
         this.finalizeTaskBestEffort(
           this.buildResultSummary() || "Task wrapped up before producing results.",
           "Wrap-up requested by user.",
+          createTerminalState("partial_success", {
+            reason: "Wrap-up requested by user.",
+            failureClass: "contract_error",
+            ...this.buildTerminalStepState(),
+          }),
         );
         return;
       }

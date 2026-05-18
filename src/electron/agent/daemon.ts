@@ -96,6 +96,7 @@ import { deriveCanonicalTaskStatus, isTerminalTaskStatus } from "../../shared/ta
 import { createTimelineEmitter } from "./timeline-emitter";
 import { TaskExecutor } from "./executor";
 import { TaskQueueManager } from "./queue-manager";
+import type { TerminalKind } from "./runtime/TerminalState";
 import { BuiltinToolsSettingsManager } from "./tools/builtin-settings";
 import { loadPolicies } from "../admin/policies";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
@@ -7304,6 +7305,9 @@ export class AgentDaemon extends EventEmitter {
       waiveFailedStepIds?: string[];
       failedMutationRequiredStepIds?: string[];
       waivedVerificationStepIds?: string[];
+      failedStepIds?: string[];
+      incompleteStepIds?: string[];
+      terminalKind?: TerminalKind;
       terminalStatusReason?: string;
       nonBlockingFailedStepIds?: string[];
       bestKnownOutcome?: Task["bestKnownOutcome"];
@@ -7737,7 +7741,8 @@ export class AgentDaemon extends EventEmitter {
     ];
     const terminalStatusReason = metadata?.terminalStatusReason ?? "";
     const isBestEffortFinalization =
-      bestEffortReasons.some((r) => terminalStatusReason.includes(r)) &&
+      (metadata?.terminalKind === "timed_out" ||
+        bestEffortReasons.some((r) => terminalStatusReason.includes(r))) &&
       (metadata?.terminalStatus === "ok" || metadata?.terminalStatus === "partial_success");
     if (isBestEffortFinalization && blockingFailedSteps.length > 0) {
       const nonMutationBlockers = blockingFailedSteps.filter((id) => {
@@ -8002,6 +8007,13 @@ export class AgentDaemon extends EventEmitter {
       ...(Array.isArray(metadata?.waivedVerificationStepIds) &&
       metadata.waivedVerificationStepIds.length > 0
         ? { waivedVerificationStepIds: metadata.waivedVerificationStepIds }
+        : {}),
+      ...(metadata?.terminalKind ? { terminalKind: metadata.terminalKind } : {}),
+      ...(Array.isArray(metadata?.failedStepIds) && metadata.failedStepIds.length > 0
+        ? { failedStepIds: metadata.failedStepIds }
+        : {}),
+      ...(Array.isArray(metadata?.incompleteStepIds) && metadata.incompleteStepIds.length > 0
+        ? { incompleteStepIds: metadata.incompleteStepIds }
         : {}),
       ...(metadata?.terminalStatusReason ? { terminalStatusReason: metadata.terminalStatusReason } : {}),
       ...(timelineErrorStepIds.length > 0 ? { timelineErrorStepIds } : {}),

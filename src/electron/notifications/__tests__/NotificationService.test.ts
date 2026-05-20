@@ -44,6 +44,32 @@ describe("NotificationService", () => {
     expect(events[0]?.type).toBe("added");
   });
 
+  it("does not add the same unresolved integration reconnect notification more than once", async () => {
+    const events: NotificationEvent[] = [];
+    const service = new NotificationService({
+      storePath,
+      onEvent: (event) => events.push(event),
+    });
+
+    const params = {
+      type: "warning" as const,
+      title: "Reconnect Google Workspace",
+      message:
+        "Google Workspace needs attention in Settings > Integrations > Google Workspace. Reconnect or resync it before automated work can continue.",
+    };
+    const first = await service.add(params);
+    const second = await service.add({
+      ...params,
+      message:
+        "Google Workspace needs attention in Settings > Integrations > Google Workspace. Reconnect or resync it before automated work can continue. Token has been expired or revoked.",
+    });
+
+    expect(second.id).toBe(first.id);
+    expect(service.list()).toHaveLength(1);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("added");
+  });
+
   it("collapses stored duplicate input-required notifications for the same task on startup", () => {
     const notifications: AppNotification[] = [
       {
@@ -88,6 +114,54 @@ describe("NotificationService", () => {
     expect(persisted.notifications.map((notification) => notification.id)).toEqual([
       "newer-input",
       "warning-1",
+    ]);
+  });
+
+  it("collapses stored duplicate integration reconnect notifications on startup", () => {
+    const notifications: AppNotification[] = [
+      {
+        id: "older-google-workspace-auth",
+        type: "warning",
+        title: "Reconnect Google Workspace",
+        message:
+          "Google Workspace needs attention in Settings > Integrations > Google Workspace. Reconnect or resync it before automated work can continue.",
+        read: false,
+        createdAt: 100,
+      },
+      {
+        id: "newer-google-workspace-auth",
+        type: "warning",
+        title: "Reconnect Google Workspace",
+        message:
+          "Google Workspace needs attention in Settings > Integrations > Google Workspace. Reconnect or resync it before automated work can continue. Token has been expired or revoked.",
+        read: false,
+        createdAt: 200,
+      },
+      {
+        id: "whatsapp-auth",
+        type: "warning",
+        title: "Reconnect WhatsApp",
+        message:
+          "WhatsApp needs attention in Settings > WhatsApp. Reconnect or resync it before automated work can continue.",
+        read: false,
+        createdAt: 300,
+      },
+    ];
+    fs.writeFileSync(storePath, JSON.stringify({ version: 1, notifications }, null, 2), "utf-8");
+
+    const service = new NotificationService({ storePath });
+
+    expect(service.list().map((notification) => notification.id)).toEqual([
+      "whatsapp-auth",
+      "newer-google-workspace-auth",
+    ]);
+
+    const persisted = JSON.parse(fs.readFileSync(storePath, "utf-8")) as {
+      notifications: AppNotification[];
+    };
+    expect(persisted.notifications.map((notification) => notification.id)).toEqual([
+      "newer-google-workspace-auth",
+      "whatsapp-auth",
     ]);
   });
 });

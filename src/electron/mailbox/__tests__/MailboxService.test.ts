@@ -1609,6 +1609,23 @@ describeWithSqlite("MailboxService", () => {
     }
   });
 
+  it("reports missing Google Workspace tokens as an authorization issue, not a mail-server connection failure", async () => {
+    try {
+      await service.applyAction({
+        threadId: "gmail-thread:alpha",
+        type: "mark_read",
+      });
+      throw new Error("Expected mark_read to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(
+        "Mailbox action mark_read needs mailbox authorization",
+      );
+      expect((error as Error).message).toContain("Google Workspace access token not configured");
+      expect((error as Error).message).not.toContain("could not reach the gmail mail server");
+    }
+  });
+
   it("refreshes Microsoft Graph read-state tokens without requesting send scope", async () => {
     const findByIdSpy = vi.spyOn((service as Any).channelRepo, "findById").mockReturnValue({
       id: "email-channel",

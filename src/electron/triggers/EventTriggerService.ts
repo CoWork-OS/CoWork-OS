@@ -115,6 +115,9 @@ export class EventTriggerService {
   async evaluateEvent(event: TriggerEvent): Promise<void> {
     if (!this.running) return;
 
+    const activeCount = this.deps.getActiveTaskCount?.() ?? 0;
+    if (activeCount >= 4) return;
+
     for (const trigger of this.triggers.values()) {
       if (!trigger.enabled) continue;
       if (!triggerMatchesEventSource(trigger.source, event.source)) continue;
@@ -161,15 +164,31 @@ export class EventTriggerService {
         case "create_task": {
           const prompt = substituteEventVariables(cfg.prompt || "", event);
           const title = substituteEventVariables(cfg.title || `Trigger: ${trigger.name}`, event);
-          const result = await this.deps.createTask({
-            title,
-            prompt,
-            workspaceId:
-              cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
-            agentConfig: cfg.agentConfig,
-          });
-          historyEntry.taskId = result.id;
-          historyEntry.actionResult = "task_created";
+          if (cfg.runMode === "thread_follow_up") {
+            if (!cfg.targetTaskId) {
+              throw new Error("Thread follow-up trigger is missing a target task");
+            }
+            if (!this.deps.sendTaskMessage) {
+              throw new Error("Thread follow-up execution is not available in this runtime");
+            }
+            await this.deps.sendTaskMessage({
+              taskId: cfg.targetTaskId,
+              message: prompt,
+              agentConfig: cfg.agentConfig,
+            });
+            historyEntry.taskId = cfg.targetTaskId;
+            historyEntry.actionResult = "thread_follow_up_sent";
+          } else {
+            const result = await this.deps.createTask({
+              title,
+              prompt,
+              workspaceId:
+                cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
+              agentConfig: cfg.agentConfig,
+            });
+            historyEntry.taskId = result.id;
+            historyEntry.actionResult = "task_created";
+          }
           break;
         }
 

@@ -1,17 +1,28 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleWorkspaceSettingsData } from "../../shared/types";
-import { mergeGoogleWorkspaceScopes } from "../../shared/google-workspace";
+import {
+  GMAIL_DEFAULT_SCOPES,
+  GOOGLE_WORKSPACE_DEFAULT_SCOPES,
+  inferGoogleWorkspaceConnectionMode,
+  mergeGoogleScopesForMode,
+  normalizeGoogleAccountEmail,
+  removeGoogleWorkspaceAccount,
+  upsertGoogleWorkspaceAccount,
+  type GoogleWorkspaceConnectionMode,
+} from "../../shared/google-workspace";
+import { createRendererLogger } from "../utils/logger";
 
 const DEFAULT_TIMEOUT_MS = 20000;
-
-const scopesToText = (scopes?: string[]) =>
-  mergeGoogleWorkspaceScopes(scopes).join(" ");
+const logger = createRendererLogger("GoogleWorkspaceSettings");
 
 const textToScopes = (value: string) =>
   value
     .split(/\s+/)
     .map((scope) => scope.trim())
     .filter(Boolean);
+
+const modeLabel = (mode: GoogleWorkspaceConnectionMode) =>
+  mode === "workspace" ? "Google Workspace" : "Gmail";
 
 export function GoogleWorkspaceSettings() {
   const [settings, setSettings] = useState<GoogleWorkspaceSettingsData | null>(null);
@@ -23,6 +34,7 @@ export function GoogleWorkspaceSettings() {
     name?: string;
     userId?: string;
     email?: string;
+    missingScopes?: string[];
   } | null>(null);
   const [status, setStatus] = useState<{
     configured: boolean;
@@ -30,6 +42,7 @@ export function GoogleWorkspaceSettings() {
     name?: string;
     error?: string;
     missingScopes?: string[];
+    connectionMode?: GoogleWorkspaceConnectionMode;
   } | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [oauthBusy, setOauthBusy] = useState(false);
@@ -48,12 +61,27 @@ export function GoogleWorkspaceSettings() {
     };
   }, []);
 
+  const currentMode = useMemo<GoogleWorkspaceConnectionMode>(() => {
+    return inferGoogleWorkspaceConnectionMode(settings?.connectionMode, settings?.scopes);
+  }, [settings?.connectionMode, settings?.scopes]);
+
+  const effectiveScopes = useMemo(
+    () => mergeGoogleScopesForMode(settings?.scopes, currentMode),
+    [currentMode, settings?.scopes],
+  );
+
   const loadSettings = async () => {
     try {
       const loaded = await window.electronAPI.getGoogleWorkspaceSettings();
-      setSettings(loaded);
+      const inferred = inferGoogleWorkspaceConnectionMode(loaded.connectionMode, loaded.scopes);
+      const mode = inferred === "gmail" && !loaded.builtinOAuthClientAvailable && !loaded.clientId ? "workspace" : inferred;
+      setSettings({
+        ...loaded,
+        connectionMode: mode,
+        scopes: mergeGoogleScopesForMode(loaded.scopes, mode),
+      });
     } catch (error) {
-      console.error("Failed to load Google Workspace settings:", error);
+      logger.error("Failed to load Google Workspace settings:", error);
     }
   };
 
@@ -62,20 +90,114 @@ export function GoogleWorkspaceSettings() {
     setSettings({ ...settings, ...updates });
   };
 
+  const setConnectionMode = (connectionMode: GoogleWorkspaceConnectionMode) => {
+    if (!settings) return;
+    const activeEmail = normalizeGoogleAccountEmail(settings.activeAccountEmail);
+    const accounts = (settings.accounts || []).map((account) =>
+      normalizeGoogleAccountEmail(account.email) === activeEmail
+        ? {
+            ...account,
+            connectionMode,
+            scopes: mergeGoogleScopesForMode(
+              connectionMode === "workspace"
+                ? GOOGLE_WORKSPACE_DEFAULT_SCOPES
+                : GMAIL_DEFAULT_SCOPES,
+              connectionMode,
+            ),
+          }
+        : account,
+    );
+    setSettings({
+      ...settings,
+      accounts,
+      connectionMode,
+      scopes: mergeGoogleScopesForMode(
+        connectionMode === "workspace" ? GOOGLE_WORKSPACE_DEFAULT_SCOPES : GMAIL_DEFAULT_SCOPES,
+        connectionMode,
+      ),
+    });
+    setOauthError(null);
+    setTestResult(null);
+  };
+
+  const buildPayload = (overrides: Partial<GoogleWorkspaceSettingsData> = {}) => {
+    const mode = overrides.connectionMode ?? currentMode;
+    return {
+      ...settings!,
+      ...overrides,
+      enabled: overrides.enabled ?? true,
+      connectionMode: mode,
+      scopes: mergeGoogleScopesForMode(overrides.scopes ?? settings?.scopes, mode),
+    };
+  };
+
+  const handleSelectAccount = async (email: string) => {
+    if (!settings) return;
+    const account = (settings.accounts || []).find(
+      (item) => normalizeGoogleAccountEmail(item.email) === normalizeGoogleAccountEmail(email),
+    );
+    if (!account) return;
+    const mode = inferGoogleWorkspaceConnectionMode(account.connectionMode, account.scopes);
+    const payload = {
+      ...settings,
+      activeAccountEmail: normalizeGoogleAccountEmail(account.email),
+      connectionMode: mode,
+      accessToken: account.accessToken,
+      refreshToken: account.refreshToken,
+      tokenExpiresAt: account.tokenExpiresAt,
+      scopes: mergeGoogleScopesForMode(account.scopes, mode),
+      loginHint: account.email,
+    };
+    setSettings(payload);
+    await window.electronAPI.saveGoogleWorkspaceSettings(payload);
+    await refreshStatus();
+  };
+
+  const handleRemoveAccount = async (email: string) => {
+    if (!settings) return;
+    const payload = removeGoogleWorkspaceAccount(settings, email);
+    await window.electronAPI.saveGoogleWorkspaceSettings(payload);
+    setSettings(payload);
+    await refreshStatus();
+  };
+
+  const getLegacyConnectedAccountEmail = () =>
+    normalizeGoogleAccountEmail(status?.name) ||
+    normalizeGoogleAccountEmail(status?.connected ? settings?.loginHint : undefined);
+
+  const materializeLegacyConnectedAccount = (
+    baseSettings: GoogleWorkspaceSettingsData,
+  ): GoogleWorkspaceSettingsData => {
+    if (baseSettings.accounts?.length) return baseSettings;
+    if (!baseSettings.accessToken && !baseSettings.refreshToken) return baseSettings;
+    const email = getLegacyConnectedAccountEmail();
+    if (!email) return baseSettings;
+    return upsertGoogleWorkspaceAccount(baseSettings, {
+      email,
+      name: email,
+      accessToken: baseSettings.accessToken,
+      refreshToken: baseSettings.refreshToken,
+      tokenExpiresAt: baseSettings.tokenExpiresAt,
+      scopes: baseSettings.scopes,
+      connectionMode: currentMode,
+      connectedAt: Date.now(),
+    });
+  };
+
+  const hasStoredOrLegacyConnection = () =>
+    Boolean(settings?.accounts?.length || settings?.accessToken || settings?.refreshToken);
+
   const handleSave = async () => {
     if (!settings) return;
     setSaving(true);
     setTestResult(null);
     try {
-      const payload: GoogleWorkspaceSettingsData = {
-        ...settings,
-        scopes: mergeGoogleWorkspaceScopes(settings.scopes),
-      };
+      const payload = buildPayload({ enabled: settings.enabled });
       await window.electronAPI.saveGoogleWorkspaceSettings(payload);
       setSettings(payload);
       await refreshStatus();
     } catch (error) {
-      console.error("Failed to save Google Workspace settings:", error);
+      logger.error("Failed to save Google Workspace settings:", error);
     } finally {
       setSaving(false);
     }
@@ -87,7 +209,7 @@ export function GoogleWorkspaceSettings() {
       const result = await window.electronAPI.getGoogleWorkspaceStatus();
       setStatus(result);
     } catch (error) {
-      console.error("Failed to load Google Workspace status:", error);
+      logger.error("Failed to load Google Workspace status:", error);
     } finally {
       setStatusLoading(false);
     }
@@ -107,83 +229,99 @@ export function GoogleWorkspaceSettings() {
     }
   };
 
+  const hasOAuthClient = () => Boolean(settings?.builtinOAuthClientAvailable || settings?.clientId);
+
+  const ensureOAuthClient = (action: string) => {
+    if (hasOAuthClient()) return true;
+    setOauthError(
+      `${action} needs the official CoWork Google OAuth client or a custom Google OAuth client ID in Advanced setup.`,
+    );
+    return false;
+  };
+
   const handleOAuthConnect = async () => {
-    if (!settings?.clientId) {
-      setOauthError("Client ID is required to start OAuth.");
-      return;
-    }
+    if (!settings || !ensureOAuthClient(`Connect ${modeLabel(currentMode)}`)) return;
 
     setOauthBusy(true);
     setOauthError(null);
 
     try {
-      const scopes = mergeGoogleWorkspaceScopes(settings.scopes);
+      const scopes = mergeGoogleScopesForMode(settings.scopes, currentMode);
       const result = await window.electronAPI.startGoogleWorkspaceOAuth({
-        clientId: settings.clientId,
-        clientSecret: settings.clientSecret || undefined,
+        clientId: settings.clientId || undefined,
+        clientSecret: settings.clientId ? settings.clientSecret || undefined : undefined,
         scopes,
-        loginHint: settings.loginHint || undefined,
+        connectionMode: currentMode,
+        loginHint: hasStoredOrLegacyConnection() ? undefined : settings.loginHint || undefined,
       });
 
       const tokenExpiresAt = result.expiresIn
         ? Date.now() + result.expiresIn * 1000
-        : settings.tokenExpiresAt;
-
-      const payload: GoogleWorkspaceSettingsData = {
-        ...settings,
-        enabled: true,
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken || settings.refreshToken,
-        tokenExpiresAt,
-        scopes: result.scopes || scopes,
-      };
+        : undefined;
+      const baseSettings = materializeLegacyConnectedAccount(settings);
+      const email = normalizeGoogleAccountEmail(result.email) || normalizeGoogleAccountEmail(settings.loginHint);
+      const payload = email
+        ? upsertGoogleWorkspaceAccount(baseSettings, {
+            email,
+            name: result.email,
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            tokenExpiresAt,
+            scopes: result.scopes || scopes,
+            connectionMode: currentMode,
+            connectedAt: Date.now(),
+          })
+        : {
+            ...baseSettings,
+            enabled: true,
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken || settings.refreshToken,
+            tokenExpiresAt,
+            scopes: result.scopes || scopes,
+          };
 
       await window.electronAPI.saveGoogleWorkspaceSettings(payload);
       setSettings(payload);
       await refreshStatus();
     } catch (error: Any) {
-      setOauthError(error.message || "Google Workspace OAuth failed");
+      setOauthError(error.message || `${modeLabel(currentMode)} OAuth failed`);
     } finally {
       setOauthBusy(false);
     }
   };
 
   const handleCopyLink = async () => {
-    if (!settings?.clientId) {
-      setOauthError("Client ID is required to generate the OAuth link.");
-      return;
-    }
+    if (!settings || !ensureOAuthClient(`Copy ${modeLabel(currentMode)} auth link`)) return;
 
     setLinkBusy(true);
     setLinkCopied(false);
     setOauthError(null);
 
     try {
-      const scopes = mergeGoogleWorkspaceScopes(settings.scopes);
+      const scopes = mergeGoogleScopesForMode(settings.scopes, currentMode);
       const { url } = await window.electronAPI.getGoogleWorkspaceOAuthLink({
-        clientId: settings.clientId,
-        clientSecret: settings.clientSecret || undefined,
+        clientId: settings.clientId || undefined,
+        clientSecret: settings.clientId ? settings.clientSecret || undefined : undefined,
         scopes,
-        loginHint: settings.loginHint || undefined,
+        connectionMode: currentMode,
+        loginHint: hasStoredOrLegacyConnection() ? undefined : settings.loginHint || undefined,
       });
       await navigator.clipboard.writeText(url);
       setLinkCopied(true);
-      // Poll for status so the UI updates once the browser callback arrives.
       if (linkPollRef.current !== null) {
         clearInterval(linkPollRef.current);
       }
       linkPollRef.current = setInterval(async () => {
-        const s = await window.electronAPI.getGoogleWorkspaceStatus();
-        if (s?.connected) {
+        const nextStatus = await window.electronAPI.getGoogleWorkspaceStatus();
+        if (nextStatus?.connected) {
           if (linkPollRef.current !== null) {
             clearInterval(linkPollRef.current);
             linkPollRef.current = null;
           }
-          setStatus(s);
+          setStatus(nextStatus);
           await loadSettings();
         }
       }, 2000);
-      // Stop polling after 5 minutes regardless.
       setTimeout(() => {
         if (linkPollRef.current !== null) {
           clearInterval(linkPollRef.current);
@@ -198,11 +336,17 @@ export function GoogleWorkspaceSettings() {
   };
 
   if (!settings) {
-    return <div className="settings-loading">Loading Google Workspace settings...</div>;
+    return <div className="settings-loading">Loading Google settings...</div>;
   }
 
+  const connectedLabel = status?.connected ? `Connected${status.name ? ` as ${status.name}` : ""}` : "";
+  const accounts = settings.accounts || [];
+  const activeAccountEmail = normalizeGoogleAccountEmail(settings.activeAccountEmail);
+  const legacyConnectedEmail = accounts.length === 0 ? getLegacyConnectedAccountEmail() : undefined;
+  const hasConnectedAccount = accounts.length > 0 || Boolean(legacyConnectedEmail);
+  const hasOfficialOAuthClient = Boolean(settings.builtinOAuthClientAvailable);
   const statusLabel = !status?.configured
-    ? "Missing Token"
+    ? "Not Connected"
     : status.connected
       ? "Connected"
       : "Configured";
@@ -218,42 +362,156 @@ export function GoogleWorkspaceSettings() {
       <div className="settings-section">
         <div className="settings-section-header">
           <div className="settings-title-with-badge">
-            <h3>Connect Google Workspace</h3>
+            <h3>Connect Gmail</h3>
             {status && (
               <span
                 className={`google-workspace-status-badge ${statusClass}`}
                 title={
                   !status.configured
-                    ? "Tokens not configured"
+                    ? "Gmail is not connected"
                     : status.connected
-                      ? "Connected to Google Workspace"
-                      : "Configured"
+                      ? connectedLabel || "Connected"
+                      : "OAuth credentials are saved but not connected"
                 }
               >
                 {statusLabel}
               </span>
             )}
             {statusLoading && !status && (
-              <span className="google-workspace-status-badge configured">Checking…</span>
+              <span className="google-workspace-status-badge configured">Checking...</span>
             )}
           </div>
           <button className="btn-secondary btn-sm" onClick={refreshStatus} disabled={statusLoading}>
             {statusLoading ? "Checking..." : "Refresh Status"}
           </button>
         </div>
+
         <p className="settings-description">
-          Connect Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, and Chat with a single Google Workspace OAuth flow. After
-          connecting, use `google_drive_action`, `gmail_action`, and `calendar_action` tools in
-          tasks.
+          Start with Gmail-only access for inbox search, thread reading, drafts, sending, labels,
+          and Inbox Agent workflows. This same connection can be upgraded to full Google Workspace
+          access for Drive, Calendar, Docs, Sheets, Slides, Tasks, and Chat.
         </p>
+
+        {hasConnectedAccount && (
+          <div className="settings-field">
+            <label>Gmail Accounts</label>
+            <div className="google-workspace-account-list">
+              {legacyConnectedEmail && (
+                <div className="google-workspace-account-row">
+                  <div>
+                    <strong>{legacyConnectedEmail}</strong>
+                    <p className="settings-hint">Active account</p>
+                  </div>
+                </div>
+              )}
+              {accounts.map((account) => {
+                const email = normalizeGoogleAccountEmail(account.email) || account.email;
+                const isActive = email === activeAccountEmail;
+                return (
+                  <div className="google-workspace-account-row" key={email}>
+                    <div>
+                      <strong>{account.email}</strong>
+                      <p className="settings-hint">
+                        {isActive ? "Active account" : "Connected account"}
+                      </p>
+                    </div>
+                    <div className="settings-actions">
+                      {!isActive && (
+                        <button
+                          className="btn-secondary btn-sm"
+                          type="button"
+                          onClick={() => handleSelectAccount(account.email)}
+                        >
+                          Use
+                        </button>
+                      )}
+                      <button
+                        className="btn-secondary btn-sm"
+                        type="button"
+                        onClick={() => handleRemoveAccount(account.email)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="settings-field">
+          <label>Connection Type</label>
+          <div className="settings-actions">
+            <button
+              className={currentMode === "gmail" ? "btn-primary btn-sm" : "btn-secondary btn-sm"}
+              onClick={() => setConnectionMode("gmail")}
+              type="button"
+              disabled={!settings?.builtinOAuthClientAvailable && !settings?.clientId}
+              title={!settings?.builtinOAuthClientAvailable && !settings?.clientId ? "Gmail Only requires an OAuth client" : undefined}
+            >
+              Gmail Only
+            </button>
+            <button
+              className={currentMode === "workspace" ? "btn-primary btn-sm" : "btn-secondary btn-sm"}
+              onClick={() => setConnectionMode("workspace")}
+              type="button"
+            >
+              Full Workspace
+            </button>
+          </div>
+          <p className="settings-hint">
+            {!settings?.clientId
+              ? "Gmail Only is temporarily unavailable while OAuth verification is in progress. Use Full Workspace with a custom OAuth client, or set up your own client ID below."
+              : "Gmail Only requests Gmail scopes. Full Workspace also requests Drive, Calendar, Docs, Sheets, Slides, Tasks, and Chat scopes."}
+          </p>
+        </div>
+
         {status?.error && <p className="settings-hint">Status check: {status.error}</p>}
+        {status?.missingScopes?.length ? (
+          <p className="settings-hint">Missing scopes: {status.missingScopes.join(", ")}</p>
+        ) : null}
         {oauthError && <p className="settings-hint">OAuth error: {oauthError}</p>}
         {linkCopied && (
           <p className="settings-hint">
-            Link copied — paste it into your browser to authorize. This panel will update
-            automatically once you complete sign-in.
+            Link copied. Paste it into your browser to authorize; this panel updates after sign-in.
           </p>
         )}
+
+        <div className="settings-actions">
+          <button
+            className="btn-secondary btn-sm"
+            onClick={handleCopyLink}
+            disabled={linkBusy || oauthBusy}
+            title="Generate an OAuth URL and copy it to clipboard"
+          >
+            {linkBusy ? "Generating..." : linkCopied ? "Link Copied" : "Copy Auth Link"}
+          </button>
+          <button
+            className="btn-primary btn-sm"
+            onClick={handleOAuthConnect}
+            disabled={oauthBusy || linkBusy}
+          >
+            {oauthBusy
+              ? "Connecting..."
+              : hasConnectedAccount
+                ? `Add ${modeLabel(currentMode)} Account`
+                : `Connect ${modeLabel(currentMode)}`}
+          </button>
+        </div>
+      </div>
+
+      <details className="settings-section" open={!hasOAuthClient()}>
+        <summary>
+          <h4>Advanced OAuth Setup</h4>
+        </summary>
+
+        <p className="settings-description">
+          {hasOfficialOAuthClient
+            ? "This build uses CoWork's official Google OAuth client automatically. Use this section only for self-hosted builds or a custom Google Cloud project."
+            : "This build does not include CoWork's official Google OAuth client. Add a custom Google OAuth client ID for development or self-hosted use."}
+        </p>
+
         <div className="settings-actions">
           <button
             className="btn-secondary btn-sm"
@@ -263,85 +521,27 @@ export function GoogleWorkspaceSettings() {
           >
             Open Google Cloud Console
           </button>
-          <button
-            className="btn-secondary btn-sm"
-            onClick={handleCopyLink}
-            disabled={linkBusy || oauthBusy}
-            title="Generate the OAuth URL and copy it to clipboard — paste it into any browser to authorize"
-          >
-            {linkBusy ? "Generating..." : linkCopied ? "Link Copied ✓" : "Copy Auth Link"}
-          </button>
-          <button className="btn-primary btn-sm" onClick={handleOAuthConnect} disabled={oauthBusy || linkBusy}>
-            {oauthBusy ? "Connecting..." : "Connect"}
-          </button>
         </div>
-      </div>
 
-      <div className="settings-section">
-        <h4>Setup Guide</h4>
         <ol className="settings-setup-steps">
+          <li>Create or select a Google Cloud project.</li>
           <li>
-            <strong>Create a Google Cloud project</strong> — open{" "}
-            <button
-              className="btn-link"
-              onClick={() =>
-                window.electronAPI.openExternal("https://console.cloud.google.com/projectcreate")
-              }
-            >
-              console.cloud.google.com
-            </button>{" "}
-            and create (or select) a project.
+            Enable APIs: <strong>Gmail API</strong> for Gmail Only. For Full Workspace, also enable
+            Drive, Calendar, Docs, Sheets, Slides, Tasks, and Chat APIs.
           </li>
           <li>
-            <strong>Enable APIs</strong> — go to{" "}
-            <em>APIs &amp; Services → Library</em> and enable{" "}
-            <strong>Gmail API</strong>, <strong>Google Drive API</strong>, and{" "}
-            <strong>Google Calendar API</strong>.
+            Configure the OAuth consent screen. If the app is in testing mode, add every Gmail
+            account you want to connect as a test user.
           </li>
           <li>
-            <strong>Configure OAuth consent screen</strong>:
-            <ol className="settings-setup-steps settings-setup-steps--nested">
-              <li>
-                Go to <em>APIs &amp; Services → OAuth consent screen</em>, choose{" "}
-                <strong>External</strong>, and fill in the app name and your email. Save.
-              </li>
-              <li>
-                Open the <strong>Audience</strong> tab (sometimes labelled{" "}
-                <strong>Test users</strong> in older Console versions).
-              </li>
-              <li>
-                Click <strong>+ Add users</strong> and add the Google account you will sign in
-                with (e.g. <em>you@gmail.com</em>).
-              </li>
-              <li>
-                Click <strong>Save</strong>. Without this step you will see a{" "}
-                <em>403 access_denied</em> error.
-              </li>
-            </ol>
-          </li>
-          <li>
-            <strong>Create credentials</strong> — go to{" "}
-            <em>APIs &amp; Services → Credentials → Create Credentials → OAuth client ID</em>.
-            Choose <strong>Web application</strong> as the application type (not Desktop app).
-            Under <em>Authorized redirect URIs</em> click <strong>+ ADD URI</strong> and add
-            exactly:
+            Create an OAuth client ID. For desktop builds, use <strong>Desktop app</strong>. If you
+            use a web client for local development, add this redirect URI:
             <br />
             <code>http://127.0.0.1:18766/oauth/callback</code>
           </li>
-          <li>
-            <strong>Copy your credentials</strong> — after creation, Google shows your{" "}
-            <strong>Client ID</strong> and <strong>Client Secret</strong>. Paste them into the
-            fields below.
-          </li>
-          <li>
-            <strong>Connect</strong> — click the <strong>Connect</strong> button above.
-            A browser window will open for you to authorize access. Tokens are saved
-            automatically.
-          </li>
+          <li>Paste the Client ID below. Client Secret is optional and should be left blank for desktop clients.</li>
         </ol>
-      </div>
 
-      <div className="settings-section">
         <div className="settings-field">
           <label>Enable Integration</label>
           <label className="settings-toggle">
@@ -363,26 +563,6 @@ export function GoogleWorkspaceSettings() {
             value={settings.clientId || ""}
             onChange={(e) => updateSettings({ clientId: e.target.value || undefined })}
           />
-          <p className="settings-hint">
-            Found in <em>Google Cloud Console → APIs &amp; Services → Credentials</em> under your
-            OAuth 2.0 Client ID. Looks like{" "}
-            <code>123456789-abc....apps.googleusercontent.com</code>.
-          </p>
-        </div>
-
-        <div className="settings-field">
-          <label>Google Account Email</label>
-          <input
-            type="email"
-            className="settings-input"
-            placeholder="you@gmail.com"
-            value={settings.loginHint || ""}
-            onChange={(e) => updateSettings({ loginHint: e.target.value || undefined })}
-          />
-          <p className="settings-hint">
-            Optional. Pre-selects this account in the Google sign-in screen so you are not asked to
-            pick from multiple logged-in accounts.
-          </p>
         </div>
 
         <div className="settings-field">
@@ -394,18 +574,26 @@ export function GoogleWorkspaceSettings() {
             value={settings.clientSecret || ""}
             onChange={(e) => updateSettings({ clientSecret: e.target.value || undefined })}
           />
-          <p className="settings-hint">
-            Shown alongside the Client ID in Google Cloud Console. Required for Web application
-            clients to exchange the authorization code for tokens.
-          </p>
+        </div>
+
+        <div className="settings-field">
+          <label>Google Account Email</label>
+          <input
+            type="email"
+            className="settings-input"
+            placeholder="you@gmail.com"
+            value={settings.loginHint || ""}
+            onChange={(e) => updateSettings({ loginHint: e.target.value || undefined })}
+          />
+          <p className="settings-hint">Optional. Pre-selects this account on Google's sign-in page.</p>
         </div>
 
         <div className="settings-field">
           <label>Scopes</label>
           <textarea
             className="settings-input"
-            rows={3}
-            value={scopesToText(settings.scopes)}
+            rows={4}
+            value={effectiveScopes.join(" ")}
             onChange={(e) => updateSettings({ scopes: textToScopes(e.target.value) })}
           />
           <p className="settings-hint">Space-separated scopes used during OAuth.</p>
@@ -416,14 +604,10 @@ export function GoogleWorkspaceSettings() {
           <input
             type="password"
             className="settings-input"
-            placeholder="Google OAuth access token"
+            placeholder="Filled automatically after OAuth"
             value={settings.accessToken || ""}
             onChange={(e) => updateSettings({ accessToken: e.target.value || undefined })}
           />
-          <p className="settings-hint">
-            Filled automatically after clicking <strong>Connect</strong>. You do not need to enter
-            this manually.
-          </p>
         </div>
 
         <div className="settings-field">
@@ -431,14 +615,10 @@ export function GoogleWorkspaceSettings() {
           <input
             type="password"
             className="settings-input"
-            placeholder="Google OAuth refresh token"
+            placeholder="Filled automatically after OAuth"
             value={settings.refreshToken || ""}
             onChange={(e) => updateSettings({ refreshToken: e.target.value || undefined })}
           />
-          <p className="settings-hint">
-            Filled automatically after connecting. Used to silently renew the access token so you
-            stay connected without re-authorizing.
-          </p>
         </div>
 
         <div className="settings-field">
@@ -452,7 +632,6 @@ export function GoogleWorkspaceSettings() {
               updateSettings({ tokenExpiresAt: Number(e.target.value) || undefined })
             }
           />
-          <p className="settings-hint">Used for auto-refresh; set automatically after OAuth.</p>
         </div>
 
         <div className="settings-field">
@@ -489,29 +668,25 @@ export function GoogleWorkspaceSettings() {
             )}
           </div>
         )}
-      </div>
+      </details>
 
       <div className="settings-section">
         <h4>Quick Usage</h4>
-        <pre className="settings-info-box">{`// Search Drive files
-google_drive_action({
-  action: "list_files",
-  query: "modifiedTime > '2026-02-01T00:00:00Z'",
-  page_size: 10
+        <pre className="settings-info-box">{`// Find the latest received Gmail message
+gmail_search_emails({
+  query: "in:inbox -in:trash",
+  label_ids: ["INBOX"],
+  max_results: 1
 });
 
-// Search Gmail
-gmail_action({
-  action: "list_messages",
-  query: "from:me newer_than:7d"
+// Read a shortlisted message
+gmail_batch_read_email({
+  message_ids: ["<message id>"]
 });
 
-// List upcoming calendar events
-calendar_action({
-  action: "list_events",
-  time_min: "2026-02-05T00:00:00Z",
-  max_results: 10
-});`}</pre>
+// Full Workspace mode also enables:
+google_drive_action({ action: "list_files", page_size: 10 });
+calendar_action({ action: "list_events", max_results: 10 });`}</pre>
       </div>
     </div>
   );

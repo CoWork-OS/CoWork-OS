@@ -2,14 +2,17 @@ import http from "http";
 import { randomBytes, createHash } from "crypto";
 import { URL } from "url";
 import {
-  getMissingGoogleWorkspaceScopes,
-  mergeGoogleWorkspaceScopes,
+  getMissingGoogleScopesForMode,
+  inferGoogleWorkspaceConnectionMode,
+  mergeGoogleScopesForMode,
+  type GoogleWorkspaceConnectionMode,
 } from "../../shared/google-workspace";
 
 export interface GoogleWorkspaceOAuthRequest {
-  clientId: string;
+  clientId?: string;
   clientSecret?: string;
   scopes?: string[];
+  connectionMode?: GoogleWorkspaceConnectionMode;
   /** Email hint to pre-select the correct Google account in the browser */
   loginHint?: string;
 }
@@ -20,12 +23,14 @@ export interface GoogleWorkspaceOAuthResult {
   expiresIn?: number;
   tokenType?: string;
   scopes?: string[];
+  email?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 2 * 60 * 1000;
 const OAUTH_CALLBACK_PORT = 18766;
 const GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GMAIL_PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
 
 function getElectronShell(): Any | null {
   try {
@@ -77,6 +82,21 @@ function parseScopeList(scope?: string): string[] | undefined {
     .split(/\s+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+async function fetchOAuthAccountEmail(accessToken: string): Promise<string | undefined> {
+  try {
+    const response = await fetch(GMAIL_PROFILE_URL, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) return undefined;
+    const rawText = typeof response.text === "function" ? await response.text() : "";
+    const data = rawText ? parseJsonSafe(rawText) : undefined;
+    return typeof data?.emailAddress === "string" ? data.emailAddress : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function startOAuthCallbackServer(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<{
@@ -202,8 +222,10 @@ export async function startGoogleWorkspaceOAuthGetLink(
   if (!request.clientId) {
     throw new Error("Google Workspace OAuth requires a client ID");
   }
+  const clientId = request.clientId;
 
-  const scopes = mergeGoogleWorkspaceScopes(request.scopes);
+  const mode = inferGoogleWorkspaceConnectionMode(request.connectionMode, request.scopes);
+  const scopes = mergeGoogleScopesForMode(request.scopes, mode);
 
   const { redirectUri, waitForCode, state } = await startOAuthCallbackServer();
   const codeVerifier = createCodeVerifier();
@@ -211,7 +233,7 @@ export async function startGoogleWorkspaceOAuthGetLink(
 
   const authUrl = new URL(GOOGLE_OAUTH_AUTHORIZE_URL);
   authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("client_id", request.clientId);
+  authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
   authUrl.searchParams.set("scope", scopes.join(" "));
   authUrl.searchParams.set("state", state);
@@ -230,7 +252,7 @@ export async function startGoogleWorkspaceOAuthGetLink(
       const params = new URLSearchParams({
         grant_type: "authorization_code",
         code,
-        client_id: request.clientId,
+        client_id: clientId,
         redirect_uri: redirectUri,
         code_verifier: codeVerifier,
       });
@@ -262,21 +284,23 @@ export async function startGoogleWorkspaceOAuthGetLink(
         typeof tokenData?.expires_in === "number" ? tokenData.expires_in : undefined;
       const scopesGranted = parseScopeList(tokenData?.scope);
       const effectiveScopes = scopesGranted || scopes;
-      const missingScopes = getMissingGoogleWorkspaceScopes(effectiveScopes);
+      const missingScopes = getMissingGoogleScopesForMode(effectiveScopes, mode);
       if (missingScopes.length > 0) {
         onError(
           new Error(
-            `Google Workspace OAuth did not grant required scopes: ${missingScopes.join(", ")}`,
+            `${mode === "workspace" ? "Google Workspace" : "Gmail"} OAuth did not grant required scopes: ${missingScopes.join(", ")}`,
           ),
         );
         return;
       }
+      const email = await fetchOAuthAccountEmail(accessToken);
       onComplete({
         accessToken,
         refreshToken: tokenData?.refresh_token,
         expiresIn,
         tokenType: tokenData?.token_type,
         scopes: effectiveScopes,
+        email,
       });
     })
     .catch((err: Error) => onError(err))
@@ -293,8 +317,10 @@ export async function startGoogleWorkspaceOAuth(
   if (!request.clientId) {
     throw new Error("Google Workspace OAuth requires a client ID");
   }
+  const clientId = request.clientId;
 
-  const scopes = mergeGoogleWorkspaceScopes(request.scopes);
+  const mode = inferGoogleWorkspaceConnectionMode(request.connectionMode, request.scopes);
+  const scopes = mergeGoogleScopesForMode(request.scopes, mode);
 
   const { redirectUri, waitForCode, state } = await startOAuthCallbackServer();
   const codeVerifier = createCodeVerifier();
@@ -302,7 +328,7 @@ export async function startGoogleWorkspaceOAuth(
 
   const authUrl = new URL(GOOGLE_OAUTH_AUTHORIZE_URL);
   authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("client_id", request.clientId);
+  authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
   authUrl.searchParams.set("scope", scopes.join(" "));
   authUrl.searchParams.set("state", state);
@@ -321,7 +347,7 @@ export async function startGoogleWorkspaceOAuth(
   const params = new URLSearchParams({
     grant_type: "authorization_code",
     code,
-    client_id: request.clientId,
+    client_id: clientId,
     redirect_uri: redirectUri,
     code_verifier: codeVerifier,
   });
@@ -356,12 +382,14 @@ export async function startGoogleWorkspaceOAuth(
   const expiresIn = typeof tokenData?.expires_in === "number" ? tokenData.expires_in : undefined;
   const scopesGranted = parseScopeList(tokenData?.scope);
   const effectiveScopes = scopesGranted || scopes;
-  const missingScopes = getMissingGoogleWorkspaceScopes(effectiveScopes);
+  const missingScopes = getMissingGoogleScopesForMode(effectiveScopes, mode);
   if (missingScopes.length > 0) {
     throw new Error(
-      `Google Workspace OAuth did not grant required scopes: ${missingScopes.join(", ")}`,
+      `${mode === "workspace" ? "Google Workspace" : "Gmail"} OAuth did not grant required scopes: ${missingScopes.join(", ")}`,
     );
   }
+
+  const email = await fetchOAuthAccountEmail(accessToken);
 
   return {
     accessToken,
@@ -369,5 +397,6 @@ export async function startGoogleWorkspaceOAuth(
     expiresIn,
     tokenType: tokenData?.token_type,
     scopes: effectiveScopes,
+    email,
   };
 }

@@ -13,13 +13,15 @@ describe("TaskExecutor entrypoint guards", () => {
     executor.lifecycleMutex = { runExclusive };
     executor.executeUnlocked = vi.fn(async () => undefined);
     executor.sendMessageUnlocked = vi.fn(async () => undefined);
+    executor.task = { id: "test-task" };
+    executor.daemon = { getTask: vi.fn(() => undefined) };
 
     await executor.execute();
     await executor.sendMessage("hi");
 
     expect(runExclusive).toHaveBeenCalledTimes(2);
     expect(executor.executeUnlocked).toHaveBeenCalledTimes(1);
-    expect(executor.sendMessageUnlocked).toHaveBeenCalledWith("hi", undefined, undefined);
+    expect(executor.sendMessageUnlocked).toHaveBeenCalledWith("hi", undefined, undefined, undefined);
   });
 
   it("routes executeStep through the unified branch", async () => {

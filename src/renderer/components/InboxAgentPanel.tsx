@@ -653,6 +653,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [askBusy, setAskBusy] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(ALL_MAILBOX_ACCOUNTS_FILTER);
   const [googleWorkspaceEnabled, setGoogleWorkspaceEnabled] = useState(false);
+  const [googleWorkspaceConfigured, setGoogleWorkspaceConfigured] = useState(false);
   const [googleWorkspaceScopes, setGoogleWorkspaceScopes] = useState<string[] | null>(null);
   const [editingCommitmentId, setEditingCommitmentId] = useState<string | null>(null);
   const [editingCommitmentTitle, setEditingCommitmentTitle] = useState("");
@@ -916,10 +917,12 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     !gmailScopesKnown || hasScope(googleWorkspaceScopes ?? undefined, GOOGLE_SCOPE_GMAIL_MODIFY);
   const gmailCleanupDisabledReason = !googleWorkspaceEnabled
     ? "Enable Google Workspace in Settings > Integrations > Google Workspace to use Gmail cleanup actions."
+    : !googleWorkspaceConfigured
+      ? "Reconnect Google Workspace in Settings > Integrations > Google Workspace to use Gmail cleanup actions."
     : gmailScopesKnown && !gmailModifyScopeGranted
       ? "Reconnect Google Workspace with the Gmail modify scope to archive, trash, or mark Gmail threads."
       : null;
-  const gmailCleanupActionsEnabled = googleWorkspaceEnabled && gmailModifyScopeGranted;
+  const gmailCleanupActionsEnabled = googleWorkspaceEnabled && googleWorkspaceConfigured && gmailModifyScopeGranted;
   const selectedThreadNeedsGmailCleanupAttention =
     selectedThread?.provider === "gmail" && Boolean(gmailCleanupDisabledReason);
   const selectedBulkThreads = useMemo(() => {
@@ -1046,6 +1049,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       try {
         const googleSettings = await window.electronAPI.getGoogleWorkspaceSettings().catch(() => null);
         setGoogleWorkspaceEnabled(Boolean(googleSettings?.enabled));
+        setGoogleWorkspaceConfigured(Boolean(googleSettings?.accessToken || googleSettings?.refreshToken));
         setGoogleWorkspaceScopes(googleSettings?.scopes ?? null);
         await loadMissionControlOptions();
         await loadStatus();
@@ -4979,7 +4983,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
               }
               icon={<Calendar size={13} />}
               label="Schedule"
-              disabled={busy || !selectedThread || !googleWorkspaceEnabled}
+              disabled={busy || !selectedThread || !googleWorkspaceEnabled || !googleWorkspaceConfigured}
             />
             <ActionBtn
               onClick={() => void refreshThreadIntel()}

@@ -46,6 +46,65 @@ function extractScopePairs(
   return pairs.length >= 2 ? pairs : null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readString(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readParamString(details: Record<string, unknown>, key: string): string | null {
+  return readString(details, key) ?? readString(asRecord(details.params), key);
+}
+
+function toolNameForDetails(details: Record<string, unknown>): string | null {
+  return readString(details, "tool");
+}
+
+function formatApprovalTypeLabel(type: ApprovalType, toolName?: string | null): string {
+  switch (toolName) {
+    case "open_application":
+    case "open_url":
+    case "open_path":
+    case "show_in_folder":
+      return "system action";
+    default:
+      return type.replace(/_/g, " ");
+  }
+}
+
+function titleForApproval(type: ApprovalType, toolName?: string | null): string {
+  switch (toolName) {
+    case "open_application":
+      return "Open application";
+    case "open_url":
+      return "Open URL";
+    case "open_path":
+      return "Open path";
+    case "show_in_folder":
+      return "Show in Finder";
+    default:
+      return titleForType(type);
+  }
+}
+
+function descriptionForApproval(
+  description: string,
+  toolName?: string | null,
+  appName?: string | null,
+): string {
+  if (toolName === "open_application" && /^Approve tool call:\s*open_application\b/i.test(description)) {
+    return appName
+      ? `Allow CoWork OS to open ${appName}?`
+      : "Allow CoWork OS to open an application?";
+  }
+  return description;
+}
+
 function titleForType(type: ApprovalType): string {
   switch (type) {
     case "run_command":
@@ -87,10 +146,6 @@ function iconForType(type: ApprovalType): string {
   }
 }
 
-function formatApprovalTypeLabel(type: ApprovalType): string {
-  return type.replace(/_/g, " ");
-}
-
 interface GenericApprovalDialogProps {
   approval: ApprovalRequest;
   onRespond: (action: ApprovalResponseAction) => void;
@@ -107,6 +162,7 @@ export function GenericApprovalDialog({
     approval.details && typeof approval.details === "object" && !Array.isArray(approval.details)
       ? (approval.details as Record<string, unknown>)
       : {};
+  const toolName = toolNameForDetails(details);
   const command = typeof details.command === "string" ? details.command : null;
   const commandPreview = command ? buildApprovalCommandPreview(command) : null;
   const cwd = typeof details.cwd === "string" ? details.cwd : null;
@@ -118,10 +174,34 @@ export function GenericApprovalDialog({
     details.permissionPrompt && typeof details.permissionPrompt === "object"
       ? (details.permissionPrompt as PermissionPromptDetails)
       : null;
+  const appName = readParamString(details, "appName");
+  const description = descriptionForApproval(approval.description, toolName, appName);
 
   const rows: { label: string; value: ReactNode }[] = [];
 
-  rows.push({ label: "Category", value: formatApprovalTypeLabel(approval.type) });
+  rows.push({ label: "Category", value: formatApprovalTypeLabel(approval.type, toolName) });
+
+  if (toolName) {
+    rows.push({
+      label: "Tool",
+      value: <code className="session-approval-code">{toolName}</code>,
+    });
+  }
+
+  if (toolName === "open_application") {
+    if (appName) {
+      rows.push({
+        label: "Application",
+        value: <code className="session-approval-code">{appName}</code>,
+      });
+    }
+    rows.push({
+      label: "What happens",
+      value: appName
+        ? `CoWork OS launches ${appName} on this computer. It may open or focus a window outside the workspace.`
+        : "CoWork OS launches an application on this computer. It may open or focus a window outside the workspace.",
+    });
+  }
 
   if (command) {
     rows.push({
@@ -204,8 +284,8 @@ export function GenericApprovalDialog({
         <div className="session-approval-icon-wrap" aria-hidden="true">
           <span className="session-approval-icon">{iconForType(approval.type)}</span>
         </div>
-        <h3 className="session-approval-title">{titleForType(approval.type)}</h3>
-        <p className="session-approval-prompt">{approval.description}</p>
+        <h3 className="session-approval-title">{titleForApproval(approval.type, toolName)}</h3>
+        <p className="session-approval-prompt">{description}</p>
 
         {rows.length > 0 && (
           <dl className="session-approval-details">

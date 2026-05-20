@@ -23,7 +23,7 @@ Use cases:
 - Inbox-aware briefing and Heartbeat follow-up
 - Chief-of-staff briefing (morning executive brief)
 - Dev task queue management (agent-ready backlog execution)
-- Turn a successful one-off task into a recurring scheduled check from the task menu
+- Turn a successful one-off task into a recurring same-thread follow-up from the task menu
 - Founder-directed autonomous company operations ("zero-human company" loop)
 - Everything Workbench for generated docs, sheets, decks, web pages, PDFs, and previews
 - Smart-home orchestration via integrations
@@ -31,7 +31,7 @@ Use cases:
 
 Cowork OS supports these via:
 - Channels: Slack, iMessage, WhatsApp, Telegram, Email, etc.
-- Scheduling: `/schedule ...`, `schedule_task`, and task view `... > Add automation...`
+- Scheduling: `/schedule ...`, `/schedule here ...`, `schedule_task`, and task view `... > Add automation...`
 - Inbox + briefing commands: `/inbox`, `/brief [morning|today|tomorrow|week]`
 - Message box shortcuts: one `/` picker for app commands such as `/schedule`, `/clear`, `/plan`, `/cost`, and `/multitask`, plus skill-backed workflow aliases from plugin packs
 - Slash skill workflows: `/simplify [objective] ...` for quality passes, `/batch <objective> ...` for parallelizable migration/transform workflows, `/llm-wiki <objective> ...` for persistent research vaults, and CoWork Shortcuts aliases such as `/strategy`, `/batch-rename`, `/gmail-summary-drive`, `/multi-source-report`, and `/end-of-day-log`
@@ -43,7 +43,7 @@ Cowork OS supports these via:
 For the full founder-operated company recipe, see [Zero-Human Company Operations](zero-human-company.md).
 For the unified artifact workflow, see [Everything Workbench](everything-workbench.md).
 For live website testing inside the app, see [Browser Workbench](browser-workbench.md).
-For turning existing tasks into scheduled checks, see [Task Automations](task-automations.md).
+For turning existing tasks into recurring thread follow-ups or standalone scheduled checks, see [Task Automations](task-automations.md).
 For message-box app commands and skill-backed workflow shortcuts, see [Message Box Shortcuts](message-box-shortcuts.md).
 
 ## Test Prompts (Copy/Paste)
@@ -79,7 +79,7 @@ Propose follow-ups, but do not take external actions unless I confirm.
 
 Scheduled version (daily 8am):
 ```
-/schedule daily 8am Summarize new newsletter items from the last 24h in this chat: {{chat_messages}}. Output a digest with links and 1-2 sentence summaries.
+/schedule here daily 8am Summarize new newsletter items from the last 24h in this chat: {{chat_messages}}. Output a digest with links and 1-2 sentence summaries.
 ```
 
 ### 3) Monitor Things (Transaction Scan / Fraud Triage)

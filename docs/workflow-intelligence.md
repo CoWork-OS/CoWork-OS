@@ -59,7 +59,7 @@ Every user-facing suggestion should carry enough context to be trusted or reject
 - **Suggested action**: the prompt/action CoWork can start from
 - **Controls**: act, edit, snooze, dismiss
 
-The welcome screen shows these as **Next actions** under the message box. The same suggestion objects can also appear in the automation inbox and Suggestions panel.
+The welcome screen can show these as **Next actions** under the message box when the optional home widget is enabled. The same suggestion objects can also appear in the automation inbox and Suggestions panel.
 
 ## Learning From Response
 
@@ -134,7 +134,7 @@ This keeps CoWork useful before it becomes autonomous and avoids surprising task
 
 Workflow Intelligence appears in:
 
-- **Welcome screen**: `Next actions` under the message box
+- **Welcome screen**: optional `Next actions` under the message box, enabled from **Settings > Appearance > Home widgets > Show next actions**
 - **Home dashboard**: automation inbox items and recent automation activity
 - **Settings > Automations > Workflow Intelligence**: policy, target, run, and diagnostic controls
 - **Suggestions panel**: review, act, snooze, and dismiss active suggestions

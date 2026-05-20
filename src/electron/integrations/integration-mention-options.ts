@@ -23,6 +23,11 @@ import {
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { MCPSettingsManager } from "../mcp/settings";
 import type { MCPServerStatus, MCPSettings, MCPTool } from "../mcp/types";
+import {
+  hasGoogleWorkspaceScopeCoverage,
+  hasGoogleWorkspaceTokens,
+  inferGoogleWorkspaceConnectionMode,
+} from "../../shared/google-workspace";
 
 type BuiltinIntegrationSettings = {
   notion?: NotionSettingsData;
@@ -142,8 +147,16 @@ const GOOGLE_WORKSPACE_SPLIT_OPTIONS: IntegrationMentionOption[] = [
     iconKey: "gmail",
     description: "Search, read, draft, and send Gmail messages.",
     aliases: ["email", "mail", "inbox", "google mail"],
-    tools: ["gmail_action"],
-    promptHint: "Use gmail_action for Gmail search, reading, drafting, and sending.",
+    tools: [
+      "gmail_search_emails",
+      "gmail_batch_read_email",
+      "gmail_read_email_thread",
+      "gmail_create_draft",
+      "gmail_send_email",
+      "gmail_action",
+    ],
+    promptHint:
+      "Use gmail_search_emails first for Gmail search/listing, then gmail_batch_read_email or gmail_read_email_thread when full message or thread context is needed. Use gmail_create_draft by default for replies; use gmail_send_email only when the user explicitly asks to send.",
     status: "configured",
   },
   {
@@ -171,6 +184,12 @@ const GOOGLE_WORKSPACE_SPLIT_OPTIONS: IntegrationMentionOption[] = [
     status: "configured",
   },
 ];
+const GMAIL_OPTION = GOOGLE_WORKSPACE_SPLIT_OPTIONS.find(
+  (option) => option.id === "builtin:gmail",
+)!;
+const GOOGLE_WORKSPACE_SERVICE_OPTIONS = GOOGLE_WORKSPACE_SPLIT_OPTIONS.filter(
+  (option) => option.id !== "builtin:gmail",
+);
 
 const BROWSER_USE_OPTION: IntegrationMentionOption = {
   id: "builtin:browser-use",
@@ -329,12 +348,19 @@ function buildBuiltinOptions(settings: BuiltinIntegrationSettings): IntegrationM
   const options: IntegrationMentionOption[] = [BROWSER_USE_OPTION];
 
   const google = settings.googleWorkspace;
-  if (google?.enabled && (hasText(google.accessToken) || hasText(google.refreshToken))) {
-    options.push(...GOOGLE_WORKSPACE_SPLIT_OPTIONS);
+  const googleConnected = Boolean(google?.enabled && hasGoogleWorkspaceTokens(google));
+  if (googleConnected) {
+    const mode = inferGoogleWorkspaceConnectionMode(google?.connectionMode, google?.scopes);
+    if (hasGoogleWorkspaceScopeCoverage(google?.scopes, "gmail")) {
+      options.push(GMAIL_OPTION);
+    }
+    if (mode === "workspace" && hasGoogleWorkspaceScopeCoverage(google?.scopes, "workspace")) {
+      options.push(...GOOGLE_WORKSPACE_SERVICE_OPTIONS);
+    }
   }
 
   const inboxAgentAvailable =
-    Boolean(google?.enabled && (hasText(google.accessToken) || hasText(google.refreshToken))) ||
+    googleConnected ||
     Boolean(
       settings.agentMail?.enabled &&
         hasText((settings.agentMail as AgentMailSettingsData | undefined)?.apiKey),

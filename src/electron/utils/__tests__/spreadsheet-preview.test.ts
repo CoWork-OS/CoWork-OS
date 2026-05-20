@@ -97,6 +97,22 @@ describe("spreadsheet preview extraction", () => {
     expect(savedSheet?.getCell("B3").value).toMatchObject({ formula: "UPPER(A3)" });
   });
 
+  it("marks xlsx previews as truncated when source bounds exceed the preview window", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-xlsx-large-preview-"));
+    const outPath = path.join(tmpDir, "large.xlsx");
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Large");
+    sheet.getCell("A1").value = "Header";
+    sheet.getCell("A2001").value = "Outside preview";
+    await workbook.xlsx.writeFile(outPath);
+
+    const preview = await buildSpreadsheetPreviewFromFile(outPath);
+
+    expect(preview.sheets[0].rows).toHaveLength(2000);
+    expect(preview.sheets[0].sourceRowCount).toBe(2001);
+    expect(preview.sheets[0].truncated).toBe(true);
+  });
+
   it("extracts and writes CSV previews with quoted cells", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-csv-preview-"));
     const outPath = path.join(tmpDir, "people.csv");

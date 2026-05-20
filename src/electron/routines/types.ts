@@ -264,6 +264,11 @@ export interface RoutineServiceDeps {
     agentConfig?: AgentConfig;
     source?: "manual" | "cron" | "hook" | "api";
   }) => Promise<{ id: string }>;
+  sendTaskMessage?: (params: {
+    taskId: string;
+    message: string;
+    agentConfig?: AgentConfig;
+  }) => Promise<{ queued: boolean }>;
   onHooksConfigChanged?: (settings: HooksConfig) => void;
   onTriggerMutation?: () => Promise<void> | void;
   now?: () => number;

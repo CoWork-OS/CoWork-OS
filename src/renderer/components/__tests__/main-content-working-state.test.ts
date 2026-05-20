@@ -32,6 +32,7 @@ import {
   shouldShowBootstrapProgressRow,
   shouldScheduleAutoScrollWrite,
   TaskAutomationModal,
+  TaskSessionLineageFooter,
 } from "../MainContent";
 import { isTaskActivelyWorking } from "../../utils/task-working-state";
 import {
@@ -41,7 +42,7 @@ import {
   TASK_AUTOMATION_TEMPLATES,
 } from "../task-automation-utils";
 
-const mainContentPath = fileURLToPath(new URL("../MainContent.tsx", import.meta.url));
+const mainContentPath = fileURLToPath(new URL("../MainContent/MainContent.tsx", import.meta.url));
 const appPath = fileURLToPath(new URL("../../App.tsx", import.meta.url));
 
 afterEach(() => {
@@ -317,6 +318,109 @@ describe("task automation creation", () => {
     });
   });
 
+  it("builds thread follow-up automation payloads when requested", () => {
+    const task = makeTask({
+      id: "task-123",
+      title: "Review recent failures",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+    });
+    const schedule = buildTaskAutomationSchedule("hourly", "")!;
+
+    expect(
+      buildTaskRoutineCreate({
+        task,
+        workspace: makeWorkspace(),
+        name: "Review recent failures",
+        prompt: "Check again in this thread",
+        runMode: "chat",
+        targetMode: "thread_follow_up",
+        triggerPreset: "hourly",
+        schedule,
+        deeplink: "cowork://tasks/task-123",
+      }),
+    ).toMatchObject({
+      contextBindings: {
+        metadata: {
+          automationRunMode: "thread_follow_up",
+          runMode: "thread_follow_up",
+          targetTaskId: "task-123",
+          threadAutomation: "true",
+        },
+      },
+    });
+
+    expect(
+      buildTaskAutomationCronJobCreate({
+        task,
+        workspace: makeWorkspace(),
+        name: "Review recent failures",
+        prompt: "Check again in this thread",
+        runMode: "chat",
+        targetMode: "thread_follow_up",
+        schedule,
+        deeplink: "cowork://tasks/task-123",
+      }),
+    ).toMatchObject({
+      runMode: "thread_follow_up",
+      targetTaskId: "task-123",
+      threadAutomation: {
+        sourceTaskId: "task-123",
+        sourceTaskTitle: "Review recent failures",
+        sourceLink: "cowork://tasks/task-123",
+        wakeObjective: "Check again in this thread",
+      },
+    });
+  });
+
+  it("forces worktree automations to create a new task even when thread follow-up is requested", () => {
+    const task = makeTask({
+      id: "task-123",
+      title: "Review recent failures",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+    });
+    const schedule = buildTaskAutomationSchedule("hourly", "")!;
+
+    expect(
+      buildTaskRoutineCreate({
+        task,
+        workspace: makeWorkspace(),
+        name: "Review recent failures",
+        prompt: "Run in a worktree",
+        runMode: "worktree",
+        targetMode: "thread_follow_up",
+        triggerPreset: "hourly",
+        schedule,
+        deeplink: "cowork://tasks/task-123",
+      }),
+    ).toMatchObject({
+      executionTarget: { kind: "worktree" },
+      contextBindings: {
+        metadata: {
+          automationRunMode: "new_task",
+        },
+      },
+    });
+
+    expect(
+      buildTaskAutomationCronJobCreate({
+        task,
+        workspace: makeWorkspace(),
+        name: "Review recent failures",
+        prompt: "Run in a worktree",
+        runMode: "worktree",
+        targetMode: "thread_follow_up",
+        schedule,
+        deeplink: "cowork://tasks/task-123",
+      }),
+    ).toMatchObject({
+      runMode: "new_task",
+      targetTaskId: undefined,
+      threadAutomation: undefined,
+    });
+  });
+
   it("enables shell access for Local run mode", () => {
     const task = makeTask({ workspaceId: "workspace-1" });
     const schedule = buildTaskAutomationSchedule("hourly", "")!;
@@ -341,6 +445,31 @@ describe("task automation creation", () => {
       schedulePreset: "hourly",
     });
     expect(template?.prompt).toContain("CI failures");
+  });
+});
+
+describe("TaskSessionLineageFooter", () => {
+  it("renders a source conversation link for forked tasks", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(TaskSessionLineageFooter, {
+        task: makeTask({ branchFromTaskId: "source-task" }),
+        onSelectTask: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Forked from conversation");
+    expect(html).toContain("Open source conversation");
+  });
+
+  it("does not render for non-forked tasks", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(TaskSessionLineageFooter, {
+        task: makeTask(),
+        onSelectTask: vi.fn(),
+      }),
+    );
+
+    expect(html).toBe("");
   });
 });
 
@@ -693,6 +822,22 @@ describe("isTaskActivelyWorking", () => {
     ];
 
     expect(isTaskActivelyWorking(task, events, false, 2_500)).toBe(true);
+  });
+
+  it("keeps pending fork drafts idle even when copied history contains recent active events", () => {
+    const task = makeTask({
+      status: "pending",
+      branchFromTaskId: "source-task",
+    });
+    const events = [
+      makeEvent("copied-step-progress", 2_000, "timeline_step_updated", {
+        legacyType: "progress_update",
+        message: "Copied work from the source session",
+        forkedFromTaskId: "source-task",
+      }),
+    ];
+
+    expect(isTaskActivelyWorking(task, events, false, 2_500)).toBe(false);
   });
 
   it("marks executing tasks idle when the latest relevant event is a completed follow-up", () => {

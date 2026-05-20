@@ -26,6 +26,7 @@ import type {
   CanvasSnapshot,
   CanvasCheckpoint,
 } from "../../shared/types";
+import { IPC_CHANNELS } from "../../shared/types";
 import { loadCanvasStore, saveCanvasStore } from "./canvas-store";
 import { getUserDataDir } from "../utils/user-data-dir";
 
@@ -865,7 +866,7 @@ export class CanvasManager {
 
     // Broadcast to main window
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("canvas:event", event);
+      this.mainWindow.webContents.send(IPC_CHANNELS.CANVAS_EVENT, event);
     }
   }
 

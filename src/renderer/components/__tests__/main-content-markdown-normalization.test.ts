@@ -1,4 +1,5 @@
-import type { ReactElement } from "react";
+import { createElement, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   autolinkBareDomains,
@@ -12,10 +13,12 @@ import {
 import {
   createQuotedAssistantMessage,
   isXComLink,
+  normalizeQuotedAssistantMarkdownPreview,
   normalizeSourcesSection,
   resolveSafeCollapsedBubbleHeight,
   shouldCreateFreshTaskForSend,
 } from "../MainContent";
+import { MarkdownRenderer } from "../MarkdownRenderer";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -187,5 +190,57 @@ describe("MainContent markdown normalization helpers", () => {
       message: "**Result:** done",
     });
     expect(createQuotedAssistantMessage("   ")).toBeNull();
+  });
+
+  it("preserves quote preview line breaks so markdown tables render", () => {
+    const preview = normalizeQuotedAssistantMarkdownPreview(
+      [
+        "For this check, the result is:",
+        "| Signal | Status |",
+        "| --- | --- |",
+        "| **Repetitive promotional blasts** | Not assessable |",
+      ].join("\n"),
+      420,
+    );
+    const markup = renderToStaticMarkup(
+      createElement(
+        "div",
+        { className: "markdown-content" },
+        createElement(
+          MarkdownRenderer,
+          { components: buildMarkdownComponents({}), children: preview },
+        ),
+      ),
+    );
+
+    expect(preview).toContain("\n| Signal | Status |");
+    expect(markup).toContain("<table");
+    expect(markup).toContain("<strong>Repetitive promotional blasts</strong>");
+    expect(markup).not.toContain("| --- | --- |");
+  });
+
+  it("does not truncate quoted markdown before rendering by default", () => {
+    const preview = normalizeQuotedAssistantMarkdownPreview(
+      [
+        "For this check, the result is:",
+        "| Signal | Status |",
+        "| --- | --- |",
+        "| Repetitive promotional blasts | Not assessable |",
+        "| Clickbait or fake urgency | Not assessable |",
+      ].join("\n"),
+    );
+    const markup = renderToStaticMarkup(
+      createElement(
+        "div",
+        { className: "markdown-content" },
+        createElement(
+          MarkdownRenderer,
+          { components: buildMarkdownComponents({}), children: preview },
+        ),
+      ),
+    );
+
+    expect(markup).toContain("<table");
+    expect(markup).toContain("Clickbait or fake urgency");
   });
 });

@@ -3,7 +3,7 @@ import type { CompletionContract } from "./executor-helpers";
 import { extractArtifactExtensionsFromText } from "./step-contract";
 
 const ARTIFACT_CREATION_VERB_REGEX =
-  /\b(create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize)\b/;
+  /\b(create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize|combine|merge|join|stitch|concatenate|concat|transcode|remux)\b/;
 const STRATEGY_CONTEXT_BLOCK_REGEX =
   /\[AGENT_STRATEGY_CONTEXT_V1\][\s\S]*?\[\/AGENT_STRATEGY_CONTEXT_V1\]/g;
 const ADDITIONAL_CONTEXT_HEADER = "ADDITIONAL CONTEXT:";
@@ -11,6 +11,8 @@ const WORKFLOW_DECOMPOSITION_HEADER =
   "WORKFLOW DECOMPOSITION (execute these phases sequentially, passing output from each phase to the next):";
 const USER_UPDATE_HEADER = "USER UPDATE:";
 const SYNTHETIC_SECTION_LOOKAHEAD = `(?:${ADDITIONAL_CONTEXT_HEADER}|${WORKFLOW_DECOMPOSITION_HEADER}|${USER_UPDATE_HEADER})`;
+const COMPLETED_REVIEW_STEP_REGEX =
+  /\b(review(?:ed|ing)?|evaluat(?:e|ed|ing|ion)|assess(?:ed|ing|ment)?|verif(?:y|ied|ying|ication)|check(?:ed|ing)?|read(?:ing)?|audit(?:ed|ing)?|analy[sz](?:e|ed|ing|is)|scan(?:ned|ning)?|summari[sz](?:e|ed|ing)|triag(?:e|ed|ing))\b/i;
 
 export function normalizePromptForContracts(taskPrompt: string): string {
   const raw = String(taskPrompt || "");
@@ -49,10 +51,18 @@ export function promptRequestsArtifactOutput(taskTitle: string, taskPrompt: stri
   const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
   const createVerb = ARTIFACT_CREATION_VERB_REGEX.test(prompt);
   const artifactNoun =
-    /\b(file|document|report|pdf|docx|markdown|md|spreadsheet|csv|xlsx|json|txt|pptx|slide|slides)\b/.test(
+    /\b(file|document|report|pdf|docx|markdown|md|spreadsheet|csv|xlsx|json|txt|pptx|slide|slides|video|videos|clip|clips|movie|footage)\b/.test(
       prompt,
     );
   return (createVerb && artifactNoun) || promptRequestsPresentationArtifactOutput(taskTitle, taskPrompt);
+}
+
+function promptRequestsVideoArtifactOutput(taskTitle: string, taskPrompt: string): boolean {
+  const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
+  if (!prompt.trim()) return false;
+  const hasVideoNoun = /\b(video|videos|clip|clips|movie|footage)\b/.test(prompt);
+  if (!hasVideoNoun) return false;
+  return ARTIFACT_CREATION_VERB_REGEX.test(prompt);
 }
 
 export function promptRequestsPresentationArtifactOutput(
@@ -131,6 +141,9 @@ export function inferRequiredArtifactExtensions(taskTitle: string, taskPrompt: s
   const extensions = new Set<string>(extractArtifactExtensionsFromText(prompt));
   if (promptRequestsPresentationArtifactOutput(taskTitle, taskPrompt)) {
     extensions.add(".pptx");
+  }
+  if (promptRequestsVideoArtifactOutput(taskTitle, taskPrompt) && extensions.size === 0) {
+    extensions.add(".mp4");
   }
 
   return Array.from(extensions);
@@ -376,9 +389,7 @@ export function hasVerificationEvidence(opts: {
     (step) =>
       step.status === "completed" &&
       (isVerificationStepDescription(step.description || "") ||
-        /\b(review|evaluate|assess|verify|check|read|audit|analy[sz]e)\b/i.test(
-          step.description || "",
-        )),
+        COMPLETED_REVIEW_STEP_REGEX.test(step.description || "")),
   );
 
   const hasReviewBackedConclusion = responseHasVerificationSignal(opts.bestCandidate);

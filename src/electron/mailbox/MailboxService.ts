@@ -19,6 +19,7 @@ import { assertSafeLoomMailboxFolder } from "../utils/loom";
 import { refreshMicrosoftEmailAccessToken } from "../utils/microsoft-email-oauth";
 import { getSafeStorage, type SafeStorageLike } from "../utils/safe-storage";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { notifyDetectedIntegrationAuthIssue } from "../notifications/integration-auth";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { PlaybookService } from "../memory/PlaybookService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
@@ -586,8 +587,13 @@ function isMailboxConnectionError(error: unknown): boolean {
   return flattened.some((entry) => {
     const code = String((entry as Any)?.code || "");
     const message = String(entry.message || "");
+    if (isMailboxAuthConfigurationError(message)) return false;
     return MAILBOX_CONNECTION_ERROR_RE.test(code) || MAILBOX_CONNECTION_ERROR_RE.test(message);
   });
+}
+
+function isMailboxAuthConfigurationError(message: string): boolean {
+  return /\b(google workspace|oauth|token|refresh token|access token|authorization|authentication scope|insufficient authentication scopes|reconnect)\b/i.test(message);
 }
 
 function summarizeMailboxConnectionError(error: unknown): string {
@@ -627,6 +633,11 @@ function toMailboxActionError(
   error: unknown,
 ): Error {
   const originalMessage = error instanceof Error ? error.message : String(error);
+  if (isMailboxAuthConfigurationError(originalMessage)) {
+    return new Error(`Mailbox action ${action} needs mailbox authorization: ${originalMessage}`, {
+      cause: error,
+    });
+  }
   if (isMailboxConnectionError(error)) {
     return new Error(
       `Mailbox provider connection failed while applying ${action}. CoWork could not reach the ${provider} mail server (${summarizeMailboxConnectionError(error)}). Check your network/VPN/firewall and mailbox integration settings, then retry.`,
@@ -4443,6 +4454,7 @@ export class MailboxService {
               syncedMessages += result.syncedMessages;
             }
           } catch (error) {
+            void notifyDetectedIntegrationAuthIssue(error);
             if (isMailboxConnectionError(error)) {
               const label = this.noteGmailTransientSyncFailure(error);
               syncErrors.push({ message: label, transient: true });
@@ -4457,6 +4469,7 @@ export class MailboxService {
         }
       } else if (googleWorkspaceAuthIssue) {
         syncErrors.push({ message: googleWorkspaceAuthIssue.statusLabel, transient: true });
+        void notifyDetectedIntegrationAuthIssue(new Error(googleWorkspaceAuthIssue.logMessage));
       }
 
       if (this.agentMailEnabled()) {
@@ -4469,6 +4482,7 @@ export class MailboxService {
             syncedMessages += result.syncedMessages;
           }
         } catch (error) {
+          void notifyDetectedIntegrationAuthIssue(error);
           syncErrors.push({
             message: `AgentMail sync failed: ${error instanceof Error ? error.message : String(error)}`,
             transient: false,
@@ -4486,6 +4500,7 @@ export class MailboxService {
             syncedMessages += result.syncedMessages;
           }
         } catch (error) {
+          void notifyDetectedIntegrationAuthIssue(error);
           mailboxLogger.warn("Email channel sync failed", {
             message: error instanceof Error ? error.message : String(error),
             transient: isMailboxConnectionError(error),
@@ -6321,6 +6336,7 @@ export class MailboxService {
           throw new Error(`Unsupported mailbox action: ${input.type}`);
       }
     } catch (error) {
+      void notifyDetectedIntegrationAuthIssue(error);
       throw toMailboxActionError(input.type, thread.provider, error);
     }
 

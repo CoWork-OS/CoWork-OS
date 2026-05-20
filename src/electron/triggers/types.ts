@@ -58,6 +58,10 @@ export interface TriggerAction {
     workspaceId?: string;
     /** Optional per-task agent restrictions or routing hints */
     agentConfig?: AgentConfig;
+    /** Routine dispatch mode */
+    runMode?: "new_task" | "thread_follow_up";
+    /** Existing task to receive the message when runMode is thread_follow_up */
+    targetTaskId?: string;
   };
 }
 
@@ -103,6 +107,11 @@ export interface EventTriggerServiceDeps {
     workspaceId: string;
     agentConfig?: AgentConfig;
   }) => Promise<{ id: string }>;
+  sendTaskMessage?: (params: {
+    taskId: string;
+    message: string;
+    agentConfig?: AgentConfig;
+  }) => Promise<{ queued: boolean }>;
   deliverToChannel?: (params: {
     channelType: string;
     channelId: string;
@@ -110,6 +119,7 @@ export interface EventTriggerServiceDeps {
   }) => Promise<void>;
   wakeAgent?: (agentRoleId: string, prompt: string) => void;
   getDefaultWorkspaceId: () => string;
+  getActiveTaskCount?: () => number;
   log?: (...args: unknown[]) => void;
   onTriggerFired?: (payload: {
     trigger: EventTrigger;

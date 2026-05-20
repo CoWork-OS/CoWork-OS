@@ -4329,6 +4329,13 @@ ${skillDescriptions}`;
   async cleanup(): Promise<void> {
     await this.browserTools.cleanup();
     await this.qaTools.execute("qa_cleanup", {}).catch(() => {});
+
+    // Release any MCP server connections held by this executor to prevent process leaks
+    try {
+      await MCPClientManager.getInstance()?.releaseForExecutor(this.taskId);
+    } catch {
+      // Ignore — MCPClientManager may not be initialized or already shut down
+    }
   }
 
   private storeResolvedSkillInvocation(application: SkillApplication): string {

@@ -45,7 +45,7 @@ Core behavior:
 - keeps `index.md`, `log.md`, and `inbox.md` current
 - writes run artifacts under `artifacts/skills/<task>/llm-wiki/`
 - runs a deterministic analyzer to report vault topology and maintenance gaps
-- exposes the default vault in the GUI welcome screen as a browsable surface, not just a starter prompt
+- can expose the default vault in the GUI welcome screen as a browsable surface when the optional home widget is enabled
 
 ## Why it is first-class in CoWork
 
@@ -55,6 +55,7 @@ It is integrated into the same first-class surfaces as `/simplify` and `/batch`:
 
 - GUI prompts such as `Build a persistent Obsidian-friendly research vault for GRPO papers`
 - welcome screen and onboarding starter cards
+- optional welcome-screen vault browser, enabled from **Settings > Appearance > Home widgets > Show research vault**
 - desktop slash command handling
 - gateway/channel slash command handling
 - inline chaining such as `research this topic then run /llm-wiki`
@@ -175,9 +176,9 @@ This gives the vault a maintenance loop, not just an ingestion loop.
 
 ## GUI vault surface
 
-The desktop app now treats the default vault path as a visible part of the product.
+The desktop app can treat the default vault path as a visible part of the product when the optional home widget is enabled.
 
-When `research/wiki` exists in the active workspace, the welcome screen shows a vault panel with:
+When **Settings > Appearance > Home widgets > Show research vault** is enabled and `research/wiki` exists in the active workspace, the welcome screen shows a vault panel with:
 
 - core files such as `index.md`, `inbox.md`, `log.md`, and `SCHEMA.md`
 - recent durable notes
@@ -186,7 +187,7 @@ When `research/wiki` exists in the active workspace, the welcome screen shows a 
 - recent raw captures
 - quick GUI actions for ingest, query, audit, explore, briefing, and opening the vault index
 
-This makes the vault easier to inspect and showcase without dropping into slash syntax or opening the filesystem manually.
+When the home widget is enabled, the vault is easier to inspect and showcase without dropping into slash syntax or opening the filesystem manually. It is disabled by default; normal prompts and `/llm-wiki` continue to work either way.
 
 ## Prompt library
 

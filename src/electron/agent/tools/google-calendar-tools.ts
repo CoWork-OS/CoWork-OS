@@ -2,6 +2,11 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { GoogleWorkspaceSettingsManager } from "../../settings/google-workspace-manager";
 import { googleCalendarRequest } from "../../utils/google-calendar-api";
+import {
+  hasGoogleWorkspaceScopeCoverage,
+  hasGoogleWorkspaceTokens,
+  inferGoogleWorkspaceConnectionMode,
+} from "../../../shared/google-workspace";
 
 type CalendarAction =
   | "list_calendars"
@@ -102,7 +107,14 @@ export class GoogleCalendarTools {
   }
 
   static isEnabled(): boolean {
-    return GoogleWorkspaceSettingsManager.loadSettings().enabled;
+    const settings = GoogleWorkspaceSettingsManager.loadSettings();
+    const mode = inferGoogleWorkspaceConnectionMode(settings.connectionMode, settings.scopes);
+    return (
+      settings.enabled &&
+      mode === "workspace" &&
+      hasGoogleWorkspaceTokens(settings) &&
+      hasGoogleWorkspaceScopeCoverage(settings.scopes, "workspace")
+    );
   }
 
   private formatAuthError(error: unknown): string | null {

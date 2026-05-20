@@ -18,6 +18,41 @@ describe("refreshGoogleWorkspaceAccessToken", () => {
     vi.clearAllMocks();
   });
 
+  it("deduplicates concurrent refreshes for the same account", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          access_token: "new-access",
+          expires_in: 3600,
+        }),
+      ),
+    });
+
+    const settings = {
+      enabled: true,
+      clientId: "client",
+      clientSecret: "secret",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      tokenExpiresAt: Date.now() - 1000,
+    };
+
+    await expect(
+      Promise.all([
+        refreshGoogleWorkspaceAccessToken(settings),
+        refreshGoogleWorkspaceAccessToken(settings),
+        refreshGoogleWorkspaceAccessToken(settings),
+      ]),
+    ).resolves.toEqual(["new-access", "new-access", "new-access"]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(settingsManagerMock.saveSettings).toHaveBeenCalledTimes(1);
+    expect(settingsManagerMock.clearCache).toHaveBeenCalledTimes(1);
+  });
+
   it("clears broken OAuth tokens and asks the user to reconnect on invalid refresh token", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,

@@ -56,6 +56,8 @@ export interface OrchestrationGraphEngineDeps {
       depth?: number;
       assignedAgentRoleId?: string;
       workerRole?: WorkerRoleKind;
+      teamRunId?: string;
+      teamItemId?: string;
     }) => Promise<Task>;
     createRootTask: (params: {
       title: string;
@@ -444,6 +446,8 @@ export class OrchestrationGraphEngine extends EventEmitter {
             ? Math.max(1, Math.floor(node.metadata.depth))
             : undefined,
         assignedAgentRoleId: node.assignedAgentRoleId,
+        teamRunId: node.teamRunId,
+        teamItemId: node.teamItemId,
       });
       this.markNodeRunning(run, node, child.id);
     } catch (error: Any) {

@@ -28,7 +28,7 @@ The built-in app command catalog is:
 
 | Command | Behavior |
 |---------|----------|
-| `/schedule ...` | Creates, lists, enables, disables, or deletes scheduled tasks through the deterministic schedule handler. It starts as a fresh task even when another task is selected so schedule handling keeps precedence. |
+| `/schedule ...` | Creates, lists, enables, disables, or deletes scheduled tasks through the deterministic schedule handler. Plain `/schedule ...` creates standalone scheduled work; `/schedule here ...` and schedule prompts that clearly ask to return to this conversation create a scheduled follow-up for the selected task thread. |
 | `/clear` | Clears the current task/chat view without deleting history and without switching the current workspace. |
 | `/plan <task>` | Creates a new task in Plan execution mode using `<task>` as the prompt. |
 | `/cost <task>` | Creates an Analyze-mode estimate request for token usage, model cost, runtime, and risk without executing the requested task. |
@@ -41,6 +41,7 @@ The built-in app command catalog is:
 | `/compact [context]` | Starts a safe continuation-brief workflow that summarizes context, decisions, open questions, constraints, and next actions. |
 | `/doctor [context]` | Starts a diagnostic workflow for workspace/app state, integrations, permissions, skills, commands, and setup issues. It should not make changes unless explicitly asked. |
 | `/undo [context]` | Starts a safe undo-planning workflow. It does not roll back, delete, or modify anything unless the user explicitly approves a follow-up action. |
+| `/review [target]` | Invokes the code-review workflow for local changes, a PR, or the requested focus in the current regular workspace. It is unavailable in temporary workspaces. |
 
 `/clear` is intentionally view-only. It deselects the current task and clears visible events, but it does not delete task history or move the user into a new temporary workspace.
 
@@ -53,6 +54,16 @@ They can come from:
 - a skill ID such as `/llm-wiki`
 - a plugin-pack alias from `slashCommands`, such as `/gmail-summary-drive`
 - the bundled **CoWork Shortcuts** pack
+
+`/review` is the code-review shortcut. It routes to the bundled `code-reviewer` skill, passes the text after `/review` as the review target or focus, and is read-only by default. Examples:
+
+```text
+/review all uncommitted fixes
+/review PR #123
+/review focus on security and migration risk
+```
+
+Because code review depends on a real project checkout and git state, `/review` only runs from a regular workspace. Temporary workspaces reject the command and ask the user to switch to a workspace first.
 
 When a plugin alias exists, the backend resolves the visible command token to the target `skillId`. Alias precedence matches the picker: if a plugin alias and a direct skill ID collide on the same visible token, the plugin alias wins when its target skill is enabled and available. If the alias target is missing or disabled, resolution falls back to the direct skill when one exists.
 
@@ -97,7 +108,7 @@ The pack seeds general productivity workflow shortcuts as skills. They are not h
 Core workflow shortcuts:
 
 - `/strategy`
-- `/review`
+- `/review` - code-review local changes or a pull request in the current workspace
 - `/memory`
 
 File and workspace workflows:

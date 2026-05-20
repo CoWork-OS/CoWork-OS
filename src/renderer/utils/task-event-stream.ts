@@ -44,6 +44,26 @@ export function mergeTaskEventsByIdentity(
   if (incoming.length === 0) return [...existing].sort(compareTaskEventOrder);
   if (existing.length === 0) return [...incoming].sort(compareTaskEventOrder);
 
+  // Fast path: single-event insert (common for streaming updates)
+  if (incoming.length === 1) {
+    const incomingEvent = incoming[0];
+    const incomingIdentity = getTaskEventIdentity(incomingEvent);
+    const existingIndex = existing.findIndex(
+      (event) => getTaskEventIdentity(event) === incomingIdentity,
+    );
+
+    if (existingIndex >= 0) {
+      const next = [...existing];
+      next[existingIndex] = incomingEvent;
+      return next.sort(compareTaskEventOrder);
+    }
+
+    const lastEvent = existing[existing.length - 1];
+    if (!lastEvent || compareTaskEventOrder(lastEvent, incomingEvent) <= 0) {
+      return [...existing, incomingEvent];
+    }
+  }
+
   const merged = new Map<string, TaskEvent>();
   for (const event of existing) {
     merged.set(getTaskEventIdentity(event), event);

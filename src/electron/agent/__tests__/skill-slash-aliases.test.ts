@@ -78,20 +78,36 @@ describe("resolveSkillSlashAlias", () => {
 
   it("falls back to a direct skill when a colliding alias target is unavailable", () => {
     mocks.getSkill.mockImplementation((id: string) =>
-      id === "review" ? { id, enabled: true } : undefined,
+      id === "fallback" ? { id, enabled: true } : undefined,
     );
     mocks.getPluginsByType.mockReturnValue([
       {
         state: "registered",
         manifest: {
           name: "shortcuts",
-          slashCommands: [{ name: "review", skillId: "missing" }],
+          slashCommands: [{ name: "fallback", skillId: "missing" }],
           skills: [{ id: "missing", enabled: true }],
         },
       },
     ]);
 
-    expect(resolveSkillSlashAlias("review")).toBe("review");
+    expect(resolveSkillSlashAlias("fallback")).toBe("fallback");
+  });
+
+  it("does not fall back /review to the bundled code-reviewer skill", () => {
+    mocks.getSkill.mockImplementation((id: string) =>
+      id === "code-reviewer" ? { id, enabled: true } : undefined,
+    );
+
+    expect(resolveSkillSlashAlias("/review")).toBeNull();
+  });
+
+  it("does not fall back /review to a generic direct review skill", () => {
+    mocks.getSkill.mockImplementation((id: string) =>
+      id === "review" ? { id, enabled: true } : undefined,
+    );
+
+    expect(resolveSkillSlashAlias("/review")).toBeNull();
   });
 
   it("ignores aliases from disabled packs", () => {

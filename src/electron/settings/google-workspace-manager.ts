@@ -6,9 +6,15 @@
 
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { GoogleWorkspaceSettingsData } from "../../shared/types";
+import {
+  getActiveGoogleWorkspaceAccount,
+  inferGoogleWorkspaceConnectionMode,
+  normalizeGoogleAccountEmail,
+} from "../../shared/google-workspace";
 
 const DEFAULT_SETTINGS: GoogleWorkspaceSettingsData = {
   enabled: false,
+  connectionMode: "gmail",
   timeoutMs: 20000,
 };
 
@@ -29,6 +35,22 @@ export class GoogleWorkspaceSettingsManager {
         const stored = repository.load<GoogleWorkspaceSettingsData>("google-drive");
         if (stored) {
           settings = { ...DEFAULT_SETTINGS, ...stored };
+          if (!stored.connectionMode) {
+            settings.connectionMode = inferGoogleWorkspaceConnectionMode(undefined, stored.scopes);
+          }
+          if (!settings.activeAccountEmail && settings.accounts?.length) {
+            settings.activeAccountEmail = settings.accounts[0].email;
+          }
+          const activeAccount = getActiveGoogleWorkspaceAccount(settings);
+          if (activeAccount) {
+            settings.activeAccountEmail = normalizeGoogleAccountEmail(activeAccount.email);
+            settings.accessToken = activeAccount.accessToken;
+            settings.refreshToken = activeAccount.refreshToken;
+            settings.tokenExpiresAt = activeAccount.tokenExpiresAt;
+            settings.scopes = activeAccount.scopes ?? settings.scopes;
+            settings.connectionMode = activeAccount.connectionMode ?? settings.connectionMode;
+            settings.loginHint = activeAccount.email;
+          }
         }
       }
     } catch (error) {

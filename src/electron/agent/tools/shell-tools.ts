@@ -11,6 +11,18 @@ import {
 } from "./shell-session-manager";
 import { createSandbox } from "../sandbox/sandbox-factory";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
+import { createLogger } from "../../utils/logger";
+
+const log = createLogger("ShellTools");
+
+type RunCommandResult = {
+  success: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  truncated?: boolean;
+  terminationReason?: CommandTerminationReason;
+};
 
 /**
  * Strip ANSI/VT control sequences and normalize line endings produced by the
@@ -65,6 +77,20 @@ const SHELL_OUTPUT_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: str
     pattern: /\[(?:\s*\d{1,3}\s*,){31,}\s*\d{1,3}\s*\]/g,
     replacement: "[REDACTED_SECRET_KEY_ARRAY]",
   },
+  // OpenAI-style API keys
+  { pattern: /\bsk-[A-Za-z0-9_-]{16,}\b/g, replacement: "[REDACTED_API_KEY]" },
+  // Anthropic API keys
+  { pattern: /\bsk-ant-[A-Za-z0-9_-]{16,}\b/g, replacement: "[REDACTED_API_KEY]" },
+  // AWS access key IDs
+  { pattern: /\bAKIA[0-9A-Z]{16}\b/g, replacement: "[REDACTED_AWS_KEY]" },
+  // GitHub tokens
+  { pattern: /\bgh[pousr]_[A-Za-z0-9_]{16,}\b/g, replacement: "[REDACTED_GITHUB_TOKEN]" },
+  // Bearer tokens in output
+  { pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, replacement: "Bearer [REDACTED]" },
+  // JWT tokens (header.payload.signature)
+  { pattern: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, replacement: "[REDACTED_JWT]" },
+  // JSON fields containing tokens/secrets/keys with string values
+  { pattern: /("(?:access_token|refresh_token|api_key|apiKey|secret_key|client_secret|password|token)":\s*")([^"]{8,})(")/gi, replacement: "$1[REDACTED]$3" },
 ];
 
 /**
@@ -88,11 +114,11 @@ function isProcessOwnedByCurrentUser(pid: number): boolean {
     // This will throw ESRCH if process doesn't exist
     process.kill(pid, 0);
     return true;
-  } catch (error: Any) {
+  } catch (error) {
     // ESRCH = no such process (that's fine, process exited)
     // EPERM = permission denied (process exists but owned by another user - DON'T KILL)
-    if (error.code === "EPERM") {
-      console.warn(`[ShellTools] Process ${pid} exists but is owned by another user, skipping`);
+    if ((error as NodeJS.ErrnoException).code === "EPERM") {
+      log.warn(`Process ${pid} exists but is owned by another user, skipping`);
       return false;
     }
     // Process doesn't exist, that's fine
@@ -317,7 +343,7 @@ function resolveDockerSandboxCwd(workspacePath: string, cwd: string): string {
  */
 function getDescendantPids(parentPid: number): number[] {
   if (!isValidPid(parentPid)) {
-    console.error(`[ShellTools] Invalid parent PID: ${parentPid}`);
+    log.error(`Invalid parent PID: ${parentPid}`);
     return [];
   }
 
@@ -329,7 +355,8 @@ function getDescendantPids(parentPid: number): number[] {
   // Validate username to prevent command injection
   const safeUser = isValidUsername(currentUser) ? currentUser : undefined;
   if (currentUser && !safeUser) {
-    console.warn(`[ShellTools] Invalid USER env var: ${currentUser}, skipping user filter`);
+    log.warn("Invalid USER env var, aborting descendant PID lookup");
+    return [];
   }
 
   const descendants: number[] = [];
@@ -430,7 +457,7 @@ function getDescendantPidsWindows(parentPid: number): number[] {
  */
 function killProcessTree(pid: number, signal: NodeJS.Signals): void {
   if (!isValidPid(pid)) {
-    console.error(`[ShellTools] Refusing to kill invalid PID: ${pid}`);
+    log.error(`Refusing to kill invalid PID: ${pid}`);
     return;
   }
 
@@ -472,6 +499,9 @@ function killProcessTree(pid: number, signal: NodeJS.Signals): void {
  * ShellTools implements shell command execution with user approval
  */
 export class ShellTools {
+  private static readonly verificationCommandTtlMs = 120_000;
+  private static runningVerificationCommands = new Map<string, { startedAt: number }>();
+  private static recentVerificationResults = new Map<string, { completedAt: number; result: RunCommandResult }>();
   private readonly recentApprovals = new Map<string, { approvedAt: number; count: number }>();
   private readonly approvalWindowMs = 2 * 60 * 1000;
   private readonly bundleApprovalWindowMs = 10 * 60 * 1000;
@@ -498,6 +528,72 @@ export class ShellTools {
    */
   setWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
+  }
+
+  private getVerificationCommandKey(command: string, cwd: string): string | null {
+    const normalized = command.replace(/\s+/g, " ").trim();
+    if (
+      !/^(?:npx\s+)?tsc\b.*\s--noEmit\b/.test(normalized) &&
+      !/^npm\s+run\s+(?:type-check|build:react|build:electron|build:daemon|build:connectors)\b/.test(
+        normalized,
+      )
+    ) {
+      return null;
+    }
+    return `${cwd}::${normalized}`;
+  }
+
+  private async waitForVerificationCommandResult(key: string): Promise<RunCommandResult | null> {
+    const now = Date.now();
+    const recent = ShellTools.recentVerificationResults.get(key);
+    if (recent && now - recent.completedAt <= ShellTools.verificationCommandTtlMs) {
+      return { ...recent.result };
+    }
+
+    const running = ShellTools.runningVerificationCommands.get(key);
+    if (!running || now - running.startedAt > ShellTools.verificationCommandTtlMs) {
+      ShellTools.runningVerificationCommands.delete(key);
+      return null;
+    }
+
+    this.daemon.logEvent(this.taskId, "log", {
+      message: "Reusing concurrent workspace verification command result",
+    });
+
+    while (Date.now() - running.startedAt <= ShellTools.verificationCommandTtlMs) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const completed = ShellTools.recentVerificationResults.get(key);
+      if (completed && completed.completedAt >= running.startedAt) {
+        return { ...completed.result };
+      }
+      if (!ShellTools.runningVerificationCommands.has(key)) break;
+    }
+    return null;
+  }
+
+  private markVerificationCommandRunning(key: string): void {
+    ShellTools.runningVerificationCommands.set(key, { startedAt: Date.now() });
+  }
+
+  private pruneVerificationCommandCache(now = Date.now()): void {
+    for (const [key, entry] of ShellTools.recentVerificationResults.entries()) {
+      if (now - entry.completedAt > ShellTools.verificationCommandTtlMs) {
+        ShellTools.recentVerificationResults.delete(key);
+      }
+    }
+    for (const [key, entry] of ShellTools.runningVerificationCommands.entries()) {
+      if (now - entry.startedAt > ShellTools.verificationCommandTtlMs) {
+        ShellTools.runningVerificationCommands.delete(key);
+      }
+    }
+  }
+
+  private recordVerificationCommandResult(key: string | null, result: RunCommandResult): RunCommandResult {
+    if (!key) return result;
+    this.pruneVerificationCommandCache();
+    ShellTools.runningVerificationCommands.delete(key);
+    ShellTools.recentVerificationResults.set(key, { completedAt: Date.now(), result: { ...result } });
+    return result;
   }
 
   private allowUnsandboxedShellFallback(policies: AdminPolicies): boolean {
@@ -729,7 +825,7 @@ export class ShellTools {
       });
       return true;
     } catch (error) {
-      console.error("Failed to write to stdin:", error);
+      log.error("Failed to write to stdin:", error);
       return false;
     }
   }
@@ -752,13 +848,13 @@ export class ShellTools {
 
     const pid = this.activeProcess.pid;
     if (!isValidPid(pid)) {
-      console.error(`[ShellTools] Invalid PID for kill: ${pid}`);
+      log.error(`Invalid PID for kill: ${pid}`);
       return false;
     }
 
     // Prevent multiple concurrent kill chains (security: avoid race conditions)
     if (this.killInProgress && !force) {
-      console.log(`[ShellTools] Kill already in progress, ignoring duplicate request`);
+      log.info(`Kill already in progress, ignoring duplicate request`);
       return true; // Return true since a kill is already underway
     }
 
@@ -781,7 +877,7 @@ export class ShellTools {
         });
         return true;
       } catch (error) {
-        console.error("Failed to force kill process tree:", error);
+        log.error("Failed to force kill process tree:", error);
         return false;
       }
     }
@@ -805,14 +901,14 @@ export class ShellTools {
       const sigtermTimeout = setTimeout(() => {
         // Verify this is still the same process session (prevents PID reuse attacks)
         if (currentSessionId !== this.processSessionId) {
-          console.log(`[ShellTools] Session ID mismatch, skipping SIGTERM escalation`);
+          log.info(`Session ID mismatch, skipping SIGTERM escalation`);
           return;
         }
         if (childProcess && !childProcess.killed && childProcess.pid === pid) {
           // Additional safety: verify we own this process before killing
           if (!isProcessOwnedByCurrentUser(pid)) {
-            console.warn(
-              `[ShellTools] Process ${pid} no longer owned by current user, skipping SIGTERM`,
+            log.warn(
+              `Process ${pid} no longer owned by current user, skipping SIGTERM`,
             );
             return;
           }
@@ -832,14 +928,14 @@ export class ShellTools {
       const sigkillTimeout = setTimeout(() => {
         // Verify this is still the same process session (prevents PID reuse attacks)
         if (currentSessionId !== this.processSessionId) {
-          console.log(`[ShellTools] Session ID mismatch, skipping SIGKILL escalation`);
+          log.info(`Session ID mismatch, skipping SIGKILL escalation`);
           return;
         }
         if (childProcess && !childProcess.killed && childProcess.pid === pid) {
           // Additional safety: verify we own this process before killing
           if (!isProcessOwnedByCurrentUser(pid)) {
-            console.warn(
-              `[ShellTools] Process ${pid} no longer owned by current user, skipping SIGKILL`,
+            log.warn(
+              `Process ${pid} no longer owned by current user, skipping SIGKILL`,
             );
             return;
           }
@@ -858,7 +954,7 @@ export class ShellTools {
 
       return true;
     } catch (error) {
-      console.error("Failed to kill process tree:", error);
+      log.error("Failed to kill process tree:", error);
       this.killInProgress = false;
 
       // Try SIGTERM as fallback
@@ -889,14 +985,7 @@ export class ShellTools {
       timeout?: number;
       env?: Record<string, string>;
     },
-  ): Promise<{
-    success: boolean;
-    stdout: string;
-    stderr: string;
-    exitCode: number | null;
-    truncated?: boolean;
-    terminationReason?: CommandTerminationReason;
-  }> {
+  ): Promise<RunCommandResult> {
     // Check if command is blocked by guardrails BEFORE anything else
     const blockCheck = GuardrailManager.isCommandBlocked(command);
     if (blockCheck.blocked) {
@@ -1011,6 +1100,12 @@ export class ShellTools {
     });
 
     const cwd = resolveCommandCwd(this.workspace.path, options?.cwd);
+    const verificationCommandKey = this.getVerificationCommandKey(command, cwd);
+    if (verificationCommandKey) {
+      const reused = await this.waitForVerificationCommandResult(verificationCommandKey);
+      if (reused) return reused;
+      this.markVerificationCommandRunning(verificationCommandKey);
+    }
     const dirName = (() => {
       const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
       return parts[parts.length - 1] ?? "";
@@ -1028,7 +1123,7 @@ export class ShellTools {
         policies,
       });
       if (sandboxResult) {
-        return sandboxResult;
+        return this.recordVerificationCommandResult(verificationCommandKey, sandboxResult);
       }
     }
 
@@ -1088,14 +1183,14 @@ export class ShellTools {
           terminationReason: persistentResult.terminationReason,
         });
         if (persistentResult.usedPersistentSession) {
-          return {
+          return this.recordVerificationCommandResult(verificationCommandKey, {
             success: persistentResult.success,
             stdout: this.sanitizeCommandOutput(persistentResult.stdout),
             stderr: this.sanitizeCommandOutput(persistentResult.stderr),
             exitCode: persistentResult.exitCode,
             truncated: persistentResult.truncated,
             terminationReason: persistentResult.terminationReason,
-          };
+          });
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1328,14 +1423,14 @@ export class ShellTools {
           error: errorMessage,
         });
 
-        resolve({
+        resolve(this.recordVerificationCommandResult(verificationCommandKey, {
           success,
           stdout: this.sanitizeCommandOutput(truncatedStdout),
           stderr: this.sanitizeCommandOutput(truncatedStderr),
           exitCode: code,
           truncated: stdout.length > MAX_OUTPUT_SIZE || stderr.length > MAX_OUTPUT_SIZE,
           terminationReason,
-        });
+        }));
       });
 
       child.on("error", (error: Error) => {
@@ -1362,13 +1457,13 @@ export class ShellTools {
           terminationReason,
         });
 
-        resolve({
+        resolve(this.recordVerificationCommandResult(verificationCommandKey, {
           success: false,
           stdout: this.sanitizeCommandOutput(this.truncateOutput(stdout)),
           stderr: this.sanitizeCommandOutput(error.message),
           exitCode: null,
           terminationReason,
-        });
+        }));
       });
     });
   }

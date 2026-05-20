@@ -11,7 +11,11 @@ import {
   refreshGoogleWorkspaceAccessToken,
 } from "./google-workspace-auth";
 import { gmailRequest } from "./gmail-api";
-import { getMissingGoogleWorkspaceScopes } from "../../shared/google-workspace";
+import {
+  getMissingGoogleScopesForMode,
+  getGoogleWorkspaceSettingsForAccount,
+  inferGoogleWorkspaceConnectionMode,
+} from "../../shared/google-workspace";
 import {
   isLikelyIntegrationAuthError,
   notifyIntegrationAuthIssue,
@@ -228,17 +232,22 @@ function extractUserInfo(data: Any): { name?: string; userId?: string; email?: s
 export async function testGoogleWorkspaceConnection(
   settings: GoogleWorkspaceSettingsData,
 ): Promise<GoogleWorkspaceConnectionTestResult> {
-  const missingScopes = getMissingGoogleWorkspaceScopes(settings.scopes);
+  const effectiveSettings = getGoogleWorkspaceSettingsForAccount(settings);
+  const connectionMode = inferGoogleWorkspaceConnectionMode(
+    effectiveSettings.connectionMode,
+    effectiveSettings.scopes,
+  );
+  const missingScopes = getMissingGoogleScopesForMode(effectiveSettings.scopes, connectionMode);
   if (missingScopes.length > 0) {
     return {
       success: false,
-      error: `Google Workspace is missing required scopes for the current connector surface: ${missingScopes.join(", ")}. Reconnect Google Workspace in Settings > Integrations > Google Workspace.`,
+      error: `${connectionMode === "workspace" ? "Google Workspace" : "Gmail"} is missing required scopes for the current connector surface: ${missingScopes.join(", ")}. Reconnect ${connectionMode === "workspace" ? "Google Workspace" : "Gmail"} in Settings > Integrations > Google Workspace.`,
       missingScopes,
     };
   }
 
   try {
-    const profile = await gmailRequest(settings, {
+    const profile = await gmailRequest(effectiveSettings, {
       method: "GET",
       path: "/users/me/profile",
     });
@@ -254,7 +263,7 @@ export async function testGoogleWorkspaceConnection(
   }
 
   try {
-    const result = await googleDriveRequest(settings, {
+    const result = await googleDriveRequest(effectiveSettings, {
       method: "GET",
       path: "/about",
       query: { fields: "user" },

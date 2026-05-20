@@ -170,7 +170,7 @@ CoWork OS ships with 35 plugin packs covering common job functions, finance work
 
 **Core shortcuts:**
 - `/strategy`
-- `/review`
+- `/review` - review local changes or a pull request from a regular workspace
 - `/memory`
 
 **File and workspace shortcuts:**

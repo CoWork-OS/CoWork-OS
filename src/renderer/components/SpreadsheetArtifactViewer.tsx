@@ -14,6 +14,10 @@ import {
   type SpreadsheetPreview,
   type SpreadsheetPreviewCell,
 } from "../../shared/spreadsheet-preview";
+import type {
+  SpreadsheetPatch,
+  SpreadsheetWorkbookSession,
+} from "../../shared/spreadsheet-workbook";
 import { getSpreadsheetFormatLabel } from "../../shared/spreadsheet-formats";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { ModelDropdown } from "./MainContent";
@@ -257,7 +261,9 @@ export function SpreadsheetArtifactViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fileData, setFileData] = useState<ViewerData | null>(null);
+  const [workbookSession, setWorkbookSession] = useState<SpreadsheetWorkbookSession | null>(null);
   const [editablePreview, setEditablePreview] = useState<SpreadsheetPreview | null>(null);
+  const [pendingPatches, setPendingPatches] = useState<SpreadsheetPatch[]>([]);
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
   const [selectedCell, setSelectedCell] = useState<CellPosition | null>({
     row: 1,
@@ -299,10 +305,13 @@ export function SpreadsheetArtifactViewer({
 
   useEffect(() => {
     let cancelled = false;
+    let openedSessionId: string | null = null;
     setLoading(true);
     setError(null);
     setFileData(null);
+    setWorkbookSession(null);
     setEditablePreview(null);
+    setPendingPatches([]);
     setActiveSheetIndex(0);
     setSelectedCell({ row: 1, column: 1 });
     setSelectedRange({ start: { row: 1, column: 1 }, end: { row: 1, column: 1 } });
@@ -310,24 +319,58 @@ export function SpreadsheetArtifactViewer({
     setDirty(false);
     setSaveMessage("");
 
-    window.electronAPI
-      .readFileForViewer(filePath, workspacePath)
-      .then((result) => {
-        if (cancelled) return;
-        if (!result.success || !result.data) {
-          setError(result.error || "Failed to load spreadsheet");
-          return;
+    const loadLegacyPreview = async () => {
+      const result = await window.electronAPI.readFileForViewer(filePath, workspacePath);
+      if (cancelled) return;
+      if (!result.success || !result.data) {
+        setError(result.error || "Failed to load spreadsheet");
+        return;
+      }
+      if (result.data.fileType !== "xlsx" && result.data.fileType !== "csv") {
+        setError("File is not a spreadsheet.");
+        return;
+      }
+      setFileData(result.data);
+    };
+
+    const loadWorkbook = async () => {
+      if (!window.electronAPI.openSpreadsheetWorkbook) {
+        await loadLegacyPreview();
+        return;
+      }
+      const result = await window.electronAPI.openSpreadsheetWorkbook({
+        filePath,
+        workspacePath,
+        workspaceId,
+      });
+      if (cancelled) {
+        if (result.session?.sessionId) {
+          void window.electronAPI.closeSpreadsheetWorkbook({
+            sessionId: result.session.sessionId,
+          });
         }
-        if (result.data.fileType !== "xlsx" && result.data.fileType !== "csv") {
-          setError("File is not a spreadsheet.");
-          return;
-        }
-        setFileData(result.data);
-      })
+        return;
+      }
+      if (!result.success || !result.session || !result.preview) {
+        await loadLegacyPreview();
+        return;
+      }
+      openedSessionId = result.session.sessionId;
+      setWorkbookSession(result.session);
+      setFileData({
+        path: result.session.filePath,
+        fileName: result.session.fileName,
+        fileType: result.session.format === "xlsx" ? "xlsx" : "csv",
+        content: null,
+        size: 0,
+        spreadsheetPreview: result.preview,
+      });
+    };
+
+    loadWorkbook()
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load spreadsheet");
-        }
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load spreadsheet");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -335,8 +378,11 @@ export function SpreadsheetArtifactViewer({
 
     return () => {
       cancelled = true;
+      if (openedSessionId && window.electronAPI.closeSpreadsheetWorkbook) {
+        void window.electronAPI.closeSpreadsheetWorkbook({ sessionId: openedSessionId });
+      }
     };
-  }, [filePath, workspacePath]);
+  }, [filePath, workspaceId, workspacePath]);
 
   const preview = useMemo(() => {
     if (!fileData) return null;
@@ -370,6 +416,25 @@ export function SpreadsheetArtifactViewer({
   const normalizedSelectedRange = normalizeRange(selectedRange);
   const fullscreenLabel = mode === "fullscreen" ? "Exit full screen" : "Open spreadsheet in full screen";
   const formatLabel = getSpreadsheetFormatLabel(fileName);
+  const activeSheetId = workbookSession?.sheets[activeSheetIndex]?.id || workbookSession?.activeSheetId;
+  const isSpreadsheetReadOnly = workbookSession?.capabilities.canEditCells === false;
+
+  const queuePatch = (patch: SpreadsheetPatch) => {
+    setPendingPatches((current) => {
+      if (patch.type !== "setCell") return [...current, patch];
+      const next = current.filter(
+        (entry) =>
+          !(
+            entry.type === "setCell" &&
+            entry.sheetId === patch.sheetId &&
+            entry.row === patch.row &&
+            entry.column === patch.column
+          ),
+      );
+      next.push(patch);
+      return next;
+    });
+  };
 
   const selectCell = (position: CellPosition, extend = false) => {
     setSelectedCell(position);
@@ -447,6 +512,22 @@ export function SpreadsheetArtifactViewer({
   };
 
   const updateCellValue = (row: number, column: number, value: string) => {
+    if (isSpreadsheetReadOnly) {
+      setSaveMessage("Read-only");
+      return;
+    }
+    if (activeSheetId) {
+      queuePatch({
+        type: "setCell",
+        sheetId: activeSheetId,
+        row,
+        column,
+        input: {
+          value,
+          ...(value.startsWith("=") ? { formula: value.slice(1) } : {}),
+        },
+      });
+    }
     setEditablePreview((current) => {
       if (!current) return current;
       const next = clonePreview(current);
@@ -470,6 +551,10 @@ export function SpreadsheetArtifactViewer({
   };
 
   const startEditing = (position: CellPosition, initialValue?: string) => {
+    if (isSpreadsheetReadOnly) {
+      setSaveMessage("Read-only");
+      return;
+    }
     const cell = activeSheet?.rows[position.row - 1]?.[position.column - 1] || null;
     setSelectedCell(position);
     setSelectedRange({ start: position, end: position });
@@ -501,6 +586,18 @@ export function SpreadsheetArtifactViewer({
   };
 
   const addRows = (count = 1) => {
+    if (isSpreadsheetReadOnly) {
+      setSaveMessage("Read-only");
+      return;
+    }
+    if (activeSheetId && activeSheet) {
+      queuePatch({
+        type: "insertRows",
+        sheetId: activeSheetId,
+        beforeRow: (activeSheet.rowCount || 0) + 1,
+        count,
+      });
+    }
     setEditablePreview((current) => {
       if (!current) return current;
       const next = clonePreview(current);
@@ -513,7 +610,19 @@ export function SpreadsheetArtifactViewer({
   };
 
   const addColumns = (count = 1) => {
+    if (isSpreadsheetReadOnly) {
+      setSaveMessage("Read-only");
+      return;
+    }
     if ((activeSheet?.columnCount || 0) >= MAX_EDITABLE_COLUMNS) return;
+    if (activeSheetId && activeSheet) {
+      queuePatch({
+        type: "insertColumns",
+        sheetId: activeSheetId,
+        beforeColumn: (activeSheet.columnCount || 0) + 1,
+        count,
+      });
+    }
     setEditablePreview((current) => {
       if (!current) return current;
       const next = clonePreview(current);
@@ -527,14 +636,32 @@ export function SpreadsheetArtifactViewer({
   };
 
   const pasteTabularData = (text: string) => {
+    if (isSpreadsheetReadOnly) {
+      setSaveMessage("Read-only");
+      return;
+    }
     if (!selectedCell || !text.trim()) return;
     const rows = text.replace(/\r/g, "").split("\n").filter((line) => line.length > 0);
+    const values = rows.map((line) => line.split("\t"));
+    if (activeSheetId) {
+      queuePatch({
+        type: "setRange",
+        sheetId: activeSheetId,
+        startRow: selectedCell.row,
+        startColumn: selectedCell.column,
+        values: values.map((row) =>
+          row.map((value) => ({
+            value,
+            ...(value.startsWith("=") ? { formula: value.slice(1) } : {}),
+          })),
+        ),
+      });
+    }
     setEditablePreview((current) => {
       if (!current) return current;
       const next = clonePreview(current);
       const sheet = next.sheets[activeSheetIndex] || next.sheets[0];
       if (!sheet) return current;
-      const values = rows.map((line) => line.split("\t"));
       ensureSheetBounds(
         sheet,
         selectedCell.row + values.length - 1,
@@ -617,9 +744,64 @@ export function SpreadsheetArtifactViewer({
 
   const handleSave = async () => {
     if (!editablePreview || saving) return;
+    if (isSpreadsheetReadOnly) {
+      setSaveMessage("Read-only");
+      return;
+    }
     setSaving(true);
     setSaveMessage("");
     try {
+      let currentSession = workbookSession;
+      if (currentSession && window.electronAPI.saveSpreadsheetWorkbook) {
+        if (pendingPatches.length > 0) {
+          const applyResult = await window.electronAPI.applySpreadsheetPatches({
+            sessionId: currentSession.sessionId,
+            patches: pendingPatches,
+          });
+          if (!applyResult.success) {
+            if (applyResult.error === "Spreadsheet session not found") {
+              setWorkbookSession(null);
+              currentSession = null;
+            } else {
+              setSaveMessage(applyResult.error || "Save failed");
+              return;
+            }
+          } else if (applyResult.session) {
+            setWorkbookSession(applyResult.session);
+            currentSession = applyResult.session;
+          }
+        }
+        if (currentSession) {
+          const saveResult = await window.electronAPI.saveSpreadsheetWorkbook({
+            sessionId: currentSession.sessionId,
+          });
+          if (!saveResult.success) {
+            if (saveResult.error === "Spreadsheet session not found") {
+              setWorkbookSession(null);
+            } else {
+              setSaveMessage(saveResult.error || "Save failed");
+              return;
+            }
+          } else {
+            if (saveResult.session) setWorkbookSession(saveResult.session);
+            if (saveResult.preview) {
+              setFileData((current) => ({
+                path: current?.path || filePath,
+                fileName: current?.fileName || getFileName(filePath),
+                fileType: current?.fileType === "csv" ? "csv" : "xlsx",
+                content: null,
+                size: saveResult.size || current?.size || 0,
+                spreadsheetPreview: saveResult.preview,
+              }));
+              setEditablePreview(saveResult.preview);
+            }
+            setPendingPatches([]);
+            setDirty(false);
+            setSaveMessage("Saved");
+            return;
+          }
+        }
+      }
       const result = await window.electronAPI.updateSpreadsheetFile({
         filePath,
         workspacePath,
@@ -763,14 +945,21 @@ export function SpreadsheetArtifactViewer({
             ))}
           </select>
         </label>
-        <button type="button" className="spreadsheet-viewer-tool-btn" onClick={() => addRows(1)}>
+        <button
+          type="button"
+          className="spreadsheet-viewer-tool-btn"
+          onClick={() => addRows(1)}
+          disabled={isSpreadsheetReadOnly}
+          title={isSpreadsheetReadOnly ? "This workbook is read-only" : "Add row"}
+        >
           + Row
         </button>
         <button
           type="button"
           className="spreadsheet-viewer-tool-btn"
           onClick={() => addColumns(1)}
-          disabled={(activeSheet?.columnCount || 0) >= MAX_EDITABLE_COLUMNS}
+          disabled={isSpreadsheetReadOnly || (activeSheet?.columnCount || 0) >= MAX_EDITABLE_COLUMNS}
+          title={isSpreadsheetReadOnly ? "This workbook is read-only" : "Add column"}
         >
           + Col
         </button>
@@ -788,8 +977,8 @@ export function SpreadsheetArtifactViewer({
           type="button"
           className="spreadsheet-viewer-save-btn"
           onClick={handleSave}
-          disabled={!dirty || saving || !editablePreview}
-          title="Save workbook"
+          disabled={isSpreadsheetReadOnly || !dirty || saving || !editablePreview}
+          title={isSpreadsheetReadOnly ? "This workbook is read-only" : "Save workbook"}
         >
           <Save size={15} />
           {saving ? "Saving" : "Save"}
@@ -804,6 +993,7 @@ export function SpreadsheetArtifactViewer({
           className="spreadsheet-viewer-formula-input"
           value={formulaText}
           placeholder={getWorkbookTitle(fileName)}
+          disabled={isSpreadsheetReadOnly}
           onChange={(event) => {
             const position = selectedCell || { row: 1, column: 1 };
             updateCellValue(position.row, position.column, event.target.value);

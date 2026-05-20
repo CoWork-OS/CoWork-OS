@@ -446,6 +446,28 @@ DOCUMENT CREATION BEST PRACTICES:
     );
   });
 
+  it("accepts completed review/check steps even when the final response is operational", async () => {
+    const executor = createExecuteHarness({
+      title: "Heartbeat: Pending work detected",
+      prompt:
+        "Check CI/CD pipeline health, review stalled planner-managed issues, and scan unresolved community questions.",
+      lastOutput:
+        "Heartbeat dispatch completed. Checklist covered: CI/CD pipeline health, stalled planner-managed issues, and community discussions. No duplicate work was repeated.",
+      planStepDescription: "Stalled planner-managed issues are reviewed for next action.",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
   it("accepts reasoned recommendations when evidence tools were used", async () => {
     const executor = createExecuteHarness({
       title: "Video decision",

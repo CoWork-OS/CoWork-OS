@@ -392,6 +392,113 @@ describe("HooksServer", () => {
       );
     });
 
+    it("mapped task_message hooks do not expose task IDs unless configured", async () => {
+      server.setHooksConfig({
+        enabled: true,
+        token: "test-secret-token",
+        path: "/hooks",
+        maxBodyBytes: 256 * 1024,
+        presets: [],
+        mappings: [
+          {
+            id: "routine-thread",
+            token: "routine-token",
+            match: { path: "routines/thread" },
+            action: "task_message",
+            targetTaskId: "task-existing",
+            messageTemplate: "Routine payload: {{payload.text}}",
+          },
+        ],
+      });
+
+      const onTaskMessage = vi.fn().mockResolvedValue(undefined);
+      server.setHandlers({ onTaskMessage });
+
+      const response = await makeRequest(
+        "POST",
+        "/hooks/routines/thread",
+        { text: "deploy alert" },
+        { Authorization: "Bearer routine-token" },
+      );
+
+      expect(response.statusCode).toBe(202);
+      expect(JSON.parse(response.body)).toEqual({ success: true });
+      expect(onTaskMessage).toHaveBeenCalledWith({
+        taskId: "task-existing",
+        message: "Routine payload: deploy alert",
+      });
+    });
+
+    it("passes mapped workspace bindings to task_message handlers", async () => {
+      server.setHooksConfig({
+        enabled: true,
+        token: "test-secret-token",
+        path: "/hooks",
+        maxBodyBytes: 256 * 1024,
+        presets: [],
+        mappings: [
+          {
+            id: "workspace-thread",
+            token: "workspace-token",
+            match: { path: "routines/workspace-thread" },
+            action: "task_message",
+            workspaceId: "ws-bound",
+            targetTaskId: "task-existing",
+            messageTemplate: "Routine payload: {{payload.text}}",
+          },
+        ],
+      });
+
+      const onTaskMessage = vi.fn().mockResolvedValue(undefined);
+      server.setHandlers({ onTaskMessage });
+
+      const response = await makeRequest(
+        "POST",
+        "/hooks/routines/workspace-thread",
+        { text: "deploy alert" },
+        { Authorization: "Bearer workspace-token" },
+      );
+
+      expect(response.statusCode).toBe(202);
+      expect(onTaskMessage).toHaveBeenCalledWith({
+        taskId: "task-existing",
+        workspaceId: "ws-bound",
+        message: "Routine payload: deploy alert",
+      });
+    });
+
+    it("mapped task_message hooks preserve handler status codes", async () => {
+      server.setHooksConfig({
+        enabled: true,
+        token: "test-secret-token",
+        path: "/hooks",
+        maxBodyBytes: 256 * 1024,
+        presets: [],
+        mappings: [
+          {
+            id: "routine-thread",
+            token: "routine-token",
+            match: { path: "routines/thread" },
+            action: "task_message",
+            targetTaskId: "missing-task",
+            messageTemplate: "Routine payload: {{payload.text}}",
+          },
+        ],
+      });
+
+      const error = Object.assign(new Error("Target task not found"), { statusCode: 404 });
+      server.setHandlers({ onTaskMessage: vi.fn().mockRejectedValue(error) });
+
+      const response = await makeRequest(
+        "POST",
+        "/hooks/routines/thread",
+        { text: "deploy alert" },
+        { Authorization: "Bearer routine-token" },
+      );
+
+      expect(response.statusCode).toBe(404);
+    });
+
     it("accepts the token for the selected same-path mapping only", async () => {
       server.setHooksConfig({
         enabled: true,

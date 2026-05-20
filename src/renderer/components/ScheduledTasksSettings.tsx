@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAgentContext } from "../hooks/useAgentContext";
+import { createRendererLogger } from "../utils/logger";
+
+const logger = createRendererLogger("ScheduledTasks");
 
 // Types from preload (duplicated for renderer use)
 type CronSchedule =
@@ -42,6 +45,7 @@ interface CronJobState {
 
 type CronDeliveryMode = "direct" | "outbox";
 type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
+type CronJobRunMode = "new_task" | "thread_follow_up";
 
 interface CronRunHistoryEntry {
   runAtMs: number;
@@ -49,6 +53,7 @@ interface CronRunHistoryEntry {
   status: NonNullable<CronJobState["lastStatus"]>;
   error?: string;
   taskId?: string;
+  runMode?: CronJobRunMode;
   workspaceId?: string;
   runWorkspacePath?: string;
   deliveryStatus?: "success" | "failed" | "skipped";
@@ -81,6 +86,8 @@ interface CronJob {
   workspaceId: string;
   taskPrompt: string;
   taskTitle?: string;
+  runMode?: CronJobRunMode;
+  targetTaskId?: string;
   delivery?: CronDeliveryConfig;
   state: CronJobState;
 }
@@ -859,7 +866,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
 
     // Subscribe to cron events
     const unsubscribe = window.electronAPI.onCronEvent((event) => {
-      console.log("[ScheduledTasks] Cron event:", event);
+      logger.info("Cron event:", event);
       loadData();
     });
 
@@ -906,7 +913,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
         return;
       }
       if (result.ran) {
-        console.log(`[ScheduledTasks] Created task: ${result.taskId}`);
+        logger.info(`Created task: ${result.taskId}`);
       }
       await loadData();
       await loadRunHistory(job, true);
@@ -1509,6 +1516,21 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                         {threadId ? ` · Thread ${threadId}` : ""}
                       </div>
                     )}
+                    {job.runMode === "thread_follow_up" && (
+                      <div
+                        style={{
+                          marginBottom: "16px",
+                          padding: "12px",
+                          backgroundColor: "var(--color-accent-subtle)",
+                          borderRadius: "6px",
+                          fontSize: "13px",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
+                        Thread automation
+                        {job.targetTaskId ? ` · Continues task ${job.targetTaskId}` : ""}
+                      </div>
+                    )}
                     {job.description && (
                       <div
                         style={{
@@ -1711,7 +1733,7 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
         // even when a channel is temporarily offline
         setConnectedChannels(channels.filter((c: { enabled: boolean }) => c.enabled));
       } catch (err) {
-        console.error("Failed to load gateway channels:", err);
+        logger.error("Failed to load gateway channels:", err);
       }
     };
     loadChannels();

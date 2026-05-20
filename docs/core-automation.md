@@ -28,9 +28,9 @@ Everything else is a surrounding surface:
 
 That makes `Routines` the main user-facing automation abstraction without redefining the actual core runtime boundary.
 
-Task view can also create a direct scheduled task with `... > Add automation...`. That flow is intentionally a shortcut into `Scheduled Tasks`, not a new core cognition loop and not a separate routine authoring path. It is useful when a completed or in-progress task should become a recurring cron-backed check while preserving a source task title, task ID, and `cowork://tasks/<taskId>` reference. See [Task Automations](task-automations.md).
+Task view can also create a task-sourced routine with `... > Add automation...`. That flow is not a new core cognition loop; it is a task-prefilled routine authoring shortcut that can continue the existing thread by default or create new tasks on each run. Schedule triggers still compile to `Scheduled Tasks`, API triggers compile to `Webhooks`, and event triggers compile to `Event Triggers`, with the source task title, task ID, and `cowork://tasks/<taskId>` reference preserved. See [Task Automations](task-automations.md).
 
-`Settings > Automations > Scheduled Tasks` is the observability surface for those cron-backed runs. It shows aggregate run health, the latest result, delivery status, recent run history, and task links for generated sessions so lower-level scheduled work can be audited without digging through the general task list.
+`Settings > Automations > Routines` is the primary observability surface for task-sourced automations. When a routine compiles to a cron job, `Settings > Automations > Scheduled Tasks` also shows aggregate run health, the latest result, delivery status, recent run history, and links to generated sessions or continued threads so lower-level scheduled work can be audited without digging through the general task list.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-6.webp" alt="Automations control center" width="700">
@@ -75,7 +75,7 @@ Direct reflection target ownership is intentionally narrow:
 
 Non-core concepts such as triggers, schedules, briefings, mailbox threads, and devices can still contribute evidence or execute outcomes, but they are not direct cognition targets.
 
-Task-sourced scheduled tasks follow the same rule: they can execute recurring work and produce new task evidence, but the original task, deeplink, schedule, or worktree is not a Workflow Intelligence ownership target.
+Task-sourced automations follow the same rule: they can execute recurring work, continue a task thread, or produce new task evidence, but the original task, deeplink, schedule, webhook, event trigger, or worktree is not a Workflow Intelligence ownership target.
 
 ## Mission Control
 

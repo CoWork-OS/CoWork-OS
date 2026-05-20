@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import type { TaskEvent } from "../../../../shared/types";
-import { buildActionBlockSummary } from "../ActionBlock";
+import { ActionBlock, buildActionBlockSummary } from "../ActionBlock";
 
 function toolEvent(id: string, tool: string, timestamp: number): TaskEvent {
   return {
@@ -69,5 +71,64 @@ describe("buildActionBlockSummary", () => {
 
     expect(summary.iconKind).toBe("approval");
     expect(summary.summary).toBe("Approved 2 requests, ran 2 commands");
+  });
+
+  it("uses generation icon for plain generate steps", () => {
+    const summary = buildActionBlockSummary([
+      event("step-1", "timeline_step_started", 1000, {
+        step: { description: "generate" },
+      }),
+    ]);
+
+    expect(summary.iconKind).toBe("generate");
+    expect(summary.summary).toBe("1 step");
+  });
+
+  it("renders generation blocks with a sparkles glyph instead of the generic work circle", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        ActionBlock,
+        {
+          blockId: "generate-block",
+          summary: "1 step",
+          iconKind: "generate",
+          stepCount: 1,
+          toolCallCount: 0,
+          durationMs: 0,
+          outputTokens: 0,
+          isActive: false,
+          expanded: false,
+          onToggle: () => {},
+          children: createElement("span", null, "generate"),
+        },
+      ),
+    );
+
+    expect(html).toContain("lucide-sparkles");
+    expect(html).not.toContain("lucide-circle-dot");
+  });
+
+  it("renders generic work blocks with activity glyph instead of circle-dot", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        ActionBlock,
+        {
+          blockId: "work-block",
+          summary: "Working...",
+          iconKind: "work",
+          stepCount: 1,
+          toolCallCount: 0,
+          durationMs: 0,
+          outputTokens: 0,
+          isActive: true,
+          expanded: true,
+          onToggle: () => {},
+          children: createElement("span", null, "Working..."),
+        },
+      ),
+    );
+
+    expect(html).toContain("lucide-activity");
+    expect(html).not.toContain("lucide-circle-dot");
   });
 });

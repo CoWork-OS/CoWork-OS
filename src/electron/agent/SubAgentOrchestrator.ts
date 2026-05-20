@@ -78,13 +78,33 @@ export class SubAgentOrchestrator extends EventEmitter {
 
   // ── Internal DAG execution ──────────────────────────────────────────────────
 
+  private taskCompletionNotifier: (() => void) | null = null;
+
+  /** Signal the DAG loop that a task finished so it can re-evaluate immediately. */
+  notifyTaskCompleted(): void {
+    this.taskCompletionNotifier?.();
+  }
+
+  private waitForTaskCompletion(timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.taskCompletionNotifier = null;
+        resolve();
+      }, timeoutMs);
+      this.taskCompletionNotifier = () => {
+        clearTimeout(timer);
+        this.taskCompletionNotifier = null;
+        resolve();
+      };
+    });
+  }
+
   private async executeRun(run: OrchestrationRun): Promise<void> {
     let current = run;
 
     while (true) {
       const ready = this.getReadyTasks(current);
       if (ready.length === 0) {
-        // Check if all done
         const allDone = current.tasks.every((t) => t.status === "completed" || t.status === "failed");
         if (allDone) {
           const succeeded = current.tasks.filter((t) => t.status === "completed").length;
@@ -93,8 +113,8 @@ export class SubAgentOrchestrator extends EventEmitter {
           this.emit("run_completed", { type: "run_completed", runId: current.id, succeeded, failed });
           return;
         }
-        // Still waiting for in-flight tasks — poll
-        await sleep(2000);
+        // Wait for a task completion signal instead of busy-polling
+        await this.waitForTaskCompletion(15_000);
         const refreshed = this.repo.findById(current.id);
         if (!refreshed) return;
         current = refreshed;
@@ -110,8 +130,8 @@ export class SubAgentOrchestrator extends EventEmitter {
         current = updated;
       }
 
-      // Wait a tick before next DAG pass
-      await sleep(500);
+      // Refresh state from DB — no artificial delay needed since spawnTask
+      // already awaited task completion
       const refreshed = this.repo.findById(current.id);
       if (!refreshed) return;
       current = refreshed;
@@ -273,6 +293,8 @@ export class SubAgentOrchestrator extends EventEmitter {
     timeoutSeconds: number,
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     const deadline = Date.now() + timeoutSeconds * 1000;
+    // Escalating backoff: check quickly at first, then back off
+    let pollInterval = 1000;
     while (Date.now() < deadline) {
       try {
         const task = await this.deps.daemon.getTask(taskId);
@@ -288,7 +310,8 @@ export class SubAgentOrchestrator extends EventEmitter {
       } catch {
         // Transient error — keep polling
       }
-      await sleep(3000);
+      await sleep(pollInterval);
+      pollInterval = Math.min(pollInterval * 1.5, 10_000);
     }
     return { success: false, error: `Timed out after ${timeoutSeconds}s` };
   }
@@ -299,6 +322,7 @@ export class SubAgentOrchestrator extends EventEmitter {
     timeoutSeconds: number,
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     const deadline = Date.now() + timeoutSeconds * 1000;
+    let pollInterval = 2000;
     while (Date.now() < deadline) {
       try {
         const agent = getACPRegistry(this.db).getAgent(
@@ -318,7 +342,8 @@ export class SubAgentOrchestrator extends EventEmitter {
       } catch {
         // Keep polling on transient errors.
       }
-      await sleep(3000);
+      await sleep(pollInterval);
+      pollInterval = Math.min(pollInterval * 1.5, 15_000);
     }
     return { success: false, error: `Timed out after ${timeoutSeconds}s` };
   }

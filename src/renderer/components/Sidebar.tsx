@@ -68,9 +68,7 @@ interface SidebarProps {
   hasMoreTasks?: boolean;
   uiDensity?: UiDensity;
   updateInfo?: UpdateInfo | null;
-  updateDismissed?: boolean;
   onViewUpdate?: () => void;
-  onDismissUpdate?: () => void;
 }
 
 /** Visual session mode derived from task metadata */
@@ -517,10 +515,9 @@ export function Sidebar({
   hasMoreTasks = false,
   uiDensity = "focused",
   updateInfo,
-  updateDismissed = false,
   onViewUpdate,
-  onDismissUpdate,
 }: SidebarProps) {
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
   const [renameTaskId, setRenameTaskId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -618,8 +615,6 @@ export function Sidebar({
     inboxUnreadCount > 0
       ? `Inbox (${inboxUnreadCount > 99 ? "99+" : inboxUnreadCount})`
       : "Inbox";
-  const compactUpdateVersion = updateInfo?.latestVersion.replace(/\s*\([^)]*\)\s*$/, "").trim();
-
   // Build task tree from flat list
   const taskTree = useMemo(() => {
     const childrenMap = new Map<string, Task[]>();
@@ -1646,64 +1641,34 @@ export function Sidebar({
     <div className="sidebar cli-sidebar">
       {updateInfo?.available && !updateDismissed && (
         <div className="sidebar-update-slot">
-          <div
+          <button
+            type="button"
             className="update-banner"
-            role="status"
-            aria-live="polite"
-            title={`Update v${updateInfo.latestVersion} is available`}
+            aria-label="Open update settings"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              onViewUpdate?.();
+            }}
           >
-            <div className="update-banner-content">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-              </svg>
-              <span className="update-banner-copy">
-                <strong>v{compactUpdateVersion || updateInfo.latestVersion}</strong>
-              </span>
-              <button
-                type="button"
-                className="update-banner-link"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onViewUpdate?.();
-                }}
-                onClick={(event) => event.stopPropagation()}
-              >
-                View
-              </button>
-            </div>
-            <button
-                type="button"
-                className="update-banner-dismiss"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onDismissUpdate?.();
-                }}
-                onClick={(event) => event.stopPropagation()}
-                aria-label="Dismiss update notification"
-              >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
+            Update
+          </button>
+          <button
+            type="button"
+            className="update-banner-dismiss"
+            aria-label="Dismiss update banner"
+            onClick={(event) => {
+              event.stopPropagation();
+              setUpdateDismissed(true);
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9 3L3 9M3 3L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
         </div>
       )}
 

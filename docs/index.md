@@ -18,6 +18,9 @@ hero:
       text: Everything Workbench
       link: /everything-workbench
     - theme: alt
+      text: Terminal Tabs
+      link: /terminal-tabs
+    - theme: alt
       text: Core Automation
       link: /core-automation
     - theme: alt
@@ -138,6 +141,8 @@ features:
     details: Use one app instead of separate coding, mail, browser, Word, Excel, and PowerPoint workflows for everyday agentic work.
   - title: Everything Workbench
     details: Generated documents, spreadsheets, decks, web pages, PDFs, and file outputs live beside the agent. Open artifacts in the app, edit or review them, and ask for follow-up changes without defaulting to separate office apps.
+  - title: Real Terminal Tabs
+    details: xterm.js + node-pty terminal tabs bring native macOS shell and Windows cmd sessions into the workspace, with Tab completion, arrows, Ctrl+C, interactive prompts, resize, closeable tabs, and cwd-only prompts. Coding, direct CLI work, agent runs, artifacts, browser testing, approvals, and automations can stay in one super-app surface.
   - title: Production Runtime
     details: Local-first runtime with approvals, guardrails, and governance controls for production agent workflows.
   - title: Linux Server Package
@@ -177,7 +182,7 @@ features:
   - title: Composer Mentions
     details: Type `@` in the composer to pick Agents, configured Integrations, or Files. Integration chips render with icon and label in prompts and user message history, and selected integration metadata reaches the runtime as soft routing guidance rather than tool restrictions.
   - title: Message Box Shortcuts
-    details: Type `/` in the composer to pick deterministic app commands and skill-backed workflow shortcuts from one menu, including `/schedule`, `/clear`, `/plan`, `/cost`, `/multitask`, `/compact`, `/doctor`, `/undo`, direct skill IDs, plugin aliases, and the bundled CoWork Shortcuts pack. Skill-backed picker selections insert the command token so users can add context before sending.
+    details: Type `/` in the composer to pick deterministic app commands and skill-backed workflow shortcuts from one menu, including `/schedule`, `/schedule here`, `/clear`, `/plan`, `/cost`, `/multitask`, `/compact`, `/doctor`, `/undo`, direct skill IDs, plugin aliases, and the bundled CoWork Shortcuts pack. Skill-backed picker selections insert the command token so users can add context before sending.
   - title: Claude-for-Legal Workflows
     details: Bundled legal practice packs expose upstream-style slash commands through CoWork's plugin-pack system. Legal workflow selections are editable before launch, and matter-heavy tasks can show structured main-view intake cards such as the dedicated demand-letter intake form.
   - title: Multitask Command
@@ -191,7 +196,7 @@ features:
   - title: Core Automation
     details: Workflow Intelligence now forms the strict always-on core: Memory is the source of truth, Heartbeat schedules reflection, Dreaming curates reviewable memory candidates, Suggestions are reviewable outputs, and Mission Control remains the cockpit.
   - title: Automations
-    details: The automations surface now separates core automation from trigger ingress, device routing, schedules, webhooks, and optional twin features. Existing tasks can also become cron scheduled tasks from the task overflow menu with source task references preserved.
+    details: The automations surface now separates core automation from trigger ingress, device routing, schedules, webhooks, and optional twin features. Existing tasks can become task-sourced routines from the task overflow menu, continue the same thread by default, and compile schedule/API/event triggers to lower-level engines.
   - title: Heartbeat V3
     details: Default two-lane background automation with cheap Pulse checks, selective Dispatch escalation, signal compression, automation-profile ownership, and truthful Mission Control state.
   - title: 150 Built-in Skills

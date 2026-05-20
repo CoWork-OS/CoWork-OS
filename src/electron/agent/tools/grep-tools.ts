@@ -10,6 +10,8 @@ import {
 } from "../../security/project-access";
 import { LLMTool } from "../llm/types";
 
+const MAX_GREP_OUTPUT_BYTES = 50_000;
+
 /**
  * GrepTools provides powerful regex-based content search
  * Similar to Claude Code's Grep tool (ripgrep-based)
@@ -271,14 +273,15 @@ export class GrepTools {
           truncated,
         },
       });
+      const budgeted = this.applyOutputBudget(matches);
 
       return {
         success: true,
         pattern,
-        matches,
+        matches: budgeted.matches,
         totalMatches,
         filesSearched: files.length,
-        truncated,
+        truncated: truncated || budgeted.truncated,
       };
     } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {
@@ -296,6 +299,44 @@ export class GrepTools {
         error: error.message,
       };
     }
+  }
+
+  private applyOutputBudget<T extends Array<{
+    file: string;
+    line?: number;
+    content?: string;
+    context?: { before: string[]; after: string[] };
+    count?: number;
+  }>>(matches: T): { matches: T; truncated: boolean } {
+    const outputBytes = Buffer.byteLength(JSON.stringify(matches), "utf8");
+    if (outputBytes <= MAX_GREP_OUTPUT_BYTES) {
+      return { matches, truncated: false };
+    }
+
+    const itemSizes = matches.map((m) => Buffer.byteLength(JSON.stringify(m), "utf8"));
+    let total = outputBytes;
+    let keepCount = matches.length;
+    while (keepCount > 1 && total > MAX_GREP_OUTPUT_BYTES) {
+      keepCount--;
+      total -= itemSizes[keepCount];
+    }
+    const next = matches.slice(0, keepCount) as T;
+
+    if (next.length > 0 && outputBytes > MAX_GREP_OUTPUT_BYTES) {
+      const first = { ...next[0] };
+      if (typeof first.content === "string") {
+        first.content = `${first.content.slice(0, 2_000)}\n[... truncated grep match ...]`;
+      }
+      if (first.context) {
+        first.context = {
+          before: first.context.before.slice(-2),
+          after: first.context.after.slice(0, 2),
+        };
+      }
+      next[0] = first as T[number];
+    }
+
+    return { matches: next, truncated: true };
   }
 
   /**
@@ -351,6 +392,12 @@ export class GrepTools {
       ".pytest_cache",
       "venv",
       ".venv",
+      "release",
+      ".cowork",
+      "out",
+      ".cache",
+      ".parcel-cache",
+      ".turbo",
     ];
 
     if (depth > 0 && skipDirs.includes(dirName)) {

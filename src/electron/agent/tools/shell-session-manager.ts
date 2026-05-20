@@ -1,7 +1,8 @@
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
-import { spawn, type ChildProcess } from "child_process";
+import { execFileSync, spawn, type ChildProcess } from "child_process";
 import { getUserDataDir } from "../../utils/user-data-dir";
 import type {
   CommandTerminationReason,
@@ -32,8 +33,14 @@ type ShellSessionRuntime = {
     timeout: ReturnType<typeof setTimeout>;
     fallback: boolean;
     cwd?: string;
+    onOutput?: (event: { stream: "stdout" | "stderr"; output: string }) => void;
   }>;
   cmdSeq: number;
+  exitStatusOverride?: ShellSessionStatus;
+  terminalOutputListeners: Map<
+    string,
+    (event: { stream: "stdout" | "stderr"; output: string }) => void
+  >;
 };
 
 export interface ShellCommandResult {
@@ -54,12 +61,18 @@ export interface ShellRunRequest {
   workspacePath: string;
   command: string;
   cwd?: string;
+  scope?: ShellSessionScope;
+  sessionId?: string;
   timeoutMs: number;
+  onOutput?: (event: { stream: "stdout" | "stderr"; output: string }) => void;
   fallbackRunner: () => Promise<Omit<ShellCommandResult, "usedPersistentSession" | "sessionId" | "sessionEvent">>;
 }
 
 const STATE_FILE = path.join(getUserDataDir(), "shell-sessions.json");
 const COMMAND_TIMEOUT_FALLBACK_MS = 60_000;
+const COMMAND_TIMEOUT_MAX_MS = 5 * 60 * 1000;
+const TAB_COMMAND_TIMEOUT_MAX_MS = 24 * 60 * 60 * 1000;
+const MAX_TERMINAL_TABS_PER_WORKSPACE = 12;
 
 function safeJsonParse<T>(value: string, fallback: T): T {
   try {
@@ -75,6 +88,51 @@ function normalizePathForShell(value: string): string {
 
 function quoteForPosixShell(value: string): string {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
+}
+
+function terminateProcessTree(child: ChildProcess | null, signal: NodeJS.Signals = "SIGTERM"): void {
+  if (!child?.pid) return;
+  if (process.platform === "win32") {
+    try {
+      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { timeout: 5_000 });
+      return;
+    } catch {
+      // Fall through to direct process termination.
+    }
+  } else {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Fall through to direct process termination.
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // Ignore teardown races.
+  }
+}
+
+function terminatePersistedShellProcess(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (process.platform === "win32") {
+    try {
+      execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { timeout: 5_000 });
+    } catch {
+      // The previous process may already be gone.
+    }
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // The previous process may already be gone.
+    }
+  }
 }
 
 function stripShellControlCodes(text: string): string {
@@ -119,6 +177,21 @@ function resolveShellExecutable(): string {
   return "/bin/sh";
 }
 
+function resolveTerminalShellExecutable(): string {
+  if (process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot || "C:\\Windows";
+    const cmd = path.join(systemRoot, "System32", "cmd.exe");
+    if (fs.existsSync(cmd)) return cmd;
+    return process.env.COMSPEC || "cmd.exe";
+  }
+  if (process.env.SHELL && fs.existsSync(process.env.SHELL)) {
+    return process.env.SHELL;
+  }
+  if (fs.existsSync("/bin/zsh")) return "/bin/zsh";
+  if (fs.existsSync("/bin/bash")) return "/bin/bash";
+  return "/bin/sh";
+}
+
 function getShellArgs(shell: string): string[] {
   if (process.platform === "win32") {
     const lower = shell.toLowerCase();
@@ -129,6 +202,13 @@ function getShellArgs(shell: string): string[] {
   }
   // Keep persistent sessions non-interactive so they do not attach to or read
   // from the user's controlling TTY (which can suspend an active dev terminal).
+  return [];
+}
+
+function getTerminalShellArgs(shell: string): string[] {
+  if (process.platform === "win32" && shell.toLowerCase().endsWith("cmd.exe")) {
+    return ["/Q"];
+  }
   return [];
 }
 
@@ -231,6 +311,7 @@ function snapshotForPersistence(snapshot: ShellSnapshot): ShellSnapshot {
 export class ShellSessionManager {
   private static instance: ShellSessionManager | null = null;
   private sessions = new Map<string, ShellSessionRuntime>();
+  private activeSessionRuns = new Set<string>();
   private stateLoaded = false;
 
   static getInstance(): ShellSessionManager {
@@ -266,10 +347,14 @@ export class ShellSessionManager {
           lastExitCode?: number | null;
           lastTerminationReason?: CommandTerminationReason;
           lastError?: string;
+          pid?: number;
           snapshot?: ShellSnapshot;
         }>;
       }>(raw, {});
       for (const session of parsed.sessions || []) {
+        if (session.pid) {
+          terminatePersistedShellProcess(session.pid);
+        }
         const runtime: ShellSessionRuntime = {
           info: {
             id: session.id,
@@ -297,6 +382,8 @@ export class ShellSessionManager {
           busy: false,
           pending: [],
           cmdSeq: 0,
+          exitStatusOverride: undefined,
+          terminalOutputListeners: new Map(),
         };
         this.sessions.set(session.id, runtime);
       }
@@ -325,6 +412,7 @@ export class ShellSessionManager {
         lastExitCode: session.info.lastExitCode,
         lastTerminationReason: session.info.lastTerminationReason,
         lastError: undefined,
+        pid: session.process?.pid,
         snapshot: snapshotForPersistence(session.snapshot),
       })),
     };
@@ -351,10 +439,11 @@ export class ShellSessionManager {
     workspaceId: string;
     scope: ShellSessionScope;
     cwd: string;
+    id?: string;
   }): ShellSessionInfo {
     const now = Date.now();
     return {
-      id: this.getSessionKey(params.taskId, params.workspaceId, params.scope),
+      id: params.id || this.getSessionKey(params.taskId, params.workspaceId, params.scope),
       taskId: params.taskId,
       workspaceId: params.workspaceId,
       scope: params.scope,
@@ -374,9 +463,10 @@ export class ShellSessionManager {
     workspaceId: string;
     workspacePath: string;
     scope?: ShellSessionScope;
+    id?: string;
   }): ShellSessionRuntime {
     const scope = params.scope || "task";
-    const sessionKey = this.getSessionKey(params.taskId, params.workspaceId, scope);
+    const sessionKey = params.id || this.getSessionKey(params.taskId, params.workspaceId, scope);
     let runtime = this.sessions.get(sessionKey);
     if (!runtime) {
       runtime = {
@@ -385,6 +475,7 @@ export class ShellSessionManager {
           workspaceId: params.workspaceId,
           scope,
           cwd: params.workspacePath,
+          id: params.id,
         }),
         snapshot: { cwd: params.workspacePath, env: {}, aliases: {} },
         process: null,
@@ -393,6 +484,8 @@ export class ShellSessionManager {
         busy: false,
         pending: [],
         cmdSeq: 0,
+        exitStatusOverride: undefined,
+        terminalOutputListeners: new Map(),
       };
       this.sessions.set(sessionKey, runtime);
     }
@@ -439,29 +532,41 @@ export class ShellSessionManager {
       lastError: reason,
     });
 
-    if (processToKill && !processToKill.killed) {
-      try {
-        processToKill.kill("SIGTERM");
-      } catch {
-        // Ignore process teardown errors.
-      }
-    }
+    runtime.exitStatusOverride = "inactive";
+    terminateProcessTree(processToKill);
 
     await this.persistState();
   }
 
+  private emitTerminalOutput(
+    runtime: ShellSessionRuntime,
+    event: { stream: "stdout" | "stderr"; output: string },
+  ): void {
+    if (runtime.terminalOutputListeners.size === 0) return;
+    for (const listener of runtime.terminalOutputListeners.values()) {
+      try {
+        listener(event);
+      } catch {
+        // Ignore stale renderer listeners.
+      }
+    }
+  }
+
   private spawnProcess(runtime: ShellSessionRuntime, workspacePath: string): void {
-    const shell = resolveShellExecutable();
-    const args = getShellArgs(shell);
+    const isTerminalTab = runtime.info.scope === "tab";
+    const shell = isTerminalTab ? resolveTerminalShellExecutable() : resolveShellExecutable();
+    const args = isTerminalTab ? getTerminalShellArgs(shell) : getShellArgs(shell);
     const child = spawn(shell, args, {
       cwd: runtime.info.cwd || workspacePath,
+      detached: process.platform !== "win32",
       env: {
         ...process.env,
         HOME: process.env.HOME || "",
         SHELL: shell,
-        PS1: "",
-        PS2: "",
+        PS1: isTerminalTab ? "\\w % " : "",
+        PS2: isTerminalTab ? "> " : "",
         PROMPT_COMMAND: "",
+        PROMPT: isTerminalTab ? "$P$G" : "",
         PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         LANG: process.env.LANG || "en_US.UTF-8",
         TERM: process.env.TERM || "xterm-256color",
@@ -474,20 +579,40 @@ export class ShellSessionManager {
     runtime.ready = true;
 
     child.stdout?.on("data", (chunk: Buffer) => {
-      runtime.buffer += chunk.toString("utf-8");
+      const output = chunk.toString("utf-8");
+      if (runtime.pending.length > 0) {
+        runtime.buffer += output;
+      }
+      this.emitTerminalOutput(runtime, { stream: "stdout", output });
+      for (const pending of runtime.pending) {
+        pending.onOutput?.({ stream: "stdout", output });
+      }
       this.tryCompletePending(runtime);
     });
     child.stderr?.on("data", (chunk: Buffer) => {
-      runtime.buffer += chunk.toString("utf-8");
+      const output = chunk.toString("utf-8");
+      if (runtime.pending.length > 0) {
+        runtime.buffer += output;
+      }
+      this.emitTerminalOutput(runtime, { stream: "stderr", output });
+      for (const pending of runtime.pending) {
+        pending.onOutput?.({ stream: "stderr", output });
+      }
       this.tryCompletePending(runtime);
     });
 
     child.on("exit", (code, signal) => {
+      const nextStatus = runtime.exitStatusOverride || "ended";
+      runtime.exitStatusOverride = undefined;
       runtime.process = null;
       runtime.ready = false;
       runtime.busy = false;
+      this.emitTerminalOutput(runtime, {
+        stream: "stderr",
+        output: signal ? `\n[terminal exited: ${signal}]\n` : `\n[terminal exited: ${code ?? "unknown"}]\n`,
+      });
       this.updateRuntimeInfo(runtime, {
-        status: "ended",
+        status: nextStatus,
         retained: true,
         lastExitCode: code,
         lastTerminationReason: signal ? "error" : code === 0 ? "normal" : "error",
@@ -677,16 +802,26 @@ export class ShellSessionManager {
   async runCommand(request: ShellRunRequest): Promise<ShellCommandResult> {
     await this.ensureStateLoaded();
 
-    const workspaceMode = request.workspaceId ? "task" : "task";
     const session = this.getOrCreateRuntime({
       taskId: request.taskId,
       workspaceId: request.workspaceId,
       workspacePath: request.workspacePath,
-      scope: workspaceMode,
+      scope: request.scope || "task",
+      id: request.sessionId,
     });
 
+    if (session.busy || session.pending.length > 0) {
+      throw new Error("Terminal session is already running a command.");
+    }
+    const runKey = session.info.id;
+    if (this.activeSessionRuns.has(runKey)) {
+      throw new Error("Terminal session is already running a command.");
+    }
+    this.activeSessionRuns.add(runKey);
+
     const commandId = `${session.info.id}:${++session.cmdSeq}`;
-    const commandTimeoutMs = Math.min(Math.max(request.timeoutMs || COMMAND_TIMEOUT_FALLBACK_MS, 1_000), 5 * 60 * 1000);
+    const commandTimeoutMaxMs = request.scope === "tab" ? TAB_COMMAND_TIMEOUT_MAX_MS : COMMAND_TIMEOUT_MAX_MS;
+    const commandTimeoutMs = Math.min(Math.max(request.timeoutMs || COMMAND_TIMEOUT_FALLBACK_MS, 1_000), commandTimeoutMaxMs);
 
     const firstCommand = !session.process || session.process.killed;
     if (firstCommand) {
@@ -699,6 +834,7 @@ export class ShellSessionManager {
     }
 
     if (!session.process?.stdin || !session.process.stdout) {
+      this.activeSessionRuns.delete(runKey);
       return {
         success: false,
         stdout: "",
@@ -736,7 +872,7 @@ export class ShellSessionManager {
       `printf '__COWORK_DONE__:%s:%s\\n' ${quoteForPosixShell(commandId)} "$__cowork_exit_code"`,
     ].join("\n");
 
-    return new Promise<ShellCommandResult>((resolve, reject) => {
+    const commandPromise = new Promise<ShellCommandResult>((resolve, reject) => {
       session.busy = true;
       const timeout = setTimeout(() => {
         session.busy = false;
@@ -753,6 +889,7 @@ export class ShellSessionManager {
         resolve,
         reject,
         cwd: targetCwd,
+        onOutput: request.onOutput,
       });
       session.process!.stdin!.write(`${wrapper}\n`);
       session.process!.stdin!.once("error", (error) => {
@@ -762,6 +899,187 @@ export class ShellSessionManager {
         reject(error);
       });
     });
+    return commandPromise.finally(() => {
+      this.activeSessionRuns.delete(runKey);
+    });
+  }
+
+  async createTab(params: {
+    workspaceId: string;
+    workspacePath: string;
+    cwd?: string;
+    title?: string;
+  }): Promise<ShellSessionInfo> {
+    await this.ensureStateLoaded();
+    const existingTabs = Array.from(this.sessions.values())
+      .filter((session) => session.info.workspaceId === params.workspaceId && session.info.scope === "tab")
+      .sort((a, b) => a.info.updatedAt - b.info.updatedAt);
+    let tabCount = existingTabs.length;
+    for (const tab of existingTabs) {
+      if (tabCount < MAX_TERMINAL_TABS_PER_WORKSPACE) break;
+      if (tab.info.status !== "ended") continue;
+      this.sessions.delete(tab.info.id);
+      tabCount -= 1;
+    }
+    if (tabCount >= MAX_TERMINAL_TABS_PER_WORKSPACE) {
+      throw new Error(`Terminal tabs are limited to ${MAX_TERMINAL_TABS_PER_WORKSPACE} per workspace.`);
+    }
+    const now = Date.now();
+    const tabToken = `tab-${now}-${crypto.randomUUID().slice(0, 8)}`;
+    const cwd = params.cwd
+      ? path.isAbsolute(params.cwd)
+        ? params.cwd
+        : path.resolve(params.workspacePath, params.cwd)
+      : params.workspacePath;
+    const runtime = this.getOrCreateRuntime({
+      taskId: tabToken,
+      workspaceId: params.workspaceId,
+      workspacePath: cwd,
+      scope: "tab",
+      id: `tab:${params.workspaceId}:${tabToken}`,
+    });
+    runtime.info.lastCommand = params.title?.trim() || undefined;
+    this.updateRuntimeInfo(runtime, {
+      cwd,
+      status: "inactive",
+      retained: true,
+    });
+    await this.persistState();
+    return { ...runtime.info };
+  }
+
+  async listTabs(workspaceId?: string): Promise<ShellSessionInfo[]> {
+    await this.ensureStateLoaded();
+    return this.listSessions(undefined, workspaceId).filter((session) => session.scope === "tab");
+  }
+
+  async runInTab(params: {
+    tabId: string;
+    workspacePath: string;
+    command: string;
+    cwd?: string;
+    timeoutMs: number;
+    onOutput?: (event: { stream: "stdout" | "stderr"; output: string }) => void;
+  }): Promise<ShellCommandResult> {
+    await this.ensureStateLoaded();
+    const runtime = this.sessions.get(params.tabId);
+    if (!runtime || runtime.info.scope !== "tab") {
+      throw new Error("Terminal tab not found.");
+    }
+    if (runtime.busy || runtime.pending.length > 0) {
+      throw new Error("Terminal session is already running a command.");
+    }
+    this.updateRuntimeInfo(runtime, { status: "running" });
+    return this.runCommand({
+      taskId: runtime.info.taskId,
+      workspaceId: runtime.info.workspaceId,
+      workspacePath: params.workspacePath,
+      command: params.command,
+      cwd: params.cwd,
+      timeoutMs: params.timeoutMs,
+      scope: "tab",
+      sessionId: params.tabId,
+      onOutput: params.onOutput,
+      fallbackRunner: async () => ({
+        success: false,
+        stdout: "",
+        stderr: "Terminal tab fallback requested.",
+        exitCode: null,
+        terminationReason: "error",
+        truncated: false,
+      }),
+    });
+  }
+
+  async attachTerminalTabOutput(
+    sessionId: string,
+    listenerKey: string,
+    listener: (event: { stream: "stdout" | "stderr"; output: string }) => void,
+    workspacePath?: string,
+  ): Promise<ShellSessionInfo> {
+    await this.ensureStateLoaded();
+    const session = this.sessions.get(sessionId);
+    if (!session || session.info.scope !== "tab") {
+      throw new Error("Terminal tab not found.");
+    }
+    session.terminalOutputListeners.set(listenerKey, listener);
+    if (!session.process || session.process.killed) {
+      this.spawnProcess(session, workspacePath || session.info.cwd);
+      this.updateRuntimeInfo(session, { status: "active" });
+      await this.persistState();
+    }
+    return { ...session.info };
+  }
+
+  async writeToSession(sessionId: string, input: string): Promise<ShellSessionInfo> {
+    await this.ensureStateLoaded();
+    if (input.length > 1_000_000) {
+      throw new Error("Input exceeds maximum allowed length.");
+    }
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error("Terminal session is not running.");
+    }
+    if (session.info.scope === "tab" && input === "\x03") {
+      return (await this.stopSessionById(sessionId)) || { ...session.info };
+    }
+    if (session.info.scope === "tab" && (!session.process || session.process.killed)) {
+      this.spawnProcess(session, session.info.cwd);
+      this.updateRuntimeInfo(session, { status: "active" });
+    }
+    if (!session.process?.stdin) {
+      throw new Error("Terminal session is not running.");
+    }
+    if (input) {
+      session.process.stdin.write(input);
+    }
+    this.updateRuntimeInfo(session, {
+      status: session.info.scope === "tab" ? "active" : input ? "running" : "active",
+    });
+    return { ...session.info };
+  }
+
+  async stopSessionById(sessionId: string): Promise<ShellSessionInfo | null> {
+    await this.ensureStateLoaded();
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    session.exitStatusOverride = "inactive";
+    terminateProcessTree(session.process);
+    session.process = null;
+    session.ready = false;
+    session.busy = false;
+    this.activeSessionRuns.delete(session.info.id);
+    for (const pending of session.pending) {
+      clearTimeout(pending.timeout);
+      pending.resolve({
+        success: false,
+        stdout: "",
+        stderr: "Terminal command stopped.",
+        exitCode: null,
+        terminationReason: "error",
+        usedPersistentSession: true,
+        sessionId: session.info.id,
+      });
+    }
+    session.pending = [];
+    this.updateRuntimeInfo(session, { status: "inactive", lastTerminationReason: "error" });
+    await this.persistState();
+    return { ...session.info };
+  }
+
+  async closeSessionById(sessionId: string): Promise<ShellSessionInfo | null> {
+    await this.ensureStateLoaded();
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    for (const pending of session.pending) {
+      pending.resolve({ stdout: "", stderr: "", exitCode: null, success: false, usedPersistentSession: true });
+    }
+    session.pending = [];
+    terminateProcessTree(session.process);
+    this.activeSessionRuns.delete(session.info.id);
+    this.sessions.delete(sessionId);
+    await this.persistState();
+    return { ...session.info, status: "ended" };
   }
 
   getSessionInfo(taskId: string, workspaceId: string, scope: ShellSessionScope = "task"): ShellSessionInfo | null {
@@ -818,4 +1136,5 @@ export class ShellSessionManager {
 
 export const _testUtils = {
   getShellArgs,
+  getTerminalShellArgs,
 };

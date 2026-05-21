@@ -235,6 +235,13 @@ export function isInputDependentError(errorMessage: string): boolean {
   return INPUT_DEPENDENT_ERROR_PATTERNS.some((pattern) => pattern.test(errorMessage));
 }
 
+function isCurrentLocationProviderFailure(toolName: string, errorMessage: string): boolean {
+  if (toolName !== "get_current_location") return false;
+  return /desktop geolocation|native desktop geolocation|core location|geoclue|windows location|timed out while getting current location|location access was denied|current location is unavailable|geolocation is not available/i.test(
+    errorMessage,
+  );
+}
+
 /**
  * Check if an error indicates input/context capacity exhaustion.
  */
@@ -949,6 +956,11 @@ export class ToolFailureTracker {
     const browserHttpStatusFailure =
       toolName.startsWith("browser_") &&
       /http\s*[45]\d{2}|client error\s*\(\d{3}\)|server error\s*\(\d{3}\)/i.test(errorMessage);
+
+    if (isCurrentLocationProviderFailure(toolName, errorMessage)) {
+      this.disabledTools.set(toolName, { disabledAt: Date.now(), reason: errorMessage });
+      return true;
+    }
 
     // Provider-scoped quota/rate failures for web_search should not disable the
     // whole tool globally on first failure. ProviderFactory handles provider fallback/cooldown.

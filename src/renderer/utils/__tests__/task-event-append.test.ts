@@ -183,4 +183,85 @@ describe("capTaskEvents", () => {
     expect(result).toHaveLength(4);
     expect(result[result.length - 1].type).toBe("assistant_message");
   });
+
+  it("truncates large command output payloads in renderer state", () => {
+    const hugeOutput = "x".repeat(80 * 1024);
+    const event = makeEvent({
+      taskId: "t1",
+      type: "command_output",
+      timestamp: 1,
+      payload: { type: "stderr", output: hugeOutput },
+    });
+
+    const [result] = capTaskEvents([event], 10);
+
+    expect(result).not.toBe(event);
+    expect(String(result.payload?.output || "").length).toBeLessThan(20 * 1024);
+    expect(String(result.payload?.output || "")).toContain("renderer payload truncated");
+  });
+
+  it("preserves approval request payloads so approval dialogs keep full command details", () => {
+    const command = "x".repeat(80 * 1024);
+    const approval = makeEvent({
+      taskId: "t1",
+      type: "approval_requested",
+      timestamp: 1,
+      id: "approval",
+      payload: {
+        approval: {
+          id: "approval-1",
+          type: "run_command",
+          description: "Run command",
+          details: { command },
+        },
+      },
+    });
+    const noisyOutput = makeEvent({
+      taskId: "t1",
+      type: "command_output",
+      timestamp: 2,
+      id: "output",
+      payload: { output: "y".repeat(80 * 1024) },
+    });
+
+    const result = capTaskEvents([approval, noisyOutput], 10, 32 * 1024);
+    const retainedApproval = result.find((event) => event.id === "approval");
+
+    expect(retainedApproval).toBeDefined();
+    expect(
+      String((retainedApproval?.payload?.approval as Any)?.details?.command || ""),
+    ).toHaveLength(command.length);
+  });
+
+  it("caps retained payload bytes while preserving recent structural events", () => {
+    const events = [
+      makeEvent({
+        taskId: "t1",
+        type: "tool_result",
+        timestamp: 1,
+        id: "old-large",
+        payload: { content: "a".repeat(40 * 1024) },
+      }),
+      makeEvent({
+        taskId: "t1",
+        type: "assistant_message",
+        timestamp: 2,
+        id: "structural",
+        payload: { content: "keep me" },
+      }),
+      makeEvent({
+        taskId: "t1",
+        type: "tool_result",
+        timestamp: 3,
+        id: "new-large",
+        payload: { content: "b".repeat(40 * 1024) },
+      }),
+    ];
+
+    const result = capTaskEvents(events, 10, 45 * 1024);
+
+    expect(result.map((event) => event.id)).toContain("structural");
+    expect(result.map((event) => event.id)).toContain("new-large");
+    expect(result.map((event) => event.id)).not.toContain("old-large");
+  });
 });

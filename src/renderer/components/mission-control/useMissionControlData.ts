@@ -144,6 +144,46 @@ export type DetailPanelView =
   | { kind: "issue"; issueId: string }
   | null;
 
+export type MissionControlWorkspaceDataLoadStage = "critical" | "supplemental";
+
+type MissionControlTaskListOptions = {
+  limit: number;
+};
+
+export type MissionControlWorkspaceDataLoadPlan = {
+  includeAgents: boolean;
+  includeHeartbeatStatuses: boolean;
+  includeTasks: boolean;
+  includeActivities: boolean;
+  includeMentions: boolean;
+  includeTaskLabels: boolean;
+  taskListOptions?: MissionControlTaskListOptions;
+  supplementalWorkspaceIds: string[];
+};
+
+type MissionControlWorkspaceDataApi = {
+  getAgentRoles: (includeInactive?: boolean) => Promise<AgentRole[]>;
+  getAllHeartbeatStatus: () => Promise<HeartbeatStatusInfo[]>;
+  listTasks: (opts?: MissionControlTaskListOptions) => Promise<Task[]>;
+  listActivities: (query: { workspaceId: string; limit: number }) => Promise<ActivityData[]>;
+  listMentions: (query: { workspaceId: string; limit: number }) => Promise<MentionData[]>;
+  listTaskLabels: (query: { workspaceId: string }) => Promise<TaskLabelData[]>;
+};
+
+type MissionControlWorkspaceDataResult = {
+  loadedAgents: AgentRole[];
+  statuses: HeartbeatStatusInfo[];
+  loadedTasks: Task[];
+  loadedTaskLabels: TaskLabelData[];
+  loadedActivities: ActivityData[];
+  loadedMentions: MentionData[];
+};
+
+type MissionControlWorkspaceSupplementalData = Pick<
+  MissionControlWorkspaceDataResult,
+  "loadedTaskLabels" | "loadedActivities" | "loadedMentions"
+>;
+
 const DISPLAY_NAME_ALIASES: Record<string, string> = {
   "QA / System Test Engineer Twin": "System QA Twin",
 };
@@ -156,6 +196,98 @@ function normalizeMissionControlAgent(agent: AgentRole): AgentRole {
   return {
     ...agent,
     displayName: normalizeMissionControlAgentDisplayName(agent.displayName),
+  };
+}
+
+export function createMissionControlWorkspaceDataLoadPlan(
+  workspaceId: string,
+  workspaceList: Array<Pick<Workspace, "id">>,
+  stage: MissionControlWorkspaceDataLoadStage,
+): MissionControlWorkspaceDataLoadPlan {
+  const isAllWorkspaces = workspaceId === ALL_WORKSPACES_ID;
+  const supplementalWorkspaceIds = stage === "supplemental"
+    ? isAllWorkspaces
+      ? workspaceList.map((workspace) => workspace.id)
+      : [workspaceId]
+    : [];
+
+  return {
+    includeAgents: stage === "critical",
+    includeHeartbeatStatuses: stage === "critical",
+    includeTasks: stage === "critical",
+    includeActivities: stage === "supplemental",
+    includeMentions: stage === "supplemental",
+    includeTaskLabels: stage === "supplemental",
+    taskListOptions: stage === "critical" ? { limit: 2000 } : undefined,
+    supplementalWorkspaceIds,
+  };
+}
+
+async function loadMissionControlCriticalWorkspaceData(
+  api: MissionControlWorkspaceDataApi,
+  workspaceId: string,
+  workspaceList: Workspace[],
+): Promise<MissionControlWorkspaceDataResult> {
+  const plan = createMissionControlWorkspaceDataLoadPlan(workspaceId, workspaceList, "critical");
+  const [loadedAgents, statuses, loadedTasks] = await Promise.all([
+    api.getAgentRoles(true),
+    api.getAllHeartbeatStatus(),
+    api.listTasks(plan.taskListOptions).catch(() => []),
+  ]);
+  const workspaceIds =
+    workspaceId === ALL_WORKSPACES_ID
+      ? workspaceList.map((workspace) => workspace.id)
+      : [workspaceId];
+  const workspaceIdSet = new Set(workspaceIds);
+
+  return {
+    loadedAgents: loadedAgents.map(normalizeMissionControlAgent),
+    statuses,
+    loadedTasks: loadedTasks.filter((task: Task) => workspaceIdSet.has(task.workspaceId)),
+    loadedTaskLabels: [],
+    loadedActivities: [],
+    loadedMentions: [],
+  };
+}
+
+async function loadMissionControlSupplementalWorkspaceData(
+  api: MissionControlWorkspaceDataApi,
+  workspaceId: string,
+  workspaceList: Workspace[],
+): Promise<MissionControlWorkspaceSupplementalData> {
+  const plan = createMissionControlWorkspaceDataLoadPlan(workspaceId, workspaceList, "supplemental");
+  if (plan.supplementalWorkspaceIds.length === 0) {
+    return {
+      loadedTaskLabels: [],
+      loadedActivities: [],
+      loadedMentions: [],
+    };
+  }
+
+  const [activityGroups, mentionGroups, labelGroups] = await Promise.all([
+    Promise.all(
+      plan.supplementalWorkspaceIds.map((id) =>
+        api.listActivities({ workspaceId: id, limit: 200 }).catch(() => []),
+      ),
+    ),
+    Promise.all(
+      plan.supplementalWorkspaceIds.map((id) =>
+        api.listMentions({ workspaceId: id, limit: 200 }).catch(() => []),
+      ),
+    ),
+    Promise.all(
+      plan.supplementalWorkspaceIds.map((id) =>
+        api.listTaskLabels({ workspaceId: id }).catch(() => []),
+      ),
+    ),
+  ]);
+
+  return {
+    loadedTaskLabels: labelGroups
+      .flat()
+      .filter((label, index, array) => array.findIndex((item) => item.id === label.id) === index),
+    loadedActivities: activityGroups.flat().sort((a, b) => b.createdAt - a.createdAt).slice(0, 200),
+    loadedMentions: mentionGroups.flat().sort((a, b) => b.createdAt - a.createdAt).slice(0, 200),
   };
 }
 
@@ -556,73 +688,39 @@ export function useMissionControlData(
   }, []);
 
   const loadWorkspaceScopedData = useCallback(async (workspaceId: string, workspaceList: Workspace[]) => {
-    const [loadedAgents, statuses, loadedTasks] = await Promise.all([
-      window.electronAPI.getAgentRoles(true),
-      window.electronAPI.getAllHeartbeatStatus(),
-      window.electronAPI.listTasks().catch(() => []),
+    const [critical, supplemental] = await Promise.all([
+      loadMissionControlCriticalWorkspaceData(window.electronAPI, workspaceId, workspaceList),
+      loadMissionControlSupplementalWorkspaceData(window.electronAPI, workspaceId, workspaceList),
     ]);
-    const normalizedAgents = loadedAgents.map(normalizeMissionControlAgent);
-
-    if (workspaceId === ALL_WORKSPACES_ID) {
-      const workspaceIds = workspaceList.map((workspace) => workspace.id);
-      const workspaceIdSet = new Set(workspaceIds);
-      const [activityGroups, mentionGroups] = await Promise.all([
-        Promise.all(
-          workspaceIds.map((id) =>
-            window.electronAPI.listActivities({ workspaceId: id, limit: 200 }).catch(() => []),
-          ),
-        ),
-        Promise.all(
-          workspaceIds.map((id) =>
-            window.electronAPI.listMentions({ workspaceId: id, limit: 200 }).catch(() => []),
-          ),
-        ),
-      ]);
-      return {
-        loadedAgents: normalizedAgents,
-        statuses,
-        loadedTasks: loadedTasks.filter((task: Task) => workspaceIdSet.has(task.workspaceId)),
-        loadedTaskLabels: (
-          await Promise.all(
-            workspaceIds.map((id) => window.electronAPI.listTaskLabels({ workspaceId: id }).catch(() => [])),
-          )
-        )
-          .flat()
-          .filter((label, index, array) => array.findIndex((item) => item.id === label.id) === index),
-        loadedActivities: activityGroups.flat().sort((a, b) => b.createdAt - a.createdAt).slice(0, 200),
-        loadedMentions: mentionGroups.flat().sort((a, b) => b.createdAt - a.createdAt).slice(0, 200),
-      };
-    }
-
-    const [loadedActivities, loadedMentions] = await Promise.all([
-      window.electronAPI.listActivities({ workspaceId, limit: 200 }).catch(() => []),
-      window.electronAPI.listMentions({ workspaceId, limit: 200 }).catch(() => []),
-    ]);
-    return {
-      loadedAgents: normalizedAgents,
-      statuses,
-      loadedTasks: loadedTasks.filter((task: Task) => task.workspaceId === workspaceId),
-      loadedTaskLabels: await window.electronAPI.listTaskLabels({ workspaceId }).catch(() => []),
-      loadedActivities,
-      loadedMentions,
-    };
+    return { ...critical, ...supplemental };
   }, []);
 
   const loadData = useCallback(async (workspaceId: string) => {
     const showBlockingLoader = !hasLoadedInitialDataRef.current;
     try {
       if (showBlockingLoader) setLoading(true);
-      const [result] = await Promise.all([
-        loadWorkspaceScopedData(workspaceId, workspaces),
-        loadCoreHarnessData(workspaceId),
-        loadMissionControlIntelligence(workspaceId),
-      ]);
+      const result = showBlockingLoader
+        ? await loadMissionControlCriticalWorkspaceData(window.electronAPI, workspaceId, workspaces)
+        : await loadWorkspaceScopedData(workspaceId, workspaces);
+      if (workspaceIdRef.current !== workspaceId) return;
       setAgents(result.loadedAgents);
       setHeartbeatStatuses(result.statuses);
       setTasks(result.loadedTasks);
       setTaskLabels(result.loadedTaskLabels);
       setActivities(result.loadedActivities);
       setMentions(result.loadedMentions);
+      if (showBlockingLoader) {
+        void loadMissionControlSupplementalWorkspaceData(window.electronAPI, workspaceId, workspaces)
+          .then((supplemental) => {
+            if (workspaceIdRef.current !== workspaceId) return;
+            setTaskLabels(supplemental.loadedTaskLabels);
+            setActivities(supplemental.loadedActivities);
+            setMentions(supplemental.loadedMentions);
+          })
+          .catch((err) => { logger.error("Failed to load Mission Control supplemental data:", err); });
+      }
+      void loadCoreHarnessData(workspaceId);
+      void loadMissionControlIntelligence(workspaceId);
     } catch (err) { logger.error("Failed to load mission control data:", err); }
     finally {
       hasLoadedInitialDataRef.current = true;

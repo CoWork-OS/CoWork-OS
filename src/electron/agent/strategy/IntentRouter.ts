@@ -174,6 +174,24 @@ export class IntentRouter {
     return "general";
   }
 
+  static hasLocalErrandLocationIntent(lower: string): boolean {
+    const localCue =
+      /\b(?:near\s+me|nearby|close(?:st)?|walk(?:ing)?|walkable|walking\s+distance|open\s+now|nearest|around\s+me)\b/.test(
+        lower,
+      ) ||
+      /\bwhere\s+can\s+i\b[\s\S]{0,80}\b(?:walk|buy|get|find|pick\s+up)\b/.test(lower);
+    const placeNeedCue =
+      /\b(?:buy|get|find|pick\s+up|purchase|shop|store|dress|clothes|clothing|apparel|pharmacy|coffee|restaurant|food|gift|flowers|shoes|umbrella)\b/.test(
+        lower,
+      );
+    const urgencyCue =
+      /\b(?:in\s+\d+\s+(?:minutes?|mins?|hours?)|before\s+(?:my\s+)?(?:meeting|appointment|wedding|flight|train|event)|starts?\s+in\s+\d+\s+(?:minutes?|mins?|hours?)|asap|urgent|quickly|fastest)\b/.test(
+        lower,
+      );
+
+    return localCue && (placeNeedCue || urgencyCue);
+  }
+
   static route(title: string, prompt: string): IntentRoute {
     const sanitizedPrompt = this.stripStrategyContext(String(prompt || ""));
     const text = `${title || ""}\n${sanitizedPrompt}`.trim();
@@ -283,6 +301,12 @@ export class IntentRouter {
       /\b(my screen|my display|screenshot|on screen|latest draft|same doc|what is this|why is this failing|the failing one|disk space|storage|battery|cpu|memory|ram|running apps?|running process|installed|clipboard|weather|temperature|stock price|exchange rate|current time|what time)\b/i.test(
         lower,
       ),
+    );
+    add(
+      "execution",
+      5,
+      "local-errand-location",
+      this.hasLocalErrandLocationIntent(lower),
     );
     const cloudProviderMentioned =
       /\b(box|dropbox|one[\s-]?drive|google drive|sharepoint|notion|i[\s-]?cloud(?:\s+drive)?)\b/.test(

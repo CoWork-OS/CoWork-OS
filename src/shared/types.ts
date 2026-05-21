@@ -1417,6 +1417,7 @@ export type ToolType =
   | "analyze_image"
   // System tools
   | "system_info"
+  | "get_current_location"
   | "read_clipboard"
   | "write_clipboard"
   | "take_screenshot"
@@ -1551,6 +1552,7 @@ export type ApprovalType =
   | "network_access"
   | "data_export"
   | "external_service"
+  | "location_access"
   | "run_command"
   | "risk_gate"
   | "computer_use";
@@ -1617,6 +1619,7 @@ export const TOOL_GROUPS = {
   "group:destructive": ["delete_file", "run_command"],
   // System operations - requires explicit permission
   "group:system": [
+    "get_current_location",
     "read_clipboard",
     "write_clipboard",
     "take_screenshot",
@@ -1759,6 +1762,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   list_directory: "read",
   search_files: "read",
   system_info: "read",
+  get_current_location: "system",
   get_env: "read",
   get_app_paths: "read",
   // Write operations
@@ -2398,6 +2402,7 @@ export interface Task {
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+  lastRunDurationMs?: number;
   budgetTokens?: number;
   budgetCost?: number;
   error?: string | null;

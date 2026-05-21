@@ -28,6 +28,7 @@ Use cases:
 - Everything Workbench for generated docs, sheets, decks, web pages, PDFs, and previews
 - Smart-home orchestration via integrations
 - "Figure it out" fallback orchestration for hard tasks
+- Location-aware local errands, nearby services, and walking route planning
 
 Cowork OS supports these via:
 - Channels: Slack, iMessage, WhatsApp, Telegram, Email, etc.
@@ -37,6 +38,7 @@ Cowork OS supports these via:
 - Slash skill workflows: `/simplify [objective] ...` for quality passes, `/batch <objective> ...` for parallelizable migration/transform workflows, `/llm-wiki <objective> ...` for persistent research vaults, and CoWork Shortcuts aliases such as `/strategy`, `/batch-rename`, `/gmail-summary-drive`, `/multi-source-report`, and `/end-of-day-log`
 - Integrations: Notion, Gmail/Google Calendar (if configured), Apple Calendar/Reminders (macOS)
 - Web automation: visible Browser Workbench / Browser V2 for normal-user site testing, with desktop/tablet/mobile viewport checks, snapshot refs, browser tools, diagnostics, screenshots, annotation, downloads/uploads, and fallback browser modes when explicitly needed
+- Location + Maps: `get_current_location` for desktop coordinates (macOS, Windows, Linux) + Maps MCP for nearby search, place details, walking routes, and ranked errand options
 - Company-ops primitives: venture workspace kit, digital twin operators, strategic planner, and Mission Control ops monitoring
 - Everything Workbench: task output cards, sidebar/fullscreen artifact workspaces, follow-up composer, and refresh-after-edit behavior for generated knowledge-work artifacts
 
@@ -519,3 +521,65 @@ Expected behavior:
 - CoWork writes the `.tex` file first so the source remains editable.
 - It calls `compile_latex`, which uses an installed `tectonic`, `latexmk`, `xelatex`, `lualatex`, or `pdflatex` binary.
 - The task output pairs the `.tex` source and compiled PDF in one artifact workbench with Summary, source, and PDF tabs.
+
+### 18) Nearby Errand Run (Location + Maps)
+
+Prompt:
+```
+My kid just fell into the duck pond and the wedding starts in 30 minutes.
+Where can I walk and buy her a new dress?
+
+Use get_current_location to find where I am, then search for nearby children's clothing stores within walking distance.
+Rank them by walking time, show opening hours if available, and give me turn-by-turn walking directions to the best option.
+```
+
+Variant (pharmacy run):
+```
+I need to pick up allergy medication before the office closes at 6pm.
+Use get_current_location, find pharmacies within a 10-minute walk, and rank them by walking time.
+Show which ones are still open and give me walking directions to the closest open one.
+```
+
+### 19) Location-Aware Restaurant Booking
+
+Prompt:
+```
+Find restaurants within walking distance that have availability for 2 people tonight between 7pm and 8:30pm.
+Use get_current_location first, then search nearby restaurants.
+Cross-check my calendar for conflicts.
+Rank by walking time and cuisine variety.
+STOP before booking and ask me to confirm.
+```
+
+Variant (lunch meeting):
+```
+I have a lunch meeting in 45 minutes and need a quiet café nearby for it.
+Use get_current_location, search for cafés within a 5-minute walk that are good for meetings.
+Show me the top 3 options with walking directions.
+```
+
+### 20) Multi-Stop Walking Errand Planner
+
+Prompt:
+```
+I need to hit the post office, pick up dry cleaning, and grab groceries before heading home.
+Use get_current_location and find the nearest location for each errand.
+Plan the most efficient walking route that visits all three and ends closest to my home address.
+Show total walking time and a leg-by-leg breakdown.
+```
+
+### 21) Urgent Local Service Finder
+
+Prompt:
+```
+I locked myself out. Find locksmiths near me that offer emergency service right now.
+Use get_current_location, search for locksmiths within 2km, and show phone numbers and estimated arrival times if available.
+Rank by proximity.
+Do not call anyone unless I confirm.
+```
+
+Variant (urgent medical):
+```
+Find the nearest urgent care clinic or walk-in doctor's office that is open right now.
+Use get_current_location, rank by walking or driving distance, and show opening hours.
+```

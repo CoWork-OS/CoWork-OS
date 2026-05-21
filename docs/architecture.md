@@ -115,6 +115,20 @@ MCP transport disconnects that classify as auth failures stop at `error` rather 
 - `docs/`: product and architecture documentation
 - `.cowork/`: local workspace operating context
 
+## Desktop Location
+
+`get_current_location` exposes the user's desktop location for nearby-place, walking-distance, and local-errand queries. The implementation lives in `src/electron/location/DesktopLocationService.ts` and delegates to platform-specific helpers that share a common JSON envelope format.
+
+- **macOS**: a compiled Swift helper (`native/location-helper-macos/`) uses Core Location. The `.app` bundle is code-signed with the `com.apple.security.personal-information.location` entitlement and launched via `open -W -n`. Built by `scripts/build_location_helper_macos.mjs`.
+- **Windows**: a bundled PowerShell script (`native/location-helper-windows/Get-Location.ps1`) uses the `Windows.Devices.Geolocation` WinRT API. Invoked via `powershell.exe -ExecutionPolicy Bypass`. No compilation step.
+- **Linux**: a bundled Bash script (`native/location-helper-linux/get-location.sh`) uses GeoClue2 over the system D-Bus via `gdbus`. Requires `gdbus` (part of glib2 utilities). No compilation step.
+
+Each helper accepts `--accuracy coarse|precise`, `--timeout-ms N`, and `--response-file <path>`, and outputs `{ ok, location }` or `{ ok: false, error: { code, message } }`. Error codes: `LOCATION_DENIED`, `LOCATION_UNAVAILABLE`, `LOCATION_TIMEOUT`, `LOCATION_NOT_CONFIGURED`, `LOCATION_UNSUPPORTED_PLATFORM`.
+
+The permission engine treats `get_current_location` as a `location_access` approval — it requires explicit one-time user consent, cannot be auto-approved, and does not persist across tasks. Failed location requests are cached for 2 minutes to prevent retry storms.
+
+The bundled Maps MCP connector (`connectors/maps-mcp/`) consumes location coordinates for nearby place search and walking route calculations.
+
 ## Computer use
 
 Native GUI control is implemented in the main process (`src/electron/computer-use/`, `src/electron/agent/tools/computer-use-tools.ts`) with a persistent platform helper runtime and a **singleton session** that coordinates single-task ownership plus **Esc** abort. macOS uses helper-targeted permission bootstrap; Windows uses a bundled Win32 helper for visible, non-minimized windows. Tool policy and the executor only expose the computer-use lane when **native desktop GUI intent** is detected so routine web and repo work stays on browser and shell paths. Product-level behavior, permissions, and troubleshooting are documented in [Computer use](computer-use.md).

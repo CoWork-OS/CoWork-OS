@@ -1506,24 +1506,24 @@ const CollaborativeAgentsSection = memo(function CollaborativeAgentsSection({
                   <span className="collab-agent-summary-title" title={row.task.title}>
                     {stripInlineMarkdownFormatting(row.task.title || row.task.prompt || "Sub agent")}
                   </span>
-                  <span className={`collab-agent-summary-status ${row.statusKind}`}>
-                    {row.statusLabel}
-                  </span>
                 </div>
                 <div className="collab-agent-summary-meta">
                   <span>{formatRightPanelDuration(row.durationMs)}</span>
                   <span>{formatCompactNumber(row.toolCallCount)} tools</span>
                   <span>{formatCompactNumber(row.usage.inputTokens + row.usage.outputTokens)} tok</span>
-                  {onSelectTask ? (
-                    <button
-                      type="button"
-                      className="collab-agent-open-task"
-                      onClick={() => onSelectTask(row.task.id)}
-                    >
-                      Open
-                    </button>
-                  ) : null}
                 </div>
+                <span className={`collab-agent-summary-status ${row.statusKind}`}>
+                  {row.statusLabel}
+                </span>
+                {onSelectTask ? (
+                  <button
+                    type="button"
+                    className="collab-agent-open-task"
+                    onClick={() => onSelectTask(row.task.id)}
+                  >
+                    Open
+                  </button>
+                ) : null}
               </div>
             ))}
           </div>

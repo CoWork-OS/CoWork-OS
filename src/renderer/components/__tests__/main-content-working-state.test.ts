@@ -605,6 +605,37 @@ describe("isTaskActivelyWorking", () => {
     ).toEqual(["local/output.pptx"]);
   });
 
+  it("does not promote planned or failed artifact paths as generated cards", () => {
+    expect(
+      extractGeneratedArtifactPathsFromText(
+        [
+          "This export step is defined, but not successfully written to disk.",
+          "What I attempted:",
+          "- Three.js `viewer.html`",
+          "Intended export contract:",
+          "```txt",
+          "CityRepresentation -> neo-harbor.viewer.html browser-based Three.js preview",
+          "```",
+          "Planned artifacts:",
+          "- `x-test/zoning-plan/neo-harbor.zoning-plan.json`",
+        ].join("\n"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still promotes recovered artifact paths when text says they are now saved", () => {
+    expect(
+      extractGeneratedArtifactPathsFromText(
+        [
+          "The first write failed to create the preview.",
+          "Saved files:",
+          "- `artifacts/neo-harbor.viewer.html`",
+          "Previously failed to write, now saved `artifacts/recovered-viewer.html`.",
+        ].join("\n"),
+      ),
+    ).toEqual(["artifacts/neo-harbor.viewer.html", "artifacts/recovered-viewer.html"]);
+  });
+
   it("treats file lifecycle html events as previewable", () => {
     expect(
       getInlinePreviewKindForTaskEvent(

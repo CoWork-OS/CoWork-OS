@@ -35,7 +35,7 @@ import {
 import { buildCompletionOutputMessage } from "../utils/task-completion-ux";
 import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
 import { isActiveSessionStatus, isAutomatedSession, shouldShowTaskInSidebarSessions } from "./Sidebar";
-import "./main-content.css";
+import "./MainContent/main-content.css";
 
 interface RecentHubFile {
   id: string;

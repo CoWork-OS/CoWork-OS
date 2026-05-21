@@ -130,7 +130,7 @@ export class EvolutionMetricsService {
    */
   private static computeCorrectionRate(workspaceId: string): EvolutionMetric {
     try {
-      const results = MemoryService.search(workspaceId, "[PLAYBOOK] Task failed", 100);
+      const results = MemoryService.searchByContentMarker(workspaceId, "[PLAYBOOK] Task failed", 100);
       const failures = results.filter(
         (r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]") && r.snippet.includes("failed"),
       );
@@ -244,7 +244,7 @@ export class EvolutionMetricsService {
    */
   private static computeTaskSuccessRate(workspaceId: string): EvolutionMetric {
     try {
-      const results = MemoryService.search(workspaceId, "[PLAYBOOK] Task", 100);
+      const results = MemoryService.searchByContentMarker(workspaceId, "[PLAYBOOK] Task", 100);
       const playbook = results.filter(
         (r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]"),
       );

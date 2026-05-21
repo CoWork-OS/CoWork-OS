@@ -20,14 +20,14 @@ describe("MemoryPressureService", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("flags hot memory files that exceed the compaction threshold", () => {
+  it("flags hot memory files that exceed the compaction threshold", async () => {
     writeFile(path.join(tmpDir, ".cowork", "USER.md"), `${"A".repeat(1700)}\n`);
     writeFile(
       path.join(tmpDir, ".cowork", "MEMORY.md"),
       "- Use deterministic prompts\n- Use deterministic prompts\n",
     );
 
-    const report = MemoryPressureService.analyze(tmpDir);
+    const report = await MemoryPressureService.analyze(tmpDir);
     const user = report.files.find((file) => file.file === "USER.md");
     const memory = report.files.find((file) => file.file === "MEMORY.md");
 

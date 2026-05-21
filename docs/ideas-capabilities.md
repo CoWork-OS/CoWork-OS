@@ -15,6 +15,7 @@ For the full inbox workspace, see [Inbox Agent](inbox-agent.md).
 | **Web fetch** | `web_fetch` | Static pages, APIs |
 | **Browser** | `browser_navigate`, `browser_snapshot`, ref-aware `browser_click` / `browser_fill`, diagnostics, screenshots | Forms, interactive sites, JavaScript apps, visual QA |
 | **Scraping** | `scrape_page`, `scrape_multiple` | Structured extraction |
+| **Location** | `get_current_location` | One-time OS permission prompt; feeds into Maps MCP for nearby search and routes |
 | **Slash skills** | `/simplify`, `/batch`, `/llm-wiki` | Quality passes, parallel migrations, persistent research vaults |
 
 ## Integration-Dependent (Graceful Fallbacks)

@@ -67,6 +67,16 @@ Domain names are normalized to lowercase hostnames. Path scopes are normalized t
 Command prefixes are whitespace-normalized before comparison. MCP server names are normalized for
 stable matching.
 
+## Location Access
+
+`get_current_location` uses a dedicated `location_access` approval type that is separate from
+other tool scopes. Location access:
+
+- always requires explicit one-time user consent via a dedicated dialog
+- cannot be auto-approved by any permission mode, including `dont_ask` and `bypass_permissions`
+- cannot be persisted as a session, workspace, or profile rule
+- delegates the actual permission grant to the operating system's native location dialog
+
 ## Permission Modes
 
 Default behavior depends on the selected permission mode:

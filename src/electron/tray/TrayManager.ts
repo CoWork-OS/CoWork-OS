@@ -124,6 +124,7 @@ export class TrayManager {
   private quickTaskAccumulatedResponse: string = "";
   private currentStepInfo: string = "";
   private legacySettingsPath: string;
+  private statusUpdateTimer: ReturnType<typeof setInterval> | null = null;
 
   private static instance: TrayManager | null = null;
   private static migrationCompleted = false;
@@ -1042,7 +1043,7 @@ export class TrayManager {
    */
   private startStatusUpdates(): void {
     // Update every 5 seconds
-    setInterval(() => {
+    this.statusUpdateTimer = setInterval(() => {
       this.updateContextMenu();
       this.updateTrayIcon();
     }, 5000);
@@ -1216,6 +1217,11 @@ export class TrayManager {
    * Destroy the tray
    */
   destroy(): void {
+    if (this.statusUpdateTimer) {
+      clearInterval(this.statusUpdateTimer);
+      this.statusUpdateTimer = null;
+    }
+
     // Unregister global shortcut
     this.unregisterGlobalShortcut();
 

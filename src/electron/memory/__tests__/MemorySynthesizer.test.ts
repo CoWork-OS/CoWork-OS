@@ -90,6 +90,14 @@ vi.mock("../MemoryService", () => ({
         createdAt: Date.now() - 90_000,
       },
     ]),
+    searchForPromptRecallFast: vi.fn().mockReturnValue([
+      {
+        id: "m2",
+        snippet: "Redis caused too many connections under load.",
+        type: "insight",
+        createdAt: Date.now() - 90_000,
+      },
+    ]),
   },
 }));
 
@@ -288,7 +296,7 @@ describe("MemorySynthesizer", () => {
         updatedAt: Date.now() - 40_000,
       },
     ] as Any);
-    vi.mocked(MemoryService.searchForPromptRecall).mockReturnValueOnce([
+    vi.mocked(MemoryService.searchForPromptRecallFast).mockReturnValueOnce([
       {
         id: "shared-memory",
         snippet: "Use a single archive entry.",
@@ -317,7 +325,7 @@ describe("MemorySynthesizer", () => {
         updatedAt: Date.now() - 10_000,
       },
     ] as Any);
-    vi.mocked(MemoryService.searchForPromptRecall).mockReturnValueOnce([] as Any);
+    vi.mocked(MemoryService.searchForPromptRecallFast).mockReturnValueOnce([] as Any);
     vi.mocked(MemoryFeaturesManager.loadSettings).mockReturnValueOnce({
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,

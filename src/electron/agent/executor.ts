@@ -4186,7 +4186,7 @@ export class TaskExecutor {
     ].join("\n\n");
   }
 
-  private buildHybridMemoryRecallBlock(workspaceId: string, query: string): string {
+  private async buildHybridMemoryRecallBlock(workspaceId: string, query: string): Promise<string> {
     const trimmed = (query || "").trim();
     if (!trimmed) return "";
 
@@ -4198,7 +4198,7 @@ export class TaskExecutor {
       const recentLimit = 4;
       const maxLines = 14;
       const recent = MemoryService.getRecentForPromptRecall(workspaceId, recentLimit);
-      const search = MemoryService.searchForPromptRecallFast(workspaceId, trimmed, limit);
+      const search = await MemoryService.searchForPromptRecallFastAsync(workspaceId, trimmed, limit);
 
       const seen = new Set<string>();
       const lines: string[] = [];
@@ -25022,7 +25022,7 @@ Return ONLY a JSON object:
         );
         try {
           const executionPrompt = this.getExecutionTaskPrompt();
-          const memCtx = MemoryService.getContextForInjection(this.workspace.id, executionPrompt);
+          const memCtx = await MemoryService.getContextForInjectionAsync(this.workspace.id, executionPrompt);
           const pbCtx = PlaybookService.getPlaybookForContext(this.workspace.id, executionPrompt);
           synthesizedMemoryBlock = [memCtx, pbCtx].filter(Boolean).join("\n");
         } catch {

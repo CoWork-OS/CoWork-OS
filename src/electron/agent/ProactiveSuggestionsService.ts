@@ -296,7 +296,7 @@ export class ProactiveSuggestionsService {
         ? workspaceIds
         : [workspaceId];
       const results = searchWorkspaceIds.flatMap((id) =>
-        MemoryService.search(id, SUGGESTION_MARKER, 50).map((entry) => ({
+        MemoryService.searchByContentMarker(id, SUGGESTION_MARKER, 50).map((entry) => ({
           entry,
           workspaceId: id,
         })),
@@ -394,7 +394,7 @@ export class ProactiveSuggestionsService {
     this.loadDismissed();
 
     try {
-      const results = MemoryService.search(workspaceId, SUGGESTION_MARKER, 50);
+      const results = MemoryService.searchByContentMarker(workspaceId, SUGGESTION_MARKER, 50);
       for (const r of results) {
         if (r.type !== "insight" || !r.snippet.includes(SUGGESTION_MARKER)) continue;
         const parsed = this.parseSuggestion(r.snippet, r.id, r.createdAt);
@@ -630,7 +630,7 @@ export class ProactiveSuggestionsService {
    * Detect recurring task patterns from playbook entries.
    */
   static async detectRecurringPatterns(workspaceId: string): Promise<void> {
-    const results = MemoryService.search(workspaceId, "[PLAYBOOK] Task succeeded", 50);
+    const results = MemoryService.searchByContentMarker(workspaceId, "[PLAYBOOK] Task succeeded", 50);
     const playbookEntries = results
       .filter((r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]"))
       .slice(0, 30);
@@ -989,7 +989,7 @@ export class ProactiveSuggestionsService {
 
   private static findSuggestionById(workspaceId: string, suggestionId: string): ProactiveSuggestion | null {
     try {
-      const results = MemoryService.search(workspaceId, SUGGESTION_MARKER, 50);
+      const results = MemoryService.searchByContentMarker(workspaceId, SUGGESTION_MARKER, 50);
       for (const r of results) {
         if (r.type !== "insight" || !r.snippet.includes(SUGGESTION_MARKER)) continue;
         const parsed = this.parseSuggestion(r.snippet, r.id, r.createdAt, workspaceId);

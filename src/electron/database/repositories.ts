@@ -4467,7 +4467,20 @@ export class MemoryRepository {
     marker: string,
     limit = 50,
   ): MemorySearchResult[] {
-    const stmt = this.db.prepare(`
+    const mapRows = (rows: Record<string, unknown>[]) =>
+      rows.map((row) => ({
+        id: row.id as string,
+        snippet:
+          (row.summary as string) ||
+          this.truncateToSnippet(row.content as string, 200),
+        type: row.type as MemoryType,
+        relevanceScore: 1,
+        createdAt: row.created_at as number,
+        taskId: (row.task_id as string) || undefined,
+        source: "db" as const,
+      }));
+
+    const likeStmt = this.db.prepare(`
       SELECT id, summary, content, type, created_at, task_id
       FROM memories
       WHERE workspace_id = ? AND is_private = 0 AND (content LIKE ? OR summary LIKE ?)
@@ -4475,18 +4488,7 @@ export class MemoryRepository {
       LIMIT ?
     `);
     const like = `%${marker}%`;
-    const rows = stmt.all(workspaceId, like, like, limit) as Record<string, unknown>[];
-    return rows.map((row) => ({
-      id: row.id as string,
-      snippet:
-        (row.summary as string) ||
-        this.truncateToSnippet(row.content as string, 200),
-      type: row.type as MemoryType,
-      relevanceScore: 1,
-      createdAt: row.created_at as number,
-      taskId: (row.task_id as string) || undefined,
-      source: "db" as const,
-    }));
+    return mapRows(likeStmt.all(workspaceId, like, like, limit) as Record<string, unknown>[]);
   }
 
   /**

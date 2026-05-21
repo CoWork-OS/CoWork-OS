@@ -85,6 +85,21 @@ vi.mock("../../health/HealthManager", () => ({
   HealthManager: mockHealthManager,
 }));
 
+vi.mock("../../terminal/TerminalPtyManager", () => ({
+  TerminalPtyManager: {
+    getInstance: vi.fn(() => ({
+      listTabs: vi.fn(() => []),
+      createTab: vi.fn(),
+      runCommandInTab: vi.fn(),
+      attachTerminalTabOutput: vi.fn(),
+      writeToTab: vi.fn(),
+      resizeTab: vi.fn(),
+      stopTab: vi.fn(),
+      closeTab: vi.fn(),
+    })),
+  },
+}));
+
 import { setupHealthHandlers } from "../handlers";
 
 describe("health IPC handlers", () => {

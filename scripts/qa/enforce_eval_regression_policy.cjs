@@ -26,6 +26,13 @@ function getChangedFiles(base, head) {
     .filter(Boolean);
 }
 
+function stripUncheckedChecklistItems(text) {
+  return text
+    .split('\n')
+    .filter((line) => !/^\s*-\s*\[\s\]\s+/i.test(line))
+    .join('\n');
+}
+
 function parsePullRequestContext() {
   const eventName = process.env.GITHUB_EVENT_NAME || '';
   const eventPath = process.env.GITHUB_EVENT_PATH || '';
@@ -56,7 +63,7 @@ function isProductionFailureFix(title, body) {
   if (explicitChecked) return true;
 
   // Fallback keyword detection
-  const lowered = text.toLowerCase();
+  const lowered = stripUncheckedChecklistItems(text).toLowerCase();
   const keywords = [
     'production incident',
     'production failure',
@@ -109,4 +116,11 @@ function main() {
   console.log('[regression-policy] OK');
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  isProductionFailureFix,
+  stripUncheckedChecklistItems,
+};

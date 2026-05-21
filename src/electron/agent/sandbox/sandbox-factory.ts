@@ -214,6 +214,8 @@ export class NoSandbox implements ISandbox {
  */
 let dockerAvailable: boolean | null = null;
 let dockerCheckPromise: Promise<boolean> | null = null;
+let macOSSandboxAvailable: boolean | null = null;
+let macOSSandboxCheckPromise: Promise<boolean> | null = null;
 
 /**
  * Check if Docker is available and running
@@ -268,15 +270,77 @@ export async function isDockerAvailable(): Promise<boolean> {
 }
 
 /**
+ * Check whether macOS sandbox-exec can actually apply a trivial profile.
+ * Some local/dev launches have the binary present but sandbox_apply fails or
+ * aborts immediately; treating that as available causes every shell command to
+ * enter a broken execution path.
+ */
+export async function isMacOSSandboxAvailable(): Promise<boolean> {
+  if (process.platform !== "darwin") return false;
+  if (macOSSandboxAvailable !== null) {
+    return macOSSandboxAvailable;
+  }
+  if (macOSSandboxCheckPromise) {
+    return macOSSandboxCheckPromise;
+  }
+
+  macOSSandboxCheckPromise = new Promise((resolve) => {
+    const proc = spawn(
+      "sandbox-exec",
+      ["-p", "(version 1)\n(allow default)", "/bin/echo", "ok"],
+      {
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    let stderr = "";
+    let stdout = "";
+    let resolved = false;
+    const finish = (available: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      macOSSandboxAvailable = available;
+      resolve(available);
+    };
+
+    const timeout = setTimeout(() => {
+      proc.kill();
+      finish(false);
+    }, 3_000);
+
+    proc.stdout?.on("data", (data: Buffer) => {
+      stdout += data.toString("utf8");
+    });
+    proc.stderr?.on("data", (data: Buffer) => {
+      stderr += data.toString("utf8");
+    });
+    proc.on("close", (code) => {
+      clearTimeout(timeout);
+      const combined = `${stdout}\n${stderr}`;
+      const failedRuntime =
+        /Operation not permitted|Abort trap|sandbox_apply/i.test(combined);
+      finish(code === 0 && !failedRuntime);
+    });
+    proc.on("error", () => {
+      clearTimeout(timeout);
+      finish(false);
+    });
+  });
+
+  return macOSSandboxCheckPromise;
+}
+
+/**
  * Detect the best available sandbox type for the current platform
  */
 export async function detectAvailableSandbox(): Promise<SandboxType> {
   // On macOS, prefer native sandbox-exec
-  if (process.platform === "darwin") {
+  if (process.platform === "darwin" && (await isMacOSSandboxAvailable())) {
     return "macos";
   }
 
-  // On other platforms, check for Docker
+  // Check for Docker when native sandboxing is unavailable.
   if (await isDockerAvailable()) {
     return "docker";
   }
@@ -300,8 +364,11 @@ export async function createSandbox(
 
   if (preferredType && preferredType !== "auto") {
     // Validate the preferred type is available
-    if (preferredType === "macos" && process.platform !== "darwin") {
-      console.warn("macOS sandbox requested but not on macOS, falling back to auto-detect");
+    if (
+      preferredType === "macos" &&
+      (process.platform !== "darwin" || !(await isMacOSSandboxAvailable()))
+    ) {
+      console.warn("macOS sandbox requested but unavailable, falling back to auto-detect");
       sandboxType = await detectAvailableSandbox();
     } else if (preferredType === "docker" && !(await isDockerAvailable())) {
       console.warn(
@@ -340,4 +407,9 @@ export async function createSandbox(
 export function resetDockerCache(): void {
   dockerAvailable = null;
   dockerCheckPromise = null;
+}
+
+export function resetMacOSSandboxCache(): void {
+  macOSSandboxAvailable = null;
+  macOSSandboxCheckPromise = null;
 }

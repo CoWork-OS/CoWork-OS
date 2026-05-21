@@ -293,6 +293,17 @@ describe("ToolFailureTracker browser HTTP status handling", () => {
     expect(tracker.isDisabled("write_file")).toBe(true);
   });
 
+  it("treats sandbox aborts from run_command as low-threshold systemic failures", () => {
+    const tracker = new ToolFailureTracker();
+    const message = "Shell sandbox failed before command completion: sandbox-exec aborted (exit 134)";
+
+    expect(tracker.recordFailure("run_command", message)).toBe(false);
+    expect(tracker.isDisabled("run_command")).toBe(false);
+
+    expect(tracker.recordFailure("run_command", message)).toBe(true);
+    expect(tracker.isDisabled("run_command")).toBe(true);
+  });
+
   it("immediately disables get_current_location after desktop geolocation provider failure", () => {
     const tracker = new ToolFailureTracker();
     const message =

@@ -123,7 +123,7 @@
 
 .terminal-dock-body {
   position: relative;
-  height: calc(100% - 70px);
+  height: calc(100% - 34px);
   min-height: 0;
   padding: 8px 12px 10px;
   font-family: var(--font-mono);
@@ -171,40 +171,7 @@
   pointer-events: none;
 }
 
-.terminal-dock-commandbar {
-  height: 36px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px 8px;
-  font-family: var(--font-mono);
-}
-
-.terminal-dock-prompt {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-
-.terminal-dock-commandbar input {
-  flex: 1;
-  min-width: 0;
-  height: 26px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 6px;
-  background: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-  font: inherit;
-  font-size: 12px;
-  padding: 0 8px;
-}
-
-.terminal-dock-commandbar input:focus {
-  border-color: var(--color-accent);
-  outline: none;
-}
-
-.terminal-dock-icon-btn:disabled,
-.terminal-dock-commandbar input:disabled {
+.terminal-dock-icon-btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }

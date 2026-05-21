@@ -141,7 +141,7 @@ import { DebugSessionPanel } from "../DebugSessionPanel";
 import { TaskPauseBanner } from "../TaskPauseBanner";
 import { buildMarkdownComponents } from "../markdown-components";
 import { useVirtualList } from "../../hooks/useVirtualList";
-import { useTaskDuration } from "../../hooks/useTaskDuration";
+import { formatDuration, useTaskDuration } from "../../hooks/useTaskDuration";
 import type { ReplayControls } from "../../hooks/useReplayMode";
 import "./main-content.css";
 
@@ -212,6 +212,7 @@ import {
   DeferredMarkdown,
   CollapsibleUserBubble,
   MessageCopyButton,
+  MessageForkButton,
   MessageQuoteButton,
   MessageSpeakButton,
   UserMessageText,
@@ -255,6 +256,7 @@ import {
   pruneStringSetToActiveIds,
   getCommandOutputSessionsRevision,
   collectInlineRunCommandSessionIds,
+  isRedundantTimelineEvidenceEvent,
   estimateTaskFeedRowHeight,
   assignTimelineRef,
   getAutoScrollTargetTop,
@@ -1069,6 +1071,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const onOpenBrowserView = props.onOpenBrowserView as ((url?: string) => void) | undefined;
   const onQuoteAssistantMessage = props.onQuoteAssistantMessage as
     | ((quote: QuotedAssistantMessage) => void)
+    | undefined;
+  const onForkTaskSessionFromEvent = props.onForkTaskSessionFromEvent as
+    | ((event: TaskEvent) => void)
     | undefined;
   const onSelectChildTask = props.onSelectChildTask as ((taskId: string) => void) | undefined;
   const onOpenChildAgentSidebar = props.onOpenChildAgentSidebar as
@@ -1971,6 +1976,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                   onOpenPresentationArtifact,
                                   onOpenWebArtifact,
                                   onQuoteAssistantMessage,
+                                  onForkTaskSession: onForkTaskSessionFromEvent,
                                   events,
                                   onViewOutputs: onViewTaskOutputs,
                                   hideVerificationSteps: true,
@@ -2265,6 +2271,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             <MessageQuoteButton
                               onQuote={() => onQuoteAssistantMessage(quotedAssistantMessage)}
                             />
+                          )}
+                          {event.id && onForkTaskSessionFromEvent && (
+                            <MessageForkButton onFork={() => onForkTaskSessionFromEvent(event)} />
                           )}
                           {event.id && !isTaskWorking && (
                             <>
@@ -2724,6 +2733,7 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.onOpenPresentationArtifact === next.onOpenPresentationArtifact &&
     prev.onOpenWebArtifact === next.onOpenWebArtifact &&
     prev.onQuoteAssistantMessage === next.onQuoteAssistantMessage &&
+    prev.onForkTaskSessionFromEvent === next.onForkTaskSessionFromEvent &&
     prev.onSelectChildTask === next.onSelectChildTask &&
     prev.onOpenChildAgentSidebar === next.onOpenChildAgentSidebar &&
     prev.onViewTaskOutputs === next.onViewTaskOutputs
@@ -3978,10 +3988,17 @@ function MainContentComponent({
     liveWorkCompletedAt,
     Boolean(task && isTaskWorking),
   );
+  const persistedWorkDuration =
+    isTaskFinished &&
+    typeof task?.lastRunDurationMs === "number" &&
+    Number.isFinite(task.lastRunDurationMs)
+      ? formatDuration(task.lastRunDurationMs)
+      : null;
+  const workDuration = persistedWorkDuration ?? liveWorkDuration;
   const workDurationLabel = isTaskWorking
     ? `Working for ${liveWorkDuration}`
     : isTaskFinished
-      ? `Worked for ${liveWorkDuration}`
+      ? `Worked for ${workDuration}`
       : "Activity";
 
   const continuationStatusChip = useMemo(() => {
@@ -5201,16 +5218,21 @@ function MainContentComponent({
     if (shouldHideApprovalEventInStepFeed(event)) {
       return false;
     }
+    if (isRedundantTimelineEvidenceEvent(event, events)) {
+      return false;
+    }
     // Suppress tool_result events that are paired with their tool_call (shown inline)
     if (effectiveType === "tool_result" && toolCallPairing.claimedResultIds.has(event.id)) {
       return false;
     }
-    if (!shouldShowTaskEventInStepFeed(event)) {
+    if (!shouldShowTaskEventInStepFeed(event, { verboseSteps })) {
       return false;
     }
     return true;
   }, [
     toolCallPairing.claimedResultIds,
+    events,
+    verboseSteps,
   ]);
 
   // Check if an event has details to show
@@ -7241,6 +7263,26 @@ function MainContentComponent({
     }
   }, [closeTaskHeaderMenu, onSelectTask, onTasksChanged, remoteSession, task]);
 
+  const handleForkTaskSessionFromEvent = useCallback(
+    async (event: TaskEvent) => {
+      if (!task || remoteSession || !event.id) return;
+      try {
+        const forkedTask = await window.electronAPI.forkTaskSession({
+          taskId: event.taskId || task.id,
+          branchLabel: "side-chat",
+          fromEventId: event.id,
+        });
+        await onTasksChanged?.();
+        if (forkedTask?.id) {
+          onSelectTask?.(forkedTask.id);
+        }
+      } catch (error) {
+        void error;
+      }
+    },
+    [onSelectTask, onTasksChanged, remoteSession, task],
+  );
+
   const handleTaskHeaderAddAutomation = useCallback(() => {
     if (!task || remoteSession) return;
     closeTaskHeaderMenu();
@@ -8778,6 +8820,7 @@ function MainContentComponent({
       onOpenPresentationArtifact={openPresentationArtifact}
       onOpenWebArtifact={openWebArtifact}
       onQuoteAssistantMessage={handleQuoteAssistantMessage}
+      onForkTaskSessionFromEvent={remoteSession ? undefined : handleForkTaskSessionFromEvent}
       onSelectChildTask={onSelectChildTask}
       onOpenChildAgentSidebar={onOpenChildAgentSidebar}
       onViewTaskOutputs={onViewTaskOutputs}
@@ -8821,11 +8864,11 @@ function MainContentComponent({
     <div className="main-content">
       {/* Header */}
       <div className="main-header">
-        {task?.parentTaskId && onSelectTask && (
+        {(task?.parentTaskId || task?.branchFromTaskId) && onSelectTask && (
           <button
             type="button"
             className="main-header-parent-thread-btn"
-            onClick={() => onSelectTask(task.parentTaskId!)}
+            onClick={() => onSelectTask(task.parentTaskId || task.branchFromTaskId || null)}
             title="Back to parent thread"
             aria-label="Back to parent thread"
           >

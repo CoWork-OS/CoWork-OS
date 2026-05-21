@@ -10,7 +10,7 @@ import { isPretextEnabled } from "../utils/pretext-adapter";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
 
-const SIDEBAR_ITEM_HEIGHT = 26;
+const SIDEBAR_ITEM_HEIGHT = 22;
 const SIDEBAR_LOAD_MORE_THRESHOLD_PX = 320;
 
 interface AgentRoleInfo {
@@ -1463,7 +1463,7 @@ export function Sidebar({
         }}
         style={
           {
-            "--cli-task-padding-left": depth === 0 ? "12px" : `${20 + depth * 22}px`,
+            "--cli-task-padding-left": depth === 0 ? "12px" : `${4 + depth * 12}px`,
           } as React.CSSProperties
         }
         title={

@@ -164,6 +164,17 @@ function shouldUsePersistentShell(command: string): boolean {
   );
 }
 
+function isSandboxRuntimeFailure(stderr: string, exitCode: number | null): boolean {
+  if (exitCode === 134) return true;
+  const text = stderr || "";
+  if (/sandbox_apply/i.test(text)) return true;
+  if (/Abort trap(?::\s*\d+)?/i.test(text) && /sandbox-exec/i.test(text)) return true;
+  if (/sandbox-exec/i.test(text) && /(?:failed|aborted|killed|Operation not permitted)/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
 function getExecutableTokenIndex(tokens: string[]): number {
   const isEnvAssignment = (token: string): boolean =>
     /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)$/.test(token);
@@ -636,16 +647,6 @@ export class ShellTools {
       const policies = options.policies;
       const sandboxAllowed = policies.runtime.allowedSandboxTypes.includes(sandbox.type);
       if (sandbox.type === "none" || !sandboxAllowed) {
-        if (!policies.runtime.requireSandboxForShell) {
-          this.daemon.logEvent(this.taskId, "shell_sandbox_unavailable", {
-            command,
-            cwd: options.cwd,
-            reason: sandbox.type === "none" ? "no_os_sandbox_available" : "sandbox_type_not_allowed",
-            sandboxType: sandbox.type,
-            requireSandboxForShell: policies.runtime.requireSandboxForShell,
-          });
-          return null;
-        }
         if (this.allowUnsandboxedShellFallback(policies)) {
           this.daemon.logEvent(this.taskId, "shell_sandbox_bypassed", {
             command,
@@ -667,7 +668,7 @@ export class ShellTools {
         });
         throw new Error(
           sandbox.type === "none"
-            ? `run_command requires an OS-level sandbox. Configure macOS sandboxing or Docker, or set ${UNSANDBOXED_SHELL_OVERRIDE_ENV}=1 with admin policy allowUnsandboxedShell=true for explicit local development fallback.`
+            ? `run_command requires an OS-level sandbox for complex shell execution. Configure macOS sandboxing or Docker, or set ${UNSANDBOXED_SHELL_OVERRIDE_ENV}=1 with admin policy allowUnsandboxedShell=true for explicit local development fallback.`
             : `run_command sandbox type "${sandbox.type}" is blocked by admin policy.`,
         );
       }
@@ -742,16 +743,20 @@ export class ShellTools {
         });
       }
 
+      const sandboxRuntimeFailure = isSandboxRuntimeFailure(stderr, result.exitCode);
       const terminationReason: CommandTerminationReason = this.userKillRequested
         ? "user_stopped"
         : result.timedOut
           ? "timeout"
-          : result.error
+          : result.error || sandboxRuntimeFailure
             ? "error"
             : "normal";
       const success = terminationReason === "normal" && result.exitCode === 0;
       const errorMessage =
         result.error ||
+        (sandboxRuntimeFailure
+          ? `Shell sandbox failed before command completion: sandbox-exec aborted${result.exitCode !== null ? ` (exit ${result.exitCode})` : ""}. If this command was creating or editing files, use write_file or edit_file instead of shell heredocs/redirection.`
+          : undefined) ||
         (terminationReason === "timeout"
           ? "Command timed out"
           : terminationReason === "user_stopped"
@@ -1549,5 +1554,6 @@ export const _testUtils = {
   killProcessTree,
   resolveCommandCwd,
   shouldUsePersistentShell,
+  isSandboxRuntimeFailure,
   buildSafeShellPath,
 };

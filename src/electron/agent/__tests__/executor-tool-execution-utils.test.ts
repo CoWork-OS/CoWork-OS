@@ -206,6 +206,20 @@ describe("tool failure normalization", () => {
     ).toBe(false);
   });
 
+  it("classifies desktop geolocation provider failures as hard failures", () => {
+    expect(
+      isHardToolFailure(
+        "get_current_location",
+        {
+          success: false,
+          error:
+            "Desktop geolocation timed out. Do not retry get_current_location in this task.",
+        },
+        "Desktop geolocation timed out. Do not retry get_current_location in this task.",
+      ),
+    ).toBe(true);
+  });
+
   it("treats non-blocking fallback failures as advisory tool results", () => {
     const normalized = buildNormalizedToolResult({
       toolName: "read_pdf_visual",

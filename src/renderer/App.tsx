@@ -685,6 +685,7 @@ function getAppTaskSignature(task: Task | undefined): string {
     task.workspaceId,
     task.updatedAt,
     task.completedAt ?? "",
+    task.lastRunDurationMs ?? "",
     task.pinned ? "pinned" : "unpinned",
     task.sessionId ?? "",
     task.worktreePath ?? "",
@@ -2806,11 +2807,18 @@ export function App() {
         event.type === "approval_granted" ||
         event.type === "task_resumed" ||
         event.type === "input_request_resolved";
+      const isNewRunStarted =
+        event.type === "task_resumed" && event.payload?.newRunStarted === true;
       const payloadFailureClass =
         typeof event.payload?.failureClass === "string" ? event.payload.failureClass : undefined;
       const payloadBestKnownOutcome =
         event.payload?.bestKnownOutcome && typeof event.payload.bestKnownOutcome === "object"
           ? event.payload.bestKnownOutcome
+          : undefined;
+      const payloadLastRunDurationMs =
+        typeof event.payload?.lastRunDurationMs === "number" &&
+        Number.isFinite(event.payload.lastRunDurationMs)
+          ? Math.max(0, Math.floor(event.payload.lastRunDurationMs))
           : undefined;
       const isInputRequestResolutionEvent =
         event.type === "input_request_resolved" || event.type === "input_request_dismissed";
@@ -2827,11 +2835,17 @@ export function App() {
                 return t;
               }
               const resolvedStatus =
-                resolveTaskStatusUpdateFromEvent(t, newStatus as Task["status"]) ?? t.status;
+                isNewRunStarted
+                  ? (newStatus as Task["status"])
+                  : resolveTaskStatusUpdateFromEvent(t, newStatus as Task["status"]) ?? t.status;
               const updates: Partial<Task> = {
                 status: resolvedStatus,
                 updatedAt: Math.max(t.updatedAt || 0, eventTimestamp),
               };
+              if (isNewRunStarted) {
+                updates.completedAt = undefined;
+                updates.lastRunDurationMs = undefined;
+              }
               if (shouldClearTerminalStatus) {
                 updates.terminalStatus = undefined;
                 updates.failureClass = undefined;
@@ -2843,6 +2857,9 @@ export function App() {
               }
               if (payloadBestKnownOutcome) {
                 updates.bestKnownOutcome = payloadBestKnownOutcome;
+              }
+              if (payloadLastRunDurationMs !== undefined) {
+                updates.lastRunDurationMs = payloadLastRunDurationMs;
               }
               return mergeTaskPreservingIdentity(t, updates);
             }),

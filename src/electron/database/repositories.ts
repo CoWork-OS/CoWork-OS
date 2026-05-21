@@ -239,6 +239,7 @@ export class TaskRepository {
     depth: "depth",
     resultSummary: "result_summary",
     completedAt: "completed_at",
+    lastRunDurationMs: "last_run_duration_ms",
     error: "error",
     pinned: "is_pinned",
     labels: "labels",
@@ -400,6 +401,7 @@ export class TaskRepository {
     "maxAttempts",
     "currentAttempt",
     "completedAt",
+    "lastRunDurationMs",
     "workspaceId",
     "parentTaskId",
     "agentType",
@@ -478,6 +480,9 @@ export class TaskRepository {
       }
       if (!Object.prototype.hasOwnProperty.call(normalizedUpdates, "failureClass")) {
         normalizedUpdates.failureClass = undefined;
+      }
+      if (!Object.prototype.hasOwnProperty.call(normalizedUpdates, "lastRunDurationMs")) {
+        normalizedUpdates.lastRunDurationMs = undefined;
       }
     }
 
@@ -981,6 +986,10 @@ export class TaskRepository {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       completedAt: row.completed_at || undefined,
+      lastRunDurationMs:
+        typeof row.last_run_duration_ms === "number" && Number.isFinite(row.last_run_duration_ms)
+          ? Math.max(0, Math.floor(row.last_run_duration_ms))
+          : undefined,
       pinned: Number(row.is_pinned) === 1,
       budgetTokens: row.budget_tokens || undefined,
       budgetCost: row.budget_cost || undefined,
@@ -3971,6 +3980,7 @@ export class MemoryRepository {
   private static readonly MEMORY_FTS_RAW_MAX_CHARS = 160;
   private static readonly MEMORY_FTS_RAW_MAX_TOKENS = 12;
   private static readonly MEMORY_FTS_SLOW_QUERY_MS = 250;
+  private static readonly PROMPT_RECALL_FTS_MAX_TOKENS = 5;
 
   // Keep this small and local: we want memory search to be robust against
   // natural-language queries (punctuation, filler words) without pulling in
@@ -4163,11 +4173,13 @@ export class MemoryRepository {
           source: "db" as const,
         }));
 
+      const ftsM = { workspaceId, limit };
       let rows: Record<string, unknown>[] = [];
       if (tryRaw) {
         try {
           rows = this.runMemoryFtsQuery("local-raw", raw, () =>
             stmt.all(raw, workspaceId, limit),
+            ftsM,
           ) as Record<string, unknown>[];
         } catch {
           // Raw query may be invalid FTS syntax; retry below with tokenized query.
@@ -4180,6 +4192,7 @@ export class MemoryRepository {
         try {
           rows = this.runMemoryFtsQuery("local-relaxed", tokenized, () =>
             stmt.all(tokenized, workspaceId, limit),
+            ftsM,
           ) as Record<string, unknown>[];
         } catch {
           // Ignore; we'll fall back to LIKE below.
@@ -4256,11 +4269,13 @@ export class MemoryRepository {
       const tokenized = this.buildRelaxedFtsQuery(raw);
       const tryRaw = this.shouldTryRawFtsQuery(raw);
 
+      const ftsM = { limit };
       let rows: Record<string, unknown>[] = [];
       if (tryRaw) {
         try {
           rows = this.runMemoryFtsQuery("imported-raw", raw, () =>
             stmt.all(raw, limit),
+            ftsM,
           ) as Record<string, unknown>[];
         } catch {
           rows = [];
@@ -4271,6 +4286,7 @@ export class MemoryRepository {
         try {
           rows = this.runMemoryFtsQuery("imported-relaxed", tokenized, () =>
             stmt.all(tokenized, limit),
+            ftsM,
           ) as Record<string, unknown>[];
         } catch {
           rows = [];
@@ -4322,6 +4338,149 @@ export class MemoryRepository {
     return rows.map((row) => ({
       id: row.id as string,
       snippet: (row.summary as string) || this.truncateToSnippet(row.content as string, 200),
+      type: row.type as MemoryType,
+      relevanceScore: 1,
+      createdAt: row.created_at as number,
+      taskId: (row.task_id as string) || undefined,
+      source: "db" as const,
+    }));
+  }
+
+  /**
+   * Local-only BM25 search for prompt recall. Skips imported-global and uses
+   * a tighter token cap to keep FTS fast. Returns content alongside snippets
+   * so callers can filter without a second getFullDetails round-trip.
+   */
+  searchLocalForPromptRecall(
+    workspaceId: string,
+    query: string,
+    limit = 5,
+  ): Array<MemorySearchResult & { source: "db"; content: string }> {
+    const raw = (query || "").trim();
+    if (!raw) return [];
+
+    try {
+      const stmt = this.db.prepare(`
+        SELECT m.id, m.summary, m.content, m.type, m.created_at, m.task_id,
+               bm25(memories_fts) as score
+        FROM memories_fts f
+        JOIN memories m ON f.rowid = m.rowid
+        WHERE memories_fts MATCH ? AND m.workspace_id = ? AND m.is_private = 0
+        ORDER BY score
+        LIMIT ?
+      `);
+
+      const tokenized = this.buildRelaxedFtsQuery(
+        raw,
+        MemoryRepository.PROMPT_RECALL_FTS_MAX_TOKENS,
+      );
+      const tryRaw = this.shouldTryRawFtsQuery(raw);
+
+      const mapRows = (rows: Record<string, unknown>[]) =>
+        rows.map((row) => ({
+          id: row.id as string,
+          snippet:
+            (row.summary as string) ||
+            this.truncateToSnippet(row.content as string, 200),
+          content: row.content as string,
+          type: row.type as MemoryType,
+          relevanceScore: Math.abs(row.score as number),
+          createdAt: row.created_at as number,
+          taskId: (row.task_id as string) || undefined,
+          source: "db" as const,
+        }));
+
+      const ftsM = { workspaceId, limit };
+      let rows: Record<string, unknown>[] = [];
+      if (tryRaw) {
+        try {
+          rows = this.runMemoryFtsQuery("prompt-recall-raw", raw, () =>
+            stmt.all(raw, workspaceId, limit),
+            ftsM,
+          ) as Record<string, unknown>[];
+        } catch {
+          rows = [];
+        }
+      }
+
+      if (rows.length === 0 && tokenized) {
+        try {
+          rows = this.runMemoryFtsQuery("prompt-recall-relaxed", tokenized, () =>
+            stmt.all(tokenized, workspaceId, limit),
+            ftsM,
+          ) as Record<string, unknown>[];
+        } catch {
+          rows = [];
+        }
+      }
+
+      if (rows.length > 0) return mapRows(rows);
+    } catch {
+      // Fall through to LIKE fallback
+    }
+
+    const tokens = this.tokenizeSearchQuery(raw);
+    const likeTokens = (tokens.length > 0 ? tokens : [raw])
+      .slice(0, MemoryRepository.PROMPT_RECALL_FTS_MAX_TOKENS)
+      .filter(Boolean);
+
+    const clauses: string[] = [];
+    const params: unknown[] = [workspaceId];
+    for (const token of likeTokens) {
+      clauses.push("(content LIKE ? OR summary LIKE ?)");
+      const like = `%${token}%`;
+      params.push(like, like);
+    }
+
+    const where = clauses.length > 0 ? `AND (${clauses.join(" OR ")})` : "";
+    const stmt = this.db.prepare(`
+      SELECT id, summary, content, type, created_at, task_id
+      FROM memories
+      WHERE workspace_id = ? AND is_private = 0
+        ${where}
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+    params.push(limit);
+    const rows = stmt.all(...params) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      snippet:
+        (row.summary as string) ||
+        this.truncateToSnippet(row.content as string, 200),
+      content: row.content as string,
+      type: row.type as MemoryType,
+      relevanceScore: 1,
+      createdAt: row.created_at as number,
+      taskId: (row.task_id as string) || undefined,
+      source: "db" as const,
+    }));
+  }
+
+  /**
+   * Fast marker-based lookup using LIKE instead of FTS.
+   * For background callers that search for known content prefixes/markers
+   * (e.g. "[SUGGESTION]", "[PLAYBOOK] Task succeeded").
+   */
+  searchByContentMarker(
+    workspaceId: string,
+    marker: string,
+    limit = 50,
+  ): MemorySearchResult[] {
+    const stmt = this.db.prepare(`
+      SELECT id, summary, content, type, created_at, task_id
+      FROM memories
+      WHERE workspace_id = ? AND is_private = 0 AND (content LIKE ? OR summary LIKE ?)
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+    const like = `%${marker}%`;
+    const rows = stmt.all(workspaceId, like, like, limit) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      snippet:
+        (row.summary as string) ||
+        this.truncateToSnippet(row.content as string, 200),
       type: row.type as MemoryType,
       relevanceScore: 1,
       createdAt: row.created_at as number,
@@ -4614,8 +4773,8 @@ export class MemoryRepository {
       .filter((t) => t.length > 1 && !MemoryRepository.MEMORY_SEARCH_STOP_WORDS.has(t));
   }
 
-  private buildRelaxedFtsQuery(raw: string): string | null {
-    const tokens = this.tokenizeSearchQuery(raw).slice(0, 8);
+  private buildRelaxedFtsQuery(raw: string, maxTokens = 8): string | null {
+    const tokens = this.tokenizeSearchQuery(raw).slice(0, maxTokens);
     if (tokens.length === 0) return null;
 
     // Quote tokens to avoid them being interpreted as query operators.
@@ -4629,15 +4788,28 @@ export class MemoryRepository {
     return this.tokenizeSearchQuery(raw).length <= MemoryRepository.MEMORY_FTS_RAW_MAX_TOKENS;
   }
 
-  private runMemoryFtsQuery<T>(label: string, query: string, run: () => T): T {
+  private runMemoryFtsQuery<T>(
+    label: string,
+    query: string,
+    run: () => T,
+    meta?: { workspaceId?: string; limit?: number },
+  ): T {
     const startedAt = Date.now();
+    let result: T;
     try {
-      return run();
+      result = run();
+      return result;
     } finally {
       const elapsedMs = Date.now() - startedAt;
       if (elapsedMs >= MemoryRepository.MEMORY_FTS_SLOW_QUERY_MS) {
+        const tokenCount = this.tokenizeSearchQuery(query).length;
+        const rowCount = Array.isArray(result!) ? result!.length : -1;
         memoryRepositoryLogger.warn(
-          `[MemoryRepository] Slow memory FTS query label=${label} elapsedMs=${elapsedMs} queryChars=${query.length}`,
+          `[MemoryRepository] Slow memory FTS query` +
+            ` label=${label} elapsedMs=${elapsedMs}` +
+            ` queryChars=${query.length} tokens=${tokenCount}` +
+            ` rows=${rowCount} limit=${meta?.limit ?? "?"}` +
+            ` workspace=${meta?.workspaceId ?? "global"}`,
         );
       }
     }

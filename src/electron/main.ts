@@ -283,6 +283,13 @@ const managedBriefingRuns = new Map<
     generatedAt: number;
   }
 >();
+const MANAGED_BRIEFING_TTL_MS = 24 * 60 * 60 * 1000;
+const managedBriefingCleanupTimer = setInterval(() => {
+  const cutoff = Date.now() - MANAGED_BRIEFING_TTL_MS;
+  for (const [key, value] of managedBriefingRuns) {
+    if (value.generatedAt < cutoff) managedBriefingRuns.delete(key);
+  }
+}, 60 * 60 * 1000);
 
 const HEADLESS = isHeadlessMode();
 const FORCE_ENABLE_CONTROL_PLANE = shouldEnableControlPlaneFromArgsOrEnv();
@@ -1588,6 +1595,15 @@ if (!gotTheLock) {
     try {
       MemoryService.initialize(dbManager);
       CuratedMemoryService.initialize(dbManager);
+
+      // Initialize FTS worker thread for off-main-thread memory search
+      const { FtsWorkerClient } = await import("./database/FtsWorkerClient");
+      const ftsWorkerClient = new FtsWorkerClient(
+        path.join(getUserDataDir(), "cowork-os.db"),
+      );
+      MemoryService.initFtsWorker(ftsWorkerClient);
+      app.on("will-quit", () => ftsWorkerClient.destroy());
+
       logger.info("Memory Service initialized");
     } catch (error) {
       logger.error("Failed to initialize Memory Service:", error);
@@ -2569,7 +2585,7 @@ if (!gotTheLock) {
           heartbeatRunId,
         }) => {
           const pressureInstructions = MemoryPressureService.buildCompactionInstructions(
-            MemoryPressureService.analyze(workspacePath),
+            await MemoryPressureService.analyze(workspacePath),
           );
           const result = await new DreamingService(
             new DreamingRepository(dbManager.getDatabase()),
@@ -3841,6 +3857,7 @@ if (!gotTheLock) {
   }
 
   app.on("before-quit", async () => {
+    clearInterval(managedBriefingCleanupTimer);
     if (tempWorkspacePruneTimer) {
       clearInterval(tempWorkspacePruneTimer);
       tempWorkspacePruneTimer = null;

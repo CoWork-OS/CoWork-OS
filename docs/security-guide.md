@@ -371,7 +371,9 @@ form-action 'self';
 | `files.user-selected.read-write` | Access to user-selected folders |
 | `network.client` | Connect to LLM APIs |
 
-**Not requested**: Camera, microphone, contacts, location, or other sensitive permissions.
+**Not requested**: Camera, microphone, or contacts.
+
+**Opt-in location access**: `get_current_location` requests one-time location permission through the operating system's native dialog (macOS Core Location, Windows Location Services, or Linux GeoClue2). Each invocation requires explicit user consent — the permission is never auto-approved or persisted across tasks. Coordinates are not logged; only accuracy and source are recorded in task events.
 
 ---
 

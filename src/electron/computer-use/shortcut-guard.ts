@@ -11,7 +11,16 @@
  * provides a secondary safety net.
  */
 
-import { globalShortcut } from "electron";
+import type { GlobalShortcut } from "electron";
+
+function getGlobalShortcut(): GlobalShortcut | null {
+  try {
+    const electron = require("electron") as { globalShortcut?: GlobalShortcut };
+    return electron.globalShortcut ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Accelerators that Electron *can* register on macOS.
@@ -44,6 +53,8 @@ export class ShortcutGuard {
     if (this._active) return;
     this._active = true;
     this.onEscapePress = onEscape ?? null;
+    const globalShortcut = getGlobalShortcut();
+    if (!globalShortcut) return;
 
     for (const accelerator of INTERCEPTABLE_SHORTCUTS) {
       try {
@@ -81,6 +92,11 @@ export class ShortcutGuard {
     this._active = false;
     this.onEscapePress = null;
     this.escapeRegistered = false;
+    const globalShortcut = getGlobalShortcut();
+    if (!globalShortcut) {
+      this.registeredAccelerators = [];
+      return;
+    }
 
     for (const accelerator of this.registeredAccelerators) {
       try {

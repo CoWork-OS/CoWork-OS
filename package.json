@@ -150,18 +150,18 @@
     "test:coverage": "npm run skills:check && vitest run --coverage"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
+    "@anthropic-ai/sdk": "^0.100.0",
     "@aws-sdk/client-bedrock": "^3.1009.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
-    "@chenglou/pretext": "^0.0.3",
+    "@chenglou/pretext": "^0.0.7",
     "@electron/rebuild": "^4.0.4",
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",
-    "@mariozechner/pi-ai": "^0.56.1",
-    "@pydantic/monty": "^0.0.4",
+    "@mariozechner/pi-ai": "^0.73.1",
+    "@pydantic/monty": "^0.0.17",
     "@slack/bolt": "^4.6.0",
-    "@whiskeysockets/baileys": "6.7.16",
+    "@whiskeysockets/baileys": "6.7.23",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
@@ -203,7 +203,7 @@
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
-    "better-sqlite3": "12.6.2"
+    "better-sqlite3": "12.10.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
@@ -225,7 +225,7 @@
     "electron-builder": "^26.7.0",
     "eslint": "^9.39.2",
     "globals": "^17.3.0",
-    "oxfmt": "^0.40.0",
+    "oxfmt": "^0.52.0",
     "oxlint": "^1.47.0",
     "typescript": "^5.9.0",
     "vite": "^7.3.1",

@@ -6,6 +6,8 @@ import {
   X402CheckResult,
   X402FetchRequest,
   X402FetchResult,
+  X402PaymentDetails,
+  X402PaymentPolicyEnvelope,
 } from "./wallet-provider";
 
 interface CoinbaseWalletStatusResponse {
@@ -97,7 +99,11 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
 
   async x402Fetch(req: X402FetchRequest): Promise<X402FetchResult> {
     this.ensureConfigured();
-    return this.callJson<X402FetchResult>("/x402/fetch", {
+    if (!req.paymentPolicy) {
+      throw new Error("Coinbase x402 fetch requires a payment policy envelope");
+    }
+
+    const result = await this.callJson<X402FetchResult>("/x402/fetch", {
       method: "POST",
       body: {
         url: req.url,
@@ -106,8 +112,11 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
         headers: req.headers,
         accountId: this.accountId,
         network: this.network,
+        paymentPolicy: req.paymentPolicy,
       },
     });
+    this.validateSignerPaymentResult(result, req.paymentPolicy);
+    return result;
   }
 
   private async fetchRemoteStatus(): Promise<CoinbaseWalletStatusResponse> {
@@ -159,5 +168,101 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
     }
 
     return (await response.json()) as T;
+  }
+
+  private validateSignerPaymentResult(
+    result: X402FetchResult,
+    policy: X402PaymentPolicyEnvelope,
+  ): void {
+    if (!result.paymentMade) return;
+
+    if (result.paymentPolicyEnforced !== true) {
+      throw new Error("Coinbase signer did not confirm x402 payment policy enforcement");
+    }
+    if (!result.paymentDetails) {
+      throw new Error("Coinbase signer did not return signed x402 payment details");
+    }
+
+    const amount = this.extractPaymentAmount(result.paymentDetails);
+    if (amount === null) {
+      throw new Error("Coinbase signer returned invalid x402 payment amount");
+    }
+    if (amount > policy.effectiveHardLimitUsd) {
+      throw new Error(
+        `Coinbase signer payment amount (${amount} USDC) exceeds policy hard limit (${policy.effectiveHardLimitUsd} USDC)`,
+      );
+    }
+    if (!this.isAllowedPaymentNetwork(String(result.paymentDetails.network || ""))) {
+      throw new Error(`Coinbase signer returned unsupported x402 network: ${result.paymentDetails.network}`);
+    }
+    if (!this.isAllowedPaymentAsset(result.paymentDetails)) {
+      throw new Error(`Coinbase signer returned unsupported x402 asset: ${result.paymentDetails.asset || "unknown"}`);
+    }
+    if (policy.requireApproval && !policy.approvedPaymentDetails) {
+      throw new Error("Coinbase signer made an x402 payment without exact approved payment details");
+    }
+
+    const expected = policy.approvedPaymentDetails || policy.preflight?.paymentDetails;
+    if (expected) {
+      const mismatch = this.getPaymentDetailsMismatch(expected, result.paymentDetails);
+      if (mismatch) {
+        throw new Error(`Coinbase signer payment details do not match approved policy (${mismatch})`);
+      }
+    }
+  }
+
+  private extractPaymentAmount(details: X402PaymentDetails): number | null {
+    const amount =
+      details.amount !== undefined
+        ? Number(details.amount)
+        : typeof details.maxAmountRequired === "string" && /^\d+$/.test(details.maxAmountRequired)
+          ? Number(details.maxAmountRequired) / 1_000_000
+          : Number.NaN;
+    return Number.isFinite(amount) && amount >= 0 ? amount : null;
+  }
+
+  private isAllowedPaymentNetwork(network: string): boolean {
+    const normalized = network.trim().toLowerCase();
+    return (
+      normalized === "base" ||
+      normalized === this.network ||
+      (this.network === "base-mainnet" && normalized === "eip155:8453") ||
+      (this.network === "base-sepolia" && normalized === "eip155:84532")
+    );
+  }
+
+  private isAllowedPaymentAsset(details: X402PaymentDetails): boolean {
+    const currency = String(details.currency || "").toUpperCase();
+    if (currency && currency !== "USDC") return false;
+    if (!currency && !details.asset) return false;
+    if (!details.asset) return true;
+
+    const normalized = String(details.asset).trim().toLowerCase();
+    const mainnetUsdc = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+    const sepoliaUsdc = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
+    return this.network === "base-sepolia" ? normalized === sepoliaUsdc : normalized === mainnetUsdc;
+  }
+
+  private getPaymentDetailsMismatch(
+    expected: X402PaymentDetails,
+    actual: X402PaymentDetails,
+  ): string | null {
+    const fields: Array<keyof X402PaymentDetails> = [
+      "scheme",
+      "payTo",
+      "amount",
+      "maxAmountRequired",
+      "currency",
+      "asset",
+      "network",
+      "resource",
+      "expires",
+    ];
+    for (const field of fields) {
+      if (String(expected[field] ?? "") !== String(actual[field] ?? "")) {
+        return `${field} mismatch`;
+      }
+    }
+    return null;
   }
 }

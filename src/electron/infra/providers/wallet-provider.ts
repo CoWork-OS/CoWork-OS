@@ -3,13 +3,18 @@ import { InfraSettings } from "../../../shared/types";
 export type WalletProviderKind = "local" | "coinbase_agentic";
 
 export interface X402PaymentDetails {
+  scheme?: string;
   payTo: string;
-  amount: string;
-  currency: string;
+  amount?: string;
+  maxAmountRequired?: string;
+  currency?: string;
+  asset?: string;
   network: string;
   resource: string;
   description?: string;
+  mimeType?: string;
   expires?: number;
+  [key: string]: unknown;
 }
 
 export interface X402CheckResult {
@@ -23,6 +28,8 @@ export interface X402FetchRequest {
   method?: string;
   body?: string;
   headers?: Record<string, string>;
+  paymentPolicy?: X402PaymentPolicyEnvelope;
+  approvePayment?: X402PaymentApprovalHandler;
 }
 
 export interface X402FetchResult {
@@ -31,7 +38,30 @@ export interface X402FetchResult {
   headers: Record<string, string>;
   paymentMade: boolean;
   amountPaid?: string;
+  paymentDetails?: X402PaymentDetails;
+  paymentPolicyEnforced?: boolean;
 }
+
+export interface X402PaymentPolicyEnvelope {
+  policyVersion: 1;
+  effectiveHardLimitUsd: number;
+  maxAutoApproveUsd: number;
+  requireApproval: boolean;
+  allowedHosts: string[];
+  preflight?: X402CheckResult;
+  approvedPaymentDetails?: X402PaymentDetails;
+  approvedAt?: string;
+}
+
+export interface X402PaymentChallenge {
+  url: string;
+  method: string;
+  paymentDetails: X402PaymentDetails;
+}
+
+export type X402PaymentApprovalHandler = (
+  challenge: X402PaymentChallenge,
+) => Promise<boolean> | boolean;
 
 export interface WalletProviderStatus {
   kind: WalletProviderKind;

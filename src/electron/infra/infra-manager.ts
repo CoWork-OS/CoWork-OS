@@ -13,7 +13,12 @@ import { E2BSandboxProvider } from "./providers/e2b-sandbox";
 import { NamecheapDomainsProvider } from "./providers/namecheap-domains";
 import { LocalWalletProvider } from "./providers/local-wallet-provider";
 import { CoinbaseAgenticWalletProvider } from "./providers/coinbase-agentic-wallet-provider";
-import { WalletProvider, WalletProviderKind } from "./providers/wallet-provider";
+import {
+  WalletProvider,
+  WalletProviderKind,
+  X402PaymentApprovalHandler,
+  X402PaymentPolicyEnvelope,
+} from "./providers/wallet-provider";
 
 export class InfraManager {
   private static instance: InfraManager | null = null;
@@ -284,12 +289,23 @@ export class InfraManager {
     return this.walletProvider.x402Check(url);
   }
 
-  async x402Fetch(url: string, opts?: { method?: string; body?: string; headers?: Record<string, string> }) {
+  async x402Fetch(
+    url: string,
+    opts?: {
+      method?: string;
+      body?: string;
+      headers?: Record<string, string>;
+      paymentPolicy?: X402PaymentPolicyEnvelope;
+      approvePayment?: X402PaymentApprovalHandler;
+    },
+  ) {
     return this.walletProvider.x402Fetch({
       url,
       method: opts?.method,
       body: opts?.body,
       headers: opts?.headers,
+      paymentPolicy: opts?.paymentPolicy,
+      approvePayment: opts?.approvePayment,
     });
   }
 

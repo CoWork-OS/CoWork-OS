@@ -49,6 +49,10 @@ Most signer requests include:
 }
 ```
 
+- `paymentPolicy` (object, optional but strongly recommended): desktop-side
+  policy and any user-approved preflight requirement. If present, the signer must
+  enforce it before signing the real upstream payment challenge.
+
 ### Response
 
 ```json
@@ -138,6 +142,9 @@ Checks whether a URL requires x402 payment and returns payment metadata if requi
 `POST /x402/fetch`
 
 Performs the request with signing/payment flow handled server-side.
+The signer must treat any desktop preflight result as advisory only. The real
+upstream `402 Payment Required` response from this fetch is the authoritative
+payment challenge and must be checked against the policy envelope before signing.
 
 ### Request
 
@@ -150,7 +157,35 @@ Performs the request with signing/payment flow handled server-side.
     "accept": "application/json"
   },
   "accountId": "agent-wallet-prod",
-  "network": "base-mainnet"
+  "network": "base-mainnet",
+  "paymentPolicy": {
+    "policyVersion": 1,
+    "effectiveHardLimitUsd": 100,
+    "maxAutoApproveUsd": 1,
+    "requireApproval": true,
+    "allowedHosts": ["paid-api.example.com"],
+    "preflight": {
+      "requires402": true,
+      "url": "https://paid-api.example.com/data",
+      "paymentDetails": {
+        "scheme": "exact",
+        "payTo": "0xmerchant...",
+        "maxAmountRequired": "250000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "network": "eip155:8453",
+        "resource": "/data"
+      }
+    },
+    "approvedPaymentDetails": {
+      "scheme": "exact",
+      "payTo": "0xmerchant...",
+      "maxAmountRequired": "250000",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "network": "eip155:8453",
+      "resource": "/data"
+    },
+    "approvedAt": "2026-06-01T10:00:00.000Z"
+  }
 }
 ```
 
@@ -164,7 +199,16 @@ Performs the request with signing/payment flow handled server-side.
     "content-type": "application/json"
   },
   "paymentMade": true,
-  "amountPaid": "0.25"
+  "amountPaid": "0.25",
+  "paymentPolicyEnforced": true,
+  "paymentDetails": {
+    "scheme": "exact",
+    "payTo": "0xmerchant...",
+    "maxAmountRequired": "250000",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "network": "eip155:8453",
+    "resource": "/data"
+  }
 }
 ```
 
@@ -173,6 +217,10 @@ Performs the request with signing/payment flow handled server-side.
 - `headers` (object): flattened response headers.
 - `paymentMade` (boolean): whether payment/signature flow was used.
 - `amountPaid` (string, optional): decimal USDC amount.
+- `paymentPolicyEnforced` (boolean, required when `paymentMade=true`): signer
+  confirmed it enforced the supplied policy envelope before signing.
+- `paymentDetails` (object, required when `paymentMade=true`): exact upstream
+  challenge details that were signed.
 
 ## Error Handling
 
@@ -191,6 +239,7 @@ Performs the request with signing/payment flow handled server-side.
 Suggested codes:
 - `SIGNER_UNAUTHORIZED`
 - `SIGNER_POLICY_BLOCKED`
+- `X402_PAYMENT_REQUIREMENT_CHANGED`
 - `WALLET_NOT_READY`
 - `X402_PRECHECK_FAILED`
 - `X402_FETCH_FAILED`
@@ -202,18 +251,34 @@ Suggested codes:
    - mTLS, signed JWT, or short-lived bearer token.
 2. Enforce server-side policy independent of desktop settings:
    - host allowlist, per-request max, per-day budget, account scoping.
-3. Never expose private keys over API.
-4. Log and audit all signing/payment actions with correlation IDs.
-5. Add replay protection and strict request timeouts.
+3. Enforce the desktop `paymentPolicy` envelope before signing:
+   - reject missing or unsupported `policyVersion`
+   - reject if the real upstream payment amount exceeds `effectiveHardLimitUsd`
+   - reject unsupported asset/currency/network combinations. Supported USDC
+     assets are Base mainnet `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
+     and Base Sepolia `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+   - reject resources that do not match the requested URL
+   - when `approvedPaymentDetails` is present, reject if the real upstream
+     challenge differs in `scheme`, `payTo`, `amount`, `maxAmountRequired`,
+     `asset`, `currency`, `network`, `resource`, or `expires`
+   - when `requireApproval` is true and no exact approved payment details are
+     present, reject instead of signing silently
+4. Never expose private keys over API.
+5. Log and audit all signing/payment actions with correlation IDs.
+6. Add replay protection and strict request timeouts.
 
 ## CoWork OS Policy Interaction
 
-Desktop-side policy is enforced before `x402/fetch`:
+Desktop-side policy is enforced at two points:
 - Optional host allowlist (`payments.allowedHosts`)
-- Hard payment limit (`payments.hardLimitUsd`)
-- Approval gate (`payments.requireApproval`, `maxAutoApproveUsd`)
+- Advisory preflight estimate (`/x402/check`), when available
+- Final policy/approval gate on the real upstream `402` challenge
+  (`payments.hardLimitUsd`, `payments.requireApproval`, `maxAutoApproveUsd`)
 
-Signer-side policy should be stricter or equal. Do not rely only on desktop checks.
+The final signer-side check is mandatory because HEAD preflight is not
+authoritative. If `/x402/check` returns no payment but `/x402/fetch` receives a
+real upstream `402`, the signer must still apply the policy envelope before
+signing.
 
 ## Quick Smoke Test
 

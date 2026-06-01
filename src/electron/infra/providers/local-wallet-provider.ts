@@ -80,6 +80,11 @@ export class LocalWalletProvider implements WalletProvider {
       method: req.method,
       body: req.body,
       headers: req.headers,
+      approvePayment:
+        req.approvePayment ??
+        (() => {
+          throw new Error("x402 payment policy approval handler is required before signing.");
+        }),
     });
   }
 

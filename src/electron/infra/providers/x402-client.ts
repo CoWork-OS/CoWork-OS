@@ -9,29 +9,18 @@
 
 import * as crypto from "crypto";
 import { ethers } from "ethers";
+import type {
+  X402FetchResult,
+  X402PaymentApprovalHandler,
+  X402PaymentDetails,
+  X402CheckResult,
+} from "./wallet-provider";
 
-interface PaymentDetails {
-  payTo: string;
-  amount: string;
-  currency: string;
-  network: string;
-  resource: string;
-  description?: string;
-  expires?: number;
-}
-
-interface X402CheckResult {
-  requires402: boolean;
-  paymentDetails?: PaymentDetails;
-  url: string;
-}
-
-interface X402FetchResult {
-  status: number;
-  body: string;
-  headers: Record<string, string>;
-  paymentMade: boolean;
-  amountPaid?: string;
+interface X402FetchWithPaymentOptions {
+  method?: string;
+  body?: string;
+  headers?: Record<string, string>;
+  approvePayment?: X402PaymentApprovalHandler;
 }
 
 // EIP-712 domain for x402 payment signing
@@ -91,14 +80,14 @@ export class X402Client {
    */
   async fetchWithPayment(
     url: string,
-    opts?: { method?: string; body?: string; headers?: Record<string, string> },
+    opts?: X402FetchWithPaymentOptions,
   ): Promise<X402FetchResult> {
     if (!this.privateKey || !this.address) {
       throw new Error("Wallet not configured for x402 payments");
     }
 
     const method = opts?.method || "GET";
-    const headers: Record<string, string> = { ...opts?.headers };
+    const headers: Record<string, string> = this.sanitizeRequestHeaders(opts?.headers);
 
     // First request
     const initialResponse = await fetch(url, { method, headers, body: opts?.body });
@@ -125,6 +114,14 @@ export class X402Client {
       throw new Error("Failed to parse PAYMENT-REQUIRED header");
     }
 
+    if (!opts?.approvePayment) {
+      throw new Error("x402 payment policy approval handler is required before signing.");
+    }
+    const approved = await opts.approvePayment({ url, method, paymentDetails });
+    if (!approved) {
+      throw new Error("x402 payment was not approved by policy.");
+    }
+
     // Sign the payment intent
     const signature = await this.signPaymentIntent(paymentDetails);
 
@@ -141,6 +138,8 @@ export class X402Client {
       headers: this.responseHeadersToRecord(paidResponse.headers),
       paymentMade: true,
       amountPaid: paymentDetails.amount,
+      paymentDetails,
+      paymentPolicyEnforced: true,
     };
   }
 
@@ -165,29 +164,33 @@ export class X402Client {
 
   // --- Private helpers ---
 
-  private parsePaymentHeader(header: string): PaymentDetails | undefined {
+  private parsePaymentHeader(header: string): X402PaymentDetails | undefined {
     try {
       // x402 header is base64-encoded JSON
       const decoded = Buffer.from(header, "base64").toString("utf-8");
-      return JSON.parse(decoded) as PaymentDetails;
+      return JSON.parse(decoded) as X402PaymentDetails;
     } catch {
       try {
         // Try parsing as plain JSON
-        return JSON.parse(header) as PaymentDetails;
+        return JSON.parse(header) as X402PaymentDetails;
       } catch {
         return undefined;
       }
     }
   }
 
-  private async signPaymentIntent(details: PaymentDetails): Promise<string> {
+  private async signPaymentIntent(details: X402PaymentDetails): Promise<string> {
     if (!this.privateKey) throw new Error("No private key for signing");
 
     const wallet = new ethers.Wallet(this.privateKey);
+    const amount = this.getDecimalAmount(details);
+    if (amount === null) {
+      throw new Error("x402 payment amount is missing or invalid; refusing to sign.");
+    }
 
     const value = {
       payTo: details.payTo,
-      amount: ethers.parseUnits(details.amount, 6).toString(), // USDC 6 decimals
+      amount: ethers.parseUnits(amount, 6).toString(), // USDC 6 decimals
       resource: details.resource,
       nonce: Date.now() * 1000 + crypto.randomInt(1000),
       expires: details.expires || Math.floor(Date.now() / 1000) + 300, // 5 min
@@ -206,5 +209,30 @@ export class X402Client {
       record[key] = value;
     });
     return record;
+  }
+
+  private sanitizeRequestHeaders(headers?: Record<string, string>): Record<string, string> {
+    const sanitized: Record<string, string> = {};
+    for (const [key, value] of Object.entries(headers || {})) {
+      const normalized = key.toLowerCase();
+      if (normalized === "payment-signature" || normalized === "payment-address") {
+        continue;
+      }
+      sanitized[key] = value;
+    }
+    return sanitized;
+  }
+
+  private getDecimalAmount(details: X402PaymentDetails): string | null {
+    if (typeof details.amount === "string" && Number.isFinite(Number(details.amount))) {
+      return details.amount;
+    }
+    if (
+      typeof details.maxAmountRequired === "string" &&
+      /^\d+$/.test(details.maxAmountRequired)
+    ) {
+      return ethers.formatUnits(details.maxAmountRequired, 6);
+    }
+    return null;
   }
 }

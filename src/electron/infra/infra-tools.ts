@@ -10,6 +10,12 @@ import { AgentDaemon } from "../agent/daemon";
 import { LLMTool } from "../agent/llm/types";
 import { InfraManager } from "./infra-manager";
 import { InfraSettingsManager } from "./infra-settings";
+import type {
+  X402CheckResult,
+  X402PaymentChallenge,
+  X402PaymentDetails,
+  X402PaymentPolicyEnvelope,
+} from "./providers/wallet-provider";
 
 export class InfraTools {
   constructor(
@@ -435,6 +441,9 @@ export class InfraTools {
             amount === null ||
             amount > settings.payments.maxAutoApproveUsd;
 
+          let approvedPaymentDetails: X402PaymentDetails | undefined;
+          let preflightApprovedWithoutExactDetails = false;
+
           if (preflight.requires402 && shouldRequireApproval) {
             const payApproved = await this.daemon.requestApproval(
               this.taskId,
@@ -455,12 +464,28 @@ export class InfraTools {
               result = { error: "x402 payment was not approved by the user." };
               break;
             }
+            if (preflight.paymentDetails) {
+              approvedPaymentDetails = preflight.paymentDetails;
+            } else {
+              preflightApprovedWithoutExactDetails = true;
+            }
           }
 
           result = await manager.x402Fetch(args.url, {
             method: args.method,
             body: args.body,
             headers: args.headers,
+            paymentPolicy: this.createX402PaymentPolicy(settings, preflight, {
+              approvedPaymentDetails,
+              effectiveHardLimit,
+            }),
+            approvePayment: async (challenge) =>
+              this.approveX402PaymentChallenge(challenge, settings, {
+                effectiveHardLimit,
+                preflightPaymentDetails: preflight.paymentDetails,
+                approvedPaymentDetails,
+                preflightApprovedWithoutExactDetails,
+              }),
           });
           break;
         }
@@ -519,6 +544,225 @@ export class InfraTools {
       return safeConfiguredLimit;
     }
     return safeConfiguredLimit > 0 ? Math.min(safeConfiguredLimit, envLimit) : envLimit;
+  }
+
+  private createX402PaymentPolicy(
+    settings: InfraSettings,
+    preflight: X402CheckResult,
+    opts: {
+      approvedPaymentDetails?: X402PaymentDetails;
+      effectiveHardLimit: number;
+    },
+  ): X402PaymentPolicyEnvelope {
+    return {
+      policyVersion: 1,
+      effectiveHardLimitUsd: opts.effectiveHardLimit,
+      maxAutoApproveUsd: settings.payments.maxAutoApproveUsd,
+      requireApproval: settings.payments.requireApproval,
+      allowedHosts: [...(settings.payments.allowedHosts || [])],
+      preflight,
+      ...(opts.approvedPaymentDetails
+        ? {
+            approvedPaymentDetails: opts.approvedPaymentDetails,
+            approvedAt: new Date().toISOString(),
+          }
+        : {}),
+    };
+  }
+
+  private async approveX402PaymentChallenge(
+    challenge: X402PaymentChallenge,
+    settings: InfraSettings,
+    opts: {
+      effectiveHardLimit: number;
+      preflightPaymentDetails?: X402PaymentDetails;
+      approvedPaymentDetails?: X402PaymentDetails;
+      preflightApprovedWithoutExactDetails: boolean;
+    },
+  ): Promise<boolean> {
+    this.validateX402PaymentChallenge(challenge, settings, opts.effectiveHardLimit);
+
+    if (opts.preflightPaymentDetails) {
+      const mismatch = this.getPaymentDetailsMismatch(opts.preflightPaymentDetails, challenge.paymentDetails);
+      if (mismatch) {
+        throw new Error(`x402 payment requirement changed after preflight (${mismatch}); refusing to sign.`);
+      }
+    }
+
+    if (opts.approvedPaymentDetails) {
+      const mismatch = this.getPaymentDetailsMismatch(opts.approvedPaymentDetails, challenge.paymentDetails);
+      if (mismatch) {
+        throw new Error(`x402 payment requirement changed after approval (${mismatch}); refusing to sign.`);
+      }
+      return true;
+    }
+
+    const amount = this.extractPaymentDetailsAmount(challenge.paymentDetails);
+    const shouldRequireApproval =
+      settings.payments.requireApproval ||
+      opts.preflightApprovedWithoutExactDetails ||
+      amount === null ||
+      amount > settings.payments.maxAutoApproveUsd;
+
+    if (!shouldRequireApproval) {
+      return true;
+    }
+
+    return await this.daemon.requestApproval(
+      this.taskId,
+      "external_service",
+      this.formatPaymentApprovalMessage(challenge, amount),
+      {
+        tool: "x402_fetch",
+        params: {
+          url: challenge.url,
+          method: challenge.method,
+          paymentDetails: challenge.paymentDetails,
+        },
+        reason: amount !== null ? `x402 payment operation (${amount} USDC)` : "x402 payment operation",
+      },
+      { allowAutoApprove: false },
+    );
+  }
+
+  private validateX402PaymentChallenge(
+    challenge: X402PaymentChallenge,
+    settings: InfraSettings,
+    effectiveHardLimit: number,
+  ): void {
+    const hostError = this.getHostAllowlistError(challenge.url, settings);
+    if (hostError) throw new Error(hostError);
+
+    const details = challenge.paymentDetails;
+    const amount = this.extractPaymentDetailsAmount(details);
+    if (amount === null) {
+      throw new Error("x402 payment amount is missing or invalid; refusing to sign.");
+    }
+    if (amount > effectiveHardLimit) {
+      throw new Error(
+        `x402 payment amount (${amount} USDC) exceeds configured hard limit (${effectiveHardLimit} USDC).`,
+      );
+    }
+    if (!/^0x[a-fA-F0-9]{40}$/.test(String(details.payTo || ""))) {
+      throw new Error("x402 payment recipient is missing or invalid; refusing to sign.");
+    }
+    const currency = String(details.currency || "").toUpperCase();
+    if (currency && currency !== "USDC") {
+      throw new Error(`Unsupported x402 payment currency: ${details.currency || "unknown"}.`);
+    }
+    if (!currency && !details.asset) {
+      throw new Error("x402 payment asset/currency is missing; refusing to sign.");
+    }
+    if (!this.isAllowedPaymentAsset(String(details.asset || ""), settings)) {
+      throw new Error(`Unsupported x402 payment asset: ${details.asset || "unknown"}.`);
+    }
+    if (!this.isAllowedPaymentNetwork(String(details.network || ""), settings)) {
+      throw new Error(`Unsupported x402 payment network: ${details.network || "unknown"}.`);
+    }
+    if (!this.isPaymentResourceAllowed(String(details.resource || ""), challenge.url)) {
+      throw new Error("x402 payment resource does not match the requested URL; refusing to sign.");
+    }
+    if (typeof details.expires === "number" && details.expires <= Math.floor(Date.now() / 1000)) {
+      throw new Error("x402 payment requirement is expired; refusing to sign.");
+    }
+  }
+
+  private extractPaymentDetailsAmount(details: X402PaymentDetails | undefined): number | null {
+    const amount =
+      details?.amount !== undefined
+        ? Number(details.amount)
+        : this.extractAtomicUsdcAmount(details?.maxAmountRequired);
+    if (!Number.isFinite(amount) || amount < 0) return null;
+    return amount;
+  }
+
+  private extractAtomicUsdcAmount(rawAmount: unknown): number {
+    if (typeof rawAmount !== "string" || !/^\d+$/.test(rawAmount)) return Number.NaN;
+    return Number(rawAmount) / 1_000_000;
+  }
+
+  private getPaymentDetailsMismatch(
+    approved: X402PaymentDetails,
+    actual: X402PaymentDetails,
+  ): string | null {
+    const fields: Array<keyof X402PaymentDetails> = [
+      "scheme",
+      "payTo",
+      "amount",
+      "maxAmountRequired",
+      "currency",
+      "asset",
+      "network",
+      "resource",
+      "expires",
+    ];
+    for (const field of fields) {
+      const approvedValue = approved[field];
+      const actualValue = actual[field];
+      if (String(approvedValue ?? "") !== String(actualValue ?? "")) {
+        return `${field} mismatch`;
+      }
+    }
+    return null;
+  }
+
+  private formatPaymentApprovalMessage(challenge: X402PaymentChallenge, amount: number | null): string {
+    const details = challenge.paymentDetails;
+    const displayAmount = amount !== null ? `${amount} USDC` : "unknown amount";
+    return (
+      `Make an x402 payment request to "${challenge.url}"? ` +
+      `Amount: ${displayAmount}. ` +
+      `Recipient: ${details.payTo || "unknown"}. ` +
+      `Resource: ${details.resource || "unknown"}. ` +
+      `Network: ${details.network || "unknown"}. ` +
+      `Currency: ${details.currency || "USDC"}. ` +
+      `Asset: ${details.asset || "legacy currency field"}.`
+    );
+  }
+
+  private isAllowedPaymentNetwork(network: string, settings: InfraSettings): boolean {
+    const normalized = network.trim().toLowerCase();
+    if (settings.wallet.provider === "coinbase_agentic") {
+      const configured = settings.wallet.coinbase.network;
+      return (
+        normalized === "base" ||
+        normalized === configured ||
+        (configured === "base-mainnet" && normalized === "eip155:8453") ||
+        (configured === "base-sepolia" && normalized === "eip155:84532")
+      );
+    }
+    return normalized === "base" || normalized === "base-mainnet" || normalized === "eip155:8453";
+  }
+
+  private isAllowedPaymentAsset(asset: string, settings: InfraSettings): boolean {
+    if (!asset) return true;
+    const normalized = asset.trim().toLowerCase();
+    const mainnetUsdc = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+    const sepoliaUsdc = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
+    if (settings.wallet.provider === "coinbase_agentic") {
+      return settings.wallet.coinbase.network === "base-sepolia"
+        ? normalized === sepoliaUsdc
+        : normalized === mainnetUsdc;
+    }
+    return normalized === mainnetUsdc;
+  }
+
+  private isPaymentResourceAllowed(resource: string, requestUrl: string): boolean {
+    if (!resource) return false;
+    let parsedRequest: URL;
+    try {
+      parsedRequest = new URL(requestUrl);
+    } catch {
+      return false;
+    }
+
+    try {
+      const parsedResource = new URL(resource);
+      return parsedResource.origin === parsedRequest.origin && parsedResource.href === parsedRequest.href;
+    } catch {
+      const pathWithSearch = `${parsedRequest.pathname}${parsedRequest.search}`;
+      return resource === parsedRequest.pathname || resource === pathWithSearch;
+    }
   }
 
   private getHostAllowlistError(url: string, settings: InfraSettings): string | null {

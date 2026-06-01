@@ -85,10 +85,13 @@ describe("LocalWalletProvider", () => {
       headers: { "x-test": "1" },
     });
 
-    expect(hoisted.x402Client.fetchWithPayment).toHaveBeenCalledWith("https://paid.example/data", {
-      method: "POST",
-      body: "{\"q\":1}",
-      headers: { "x-test": "1" },
-    });
+    expect(hoisted.x402Client.fetchWithPayment).toHaveBeenCalledWith(
+      "https://paid.example/data",
+      expect.objectContaining({
+        method: "POST",
+        body: "{\"q\":1}",
+        headers: { "x-test": "1" },
+      }),
+    );
   });
 });

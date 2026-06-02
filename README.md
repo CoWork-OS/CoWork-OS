@@ -37,6 +37,22 @@
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
+<!-- COWORK_PUBLIC_ADOPTION_STATS_START -->
+### Public Adoption Signals
+
+| Signal | Current |
+|---|---:|
+| GitHub stars | 338 |
+| GitHub forks | 50 |
+| Installer/server downloads | 875 |
+| Download delta | +2 |
+| npm downloads, last week | 398 |
+| GitHub views, last 14-ish days | 1,581 total / 616 unique |
+| GitHub clones, last 14-ish days | 4,617 total / 1,063 unique |
+
+Generated 2026-06-02T13:29:24.199Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. [Full report](docs/public-adoption-stats.md).
+<!-- COWORK_PUBLIC_ADOPTION_STATS_END -->
+
 <p align="center">
   <img src="resources/branding/images/cowork-os-1.webp" alt="CoWork OS home interface" width="700">
 </p>
@@ -561,7 +577,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Gateway Message Lifecycle](docs/gateway-message-lifecycle.md) | Remote command routing, active-task policy, skill slashes, delivery, and scheduled channel outputs |
 | [X Mention Triggers](docs/x-mention-triggers.md) | Configure `do:` mention-triggered task ingress on desktop and headless |
 | [Providers](docs/providers.md) | LLM and search provider configuration, costs, and fallback chains |
-| [Migration Guide](docs/migration.md) | Migration checklist and compatibility notes |
 | [Development](docs/development.md) | Build from source, project structure |
 | [Architecture](docs/architecture.md) | Technical architecture deep-dive |
 | [Skills Runtime Model](docs/skills-runtime-model.md) | Canonical prompt invariant, additive skill application, routing shortlist model, and `use_skill` contract |

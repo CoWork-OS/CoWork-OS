@@ -6,6 +6,7 @@ import {
   getEverydayAgentStatus,
   isEverydayAgentConsentRequired,
   isEverydayAgentUuid,
+  updateEverydayAgentTemporaryMode,
 } from "../EverydayAgentPanel";
 import {
   EVERYDAY_AGENT_CAPABILITY_BUNDLES,
@@ -216,6 +217,24 @@ describe("EverydayAgentPanel console state", () => {
 
     expect(isEverydayAgentConsentRequired(declined)).toBe(false);
     expect(isEverydayAgentConsentRequired(missingDecision)).toBe(true);
+  });
+
+  it("updates a temporary run mode without changing sibling modes", () => {
+    expect(
+      updateEverydayAgentTemporaryMode(
+        {
+          noMemory: false,
+          disposableBrowser: true,
+          readOnly: false,
+        },
+        "readOnly",
+        true,
+      ),
+    ).toEqual({
+      noMemory: false,
+      disposableBrowser: true,
+      readOnly: true,
+    });
   });
 
   it("classifies recoverable auth failures into connector repair actions", () => {

@@ -47,6 +47,11 @@ interface EverydayAgentPanelProps {
 type PauseKind = EverydayPauseScope["kind"];
 type PriorityTone = "danger" | "warn" | "quiet" | "success";
 type EverydayAgentStatus = "loading" | "enabled" | "paused" | "disabled" | "blocked";
+export type EverydayAgentTemporaryModes = {
+  noMemory: boolean;
+  disposableBrowser: boolean;
+  readOnly: boolean;
+};
 
 export interface EverydayAgentPriorityItem {
   id: string;
@@ -82,6 +87,17 @@ export interface EverydayAgentRecoveryItem {
   detail: string;
   actionLabel: string;
   tone: PriorityTone;
+}
+
+export function updateEverydayAgentTemporaryMode(
+  current: EverydayAgentTemporaryModes,
+  mode: keyof EverydayAgentTemporaryModes,
+  checked: boolean,
+): EverydayAgentTemporaryModes {
+  return {
+    ...current,
+    [mode]: checked,
+  };
 }
 
 interface EverydayAgentRecipe {
@@ -597,11 +613,14 @@ export function EverydayAgentPanel({
   const [preview, setPreview] = useState<EverydayActionPreview | null>(null);
   const [pauseKind, setPauseKind] = useState<PauseKind>("global");
   const [pauseTarget, setPauseTarget] = useState("");
-  const [temporaryModes, setTemporaryModes] = useState({
+  const [temporaryModes, setTemporaryModes] = useState<EverydayAgentTemporaryModes>({
     noMemory: false,
     disposableBrowser: true,
     readOnly: false,
   });
+  const updateTemporaryMode = (mode: keyof EverydayAgentTemporaryModes, checked: boolean) => {
+    setTemporaryModes((current) => updateEverydayAgentTemporaryMode(current, mode, checked));
+  };
   const [previewForm, setPreviewForm] = useState({
     title: "Triage inbox follow-ups",
     action: "Draft replies and stage follow-up tasks",
@@ -1235,10 +1254,7 @@ export function EverydayAgentPanel({
                   type="checkbox"
                   checked={temporaryModes.noMemory}
                   onChange={(event) =>
-                    setTemporaryModes((current) => ({
-                      ...current,
-                      noMemory: event.currentTarget.checked,
-                    }))
+                    updateTemporaryMode("noMemory", event.currentTarget.checked)
                   }
                 />
                 <span>
@@ -1251,10 +1267,7 @@ export function EverydayAgentPanel({
                   type="checkbox"
                   checked={temporaryModes.disposableBrowser}
                   onChange={(event) =>
-                    setTemporaryModes((current) => ({
-                      ...current,
-                      disposableBrowser: event.currentTarget.checked,
-                    }))
+                    updateTemporaryMode("disposableBrowser", event.currentTarget.checked)
                   }
                 />
                 <span>
@@ -1267,10 +1280,7 @@ export function EverydayAgentPanel({
                   type="checkbox"
                   checked={temporaryModes.readOnly}
                   onChange={(event) =>
-                    setTemporaryModes((current) => ({
-                      ...current,
-                      readOnly: event.currentTarget.checked,
-                    }))
+                    updateTemporaryMode("readOnly", event.currentTarget.checked)
                   }
                 />
                 <span>

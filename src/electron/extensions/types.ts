@@ -71,6 +71,9 @@ export interface PluginManifest {
   /** Inline skill definitions (declarative, no code required) */
   skills?: import("../../shared/types").CustomSkill[];
 
+  /** Directory-backed skill definitions with SKILL.md plus optional local references/scripts/assets */
+  skillDirectories?: SkillDirectoryDefinition[];
+
   /** Slash command definitions mapping to skill IDs */
   slashCommands?: SlashCommandDefinition[];
 
@@ -123,6 +126,23 @@ export interface AgentRoleDefinition {
   capabilities?: string[];
   /** Additional system prompt for the role */
   systemPrompt?: string;
+}
+
+/**
+ * Directory-backed skill definition within a plugin manifest.
+ * The path is relative to the plugin directory and must contain SKILL.md.
+ */
+export interface SkillDirectoryDefinition {
+  /** Skill ID exposed to the CoWork skill loader */
+  id: string;
+  /** Relative directory containing SKILL.md */
+  path: string;
+  /** Optional display overrides; defaults come from SKILL.md frontmatter */
+  name?: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  enabled?: boolean;
 }
 
 /**

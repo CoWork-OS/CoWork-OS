@@ -25,6 +25,7 @@ import {
   RegisterToolOptions,
   SecureStorage,
   PluginType,
+  SkillDirectoryDefinition,
 } from "./types";
 import { createToolFromConnector, validateConnector } from "./declarative-connector-loader";
 import { discoverPlugins, loadPlugin, getPluginDataPath, isPluginCompatible } from "./loader";
@@ -33,6 +34,7 @@ import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
 import { isPackAllowed, isPackRequired, loadPoliciesStrict } from "../admin/policies";
+import type { CustomSkill } from "../../shared/types";
 
 // Package version (will be replaced at build time or read from package.json)
 const COWORK_VERSION = process.env.npm_package_version || "0.3.0";
@@ -42,6 +44,45 @@ interface PersistedPackStates {
   updatedAt?: number;
   packs?: Record<string, boolean>;
   skills?: Record<string, Record<string, boolean>>;
+}
+
+function parseSkillMarkdownFrontmatter(markdown: string): {
+  frontmatter: Record<string, string>;
+  body: string;
+} {
+  if (!markdown.startsWith("---\n")) {
+    return { frontmatter: {}, body: markdown };
+  }
+  const end = markdown.indexOf("\n---", 4);
+  if (end === -1) {
+    return { frontmatter: {}, body: markdown };
+  }
+  const rawFrontmatter = markdown.slice(4, end).trim();
+  const body = markdown.slice(end + 4).replace(/^\s*\n/, "");
+  const frontmatter: Record<string, string> = {};
+  for (const line of rawFrontmatter.split(/\r?\n/)) {
+    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!match) continue;
+    const key = match[1];
+    let value = match[2].trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    frontmatter[key] = value;
+  }
+  return { frontmatter, body };
+}
+
+function titleFromSkillId(id: string): string {
+  const tail = id.split(":").pop() || id;
+  return tail
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 /**
@@ -267,10 +308,16 @@ export class PluginRegistry extends EventEmitter {
    */
   private applyPersistedSkillStates(manifest: PluginManifest, pluginName: string): void {
     const savedSkillStates = this.skillStates.get(pluginName);
-    if (!savedSkillStates || !manifest.skills) {
+    if (!savedSkillStates) {
       return;
     }
-    for (const skill of manifest.skills) {
+    for (const skill of manifest.skills || []) {
+      const savedSkillState = savedSkillStates.get(skill.id);
+      if (savedSkillState !== undefined) {
+        skill.enabled = savedSkillState;
+      }
+    }
+    for (const skill of manifest.skillDirectories || []) {
       const savedSkillState = savedSkillStates.get(skill.id);
       if (savedSkillState !== undefined) {
         skill.enabled = savedSkillState;
@@ -430,7 +477,7 @@ export class PluginRegistry extends EventEmitter {
         await loadedPlugin.instance.register(api);
 
         // Handle composite declarative content (skills, agentRoles, connectors)
-        await this.registerDeclarativeContent(loadedPlugin.manifest, pluginName);
+        await this.registerDeclarativeContent(loadedPlugin.manifest, pluginName, loadedPlugin.path);
       }
 
       loadedPlugin.state = shouldStartDisabled ? "disabled" : "registered";
@@ -539,6 +586,84 @@ export class PluginRegistry extends EventEmitter {
     };
   }
 
+  private buildDirectoryBackedSkill(
+    definition: SkillDirectoryDefinition,
+    pluginName: string,
+    pluginPath: string,
+  ): CustomSkill | null {
+    const relativeDir = typeof definition.path === "string" ? definition.path.trim() : "";
+    if (!definition.id || !relativeDir || path.isAbsolute(relativeDir)) {
+      logger.warn(`Skipping invalid skill directory definition from ${pluginName}: ${definition.id}`);
+      return null;
+    }
+    if (relativeDir.split(/[\\/]+/).includes("..")) {
+      logger.warn(`Skipping skill directory path with parent traversal from ${pluginName}: ${relativeDir}`);
+      return null;
+    }
+
+    const pluginRoot = path.resolve(pluginPath);
+    const skillDir = path.resolve(pluginRoot, relativeDir);
+    if (skillDir !== pluginRoot && !skillDir.startsWith(pluginRoot + path.sep)) {
+      logger.warn(`Skipping skill directory outside plugin root from ${pluginName}: ${relativeDir}`);
+      return null;
+    }
+
+    const skillPath = path.join(skillDir, "SKILL.md");
+    if (!fs.existsSync(skillPath)) {
+      logger.warn(`Skipping directory-backed skill without SKILL.md: ${skillPath}`);
+      return null;
+    }
+
+    let markdown: string;
+    try {
+      markdown = fs.readFileSync(skillPath, "utf-8");
+    } catch (error) {
+      logger.warn(`Failed to read directory-backed skill ${skillPath}`, error);
+      return null;
+    }
+
+    const { frontmatter, body } = parseSkillMarkdownFrontmatter(markdown);
+    const name = definition.name || frontmatter.name || titleFromSkillId(definition.id);
+    const description =
+      definition.description ||
+      frontmatter.description ||
+      `Directory-backed skill from ${path.relative(pluginRoot, skillPath)}`;
+    const prompt = [
+      `Use the directory-backed CoWork plugin skill \`${definition.id}\`.`,
+      "",
+      `Plugin root: ${pluginRoot}`,
+      `Skill directory: ${skillDir}`,
+      `Skill instruction file: ${skillPath}`,
+      "",
+      "Read and follow the skill instructions below. When they reference relative paths such as ../../references, scripts/, or assets/, resolve them relative to the skill instruction file or plugin root as written. Preserve required artifact contracts, report validation steps, and phase boundaries.",
+      "",
+      body.trim(),
+    ].join("\n");
+
+    return {
+      id: definition.id,
+      name,
+      description,
+      icon: definition.icon || "🧩",
+      category: definition.category || "Plugin",
+      prompt,
+      parameters: [],
+      enabled: definition.enabled !== false,
+      filePath: skillPath,
+      source: "managed",
+      metadata: {
+        version: "1.0.0",
+        pluginSource: pluginName,
+        routing: {
+          useWhen: description,
+          outputs: "Task-specific result plus any artifacts required by the directory-backed skill.",
+          successCriteria:
+            "Follow the directory-backed skill instructions and satisfy its required artifact and validation contract.",
+        },
+      },
+    };
+  }
+
   /**
    * Register declarative content from a composite plugin manifest.
    * Handles inline skills, agent roles, and declarative connectors.
@@ -546,6 +671,7 @@ export class PluginRegistry extends EventEmitter {
   private async registerDeclarativeContent(
     manifest: PluginManifest,
     pluginName: string,
+    pluginPath: string,
   ): Promise<void> {
     // 1. Register inline skills
     if (manifest.skills && manifest.skills.length > 0) {
@@ -574,6 +700,35 @@ export class PluginRegistry extends EventEmitter {
         logger.debug(`Registered ${manifest.skills.length} skill(s) from ${pluginName}`);
       } catch (error) {
         logger.error(`Failed to register skills from ${pluginName}:`, error);
+      }
+    }
+
+    // 1b. Register directory-backed skills.
+    if (manifest.skillDirectories && manifest.skillDirectories.length > 0) {
+      try {
+        const { getCustomSkillLoader } = await import("../agent/custom-skill-loader");
+        const loader = getCustomSkillLoader();
+        let registered = 0;
+        for (const skillDirectory of manifest.skillDirectories) {
+          const skill = this.buildDirectoryBackedSkill(skillDirectory, pluginName, pluginPath);
+          if (!skill) continue;
+
+          const existingOwner = this.skillOwnership.get(skill.id);
+          if (existingOwner && existingOwner !== pluginName) {
+            logger.warn(
+              `Skill ID conflict: "${skill.id}" is defined by both "${existingOwner}" and "${pluginName}". The later registration will overwrite the earlier one.`,
+            );
+          }
+          this.skillOwnership.set(skill.id, pluginName);
+
+          if (typeof loader.registerPluginSkill === "function") {
+            loader.registerPluginSkill(skill);
+            registered++;
+          }
+        }
+        logger.debug(`Registered ${registered} directory-backed skill(s) from ${pluginName}`);
+      } catch (error) {
+        logger.error(`Failed to register directory-backed skills from ${pluginName}:`, error);
       }
     }
 

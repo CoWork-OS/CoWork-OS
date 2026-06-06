@@ -1,0 +1,94 @@
+{
+  "name": "codex-security",
+  "displayName": "Codex Security",
+  "version": "1.0.0",
+  "description": "Repository, diff, and deep multi-pass security scan workflows adapted from the Codex Security plugin.",
+  "type": "pack",
+  "author": "OpenAI",
+  "keywords": ["security", "audit", "code-review", "codex", "vulnerability"],
+  "icon": "🛡️",
+  "category": "Engineering",
+  "tryAsking": [
+    "$codex-security:security-scan Run a security scan on this repository",
+    "$codex-security:security-diff-scan Review this branch diff for security regressions",
+    "$codex-security:deep-security-scan Run a deep repository-wide security scan"
+  ],
+  "skillDirectories": [
+    {
+      "id": "codex-security:security-scan",
+      "path": "skills/security-scan",
+      "icon": "🛡️",
+      "category": "Security"
+    },
+    {
+      "id": "codex-security:security-diff-scan",
+      "path": "skills/security-diff-scan",
+      "icon": "🔎",
+      "category": "Security"
+    },
+    {
+      "id": "codex-security:deep-security-scan",
+      "path": "skills/deep-security-scan",
+      "icon": "🧭",
+      "category": "Security"
+    },
+    {
+      "id": "codex-security:threat-model",
+      "path": "skills/threat-model",
+      "icon": "🧱",
+      "category": "Security"
+    },
+    {
+      "id": "codex-security:finding-discovery",
+      "path": "skills/finding-discovery",
+      "icon": "🧪",
+      "category": "Security"
+    },
+    {
+      "id": "codex-security:validation",
+      "path": "skills/validation",
+      "icon": "✅",
+      "category": "Security"
+    },
+    {
+      "id": "codex-security:attack-path-analysis",
+      "path": "skills/attack-path-analysis",
+      "icon": "🧩",
+      "category": "Security"
+    },
+    {
+      "id": "codex-security:fix-finding",
+      "path": "skills/fix-finding",
+      "icon": "🔧",
+      "category": "Security"
+    }
+  ],
+  "slashCommands": [
+    {
+      "name": "codex-security:security-scan",
+      "description": "Run a repository-wide or scoped-path Codex Security scan",
+      "skillId": "codex-security:security-scan"
+    },
+    {
+      "name": "codex-security:security-diff-scan",
+      "description": "Run a security review of a Git-backed diff",
+      "skillId": "codex-security:security-diff-scan"
+    },
+    {
+      "name": "codex-security:deep-security-scan",
+      "description": "Run a deeper multi-pass repository-wide Codex Security scan",
+      "skillId": "codex-security:deep-security-scan"
+    }
+  ],
+  "agentRoles": [
+    {
+      "name": "codex-security-reviewer",
+      "displayName": "Security Reviewer",
+      "description": "Runs defensive code security review, candidate validation, and attack-path analysis.",
+      "icon": "🛡️",
+      "color": "#2563eb",
+      "capabilities": ["code", "security", "review", "analysis"],
+      "systemPrompt": "You are a defensive application security reviewer. Stay grounded in source evidence, preserve concrete affected lines, avoid exploit execution unless explicitly authorized, and write auditable artifacts for every security claim."
+    }
+  ]
+}

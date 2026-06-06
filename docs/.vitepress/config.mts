@@ -81,6 +81,7 @@ export default defineConfig({
           { text: 'Side Chat', link: '/side-chat' },
           { text: 'Terminal Tabs', link: '/terminal-tabs' },
           { text: 'Inbox Agent', link: '/inbox-agent' },
+          { text: 'Codex Security Scans', link: '/codex-security-scans' },
           { text: 'Skill Store & External Skills', link: '/skill-store-and-external-skills' },
           { text: 'manim-video skill', link: '/skills/manim-video' },
           { text: 'Release Notes 0.5.19', link: '/release-notes-0.5.19' },

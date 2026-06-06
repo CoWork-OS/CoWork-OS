@@ -49,6 +49,47 @@ export interface ActiveContextData {
   skills: { id: string; name: string; icon: string }[];
 }
 
+function titleFromSkillId(id: string): string {
+  return (
+    id
+      .split(":")
+      .pop()
+      ?.split(/[-_\s]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ") || id
+  );
+}
+
+function listManifestSkills(manifest: {
+  skills?: Array<{ id: string; name: string; description: string; icon?: string; enabled?: boolean }>;
+  skillDirectories?: Array<{
+    id: string;
+    name?: string;
+    description?: string;
+    icon?: string;
+    enabled?: boolean;
+    path: string;
+  }>;
+}): PluginPackData["skills"] {
+  return [
+    ...(manifest.skills || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      icon: s.icon,
+      enabled: s.enabled !== false,
+    })),
+    ...(manifest.skillDirectories || []).map((s) => ({
+      id: s.id,
+      name: s.name || titleFromSkillId(s.id),
+      description: s.description || `Directory-backed skill at ${s.path}`,
+      icon: s.icon,
+      enabled: s.enabled !== false,
+    })),
+  ];
+}
+
 /**
  * Branded icon mapping for known connectors and common MCP servers.
  * Keys are matched against the lowercase server name/ID.
@@ -139,13 +180,7 @@ export function setupPluginPackHandlers(): void {
         tryAsking: m.tryAsking,
         bestFitWorkflows: m.bestFitWorkflows,
         outcomeExamples: m.outcomeExamples,
-        skills: (m.skills || []).map((s) => ({
-          id: s.id,
-          name: s.name,
-          description: s.description,
-          icon: s.icon,
-          enabled: s.enabled !== false,
-        })),
+        skills: listManifestSkills(m),
         slashCommands: (m.slashCommands || []).map((c) => ({
           name: c.name,
           description: c.description,
@@ -192,13 +227,7 @@ export function setupPluginPackHandlers(): void {
       personaTemplateId: m.personaTemplateId,
       recommendedConnectors: m.recommendedConnectors,
       tryAsking: m.tryAsking,
-      skills: (m.skills || []).map((s) => ({
-        id: s.id,
-        name: s.name,
-        description: s.description,
-        icon: s.icon,
-        enabled: s.enabled !== false,
-      })),
+      skills: listManifestSkills(m),
       slashCommands: (m.slashCommands || []).map((c) => ({
         name: c.name,
         description: c.description,
@@ -298,7 +327,10 @@ export function setupPluginPackHandlers(): void {
       if (!enabled && isPackRequired(packName, policies)) {
         throw new Error(`Pack "${packName}" is required by admin policy and cannot be disabled`);
       }
-      const skill = (plugin.manifest.skills || []).find((s) => s.id === skillId);
+      const skill = [
+        ...(plugin.manifest.skills || []),
+        ...(plugin.manifest.skillDirectories || []),
+      ].find((s) => s.id === skillId);
       if (!skill) {
         throw new Error(`Skill "${skillId}" not found in pack "${packName}"`);
       }

@@ -258,6 +258,13 @@
         ]
       },
       {
+        "from": "resources/plugin-packs",
+        "to": "plugin-packs",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "connectors",
         "to": "connectors",
         "filter": [

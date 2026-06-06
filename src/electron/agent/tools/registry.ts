@@ -166,6 +166,7 @@ import {
   withToolPromptMetadataList,
 } from "./tool-prompting";
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
+import { getSecurityScanOrchestrator } from "../../security-scans/SecurityScanOrchestrator";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -228,6 +229,14 @@ const SUB_AGENT_DEFAULT_DENIED_TOOLS = [
   "resume_agent",
   "orchestrate_agents",
 ];
+
+const SECURITY_SCAN_TOOL_NAMES = new Set([
+  "security_scan_prepare",
+  "security_scan_create_worker_dirs",
+  "security_scan_check_worker_artifacts",
+  "security_scan_merge_deep_round",
+  "security_scan_validate_report",
+]);
 
 const EXTRACTION_SUB_AGENT_ALLOWED_TOOLS = [
   "read_file",
@@ -572,6 +581,7 @@ export class ToolRegistry {
     private taskId: string,
     gatewayContext?: GatewayContextType,
     toolRestrictions?: string[],
+    private readonly securityScanToolsEnabled = false,
   ) {
     this.fileTools = new FileTools(workspace, daemon, taskId);
     this.skillTools = new SkillTools(workspace, daemon, taskId);
@@ -768,6 +778,7 @@ export class ToolRegistry {
       denyAllTools: this.denyAllTools,
       headless: isHeadlessMode(),
       deepWorkMode: this._deepWorkMode,
+      securityScanToolsEnabled: this.securityScanToolsEnabled,
     });
   }
 
@@ -967,6 +978,24 @@ export class ToolRegistry {
   setDeepWorkMode(enabled: boolean): void {
     this._deepWorkMode = enabled;
     this.invalidateToolCaches();
+  }
+
+  private assertSecurityScanToolsEnabled(): void {
+    if (!this.securityScanToolsEnabled) {
+      throw new Error("Codex Security scan tools are only available inside Codex Security skill tasks");
+    }
+  }
+
+  private resolveSecurityScanWorkspacePath(label: string, value: unknown): string {
+    if (typeof value !== "string" || !value.trim()) {
+      throw new Error(`Security scan ${label} is required`);
+    }
+    const resolved = path.resolve(this.workspace.path, value);
+    const workspaceRoot = path.resolve(this.workspace.path);
+    if (resolved !== workspaceRoot && !resolved.startsWith(workspaceRoot + path.sep)) {
+      throw new Error(`Security scan ${label} must be inside the workspace`);
+    }
+    return resolved;
   }
 
   /**
@@ -1347,6 +1376,13 @@ export class ToolRegistry {
 
     // Add meta tools for execution control
     allTools.push(...this.getMetaToolDefinitions());
+    if (!this.securityScanToolsEnabled) {
+      for (let index = allTools.length - 1; index >= 0; index--) {
+        if (SECURITY_SCAN_TOOL_NAMES.has(allTools[index].name)) {
+          allTools.splice(index, 1);
+        }
+      }
+    }
 
     // Collect built-in tool names before adding MCP tools
     const builtinToolNames = new Set(allTools.map((t) => t.name));
@@ -1816,6 +1852,62 @@ export class ToolRegistry {
     register("skill_proposal", async ({ request }) => this.executeSkillProposal(request.input));
     register("glob", async ({ request }) => this.globTools.glob(request.input), readParallelSchedulerSpec);
     register("grep", async ({ request }) => this.grepTools.grep(request.input), readParallelSchedulerSpec);
+    register("security_scan_prepare", async ({ request }) => {
+      const input = request.input || {};
+      this.assertSecurityScanToolsEnabled();
+      return getSecurityScanOrchestrator().prepareScan({
+        repoRoot:
+          typeof input.repo_root === "string"
+            ? this.resolveSecurityScanWorkspacePath("repo_root", input.repo_root)
+            : this.workspace.path,
+        workspaceRoot: this.workspace.path,
+        mode: input.mode,
+        scope: input.scope,
+        base: input.base,
+        head: input.head,
+        diffMode: input.diff_mode,
+        artifactRoot:
+          typeof input.artifact_root === "string"
+            ? this.resolveSecurityScanWorkspacePath("artifact_root", input.artifact_root)
+            : undefined,
+        scanId: input.scan_id,
+        deepRounds: input.deep_rounds,
+      });
+    }, exclusiveSchedulerSpec);
+    register("security_scan_create_worker_dirs", async ({ request }) => {
+      const input = request.input || {};
+      this.assertSecurityScanToolsEnabled();
+      return {
+        worker_dirs: getSecurityScanOrchestrator().createDeepWorkerDirs(
+          this.resolveSecurityScanWorkspacePath("scan_dir", input.scan_dir),
+          input.round,
+          input.worker_count,
+        ),
+      };
+    }, exclusiveSchedulerSpec);
+    register("security_scan_check_worker_artifacts", async ({ request }) =>
+      {
+        this.assertSecurityScanToolsEnabled();
+        return getSecurityScanOrchestrator().checkWorkerArtifacts(
+          this.resolveSecurityScanWorkspacePath("worker_dir", request.input.worker_dir),
+        );
+      }, readParallelSchedulerSpec);
+    register("security_scan_merge_deep_round", async ({ request }) =>
+      {
+        this.assertSecurityScanToolsEnabled();
+        return getSecurityScanOrchestrator().mergeDeepRound(
+          this.resolveSecurityScanWorkspacePath("scan_dir", request.input.scan_dir),
+          request.input.round,
+        );
+      }, exclusiveSchedulerSpec);
+    register("security_scan_validate_report", async ({ request }) =>
+      {
+        this.assertSecurityScanToolsEnabled();
+        return getSecurityScanOrchestrator().validateAndRenderReport(
+          this.resolveSecurityScanWorkspacePath("scan_dir", request.input.scan_dir),
+          request.input.title,
+        );
+      }, exclusiveSchedulerSpec);
     register("edit_file", async ({ request }) => this.editTools.editFile(request.input), exclusiveSchedulerSpec);
     register("count_text", async ({ request }) => this.textTools.countText(request.input));
     register("text_metrics", async ({ request }) => this.textTools.textMetrics(request.input));
@@ -11741,6 +11833,133 @@ ${skillDescriptions}`;
       ...CodeExecTools.getToolDefinitions(),
       // Document parsing
       ...DocumentParserTools.getToolDefinitions(),
+      // Codex Security scan orchestration helpers
+      {
+        name: "security_scan_prepare",
+        description:
+          "Prepare a Codex Security scan artifact directory, generate rank_input.csv and deep_review_input.csv, and return standard scan paths. Use before repository, scoped-path, diff, or deep security scans.",
+        input_schema: {
+          type: "object",
+          properties: {
+            repo_root: {
+              type: "string",
+              description: "Repository root. Defaults to the current workspace path.",
+            },
+            mode: {
+              type: "string",
+              enum: ["repository", "scoped_path", "diff", "deep_repository"],
+              description: "Security scan mode.",
+            },
+            scope: {
+              type: "string",
+              description: "Scoped subdirectory for scoped_path scans.",
+            },
+            base: {
+              type: "string",
+              description: "Base Git revision for diff scans.",
+            },
+            head: {
+              type: "string",
+              description: "Head Git revision for committed diff scans.",
+            },
+            diff_mode: {
+              type: "string",
+              enum: ["revisions", "local-patch"],
+              description: "Diff scan mode. Use local-patch for staged/unstaged working tree scans.",
+            },
+            artifact_root: {
+              type: "string",
+              description:
+                "Optional parent directory for scan artifacts. Defaults to .cowork/security-scans/<repo> under the repository.",
+            },
+            scan_id: {
+              type: "string",
+              description: "Optional explicit scan id. Defaults to <commit>_<timestamp>.",
+            },
+            deep_rounds: {
+              type: "number",
+              description: "Maximum deep discovery rounds, capped at 10. Default: 10.",
+            },
+          },
+          required: ["mode"],
+        },
+      },
+      {
+        name: "security_scan_create_worker_dirs",
+        description:
+          "Create the six standard worker artifact directories for a deep Codex Security discovery round.",
+        input_schema: {
+          type: "object",
+          properties: {
+            scan_dir: {
+              type: "string",
+              description: "Scan directory returned by security_scan_prepare.",
+            },
+            round: {
+              type: "number",
+              description: "Deep discovery round number, starting at 1.",
+            },
+            worker_count: {
+              type: "number",
+              description: "Worker count. Deep Security Scan requires 6; default is 6.",
+            },
+          },
+          required: ["scan_dir", "round"],
+        },
+      },
+      {
+        name: "security_scan_check_worker_artifacts",
+        description:
+          "Check whether a deep security scan worker directory contains the required discovery artifact files.",
+        input_schema: {
+          type: "object",
+          properties: {
+            worker_dir: {
+              type: "string",
+              description: "Worker artifact directory to inspect.",
+            },
+          },
+          required: ["worker_dir"],
+        },
+      },
+      {
+        name: "security_scan_merge_deep_round",
+        description:
+          "Merge deterministic deep-scan round bookkeeping from completed worker deduped_candidates.jsonl files. This is an artifact aid; semantic remediation-subsumption merge is still required by the Codex Security skill.",
+        input_schema: {
+          type: "object",
+          properties: {
+            scan_dir: {
+              type: "string",
+              description: "Scan directory returned by security_scan_prepare.",
+            },
+            round: {
+              type: "number",
+              description: "Deep discovery round number to merge.",
+            },
+          },
+          required: ["scan_dir", "round"],
+        },
+      },
+      {
+        name: "security_scan_validate_report",
+        description:
+          "Run the Codex Security report validator and render report.html from an existing scan_dir/report.md.",
+        input_schema: {
+          type: "object",
+          properties: {
+            scan_dir: {
+              type: "string",
+              description: "Scan directory containing report.md.",
+            },
+            title: {
+              type: "string",
+              description: "Optional HTML title.",
+            },
+          },
+          required: ["scan_dir"],
+        },
+      },
       // Sub-Agent / Parallel Agent tools
       {
         name: "acp_discover",

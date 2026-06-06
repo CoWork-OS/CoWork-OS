@@ -30,6 +30,18 @@ function joinText(...parts: Array<string | undefined>): string {
     .join(" ");
 }
 
+function joinBaseWithPromptAppend(base: string, append: string): string {
+  const normalizedBase = normalizeText(base);
+  const normalizedAppend = normalizeText(append);
+  if (!normalizedBase) return truncateText(normalizedAppend, TOOL_DESCRIPTION_CHAR_LIMIT);
+  if (!normalizedAppend) return truncateText(normalizedBase, TOOL_DESCRIPTION_CHAR_LIMIT);
+
+  const baseBudget = Math.max(120, Math.floor(TOOL_DESCRIPTION_CHAR_LIMIT * 0.45));
+  const basePart = truncateText(normalizedBase, baseBudget);
+  const appendBudget = Math.max(80, TOOL_DESCRIPTION_CHAR_LIMIT - basePart.length - 1);
+  return joinText(basePart, truncateText(normalizedAppend, appendBudget));
+}
+
 function resolvePromptMetadata(
   tool: LLMTool,
   context: LLMToolPromptRenderContext,
@@ -53,7 +65,9 @@ export function renderToolDescription(
   const base = normalizeText(tool.description);
   const merged = resolved.description
     ? normalizeText(resolved.description)
-    : joinText(base, resolved.appendDescription);
+    : resolved.appendDescription
+      ? joinBaseWithPromptAppend(base, resolved.appendDescription)
+      : base;
   return truncateText(merged || base, TOOL_DESCRIPTION_CHAR_LIMIT);
 }
 

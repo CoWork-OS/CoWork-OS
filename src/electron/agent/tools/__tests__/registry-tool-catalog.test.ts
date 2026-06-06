@@ -189,6 +189,22 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(secondTools.some((tool) => tool.name === "mcp_alpha")).toBe(true);
   });
 
+  it("only advertises security scan helpers for Codex Security tasks", () => {
+    mockBuiltinSettings.version = "security-scan-gating";
+    const normalRegistry = new ToolRegistry(createWorkspace(), createDaemon(), "task-normal");
+    expect(normalRegistry.getTools().some((tool) => tool.name === "security_scan_prepare")).toBe(false);
+
+    const securityRegistry = new ToolRegistry(
+      createWorkspace(),
+      createDaemon(),
+      "task-security",
+      undefined,
+      undefined,
+      true,
+    );
+    expect(securityRegistry.getTools().some((tool) => tool.name === "security_scan_prepare")).toBe(true);
+  });
+
   it("annotates MCP tool descriptions with the source server name", () => {
     mockMcpSettings.servers = [{ id: "server-shuttle", name: "Shuttle" }];
     mockMcpState.version = 2;

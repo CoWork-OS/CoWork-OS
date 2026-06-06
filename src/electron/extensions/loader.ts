@@ -131,7 +131,13 @@ export function validateManifest(manifest: unknown): manifest is PluginManifest 
   }
 
   // main is required UNLESS declarative content is present
-  const hasDeclarativeContent = !!(m.skills || m.agentRoles || m.connectors || m.slashCommands);
+  const hasDeclarativeContent = !!(
+    m.skills ||
+    m.skillDirectories ||
+    m.agentRoles ||
+    m.connectors ||
+    m.slashCommands
+  );
   if (!hasDeclarativeContent && (typeof m.main !== "string" || !m.main)) {
     throw new Error(
       "Plugin manifest missing required field: main (or provide declarative content: skills, agentRoles, connectors, slashCommands)",

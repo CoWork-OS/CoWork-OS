@@ -190,6 +190,8 @@ features:
     details: Type `/` in the composer to pick deterministic app commands and skill-backed workflow shortcuts from one menu, including `/side`, `/schedule`, `/schedule here`, `/clear`, `/plan`, `/cost`, `/multitask`, `/compact`, `/doctor`, `/undo`, direct skill IDs, plugin aliases, and the bundled CoWork Shortcuts pack. Skill-backed picker selections insert the command token so users can add context before sending.
   - title: Claude-for-Legal Workflows
     details: Bundled legal practice packs expose upstream-style slash commands through CoWork's plugin-pack system. Legal workflow selections are editable before launch, and matter-heavy tasks can show structured main-view intake cards such as the dedicated demand-letter intake form.
+  - title: Codex Security Scans
+    details: Bundled Codex Security workflows run repository, diff, and deep multi-pass security scans through directory-backed plugin-pack skills, workspace-scoped scan helpers, deterministic worklists, deep worker artifact checks, and validated report rendering.
   - title: Multitask Command
     details: `/multitask [N] <task>` starts a fresh collaborative run, splits the prompt into 2-8 lane-specific child tasks, respects the global task queue, and synthesizes the lane outputs through the existing team orchestration flow.
   - title: Latest Release 0.5.48

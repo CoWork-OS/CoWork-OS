@@ -15,6 +15,7 @@ A JSON manifest (`cowork.plugin.json`) that bundles related capabilities:
 | Field | Purpose |
 |-------|---------|
 | **Skills** | Prompt templates with parameter substitution for specific workflows |
+| **Skill Directories** | Directory-backed skills that load `SKILL.md` plus relative references, scripts, assets, and agent config from the pack |
 | **Agent Roles** | Pre-configured agent identities with system prompts and capabilities |
 | **Slash Commands** | Shortcut mappings that trigger skills via `/command` syntax in the message box |
 | **Connectors** | Declarative tool definitions (HTTP, shell, script) for external services |
@@ -156,7 +157,7 @@ It auto-refreshes every 30 seconds and provides at-a-glance awareness of your ac
 
 ## Bundled Plugin Packs
 
-CoWork OS ships with 35 plugin packs covering common job functions, finance workflows, legal workflows, and reusable message-box shortcuts.
+CoWork OS ships with 37 plugin packs covering common job functions, finance workflows, legal workflows, security review, and reusable message-box shortcuts.
 
 ### CoWork Shortcuts
 
@@ -210,6 +211,25 @@ CoWork OS ships with 35 plugin packs covering common job functions, finance work
 - `/competitive-scan`
 
 See [Message Box Shortcuts](message-box-shortcuts.md#cowork-shortcuts-pack) for the complete current list and runtime behavior.
+
+### Codex Security
+
+| | |
+|---|---|
+| **Icon** | Shield |
+| **Category** | Engineering |
+| **Agent Role** | Security Reviewer |
+
+**Purpose:** run repository, diff, and deep multi-pass security review workflows through the CoWork task runtime.
+
+**Core skills and commands:**
+- `/codex-security:security-scan` - repository-wide or scoped-path security scan
+- `/codex-security:security-diff-scan` - security review of a Git diff
+- `/codex-security:deep-security-scan` - deeper repository-wide scan with six independent discovery workers per round
+
+The pack is directory-backed: it loads upstream-style `SKILL.md` workflows, shared `references/`, `scripts/`, `assets/`, and `agents/` from `resources/plugin-packs/codex-security/`. CoWork also exposes internal scan orchestration helpers only inside Codex Security scan tasks. Those helpers prepare worklists, create deep-scan worker directories, check worker artifacts, merge completed rounds, and render validated reports.
+
+See [Codex Security Scans](codex-security-scans.md) for scan modes, artifact layout, workspace safety rules, and validation commands.
 
 ### Claude-for-Legal Packs
 
@@ -692,7 +712,8 @@ PluginRegistry.initialize()
 For each cowork.plugin.json found:
     │
     ├── Validate manifest (required fields, semver, platform)
-    ├── Register skills → Custom Skill Loader
+    ├── Register inline skills → Custom Skill Loader
+    ├── Register skillDirectories → Custom Skill Loader
     ├── Register agent roles → Agent Role Repository
     ├── Register connectors → Tools Map
     └── Set plugin.state = "registered"
@@ -1060,6 +1081,17 @@ window.electronAPI.scaffoldPluginPack({
       "enabled": true
     }
   ],
+  "skillDirectories": [
+    {
+      "id": "codex-security:security-scan",
+      "path": "skills/security-scan",
+      "name": "Security Scan",
+      "description": "Run a repository-wide or scoped-path security scan",
+      "icon": "shield",
+      "category": "Security",
+      "enabled": true
+    }
+  ],
   "agentRoles": [
     {
       "name": "my-assistant",
@@ -1169,6 +1201,15 @@ window.electronAPI.scaffoldPluginPack({
 - Include "Please provide:" sections to guide the LLM
 - Keep prompts focused on one task per skill
 - Add context fields for optional additional information
+
+### Directory-Backed Skill Tips
+
+- Use `skillDirectories` when a skill needs a full folder, such as `SKILL.md`, `references/`, `scripts/`, `assets/`, or `agents/`.
+- `path` must be relative to the plugin pack root. Absolute paths and parent traversal are rejected.
+- Each directory must contain `SKILL.md`.
+- Display metadata resolves in this order: manifest field, `SKILL.md` frontmatter, generated title from skill ID.
+- Per-skill enable/disable state is persisted for both inline `skills` and directory-backed `skillDirectories`.
+- Packaged builds include `resources/plugin-packs/**`, so future non-reference files under a bundled pack are preserved.
 
 ### Linking a Digital Twin
 

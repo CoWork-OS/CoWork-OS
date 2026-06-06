@@ -238,7 +238,7 @@ They intentionally avoid inventing a second synthetic "task definition" in logs.
 
 ## External and Installed Skills
 
-Bundled skills, managed installs, ClawHub imports, Git-based installs, and read-only external skill directories all follow the same runtime model after loading:
+Bundled skills, managed installs, ClawHub imports, Git-based installs, read-only external skill directories, inline plugin-pack skills, and directory-backed plugin-pack skills all follow the same runtime model after loading:
 
 - they may be shortlisted
 - they may be invoked with `use_skill`
@@ -246,6 +246,8 @@ Bundled skills, managed installs, ClawHub imports, Git-based installs, and read-
 - they may not replace the canonical task
 
 The additive contract is runtime-wide, not limited to bundled skills.
+
+Directory-backed plugin-pack skills are declared with `skillDirectories` in `cowork.plugin.json`. They load `SKILL.md` plus relative support files from the pack directory, but once registered they are invoked the same way as other skills. The Codex Security pack uses this path so its scan workflows can keep their shared references, scripts, assets, and agent configuration together.
 
 ## Migration Notes
 

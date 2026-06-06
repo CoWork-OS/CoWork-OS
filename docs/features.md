@@ -445,8 +445,8 @@ Access from **Mission Control** > **Add Digital Twin**. See [Digital Twins](digi
 
 Role-specific and workflow bundles that group skills, agent roles, connectors, and slash commands into installable packs. Each pack targets a job function or workflow area and can optionally link to a Digital Twin Persona as an optional role preset.
 
-- **35 bundled packs**: Engineering, Engineering Management, Product Management, DevOps, Mobile Development, Game Development, Data Analysis, QA & Testing, Sales CRM, Customer Support, Content & Marketing, Technical Writing, finance packs, Claude-for-Legal practice packs, Geo SEO, and CoWork Shortcuts
-- **100+ pack skills and shortcuts**: Code review prep, sprint health, feature triage, incident response, prospect research, DCF modeling, LBO analysis, `/strategy`, `/batch-rename`, `/gmail-summary-drive`, `/multi-source-report`, and more
+- **37 bundled packs**: Engineering, Engineering Management, Product Management, DevOps, Mobile Development, Game Development, Data Analysis, QA & Testing, Sales CRM, Customer Support, Content & Marketing, Technical Writing, finance packs, Codex Security, Claude-for-Legal practice packs, Geo SEO, and CoWork Shortcuts
+- **100+ pack skills and shortcuts**: Code review prep, sprint health, feature triage, incident response, repository security scans, prospect research, DCF modeling, LBO analysis, `/strategy`, `/batch-rename`, `/gmail-summary-drive`, `/multi-source-report`, and more
 - **Unified Customize panel**: Browse, enable/disable packs, view skills/commands/agents, click "Try asking" prompts
 - **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
 - **Per-skill toggles**: Enable or disable individual skills within a pack without toggling the entire pack
@@ -456,6 +456,7 @@ Role-specific and workflow bundles that group skills, agent roles, connectors, a
 - **Update detection**: Background check against the remote registry with orange dot indicators on packs with newer versions
 - **"Try asking" in chat**: Empty chat state shows randomized prompt suggestions from enabled packs for one-click task creation
 - **Message-box slash aliases**: Plugin-pack `slashCommands` appear in the main `/` picker and invoke their mapped skill IDs. Selecting skill-backed aliases inserts the slash token so the user can add context before sending. Alias enable/disable state follows pack and per-skill toggles.
+- **Codex Security scan workflows**: bundled repository, diff, and deep multi-pass security scans use directory-backed plugin-pack skills plus workspace-scoped scan orchestration helpers. See [Codex Security Scans](codex-security-scans.md).
 - **Claude-for-Legal workflow cards**: Legal pack commands are editable from the slash picker and can show structured main-view matter-context cards. `/litigation-legal-demand-intake` gets a dedicated demand-letter intake card; other matter-heavy legal workflows get a generic legal details card. See [Claude-for-Legal Workflows](claude-for-legal.md).
 - **Plugin Store**: In-app marketplace for discovering, installing, and creating packs (from Git repos, URLs, or scaffold)
 - **Managed import scanning**: Git and URL pack installs are staged and scanned before activation, with install results surfaced as installed, installed with warning, or quarantined

@@ -5279,12 +5279,24 @@ ${transcript}
           ]
         : []),
     ];
+    const securityScanToolsEnabled =
+      /\bcodex-security:|\bCodex Security\b|\bdeep-security-scan\b|\bsecurity-diff-scan\b|\bsecurity-scan\b/i.test(
+        [
+          this.task.title,
+          this.task.prompt,
+          this.task.rawPrompt,
+          this.task.userPrompt,
+        ]
+          .filter((value): value is string => typeof value === "string")
+          .join("\n"),
+      );
     const registry = new ToolRegistry(
       workspace,
       this.daemon,
       this.task.id,
       this.task.agentConfig?.gatewayContext,
       toolRestrictions,
+      securityScanToolsEnabled,
     );
     registry.setWorkspacePathAliasPolicy(this.getEffectiveWorkspacePathAliasPolicy());
     registry.setWebSearchDomainPolicy({

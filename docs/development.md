@@ -352,6 +352,32 @@ npm run skills:check
 
 The routing eval includes a React workspace feature prompt so the skill remains discoverable for React/Next.js implementation work without colliding with React Native guidance.
 
+### Testing Codex Security scans
+
+The bundled `codex-security` plugin pack uses directory-backed skills and scan orchestration helpers. Run the focused suite when touching `resources/plugin-packs/codex-security/`, directory-backed plugin-pack skills, `SecurityScanOrchestrator`, or `security_scan_*` tool definitions:
+
+```bash
+npx vitest run src/electron/security-scans/__tests__/SecurityScanOrchestrator.test.ts src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts src/electron/extensions/__tests__/codex-security-plugin-pack-manifest.test.ts
+npm run build:electron
+```
+
+When editing Codex Security skill content, also run the skill quality gate:
+
+```bash
+npm run skills:check:core
+npm run skills:check
+```
+
+The scan helpers are task-gated and workspace-scoped. Regression coverage should preserve these expectations:
+
+- `security_scan_*` tools are hidden from normal tasks and visible for Codex Security tasks.
+- `repo_root`, `artifact_root`, `scan_dir`, and `worker_dir` must stay inside the active workspace.
+- `scan_id` cannot contain traversal characters.
+- scoped scans accept only relative repository paths.
+- deep-scan round merge requires exactly six usable workers with valid JSONL artifacts.
+
+See [Codex Security Scans](./codex-security-scans.md) for the full artifact and tool contract.
+
 ### Everything Workbench artifact model
 
 The shared positioning and UX contract is documented in [Everything Workbench](./everything-workbench.md). Treat generated documents, spreadsheets, presentations, web pages, PDFs, and previews as one artifact workbench family:

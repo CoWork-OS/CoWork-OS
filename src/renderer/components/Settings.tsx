@@ -1224,7 +1224,7 @@ export function Settings({
   const [sidebarSearch, setSidebarSearch] = useState("");
   const settingsRef = useRef<LLMSettingsData>({
     providerType: "anthropic",
-    modelKey: "sonnet-3-5",
+    modelKey: "sonnet-4-5",
   });
   const [settings, setSettingsState] = useState<LLMSettingsData>(
     settingsRef.current,
@@ -2006,7 +2006,7 @@ export function Settings({
 
     switch (providerType) {
       case "anthropic":
-        return settings.modelKey || "sonnet-3-5";
+        return settings.modelKey || "sonnet-4-5";
       case "bedrock":
         return (
           bedrockModel || settings.bedrock?.model || settings.modelKey || ""

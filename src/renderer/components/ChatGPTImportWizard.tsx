@@ -477,8 +477,8 @@ export function ChatGPTImportWizard({
                 onChange={(e) => setCustomModel(e.target.value)}
                 placeholder={
                   currentProvider === "bedrock"
-                    ? "e.g. us.anthropic.claude-3-5-haiku-20241022-v1:0"
-                    : "e.g. claude-3-5-haiku-20241022"
+                    ? "e.g. us.anthropic.claude-haiku-4-5-20251001-v1:0"
+                    : "e.g. claude-haiku-4-5"
                 }
                 className="settings-input"
                 style={{

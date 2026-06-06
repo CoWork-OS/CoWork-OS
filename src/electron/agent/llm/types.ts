@@ -369,6 +369,8 @@ export interface LLMProvider {
  * Note: Bedrock models are kept in provider ID form first, then resolved via Bedrock provider mapping when needed.
  * Note: Ollama models are dynamic and fetched from the server
  */
+export const ANTHROPIC_HEALTHCHECK_MODEL_ID = "claude-haiku-4-5-20251001";
+
 export const MODELS = {
   "opus-4-6": {
     anthropic: "claude-opus-4-6",
@@ -391,7 +393,7 @@ export const MODELS = {
     displayName: "Sonnet 4.5",
   },
   "haiku-4-5": {
-    anthropic: "claude-haiku-4-5",
+    anthropic: ANTHROPIC_HEALTHCHECK_MODEL_ID,
     bedrock: "anthropic.claude-haiku-4-5-20250514",
     displayName: "Haiku 4.5",
   },
@@ -412,15 +414,43 @@ export const MODELS = {
   },
 } as const;
 
+const RETIRED_ANTHROPIC_MODEL_IDS: Record<string, string> = {
+  "claude-3-5-sonnet-20241022": "claude-sonnet-4-5",
+  "claude-3-5-haiku-20241022": ANTHROPIC_HEALTHCHECK_MODEL_ID,
+};
+
+const RETIRED_ANTHROPIC_MODEL_KEYS: Record<string, string> = {
+  "sonnet-3-5": "sonnet-4-5",
+  "haiku-3-5": "haiku-4-5",
+};
+
 const LEGACY_ANTHROPIC_MODEL_IDS: Record<string, string> = {
   "claude-opus-4-5-20250514": "claude-opus-4-5-20251101",
   "claude-sonnet-4-5-20250514": "claude-sonnet-4-5",
-  "claude-haiku-4-5-20250514": "claude-haiku-4-5",
+  "claude-haiku-4-5": ANTHROPIC_HEALTHCHECK_MODEL_ID,
+  "claude-haiku-4-5-20250514": ANTHROPIC_HEALTHCHECK_MODEL_ID,
+  ...RETIRED_ANTHROPIC_MODEL_IDS,
 };
 
 export function normalizeAnthropicModelId(modelId: string): string {
   const normalized = modelId.trim();
   return LEGACY_ANTHROPIC_MODEL_IDS[normalized] || normalized;
+}
+
+export function normalizeAnthropicModelKey(modelKey: string): string {
+  const normalized = modelKey.trim();
+  return RETIRED_ANTHROPIC_MODEL_KEYS[normalized] || normalized;
+}
+
+export function isRetiredAnthropicModelReference(model: string): boolean {
+  const normalized = model.trim();
+  return (
+    Object.prototype.hasOwnProperty.call(
+      RETIRED_ANTHROPIC_MODEL_KEYS,
+      normalized,
+    ) ||
+    Object.prototype.hasOwnProperty.call(RETIRED_ANTHROPIC_MODEL_IDS, normalized)
+  );
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   LLMContent,
   LLMMessage,
   LLMTool,
+  ANTHROPIC_HEALTHCHECK_MODEL_ID,
   normalizeAnthropicModelId,
 } from "./types";
 import {
@@ -28,6 +29,7 @@ const logger = createLogger("Anthropic");
 export class AnthropicProvider implements LLMProvider {
   readonly type = "anthropic" as const;
   private client: Anthropic;
+  private readonly configuredModel: string;
   private promptCacheAutoSupported = true;
   private static readonly STREAMING_REQUIRED_ERROR_FRAGMENT =
     "Streaming is required for operations that may take longer than 10 minutes";
@@ -40,6 +42,7 @@ export class AnthropicProvider implements LLMProvider {
       );
     }
 
+    this.configuredModel = config.model;
     const isSubscriptionToken = apiKey.includes("sk-ant-oat");
     this.client = isSubscriptionToken
       ? new Anthropic({
@@ -145,9 +148,12 @@ export class AnthropicProvider implements LLMProvider {
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
+      const model = normalizeAnthropicModelId(
+        this.configuredModel || ANTHROPIC_HEALTHCHECK_MODEL_ID,
+      );
       // Send a minimal request to test the connection
       await this.client.messages.create({
-        model: "claude-3-5-haiku-20241022",
+        model,
         max_tokens: 10,
         messages: [{ role: "user", content: "Hi" }],
       });

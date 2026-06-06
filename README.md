@@ -610,7 +610,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Gateway Message Lifecycle](docs/gateway-message-lifecycle.md) | Remote command routing, active-task policy, skill slashes, delivery, and scheduled channel outputs |
 | [X Mention Triggers](docs/x-mention-triggers.md) | Configure `do:` mention-triggered task ingress on desktop and headless |
 | [Providers](docs/providers.md) | LLM and search provider configuration, costs, and fallback chains |
-| [Migration Guide](docs/migration.md) | Migration checklist and compatibility notes |
 | [Development](docs/development.md) | Build from source, project structure |
 | [Architecture](docs/architecture.md) | Technical architecture deep-dive |
 | [Skills Runtime Model](docs/skills-runtime-model.md) | Canonical prompt invariant, additive skill application, routing shortlist model, and `use_skill` contract |

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OPENROUTER_DEFAULT_MODEL } from "../openrouter-provider";
 import { LLMProviderFactory, type LLMSettings } from "../provider-factory";
+import { ANTHROPIC_HEALTHCHECK_MODEL_ID } from "../types";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -139,6 +140,67 @@ describe("LLMProviderFactory model status", () => {
     expect(status.models.map((model) => model.key)).toContain("gpt-5.5");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.4");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.3-codex-spark");
+  });
+
+  it("filters retired Claude models from cached Anthropic model lists", async () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "anthropic",
+      modelKey: "sonnet-4-5",
+      cachedAnthropicModels: [
+        {
+          key: "haiku-3-5",
+          displayName: "Haiku 3.5",
+          description: "Retired",
+        },
+        {
+          key: "haiku-4-5",
+          displayName: "Haiku 4.5",
+          description: "Active",
+        },
+      ],
+    } as LLMSettings);
+
+    const models = await LLMProviderFactory.getAnthropicModels();
+
+    expect(models.map((model) => model.id)).toEqual(["haiku-4-5"]);
+  });
+
+  it("normalizes retired saved Anthropic model keys in model status", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "anthropic",
+      modelKey: "sonnet-3-5",
+    } as LLMSettings);
+    vi.spyOn(LLMProviderFactory, "getAvailableProviders").mockReturnValue([]);
+
+    const status = LLMProviderFactory.getConfigStatus();
+
+    expect(status.currentModel).toBe("sonnet-4-5");
+    expect(status.models.some((model) => model.key === "sonnet-3-5")).toBe(false);
+  });
+
+  it("filters retired Claude models from cached Anthropic model status", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "anthropic",
+      modelKey: "haiku-3-5",
+      cachedAnthropicModels: [
+        {
+          key: "haiku-3-5",
+          displayName: "Haiku 3.5",
+          description: "Retired",
+        },
+        {
+          key: "haiku-4-5",
+          displayName: "Haiku 4.5",
+          description: "Active",
+        },
+      ],
+    } as LLMSettings);
+    vi.spyOn(LLMProviderFactory, "getAvailableProviders").mockReturnValue([]);
+
+    const status = LLMProviderFactory.getConfigStatus();
+
+    expect(status.currentModel).toBe("haiku-4-5");
+    expect(status.models.map((model) => model.key)).toEqual(["haiku-4-5"]);
   });
 
   it("normalizes stale OpenAI API model settings for ChatGPT OAuth", () => {
@@ -467,12 +529,55 @@ describe("LLMProviderFactory profile-based task model routing", () => {
 
   it("normalizes legacy Claude snapshot IDs to current direct API IDs", () => {
     expect(LLMProviderFactory.getModelId("claude-haiku-4-5-20250514", "anthropic")).toBe(
-      "claude-haiku-4-5",
+      ANTHROPIC_HEALTHCHECK_MODEL_ID,
     );
     expect(LLMProviderFactory.getModelId("claude-sonnet-4-5-20250514", "anthropic")).toBe(
       "claude-sonnet-4-5",
     );
     expect(LLMProviderFactory.getModelId("opus-4-6", "anthropic")).toBe("claude-opus-4-6");
+  });
+
+  it("maps retired Claude 3.5 direct API IDs to active replacements", () => {
+    expect(LLMProviderFactory.getModelId("sonnet-3-5", "anthropic")).toBe(
+      "claude-sonnet-4-5",
+    );
+    expect(LLMProviderFactory.getModelId("haiku-3-5", "anthropic")).toBe(
+      ANTHROPIC_HEALTHCHECK_MODEL_ID,
+    );
+    expect(
+      LLMProviderFactory.getModelId("claude-3-5-haiku-20241022", "anthropic"),
+    ).toBe(ANTHROPIC_HEALTHCHECK_MODEL_ID);
+  });
+
+  it("normalizes retired Anthropic profile routing keys", () => {
+    const settings: LLMSettings = {
+      providerType: "anthropic",
+      modelKey: "sonnet-4-5",
+      anthropic: {
+        profileRoutingEnabled: true,
+        strongModelKey: "sonnet-3-5",
+        cheapModelKey: "haiku-3-5",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const routing = LLMProviderFactory.getProviderRoutingSettings(
+      settings,
+      "anthropic",
+    );
+    const resolved = LLMProviderFactory.resolveTaskModelSelection(
+      {
+        providerType: "anthropic",
+        llmProfileHint: "cheap",
+      },
+      { allowProfileRouting: true },
+    );
+
+    expect(routing.strongModelKey).toBe("sonnet-4-5");
+    expect(routing.cheapModelKey).toBe("haiku-4-5");
+    expect(resolved.modelSource).toBe("profile_model");
+    expect(resolved.modelKey).toBe("haiku-4-5");
+    expect(resolved.modelId).toBe(ANTHROPIC_HEALTHCHECK_MODEL_ID);
   });
 
   it("uses strong profile for verification routing", () => {

@@ -94,10 +94,27 @@ describe("AnthropicProvider", () => {
 
     expect(anthropicCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: "claude-haiku-4-5",
+        model: "claude-haiku-4-5-20251001",
       }),
       undefined,
     );
+  });
+
+  it("tests the configured Claude model instead of the retired Haiku 3.5 health check", async () => {
+    const provider = new AnthropicProvider({
+      type: "anthropic",
+      model: "claude-3-5-haiku-20241022",
+      anthropicApiKey: "sk-ant-api-test",
+    });
+
+    const result = await provider.testConnection();
+
+    expect(result).toEqual({ success: true });
+    expect(anthropicCreateMock).toHaveBeenCalledWith({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 10,
+      messages: [{ role: "user", content: "Hi" }],
+    });
   });
 
   it("retries with streaming when Anthropic SDK rejects a long non-streaming request", async () => {
@@ -132,7 +149,7 @@ describe("AnthropicProvider", () => {
     expect(anthropicCreateMock).toHaveBeenCalledTimes(1);
     expect(anthropicStreamMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: "claude-haiku-4-5",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 48000,
       }),
       undefined,

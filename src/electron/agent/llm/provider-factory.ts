@@ -19,6 +19,8 @@ import {
   DEFAULT_MODEL,
   DEFAULT_PI_MODEL,
   normalizeAnthropicModelId,
+  normalizeAnthropicModelKey,
+  isRetiredAnthropicModelReference,
 } from "./types";
 import { AnthropicProvider } from "./anthropic-provider";
 import { BedrockProvider } from "./bedrock-provider";
@@ -1365,13 +1367,28 @@ export class LLMProviderFactory {
     settings: LLMSettings,
     providerType: LLMProviderType,
   ): string {
-    const fallback = normalizeModelKey(String(settings.modelKey)) || "";
+    const fallback =
+      this.normalizeProviderModelKey(providerType, settings.modelKey) || "";
     try {
       const status = this.getProviderModelStatus({ ...settings, providerType });
-      return normalizeModelKey(status.currentModel) || fallback;
+      return (
+        this.normalizeProviderModelKey(providerType, status.currentModel) ||
+        fallback
+      );
     } catch {
       return fallback;
     }
+  }
+
+  private static normalizeProviderModelKey(
+    providerType: LLMProviderType,
+    modelKey: unknown,
+  ): string | undefined {
+    const normalized = normalizeModelKey(modelKey);
+    if (!normalized) return undefined;
+    return providerType === "anthropic"
+      ? normalizeAnthropicModelKey(normalized)
+      : normalized;
   }
 
   private static applyProfileRoutingDefaults(
@@ -1395,10 +1412,16 @@ export class LLMProviderFactory {
         next,
         providerType,
       );
-      if (!normalizeModelKey(target.strongModelKey) && providerDefaultModel) {
+      if (
+        !this.normalizeProviderModelKey(providerType, target.strongModelKey) &&
+        providerDefaultModel
+      ) {
         target.strongModelKey = providerDefaultModel;
       }
-      if (!normalizeModelKey(target.cheapModelKey) && providerDefaultModel) {
+      if (
+        !this.normalizeProviderModelKey(providerType, target.cheapModelKey) &&
+        providerDefaultModel
+      ) {
         target.cheapModelKey = providerDefaultModel;
       }
       if (typeof target.preferStrongForVerification !== "boolean") {
@@ -1459,15 +1482,21 @@ export class LLMProviderFactory {
     return {
       profileRoutingEnabled: configured?.profileRoutingEnabled === true,
       strongModelKey:
-        normalizeModelKey(configured?.strongModelKey) ||
+        this.normalizeProviderModelKey(
+          providerType,
+          configured?.strongModelKey,
+        ) ||
         defaultModel ||
         undefined,
       cheapModelKey:
-        normalizeModelKey(configured?.cheapModelKey) ||
+        this.normalizeProviderModelKey(providerType, configured?.cheapModelKey) ||
         defaultModel ||
         undefined,
       automatedTaskModelKey:
-        normalizeModelKey(configured?.automatedTaskModelKey) || undefined,
+        this.normalizeProviderModelKey(
+          providerType,
+          configured?.automatedTaskModelKey,
+        ) || undefined,
       reasoningEffort: configured?.reasoningEffort,
       preferStrongForVerification:
         configured?.preferStrongForVerification !== false,
@@ -1611,7 +1640,7 @@ export class LLMProviderFactory {
     }
 
     const explicitModelOverride = options?.allowModelOverride
-      ? normalizeModelKey(taskAgentConfig?.modelKey)
+      ? this.normalizeProviderModelKey(providerType, taskAgentConfig?.modelKey)
       : undefined;
     const profileForced =
       taskAgentConfig?.llmProfileForced === true &&
@@ -1658,6 +1687,10 @@ export class LLMProviderFactory {
         providerType,
       );
       modelSource = "provider_default";
+    }
+
+    if (providerType === "anthropic") {
+      resolvedModelKey = normalizeAnthropicModelKey(resolvedModelKey);
     }
 
     let modelId: string;
@@ -2310,6 +2343,10 @@ export class LLMProviderFactory {
     customProviders?: Record<string, CustomProviderConfig>,
     bedrockModel?: string,
   ): string {
+    const providerModelKey =
+      providerType === "anthropic" && typeof modelKey === "string"
+        ? normalizeAnthropicModelKey(modelKey)
+        : modelKey;
     const customEntry = getCustomProviderEntry(providerType);
     if (customEntry) {
       const customConfig = getCustomProviderConfig(
@@ -2416,9 +2453,9 @@ export class LLMProviderFactory {
     }
 
     // For other providers, look up in MODELS
-    const model = MODELS[modelKey as ModelKey];
+    const model = MODELS[providerModelKey as ModelKey];
     if (!model) {
-      throw new Error(`Unknown model: ${modelKey}`);
+      throw new Error(`Unknown model: ${providerModelKey}`);
     }
     const resolvedModel = model[providerType as "anthropic" | "bedrock"];
     return providerType === "anthropic"
@@ -2950,11 +2987,13 @@ export class LLMProviderFactory {
       }
 
       case "anthropic": {
-        const currentModel = settings.modelKey;
+        const currentModel = normalizeAnthropicModelKey(settings.modelKey);
         const modelList =
           settings.cachedAnthropicModels &&
           settings.cachedAnthropicModels.length > 0
-            ? settings.cachedAnthropicModels
+            ? settings.cachedAnthropicModels.filter(
+                (model) => !isRetiredAnthropicModelReference(model.key),
+              )
             : [
                 {
                   key: "opus-4-6",
@@ -2985,16 +3024,6 @@ export class LLMProviderFactory {
                   key: "sonnet-4",
                   displayName: "Sonnet 4",
                   description: "Older Claude 4 model",
-                },
-                {
-                  key: "sonnet-3-5",
-                  displayName: "Sonnet 3.5",
-                  description: "Legacy balanced model",
-                },
-                {
-                  key: "haiku-3-5",
-                  displayName: "Haiku 3.5",
-                  description: "Legacy fast model",
                 },
               ];
         return {
@@ -3750,23 +3779,15 @@ export class LLMProviderFactory {
         displayName: "Sonnet 4",
         description: "Older Claude 4 model",
       },
-      {
-        id: "sonnet-3-5",
-        displayName: "Sonnet 3.5",
-        description: "Legacy balanced model",
-      },
-      {
-        id: "haiku-3-5",
-        displayName: "Haiku 3.5",
-        description: "Legacy fast model",
-      },
     ];
 
-    const cachedModels = settings.cachedAnthropicModels?.map((model) => ({
-      id: model.key,
-      displayName: model.displayName,
-      description: model.description,
-    }));
+    const cachedModels = settings.cachedAnthropicModels
+      ?.map((model) => ({
+        id: model.key,
+        displayName: model.displayName,
+        description: model.description,
+      }))
+      .filter((model) => !isRetiredAnthropicModelReference(model.id));
 
     if (!credential) {
       return cachedModels && cachedModels.length > 0
@@ -3798,6 +3819,7 @@ export class LLMProviderFactory {
 
       const models = page.data
         .filter((model) => model.id.startsWith("claude-"))
+        .filter((model) => !isRetiredAnthropicModelReference(model.id))
         .map((model) => {
           const normalizedId = normalizeAnthropicModelId(model.id);
           const known = knownIds.get(normalizedId);

@@ -232,6 +232,7 @@ import {
   calculateBackoffDelay,
   sleep,
 } from "./executor-helpers";
+import { FileMutationVerifier } from "./file-mutation-verifier";
 import { ExecutorEventEmitter } from "./executor-event-emitter";
 import { createTimelineEmitter } from "./timeline-emitter";
 import { LifecycleMutex } from "./executor-lifecycle-mutex";
@@ -304,10 +305,14 @@ import {
   responseDirectlyAddressesPrompt as responseDirectlyAddressesPromptUtil,
   responseHasDecisionSignal as responseHasDecisionSignalUtil,
   responseHasReasonedConclusionSignal as responseHasReasonedConclusionSignalUtil,
+  responseHasReviewReportEvidenceSignal as responseHasReviewReportEvidenceSignalUtil,
   responseHasVerificationSignal as responseHasVerificationSignalUtil,
   responseLooksOperationalOnly as responseLooksOperationalOnlyUtil,
   shouldPreserveExistingDeliverableForRecovery as shouldPreserveExistingDeliverableForRecoveryUtil,
   shouldRequireExecutionEvidence as shouldRequireExecutionEvidenceUtil,
+  detectReadOnlyConstraint as detectReadOnlyConstraintUtil,
+  extractExplicitOutputExtensions as extractExplicitOutputExtensionsUtil,
+  buildCompletionGuidancePrompt as buildCompletionGuidancePromptUtil,
 } from "./executor-completion-utils";
 import {
   CANONICAL_ARTIFACT_EXTENSION_REGEX,
@@ -767,6 +772,7 @@ export class TaskExecutor {
   private toolFailureTracker: ToolFailureTracker;
   private toolCallDeduplicator: ToolCallDeduplicator;
   private fileOperationTracker: FileOperationTracker;
+  private fileMutationVerifier: FileMutationVerifier;
   private lastWebFetchFailure: {
     timestamp: number;
     tool: "web_fetch" | "http_request";
@@ -6536,6 +6542,7 @@ ${transcript}
 
     // Initialize file operation tracker to detect redundant reads and duplicate creations
     this.fileOperationTracker = new FileOperationTracker();
+    this.fileMutationVerifier = new FileMutationVerifier();
     this.initializeSessionRuntime();
 
     logger.info(
@@ -6655,16 +6662,22 @@ ${transcript}
   private getVisualQAContextPrompt(): string {
     if (!this.task) return "";
     const combined = `${this.task.title}\n${this.getContractPrompt()}`;
-    if (!this.detectVisualQARequirement(combined)) return "";
-    return [
-      "VISUAL QA REQUIRED FOR THIS TASK:",
-      "This task builds a web app AND has a testing/quality/shipping intent.",
-      "Your plan MUST include a 'Visual QA with Playwright' step after building.",
-      "Before QA: if you just scaffolded the project, run 'npm install' (or yarn/pnpm) via run_command first — NEVER skip this.",
-      "Use qa_run (with server_command if needed) to automatically test the app.",
-      "qa_run will start the server, launch a browser, take screenshots, and report bugs.",
-      "Fix any critical/major issues found, then re-run qa_run to confirm. Call qa_cleanup when done.",
-    ].join("\n");
+    const visualQARequired = this.detectVisualQARequirement(combined);
+    const sections = [
+      this.buildWebPagePreviewGuidancePrompt(combined),
+      visualQARequired
+        ? [
+            "VISUAL QA REQUIRED FOR THIS TASK:",
+            "This task builds a web app AND has a testing/quality/shipping intent.",
+            "Your plan MUST include a 'Visual QA with Playwright' step after building.",
+            "Before QA: if you just scaffolded the project, run 'npm install' (or yarn/pnpm) via run_command first - NEVER skip this.",
+            "Use qa_run (with server_command if needed) to automatically test the app.",
+            "qa_run will start the server, launch a browser, take screenshots, and report bugs.",
+            "Fix any critical/major issues found, then re-run qa_run to confirm. Call qa_cleanup when done.",
+          ].join("\n")
+        : "",
+    ].filter(Boolean);
+    return sections.join("\n\n");
   }
 
   private getInfraContextPrompt(): string {
@@ -9168,6 +9181,15 @@ ${transcript}
       "generate_video",
       "get_video_generation_job",
     ]);
+    // Record mutation result for the file mutation verifier (Hermes-style over-claiming detection).
+    if ((mutatingTools.has(toolName) || this.isFileMutationTool(toolName)) && this.fileMutationVerifier) {
+      this.fileMutationVerifier.recordMutationResult({
+        toolName,
+        input,
+        succeeded: toolSucceeded,
+        error: toolSucceeded ? undefined : String(result?.error || result?.message || "").slice(0, 200),
+      });
+    }
     if (toolSucceeded && (mutatingTools.has(toolName) || this.isFileMutationTool(toolName))) {
       const changedPath =
         result?.path ||
@@ -9697,7 +9719,36 @@ ${transcript}
     if (!this.isExecuteLikeToolMode()) {
       return false;
     }
+    if (this.promptHasReadOnlyConstraint(prompt)) {
+      return false;
+    }
     return this.followUpRequiresCommandExecution(prompt);
+  }
+
+  /**
+   * Detects any explicit read-only constraint in the prompt.
+   * Broader than the old promptIsReadOnlyReviewReport() which required
+   * documentation-review + report-format intent on top of the read-only constraint.
+   * Now any "do not edit files", "read-only", etc. suppresses execution requirements,
+   * unless the prompt explicitly asks to run commands.
+   */
+  private promptHasReadOnlyConstraint(prompt: string): boolean {
+    const lower = String(prompt || "").toLowerCase();
+    if (!lower.trim()) return false;
+    if (!detectReadOnlyConstraintUtil(lower)) return false;
+    // Even with a read-only constraint, if the prompt explicitly asks to run
+    // commands (e.g. "do not edit files but run npm test"), honour the execution request.
+    const hasExplicitRunIntent =
+      /\b(?:run|execute)\s+(?:npm|pnpm|yarn|bun|cargo|go|make|cmake|gradle|mvn|dotnet|pytest|python|swift|xcodebuild|tests?|build|commands?)\b/.test(
+        lower,
+      ) ||
+      /\b(?:run|execute)\s+(?:the\s+|a\s+)?[\w-]+(?:\s+[\w-]+){0,3}\s+commands?\b/.test(lower);
+    return !hasExplicitRunIntent;
+  }
+
+  /** @deprecated Use promptHasReadOnlyConstraint instead */
+  private promptIsReadOnlyReviewReport(prompt: string): boolean {
+    return this.promptHasReadOnlyConstraint(prompt);
   }
 
   /**
@@ -10579,6 +10630,9 @@ ${transcript}
       requiresMutation: inferredMutation,
       requiresArtifactEvidence,
       requiresWriteByArtifactMode: artifactWriteRequired,
+      hasReadOnlyConstraint: this.promptHasReadOnlyConstraint(
+        `${this.task?.title || ""}\n${this.getContractPrompt()}`,
+      ),
     });
     const policyRequiredTools = getPolicyRequiredToolsForMode(
       this.agentPolicyConfig,
@@ -11736,6 +11790,10 @@ ${transcript}
     return responseHasReasonedConclusionSignalUtil(text);
   }
 
+  private responseHasReviewReportEvidenceSignal(text: string): boolean {
+    return responseHasReviewReportEvidenceSignalUtil(text);
+  }
+
   private hasVerificationToolEvidence(): boolean {
     return hasVerificationToolEvidenceUtil(this.toolResultMemory);
   }
@@ -11953,12 +12011,34 @@ ${transcript}
       .filter((stepId) => stepId.length > 0);
   }
 
+  /**
+   * Determines how strictly completion contracts should be enforced.
+   * - "relaxed": Skip contract guard entirely. Used for tasks with explicit read-only constraints
+   *   (e.g. "do not edit files") that should produce text output only.
+   * - "standard": Enforce explicit output contracts (not inferred ones).
+   */
+  private getCompletionStrictness(): "standard" | "relaxed" {
+    const prompt = this.getContractPrompt();
+    if (detectReadOnlyConstraintUtil(prompt)) return "relaxed";
+    return "standard";
+  }
+
   private getFinalOutcomeGuardError(): string | null {
     const contract = this.buildCompletionContract();
     const bestCandidate = this.getBestFinalResponseCandidate();
     const createdFiles = (this.fileOperationTracker?.getCreatedFiles?.() || []).map((file) =>
       String(file),
     );
+
+    // For relaxed strictness (read-only tasks), skip artifact and execution
+    // evidence checks but keep verification evidence and direct answer checks.
+    const strictness = this.getCompletionStrictness();
+    if (strictness === "relaxed") {
+      contract.requiresArtifactEvidence = false;
+      contract.requiresExecutionEvidence = false;
+      contract.requiredArtifactExtensions = [];
+    }
+
     const baseGuardError = getFinalOutcomeGuardErrorUtil({
       contract,
       preferBestEffortCompletion: this.shouldPreferBestEffortCompletion(),
@@ -12020,6 +12100,8 @@ ${transcript}
             hasVerificationSignal: this.responseHasVerificationSignal(bestCandidate),
             hasReasonedConclusionSignal:
               this.responseHasReasonedConclusionSignal(bestCandidate),
+            hasReviewReportEvidenceSignal:
+              this.responseHasReviewReportEvidenceSignal(bestCandidate),
             hasToolEvidence: this.hasVerificationToolEvidence(),
           },
           successfulTools,
@@ -12108,9 +12190,10 @@ ${transcript}
     this.task.dependencyOutcome = reliabilityOutcomes.dependencyOutcome;
     this.task.failureDomains = reliabilityOutcomes.failureDomains;
     this.task.stopReasons = reliabilityOutcomes.stopReasons;
-    this.task.resultSummary = summary;
+    const mutationFooter = this.fileMutationVerifier?.buildAdvisoryFooter();
+    this.task.resultSummary = mutationFooter ? `${summary}\n\n${mutationFooter}` : summary;
     const outputSummary = this.buildTaskOutputSummary();
-    this.persistBestKnownOutcome(summary, terminalStatus, failureClass);
+    this.persistBestKnownOutcome(this.task.resultSummary, terminalStatus, failureClass);
     const goalAgentConfig = this.applyGoalTerminalState(summary, terminalStatus);
     const verificationMetadata =
       this.verificationOutcomeV2Enabled && this.completionVerificationMetadata
@@ -13606,9 +13689,41 @@ ${transcript}
     );
   }
 
+  private isWebPagePreviewWorkflowTask(text: string): boolean {
+    const lower = String(text || "").toLowerCase();
+    const hasAction =
+      /\b(design|build|create|make|implement|scaffold|develop|generate|edit|modify|update|fix|debug|troubleshoot|polish|redesign|improve|verify|test)\b/.test(
+        lower,
+      );
+    if (!hasAction) return false;
+
+    const hasWebPageTarget =
+      /\b(html|css|react|vite|next\.?js|nextjs|vue|svelte|webpack|web\s*page|web\s*app|webapp|website|landing\s*page|frontend|spa|localhost|dev\s*server)\b/.test(
+        lower,
+      ) ||
+      /\.(?:html|css|jsx|tsx)\b/.test(lower) ||
+      /\b(?:index|app|main)\.(?:html|jsx|tsx)\b/.test(lower);
+    if (!hasWebPageTarget) return false;
+
+    const codeOnlySignals =
+      /\b(design\s+tokens?|css\s+variables?|button\s+variants?|component\s+variants?|call\s+sites?|class\s+names?|type\s+check|lint only|static checks? only)\b/.test(
+        lower,
+      );
+    const explicitWebPreviewSignals =
+      this.hasExplicitLiveVisualSurfaceIntent(lower) ||
+      /\b(html|react|vite|next\.?js|nextjs|web\s*page|web\s*app|webapp|website|landing\s*page|frontend|localhost|dev\s*server)\b/.test(
+        lower,
+      );
+    return !codeOnlySignals || explicitWebPreviewSignals;
+  }
+
   private isCodeFirstUiTask(text?: string): boolean {
     const combined = String(text || `${this.task.title}\n${this.getContractPrompt()}`);
-    return isDesignSystemRelevantTask(combined) && !this.hasExplicitLiveVisualSurfaceIntent(combined);
+    return (
+      isDesignSystemRelevantTask(combined) &&
+      !this.hasExplicitLiveVisualSurfaceIntent(combined) &&
+      !this.isWebPagePreviewWorkflowTask(combined)
+    );
   }
 
   private isCodeFirstUiBlockedTool(toolName: string): boolean {
@@ -13642,6 +13757,18 @@ ${transcript}
       "- Do not split subjective visual consistency into separate verification steps such as same sizing, same radius, same padding, or same font weight.",
       "- Prefer a compact implementation plan: inspect design system, centralize button variants/styles, update call sites, run static checks/build if available.",
       "- Verification should be code-based: changed files, class/component usage, lint/type/build checks, or exact token/class references.",
+    ].join("\n");
+  }
+
+  private buildWebPagePreviewGuidancePrompt(taskPrompt: string): string {
+    if (!this.isWebPagePreviewWorkflowTask(taskPrompt)) return "";
+    return [
+      "WEB PAGE PREVIEW GUIDANCE:",
+      "- For HTML, React, Vite, Next.js, landing page, website, and frontend page design/edit/debug tasks, plan to render the page and inspect it in the visible in-app browser when practical.",
+      "- For React/Vite/Next.js projects, start the existing dev server with the repo's script or use qa_run with server_command when automated QA is more appropriate; use an available localhost port.",
+      "- For standalone HTML, open the file or local preview URL in the browser instead of inventing a complex server.",
+      "- Use browser_navigate, browser_snapshot, browser_screenshot, and browser_emulate for desktop/mobile checks, screenshots, layout overlap, interaction, console, and network issues.",
+      "- Fix issues found in the rendered page, then re-check before finalizing. Skip browser checks only for pure design-token/component refactors where rendered-page evidence would not change the outcome.",
     ].join("\n");
   }
 
@@ -14128,6 +14255,7 @@ ${transcript}
       workspaceContextPrompt: this.buildExecutionWorkspaceContextPrompt(),
       currentTimePrompt: `Current time: ${getCurrentDateTimeContext()}`,
       modeDomainContractPrompt: buildModeDomainContract(params.executionMode, params.taskDomain),
+      completionGuidancePrompt: this.buildCompletionGuidancePrompt(),
       roleContext: params.roleContext,
       memoryContext: params.memoryContext,
       awarenessSnapshot: params.awarenessSnapshot,
@@ -14144,6 +14272,19 @@ ${transcript}
       totalBudgetTokens: EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET,
       transcriptContext,
       sectionCache: this.promptSectionCache,
+    });
+  }
+
+  private buildCompletionGuidancePrompt(): string {
+    const prompt = this.getContractPrompt();
+    const hasReadOnly = detectReadOnlyConstraintUtil(prompt);
+    const explicitExts = hasReadOnly
+      ? []
+      : extractExplicitOutputExtensionsUtil(this.task.title || "", prompt);
+    return buildCompletionGuidancePromptUtil({
+      hasReadOnlyConstraint: hasReadOnly,
+      explicitOutputExtensions: explicitExts,
+      likelyRequiresExecution: this.requiresExecutionToolRun,
     });
   }
 
@@ -23594,6 +23735,7 @@ Return ONLY a JSON object:
         }),
         this.buildIntegrationMentionGuidancePrompt(),
         this.buildLocalModelExecutionGuidancePrompt("planning"),
+        this.buildWebPagePreviewGuidancePrompt(planTextPrompt),
         this.buildCodeFirstUiGuidancePrompt(planTextPrompt),
         adaptiveRecoveryGuidance,
       ]
@@ -30076,11 +30218,16 @@ Return ONLY a JSON object:
         !isSummaryStep &&
         !stepAttemptedExecutionTool
       ) {
-        stepFailed = true;
-        if (!lastFailureReason) {
-          lastFailureReason =
-            "Execution-oriented task finished without attempting run_command/run_applescript. Execute commands directly instead of returning guidance only.";
-        }
+        // Demoted to advisory: log instead of failing the step.
+        // Behavioral steering in the system prompt guides the model to use
+        // execution tools; failing the step here caused false positives for
+        // read-only tasks and triggered wasteful plan-revision recovery loops.
+        this.emitEvent("log", {
+          metric: "execution_tool_advisory",
+          message:
+            "Step completed without execution tool — relying on behavioral steering. " +
+            "Previous behavior would have failed the step here.",
+        });
       }
 
       const currentStepBrowserVerificationObserved =
@@ -32089,9 +32236,14 @@ Return ONLY a JSON object:
       }
     }
 
-    await this.sendMessageUnified(message, images, quotedAssistantMessage, {
-      agentConfigOverride: options?.agentConfigOverride,
-    });
+    if (options?.agentConfigOverride) {
+      await this.sendMessageUnified(message, images, quotedAssistantMessage, {
+        agentConfigOverride: options.agentConfigOverride,
+      });
+      return;
+    }
+
+    await this.sendMessageUnified(message, images, quotedAssistantMessage);
   }
 
   private async sendMessageUnified(

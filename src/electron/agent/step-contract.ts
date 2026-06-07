@@ -1,7 +1,7 @@
 import * as path from "path";
 
 export type StepContractMode = "mutation_required" | "artifact_presence_required" | "analysis_only";
-export type StepContractEnforcementLevel = "strict" | "standard";
+export type StepContractEnforcementLevel = "strict" | "standard" | "advisory";
 
 const CANONICAL_ARTIFACT_EXTENSION_LIST = [
   "pdf",
@@ -45,6 +45,7 @@ const CANONICAL_ARTIFACT_EXTENSION_LIST = [
 ] as const;
 
 const CANONICAL_ARTIFACT_EXTENSION_SET = new Set<string>(CANONICAL_ARTIFACT_EXTENSION_LIST);
+export { CANONICAL_ARTIFACT_EXTENSION_SET as CANONICAL_ARTIFACT_EXTENSION_SET_EXPORT };
 const CANONICAL_EXTENSIONS_WITH_DOT = CANONICAL_ARTIFACT_EXTENSION_LIST.map((extension) => `.${extension}`);
 const CANONICAL_EXTENSION_PATTERN = CANONICAL_ARTIFACT_EXTENSION_LIST
   .map((extension) => extension.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
@@ -255,12 +256,26 @@ export function deriveStepContractMode(opts: {
   requiresMutation: boolean;
   requiresArtifactEvidence: boolean;
   requiresWriteByArtifactMode: boolean;
+  hasReadOnlyConstraint?: boolean;
 }): {
   mode: StepContractMode;
   enforcementLevel: StepContractEnforcementLevel;
   contractReason: string;
 } {
   const desc = String(opts.description || "");
+
+  // When the task has an explicit read-only constraint (e.g. "do not edit files"),
+  // downgrade all enforcement to advisory — the step should not fail for missing mutations.
+  // Note: we only check the task-level flag, NOT descriptionHasReadOnlyIntent() —
+  // a step like "research trends" describes read-only activities but the task may still
+  // need file output.
+  if (opts.hasReadOnlyConstraint) {
+    return {
+      mode: "analysis_only",
+      enforcementLevel: "advisory",
+      contractReason: "readonly_constraint_detected",
+    };
+  }
 
   if (opts.requiresMutation || opts.requiresWriteByArtifactMode) {
     return {

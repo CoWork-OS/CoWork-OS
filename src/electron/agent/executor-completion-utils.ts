@@ -17,6 +17,7 @@ const VERIFICATION_TOOL_EVIDENCE = new Set([
   "web_search",
   "web_fetch",
   "search_files",
+  "grep",
   "glob",
   "run_command",
   "http_request",
@@ -189,6 +190,155 @@ export function inferRequiredArtifactExtensions(taskTitle: string, taskPrompt: s
   return Array.from(extensions);
 }
 
+const EXPLICIT_OUTPUT_EXTENSION_SET = new Set([
+  "pdf", "docx", "md", "csv", "xlsx", "json", "jsonl",
+  "txt", "pptx", "mp4", "mov", "webm", "html",
+]);
+
+/**
+ * Extracts artifact extensions ONLY from explicit output-intent patterns —
+ * e.g. "save as .pdf", "export to .xlsx", "create a PDF report".
+ * Unlike inferRequiredArtifactExtensions() which scans the full prompt text,
+ * this function does NOT pick up extensions from input-context references
+ * like "read PRIORITIES.md".
+ */
+export function extractExplicitOutputExtensions(
+  taskTitle: string,
+  taskPrompt: string,
+): string[] {
+  const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
+  const extensions = new Set<string>();
+
+  // Pattern 1: "save/export/write/output ... to/as ... .ext"
+  const saveAsPattern =
+    /\b(?:save|export|write|output)\b[^.!?\n]{0,80}\b(?:to|as)\b[^.!?\n]{0,80}\.(\w{2,5})\b/gi;
+  let match = saveAsPattern.exec(prompt);
+  while (match) {
+    const ext = match[1]!;
+    if (EXPLICIT_OUTPUT_EXTENSION_SET.has(ext)) extensions.add(`.${ext}`);
+    match = saveAsPattern.exec(prompt);
+  }
+
+  // Pattern 2: "create/generate a PDF/DOCX/CSV file/document/report"
+  const createFormatPattern =
+    /\b(?:create|generate|produce|draft|build|write)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}(pdf|docx|xlsx|csv|pptx|txt|markdown|md)\s+(?:file|document|report|spreadsheet|deck)\b/gi;
+  match = createFormatPattern.exec(prompt);
+  while (match) {
+    let ext = match[1]!;
+    if (ext === "markdown") ext = "md";
+    if (EXPLICIT_OUTPUT_EXTENSION_SET.has(ext)) extensions.add(`.${ext}`);
+    match = createFormatPattern.exec(prompt);
+  }
+
+  // Pattern 3: "write ... as a markdown file" / "write the findings as a markdown file"
+  const writeAsFormatPattern =
+    /\b(?:write|save|export)\b[^.!?\n]{0,60}\bas\s+(?:a\s+|an\s+)?(?:\w+\s+){0,2}(markdown|md|pdf|csv|json|txt|docx|xlsx|pptx)\s+(?:file|document|report)\b/gi;
+  match = writeAsFormatPattern.exec(prompt);
+  while (match) {
+    let ext = match[1]!;
+    if (ext === "markdown") ext = "md";
+    if (EXPLICIT_OUTPUT_EXTENSION_SET.has(ext)) extensions.add(`.${ext}`);
+    match = writeAsFormatPattern.exec(prompt);
+  }
+
+  // Pattern 4: Semantic format nouns in output-intent context
+  // "create a spreadsheet" → .xlsx, "generate a PDF" → .pdf, etc.
+  const semanticFormats: Array<[RegExp, string]> = [
+    [/\b(?:create|generate|build|produce)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}spreadsheet\b/i, ".xlsx"],
+    [/\b(?:create|generate|build|produce)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}excel\s+(?:file|workbook|spreadsheet|document)\b/i, ".xlsx"],
+    [/\b(?:create|generate|build|produce|export)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}pdf\b/i, ".pdf"],
+    [/\b(?:create|generate|build|produce|export)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}docx?\b/i, ".docx"],
+  ];
+  for (const [pattern, ext] of semanticFormats) {
+    if (pattern.test(prompt)) extensions.add(ext);
+  }
+
+  // Presentation detection still uses the dedicated function
+  if (promptRequestsPresentationArtifactOutput(taskTitle, taskPrompt)) {
+    extensions.add(".pptx");
+  }
+  if (promptRequestsVideoArtifactOutput(taskTitle, taskPrompt) && extensions.size === 0) {
+    extensions.add(".mp4");
+  }
+
+  return Array.from(extensions);
+}
+
+/**
+ * Builds dynamic completion guidance for injection into the system prompt.
+ * This is the Hermes-style behavioral steering layer — it tells the model
+ * how to handle task completion rather than enforcing it post-hoc.
+ */
+export function buildCompletionGuidancePrompt(opts: {
+  hasReadOnlyConstraint: boolean;
+  explicitOutputExtensions: string[];
+  likelyRequiresExecution: boolean;
+}): string {
+  const lines: string[] = [
+    "TASK COMPLETION GUIDANCE:",
+    "- When you create or modify files, use the appropriate write tool — do not describe what you would write without actually writing it.",
+    "- If a tool call fails, report the failure honestly and try an alternative approach. Never fabricate tool output.",
+    "- End with a substantive summary of what was accomplished, not just a status message.",
+  ];
+
+  if (opts.hasReadOnlyConstraint) {
+    lines.push(
+      "- IMPORTANT: This task has explicit read-only constraints. Do NOT create, modify, or delete files. Deliver all results as direct text output.",
+    );
+  }
+
+  if (opts.explicitOutputExtensions.length > 0) {
+    const exts = opts.explicitOutputExtensions.join(", ");
+    lines.push(
+      `- This task requests output in ${exts} format. Use the appropriate write tool and confirm the file was created successfully.`,
+    );
+  }
+
+  if (opts.likelyRequiresExecution && !opts.hasReadOnlyConstraint) {
+    lines.push(
+      "- This task likely expects command execution. Use run_command to execute commands rather than describing what commands to run.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Detects whether the prompt contains an explicit read-only constraint
+ * (e.g. "do not edit files", "this is read-only", "without editing").
+ * When true, artifact and execution requirements are suppressed because
+ * the task should produce text output only, not file artifacts.
+ *
+ * "read-only" alone is NOT matched — it must appear as a constraint declaration
+ * (e.g. "this is read-only", "read-only mode"), not as a subject to fix
+ * (e.g. "fix the read-only permission", "database is in read-only mode, fix it").
+ */
+export function detectReadOnlyConstraint(prompt: string): boolean {
+  const lower = String(prompt || "").toLowerCase();
+
+  // Explicit "do not" / "don't" constraints — unambiguous
+  const hasExplicitConstraint =
+    /\b(?:do\s+not\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?|do\s+not\s+make\s+(?:any\s+)?changes|no\s+file\s+changes|without\s+(?:editing|modifying|creating)|don'?t\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?|situational\s+awareness\s+(?:only|mode))\b/.test(
+      lower,
+    );
+  if (hasExplicitConstraint) return true;
+
+  // "read-only" requires constraint context — must NOT be preceded by fix/debug verbs
+  // "fix the read-only issue" → false, "this task is read-only" → true
+  if (/\bread[- ]only\b/.test(lower)) {
+    const isSubjectToFix =
+      /\b(?:fix|repair|resolve|debug|troubleshoot|diagnose|investigate|restore|change|update|remove|disable|toggle|switch)\b[^.!?\n]{0,40}\bread[- ]only\b/.test(
+        lower,
+      ) ||
+      /\bread[- ]only\b[^.!?\n]{0,40}\b(?:fix|repair|resolve|broken|issue|problem|bug|error|fail)\b/.test(
+        lower,
+      );
+    if (!isSubjectToFix) return true;
+  }
+
+  return false;
+}
+
 export function buildCompletionContract(opts: {
   taskTitle: string;
   taskPrompt: string;
@@ -196,13 +346,18 @@ export function buildCompletionContract(opts: {
   requiresDecisionSignal: boolean;
   isWatchSkipRecommendationTask: boolean;
 }): CompletionContract {
+  const fullPrompt = `${opts.taskTitle}\n${normalizePromptForContracts(opts.taskPrompt)}`;
+  const hasReadOnlyConstraint = detectReadOnlyConstraint(fullPrompt);
+
   const requiresExecutionEvidence = shouldRequireExecutionEvidence(opts.taskTitle, opts.taskPrompt);
   const requiresCanvasArtifact = promptRequestsCanvasArtifactOutput(opts.taskTitle, opts.taskPrompt);
-  const requiredArtifactExtensions = inferRequiredArtifactExtensions(
-    opts.taskTitle,
-    opts.taskPrompt,
-  );
+  // Use explicit-only extraction: only picks up extensions from output-intent
+  // patterns (e.g. "save as .pdf"), not from input references (e.g. "read PRIORITIES.md").
+  const requiredArtifactExtensions = hasReadOnlyConstraint
+    ? []
+    : extractExplicitOutputExtensions(opts.taskTitle, opts.taskPrompt);
   const requiresArtifactEvidence =
+    !hasReadOnlyConstraint &&
     (promptRequestsArtifactOutput(opts.taskTitle, opts.taskPrompt) ||
       requiresCanvasArtifact ||
       requiredArtifactExtensions.length > 0) &&
@@ -214,11 +369,13 @@ export function buildCompletionContract(opts: {
     !opts.isWatchSkipRecommendationTask &&
     (hasExplicitCanvasCue || requiredArtifactExtensions.length === 0);
   const artifactKind: CompletionContract["artifactKind"] =
-    shouldTreatAsCanvasArtifact
-      ? "canvas"
-      : requiresArtifactEvidence
-        ? "file"
-        : "none";
+    hasReadOnlyConstraint
+      ? "none"
+      : shouldTreatAsCanvasArtifact
+        ? "canvas"
+        : requiresArtifactEvidence
+          ? "file"
+          : "none";
 
   // Only require canvas_push evidence when the prompt explicitly mentions "canvas".
   // Tasks detected as canvas via promptIsMultiFileWebAppCreation (e.g. "Create a website")
@@ -339,6 +496,50 @@ export function responseHasReasonedConclusionSignal(text: string): boolean {
     );
 
   return hasConclusionCue && hasReasoningCue;
+}
+
+export function responseHasReviewReportEvidenceSignal(text: string): boolean {
+  const normalized = String(text || "").toLowerCase();
+  if (!normalized.trim()) return false;
+
+  const hasAffectedDocumentation =
+    /\b(?:affected\s+(?:documentation|docs?)|docs?\s+(?:that\s+need|to\s+update)|readme\.md|docs\/|changelog\.md|agents\.md|package\.json)\b/.test(
+      normalized,
+    );
+  const hasSourceOfTruth =
+    /\b(?:source(?:\s+of\s+truth)?|source-of-truth|code\/config|current\s+(?:repo\s+)?(?:behavior|state)|fresh\s+evidence|repo\s+evidence)\b/.test(
+      normalized,
+    );
+  const hasMismatchOrFinding =
+    /\b(?:drift|mismatch|stale|outdated|missing|under-?documented|not\s+documented|finding|gap)\b/.test(
+      normalized,
+    );
+  const hasSuggestedDocChange =
+    /\b(?:suggested\s+(?:documentation|doc)\s+(?:change|update)|documentation\s+change|doc\s+update|update\s+(?:the\s+)?docs?|add\s+(?:to\s+)?docs?)\b/.test(
+      normalized,
+    );
+  const hasPriority =
+    /\b(?:priority|must\s+fix\s+before\s+release|should\s+fix|optional)\b/.test(normalized);
+  const hasReviewFraming =
+    /\b(?:documentation\s+drift|drift\s+(?:check|assessment|report)|review-backed|review\s+report|inspected|reviewed|checked)\b/.test(
+      normalized,
+    );
+
+  const matchedFieldCount = [
+    hasAffectedDocumentation,
+    hasSourceOfTruth,
+    hasMismatchOrFinding,
+    hasSuggestedDocChange,
+    hasPriority,
+    hasReviewFraming,
+  ].filter(Boolean).length;
+
+  return (
+    matchedFieldCount >= 4 &&
+    hasMismatchOrFinding &&
+    hasSuggestedDocChange &&
+    hasPriority
+  );
 }
 
 export function hasVerificationToolEvidence(
@@ -530,15 +731,18 @@ export function hasVerificationEvidence(opts: {
       (isVerificationStepDescription(step.description || "") ||
         COMPLETED_REVIEW_STEP_REGEX.test(step.description || "")),
   );
+  const hasToolEvidence = hasVerificationToolEvidence(opts.toolResultMemory);
 
-  const hasReviewBackedConclusion = responseHasVerificationSignal(opts.bestCandidate);
-  if (hasCompletedReviewStep || hasReviewBackedConclusion) {
+  if (responseHasExecutionReportEvidenceSignal(opts.bestCandidate)) {
     return true;
   }
 
   return (
-    hasVerificationToolEvidence(opts.toolResultMemory) &&
-    responseHasReasonedConclusionSignal(opts.bestCandidate)
+    hasToolEvidence &&
+    (hasCompletedReviewStep ||
+      responseHasVerificationSignal(opts.bestCandidate) ||
+      responseHasReasonedConclusionSignal(opts.bestCandidate) ||
+      responseHasReviewReportEvidenceSignal(opts.bestCandidate))
   );
 }
 

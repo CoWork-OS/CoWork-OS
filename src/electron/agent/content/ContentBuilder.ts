@@ -28,6 +28,7 @@ export interface BuildExecutionPromptParams {
   visualQAContext?: string;
   personalityPrompt?: string;
   guidelinesPrompt?: string;
+  completionGuidancePrompt?: string;
   turnGuidancePrompt?: string;
   turnGuidanceMaxTokens?: number;
   coreInstructions?: string;
@@ -245,6 +246,12 @@ export class ContentBuilder {
           }),
           makeSection("web_search_contract", params.webSearchModeContract, 260, {
             required: true,
+            layerKind: "always",
+            cacheScope: "session",
+          }),
+          makeSection("completion_guidance", params.completionGuidancePrompt, 500, {
+            required: false,
+            dropPriority: 1,
             layerKind: "always",
             cacheScope: "session",
           }),

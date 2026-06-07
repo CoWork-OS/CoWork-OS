@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import {
+  buildCompletionGuidancePrompt,
+  detectReadOnlyConstraint,
+} from "../executor-completion-utils";
 
 type HarnessOptions = {
   prompt: string;
@@ -215,8 +219,10 @@ checklist_contract:
 
     const contract = (executor as Any).buildCompletionContract();
 
-    expect(contract.requiredArtifactExtensions).toContain(".md");
-    expect(contract.artifactKind).toBe("file");
+    // The heartbeat prompt mentions PRIORITIES.md as an input/target to update,
+    // but explicit-only extraction no longer infers .md as a required output extension.
+    // Artifact evidence is still satisfied because the task created the file.
+    expect(contract.requiredArtifactExtensions).toEqual([]);
     expect((executor as Any).hasArtifactEvidence(contract)).toBe(true);
   });
 
@@ -854,11 +860,37 @@ Verification complete: this routine produced a review-backed build-health conclu
         "Heartbeat dispatch completed. Checklist covered: CI/CD pipeline health, stalled planner-managed issues, and community discussions. No duplicate work was repeated.",
       planStepDescription: "Stalled planner-managed issues are reviewed for next action.",
     });
+    (executor as Any).toolResultMemory = [
+      { tool: "web_fetch", summary: "Fetched CI pipeline health", timestamp: Date.now() },
+      { tool: "web_search", summary: "Searched unresolved community questions", timestamp: Date.now() },
+    ];
 
     await (executor as Any).execute();
 
     expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
     expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
+  it("rejects completed review/check steps when no evidence tools were used", async () => {
+    const executor = createExecuteHarness({
+      title: "Heartbeat: Pending work detected",
+      prompt:
+        "Check CI/CD pipeline health, review stalled planner-managed issues, and scan unresolved community questions.",
+      lastOutput:
+        "Heartbeat dispatch completed. Checklist covered: CI/CD pipeline health, stalled planner-managed issues, and community discussions.",
+      planStepDescription: "Stalled planner-managed issues are reviewed for next action.",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
       "task-1",
       expect.objectContaining({
         status: "failed",
@@ -883,6 +915,96 @@ Verification complete: this routine produced a review-backed build-health conclu
 
     expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
     expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
+  it("accepts structured documentation-drift reports when repo evidence tools were used", async () => {
+    const executor = createExecuteHarness({
+      title: "CoWork OS documentation drift check",
+      prompt:
+        "Review current repo evidence for documentation drift in CoWork OS. Do not edit files. Report docs that need updates, exact source of truth in code/config, suggested documentation change, and priority.",
+      lastOutput: `## Documentation Drift Report
+
+1. Docs that need updates: docs/automation.md
+- Source of truth in code/config: src/electron/cron/service.ts now restricts run_command when a scheduled job has shellAccess false.
+- Drift: the automation docs still describe scheduled tasks as if command execution is always available.
+- Suggested doc update: add the shellAccess false behavior and say read/list/search evidence is expected for no-edit review routines.
+- Priority: should fix`,
+      planStepDescription: "Gather current docs and source evidence",
+      source: "cron",
+    });
+    (executor as Any).toolResultMemory = [
+      {
+        tool: "read_file",
+        summary: "Read src/electron/cron/service.ts",
+        timestamp: Date.now(),
+      },
+      { tool: "grep", summary: "Searched docs for shellAccess", timestamp: Date.now() },
+    ];
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
+  it("rejects structured documentation-drift labels without repo evidence tools", async () => {
+    const executor = createExecuteHarness({
+      title: "CoWork OS documentation drift check",
+      prompt:
+        "Review current repo evidence for documentation drift in CoWork OS. Do not edit files. Report docs that need updates, exact source of truth in code/config, suggested documentation change, and priority.",
+      lastOutput: `## Documentation Drift Report
+
+1. Docs that need updates: docs/automation.md
+- Source of truth in code/config: src/electron/cron/service.ts
+- Drift: scheduled task docs are stale.
+- Suggested doc update: update the automation docs.
+- Priority: should fix`,
+      planStepDescription: "Gather current docs and source evidence",
+      source: "cron",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
+  it("rejects generic documentation-drift findings without repo evidence tools", async () => {
+    const executor = createExecuteHarness({
+      title: "CoWork OS documentation drift check",
+      prompt:
+        "Review current repo evidence for documentation drift in CoWork OS. Do not edit files. Report docs that need updates, exact source of truth in code/config, suggested documentation change, and priority.",
+      lastOutput: `## Findings
+
+I reviewed the documentation drift state.
+
+Recommendation: update docs/automation.md because scheduled task docs are stale.`,
+      planStepDescription: "Gather current docs and source evidence",
+      source: "cron",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
       "task-1",
       expect.objectContaining({
         status: "failed",
@@ -1418,6 +1540,9 @@ Verification complete: this routine produced a review-backed build-health conclu
       createdFiles: [],
       planStepDescription: "Review transcript and recommend",
     });
+    (executor as Any).toolResultMemory = [
+      { tool: "web_fetch", summary: "Fetched transcript evidence", timestamp: Date.now() },
+    ];
 
     await (executor as Any).execute();
 
@@ -1561,5 +1686,124 @@ Verification complete: this routine produced a review-backed build-health conclu
         waiveFailedStepIds: ["1"],
       }),
     );
+  });
+
+  it("suppresses artifact requirements when prompt has read-only constraint", () => {
+    const executor = createExecuteHarness({
+      title: "Daily CoWork OS Project Brief",
+      prompt: [
+        "Create my daily CoWork OS development brief.",
+        "Do not edit files, commit, push, publish, post externally, or change settings.",
+        "This routine is for situational awareness and prioritization only.",
+        "read .cowork/PRIORITIES.md if present",
+        "compare current repo state against the active priorities",
+      ].join("\n"),
+      lastOutput: "Daily brief prepared.",
+    });
+
+    const contract = (executor as Any).buildCompletionContract();
+
+    expect(contract.requiresArtifactEvidence).toBe(false);
+    expect(contract.requiredArtifactExtensions).toEqual([]);
+    expect(contract.artifactKind).toBe("none");
+  });
+
+  it("suppresses artifact requirements with don't edit variant", () => {
+    const executor = createExecuteHarness({
+      title: "Architecture review",
+      prompt: "Analyze the codebase architecture. Don't edit any files. Report back with a summary.",
+      lastOutput: "Architecture summary.",
+    });
+
+    const contract = (executor as Any).buildCompletionContract();
+
+    expect(contract.requiresArtifactEvidence).toBe(false);
+    expect(contract.requiredArtifactExtensions).toEqual([]);
+    expect(contract.artifactKind).toBe("none");
+  });
+
+  it("still requires artifacts when read-only constraint is absent", () => {
+    const executor = createExecuteHarness({
+      title: "Research report",
+      prompt: "Research AI agent trends and compile a comprehensive report.",
+      lastOutput: "Report prepared.",
+    });
+
+    const contract = (executor as Any).buildCompletionContract();
+
+    expect(contract.requiresArtifactEvidence).toBe(true);
+  });
+
+  it("does not false-positive on 'fix the read-only permission issue'", () => {
+    expect(detectReadOnlyConstraint("Fix the read-only permission issue on the database.")).toBe(
+      false,
+    );
+  });
+
+  it("does not false-positive on 'database is in read-only mode, fix it'", () => {
+    expect(
+      detectReadOnlyConstraint(
+        "The database is in read-only mode, fix it so writes work again.",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not false-positive on 'debug the read-only access error'", () => {
+    expect(detectReadOnlyConstraint("Debug the read-only access error users are reporting.")).toBe(
+      false,
+    );
+  });
+
+  it("detects read-only constraint in 'this task is read-only'", () => {
+    expect(detectReadOnlyConstraint("This task is read-only. Just analyze and report.")).toBe(true);
+  });
+});
+
+describe("buildCompletionGuidancePrompt", () => {
+  it("includes read-only warning when hasReadOnlyConstraint is true", () => {
+    const result = buildCompletionGuidancePrompt({
+      hasReadOnlyConstraint: true,
+      explicitOutputExtensions: [],
+      likelyRequiresExecution: false,
+    });
+    expect(result).toContain("read-only constraints");
+    expect(result).toContain("Do NOT create, modify, or delete files");
+  });
+
+  it("includes extension format guidance when extensions are specified", () => {
+    const result = buildCompletionGuidancePrompt({
+      hasReadOnlyConstraint: false,
+      explicitOutputExtensions: [".pdf", ".xlsx"],
+      likelyRequiresExecution: false,
+    });
+    expect(result).toContain(".pdf, .xlsx");
+  });
+
+  it("includes execution guidance when likelyRequiresExecution is true", () => {
+    const result = buildCompletionGuidancePrompt({
+      hasReadOnlyConstraint: false,
+      explicitOutputExtensions: [],
+      likelyRequiresExecution: true,
+    });
+    expect(result).toContain("run_command");
+  });
+
+  it("omits execution guidance when hasReadOnlyConstraint is true", () => {
+    const result = buildCompletionGuidancePrompt({
+      hasReadOnlyConstraint: true,
+      explicitOutputExtensions: [],
+      likelyRequiresExecution: true,
+    });
+    expect(result).not.toContain("run_command");
+  });
+
+  it("always includes core guidance", () => {
+    const result = buildCompletionGuidancePrompt({
+      hasReadOnlyConstraint: false,
+      explicitOutputExtensions: [],
+      likelyRequiresExecution: false,
+    });
+    expect(result).toContain("TASK COMPLETION GUIDANCE");
+    expect(result).toContain("Never fabricate tool output");
   });
 });

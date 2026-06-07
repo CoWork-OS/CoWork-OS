@@ -390,6 +390,52 @@ describe("TaskExecutor plan parsing", () => {
     expect(result.blockedResult?.error).toContain("Code-first UI task mode is active");
   });
 
+  it("allows browser tools for web page design and troubleshooting prompts", () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [],
+    });
+    const prompt =
+      "Edit the React landing page, start the app, open it in the browser, and troubleshoot the hero layout.";
+    executor.task.title = "Improve React landing page";
+    executor.task.prompt = prompt;
+    executor.task.rawPrompt = prompt;
+    executor.currentStepId = "1";
+    executor.plan = {
+      description: "Plan",
+      steps: [
+        {
+          id: "1",
+          description: "Edit the React landing page and verify it in the browser.",
+          status: "pending",
+        },
+      ],
+    };
+
+    const result = executor.applyPreToolUsePolicyHook({
+      toolName: "browser_navigate",
+      input: { url: "http://localhost:5173" },
+      stepMode: undefined,
+    });
+
+    expect(result.blockedResult).toBeUndefined();
+  });
+
+  it("adds web page preview guidance for frontend page work", () => {
+    const executor = createPlanExecutor({
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [],
+    });
+
+    const guidance = executor.buildWebPagePreviewGuidancePrompt(
+      "Design a React web page and troubleshoot it in the browser.",
+    );
+
+    expect(guidance).toContain("WEB PAGE PREVIEW GUIDANCE");
+    expect(guidance).toContain("visible in-app browser");
+    expect(guidance).toContain("browser_screenshot");
+  });
+
   it("uses the simple image path for app avatar image prompts", async () => {
     const executor = createPlanExecutor({
       usage: { inputTokens: 1, outputTokens: 2 },

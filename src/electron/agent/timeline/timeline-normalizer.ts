@@ -77,8 +77,14 @@ const SHELL_TOOLS = new Set(["run_command", "run_skill"]);
 const BROWSER_TOOLS = new Set([
   "browser_navigate",
   "browser_screenshot",
+  "browser_snapshot",
+  "browser_tabs",
+  "browser_switch_tab",
+  "browser_close_tab",
   "browser_get_content",
   "browser_click",
+  "browser_hover",
+  "browser_drag",
   "browser_fill",
   "browser_type",
   "browser_press",
@@ -87,6 +93,15 @@ const BROWSER_TOOLS = new Set([
   "browser_select",
   "browser_get_text",
   "browser_evaluate",
+  "browser_upload_file",
+  "browser_handle_dialog",
+  "browser_console",
+  "browser_network",
+  "browser_downloads",
+  "browser_storage",
+  "browser_emulate",
+  "browser_trace_start",
+  "browser_trace_stop",
   "browser_back",
   "browser_forward",
   "browser_reload",
@@ -162,6 +177,7 @@ function toCanonicalKind(event: NormalizerInputEvent): CanonicalActionKind {
   if (SEARCH_WEB_TOOLS.has(type)) return "search.web";
   if (SHELL_TOOLS.has(type)) return "shell.run";
   if (BROWSER_TOOLS.has(type)) return "browser.action";
+  if (type === "browser_action") return "browser.action";
 
   // Timeline step events are general step updates
   if (

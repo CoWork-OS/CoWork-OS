@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface RequestDayRow {
   dateKey: string;
@@ -10,15 +10,21 @@ interface RequestDayRow {
 }
 
 interface OverviewProps {
-  sessions: number;
-  messages: number;
   totalTokens: number;
-  mostActiveHour: number | null;
-  favoriteModel: string | null;
+  avgTaskTimeMs: number | null;
   requestsByDay: RequestDayRow[];
+  periodLabel: string;
 }
 
-const DAY_LABELS = ["Mon", "Wed", "Fri"];
+type HeatmapMode = "daily" | "weekly" | "cumulative";
+
+const HEATMAP_MODES: Array<{ value: HeatmapMode; label: string }> = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "cumulative", label: "Cumulative" },
+];
+
+const MIN_HEATMAP_MONTHS = 12;
 
 // Roughly the word count of Moby-Dick (~210k words ≈ ~270k tokens).
 const MOBY_DICK_TOKENS = 270_000;
@@ -39,13 +45,15 @@ function formatBigNumber(n: number): string {
   return n.toLocaleString();
 }
 
-function formatHourRange(hour: number): string {
-  const wrap = (h: number) => {
-    const suffix = h < 12 ? "AM" : "PM";
-    const hh = h % 12 === 0 ? 12 : h % 12;
-    return `${hh} ${suffix}`;
-  };
-  return wrap(hour);
+function formatShortDuration(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms) || ms <= 0) return "\u2014";
+  const totalMinutes = Math.max(1, Math.round(ms / 60_000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function parseDateKey(dateKey: string): Date | null {
@@ -66,21 +74,42 @@ interface HeatmapCell {
   count: number;
   intensity: number; // 0..4
   inRange: boolean;
+  rawCount: number;
+}
+
+interface MonthLabel {
+  label: string;
+  start: number;
+  span: number;
+}
+
+function tokenCount(row: RequestDayRow): number {
+  return row.inputTokens + row.outputTokens;
 }
 
 function buildHeatmap(
   requestsByDay: RequestDayRow[],
-): { weeks: HeatmapCell[][]; max: number } {
-  if (requestsByDay.length === 0) return { weeks: [], max: 0 };
+  mode: HeatmapMode,
+): { weeks: HeatmapCell[][]; max: number; months: MonthLabel[] } {
+  if (requestsByDay.length === 0) return { weeks: [], max: 0, months: [] };
   const byDate = new Map<string, number>();
   for (const row of requestsByDay) {
-    byDate.set(row.dateKey, row.llmCalls);
+    byDate.set(row.dateKey, tokenCount(row));
   }
 
   const sorted = [...requestsByDay].sort((a, b) => a.dateKey.localeCompare(b.dateKey));
-  const firstDate = parseDateKey(sorted[0].dateKey);
-  const lastDate = parseDateKey(sorted[sorted.length - 1].dateKey);
-  if (!firstDate || !lastDate) return { weeks: [], max: 0 };
+  const firstDataDate = parseDateKey(sorted[0].dateKey);
+  const lastDataDate = parseDateKey(sorted[sorted.length - 1].dateKey);
+  if (!firstDataDate || !lastDataDate) return { weeks: [], max: 0, months: [] };
+
+  const firstDate = new Date(firstDataDate);
+  const lastDate = new Date(lastDataDate);
+  const minStart = new Date(lastDate);
+  minStart.setMonth(minStart.getMonth() - (MIN_HEATMAP_MONTHS - 1));
+  minStart.setDate(1);
+  if (firstDate > minStart) {
+    firstDate.setTime(minStart.getTime());
+  }
 
   // Back up to the preceding Sunday so the first column is a full week.
   const start = new Date(firstDate);
@@ -88,28 +117,78 @@ function buildHeatmap(
   const end = new Date(lastDate);
   end.setDate(end.getDate() + (6 - end.getDay()));
 
-  const values = Array.from(byDate.values()).filter((v) => v > 0);
-  const max = values.length > 0 ? Math.max(...values) : 0;
-
   const weeks: HeatmapCell[][] = [];
+  const values: number[] = [];
+  let cumulative = 0;
   let cursor = new Date(start);
   while (cursor <= end) {
+    const weekStart = new Date(cursor);
+    let weekTotal = 0;
+    for (let i = 0; i < 7; i++) {
+      const next = new Date(weekStart);
+      next.setDate(weekStart.getDate() + i);
+      weekTotal += byDate.get(toKey(next)) ?? 0;
+    }
+
     const week: HeatmapCell[] = [];
     for (let i = 0; i < 7; i++) {
       const key = toKey(cursor);
-      const count = byDate.get(key) ?? 0;
+      const rawCount = byDate.get(key) ?? 0;
       const inRange = cursor >= firstDate && cursor <= lastDate;
-      let intensity = 0;
-      if (count > 0 && max > 0) {
-        const ratio = count / max;
-        intensity = ratio > 0.75 ? 4 : ratio > 0.5 ? 3 : ratio > 0.25 ? 2 : 1;
+      const isDataRange = cursor >= firstDataDate && cursor <= lastDataDate;
+      if (isDataRange) {
+        cumulative += rawCount;
       }
-      week.push({ dateKey: key, count, intensity, inRange });
+      const count = !inRange
+        ? 0
+        : mode === "weekly"
+          ? rawCount > 0
+            ? weekTotal
+            : 0
+          : mode === "cumulative" && isDataRange
+            ? cumulative
+            : rawCount;
+      if (count > 0) {
+        values.push(count);
+      }
+      week.push({ dateKey: key, count, intensity: 0, inRange, rawCount });
       cursor.setDate(cursor.getDate() + 1);
     }
     weeks.push(week);
   }
-  return { weeks, max };
+
+  const max = values.length > 0 ? Math.max(...values) : 0;
+  for (const week of weeks) {
+    for (const cell of week) {
+      let intensity = 0;
+      if (cell.count > 0 && max > 0) {
+        const ratio = cell.count / max;
+        intensity = ratio > 0.75 ? 4 : ratio > 0.5 ? 3 : ratio > 0.25 ? 2 : 1;
+      }
+      cell.intensity = intensity;
+    }
+  }
+
+  const months = buildMonthLabels(weeks);
+  return { weeks, max, months };
+}
+
+function buildMonthLabels(weeks: HeatmapCell[][]): MonthLabel[] {
+  const labels: MonthLabel[] = [];
+  for (let i = 0; i < weeks.length; i++) {
+    const visibleCell = weeks[i].find((cell) => cell.inRange);
+    if (!visibleCell) continue;
+    const date = parseDateKey(visibleCell.dateKey);
+    if (!date) continue;
+    const label = date.toLocaleDateString(undefined, { month: "short" });
+    const current = labels[labels.length - 1];
+    if (current?.label === label) {
+      current.span += 1;
+    } else {
+      labels.push({ label, start: i + 1, span: 1 });
+    }
+  }
+  return labels;
 }
 
 function computeStreaks(requestsByDay: RequestDayRow[]): {
@@ -177,56 +256,107 @@ function pickBookComparison(totalTokens: number): string | null {
   return `You've used ${rendered} more tokens than ${best.name}.`;
 }
 
-export function UsageInsightsOverview(props: OverviewProps) {
-  const { sessions, messages, totalTokens, mostActiveHour, favoriteModel, requestsByDay } = props;
+function heatmapTitle(cell: HeatmapCell, mode: HeatmapMode): string {
+  const value = formatBigNumber(cell.count);
+  const raw = formatBigNumber(cell.rawCount);
+  if (mode === "weekly") {
+    return `${cell.dateKey}: ${raw} tokens, ${value} for the week`;
+  }
+  if (mode === "cumulative") {
+    return `${cell.dateKey}: ${value} cumulative tokens`;
+  }
+  return `${cell.dateKey}: ${value} tokens`;
+}
 
-  const { activeDays, currentStreak, longestStreak } = useMemo(
+export function UsageInsightsOverview(props: OverviewProps) {
+  const { totalTokens, avgTaskTimeMs, requestsByDay, periodLabel } = props;
+  const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>("cumulative");
+  const heatmapScrollRef = useRef<HTMLDivElement>(null);
+
+  const { currentStreak, longestStreak } = useMemo(
     () => computeStreaks(requestsByDay),
     [requestsByDay],
   );
 
-  const { weeks } = useMemo(() => buildHeatmap(requestsByDay), [requestsByDay]);
+  const { weeks, months } = useMemo(
+    () => buildHeatmap(requestsByDay, heatmapMode),
+    [heatmapMode, requestsByDay],
+  );
+
+  useEffect(() => {
+    const scrollEl = heatmapScrollRef.current;
+    if (!scrollEl) return;
+    scrollEl.scrollLeft = scrollEl.scrollWidth;
+  }, [heatmapMode, weeks.length]);
+
   const comparison = useMemo(() => pickBookComparison(totalTokens), [totalTokens]);
 
-  const peakLabel =
-    mostActiveHour !== null && mostActiveHour >= 0 ? formatHourRange(mostActiveHour) : "\u2014";
+  const peakTokens = useMemo(
+    () => requestsByDay.reduce((peak, row) => Math.max(peak, tokenCount(row)), 0),
+    [requestsByDay],
+  );
 
   return (
     <div className="insights-overview">
       <div className="insights-overview-stats">
-        <StatCard label="Sessions" value={formatBigNumber(sessions)} />
-        <StatCard label="Messages" value={formatBigNumber(messages)} />
         <StatCard label="Total tokens" value={formatBigNumber(totalTokens)} />
-        <StatCard label="Active days" value={formatBigNumber(activeDays)} />
-        <StatCard label="Current streak" value={`${currentStreak}d`} />
-        <StatCard label="Longest streak" value={`${longestStreak}d`} />
-        <StatCard label="Peak hour" value={peakLabel} />
-        <StatCard
-          label="Favorite model"
-          value={favoriteModel ?? "\u2014"}
-          valueClass="insights-overview-stat-value--small"
-        />
+        <StatCard label="Peak tokens" value={formatBigNumber(peakTokens)} />
+        <StatCard label="Avg task" value={formatShortDuration(avgTaskTimeMs)} />
+        <StatCard label="Current streak" value={`${currentStreak} days`} />
+        <StatCard label="Longest streak" value={`${longestStreak} days`} />
       </div>
 
       {weeks.length > 0 && (
-        <div className="insights-overview-heatmap" aria-label="Daily activity heatmap">
-          <div className="insights-overview-heatmap-labels">
-            {DAY_LABELS.map((d) => (
-              <span key={d}>{d}</span>
-            ))}
+        <div className="insights-token-activity" aria-label="Token activity heatmap">
+          <div className="insights-token-activity-header">
+            <div className="insights-token-activity-title">
+              <h3>Token activity</h3>
+              <span className="insights-token-activity-range">{periodLabel}</span>
+            </div>
+            <div className="insights-token-activity-tabs" role="tablist" aria-label="Token activity view">
+              {HEATMAP_MODES.map((mode) => (
+                <button
+                  key={mode.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={heatmapMode === mode.value}
+                  className={`insights-token-activity-tab${heatmapMode === mode.value ? " active" : ""}`}
+                  onClick={() => setHeatmapMode(mode.value)}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="insights-overview-heatmap-grid">
-            {weeks.map((week, wi) => (
-              <div key={wi} className="insights-overview-heatmap-col">
-                {week.map((cell) => (
-                  <div
-                    key={cell.dateKey}
-                    className={`insights-overview-heatmap-cell insights-overview-heatmap-cell-l${cell.intensity}${cell.inRange ? "" : " out-of-range"}`}
-                    title={`${cell.dateKey}: ${cell.count} call${cell.count === 1 ? "" : "s"}`}
-                  />
+          <div className="insights-overview-heatmap" ref={heatmapScrollRef}>
+            <div className="insights-overview-heatmap-grid">
+              {weeks.map((week, wi) => (
+                <div key={wi} className="insights-overview-heatmap-col">
+                  {week.map((cell) => (
+                    <div
+                      key={cell.dateKey}
+                      className={`insights-overview-heatmap-cell insights-overview-heatmap-cell-l${cell.intensity}${cell.inRange ? "" : " out-of-range"}`}
+                      title={heatmapTitle(cell, heatmapMode)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+            {months.length > 0 && (
+              <div
+                className="insights-overview-heatmap-months"
+                style={{ gridTemplateColumns: `repeat(${weeks.length}, 16px)` }}
+              >
+                {months.map((month) => (
+                  <span
+                    key={`${month.label}-${month.start}`}
+                    style={{ gridColumn: `${month.start} / span ${month.span}` }}
+                  >
+                    {month.label}
+                  </span>
                 ))}
               </div>
-            ))}
+            )}
           </div>
         </div>
       )}

@@ -224,7 +224,13 @@ interface PluginPackSummary {
   skills: Array<{ id: string; name: string }>;
 }
 
+interface OverviewLoadState {
+  workspaceId: string;
+  data: UsageInsightsData;
+}
+
 const ALL_WORKSPACES = "__all__";
+const OVERVIEW_PERIOD_DAYS = 365;
 
 const chartTooltipProps = {
   contentStyle: {
@@ -250,6 +256,9 @@ function isValidWorkspaceId(id: string | undefined): id is string {
 
 export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageInsightsPanelProps) {
   const [data, setData] = useState<UsageInsightsData | null>(null);
+  const [overviewData, setOverviewData] = useState<OverviewLoadState | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
   const [selectedPreset, setSelectedPreset] =
     useState<UsageInsightsPeriodPreset>(DEFAULT_USAGE_INSIGHTS_PERIOD_PRESET);
   const [customStart, setCustomStart] = useState(() => toISODate(new Date(Date.now() - 30 * 86_400_000)));
@@ -267,6 +276,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
   const [pluginPacks, setPluginPacks] = useState<PluginPackSummary[]>([]);
   const cacheRef = useRef(new Map<string, UsageInsightsData>());
   const requestSeqRef = useRef(0);
+  const overviewRequestSeqRef = useRef(0);
 
   const periodDays = useMemo(
     () => (selectedPreset === "custom" ? daysBetween(customStart, customEnd) : selectedPreset),
@@ -335,6 +345,40 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
     }
   }, [workspaceId, periodDays]);
 
+  const loadOverview = useCallback(async () => {
+    if (!isValidWorkspaceId(workspaceId)) return;
+    const requestId = ++overviewRequestSeqRef.current;
+    const cacheKey = `${workspaceId}|${OVERVIEW_PERIOD_DAYS}`;
+    const cached = cacheRef.current.get(cacheKey);
+    if (cached) {
+      setOverviewData({ workspaceId, data: cached });
+      setOverviewError(null);
+      setOverviewLoading(false);
+      return;
+    }
+    setOverviewLoading(true);
+    setOverviewError(null);
+    setOverviewData((current) => (current?.workspaceId === workspaceId ? current : null));
+    try {
+      const result = await window.electronAPI.getUsageInsights(
+        workspaceId,
+        OVERVIEW_PERIOD_DAYS,
+      );
+      cacheRef.current.set(cacheKey, result);
+      if (overviewRequestSeqRef.current !== requestId) return;
+      setOverviewData({ workspaceId, data: result });
+    } catch (err: unknown) {
+      if (overviewRequestSeqRef.current === requestId) {
+        setOverviewError(err instanceof Error ? err.message : "Failed to load 12-month token activity");
+        setOverviewData((current) => (current?.workspaceId === workspaceId ? current : null));
+      }
+    } finally {
+      if (overviewRequestSeqRef.current === requestId) {
+        setOverviewLoading(false);
+      }
+    }
+  }, [workspaceId]);
+
   useEffect(() => {
     if (!showCustomPicker) return;
     function handleClickOutside(e: MouseEvent) {
@@ -373,6 +417,10 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    void loadOverview();
+  }, [loadOverview]);
 
   useEffect(() => {
     let cancelled = false;
@@ -537,9 +585,32 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
     label: formatDayLabel(row.dateKey),
     lineValue: awuLineMetric === "tokens" ? row.tokensPerAwu : row.costPerAwu,
   }));
+  const activeOverviewData = overviewData?.workspaceId === workspaceId ? overviewData.data : null;
+  const overview = activeOverviewData ?? (periodDays >= OVERVIEW_PERIOD_DAYS ? data : null);
+  const overviewPeriodLabel = activeOverviewData ? "Last 12 months" : "Current period";
 
   return (
     <div className="settings-panel insights-panel">
+      {overview && (
+        <UsageInsightsOverview
+          totalTokens={overview.executionMetrics.totalTokens}
+          avgTaskTimeMs={overview.taskMetrics.avgCompletionTimeMs}
+          requestsByDay={overview.requestsByDay ?? []}
+          periodLabel={overviewPeriodLabel}
+        />
+      )}
+      {!overview && overviewLoading && (
+        <div className="insights-overview-status">Loading 12-month token activity...</div>
+      )}
+      {overviewError && !activeOverviewData && (
+        <div className="insights-overview-status">
+          <span>Could not load 12-month token activity.</span>
+          <button type="button" className="insights-overview-status-btn" onClick={() => void loadOverview()}>
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Header with workspace and period inline */}
       <div className="insights-header">
         <div className="insights-header-left">
@@ -636,21 +707,6 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
           </div>
         </div>
       </div>
-
-      {data && (
-        <UsageInsightsOverview
-          sessions={tm?.totalCreated ?? 0}
-          messages={em?.totalLlmCalls ?? 0}
-          totalTokens={em?.totalTokens ?? 0}
-          mostActiveHour={ap ? ap.mostActiveHour : null}
-          favoriteModel={
-            modelRows.length > 0
-              ? [...modelRows].sort((a, b) => b.calls - a.calls)[0]?.model ?? null
-              : null
-          }
-          requestsByDay={data.requestsByDay ?? []}
-        />
-      )}
 
       {/* Hero stats row */}
       {tm && (

@@ -135,20 +135,8 @@ import { classifyLiveTaskEvent } from "./utils/live-task-event-policy";
 const Settings = lazy(() =>
   import("./components/Settings").then((module) => ({ default: module.Settings })),
 );
-const mainContentModuleStartedAt = typeof performance !== "undefined" ? performance.now() : 0;
 const mainContentModulePromise = import("./components/MainContent");
-void mainContentModulePromise
-  .then(() => {
-    const now = typeof performance !== "undefined" ? performance.now() : 0;
-    void window.electronAPI?.logRendererPerf?.({
-      timestamp: new Date().toISOString(),
-      message: `[Startup] main_content_module_loaded at ${now.toFixed(1)}ms {"loadMs":${Math.max(
-        0,
-        now - mainContentModuleStartedAt,
-      ).toFixed(1)}}`,
-    });
-  })
-  .catch(() => {});
+void mainContentModulePromise.catch(() => {});
 const MainContent = lazy(() =>
   mainContentModulePromise.then((module) => ({ default: module.MainContent })),
 );
@@ -1995,6 +1983,7 @@ export function App() {
   const [unseenOutputTaskIds, setUnseenOutputTaskIds] = useState<string[]>([]);
   const [unseenCompletedTaskIds, setUnseenCompletedTaskIds] = useState<string[]>([]);
   const [isInitialTaskListLoading, setIsInitialTaskListLoading] = useState(true);
+  const [isLoadingMoreTasks, setIsLoadingMoreTasks] = useState(false);
   const [rightPanelHighlight, setRightPanelHighlight] = useState<{
     taskId: string;
     path: string;
@@ -4164,6 +4153,7 @@ export function App() {
       taskOffsetRef.current = 0;
       sidebarTaskCursorRef.current = null;
       isLoadingMoreRef.current = false;
+      setIsLoadingMoreTasks(false);
       const startedAt = performance.now();
       markRendererPerfEvent("sidebar_request_start", rendererPerfLoggingEnabled, {
         limit: INITIAL_TASK_LOAD + TASK_PAGE_LOOKAHEAD,
@@ -4211,6 +4201,7 @@ export function App() {
       return;
     }
     isLoadingMoreRef.current = true;
+    setIsLoadingMoreTasks(true);
     try {
       const offset = taskOffsetRef.current;
       const cursor = sidebarTaskCursorRef.current;
@@ -4248,6 +4239,7 @@ export function App() {
       console.error("Failed to load more tasks:", error);
     } finally {
       isLoadingMoreRef.current = false;
+      setIsLoadingMoreTasks(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -5780,6 +5772,7 @@ export function App() {
                 isHealthActive={currentView === "health"}
                 isDevicesActive={currentView === "devices"}
                 isLoadingSessions={isInitialTaskListLoading}
+                isLoadingMoreTasks={isLoadingMoreTasks}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
                 onSelectTask={handleSelectTaskFromShell}
                 onOpenHome={() => setCurrentView("home")}

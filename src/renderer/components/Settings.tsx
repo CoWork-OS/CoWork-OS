@@ -3,8 +3,10 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useDeferredValue,
   useRef,
   lazy,
+  memo,
   Suspense,
   type ComponentType,
   type ReactNode,
@@ -1048,6 +1050,160 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
     updates: [{ terms: ["updates", "update", "release notes"] }],
   };
 
+const getSidebarItemLabel = (item: SidebarItem): string => item.label;
+
+const normalizeSettingsSidebarSearchQuery = (value: string): string =>
+  value.trim().toLowerCase();
+
+const matchesSettingsSidebarSearchQuery = (haystack: string, query: string): boolean => {
+  const normalizedQuery = normalizeSettingsSidebarSearchQuery(query);
+  if (!normalizedQuery) return true;
+  const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  return tokens.every((token) => haystack.includes(token));
+};
+
+interface SettingsSidebarProps {
+  activeTab: SettingsTab;
+  isMacPlatform: boolean;
+  onBack: () => void;
+  onSelect: (item: SidebarItem, target?: SidebarSearchTarget) => void;
+}
+
+const SettingsSidebar = memo(function SettingsSidebar({
+  activeTab,
+  isMacPlatform,
+  onBack,
+  onSelect,
+}: SettingsSidebarProps) {
+  const [sidebarSearch, setSidebarSearch] = useState("");
+  const deferredSidebarSearch = useDeferredValue(sidebarSearch);
+  const hasSidebarSearch = sidebarSearch.trim().length > 0;
+
+  const filteredSidebarItems = useMemo(() => {
+    return sidebarItems
+      .filter((item) => !item.macOnly || isMacPlatform)
+      .map((item) => {
+        const entries: SidebarSearchEntry[] = [
+          {
+            terms: [getSidebarItemLabel(item), item.group],
+            target: { tab: item.tab },
+          },
+          ...(sidebarSearchEntries[item.tab] ?? []),
+        ];
+        const searchBlob = entries
+          .flatMap((entry) => entry.terms)
+          .join(" ")
+          .toLowerCase();
+        const matchedEntry = entries.find((entry) =>
+          entry.terms.some((term) =>
+            matchesSettingsSidebarSearchQuery(term.toLowerCase(), deferredSidebarSearch),
+          ),
+        );
+        return {
+          item,
+          matchedTarget: matchedEntry?.target,
+          matches: matchesSettingsSidebarSearchQuery(searchBlob, deferredSidebarSearch),
+        };
+      })
+      .filter((entry) => entry.matches);
+  }, [deferredSidebarSearch, isMacPlatform]);
+
+  return (
+    <div className="settings-sidebar">
+      <h1 className="settings-sidebar-title">Settings</h1>
+      <button className="settings-back-btn" onClick={onBack}>
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M19 12H5M12 19l-7-7 7-7" />
+        </svg>
+        Back
+      </button>
+      <div className="settings-sidebar-search">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <path d="M21 21l-4.35-4.35" />
+        </svg>
+        <input
+          type="text"
+          placeholder="Search settings..."
+          value={sidebarSearch}
+          onChange={(e) => setSidebarSearch(e.target.value)}
+        />
+        {hasSidebarSearch && (
+          <button
+            className="settings-sidebar-search-clear"
+            onClick={() => setSidebarSearch("")}
+            aria-label="Clear search"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
+      </div>
+      <div className="settings-nav-items">
+        {
+          filteredSidebarItems
+            .reduce<{ seenGroups: Set<string>; elements: ReactNode[] }>(
+              (acc, { item, matchedTarget }) => {
+                if (!hasSidebarSearch && !acc.seenGroups.has(item.group)) {
+                  acc.elements.push(
+                    <div
+                      key={`group-${item.group}`}
+                      className="settings-nav-group-header"
+                    >
+                      {item.group}
+                    </div>,
+                  );
+                  acc.seenGroups.add(item.group);
+                }
+                acc.elements.push(
+                  <button
+                    key={item.tab}
+                    className={`settings-nav-item ${activeTab === item.tab || (item.tab === "morechannels" && (activeTab === "teams" || activeTab === "x")) ? "active" : ""}`}
+                    data-tab={item.tab}
+                    onClick={() => onSelect(item, matchedTarget)}
+                  >
+                    {item.icon}
+                    {getSidebarItemLabel(item)}
+                  </button>,
+                );
+                return acc;
+              },
+              { seenGroups: new Set<string>(), elements: [] },
+            ).elements
+        }
+        {hasSidebarSearch && filteredSidebarItems.length === 0 && (
+          <div className="settings-nav-no-results">
+            No matching settings
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
   anthropic: <Layers {...S} />,
   openai: <CircleDot {...S} />,
@@ -1221,7 +1377,6 @@ export function Settings({
   const [activeAccessSubTab, setActiveAccessSubTab] = useState<
     "controlplane" | "webaccess"
   >(initialTab === "webaccess" ? "webaccess" : "controlplane");
-  const [sidebarSearch, setSidebarSearch] = useState("");
   const settingsRef = useRef<LLMSettingsData>({
     providerType: "anthropic",
     modelKey: "sonnet-4-5",
@@ -1265,44 +1420,6 @@ export function Settings({
       return "linux";
     })();
   const isMacPlatform = platform === "darwin";
-  const getSidebarItemLabel = (item: SidebarItem): string => item.label;
-  const normalizeSearchQuery = (value: string): string =>
-    value.trim().toLowerCase();
-  const matchesSearchQuery = (haystack: string, query: string): boolean => {
-    const normalizedQuery = normalizeSearchQuery(query);
-    if (!normalizedQuery) return true;
-    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
-    return tokens.every((token) => haystack.includes(token));
-  };
-
-  const filteredSidebarItems = useMemo(() => {
-    return sidebarItems
-      .filter((item) => !item.macOnly || isMacPlatform)
-      .map((item) => {
-        const entries: SidebarSearchEntry[] = [
-          {
-            terms: [getSidebarItemLabel(item), item.group],
-            target: { tab: item.tab },
-          },
-          ...(sidebarSearchEntries[item.tab] ?? []),
-        ];
-        const searchBlob = entries
-          .flatMap((entry) => entry.terms)
-          .join(" ")
-          .toLowerCase();
-        const matchedEntry = entries.find((entry) =>
-          entry.terms.some((term) =>
-            matchesSearchQuery(term.toLowerCase(), sidebarSearch),
-          ),
-        );
-        return {
-          item,
-          matchedTarget: matchedEntry?.target,
-          matches: matchesSearchQuery(searchBlob, sidebarSearch),
-        };
-      })
-      .filter((entry) => entry.matches);
-  }, [isMacPlatform, sidebarSearch]);
 
   const handleSidebarItemSelect = useCallback(
     (item: SidebarItem, target?: SidebarSearchTarget) => {
@@ -7601,100 +7718,12 @@ export function Settings({
   return (
     <div className="settings-page">
       <div className="settings-page-layout">
-        <div className="settings-sidebar">
-          <h1 className="settings-sidebar-title">Settings</h1>
-          <button className="settings-back-btn" onClick={onBack}>
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
-            Back
-          </button>
-          <div className="settings-sidebar-search">
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="M21 21l-4.35-4.35" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Search settings..."
-              value={sidebarSearch}
-              onChange={(e) => setSidebarSearch(e.target.value)}
-            />
-            {sidebarSearch && (
-              <button
-                className="settings-sidebar-search-clear"
-                onClick={() => setSidebarSearch("")}
-                aria-label="Clear search"
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
-          </div>
-          <div className="settings-nav-items">
-            {
-              filteredSidebarItems
-                .reduce<{ seenGroups: Set<string>; elements: ReactNode[] }>(
-                  (acc, { item, matchedTarget }) => {
-                    if (!sidebarSearch && !acc.seenGroups.has(item.group)) {
-                      acc.elements.push(
-                        <div
-                          key={`group-${item.group}`}
-                          className="settings-nav-group-header"
-                        >
-                          {item.group}
-                        </div>,
-                      );
-                      acc.seenGroups.add(item.group);
-                    }
-                    acc.elements.push(
-                      <button
-                        key={item.tab}
-                        className={`settings-nav-item ${activeTab === item.tab || (item.tab === "morechannels" && (activeTab === "teams" || activeTab === "x")) ? "active" : ""}`}
-                        data-tab={item.tab}
-                        onClick={() =>
-                          handleSidebarItemSelect(item, matchedTarget)
-                        }
-                      >
-                        {item.icon}
-                        {getSidebarItemLabel(item)}
-                      </button>,
-                    );
-                    return acc;
-                  },
-                  { seenGroups: new Set<string>(), elements: [] },
-                ).elements
-            }
-            {sidebarSearch && filteredSidebarItems.length === 0 && (
-                <div className="settings-nav-no-results">
-                  No matching settings
-                </div>
-              )}
-          </div>
-        </div>
+        <SettingsSidebar
+          activeTab={activeTab}
+          isMacPlatform={isMacPlatform}
+          onBack={onBack}
+          onSelect={handleSidebarItemSelect}
+        />
 
         <div className="settings-content-card">
           <div className="settings-content">

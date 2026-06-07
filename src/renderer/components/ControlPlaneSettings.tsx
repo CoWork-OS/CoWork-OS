@@ -80,21 +80,27 @@ export function ControlPlaneSettings() {
     [sshTunnelEnabled, sshHost, sshUsername, sshPort, sshKeyPath, sshLocalPort, sshRemotePort],
   );
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (options: { includeStatic?: boolean } = {}) => {
+    const includeStatic = options.includeStatic ?? true;
     try {
       const [settingsData, statusData, tailscale, remoteStatusData, sshStatus] = await Promise.all([
-        window.electronAPI?.getControlPlaneSettings?.() || null,
+        includeStatic ? window.electronAPI?.getControlPlaneSettings?.() || null : null,
         window.electronAPI?.getControlPlaneStatus?.() || null,
-        window.electronAPI?.checkTailscaleAvailability?.() || null,
+        includeStatic ? window.electronAPI?.checkTailscaleAvailability?.() || null : null,
         window.electronAPI?.getRemoteGatewayStatus?.() || null,
         window.electronAPI?.getSSHTunnelStatus?.() || null,
       ]);
 
-      setSettings(settingsData);
       setStatus(statusData);
-      setTailscaleAvailability(tailscale);
       setRemoteStatus(remoteStatusData);
       setSshTunnelStatus(sshStatus);
+
+      if (!includeStatic) {
+        return;
+      }
+
+      setSettings(settingsData);
+      setTailscaleAvailability(tailscale);
 
       // Set connection mode from settings
       if (settingsData?.connectionMode) {
@@ -135,11 +141,12 @@ export function ControlPlaneSettings() {
   }, []);
 
   useEffect(() => {
-    loadData();
+    loadData({ includeStatic: true });
 
-    // Poll status every 5 seconds
+    // Poll only live status. Settings and Tailscale discovery are static enough
+    // to refresh after explicit actions instead of every interval tick.
     const interval = setInterval(() => {
-      loadData();
+      loadData({ includeStatic: false });
     }, 5000);
 
     return () => clearInterval(interval);

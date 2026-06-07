@@ -83,6 +83,7 @@ import {
 import { isTaskActivelyWorking } from "../../utils/task-working-state";
 import { shouldShowPersistentNeedsUserActionBanner } from "../../utils/task-completion-ux";
 import {
+  filterAdjacentDuplicateTimelineFailures,
   filterVerboseTimelineNoise,
   shouldShowTaskEventInStepFeed,
   shouldShowTaskEventInSummaryMode,
@@ -3953,7 +3954,9 @@ function MainContentComponent({
     return measureRendererPerf("MainContent.filteredEvents", rendererPerfLoggingEnabled, () => {
       const baseEvents = verboseSteps
         ? filterVerboseTimelineNoise(events)
-        : events.filter((event) => shouldShowTaskEventInSummaryMode(event, task?.status));
+        : filterAdjacentDuplicateTimelineFailures(
+            events.filter((event) => shouldShowTaskEventInSummaryMode(event, task?.status)),
+          );
       // Command output is rendered separately via CommandOutput component
       const visibleEvents = baseEvents.filter(
         (event) => event.type !== "command_output" && event.type !== "timeline_command_output",

@@ -54,6 +54,7 @@ interface SidebarProps {
   isMissionControlActive?: boolean;
   isHealthActive?: boolean;
   isLoadingSessions?: boolean;
+  isLoadingMoreTasks?: boolean;
   completionAttentionTaskIds?: string[];
   onSelectTask: (id: string | null) => void;
   onOpenHome?: () => void;
@@ -485,6 +486,7 @@ export type SidebarVirtualRow =
   | {
       kind: "load-more";
       id: string;
+      loading: boolean;
     };
 
 export function flattenVisibleTaskRows(
@@ -570,6 +572,7 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.isHealthActive === next.isHealthActive &&
     prev.isDevicesActive === next.isDevicesActive &&
     prev.isLoadingSessions === next.isLoadingSessions &&
+    prev.isLoadingMoreTasks === next.isLoadingMoreTasks &&
     prev.hasMoreTasks === next.hasMoreTasks &&
     prev.uiDensity === next.uiDensity &&
     getSidebarTaskListSignature(prev.tasks) === getSidebarTaskListSignature(next.tasks) &&
@@ -607,6 +610,7 @@ function SidebarComponent({
   onOpenMissionControl,
   onOpenDevices,
   isDevicesActive = false,
+  isLoadingMoreTasks = false,
 
   onTasksChanged,
   onLoadMoreTasks,
@@ -970,7 +974,7 @@ function SidebarComponent({
         }),
       );
       if (hasMoreTasks) {
-        rows.push({ kind: "load-more", id: "load-more" });
+        rows.push({ kind: "load-more", id: "load-more", loading: isLoadingMoreTasks });
       }
       return rows;
     },
@@ -978,6 +982,7 @@ function SidebarComponent({
       automatedRowsExpanded,
       automatedTaskRows,
       hasMoreTasks,
+      isLoadingMoreTasks,
       uiDensity,
       virtualizedTaskRows,
       visibleAutomatedTaskTree,
@@ -1785,10 +1790,20 @@ function SidebarComponent({
     }
     if (row.kind === "load-more") {
       return (
-        <div className="task-list-load-more">
-          <span className="terminal-only">loading more...</span>
-          <span className="modern-only">Loading more sessions…</span>
-        </div>
+        <button
+          type="button"
+          className={`task-list-load-more ${row.loading ? "loading" : "idle"}`}
+          onClick={row.loading ? undefined : onLoadMoreTasks}
+          disabled={row.loading || !onLoadMoreTasks}
+          aria-busy={row.loading}
+        >
+          <span className="terminal-only">
+            {row.loading ? "loading more..." : "load more sessions"}
+          </span>
+          <span className="modern-only">
+            {row.loading ? "Loading more sessions..." : "Load more sessions"}
+          </span>
+        </button>
       );
     }
 

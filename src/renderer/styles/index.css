@@ -24076,14 +24076,32 @@ a,
 
 /* Pagination load-more hint shown at the bottom of the task list */
 .task-list-load-more {
+  display: block;
+  width: 100%;
   padding: 8px 12px 10px;
+  border: 0;
+  background: transparent;
   font-size: 11px;
   color: var(--color-text-muted, #6b7280);
   text-align: center;
   font-family: var(--font-ui);
-  opacity: 0.6;
-  pointer-events: none;
   user-select: none;
+}
+
+.task-list-load-more.loading,
+.task-list-load-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.task-list-load-more.idle {
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.task-list-load-more.idle:hover {
+  color: var(--color-text-secondary, #4b5563);
+  opacity: 1;
 }
 
 .cli-sidebar-error {

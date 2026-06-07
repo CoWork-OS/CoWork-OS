@@ -10,6 +10,7 @@ import sys
 import asyncio
 import traceback
 from typing import Any
+from urllib.parse import urlparse
 
 # Ensure Scrapling is importable
 try:
@@ -43,6 +44,21 @@ def check_available() -> bool:
         )
         return False
     return True
+
+
+def get_response_url(response: Any, requested_url: str) -> str:
+    """Return the fetcher's final URL when available."""
+    return str(response.url) if hasattr(response, "url") else requested_url
+
+
+def enforce_same_host_final_url(requested_url: str, response: Any) -> str:
+    """Block bridge-side redirects to a different host after the TS policy check."""
+    final_url = get_response_url(response, requested_url)
+    requested_host = (urlparse(requested_url).hostname or "").lower()
+    final_host = (urlparse(final_url).hostname or requested_host).lower()
+    if requested_host and final_host and requested_host != final_host:
+        raise ValueError("Scraping redirect crossed to a different host")
+    return final_url
 
 
 # ──────────────────────────────────────────────
@@ -101,11 +117,12 @@ def handle_scrape_page(params: dict) -> None:
 
         # Perform the fetch
         response = fetcher.get(url, **fetch_kwargs)
+        final_url = enforce_same_host_final_url(url, response)
 
         # Extract content
         result: dict[str, Any] = {
             "success": True,
-            "url": str(response.url) if hasattr(response, "url") else url,
+            "url": final_url,
             "status": response.status if hasattr(response, "status") else 200,
         }
 
@@ -200,6 +217,7 @@ def handle_scrape_multiple(params: dict) -> None:
         for url in urls[:20]:  # Cap at 20 URLs per batch
             try:
                 response = fetcher.get(url)
+                final_url = enforce_same_host_final_url(url, response)
 
                 title_els = response.css("title")
                 title = title_els[0].text if title_els else ""
@@ -215,7 +233,7 @@ def handle_scrape_multiple(params: dict) -> None:
                     content = content[:max_content_length] + "\n... [truncated]"
 
                 results.append({
-                    "url": url,
+                    "url": final_url,
                     "success": True,
                     "title": title,
                     "content": content,
@@ -257,7 +275,8 @@ def handle_extract_structured(params: dict) -> None:
             fetcher = Fetcher(auto_match=True)
 
         response = fetcher.get(url)
-        result: dict[str, Any] = {"success": True, "url": url, "data": {}}
+        final_url = enforce_same_host_final_url(url, response)
+        result: dict[str, Any] = {"success": True, "url": final_url, "data": {}}
 
         if extract_type in ("auto", "tables"):
             tables = []
@@ -336,10 +355,11 @@ def handle_scrape_session(params: dict) -> None:
                 if step_wait:
                     kwargs["wait_selector"] = step_wait
                 response = fetcher.get(step_url, **kwargs)
+                final_url = enforce_same_host_final_url(step_url, response)
                 title_els = response.css("title")
                 results.append({
                     "action": "navigate",
-                    "url": step_url,
+                    "url": final_url,
                     "title": title_els[0].text if title_els else "",
                     "success": True,
                 })

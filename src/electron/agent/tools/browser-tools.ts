@@ -5,6 +5,15 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { BrowserService } from "../browser/browser-service";
 import {
+  BrowserUseCloudClient,
+  BrowserUseCloudSettings,
+  BrowserUseBrowserSession,
+  isPrivateOrLocalBrowserTarget,
+  normalizeBrowserUseProxyCountryCode,
+  normalizeBrowserUseTimeoutMinutes,
+  redactBrowserUseUrl,
+} from "../browser/browser-use-cloud-client";
+import {
   BrowserWorkbenchService,
   getBrowserWorkbenchService,
 } from "../../browser/browser-workbench-service";
@@ -13,6 +22,20 @@ import { evaluateNetworkPolicy } from "../../security/network-policy";
 
 // oxlint-disable-next-line typescript-eslint/no-explicit-any
 type Any = any;
+type BrowserProvider = "local" | "browser-use-cloud";
+
+interface BrowserUseCloudSessionState {
+  id: string;
+  cdpUrl: string;
+  liveUrl?: string | null;
+  proxyCountryCode?: string | null;
+  profileId?: string | null;
+  timeoutMinutes?: number;
+  browserScreenWidth?: number;
+  browserScreenHeight?: number;
+  allowResizing?: boolean;
+  enableRecording?: boolean;
+}
 
 /**
  * BrowserTools provides browser automation capabilities to the agent
@@ -24,12 +47,16 @@ export class BrowserTools {
     profile: string | null;
     browserChannel: "chromium" | "chrome" | "brave";
     debuggerUrl: string | null;
+    browserProvider: BrowserProvider;
   } = {
     headless: true,
     profile: null,
     browserChannel: "chromium",
     debuggerUrl: null,
+    browserProvider: "local",
   };
+  private browserUseCloudClient: BrowserUseCloudClient | null = null;
+  private browserUseCloudSession: BrowserUseCloudSessionState | null = null;
 
   constructor(
     private workspace: Workspace,
@@ -59,6 +86,7 @@ export class BrowserTools {
       profile: null,
       browserChannel: "chromium",
       debuggerUrl: null,
+      browserProvider: "local",
     };
   }
 
@@ -147,6 +175,7 @@ export class BrowserTools {
 
   private shouldPreferVisibleWorkbench(input: unknown): boolean {
     const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    if (this.getRequestedBrowserProvider(input) === "browser-use-cloud") return false;
     const forceHeadless =
       toolInput.force_headless === true ||
       toolInput.mode === "headless" ||
@@ -159,6 +188,179 @@ export class BrowserTools {
     if (typeof toolInput.browser_channel === "string" && toolInput.browser_channel.trim()) return false;
     if (this.browserState.profile || this.browserState.debuggerUrl) return false;
     return true;
+  }
+
+  private getRequestedBrowserProvider(input: unknown): BrowserProvider {
+    const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    const provider = typeof toolInput.browser_provider === "string" ? toolInput.browser_provider.trim() : "";
+    if (provider === "browser-use-cloud") return "browser-use-cloud";
+    return "local";
+  }
+
+  private getBrowserUseCloudSettings(): BrowserUseCloudSettings {
+    return BrowserUseCloudClient.loadSettings();
+  }
+
+  private getBrowserUseCloudClient(): BrowserUseCloudClient | null {
+    if (this.browserUseCloudClient) return this.browserUseCloudClient;
+    const apiKey = BrowserUseCloudClient.resolveApiKey(this.getBrowserUseCloudSettings());
+    if (!apiKey) return null;
+    this.browserUseCloudClient = new BrowserUseCloudClient(apiKey);
+    return this.browserUseCloudClient;
+  }
+
+  private readBrowserUseCloudOptions(input: unknown): {
+    profileId?: string | null;
+    proxyCountryCode?: string | null;
+    timeoutMinutes?: number;
+    browserScreenWidth?: number;
+    browserScreenHeight?: number;
+    allowResizing?: boolean;
+    enableRecording?: boolean;
+  } {
+    const settings = this.getBrowserUseCloudSettings();
+    const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    const rawProfileId =
+      typeof toolInput.browser_use_profile_id === "string"
+        ? toolInput.browser_use_profile_id.trim()
+        : typeof settings.defaultProfileId === "string"
+          ? settings.defaultProfileId.trim()
+          : "";
+    const rawProxy =
+      "proxy_country_code" in toolInput
+        ? toolInput.proxy_country_code
+        : "browser_use_proxy_country_code" in toolInput
+          ? toolInput.browser_use_proxy_country_code
+          : settings.defaultProxyCountryCode;
+    const rawTimeout =
+      typeof toolInput.browser_timeout_minutes === "number"
+        ? toolInput.browser_timeout_minutes
+        : typeof toolInput.timeout_minutes === "number"
+          ? toolInput.timeout_minutes
+          : undefined;
+    const timeoutMinutes = normalizeBrowserUseTimeoutMinutes(rawTimeout, settings.defaultTimeoutMinutes);
+    return {
+      profileId: rawProfileId || undefined,
+      proxyCountryCode: normalizeBrowserUseProxyCountryCode(rawProxy),
+      timeoutMinutes,
+      browserScreenWidth:
+        typeof toolInput.browser_screen_width === "number"
+          ? Math.max(320, Math.min(6144, Math.round(toolInput.browser_screen_width)))
+          : undefined,
+      browserScreenHeight:
+        typeof toolInput.browser_screen_height === "number"
+          ? Math.max(320, Math.min(3456, Math.round(toolInput.browser_screen_height)))
+          : undefined,
+      allowResizing: toolInput.allow_resizing === true,
+      enableRecording:
+        typeof toolInput.enable_recording === "boolean"
+          ? toolInput.enable_recording
+          : settings.defaultEnableRecording === true,
+    };
+  }
+
+  private browserUseSessionMatches(
+    existing: BrowserUseCloudSessionState | null,
+    next: ReturnType<BrowserTools["readBrowserUseCloudOptions"]>,
+  ): boolean {
+    if (!existing) return false;
+    return (
+      existing.profileId === (next.profileId ?? undefined) &&
+      existing.proxyCountryCode === next.proxyCountryCode &&
+      existing.timeoutMinutes === next.timeoutMinutes &&
+      existing.browserScreenWidth === next.browserScreenWidth &&
+      existing.browserScreenHeight === next.browserScreenHeight &&
+      existing.allowResizing === next.allowResizing &&
+      existing.enableRecording === next.enableRecording
+    );
+  }
+
+  private isRetryableBrowserUseCloudSessionError(error: unknown): boolean {
+    const message = String((error as Error)?.message || error || "").toLowerCase();
+    return /target.*closed|browser.*closed|context.*closed|websocket|web socket|socket hang up|econnreset|econnrefused|protocol error|cdp|session.*closed|session.*expired|browser.*expired|not connected/.test(
+      message,
+    );
+  }
+
+  private async ensureBrowserUseCloudConfigured(input: unknown): Promise<BrowserUseCloudSessionState> {
+    const client = this.getBrowserUseCloudClient();
+    if (!client) {
+      throw new Error(
+        "Browser Use Cloud is not configured. Set BROWSER_USE_API_KEY or save Browser Use credentials in encrypted settings.",
+      );
+    }
+    const options = this.readBrowserUseCloudOptions(input);
+    if (
+      this.browserUseSessionMatches(this.browserUseCloudSession, options) &&
+      this.browserState.browserProvider === "browser-use-cloud" &&
+      this.browserState.debuggerUrl === this.browserUseCloudSession?.cdpUrl
+    ) {
+      return this.browserUseCloudSession;
+    }
+
+    await this.browserService.close();
+    await this.stopBrowserUseCloudSession();
+
+    const session = await client.createBrowserSession({
+      profileId: options.profileId,
+      proxyCountryCode: options.proxyCountryCode,
+      timeout: options.timeoutMinutes,
+      browserScreenWidth: options.browserScreenWidth,
+      browserScreenHeight: options.browserScreenHeight,
+      allowResizing: options.allowResizing,
+      enableRecording: options.enableRecording,
+    });
+    const state: BrowserUseCloudSessionState = {
+      id: session.id,
+      cdpUrl: session.cdpUrl || "",
+      liveUrl: session.liveUrl,
+      proxyCountryCode: options.proxyCountryCode,
+      profileId: options.profileId,
+      timeoutMinutes: options.timeoutMinutes,
+      browserScreenWidth: options.browserScreenWidth,
+      browserScreenHeight: options.browserScreenHeight,
+      allowResizing: options.allowResizing,
+      enableRecording: options.enableRecording,
+    };
+    if (!state.cdpUrl) {
+      await this.stopBrowserUseCloudSessionById(client, state.id).catch(() => {});
+      throw new Error("Browser Use Cloud session did not include a CDP URL");
+    }
+    this.browserUseCloudSession = state;
+    this.browserService = new BrowserService(this.workspace, {
+      headless: true,
+      timeout: 90000,
+      debuggerUrl: state.cdpUrl,
+    });
+    this.browserState = {
+      headless: true,
+      profile: null,
+      browserChannel: "chromium",
+      debuggerUrl: state.cdpUrl,
+      browserProvider: "browser-use-cloud",
+    };
+    return state;
+  }
+
+  private async stopBrowserUseCloudSession(): Promise<BrowserUseBrowserSession | null> {
+    const existing = this.browserUseCloudSession;
+    if (!existing) return null;
+    const client = this.getBrowserUseCloudClient();
+    if (!client) {
+      throw new Error(`Cannot stop Browser Use Cloud session ${existing.id}: client is not configured`);
+    }
+    const stopped = await this.stopBrowserUseCloudSessionById(client, existing.id);
+    if (this.browserUseCloudSession?.id === existing.id) {
+      this.browserUseCloudSession = null;
+    }
+    return stopped;
+  }
+
+  private async stopBrowserUseCloudSessionById(
+    client: BrowserUseCloudClient,
+    sessionId: string,
+  ): Promise<BrowserUseBrowserSession> {
+    return await client.stopBrowserSession(sessionId);
   }
 
   private isProfileLaunchConflict(error: unknown): boolean {
@@ -248,12 +450,14 @@ export class BrowserTools {
       nextHeadless === this.browserState.headless &&
       nextProfile === this.browserState.profile &&
       nextChannel === this.browserState.browserChannel &&
-      nextDebuggerUrl === this.browserState.debuggerUrl
+      nextDebuggerUrl === this.browserState.debuggerUrl &&
+      this.browserState.browserProvider === "local"
     ) {
       return;
     }
 
     await this.browserService.close();
+    await this.stopBrowserUseCloudSession();
     this.browserService = new BrowserService(this.workspace, {
       headless: nextHeadless,
       timeout: 90000,
@@ -266,6 +470,7 @@ export class BrowserTools {
       profile: nextProfile,
       browserChannel: nextChannel,
       debuggerUrl: nextDebuggerUrl,
+      browserProvider: "local",
     };
   }
 
@@ -344,6 +549,41 @@ export class BrowserTools {
               enum: ["chromium", "chrome", "brave"],
               description:
                 'Which browser binary to use (default: chromium). "chrome" requires Google Chrome; "brave" requires Brave (or BRAVE_PATH).',
+            },
+            browser_provider: {
+              type: "string",
+              enum: ["browser-use-cloud"],
+              description:
+                'Explicitly use a Browser Use Cloud stealth browser. Omit for the default visible in-app Browser Workbench.',
+            },
+            proxy_country_code: {
+              type: "string",
+              description:
+                "Browser Use Cloud proxy country code, such as 'us' or 'de'. Use 'none' to disable Browser Use proxy routing.",
+            },
+            browser_use_profile_id: {
+              type: "string",
+              description: "Optional Browser Use profile id for persistent cloud browser cookies/state.",
+            },
+            browser_timeout_minutes: {
+              type: "number",
+              description: "Browser Use Cloud session timeout in minutes. Clamped to 1-240.",
+            },
+            enable_recording: {
+              type: "boolean",
+              description: "Enable Browser Use Cloud recording for this browser session.",
+            },
+            browser_screen_width: {
+              type: "number",
+              description: "Optional Browser Use Cloud browser screen width.",
+            },
+            browser_screen_height: {
+              type: "number",
+              description: "Optional Browser Use Cloud browser screen height.",
+            },
+            allow_resizing: {
+              type: "boolean",
+              description: "Allow Browser Use Cloud viewport resizing for this session.",
             },
             confirm_real_browser_control: {
               type: "boolean",
@@ -1024,6 +1264,99 @@ export class BrowserTools {
             return visibleResult;
           }
         }
+        if (this.getRequestedBrowserProvider(input) === "browser-use-cloud") {
+          const url = this.ensureVisibleNavigationAllowed(input?.url);
+          if (isPrivateOrLocalBrowserTarget(url)) {
+            return {
+              success: false,
+              error:
+                "Browser Use Cloud cannot be used for localhost, private IP, link-local, or file targets. Use the default visible Browser Workbench for local/private sites.",
+            };
+          }
+          let lastError: unknown;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            let cloudSession: BrowserUseCloudSessionState | null = null;
+            try {
+              cloudSession = await this.ensureBrowserUseCloudConfigured(input);
+              const result = await this.browserService.navigate(url, input?.wait_until || "load");
+              this.daemon.logEvent(this.taskId, "browser_action", {
+                action: "navigate",
+                url: result.url,
+                title: result.title,
+                browserProvider: "browser-use-cloud",
+                browserUseSessionId: cloudSession.id,
+                liveUrl: redactBrowserUseUrl(cloudSession.liveUrl),
+              });
+              if (result.isError) {
+                const statusText =
+                  typeof result.status === "number" ? `HTTP ${result.status}` : "unknown HTTP status";
+                return {
+                  success: false,
+                  error: `Navigation failed with ${statusText}`,
+                  browserProvider: "browser-use-cloud",
+                  browserUseSession: {
+                    id: cloudSession.id,
+                    liveUrl: cloudSession.liveUrl,
+                  },
+                  ...result,
+                };
+              }
+              return {
+                success: true,
+                browserProvider: "browser-use-cloud",
+                browserUseSession: {
+                  id: cloudSession.id,
+                  liveUrl: cloudSession.liveUrl,
+                },
+                ...result,
+              };
+            } catch (error) {
+              lastError = error;
+              const retryable = this.isRetryableBrowserUseCloudSessionError(error);
+              const pendingSessionId = cloudSession?.id || this.browserUseCloudSession?.id;
+              await this.browserService.close().catch(() => {});
+              if (pendingSessionId) {
+                try {
+                  await this.stopBrowserUseCloudSession();
+                  this.daemon.logEvent(this.taskId, "browser_action", {
+                    action: "browser_use_cloud_cleanup_after_failure",
+                    browserUseSessionId: pendingSessionId,
+                    retryable,
+                  });
+                } catch (stopError) {
+                  this.daemon.logEvent(this.taskId, "browser_action", {
+                    action: "browser_use_cloud_stop_failed",
+                    browserUseSessionId: pendingSessionId,
+                    error: stopError instanceof Error ? stopError.message : String(stopError),
+                  });
+                  return {
+                    success: false,
+                    error:
+                      `Browser Use Cloud navigation failed and cleanup also failed. ` +
+                      `Retry browser_close to stop the pending Browser Use session. Navigation error: ${
+                        error instanceof Error ? error.message : String(error)
+                      } Cleanup error: ${stopError instanceof Error ? stopError.message : String(stopError)}`,
+                    browserProvider: "browser-use-cloud",
+                    browserUseSession: {
+                      id: pendingSessionId,
+                      pendingStop: true,
+                    },
+                    retryable: true,
+                  };
+                }
+              }
+              if (retryable && attempt === 0) {
+                continue;
+              }
+              break;
+            }
+          }
+          return {
+            success: false,
+            error: lastError instanceof Error ? lastError.message : String(lastError),
+            browserProvider: "browser-use-cloud",
+          };
+        }
         let result;
         try {
           if (this.isSystemBrowserProfileRequest(input) && !this.hasExplicitRealBrowserConsent(input)) {
@@ -1038,7 +1371,10 @@ export class BrowserTools {
             headless: input?.force_headless === true ? true : input?.headless,
             profile: input?.profile,
             browser_channel: input?.browser_channel,
-            debugger_url: this.browserState.debuggerUrl,
+            debugger_url:
+              this.browserState.browserProvider === "browser-use-cloud"
+                ? null
+                : this.browserState.debuggerUrl,
           });
           result = await this.browserService.navigate(input.url, input.wait_until || "load");
         } catch (error) {
@@ -2007,8 +2343,42 @@ export class BrowserTools {
 
       case "browser_close": {
         await this.browserService.close();
+        const pendingCloudSessionId = this.browserUseCloudSession?.id;
+        let stoppedCloudSession: BrowserUseBrowserSession | null = null;
+        try {
+          stoppedCloudSession = await this.stopBrowserUseCloudSession();
+        } catch (error) {
+          this.daemon.logEvent(this.taskId, "browser_action", {
+            action: "browser_use_cloud_stop_failed",
+            browserUseSessionId: pendingCloudSessionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return {
+            success: false,
+            error:
+              `Closed the local browser connection, but failed to stop Browser Use Cloud session ${
+                pendingCloudSessionId || "(unknown)"
+              }. Retry browser_close to stop the pending remote browser. ${error instanceof Error ? error.message : String(error)}`,
+            browserProvider: "browser-use-cloud",
+            browserUseSession: pendingCloudSessionId
+              ? {
+                  id: pendingCloudSessionId,
+                  pendingStop: true,
+                }
+              : undefined,
+            retryable: true,
+          };
+        }
+        this.browserState = {
+          headless: true,
+          profile: null,
+          browserChannel: "chromium",
+          debuggerUrl: null,
+          browserProvider: "local",
+        };
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "close",
+          browserUseCloudStopped: Boolean(stoppedCloudSession),
         });
         return { success: true };
       }
@@ -2030,5 +2400,6 @@ export class BrowserTools {
    */
   async cleanup(): Promise<void> {
     await this.browserService.close();
+    await this.stopBrowserUseCloudSession().catch(() => {});
   }
 }

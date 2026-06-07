@@ -79,6 +79,7 @@ export type SettingsCategory =
   | "subconscious-loop"
   | "subconscious-migration-v1"
   | "webaccess"
+  | "browser-use"
   | "adaptive-style-engine"
   | "awareness-state"
   | "autonomy-chief-of-staff"

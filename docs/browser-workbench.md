@@ -187,10 +187,49 @@ Browser tools fall back to Playwright-local or external-CDP adapters when:
 - the user explicitly requests `force_headless`
 - the task specifies `profile`, `browser_channel`, or `debugger_url`
 - the task uses explicit Chrome DevTools attach for an existing signed-in Chrome/Edge session after real-browser consent
+- the task explicitly requests Browser Use Cloud with `browser_provider: "browser-use-cloud"`
 
 Visible workbench navigation now applies the same domain guardrails as the Playwright fallback before loading the page.
 
 The legacy `headless` flag is compatibility-only and should not bypass the visible Browser Workbench for normal user-facing website testing.
+
+## Browser Use Cloud Stealth Browsers
+
+Browser Use Cloud is available as an explicit remote backend for tasks that need Browser Use hosted stealth-browser infrastructure. It is not the default browser path, and it does not replace the visible Browser Workbench for ordinary local app testing.
+
+Use Browser Use Cloud only when the task deliberately asks for the cloud stealth backend:
+
+```json
+{
+  "url": "https://example.com",
+  "browser_provider": "browser-use-cloud",
+  "proxy_country_code": "us"
+}
+```
+
+Credential sources:
+
+- `BROWSER_USE_API_KEY` environment variable
+- encrypted secure settings category `browser-use` with `apiKey`
+
+Optional cloud settings and tool inputs include:
+
+- `proxy_country_code`: two-letter country code; use `none` to disable Browser Use proxy routing
+- `browser_use_profile_id`: Browser Use profile id for persistent remote cookies/state
+- `browser_timeout_minutes`: remote browser timeout, clamped to 1-240 minutes
+- `enable_recording`: request Browser Use recording
+- `browser_screen_width` / `browser_screen_height`: remote browser screen size
+- `allow_resizing`: allow remote viewport resizing
+
+Important behavior:
+
+- Cloud mode creates a Browser Use browser session, connects to its `cdpUrl`, and runs browser tools through the existing Playwright/CDP fallback path.
+- `browser_close` stops the Browser Use remote session. If the stop API fails, CoWork returns a retryable pending-stop result with the session id so the stop can be retried.
+- Stale or expired remote CDP sessions are cleaned up and retried once with a fresh Browser Use session.
+- Browser Use Cloud blocks local-only targets: `localhost`, private IP ranges, IPv6 private/link-local ranges, `.local`, `.internal`, single-label intranet hosts, `file:` URLs, and other non-HTTP(S) URLs.
+- Use the visible Browser Workbench for local dev servers, private networks, generated HTML files, and cases where the user should watch the page and cursor.
+
+Browser Use Cloud API errors, live URLs, and CDP URLs are redacted before entering logs or model-visible output.
 
 ## Implementation Notes
 
@@ -199,6 +238,7 @@ Key files:
 - `src/renderer/components/BrowserWorkbenchView.tsx`: renderer-owned webview, tab strip, toolbar, diagnostics drawer, snapshot overlay, fullscreen mode, screenshot annotation, follow-up composer, and visible cursor overlay
 - `src/electron/browser/browser-session-manager.ts`: Browser V2 session registry, backend kind, CDP actions, accessibility snapshots, ref staleness, diagnostics, uploads, downloads, storage, emulation, and trace state
 - `src/electron/browser/browser-workbench-service.ts`: main-process bridge that maps `{ taskId, sessionId }` to the renderer webview `webContentsId`, routes Browser V2 actions, captures screenshots, and emits cursor and viewport events
+- `src/electron/agent/browser/browser-use-cloud-client.ts`: Browser Use Cloud API client, credential lookup, private-target blocking, and error redaction
 - `src/electron/agent/tools/browser-tools.ts`: browser tool routing, visible-workbench preference, ref-aware actions, real-browser consent gates, and Playwright fallback behavior
 - `src/electron/preload.ts`: Browser Workbench registration, status, screenshot, open-request, cursor, and viewport IPC bridge
 - `src/shared/types.ts`: Browser Workbench IPC channel names

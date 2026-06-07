@@ -298,6 +298,36 @@ Then inspect:
 logs/dev-latest.log
 ```
 
+## Browser Use Cloud stealth browser issues
+
+Browser Use Cloud is an explicit remote backend for Browser V2. It is used only when a browser tool requests `browser_provider: "browser-use-cloud"`.
+
+If Browser Use Cloud does not start:
+
+1. Confirm `BROWSER_USE_API_KEY` is set for the app process, or that encrypted secure settings category `browser-use` contains an `apiKey`.
+2. If using encrypted settings, confirm `enabled` is not `false`. The `BROWSER_USE_API_KEY` environment variable is allowed to override disabled stored settings for development/runtime use.
+3. Confirm the target is a public `http:` or `https:` URL. Cloud mode intentionally blocks `localhost`, private IP ranges, IPv6 private/link-local ranges, `.local`, `.internal`, single-label intranet hostnames, `file:` URLs, and other non-HTTP(S) targets.
+4. Use the visible Browser Workbench for local Vite/Next/dev-server URLs, generated HTML artifacts, and private network targets.
+
+If a Browser Use Cloud run fails after creating a session:
+
+1. Check the tool result for `browserUseSession.id`. CoWork keeps this id when cleanup fails so `browser_close` can retry stopping the remote browser.
+2. If the error says the Browser Use Cloud session is pending stop, call `browser_close` again after network/API connectivity recovers.
+3. Stale or expired Browser Use CDP sessions are cleaned up and retried once. If the retry also fails, inspect Browser Use account/session status and the redacted API error in the task timeline or dev logs.
+4. API errors and Browser Use live/CDP URLs are redacted; do not expect raw API keys or full tokenized URLs in logs.
+
+For a fresh repro log:
+
+```bash
+npm run dev:log
+```
+
+Then inspect:
+
+```bash
+logs/dev-latest.log
+```
+
 ## Task automation creation issues
 
 If `... > Add automation...` is missing from task view:

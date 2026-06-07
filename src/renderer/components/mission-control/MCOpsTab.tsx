@@ -18,6 +18,7 @@ const OPS_TABS: { id: OpsSubTab; label: string }[] = [
   { id: "outputs", label: "Outputs & Review" },
   { id: "execution", label: "Execution Map" },
   { id: "planner", label: "Planner" },
+  { id: "automation", label: "Automation" },
 ];
 
 export function MCOpsTab({ data }: MCOpsTabProps) {
@@ -26,6 +27,7 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
     selectedCompany, commandCenterSummary,
     commandCenterOutputs, commandCenterReviewQueue,
     commandCenterOperators, commandCenterExecutionMap,
+    automationOutcomes, automationOutcomeSummary,
     coreFailureRecords, coreFailureClusters, coreEvalCases, coreExperiments, coreLearnings,
     plannerConfig, plannerRuns, plannerRunning, plannerSaving, plannerLoading,
     symphonyConfig, symphonyStatus, symphonySaving, symphonyRunning,
@@ -113,6 +115,14 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
             setDetailPanel={setDetailPanel}
             formatRelativeTime={formatRelativeTime}
             selectedIssueId={data.selectedIssueId}
+          />
+        )}
+        {selectedCompany && opsSubTab === "automation" && (
+          <OpsAutomation
+            outcomes={automationOutcomes}
+            summary={automationOutcomeSummary}
+            formatRelativeTime={formatRelativeTime}
+            setDetailPanel={setDetailPanel}
           />
         )}
       </div>
@@ -264,6 +274,75 @@ function OpsOverview({ company, summary }: { company: any; summary: any }) {
             <span className="mc-v2-ops-stat-label">{stat.label}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function OpsAutomation({
+  outcomes,
+  summary,
+  formatRelativeTime,
+  setDetailPanel,
+}: {
+  outcomes: any[];
+  summary: any;
+  formatRelativeTime: (t?: number) => string;
+  setDetailPanel: (panel: any) => void;
+}) {
+  const stats = summary || { total: 0, actionable: 0, informational: 0, lowValue: 0, failed: 0 };
+  return (
+    <div className="mc-v2-ops-stack">
+      <div className="mc-v2-ops-stats">
+        {[
+          { label: "Runs", value: stats.total },
+          { label: "Actionable", value: stats.actionable },
+          { label: "Informational", value: stats.informational },
+          { label: "Low value", value: stats.lowValue },
+          { label: "Failed", value: stats.failed },
+        ].map((stat) => (
+          <div key={stat.label} className="mc-v2-ops-stat-card">
+            <span className="mc-v2-ops-stat-value">{stat.value}</span>
+            <span className="mc-v2-ops-stat-label">{stat.label}</span>
+          </div>
+        ))}
+      </div>
+      <div>
+        <h3 className="mc-v2-ops-heading">Recent Automation Outcomes</h3>
+        <div className="mc-v2-ops-list">
+          {outcomes.length === 0 ? (
+            <div className="mc-v2-empty mc-v2-empty-compact">No automation outcomes recorded yet.</div>
+          ) : (
+            outcomes.map((outcome) => {
+              const clickable = Boolean(outcome.taskId);
+              const RowTag = clickable ? "button" : "div";
+              return (
+                <RowTag
+                  key={outcome.id}
+                  type={clickable ? "button" : undefined}
+                  className={`mc-v2-ops-row ${clickable ? "mc-v2-ops-row-btn" : ""}`}
+                  onClick={() => {
+                    if (outcome.taskId) setDetailPanel({ kind: "task", taskId: outcome.taskId });
+                  }}
+                >
+                  <div>
+                    <div className="mc-v2-ops-row-title">{outcome.title}</div>
+                    <div className="mc-v2-ops-row-subtitle">
+                      {outcome.source} · {formatRelativeTime(outcome.createdAt)}
+                    </div>
+                    <div className="mc-v2-ops-row-subtitle">{outcome.summary}</div>
+                    {outcome.nextAction && (
+                      <div className="mc-v2-ops-row-subtitle">Next: {outcome.nextAction}</div>
+                    )}
+                  </div>
+                  <span className={`mc-v2-ops-pill status-${outcome.usefulness}`}>
+                    {String(outcome.usefulness).replace("_", " ")}
+                  </span>
+                </RowTag>
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
   );

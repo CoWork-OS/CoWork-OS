@@ -140,7 +140,7 @@ type RuntimeQueueStatusState = "loading" | "ready" | "unavailable" | "error";
 export type MissionControlCategoryFilter = "all" | MissionControlCategory;
 export type MissionControlSeverityFilter = "all" | MissionControlSeverity;
 export type MCTab = "overview" | "agents" | "board" | "intelligence" | "feed" | "ops";
-export type OpsSubTab = "overview" | "operators" | "outputs" | "execution" | "planner" | "harness";
+export type OpsSubTab = "overview" | "operators" | "outputs" | "execution" | "planner" | "harness" | "automation";
 export type DetailPanelView =
   | { kind: "task"; taskId: string }
   | { kind: "agent"; agentId: string }
@@ -1256,6 +1256,8 @@ export function useMissionControlData(
   const commandCenterReviewQueue = commandCenterSummary?.reviewQueue || [];
   const commandCenterOperators = commandCenterSummary?.operators || [];
   const commandCenterExecutionMap = commandCenterSummary?.executionMap || [];
+  const automationOutcomes = commandCenterSummary?.automationOutcomes || [];
+  const automationOutcomeSummary = commandCenterSummary?.automationOutcomeSummary || null;
 
   const selectedPlannerRun = useMemo(() =>
     plannerRuns.find((r) => r.id === selectedPlannerRunId) || null,
@@ -1409,6 +1411,7 @@ export function useMissionControlData(
     taskLabels,
     commandCenterOutputs, commandCenterReviewQueue,
     commandCenterOperators, commandCenterExecutionMap,
+    automationOutcomes, automationOutcomeSummary,
     selectedPlannerRun, plannerManagedIssues,
     selectedIssue, selectedIssueRun,
     filteredIssues, plannerRunIssueIds, plannerRunIssues,

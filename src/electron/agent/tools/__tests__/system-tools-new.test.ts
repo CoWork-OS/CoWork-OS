@@ -34,8 +34,10 @@ vi.mock("../../../location/DesktopLocationService", () => ({
 import { SystemTools } from "../system-tools";
 import { LayeredMemoryIndexService } from "../../../memory/LayeredMemoryIndexService";
 import { DurableContextService } from "../../../memory/DurableContextService";
+import { shell } from "electron";
 
 beforeEach(() => {
+  vi.clearAllMocks();
   memoryFeatureMocks.getCurrentLocation.mockReset();
   memoryFeatureMocks.loadSettings.mockReturnValue({
     sessionRecallEnabled: true,
@@ -116,6 +118,15 @@ describe("SystemTools.normalizeAppleScript", () => {
 
     expect(result).toContain('The bundle identifier "ai.perplexity" was not resolvable.');
     expect(result).toContain(`osascript -e 'id of app "App Name"'`);
+  });
+
+  it("rejects non-web URL schemes before opening external handlers", async () => {
+    const instance = makeSystemTools();
+
+    await expect(instance.openUrl("x-apple.systempreferences:com.apple.preference.security")).rejects.toThrow(
+      "Only http and https URLs are allowed",
+    );
+    expect(shell.openExternal).not.toHaveBeenCalled();
   });
 });
 

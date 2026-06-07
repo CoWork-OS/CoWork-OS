@@ -684,10 +684,14 @@ export class SystemTools {
     }
 
     // Basic URL validation
+    let parsedUrl: URL;
     try {
-      new URL(url);
+      parsedUrl = new URL(url);
     } catch {
       throw new Error("Invalid URL format");
+    }
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      throw new Error("Only http and https URLs are allowed");
     }
 
     this.daemon.logEvent(this.taskId, "tool_call", {

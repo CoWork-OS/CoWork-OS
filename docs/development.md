@@ -26,6 +26,7 @@ npm run setup
 
 # Build and package the app
 npm run build          # compile TypeScript and bundle the UI
+npm run build:cli      # compile the standalone cowork CLI
 npm run package        # package desktop installers (.dmg on macOS, .exe on Windows)
 ```
 
@@ -99,6 +100,7 @@ npm run dev:log
 | `npm run dev:log` | Start development mode and force redacted text + JSONL logs to `logs/` |
 | `npm run dev:start` | Internal raw dev start command (used by wrappers) |
 | `npm run build` | Production build |
+| `npm run build:cli` | Compile the `cowork` CLI TypeScript output |
 | `npm run package` | Package desktop installers (`.dmg` on macOS, `.exe` on Windows) |
 | `npm run package:linux:server` | Build the Linux x64 server tarball and checksum on Linux |
 | `npm run package:linux:server:smoke` | Extract and boot-smoke the Linux server tarball on Linux |
@@ -131,7 +133,42 @@ COWORK_CODESIGN_ENABLE=1 node scripts/codesign_electron_dev.mjs
 COWORK_CODESIGN_IDENTITY="Apple Development: Name (TEAMID)" node scripts/codesign_electron_dev.mjs
 ```
 
-Development codesigning remains opt-in. Without `COWORK_CODESIGN_ENABLE=1` or `COWORK_CODESIGN_IDENTITY`, `scripts/codesign_electron_dev.mjs` reports that signing is skipped.
+Development codesigning remains opt-in for a valid app bundle. If local branding or another file mutation leaves `Electron.app` with an invalid signature, `scripts/codesign_electron_dev.mjs` repairs it with an ad-hoc development signature without app entitlements, so macOS can register the app while Electron's run-as-node native-module checks keep working.
+
+## CLI Development
+
+The standalone terminal entrypoint is `cowork`. It is separate from in-app terminal tabs: terminal tabs give users a real PTY inside the desktop workspace, while `cowork` starts CoWork tasks from an external terminal.
+
+Implementation landmarks:
+
+- `bin/cowork-cli.js`: npm binary launcher and source-checkout artifact bootstrap
+- `src/cli/main.ts`: argument parsing, interactive terminal UI, slash commands, diagnostics, and remote dispatch
+- `src/cli/direct-run.ts`: local one-shot task execution
+- `src/electron/main.ts`: hidden `--cowork-cli-direct-run` app-entry mode for local CLI tasks
+- `tsconfig.cli.json`: CLI TypeScript build target
+
+Common local commands:
+
+```bash
+npm run build:cli
+cowork --help
+cowork
+cowork run "who are you?"
+cowork run "who are you?" --json
+COWORK_CLI_DEBUG=1 cowork run "diagnose local provider setup"
+```
+
+Local `cowork run` should not require `COWORK_CONTROL_PLANE_TOKEN`. It uses the local profile and normally prefers the hidden Electron app-entry runner so desktop-encrypted settings can be read with the same app identity. `cowork run ... --remote` is the explicit Control Plane client path and is the mode that requires Control Plane URL/token configuration.
+
+Focused validation:
+
+```bash
+npm run build:cli
+npm run build:electron
+npx vitest run src/cli/__tests__/main.test.ts src/cli/__tests__/terminal-ui.test.ts src/cli/__tests__/local-control-plane-discovery.test.ts
+```
+
+For packaged or npm-release checks, verify the package includes `dist/cli`, `bin/cowork-cli.js`, and `tsconfig.cli.json`, then test both `cowork --help` and one local `cowork run` command from a clean install.
 
 ## Renderer Bundle Size
 
@@ -144,6 +181,7 @@ Current bundle-splitting rules:
   lazy-loaded behind its own lightweight fallback.
 - Lazy-load secondary views from `App.tsx`: Settings, Browser, Home, Devices, Health, Ideas, Inbox Agent, Agents Hub, and Mission Control.
 - Keep the in-app browser workbench renderer-owned. `BrowserWorkbenchView` registers its Electron webview `webContentsId` with the main process, and browser tools route visible actions through `BrowserWorkbenchService` into `BrowserSessionManager`. Browser V2 automation should be CDP-backed through Electron `webContents.debugger` for snapshots, ref-aware actions, dialogs, diagnostics, downloads/uploads, emulation, traces, and screenshots; renderer DOM scripts are compatibility fallback, not the primary control plane. Browser Workbench IPC also carries open requests, status updates, screenshot capture, annotation handoff, diagnostics state, cursor events for visible agent movement, and viewport events so `browser_emulate` can resize the shared webview for responsive QA. Do not replace generated web artifact iframes with this live browser path; artifact previews and live website testing are separate surfaces. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
+- Keep Browser Use Cloud as an explicit backend, not a default fallback. The Browser Use client lives in `src/electron/agent/browser/browser-use-cloud-client.ts`, uses `BROWSER_USE_API_KEY` or encrypted `browser-use` settings, and connects through the existing Playwright CDP path. Preserve the private/local target block, API error redaction, stale-session retry, and pending-stop behavior when changing browser routing. Focused checks: `npx vitest run src/electron/agent/browser/__tests__/browser-use-cloud-client.test.ts src/electron/agent/tools/__tests__/browser-tools.test.ts src/electron/security/__tests__/network-policy.test.ts tests/tools/shell-tools.test.ts`.
 - Keep CSS split by surface. `src/renderer/styles/index.css` is for app-wide tokens/layout plus the
   small critical composer startup block needed before lazy chunks hydrate. `src/renderer/components/main-content.css`
   owns the heavier task surface, welcome view, remote file picker, workspace/permission dropdowns, and
@@ -351,32 +389,6 @@ npm run skills:check
 ```
 
 The routing eval includes a React workspace feature prompt so the skill remains discoverable for React/Next.js implementation work without colliding with React Native guidance.
-
-### Testing Codex Security scans
-
-The bundled `codex-security` plugin pack uses directory-backed skills and scan orchestration helpers. Run the focused suite when touching `resources/plugin-packs/codex-security/`, directory-backed plugin-pack skills, `SecurityScanOrchestrator`, or `security_scan_*` tool definitions:
-
-```bash
-npx vitest run src/electron/security-scans/__tests__/SecurityScanOrchestrator.test.ts src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts src/electron/extensions/__tests__/codex-security-plugin-pack-manifest.test.ts
-npm run build:electron
-```
-
-When editing Codex Security skill content, also run the skill quality gate:
-
-```bash
-npm run skills:check:core
-npm run skills:check
-```
-
-The scan helpers are task-gated and workspace-scoped. Regression coverage should preserve these expectations:
-
-- `security_scan_*` tools are hidden from normal tasks and visible for Codex Security tasks.
-- `repo_root`, `artifact_root`, `scan_dir`, and `worker_dir` must stay inside the active workspace.
-- `scan_id` cannot contain traversal characters.
-- scoped scans accept only relative repository paths.
-- deep-scan round merge requires exactly six usable workers with valid JSONL artifacts.
-
-See [Codex Security Scans](./codex-security-scans.md) for the full artifact and tool contract.
 
 ### Everything Workbench artifact model
 

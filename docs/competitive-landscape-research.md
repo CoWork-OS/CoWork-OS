@@ -49,11 +49,11 @@
 
 | Player | Focus | Strengths | Weaknesses | Relation to CoWork OS |
 |---|---|---|---|---|
-| **OpenClaw (Clawdbot → Moltbot → OpenClaw)** | Self-hosted personal AI assistant | 60K+ GitHub stars, viral growth, multi-channel support, skills system, MCP support, CLI-first, Ollama/local LLM support | CLI-first experience can be harder for non-technical users, setup complexity (OAuth/webhooks), desktop UX depends on external tooling, governance controls vary by deployment | **Closest adjacent product in this category.** Similar architecture (gateway + agent + channels + skills). CoWork OS differentiates with a GUI-first desktop control plane, visual many-agent management, built-in approval/guardrail model, and local-first governance defaults |
+| **OpenClaw (Clawdbot → Moltbot → OpenClaw)** | Self-hosted personal AI assistant | 60K+ GitHub stars, viral growth, multi-channel support, skills system, MCP support, CLI-first, Ollama/local LLM support | CLI-first experience can be harder for non-technical users, setup complexity (OAuth/webhooks), desktop UX depends on external tooling, governance controls vary by deployment | **Closest adjacent product in this category.** Similar architecture (gateway + agent + channels + skills). CoWork OS differentiates with a GUI-first desktop control plane, first-class local `cowork` CLI, visual many-agent management, built-in approval/guardrail model, and local-first governance defaults |
 | **LettaBot (Letta AI)** | Multi-channel AI with memory | Cross-channel memory, Telegram/Slack/WhatsApp/Discord/Signal | Less agentic (more chat-focused), smaller community | Similar multi-channel approach but less action-oriented |
 | **ChatBotKit** | Multi-platform AI chatbot builder | Easy deployment to Slack/Discord/WhatsApp/Messenger/Telegram | More chatbot than agent, not self-hosted, limited automation | Different category — chatbot builder, not personal AI agent |
 
-**Key Insight**: OpenClaw has significant adoption and meaningful capability overlap, and its community momentum is real. The category emphasis differs: OpenClaw leans toward framework/operator workflows, while CoWork OS emphasizes a GUI-first personal super app for governed day-to-day operations via desktop + channel runtime, with visible agent management, learning progression, unified recall, persistent shell sessions, and live routing observability.
+**Key Insight**: OpenClaw has significant adoption and meaningful capability overlap, and its community momentum is real. The category emphasis differs: OpenClaw leans toward framework/operator workflows, while CoWork OS emphasizes a GUI-first, CLI-capable personal super app for governed day-to-day operations via desktop, terminal, and channel runtime, with visible agent management, learning progression, unified recall, persistent shell sessions, and live routing observability.
 
 ### CoWork OS Positioning vs OpenClaw
 
@@ -62,11 +62,11 @@ CoWork OS sits next to a **channel-first hub ecosystem** like OpenClaw, but it p
 | Dimension | OpenClaw | CoWork OS |
 |---|---|---|
 | Core motion | Build and run agent workflows | Operate governed workflows across desktop and channels |
-| Runtime shape | CLI-first self-hosted agent runtime | GUI-first Electron desktop app plus headless daemon |
+| Runtime shape | CLI-first self-hosted agent runtime | GUI-first Electron desktop app plus first-class local CLI and headless daemon |
 | Main strength | Broad ecosystem and operator flexibility | Visual agent management, approvals, local-first governance, and multi-channel delivery |
 | Best fit | Developers and operators who want a framework/runtime | Teams that want a production-ready AI operating system |
 
-In short: OpenClaw is closer to a framework/operator layer, while CoWork OS is the GUI-first governed super app that productizes those capabilities for day-to-day operations while exposing agent runs, learning progress, recall, and router decisions directly to users.
+In short: OpenClaw is closer to a framework/operator layer, while CoWork OS is the GUI-first, CLI-capable governed super app that productizes those capabilities for day-to-day operations while exposing agent runs, learning progress, recall, and router decisions directly to users.
 
 ---
 

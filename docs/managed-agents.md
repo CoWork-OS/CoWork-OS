@@ -1,6 +1,6 @@
 # Managed Agents
 
-Managed Agents adds a first-class, GUI-first managed resource model to CoWork without replacing the existing task runtime. It is one of the core reasons CoWork OS is positioned as a personal AI super app and everything app rather than a terminal-only agent runner: users can create reusable agents, spawn work from templates or prompts, inspect configuration, run tests, and monitor execution from visual surfaces.
+Managed Agents adds a first-class, GUI-first managed resource model to CoWork without replacing the existing task runtime or the new terminal entrypoint. It is one of the core reasons CoWork OS is positioned as a personal AI super app and everything app: users can create reusable agents, spawn work from templates or prompts, inspect configuration, run tests, and monitor execution from visual surfaces, while `cowork` remains available for terminal-native task starts.
 
 V1 introduces three control-plane resources:
 

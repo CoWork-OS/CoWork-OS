@@ -49,6 +49,57 @@ npm init -y
 npm install --ignore-scripts /path/to/cowork-os-<version>.tgz
 ```
 
+## CoWork CLI issues
+
+The `cowork` command has a local mode and an explicit remote mode. Normal local use should not require a Control Plane token.
+
+### `cowork run` says `Missing token`
+
+This error belongs to the remote Control Plane path. Check whether the command includes `--remote` or a remote alias. For local one-shot execution, run without `--remote`:
+
+```bash
+cowork run "who are you?"
+```
+
+For remote execution, configure the Control Plane connection:
+
+```bash
+export COWORK_CONTROL_PLANE_URL=http://127.0.0.1:3333
+export COWORK_CONTROL_PLANE_TOKEN=<token>
+cowork run "check remote status" --remote
+```
+
+### CLI build artifacts are missing
+
+In a source checkout, compile the CLI:
+
+```bash
+npm run build:cli
+```
+
+If the hidden app-entry runner is missing after a clean checkout or package test, also build Electron:
+
+```bash
+npm run build:electron
+npm run build:cli
+```
+
+### CLI cannot see providers configured in the desktop app
+
+Local one-shot CLI runs prefer a hidden Electron app-entry mode so OS-encrypted settings can be read with the same desktop app identity. If providers are missing:
+
+1. Confirm the CLI and desktop app are from the same install/profile.
+2. Open the desktop app and verify **Settings > LLM** has a working provider route.
+3. Run the CLI with diagnostics:
+
+   ```bash
+   COWORK_CLI_DEBUG=1 cowork run "diagnose provider setup"
+   ```
+
+4. If running from source, rebuild both Electron and CLI artifacts.
+
+See [CoWork OS CLI](cli.md) for the full local-vs-remote model.
+
 ## macOS "Killed: 9" during setup
 
 If you see `Killed: 9` during `npm run setup`, macOS terminated a native build due to memory pressure.

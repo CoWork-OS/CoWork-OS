@@ -27,14 +27,6 @@ function markdownEscape(value) {
     .replaceAll("\n", " ");
 }
 
-function htmlEscape(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
 function renderTrafficMetric(metric, totalKey, uniquesKey) {
   if (!metric || metric.status !== "available") return "unavailable";
   const data = metric.data || {};
@@ -114,45 +106,20 @@ function renderReadmeStatsBlock({ stats, repo, releases, traffic, npm, npmDownlo
         ? `+${formatNumber(releaseDownloadDeltas.totalDeltaSincePreviousSnapshot)}`
         : formatNumber(releaseDownloadDeltas.totalDeltaSincePreviousSnapshot);
 
-  const rows = [
-    ["GitHub stars", formatNumber(repo.stars)],
-    ["GitHub forks", formatNumber(repo.forks)],
-    ["Installer/server downloads", formatNumber(releases.totalInstallAssetDownloadCount)],
-    ["Download delta", releaseDelta],
-    ["npm downloads, last week", formatNumber(npmDownloads.lastWeek?.downloads)],
-    ["GitHub views, last 14-ish days", renderTrafficMetric(traffic.views, "count", "uniques")],
-    ["GitHub clones, last 14-ish days", renderTrafficMetric(traffic.clones, "count", "uniques")],
-  ];
+  return `${readmeStatsStart}
+### Public Adoption Signals
 
-return `${readmeStatsStart}
-<div align="center">
+| Signal | Current |
+|---|---:|
+| GitHub stars | ${formatNumber(repo.stars)} |
+| GitHub forks | ${formatNumber(repo.forks)} |
+| Installer/server downloads | ${formatNumber(releases.totalInstallAssetDownloadCount)} |
+| Download delta | ${releaseDelta} |
+| npm downloads, last week | ${formatNumber(npmDownloads.lastWeek?.downloads)} |
+| GitHub views, last 14-ish days | ${renderTrafficMetric(traffic.views, "count", "uniques")} |
+| GitHub clones, last 14-ish days | ${renderTrafficMetric(traffic.clones, "count", "uniques")} |
 
-<h3>Public Adoption Signals</h3>
-
-<table>
-  <thead>
-    <tr>
-      <th align="center">Signal</th>
-      <th align="center">Current</th>
-    </tr>
-  </thead>
-  <tbody>
-${rows
-  .map(
-    ([label, value]) => `    <tr>
-      <td align="left">${htmlEscape(label)}</td>
-      <td align="center">${htmlEscape(value)}</td>
-    </tr>`,
-  )
-  .join("\n")}
-  </tbody>
-</table>
-
-<p><sub>Generated ${htmlEscape(
-    stats.generatedAt,
-  )}. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. <a href="docs/public-adoption-stats.md">Full report</a>.</sub></p>
-
-</div>
+Generated ${stats.generatedAt}. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. [Full report](docs/public-adoption-stats.md).
 ${readmeStatsEnd}`;
 }
 

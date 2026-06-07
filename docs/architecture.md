@@ -1,14 +1,15 @@
 # CoWork OS Architecture
 
-CoWork OS is a GUI-first local AI super app, everything app, and desktop runtime for task execution, many-agent orchestration, generated knowledge-work artifacts, background operator loops, and multi-surface automation.
+CoWork OS is a GUI-first, CLI-capable local AI super app, everything app, and runtime for task execution, many-agent orchestration, generated knowledge-work artifacts, background operator loops, and multi-surface automation.
 
 ## Core Architecture
 
 - **Electron main process**: task orchestration, agent runtime, heartbeat orchestration, IPC, and tool execution
-- **React renderer**: desktop UI, Agents Hub, Mission Control, task timeline, settings, task boards, approval dialogs, xterm.js terminal tabs, and monitoring surfaces for managing many agents without a terminal-first workflow
+- **React renderer**: desktop UI, Agents Hub, Mission Control, task timeline, settings, task boards, approval dialogs, xterm.js terminal tabs, and monitoring surfaces for managing many agents visually while the external CLI covers terminal-native starts
 - **Tool and connector layer**: file, shell, browser, web, native integrations, document generation/compilation tools including source-first LaTeX PDF compilation, MCP connectors, remote execution, and **computer use** (`screenshot`, `click`, `type_text`, and related tools) as a governed desktop-GUI lane (platform helper, single-session lock, policy-gated routing). See [Computer use](computer-use.md).
 - **Secure MCP tunnel layer**: outbound-only WebSocket clients can expose selected local/private MCP JSON-RPC endpoints through a CoWork-operated or self-hosted relay, with separate client/caller tokens, relay-side policy, local policy, request limits, and audit events. See [Secure MCP Tunnels](secure-mcp-tunnels.md).
 - **Terminal tab layer**: workspace terminal tabs use xterm.js in the renderer and `node-pty` in Electron so user-visible terminal work flows through native PTYs instead of custom text emulation. macOS launches the user's login shell with zsh prompt/cwd integration; Windows launches `cmd.exe` through node-pty's ConPTY/winpty backend with a cwd-only prompt. See [Terminal Tabs](terminal-tabs.md).
+- **CLI runtime layer**: the `cowork` command provides an interactive terminal UI and local one-shot task runner on top of the same database, settings, providers, workspaces, skills, MCP servers, and agent runtime as the desktop app. Local `cowork run` prefers a hidden Electron app-entry mode (`--cowork-cli-direct-run`) so encrypted desktop settings keep the same app identity. `--remote` is the explicit Control Plane client path. See [CoWork OS CLI](cli.md).
 - **Composer mention layer**: the renderer and Electron preload expose a grouped `@` autocomplete for Agents, configured Integrations, and Files. Integration mentions are resolved locally, render as rich chips, persist in task/session metadata, and inject soft routing guidance into the executor without changing permissions or `allowedTools`. See [Composer Mentions](composer-mentions.md).
 - **Message shortcut layer**: the renderer exposes one `/` picker for deterministic app commands and skill-backed workflow shortcuts. Shared app command parsing handles `/schedule`, `/clear`, `/plan`, `/cost`, `/multitask`, `/compact`, `/doctor`, and `/undo`; plugin-pack aliases resolve to target skill IDs before generic skill slash execution. Skill-backed picker selections insert editable slash tokens before launch, and Claude-for-Legal workflows can surface structured main-view matter intake cards. See [Message Box Shortcuts](message-box-shortcuts.md) and [Claude-for-Legal Workflows](claude-for-legal.md).
 - **Chronicle screen-context lane**: desktop-only passive recent-screen capture, local ranking/OCR enrichment, source resolution, provenance-aware `screen_context_resolve` tool exposure, and promotion of task-used observations into workspace-backed `screen_context` evidence plus optional linked background memory generation. See [Chronicle](chronicle.md).
@@ -109,6 +110,8 @@ MCP transport disconnects that classify as auth failures stop at `error` rather 
 
 - `src/electron/`: main-process runtime, services, database, scheduling, monitoring
 - `src/electron/agent/runtime/SessionRuntime.ts`: canonical task-session owner for execution, recovery, snapshotting, and task projection
+- `src/cli/`: `cowork` CLI argument parsing, terminal UI, local one-shot runner, diagnostics, and remote Control Plane dispatch
+- `bin/cowork-cli.js`: npm binary launcher for the `cowork` command
 - `src/renderer/components/RightPanel.tsx`: renderer-side read-only projection of the latest session checklist state
 - `src/electron/agent/runtime/PermissionEngine.ts`: layered tool-approval evaluation, rule matching, and fallback escalation
 - `src/renderer/`: React UI and settings surfaces
@@ -143,6 +146,19 @@ Terminal tabs are implemented with a renderer/main split:
 - `src/electron/ipc/handlers.ts`, `src/electron/preload.ts`, and `src/shared/types.ts` expose typed channels for create/list/write/resize/stop/close/output.
 
 The design keeps structured shell tools available for agent-run commands while giving humans a real terminal work surface in the same task workspace. This is the terminal counterpart to the Everything Workbench and Browser Workbench: direct CLI work no longer has to leave CoWork OS. Product behavior and QA guidance are documented in [Terminal Tabs](terminal-tabs.md).
+
+## CoWork CLI
+
+The standalone `cowork` CLI is implemented separately from in-app terminal tabs:
+
+- `bin/cowork-cli.js` resolves the installed package and launches built CLI output.
+- `src/cli/main.ts` owns argument parsing, the interactive welcome screen, slash commands, local diagnostics, and remote-mode handling.
+- `src/cli/direct-run.ts` owns one-shot local task execution once the app runtime has initialized.
+- `src/electron/main.ts` recognizes `--cowork-cli-direct-run` and starts a hidden Electron runner without opening the desktop window.
+
+The local path is intentionally not a Control Plane dependency. It initializes the local database, settings manager, provider routing, workspace state, skill registry, MCP manager, and `AgentDaemon`, then creates and waits on a task. The daemon is started with startup recovery disabled in CLI direct-run mode so a short-lived terminal process does not recover or rewrite GUI-owned tasks.
+
+Use `cowork run ... --remote` for the token-gated Control Plane client path. Product behavior and first-run guidance are documented in [CoWork OS CLI](cli.md).
 
 ## Chronicle
 

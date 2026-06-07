@@ -296,6 +296,8 @@ sudo npx playwright install --with-deps chromium
 
 If you don’t need browser automation, you can ignore this and rely on `web_fetch` + API-based search providers.
 
+For public HTTP(S) sites, Browser Use Cloud can be used instead of local Chromium by setting `BROWSER_USE_API_KEY` and explicitly passing `browser_provider: "browser-use-cloud"` to `browser_navigate`. This creates a remote Browser Use session and attaches through CDP. It is not used automatically, and it is blocked for localhost, private networks, `file:` URLs, and intranet-style hostnames; use local Playwright or a desktop Browser Workbench for those targets.
+
 If you’re running under Docker and want Playwright inside the container, you’ll want a container image that includes
 the required libraries. (We can add an optional “Playwright-ready” Docker profile/image next.)
 

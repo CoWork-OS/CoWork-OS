@@ -669,27 +669,25 @@ Imported bundles that cannot be fully checked against network-backed intelligenc
 - `src/electron/extensions/pack-installer.ts` (pack install staging and scan gate)
 - `src/electron/extensions/loader.ts` (discovery-time integrity checks and quarantine enforcement)
 
-### Codex Security Scan Tool Containment
+### Codex Security Scan Containment
 
-The bundled Codex Security pack includes internal helper tools for repository, diff, and deep multi-pass security scans. These tools are deliberately narrower than general file or shell tools.
+The bundled Codex Security pack runs repository, diff, and deep multi-pass security scans through first-party plugin-pack skills. The old `security_scan_*` built-in helpers are no longer exposed; scan workflows use the normal workspace-scoped task tools plus bundled skill instructions, references, and scripts.
 
 | Protection | Description |
 |------------|-------------|
-| **Task-gated tool exposure** | `security_scan_*` helpers are advertised only when the active task text identifies a Codex Security scan workflow. Normal tasks do not see them. |
-| **Handler-level enforcement** | Even if a hidden helper is called directly, the handler rejects it unless Codex Security scan tooling is enabled for that task. |
-| **Workspace path containment** | `repo_root`, `artifact_root`, `scan_dir`, and `worker_dir` must resolve inside the active workspace. |
-| **Scan ID validation** | `scan_id` is limited to letters, numbers, dot, underscore, and dash, preventing path traversal through artifact names. |
-| **Scoped-path validation** | Scoped scans require a relative repository path; absolute paths and `..` segments are rejected. |
-| **Deep worker completeness** | Deep-scan round merge requires exactly six usable workers, with all required files present and valid JSONL in worker ledgers/candidates. |
-| **Report rendering through bundled scripts** | Report validation and HTML rendering use the bundled Codex Security scripts from the packaged plugin pack, not user-provided renderer paths. |
+| **First-party pack loading** | The bundled Codex Security pack is discovered from `resources/plugin-packs/codex-security/` in development and `plugin-packs/codex-security/` in packaged builds. |
+| **Normal workspace policy** | Scan tasks use the same workspace path, shell, network, and approval controls as other CoWork tasks. |
+| **Artifact containment** | Scan artifacts should be written under the active workspace, normally `.cowork/security-scans/<repo-name>/<scan-id>/`. |
+| **Scoped-path discipline** | Scoped scans should use relative repository paths; absolute paths and `..` segments should be rejected by the workflow before scanning. |
+| **Deep worker completeness** | Deep-scan reconciliation expects six usable workers, with all required files present and valid JSONL in worker ledgers/candidates. |
+| **Report rendering through bundled scripts** | Report validation and HTML rendering should use bundled Codex Security scripts from the packaged plugin pack, not user-provided renderer paths. |
 
-These controls keep the scan workflow auditable and prevent a scan request from becoming an arbitrary read/write primitive outside the workspace.
+These controls keep the scan workflow auditable and keep scan activity within the same policy boundary as normal CoWork task execution.
 
 **Implementation**:
-- `src/electron/security-scans/SecurityScanOrchestrator.ts` (artifact layout, path validation, worker validation, merge, report rendering)
-- `src/electron/agent/tools/registry.ts` (tool definitions, task-gated handlers, workspace path resolution)
-- `src/electron/agent/executor.ts` (Codex Security task detection for tool exposure)
+- `src/electron/agent/tools/registry.ts` (normal workspace-scoped tool catalog used by scan skills)
 - `resources/plugin-packs/codex-security/` (bundled scan skills, references, scripts, and assets)
+- `src/electron/extensions/loader.ts` and `src/electron/extensions/registry.ts` (directory-backed plugin-pack discovery and skill loading)
 
 See [Codex Security Scans](codex-security-scans.md) for scan modes and artifact contracts.
 

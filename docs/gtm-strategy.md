@@ -4,22 +4,22 @@
 
 ## Category Definition
 
-CoWork OS is a **security-hardened, GUI-first local AI super app, everything app, and personal agentic operating system**.
+CoWork OS is a **security-hardened, GUI-first, CLI-capable local AI super app, everything app, and personal agentic operating system**.
 
 - OpenClaw is best positioned as an agent experimentation toolkit.
 - CoWork OS is positioned as the production runtime for running agents safely across real workflows.
 
 ## Primary Positioning Statement
 
-CoWork OS is a GUI-first local AI super app, everything app, and production workbench for users who need:
+CoWork OS is a GUI-first, CLI-capable local AI super app, everything app, and production workbench for users who need:
 
 - One app for coding, email, web design, research, documents, spreadsheets, decks, generated web pages, live website testing, automations, channels, and devices
-- Visual agent creation, spawning, assignment, monitoring, and review without managing everything from a terminal
+- Visual agent creation, spawning, assignment, monitoring, and review through the desktop operator console, with `cowork` available for terminal-native task starts
 - Generated artifacts and live websites that can be opened, reviewed, tested, lightly edited, annotated, and revised with the agent beside them
 - Guardrails and approval workflows by default
 - Local-first data ownership (BYOK, no telemetry)
 - A multi-channel operating layer (17 messaging channels)
-- A desktop + headless runtime that can be governed in daily operations
+- A desktop + CLI + headless runtime that can be governed in daily operations
 
 Short form:
 

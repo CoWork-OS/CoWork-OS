@@ -4,9 +4,9 @@ A comprehensive guide to what you can build, automate, and manage with CoWork OS
 
 ## AI Super App For Everyday Work
 
-CoWork OS is positioned as a GUI-first local AI super app and everything app: one place for coding, email, research, web design, documents, spreadsheets, presentations, agent spawning and management, automations, channels, devices, and long-running work. The product is broader than an office artifact viewer; artifacts are one part of the larger agentic workspace.
+CoWork OS is positioned as a GUI-first, CLI-capable local AI super app and everything app: one place for coding, email, research, web design, documents, spreadsheets, presentations, agent spawning and management, automations, channels, devices, terminal starts, and long-running work. The product is broader than an office artifact viewer; artifacts are one part of the larger agentic workspace.
 
-Unlike CLI-first agent tools, CoWork makes many-agent work visible: users can create reusable agents in Agents Hub, spawn parallel lanes, watch delegated runs in task timelines, assign work through Mission Control, and manage teams from GUI surfaces built for normal daily operation.
+CoWork makes many-agent work visible while still offering a terminal entrypoint: users can create reusable agents in Agents Hub, spawn parallel lanes, watch delegated runs in task timelines, assign work through Mission Control, manage teams from GUI surfaces built for normal daily operation, and start local one-shot tasks with `cowork run`.
 
 ---
 

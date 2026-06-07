@@ -2,20 +2,21 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: 'CoWork OS',
-  description: 'CoWork OS is a local-first, security-hardened runtime for operating AI agents in production.',
+  description: 'CoWork OS is a local-first, security-hardened desktop and CLI runtime for operating AI agents in production.',
   base: '/CoWork-OS/',
 
   ignoreDeadLinks: true,
 
   head: [
     ['meta', { name: 'theme-color', content: '#646cff' }],
-    ['meta', { name: 'description', content: 'CoWork OS helps teams run local-first AI workflows with approvals, guardrails, and multi-channel operations.' }],
-    ['meta', { name: 'keywords', content: 'local-first AI agent OS, approvals, guardrails, production AI workflows' }],
+    ['meta', { name: 'description', content: 'CoWork OS helps teams run local-first AI workflows from desktop and CLI surfaces with approvals, guardrails, and multi-channel operations.' }],
+    ['meta', { name: 'keywords', content: 'local-first AI agent OS, AI CLI, approvals, guardrails, production AI workflows' }],
   ],
 
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/getting-started' },
+      { text: 'CLI', link: '/cli' },
       { text: 'Platform Updates', link: '/integration-skill-bootstrap-lifecycle' },
       { text: 'Release Notes', link: '/release-notes-0.5.19' },
       { text: 'Architecture', link: '/architecture' },
@@ -29,9 +30,9 @@ export default defineConfig({
         items: [
           { text: 'Introduction', link: '/' },
           { text: 'Getting Started', link: '/getting-started' },
+          { text: 'CoWork CLI', link: '/cli' },
           { text: "Beginner's Guide", link: '/cowork-school' },
           { text: 'Platform Updates', link: '/integration-skill-bootstrap-lifecycle' },
-          { text: 'Migration Guide', link: '/migration' },
         ],
       },
       {
@@ -40,6 +41,7 @@ export default defineConfig({
           { text: 'Overview', link: '/architecture' },
           { text: 'Reliability Flywheel', link: '/reliability-flywheel' },
           { text: 'Runtime Visibility', link: '/operator-runtime-visibility' },
+          { text: 'CoWork CLI', link: '/cli' },
           { text: 'Terminal Tabs', link: '/terminal-tabs' },
           { text: 'Computer Use (macOS)', link: '/computer-use' },
           { text: 'Live Canvas', link: '/live-canvas' },
@@ -78,10 +80,10 @@ export default defineConfig({
           { text: 'Channel Integrations', link: '/channels' },
           { text: 'Channel Comparison', link: '/channel-comparison' },
           { text: 'Composer Mentions', link: '/composer-mentions' },
+          { text: 'CoWork CLI', link: '/cli' },
           { text: 'Side Chat', link: '/side-chat' },
           { text: 'Terminal Tabs', link: '/terminal-tabs' },
           { text: 'Inbox Agent', link: '/inbox-agent' },
-          { text: 'Codex Security Scans', link: '/codex-security-scans' },
           { text: 'Skill Store & External Skills', link: '/skill-store-and-external-skills' },
           { text: 'manim-video skill', link: '/skills/manim-video' },
           { text: 'Release Notes 0.5.19', link: '/release-notes-0.5.19' },
@@ -95,8 +97,6 @@ export default defineConfig({
           { text: 'aurl skill (OpenAPI/GraphQL)', link: '/skills/aurl' },
           { text: 'Use Cases', link: '/use-cases' },
           { text: 'Simplify & Batch', link: '/simplify-batch' },
-          { text: 'GTM Strategy', link: '/gtm-strategy' },
-          { text: 'Competitive Landscape', link: '/competitive-landscape-research' },
           { text: 'Contributing', link: '/contributing' },
           { text: 'Changelog', link: '/changelog' },
           { text: 'Project Status', link: '/project-status' },

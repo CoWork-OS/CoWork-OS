@@ -15,7 +15,7 @@ cd CoWork-OS
 npm run setup
 ```
 
-### Step 2: Run the App
+### Step 2: Run the Desktop App
 
 ```bash
 npm run dev
@@ -25,6 +25,31 @@ This will:
 1. Start the Vite dev server (React UI)
 2. Launch Electron with hot reload enabled
 3. Open DevTools automatically
+
+### Step 2b: Run the CLI
+
+Build the CLI once, then launch the terminal UI:
+
+```bash
+npm run build:cli
+cowork
+```
+
+For a one-shot local task:
+
+```bash
+cowork run "who are you?"
+```
+
+`cowork` uses the same local profile, database, provider settings, workspaces, skills, and MCP connector configuration as the desktop app. It does not need a Control Plane token for normal local use. If the desktop app is installed and already configured, one-shot local CLI runs prefer a hidden app-entry runtime so encrypted desktop settings keep using the same app identity.
+
+Use remote mode only when intentionally calling a remote Control Plane endpoint:
+
+```bash
+cowork run "check the remote workspace status" --remote
+```
+
+See [CoWork OS CLI](cli.md) for command syntax, local-vs-remote behavior, JSON output, and troubleshooting.
 
 ### Step 3: Choose How CoWork Runs AI
 
@@ -97,6 +122,8 @@ Supermemory does not replace CoWork's local memory system. It adds an external p
 - If the Claude model list is empty, click **Refresh Models** after entering your API key or Claude subscription token.
 - If a provider endpoint changes, override the **Base URL** in Settings (custom providers or Groq/xAI/Kimi/OpenRouter).
 - If Ollama fails to connect, confirm the service is running and the base URL is correct (default `http://localhost:11434`).
+- If `cowork run` asks for a missing token, confirm you did not pass `--remote`. Local CLI tasks should run without `COWORK_CONTROL_PLANE_TOKEN`.
+- If `cowork` reports missing build artifacts in a source checkout, run `npm run build:cli`.
 - If `npm run setup` fails on macOS with `Killed: 9`, macOS terminated the native build due to memory pressure. The setup script retries automatically (with exponential backoff); if it still fails, close other apps and run `npm run setup` again.
 - Note: as of April 4, 2026, third-party harnesses connected to your Claude account draw from extra usage instead of from your subscription. If you do not use them, nothing changes. If you do, the credit and bundles above have you covered.
 
@@ -136,6 +163,12 @@ Generated documents, spreadsheets, presentations, and web pages appear as artifa
    - Title: "Organize my files"
    - Description: "Please organize all files in this folder by file type (Images, Documents, etc.)"
    - Click "Create Task"
+
+   Or run the same kind of local task from the terminal:
+
+   ```bash
+   cowork run "Please organize all files in this folder by file type, but ask before moving anything destructive."
+   ```
 
 3. **Watch it Work**
    - The agent will create a plan
@@ -316,6 +349,8 @@ Description: Navigate to https://example.com and take a screenshot. Save it as e
 ```
 
 Interactive browser tasks use the visible Browser Workbench by default. For form testing or JavaScript-heavy apps, the agent should navigate, call `browser_snapshot`, and then use refs for click/fill/type/read actions. For responsive checks, use `browser_emulate` before screenshots or snapshots so the shared workbench and saved captures reflect the tested desktop/tablet/mobile viewport. Real signed-in Chrome/Edge control is explicit opt-in through `browser_attach`; the default workspace browser profile does not reuse system Chrome cookies.
+
+Browser Use Cloud stealth browsers are available only as an explicit opt-in backend. Configure `BROWSER_USE_API_KEY`, then request `browser_provider: "browser-use-cloud"` for a public HTTP(S) site. Cloud mode is blocked for localhost, private networks, `file:` URLs, generated local HTML artifacts, and intranet-style hostnames; use the default visible Browser Workbench for those targets. Browser Use Cloud sessions are stopped by `browser_close`, and retryable pending-stop results include the Browser Use session id if the stop API fails.
 
 ## Understanding the UI
 

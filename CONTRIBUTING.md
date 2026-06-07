@@ -2,8 +2,6 @@
 
 Thank you for your interest in contributing to CoWork OS! This document provides guidelines and instructions for contributing.
 
-> **Note:** This entire codebase was AI-generated using Claude Code and OpenAI Codex — no code was written manually. You may encounter AI-typical patterns, inconsistencies, or areas that could use refactoring. Fresh eyes and improvements are very welcome!
-
 ## Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
@@ -74,6 +72,7 @@ curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh
 - `npm run dev` - Start development mode with hot reload
 - `npm run hooks:install` - Reinstall local git hooks (`.githooks`)
 - `npm run build` - Build for production
+- `npm run build:cli` - Build the standalone `cowork` CLI
 - `npm run package` - Package the Electron app
 - `npm run fmt` - Format code with Oxfmt
 - `npm run fmt:check` - Check formatting without writing
@@ -125,18 +124,13 @@ git push && git push --tags
 
 ## How to Contribute
 
-### AI-Assisted PRs Welcome!
+### Contribution Expectations
 
-Built with Claude Code, Codex, Cursor, or other AI tools? **Awesome — we embrace it!**
+Help reviewers evaluate your change efficiently:
 
-This entire codebase was AI-generated, so AI-assisted contributions are first-class citizens here. Just be transparent:
-
-- [ ] Mark as AI-assisted in your PR title or description
 - [ ] Note your testing level (untested / lightly tested / fully tested)
 - [ ] Confirm you understand what the code does
-- [ ] Include prompts or session logs if helpful for reviewers
-
-We just want transparency so reviewers know what to look for. Don't be shy about using AI — it's how this project was built!
+- [ ] Include implementation notes or session logs if helpful for reviewers
 
 ### Reporting Bugs
 

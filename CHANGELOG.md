@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Browser Use Cloud stealth backend**: Browser V2 can now explicitly route `browser_navigate` through Browser Use Cloud with `browser_provider: "browser-use-cloud"`, using `BROWSER_USE_API_KEY` or encrypted `browser-use` settings, Browser Use API v3 session creation, CDP attach, optional proxy/profile/timeout/recording/screen controls, stale-session retry, and remote-session stop handling.
 
 ### Changed
-- **Browser V2 docs and safety model**: documented Browser Use Cloud configuration, explicit opt-in behavior, private/local target blocking, redacted Browser Use errors/URLs, and retryable pending-stop results across Browser Workbench, Browser V2 architecture, troubleshooting, feature, and architecture docs.
+- **Browser V2 docs and safety model**: documented Browser Use Cloud configuration, explicit opt-in behavior, private/local target blocking, redacted Browser Use errors/URLs, and retryable pending-stop results across Browser Workbench, Browser V2 architecture, getting started, troubleshooting, development, feature, and architecture docs.
 
 ## [0.5.48] - 2026-05-28
 

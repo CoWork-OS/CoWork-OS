@@ -223,11 +223,11 @@ See [Message Box Shortcuts](message-box-shortcuts.md#cowork-shortcuts-pack) for 
 **Purpose:** run repository, diff, and deep multi-pass security review workflows through the CoWork task runtime.
 
 **Core skills and commands:**
-- `/codex-security:security-scan` - repository-wide or scoped-path security scan
-- `/codex-security:security-diff-scan` - security review of a Git diff
-- `/codex-security:deep-security-scan` - deeper repository-wide scan with six independent discovery workers per round
+- `/security-scan` - repository-wide or scoped-path security scan
+- `/security-diff-scan` - security review of a Git diff
+- `/deep-security-scan` - deeper repository-wide scan with six independent discovery workers per round
 
-The pack is directory-backed: it loads upstream-style `SKILL.md` workflows, shared `references/`, `scripts/`, `assets/`, and `agents/` from `resources/plugin-packs/codex-security/`. CoWork also exposes internal scan orchestration helpers only inside Codex Security scan tasks. Those helpers prepare worklists, create deep-scan worker directories, check worker artifacts, merge completed rounds, and render validated reports.
+The pack is directory-backed: it loads upstream-style `SKILL.md` workflows, shared `references/`, `scripts/`, `assets/`, and `agents/` from `resources/plugin-packs/codex-security/`. Scan orchestration now lives in those bundled skill instructions and scripts, using normal workspace-scoped tools for worklists, deep-scan worker artifacts, reconciliation, and final reports.
 
 See [Codex Security Scans](codex-security-scans.md) for scan modes, artifact layout, workspace safety rules, and validation commands.
 

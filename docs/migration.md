@@ -4,7 +4,7 @@ This guide helps users transition from other AI assistant platforms or set up Co
 
 ## Overview
 
-CoWork OS is a security-first, GUI-first local AI super app and everything app that runs on macOS and Windows. If you're coming from another multi-channel AI platform, CLI-first agent runner, or self-hosted assistant, this guide will help you move into one app for coding, email, documents, spreadsheets, presentations, browser work, agents, and automations.
+CoWork OS is a security-first, GUI-first, CLI-capable local AI super app and everything app that runs on macOS and Windows. If you're coming from another multi-channel AI platform, terminal agent runner, or self-hosted assistant, this guide will help you move into one local runtime for coding, email, documents, spreadsheets, presentations, browser work, agents, automations, desktop review, and terminal task starts.
 
 ---
 
@@ -13,7 +13,7 @@ CoWork OS is a security-first, GUI-first local AI super app and everything app t
 If you're currently using OpenClaw, the migration is mostly an operating model shift:
 
 - OpenClaw is commonly used as an agent experimentation toolkit.
-- CoWork OS is designed as a GUI-first production runtime with built-in approvals, guardrails, local-first controls, and visual management for many agents.
+- CoWork OS is designed as a GUI-first, CLI-capable production runtime with built-in approvals, guardrails, local-first controls, visual management for many agents, and a terminal entrypoint for local one-shot work.
 
 See also: [OpenClaw alternative guide](openclaw-comparison.md)
 

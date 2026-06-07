@@ -1,6 +1,6 @@
 # Best-Fit Operational Workflows
 
-> This page explains where CoWork OS delivers the strongest return for teams running governed, intelligence-heavy operational lanes. It is a secondary narrative layer for the same category: CoWork OS remains a **security-hardened, GUI-first local AI super app, everything app, and personal agentic operating system**.
+> This page explains where CoWork OS delivers the strongest return for teams running governed, intelligence-heavy operational lanes. It is a secondary narrative layer for the same category: CoWork OS remains a **security-hardened, GUI-first, CLI-capable local AI super app, everything app, and personal agentic operating system**.
 
 ---
 
@@ -15,7 +15,7 @@ CoWork OS is built for production use: approval gates, guardrail budgets, local-
 
 These are the same reasons teams pick CoWork OS for daily governed operations. The outsourced-workflow fit is additive, not a repositioning.
 
-CoWork is also GUI-first: operators can create agents, spawn parallel work, assign tasks, inspect live timelines, and review outcomes through Agents Hub, Mission Control, boards, and approval dialogs. This matters for operational lanes because the people supervising the work should not need to manage every agent from a terminal.
+CoWork is also GUI-first and CLI-capable: operators can create agents, spawn parallel work, assign tasks, inspect live timelines, and review outcomes through Agents Hub, Mission Control, boards, and approval dialogs, while terminal-native users can start local tasks with `cowork`. This matters for operational lanes because supervision, approvals, and review still live in visible operator surfaces.
 
 CoWork's Everything Workbench strengthens these lanes for knowledge workers and operators: reports, issue summaries, tables, decks, generated web pages, live website testing, inbox work, and PDFs stay attached to the task that produced or used them. Teams can review or edit generated artifacts in-place, test websites in a visible Browser V2 Workbench with snapshot refs and diagnostics, annotate screenshots, request follow-up changes, and use CoWork as the everyday alternative to separate office, browser, mail, and coding apps. Native apps and explicitly consented external browsers remain available when specialized functionality is needed.
 

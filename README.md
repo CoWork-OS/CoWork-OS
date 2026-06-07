@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <strong>CoWork OS is the GUI-first local AI super app and everything app for getting real work done.</strong><br>
-  Code, email, research, design web pages, create documents, work with spreadsheets and decks, spawn and manage agents, run automations, and ask for changes without jumping between separate coding, mail, browser, Word, Excel, or PowerPoint apps.
+  <strong>CoWork OS is the GUI-first, CLI-capable local AI super app and everything app for getting real work done.</strong><br>
+  Code, email, research, design web pages, create documents, work with spreadsheets and decks, spawn and manage agents, run automations, and ask for changes from the desktop app or the <code>cowork</code> CLI without jumping between separate coding, mail, browser, Word, Excel, or PowerPoint apps.
 </p>
 
 <p align="center">
@@ -26,6 +26,7 @@
   <a href="docs/side-chat.md">Side Chat</a> &middot;
   <a href="docs/ask-inbox-architecture.md">Ask Inbox</a> &middot;
   <a href="docs/everything-workbench.md">Everything Workbench</a> &middot;
+  <a href="docs/cli.md">CoWork CLI</a> &middot;
   <a href="docs/terminal-tabs.md">Terminal Tabs</a> &middot;
   <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
@@ -38,52 +39,19 @@
 </p>
 
 <!-- COWORK_PUBLIC_ADOPTION_STATS_START -->
-<div align="center">
+### Public Adoption Signals
 
-<h3>Public Adoption Signals</h3>
+| Signal | Current |
+|---|---:|
+| GitHub stars | 345 |
+| GitHub forks | 51 |
+| Installer/server downloads | 917 |
+| Download delta | +5 |
+| npm downloads, last week | 460 |
+| GitHub views, last 14-ish days | 1,412 total / 581 unique |
+| GitHub clones, last 14-ish days | 3,162 total / 971 unique |
 
-<table>
-  <thead>
-    <tr>
-      <th align="center">Signal</th>
-      <th align="center">Current</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="left">GitHub stars</td>
-      <td align="center">345</td>
-    </tr>
-    <tr>
-      <td align="left">GitHub forks</td>
-      <td align="center">51</td>
-    </tr>
-    <tr>
-      <td align="left">Installer/server downloads</td>
-      <td align="center">917</td>
-    </tr>
-    <tr>
-      <td align="left">Download delta</td>
-      <td align="center">+5</td>
-    </tr>
-    <tr>
-      <td align="left">npm downloads, last week</td>
-      <td align="center">460</td>
-    </tr>
-    <tr>
-      <td align="left">GitHub views, last 14-ish days</td>
-      <td align="center">1,412 total / 581 unique</td>
-    </tr>
-    <tr>
-      <td align="left">GitHub clones, last 14-ish days</td>
-      <td align="center">3,162 total / 971 unique</td>
-    </tr>
-  </tbody>
-</table>
-
-<p><sub>Generated 2026-06-07T07:13:23.624Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. <a href="docs/public-adoption-stats.md">Full report</a>.</sub></p>
-
-</div>
+Generated 2026-06-07T07:13:23.624Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. [Full report](docs/public-adoption-stats.md).
 <!-- COWORK_PUBLIC_ADOPTION_STATS_END -->
 
 <p align="center">
@@ -93,13 +61,14 @@
 ### Why CoWork OS?
 
 - **Local AI super app** — CoWork OS keeps coding, email, research, browser testing, documents, spreadsheets, presentations, PDFs, channels, devices, automations, memory, providers, and approvals in one governed local workspace.
-- **GUI-first agent operations** — Agents Hub, Mission Control, task timelines, visual boards, teams, devices, and automations let you create reusable agents, assign work, inspect delegated runs, review approvals, and monitor many agents without reducing the product to a terminal.
+- **GUI-first, CLI-capable agent operations** — Agents Hub, Mission Control, task timelines, visual boards, teams, devices, and automations remain the main operator console, while the `cowork` CLI gives terminal users the same local runtime for quick prompts and one-shot tasks.
+- **First-class `cowork` CLI** — Type `cowork` for an interactive terminal UI or `cowork run "task"` for a local one-shot run. Normal local CLI use shares desktop provider/settings state and does not require a Control Plane token; `--remote` is the explicit token-gated path. [CoWork CLI](docs/cli.md)
 - **Long-running agent runtime** — Chat, Execute, Plan, Analyze, Verified, Think With Me, Collaborative, Multi-LLM, `/multitask`, structured input cards, Side Chat, adaptive recovery, and visible routing/fallback state make agent work inspectable while it is running. [Chat mode](docs/chat-mode.md) · [Side Chat](docs/side-chat.md) · [Multitask](docs/multitask.md)
 - **Everything Workbench** — Generated documents, spreadsheets, decks, web pages, PDFs, previews, and file outputs open beside the agent with follow-up context, so everyday knowledge work can be created and revised inside CoWork. [Learn more](docs/everything-workbench.md)
 - **Developer workbench** — Real xterm.js + node-pty terminal tabs, title-bar terminal/browser toggles, Browser Workbench, responsive Browser V2 automation, screenshots, diagnostics, and visible web testing keep repo work, CLI work, and live app QA in the same workspace. [Terminal Tabs](docs/terminal-tabs.md) · [Browser Workbench](docs/browser-workbench.md)
 - **Inbox and channels** — Inbox Agent handles local-first mail triage, Ask Inbox evidence search, drafts, send/reply/forward, commitments, and `@Inbox` routing, while the gateway supports 17 messaging channels with specialization by workspace, agent role, guidance, and tool policy. [Inbox Agent](docs/inbox-agent.md) · [Channels](docs/channels.md)
 - **Automation and memory loop** — Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, Chronicle, Knowledge Graph, durable runtime context, and Usage Insights form a reviewable learning loop instead of an invisible background process. [Workflow Intelligence](docs/workflow-intelligence.md) · [Chronicle](docs/chronicle.md)
-- **Integrations, providers, and skills** — 35 LLM provider options, configurable fallback chains, provider-aware prompt caching, 44 MCP connectors, 37 bundled packs, 147 built-in skills, Composer `@` mentions, message-box `/` shortcuts, Plugin Store, Skill Store, and external skill directories make the app extensible without giving up local control. [Providers](docs/providers.md) · [Plugin Packs](docs/plugin-packs.md)
+- **Integrations, providers, and skills** — 35 LLM provider options, configurable fallback chains, provider-aware prompt caching, 44 MCP connectors, 36 bundled packs, 147 built-in skills, Composer `@` mentions, message-box `/` shortcuts, Plugin Store, Skill Store, and external skill directories make the app extensible without giving up local control. [Providers](docs/providers.md) · [Plugin Packs](docs/plugin-packs.md)
 - **Ops and portability** — Zero-Human Company Ops, Digital Twin personas, managed devices, remote access, profiles, profile import/export, and best-fit workflow packs support both personal work and founder/operator-style autonomous company loops.
 - **Local-first security** — Your data and API keys stay on your machine. Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, session-scoped location prompts, private-memory filtering, and a verified automated test suite keep high-agency work bounded and reviewable.
 
@@ -120,7 +89,7 @@ Stable workflow entry points for the newest high-impact capabilities.
 - **Spreadsheet artifacts** — task-created spreadsheet files render as compact artifact cards. Excel workbooks and CSV/TSV files open in the editable right-sidebar viewer; native Numbers, Google Sheets shortcut, ODS, XLSB, and other recognized spreadsheet outputs still get the same card and external-app/folder actions. Fullscreen mode expands editable sheets across the app with cell/range/row/column selection, copy, zoom, add row/column, save, model picker, voice input, attachments, and follow-up task context. [Learn more](docs/spreadsheet-artifacts.md)
 - **Presentation artifacts** — generated `.pptx` decks render as compact artifact cards and open by default in the resizable right-sidebar presentation viewer. The viewer shows thumbnails, slide navigation, zoom, a white slide canvas, speaker notes, text-first fast loading, cached rendered slide images, fullscreen follow-up context, and background refresh after requested deck edits. Legacy PowerPoint formats are recognized with external-app/folder actions. [Learn more](docs/pptx-generation-and-preview.md)
 - **Web page artifacts** — generated `.html` / `.htm` pages and built React output such as `dist/index.html`, `build/index.html`, or `out/index.html` render as compact artifact cards and open by default in a resizable right-sidebar sandboxed iframe preview. Fullscreen mode keeps the functional follow-up composer and refreshes after the relevant file or build output changes. React-style source projects without build output show a clear build-output-needed state instead of auto-starting a dev server. [Learn more](docs/web-page-artifacts.md)
-- **Browser Workbench / Browser V2** — live website testing opens a visible in-app browser in the right sidebar by default. Browser-use tools target that shared webview through Browser V2, show cursor movement during actions, can resize the page to desktop/tablet/mobile breakpoints for responsive QA, prefer accessibility snapshot refs over selectors, expose console/network/download/storage diagnostics, support screenshots and annotation, and can expand to fullscreen with the normal follow-up composer. [Learn more](docs/browser-workbench.md)
+- **Browser Workbench / Browser V2** — live website testing opens a visible in-app browser in the right sidebar by default. Browser-use tools target that shared webview through Browser V2, show cursor movement during actions, can resize the page to desktop/tablet/mobile breakpoints for responsive QA, prefer accessibility snapshot refs over selectors, expose console/network/download/storage diagnostics, support screenshots and annotation, and can expand to fullscreen with the normal follow-up composer. Explicit fallback routes include local Playwright, external Chrome/Edge CDP attach with consent, and Browser Use Cloud stealth browsers through `browser_provider: "browser-use-cloud"` for public HTTP(S) targets. [Learn more](docs/browser-workbench.md)
 - **Image generation** — configurable provider ordering across Gemini, OpenAI, Azure OpenAI, and OpenRouter.
 - **Video generation** — text-to-video and image-to-video routing with polling tools and inline preview.
 - **Programmatic technical video** — bundled `manim-video` skill for Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](docs/skills/manim-video.md)
@@ -181,7 +150,11 @@ Release maintainers can create this unsigned DMG/ZIP with `npm run package:mac:u
 ```bash
 npm install -g cowork-os
 cowork-os
+cowork
+cowork run "who are you?"
 ```
+
+`cowork-os` launches the desktop GUI. `cowork` launches the terminal UI, `cowork run` starts a local one-shot task, and commands like `cowork status`, `cowork sessions list`, `cowork tools list`, `cowork mcp list`, `cowork backup create`, and `cowork security audit` manage the same local profile, provider settings, workspaces, skills, and MCP configuration. Use `--remote` only when intentionally calling a remote Control Plane endpoint.
 
 > **Windows npm install notes:**
 > - Run `npm install -g cowork-os` / `npm uninstall -g cowork-os` from `%USERPROFILE%` (or another neutral directory), **not** from `%APPDATA%\npm\node_modules\cowork-os`, to avoid `EBUSY` lock errors.
@@ -207,7 +180,7 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 ## How It Works
 
 1. **Choose an AI route** — The easiest path for many users is **Sign in with ChatGPT**. If CoWork detects a local Ollama model, it offers that private local route. API-key providers are available for Claude, OpenAI API, Gemini, OpenRouter, Groq, and others, with free-option badges shown where applicable.
-2. **Create a task or start from Ideas** — Describe what you want ("create a weekly plan", "create a quarterly report spreadsheet", "draft a DOCX memo", "build a small landing page") or begin from a curated Ideas prompt. No workspace needed — a private starter workspace is used automatically if you don't select one.
+2. **Create a task or start from Ideas** — Describe what you want in the desktop app ("create a weekly plan", "create a quarterly report spreadsheet", "draft a DOCX memo", "build a small landing page"), begin from a curated Ideas prompt, or run a one-shot terminal task with `cowork run "..."`. No workspace needed — a private starter workspace is used automatically if you don't select one.
 3. **Choose a mode** — Pick **Chat**, **Execute**, **Plan**, **Analyze**, or **Verified** for the runtime behavior, then optionally toggle **Autonomous** (auto-approve actions), **Collaborative** (multi-agent perspectives), or **Multi-LLM** (compare providers with a judge) per task. For one-shot parallel lane work, start with `/multitask [N] <task>`.
 4. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts. Parallel tool bursts are grouped into lane summaries, shell commands stay visible, and the workspace can open real terminal tabs for direct interactive CLI work.
 5. **Ask without interrupting** — Use `/side` to open Side Chat for read-only questions about the selected running session, or use the title-bar terminal and browser buttons when you need direct CLI or web inspection beside the task.
@@ -304,7 +277,7 @@ The top of this README is intentionally opinionated about what matters first. Th
 | **Knowledge work artifacts** | Editable document artifacts, spreadsheet artifacts, presentation artifacts, web page artifacts, paired LaTeX/PDF outputs, smart PDF attachments, format-aware file preview, designed editorial documents, generated images, generated videos, and programmatic Manim technical videos |
 | **Inbox and communications** | Inbox Agent, Classic and Today inbox modes, Ask Inbox, hybrid mailbox search, editable AI drafts, manual reply/reply-all/forward, sender cleanup, commitments, Gmail forwarding automations, `@Inbox` routing, voice mode, outbound calls, and 17 messaging channels |
 | **Automation and memory** | Routines, scheduled tasks, webhooks, event triggers, Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, adaptive style learning, Usage Insights, persistent memory, Knowledge Graph, ChatGPT history import, durable runtime context, context compaction, Supermemory, and Chronicle |
-| **Integrations and extensibility** | 35 LLM provider options, ordered LLM/search fallback chains, provider-aware prompt caching, 44 MCP connectors, native Google Workspace coverage, 37 bundled plugin packs, 346 pack skills, 266 pack shortcuts, 43 pack agent roles, 147 built-in skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support |
+| **Integrations and extensibility** | 35 LLM provider options, ordered LLM/search fallback chains, provider-aware prompt caching, 44 MCP connectors, native Google Workspace coverage, 36 bundled plugin packs, 338 pack skills, 263 pack shortcuts, 42 pack agent roles, 147 built-in skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support |
 | **Operations and deployment** | Profiles, profile import/export, Devices, remote workspaces, remote task dispatch, remote file picking, Control Plane, Linux server package, self-hosting, Tailscale/SSH remote access, Zero-Human Company Ops, Digital Twin personas, company-linked operator agents, and best-fit Support/IT/Sales workflow packs |
 | **Safety and reliability** | Approval workflows, sandboxed execution, workspace/profile permission rules, network/sandbox policy controls, private-memory filtering, session-scoped location approvals, command/path containment, import scanning and quarantine, encrypted storage, local-first data handling, renderer event caps, off-main-thread memory recall, and long-session cleanup |
 
@@ -458,7 +431,7 @@ Health pulls personal signals into a private, action-oriented view for readiness
 
 ### Plugin Platform & Customize
 
-Unified plugin platform with 37 bundled packs (Engineering, DevOps, Product, Sales, QA, Finance, Codex Security, Claude-for-Legal practice packs, CoWork Shortcuts, and more), each bundling skills, agent roles, connectors, slash command aliases, and "Try asking" prompts. Packs can link to Digital Twin personas as optional role presets.
+Unified plugin platform with 36 bundled packs (Engineering, DevOps, Product, Sales, QA, Finance, Claude-for-Legal practice packs, CoWork Shortcuts, and more), each bundling skills, agent roles, connectors, slash command aliases, and "Try asking" prompts. Packs can link to Digital Twin personas as optional role presets.
 
 - **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
 - **Per-skill control**: Enable or disable individual skills within a pack without toggling the whole pack
@@ -491,7 +464,7 @@ These are the workflows where approval gates, local data control, and measurable
 
 - **147 built-in skills** across developer, productivity, communication, documents, frontend, game development, mobile development, financial analysis, infrastructure-as-code, and more
 - **Custom skills** in `~/Library/Application Support/cowork-os/skills/` (macOS) or `%APPDATA%\cowork-os\skills\` (Windows)
-- **37 bundled plugin packs** with 346 pack skills, 266 pack shortcuts, 43 pack agent roles, message-box slash aliases, Codex Security scan workflows, Claude-for-Legal workflow cards, and Digital Twin integration where applicable
+- **36 bundled plugin packs** with 338 pack skills, 263 pack shortcuts, 42 pack agent roles, message-box slash aliases, Claude-for-Legal workflow cards, and Digital Twin integration where applicable
 - **Plugin Store** — browse, install from Git/URL, scaffold custom packs, and review quarantine/report state for imported packs
 - **Skill Store** — browse CoWork Registry skills, search ClawHub, import external skills from Git, raw JSON, or raw `SKILL.md`, and review quarantine/report state for imported skills
 - **MCP support** — client, host, and registry
@@ -635,7 +608,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Subconscious Loop](docs/subconscious-loop.md) | Compatibility redirect for the former name of Workflow Intelligence |
 | [Zero-Human Company Ops](docs/zero-human-company.md) | Founder-directed company planning, operators, and Mission Control ops workflows |
 | [Plugin Packs](docs/plugin-packs.md) | Plugin platform, Customize panel, and Plugin Store |
-| [Codex Security Scans](docs/codex-security-scans.md) | Repository, diff, and deep multi-pass security scan workflows |
 | [Skill Store & External Skills](docs/skill-store-and-external-skills.md) | ClawHub support, external skill imports, and managed-skill install flows |
 | [Best-Fit Workflows](docs/best-fit-workflows.md) | Support Ops, IT Ops, and Sales Ops — where CoWork OS delivers the strongest ROI |
 | [Admin Policies](docs/admin-policies.md) | Enterprise admin policies and organization pack management |

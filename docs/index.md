@@ -2,8 +2,8 @@
 layout: home
 hero:
   name: CoWork OS
-  text: The GUI-first local AI super app and everything app
-  tagline: Code, email, research, design web pages, create documents, work with spreadsheets and decks, spawn and manage agents, run automations, and ask for changes without jumping between separate coding, mail, browser, Word, Excel, or PowerPoint apps.
+  text: The GUI-first, CLI-capable local AI super app and everything app
+  tagline: Code, email, research, design web pages, create documents, work with spreadsheets and decks, spawn and manage agents, run automations, and ask for changes from the desktop app or the cowork CLI without jumping between separate coding, mail, browser, Word, Excel, or PowerPoint apps.
   actions:
     - theme: brand
       text: Get Started
@@ -17,6 +17,9 @@ hero:
     - theme: alt
       text: Everything Workbench
       link: /everything-workbench
+    - theme: alt
+      text: CoWork CLI
+      link: /cli
     - theme: alt
       text: Terminal Tabs
       link: /terminal-tabs
@@ -139,7 +142,9 @@ features:
   - title: AI Super App / Everything App
     details: CoWork OS keeps coding, email, research, documents, spreadsheets, presentations, web pages, PDFs, memory, skills, providers, approvals, channels, devices, and automations in one local-first governed workspace.
   - title: GUI-First Agent Management
-    details: Create reusable agents, spawn parallel work, inspect delegated runs, assign tasks, review approvals, and monitor many agents through Agents Hub, Mission Control, task timelines, and visual boards instead of terminal-only workflows.
+    details: Create reusable agents, spawn parallel work, inspect delegated runs, assign tasks, review approvals, and monitor many agents through Agents Hub, Mission Control, task timelines, and visual boards, while still having a terminal-native entrypoint for fast local runs.
+  - title: First-Class CoWork CLI
+    details: Type `cowork` for the interactive terminal UI or `cowork run "task"` for a local one-shot run. The default CLI path shares local desktop profile, provider, workspace, skills, and MCP settings without requiring a Control Plane token; remote mode is explicit.
   - title: One App For Daily Work
     details: Use one app instead of separate coding, mail, browser, Word, Excel, and PowerPoint workflows for everyday agentic work.
   - title: Everything Workbench
@@ -190,8 +195,6 @@ features:
     details: Type `/` in the composer to pick deterministic app commands and skill-backed workflow shortcuts from one menu, including `/side`, `/schedule`, `/schedule here`, `/clear`, `/plan`, `/cost`, `/multitask`, `/compact`, `/doctor`, `/undo`, direct skill IDs, plugin aliases, and the bundled CoWork Shortcuts pack. Skill-backed picker selections insert the command token so users can add context before sending.
   - title: Claude-for-Legal Workflows
     details: Bundled legal practice packs expose upstream-style slash commands through CoWork's plugin-pack system. Legal workflow selections are editable before launch, and matter-heavy tasks can show structured main-view intake cards such as the dedicated demand-letter intake form.
-  - title: Codex Security Scans
-    details: Bundled Codex Security workflows run repository, diff, and deep multi-pass security scans through directory-backed plugin-pack skills, workspace-scoped scan helpers, deterministic worklists, deep worker artifact checks, and validated report rendering.
   - title: Multitask Command
     details: `/multitask [N] <task>` starts a fresh collaborative run, splits the prompt into 2-8 lane-specific child tasks, respects the global task queue, and synthesizes the lane outputs through the existing team orchestration flow.
   - title: Latest Release 0.5.48

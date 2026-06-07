@@ -88,6 +88,7 @@ import {
   VerificationVerdict,
 } from "../../shared/types";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
+import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
 import {
   extractTimelineEvidenceRefs,
@@ -3610,6 +3611,9 @@ export class AgentDaemon extends EventEmitter {
     }
     if (task?.agentConfig?.permissionMode) {
       return enforceAllowedMode(task.agentConfig.permissionMode);
+    }
+    if (isAutomatedTaskLike(task)) {
+      return enforceAllowedMode("dont_ask");
     }
     return enforceAllowedMode(PermissionSettingsManager.loadSettings().defaultMode || "default");
   }

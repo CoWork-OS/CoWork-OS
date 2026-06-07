@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { AgentDaemon } from "../daemon";
+import { PermissionSettingsManager } from "../../security/permission-settings-manager";
 
 vi.mock("../../admin/policies", () => ({
   loadPolicies: vi.fn(() => ({
@@ -40,6 +41,137 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       reason: "allowed",
       ruleSource: "admin_policy",
     });
+  });
+
+  it("uses dont_ask as the default permission mode for automated tasks", () => {
+    const daemonLike = {
+      getExecutorForTask: vi.fn().mockReturnValue(null),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const mode = AgentDaemon.prototype["buildPermissionMode"].call(daemonLike, "task-auto", {
+      id: "task-auto",
+      source: "cron",
+      status: "executing",
+      agentConfig: {},
+    });
+
+    expect(mode).toBe("dont_ask");
+  });
+
+  it("keeps explicit task permission modes for automated tasks", () => {
+    const daemonLike = {
+      getExecutorForTask: vi.fn().mockReturnValue(null),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const mode = AgentDaemon.prototype["buildPermissionMode"].call(daemonLike, "task-auto", {
+      id: "task-auto",
+      source: "cron",
+      status: "executing",
+      agentConfig: { permissionMode: "default" },
+    });
+
+    expect(mode).toBe("default");
+  });
+
+  it("keeps runtime permission modes ahead of automated task defaults", () => {
+    const daemonLike = {
+      getExecutorForTask: vi.fn().mockReturnValue({
+        runtime: {
+          getPermissionState: vi.fn().mockReturnValue({ mode: "plan" }),
+        },
+      }),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const mode = AgentDaemon.prototype["buildPermissionMode"].call(daemonLike, "task-auto", {
+      id: "task-auto",
+      source: "cron",
+      status: "executing",
+      agentConfig: {},
+    });
+
+    expect(mode).toBe("plan");
+  });
+
+  it("keeps manual tasks on the configured default permission mode", () => {
+    const loadSettings = vi.spyOn(PermissionSettingsManager, "loadSettings").mockReturnValue({
+      version: 1,
+      defaultMode: "default",
+      defaultShellEnabled: false,
+      defaultPermissionAccess: "default",
+      rules: [],
+    });
+    const daemonLike = {
+      getExecutorForTask: vi.fn().mockReturnValue(null),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const mode = AgentDaemon.prototype["buildPermissionMode"].call(daemonLike, "task-manual", {
+      id: "task-manual",
+      source: "manual",
+      status: "executing",
+      agentConfig: {},
+    });
+
+    expect(mode).toBe("default");
+    expect(loadSettings).toHaveBeenCalled();
+    loadSettings.mockRestore();
+  });
+
+  it("allows automation write_file permission checks without prompting", () => {
+    const workspace = {
+      id: "workspace-1",
+      name: "Workspace",
+      path: "/Users/me/project",
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        shell: true,
+      },
+      createdAt: Date.now(),
+    };
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({
+          id: "task-auto",
+          workspaceId: workspace.id,
+          source: "cron",
+          status: "executing",
+          agentConfig: {},
+        }),
+      },
+      workspaceRepo: {
+        findById: vi.fn().mockReturnValue(workspace),
+      },
+      workspacePermissionRuleRepo: {
+        listByWorkspaceId: vi.fn().mockReturnValue([]),
+      },
+      getExecutorForTask: vi.fn().mockReturnValue(null),
+      logEvent: vi.fn(),
+    }) as Any;
+
+    const result = AgentDaemon.prototype.evaluateToolPermission.call(daemonLike, "task-auto", {
+      approvalType: "external_service",
+      toolName: "write_file",
+      details: {
+        path: "package.json",
+        params: {
+          path: "package.json",
+        },
+      },
+    });
+
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toEqual(
+      expect.objectContaining({
+        type: "mode",
+        mode: "dont_ask",
+      }),
+    );
   });
 
   it("keeps session approve-all behavior for safe network reads", async () => {

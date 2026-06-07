@@ -1518,13 +1518,6 @@ export class DatabaseManager {
         ON tasks(workspace_id, completed_at DESC);
       CREATE INDEX IF NOT EXISTS idx_tasks_completed_at
         ON tasks(completed_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_tasks_sidebar_order
-        ON tasks(
-          CASE WHEN COALESCE(is_pinned, 0) = 1 THEN 0 ELSE 1 END,
-          CASE WHEN status IN ('executing', 'planning', 'interrupted', 'paused', 'blocked') THEN 0 ELSE 1 END,
-          COALESCE(updated_at, created_at) DESC,
-          created_at DESC
-        );
       CREATE INDEX IF NOT EXISTS idx_hook_sessions_task ON hook_sessions(task_id);
       CREATE INDEX IF NOT EXISTS idx_hook_session_locks_expires ON hook_session_locks(expires_at);
       CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id);
@@ -1534,10 +1527,6 @@ export class DatabaseManager {
         ON task_events(type, timestamp DESC, task_id);
       CREATE INDEX IF NOT EXISTS idx_task_events_task_type_timestamp
         ON task_events(task_id, type, timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_task_events_task_order_expr
-        ON task_events(task_id, COALESCE(seq, timestamp) DESC, timestamp DESC, id DESC);
-      CREATE INDEX IF NOT EXISTS idx_task_events_task_effective_type_order_expr
-        ON task_events(task_id, COALESCE(legacy_type, type), COALESCE(seq, timestamp) DESC, timestamp DESC, id DESC);
       CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id);
       CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id);
       CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
@@ -2970,6 +2959,20 @@ export class DatabaseManager {
       // Column already exists, ignore
     }
 
+    try {
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tasks_sidebar_order
+          ON tasks(
+            CASE WHEN COALESCE(is_pinned, 0) = 1 THEN 0 ELSE 1 END,
+            CASE WHEN status IN ('executing', 'planning', 'interrupted', 'paused', 'blocked') THEN 0 ELSE 1 END,
+            COALESCE(updated_at, created_at) DESC,
+            created_at DESC
+          );
+      `);
+    } catch {
+      // Index can be retried on the next startup after schema repair.
+    }
+
     // Add index for parent_task_id lookups
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)");
@@ -3158,6 +3161,12 @@ export class DatabaseManager {
       `);
     } catch {
       // Table already exists, ignore
+    }
+
+    try {
+      this.db.exec("ALTER TABLE activity_feed ADD COLUMN is_pinned INTEGER DEFAULT 0");
+    } catch {
+      // Column already exists, ignore
     }
 
     try {

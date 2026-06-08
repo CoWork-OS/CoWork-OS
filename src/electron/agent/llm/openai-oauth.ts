@@ -57,6 +57,9 @@ const MANUAL_CALLBACK_HELPER_HTML = `data:text/html;charset=utf-8,${encodeURICom
 </html>`)}`;
 
 let proxyBootstrapPromise: Promise<void> | null = null;
+let electronOAuthFetchFallbackInstalled = false;
+
+const OPENAI_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token";
 
 function ensureNodeFetchProxySupport(): void {
   if (proxyBootstrapPromise || typeof process === "undefined" || !process.versions?.node) {
@@ -74,6 +77,68 @@ function ensureNodeFetchProxySupport(): void {
 }
 
 ensureNodeFetchProxySupport();
+
+function getFetchUrl(input: Parameters<typeof fetch>[0]): string | undefined {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.toString();
+  const url = (input as Any)?.url;
+  return typeof url === "string" ? url : undefined;
+}
+
+function shouldUseElectronOAuthFetch(input: Parameters<typeof fetch>[0]): boolean {
+  const rawUrl = getFetchUrl(input);
+  if (!rawUrl) return false;
+  try {
+    const url = new URL(rawUrl);
+    return url.origin + url.pathname === OPENAI_OAUTH_TOKEN_URL;
+  } catch {
+    return false;
+  }
+}
+
+function getElectronNetFetch(): typeof fetch | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
+    const netFetch = electron?.net?.fetch;
+    return typeof netFetch === "function" ? netFetch.bind(electron.net) : null;
+  } catch {
+    return null;
+  }
+}
+
+function installElectronOAuthFetchFallback(): void {
+  if (electronOAuthFetchFallbackInstalled || typeof globalThis.fetch !== "function") {
+    return;
+  }
+
+  const electronFetch = getElectronNetFetch();
+  if (!electronFetch) return;
+
+  const nodeFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    if (shouldUseElectronOAuthFetch(input)) {
+      try {
+        return await electronFetch(input, init);
+      } catch (error: Any) {
+        logger.warn(
+          "Electron net.fetch failed for OpenAI OAuth token request; retrying Node fetch:",
+          error?.message || error,
+        );
+      }
+    }
+    return nodeFetch(input, init);
+  }) as typeof fetch;
+
+  electronOAuthFetchFallbackInstalled = true;
+  logger.info("Installed Electron network fallback for OpenAI OAuth token exchange.");
+}
+
+installElectronOAuthFetchFallback();
 
 function getElectronShell(): Any | null {
   try {
@@ -317,18 +382,14 @@ export class OpenAIOAuth {
   static async getApiKeyFromTokens(
     tokens: OpenAIOAuthTokens,
   ): Promise<{ apiKey: string; newTokens?: OpenAIOAuthTokens }> {
-    const { getOAuthApiKey } = await loadPiAiOAuthModule();
-    const credentials = tokensToCredentials(tokens);
-
-    const result = await getOAuthApiKey("openai-codex", { "openai-codex": credentials });
-
-    if (!result) {
-      throw new Error("Failed to get API key from OAuth credentials");
+    if (!this.isTokenExpired(tokens)) {
+      return { apiKey: tokens.access_token };
     }
 
+    const newTokens = await this.refreshTokens(tokens);
     return {
-      apiKey: result.apiKey,
-      newTokens: credentialsToTokens(result.newCredentials),
+      apiKey: newTokens.access_token,
+      newTokens,
     };
   }
 

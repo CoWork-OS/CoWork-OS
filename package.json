@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.5.48",
+  "version": "0.5.49",
   "description": "CoWork OS - GUI-first, CLI-capable local AI super app and everything app for coding, email, agents, documents, spreadsheets, presentations, web design, automations, and agentic work",
   "overrides": {
     "@whiskeysockets/baileys": {

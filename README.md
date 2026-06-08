@@ -30,7 +30,7 @@
   <a href="docs/terminal-tabs.md">Terminal Tabs</a> &middot;
   <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.48.md">Release Notes 0.5.48</a> &middot;
+  <a href="docs/release-notes-0.5.49.md">Release Notes 0.5.49</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -72,7 +72,7 @@ Generated 2026-06-08T08:21:20.470Z. These are public GitHub/npm adoption signals
 - **Ops and portability** — Zero-Human Company Ops, Digital Twin personas, managed devices, remote access, profiles, profile import/export, and best-fit workflow packs support both personal work and founder/operator-style autonomous company loops.
 - **Local-first security** — Your data and API keys stay on your machine. Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, session-scoped location prompts, private-memory filtering, and a verified automated test suite keep high-agency work bounded and reviewable.
 
-Recent high-impact additions change the day-to-day product shape: real terminal tabs, visible Browser Workbench, Side Chat, message-box shortcuts, Everything Workbench artifacts, Secure MCP Tunnels, and the 0.5.48 runtime reliability work. Detailed feature inventory remains below for deeper evaluation.
+Recent high-impact additions change the day-to-day product shape: the `cowork` CLI, Browser Use Cloud routing, Codex Security workflows, automation outcome reporting, real terminal tabs, visible Browser Workbench, Side Chat, message-box shortcuts, Everything Workbench artifacts, and Secure MCP Tunnels. Detailed feature inventory remains below for deeper evaluation.
 
 ### Ideas & Media
 
@@ -100,7 +100,7 @@ See [Everyday Agent](docs/everyday-agent.md), [Workflow Intelligence](docs/workf
 
 ### Latest Release
 
-**`0.5.48`** is the current package version. It adds Side Chat, self-hosted Secure MCP Tunnels, YouTube video intelligence, stronger timeline/sidebar paging, scheduler/routine duplicate-run guards, and several runtime safety fixes. Start with [Release Notes 0.5.48](docs/release-notes-0.5.48.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
+**`0.5.49`** is the current package version. It adds the `cowork` CLI, Browser Use Cloud routing, bundled Codex Security workflows, automation outcome reporting, Mission Control automation visibility, Usage Insights token heatmaps, prompt composer link chips, public adoption stats, and a broad security/reliability hardening pass. Start with [Release Notes 0.5.49](docs/release-notes-0.5.49.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
 
 The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox compose/send upgrades, runtime network/sandbox policy controls, Dreaming memory curation, and `/multitask` lane fan-out. See [Release Notes 0.5.45](docs/release-notes-0.5.45.md), [Managed Agents](docs/managed-agents.md), [Claude-for-Legal Workflows](docs/claude-for-legal.md), [Multitask Command](docs/multitask.md), and [Dreaming](docs/dreaming.md).
 
@@ -562,7 +562,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Beginner's Guide](docs/cowork-school.md) | Practical guide to what CoWork OS is for and which workflows to try first |
-| [Release Notes 0.5.48](docs/release-notes-0.5.48.md) | What is new in the latest release |
+| [Release Notes 0.5.49](docs/release-notes-0.5.49.md) | What is new in the latest release |
 | [Composer Mentions](docs/composer-mentions.md) | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing |
 | [Message Box Shortcuts](docs/message-box-shortcuts.md) | `/` picker for deterministic app commands and skill-backed workflow shortcuts |
 | [Side Chat](docs/side-chat.md) | Right-side read-only questions about an active running session without steering or stopping the parent task |

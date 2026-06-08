@@ -8,13 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Browser Use Cloud stealth backend**: Browser V2 can explicitly route `browser_navigate` through Browser Use Cloud with `browser_provider: "browser-use-cloud"`, using `BROWSER_USE_API_KEY` or encrypted `browser-use` settings, Browser Use API v3 session creation, CDP attach, optional proxy/profile/timeout/recording/screen controls, stale-session retry, and remote-session stop handling.
 - **Cross-platform desktop location**: `get_current_location` now works on macOS (Core Location), Windows (Windows.Devices.Geolocation via PowerShell), and Linux (GeoClue2 via gdbus). Each platform uses a bundled helper script that outputs a standard JSON envelope; the `DesktopLocationService` tries the first available provider. The macOS helper now includes the `com.apple.security.personal-information.location` entitlement required for Core Location authorization. Location access requires explicit one-time user permission on each platform and cannot be auto-approved or persisted.
 - **xAI Grok OAuth / SuperGrok provider docs**: documented the new `xai-oauth` provider option, SuperGrok browser sign-in flow, `grok-4.3` default model, token-refresh behavior, xAI API-key alternative, and related provider-count updates across README, getting started, provider, migration, status, feature, and positioning docs.
 - **Durable Runtime Context docs**: documented opt-in active-task durable recall, `context_grep` / `context_describe`, summary DAG parent links, clear-memory behavior, enable/disable expectations, diagnostics, edge cases, validation commands, and manual test prompts.
 
 ### Changed
-- **Browser V2 docs and safety model**: documented Browser Use Cloud configuration, explicit opt-in behavior, private/local target blocking, redacted Browser Use errors/URLs, and retryable pending-stop results across Browser Workbench, Browser V2 architecture, getting started, troubleshooting, development, feature, and architecture docs.
 - **First-run onboarding docs and UX**: documented the staged first-run setup flow, ChatGPT subscription sign-in path, local Ollama detection, free-option provider badges for OpenRouter/Gemini/Groq, and the fixed-frame onboarding recap with a scrollable review body.
 
 ### Fixed
@@ -25,6 +23,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Collaborative team run phase tracking**: added `execute` phase to `AgentTeamRunPhase` so the UI shows "Agents are executing..." during active child task work instead of "Thinking...".
 - **Read-only review safety**: review tasks automatically snapshot git state at start and restrict system interaction tools (screenshots, clicks, mouse) to prevent accidental workspace modifications.
 - **Workspace verification deduplication**: identical verification commands in the same workspace are deduplicated at the daemon level, preventing concurrent `tsc --noEmit` or build processes.
+
+## [0.5.49] - 2026-06-08
+
+### Added
+- **Release notes for 0.5.49**: see [Release Notes 0.5.49](release-notes-0.5.49.md).
+- **CLI local runner**: added the `cowork` npm binary, CLI source/build coverage, local Control Plane discovery, terminal UI helpers, direct-run support, and package inclusion for `tsconfig.cli.json`.
+- **Browser Use Cloud stealth backend**: Browser V2 can explicitly route `browser_navigate` through Browser Use Cloud with `browser_provider: "browser-use-cloud"`, using `BROWSER_USE_API_KEY` or encrypted `browser-use` settings, Browser Use API v3 session creation, CDP attach, optional proxy/profile/timeout/recording/screen controls, stale-session retry, and remote-session stop handling.
+- **Codex Security workflows**: added repository, diff, and deep security scan workflows, workspace-local scan artifact orchestration, report validation/render helpers, and the bundled Codex Security plugin pack with skills, references, scripts, and assets.
+- **Automation outcomes**: scheduled/automated runs can now record actionable, informational, low-value, and failed outcomes, with Mission Control surfacing outcome summaries and recent run details.
+- **Usage Insights token heatmap**: added a 12-month token activity overview with daily, weekly, and cumulative heatmap modes.
+- **Prompt composer link chips**: pasted standalone web URLs are converted to compact Markdown links and rendered as favicon chips in the composer.
+- **Public adoption stats**: added public GitHub/npm adoption stat collection, README rendering, history snapshots, and generated adoption reports.
+- **Namespaced skill slash commands**: slash command resolution now supports namespaced skill routes.
+
+### Changed
+- **Browser V2 docs and safety model**: documented Browser Use Cloud configuration, explicit opt-in behavior, private/local target blocking, redacted Browser Use errors/URLs, and retryable pending-stop results across Browser Workbench, Browser V2 architecture, getting started, troubleshooting, development, feature, and architecture docs.
+- **Startup and Control Plane behavior**: reduced sluggish desktop startup paths, tuned deferred startup work, and added an opt-in desktop Control Plane auto-enable path.
+- **Renderer shell polish**: improved task-list load-more state, reduced static Control Plane polling, isolated Settings sidebar search into a memoized component, and de-duplicated adjacent timeline failures in summary mode.
+- **Timeline event display**: improved browser action classification, timeline labels, event projection, and parallel group rendering for clearer task progress.
+- **Tool prompting**: contextual prompt guidance now wins over generic tool guidance when both apply.
+- **Documentation refresh**: refreshed README and docs for CLI usage, security scans, Browser Use Cloud, setup, troubleshooting, security, plugin packs, project status, and public adoption signals.
+
+### Fixed
+- **Security and auth hardening**: hardened webhook and MCP host auth, authenticated CoWork host tunnel forwarding, blocked cross-host Scrapling redirects, restricted `open_url` to web schemes, and tightened web fetch/scraping guardrails.
+- **Executor completion guardrails**: strengthened completion contract handling, file mutation verification, command requirements, and frontend browser-preview guidance.
+- **Automation permissions**: automated tasks now default to `dont_ask` permission behavior.
+- **Database migrations**: repaired pinned activity schema migration behavior and added legacy/schema migration coverage.
+- **Provider routing**: fixed retired Anthropic model handling and OpenCode Go Qwen 3.7 Max routing.
+- **Payments policy**: fixed x402 payment approval enforcement.
+- **Everyday Agent settings**: fixed the Everyday Agent read-only toggle.
+- **Development codesigning**: hardened the Electron development codesign helper.
 
 ## [0.5.48] - 2026-05-28
 
@@ -1113,6 +1142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.5.49 | 2026-06-08 | CoWork CLI, Browser Use Cloud, Codex Security workflows, automation outcomes, Usage Insights heatmaps, composer link chips, public adoption stats, and security hardening |
 | 0.5.48 | 2026-05-28 | Side Chat, Secure MCP Tunnels, YouTube video intelligence, timeline/sidebar paging, scheduler/routine reliability, and runtime safety fixes |
 | 0.5.47 | 2026-05-21 | Long-session reliability, off-main-thread memory recall, renderer stability, location approval safety, Maps MCP workflows, and private-memory filtering |
 | 0.5.45 | 2026-05-14 | Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox queue upgrades, runtime policy controls, Dreaming, and multitask lanes |
@@ -1138,7 +1168,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.48...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.49...HEAD
+[0.5.49]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.48...v0.5.49
 [0.5.48]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.47...v0.5.48
 [0.5.47]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.45...v0.5.47
 [0.5.45]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.44...v0.5.45

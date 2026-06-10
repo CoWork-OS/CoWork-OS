@@ -1,0 +1,17 @@
+{
+  "name": "@cowork-os/comfyui-mcp",
+  "version": "0.1.0",
+  "description": "ComfyUI workflow MCP connector for CoWork OS.",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "typescript": "^5.9.3"
+  }
+}

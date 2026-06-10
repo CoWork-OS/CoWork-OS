@@ -68,7 +68,7 @@ Generated 2026-06-10T07:16:50.308Z. These are public GitHub/npm adoption signals
 - **Developer workbench** — Real xterm.js + node-pty terminal tabs, title-bar terminal/browser toggles, Browser Workbench, responsive Browser V2 automation, screenshots, diagnostics, and visible web testing keep repo work, CLI work, and live app QA in the same workspace. [Terminal Tabs](docs/terminal-tabs.md) · [Browser Workbench](docs/browser-workbench.md)
 - **Inbox and channels** — Inbox Agent handles local-first mail triage, Ask Inbox evidence search, drafts, send/reply/forward, commitments, and `@Inbox` routing, while the gateway supports 17 messaging channels with specialization by workspace, agent role, guidance, and tool policy. [Inbox Agent](docs/inbox-agent.md) · [Channels](docs/channels.md)
 - **Automation and memory loop** — Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, Chronicle, Knowledge Graph, durable runtime context, and Usage Insights form a reviewable learning loop instead of an invisible background process. [Workflow Intelligence](docs/workflow-intelligence.md) · [Chronicle](docs/chronicle.md)
-- **Integrations, providers, and skills** — 35 LLM provider options, configurable fallback chains, provider-aware prompt caching, 44 MCP connectors, 36 bundled packs, 147 built-in skills, Composer `@` mentions, message-box `/` shortcuts, Plugin Store, Skill Store, and external skill directories make the app extensible without giving up local control. [Providers](docs/providers.md) · [Plugin Packs](docs/plugin-packs.md)
+- **Integrations, providers, and skills** — 35 LLM provider options, configurable fallback chains, provider-aware prompt caching, 47 MCP connectors, 36 bundled packs, 150 built-in skills, Composer `@` mentions, message-box `/` shortcuts, Plugin Store, Skill Store, and external skill directories make the app extensible without giving up local control. [Providers](docs/providers.md) · [Plugin Packs](docs/plugin-packs.md)
 - **Ops and portability** — Zero-Human Company Ops, Digital Twin personas, managed devices, remote access, profiles, profile import/export, and best-fit workflow packs support both personal work and founder/operator-style autonomous company loops.
 - **Local-first security** — Your data and API keys stay on your machine. Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, session-scoped location prompts, private-memory filtering, and a verified automated test suite keep high-agency work bounded and reviewable.
 
@@ -93,6 +93,7 @@ Stable workflow entry points for the newest high-impact capabilities.
 - **Image generation** — configurable provider ordering across Gemini, OpenAI, Azure OpenAI, and OpenRouter.
 - **Video generation** — text-to-video and image-to-video routing with polling tools and inline preview.
 - **Programmatic technical video** — bundled `manim-video` skill for Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](docs/skills/manim-video.md)
+- **Architecture design orchestration** — bundled `architecture-design` skill and local Rhino, Blender, and ComfyUI MCP connectors for concept house/building workflows with project-contained artifacts and connector evidence. [Learn more](docs/skills/architecture-design.md)
 - **React/Next.js implementation guidance** — bundled `react-best-practices` skill for React workspace changes, Next.js feature work, reviews, refactors, data-fetching improvements, bundle-size checks, and rendering-performance fixes. [Learn more](docs/skills/react-best-practices.md)
 - **High-agency frontend design** — bundled `taste-skill` for stricter anti-slop frontend work with stronger layout variance, typography, motion, and implementation rules.
 
@@ -277,7 +278,7 @@ The top of this README is intentionally opinionated about what matters first. Th
 | **Knowledge work artifacts** | Editable document artifacts, spreadsheet artifacts, presentation artifacts, web page artifacts, paired LaTeX/PDF outputs, smart PDF attachments, format-aware file preview, designed editorial documents, generated images, generated videos, and programmatic Manim technical videos |
 | **Inbox and communications** | Inbox Agent, Classic and Today inbox modes, Ask Inbox, hybrid mailbox search, editable AI drafts, manual reply/reply-all/forward, sender cleanup, commitments, Gmail forwarding automations, `@Inbox` routing, voice mode, outbound calls, and 17 messaging channels |
 | **Automation and memory** | Routines, scheduled tasks, webhooks, event triggers, Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, adaptive style learning, Usage Insights, persistent memory, Knowledge Graph, ChatGPT history import, durable runtime context, context compaction, Supermemory, and Chronicle |
-| **Integrations and extensibility** | 35 LLM provider options, ordered LLM/search fallback chains, provider-aware prompt caching, 44 MCP connectors, native Google Workspace coverage, 36 bundled plugin packs, 338 pack skills, 263 pack shortcuts, 42 pack agent roles, 147 built-in skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support |
+| **Integrations and extensibility** | 35 LLM provider options, ordered LLM/search fallback chains, provider-aware prompt caching, 47 MCP connectors, native Google Workspace coverage, 36 bundled plugin packs, 338 pack skills, 263 pack shortcuts, 42 pack agent roles, 150 built-in skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support |
 | **Operations and deployment** | Profiles, profile import/export, Devices, remote workspaces, remote task dispatch, remote file picking, Control Plane, Linux server package, self-hosting, Tailscale/SSH remote access, Zero-Human Company Ops, Digital Twin personas, company-linked operator agents, and best-fit Support/IT/Sales workflow packs |
 | **Safety and reliability** | Approval workflows, sandboxed execution, workspace/profile permission rules, network/sandbox policy controls, private-memory filtering, session-scoped location approvals, command/path containment, import scanning and quarantine, encrypted storage, local-first data handling, renderer event caps, off-main-thread memory recall, and long-session cleanup |
 
@@ -391,7 +392,7 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 ### Integrations
 
 - **Cloud Storage/Productivity**: 6 integrations, including Notion, Box, OneDrive, Google Workspace, Dropbox, and SharePoint
-- **44 MCP Connectors**: pre-built enterprise integrations for CRM, support, productivity, analytics, and payments (Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Socket, and more), with connector notifications available as trigger inputs for automations
+- **47 MCP Connectors**: pre-built enterprise integrations for CRM, support, productivity, analytics, payments, and local creative tools (Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Socket, Rhino, Blender, ComfyUI, and more), with connector notifications available as trigger inputs for automations
 - **Composer mentions**: type `@` in the message box to choose configured integrations. Google Workspace appears as service-specific options: built-in Gmail, Google Drive, and Google Calendar plus MCP-backed Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat when those tools are available. Mentions render as icon+name chips and are passed as soft routing hints, not permission grants. [Learn more](docs/composer-mentions.md)
 - **Google Workspace**: one OAuth connection covers Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, and Chat. Existing users may need to reconnect when a release adds new required scopes.
 - **Developer Tools**: `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry
@@ -405,7 +406,7 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 
 ### Active Context Sidebar
 
-Real-time overview of your active integrations, always visible in the right panel. Shows connected MCP connectors (44 available) and native integrations with branded Lucide icons (HubSpot, Salesforce, Google Workspace, Discord, GitHub, Postgres, and more) and green status dots, plus enabled skills from active packs. Each section shows 4 items with internal scrolling for more. Auto-refreshes every 30 seconds. [Learn more](docs/plugin-packs.md#context-panel)
+Real-time overview of your active integrations, always visible in the right panel. Shows connected MCP connectors (47 available) and native integrations with branded Lucide icons (HubSpot, Salesforce, Google Workspace, Discord, GitHub, Postgres, and more) and green status dots, plus enabled skills from active packs. Each section shows 4 items with internal scrolling for more. Auto-refreshes every 30 seconds. [Learn more](docs/plugin-packs.md#context-panel)
 
 ### Usage Insights
 
@@ -462,7 +463,7 @@ These are the workflows where approval gates, local data control, and measurable
 
 ### Extensibility
 
-- **147 built-in skills** across developer, productivity, communication, documents, frontend, game development, mobile development, financial analysis, infrastructure-as-code, and more
+- **150 built-in skills** across developer, productivity, communication, documents, frontend, game development, mobile development, financial analysis, infrastructure-as-code, architecture design, and more
 - **Custom skills** in `~/Library/Application Support/cowork-os/skills/` (macOS) or `%APPDATA%\cowork-os\skills\` (Windows)
 - **36 bundled plugin packs** with 338 pack skills, 263 pack shortcuts, 42 pack agent roles, message-box slash aliases, Claude-for-Legal workflow cards, and Digital Twin integration where applicable
 - **Plugin Store** — browse, install from Git/URL, scaffold custom packs, and review quarantine/report state for imported packs
@@ -589,6 +590,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [LLM Wiki](docs/llm-wiki.md) | First-class research vault workflow, slash syntax, vault layout, analyzer outputs, and Obsidian-friendly knowledge-base behavior |
 | [Kami Skill](docs/skills/kami.md) | Bundled editorial document workflow for resumes, one-pagers, white papers, diagrams, and slide decks |
 | [manim-video Skill](docs/skills/manim-video.md) | Bundled Manim CE workflow for technical animation, project scaffolding, and draft-to-production render flow |
+| [Architecture Design Skill](docs/skills/architecture-design.md) | Bundled Rhino, Blender, and ComfyUI orchestration workflow for concept architecture artifacts |
 | [React Best Practices Skill](docs/skills/react-best-practices.md) | Bundled React and Next.js guidance for feature work, refactors, reviews, data fetching, bundle size, and rendering performance |
 | [Workflow Intelligence](docs/workflow-intelligence.md) | Memory + Heartbeat + Reflection + Dreaming + Suggestions model, reviewable outputs, and feedback learning |
 | [Dreaming](docs/dreaming.md) | Background memory curation, Dreaming runs/candidates, trigger sources, and review-first memory maintenance |

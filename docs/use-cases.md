@@ -522,7 +522,36 @@ Expected behavior:
 - It calls `compile_latex`, which uses an installed `tectonic`, `latexmk`, `xelatex`, `lualatex`, or `pdflatex` binary.
 - The task output pairs the `.tex` source and compiled PDF in one artifact workbench with Summary, source, and PDF tabs.
 
-### 18) Nearby Errand Run (Location + Maps)
+### 18) Architecture Concept Workflow (Rhino + Blender + ComfyUI)
+
+Prompt:
+```
+Use the architecture-design skill to create a concept workflow for a two-story courtyard house.
+
+Create the project folder under .cowork/architecture-projects/courtyard-house.
+Use Rhino for site/massing and floor-plan iteration, Blender for one exterior render, and ComfyUI only if the local API is available.
+Keep all artifacts in the project folder.
+Stop before any long render or source CAD overwrite unless I approve it.
+```
+
+Prompt (site reference to render):
+```
+Use architecture-design to turn references/site-plan.png into a rough Rhino massing and Blender render.
+
+Copy the reference into the project folder before mutation.
+Set COWORK_ARCH_PROJECT_ROOT to the project folder.
+Record each connector result in manifest.json.
+If Rhino, Blender, or ComfyUI is unavailable, continue with the available stages only and tell me what setup is missing.
+```
+
+Expected behavior:
+
+- CoWork creates `.cowork/architecture-projects/<project-id>/` with `brief.json`, `manifest.json`, and stage folders.
+- Rhino, Blender, and ComfyUI tools are called only when their local connectors report healthy.
+- File paths stay under `COWORK_ARCH_PROJECT_ROOT`.
+- Results are treated as concept design, not licensed architectural or engineering approval.
+
+### 19) Nearby Errand Run (Location + Maps)
 
 Prompt:
 ```

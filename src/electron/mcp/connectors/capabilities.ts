@@ -16,7 +16,10 @@ export type ConnectorCapabilityId =
   | "google-workspace"
   | "figma"
   | "vercel"
-  | "monday";
+  | "monday"
+  | "rhino"
+  | "blender"
+  | "comfyui";
 
 export type Tier1IntegrationProvider =
   | "resend"
@@ -303,6 +306,84 @@ const CAPABILITIES: Record<ConnectorCapabilityId, ConnectorCapability> = {
       dashboard: "https://monday.com/developers/apps",
       create_api_key: "https://monday.com/developers/apps",
       api_keys_docs: "https://developer.monday.com/api-reference/docs/getting-started",
+    },
+  },
+  rhino: {
+    id: "rhino",
+    name: "Rhino",
+    registryEntryId: "rhino",
+    authMethods: ["api_key"],
+    readinessAny: [["COWORK_ARCH_PROJECT_ROOT"]],
+    healthTool: "rhino.health",
+    links: {
+      dashboard: "https://www.rhino3d.com/",
+      api_keys_docs: "https://developer.rhino3d.com/",
+    },
+    inputHints: {
+      COWORK_ARCH_PROJECT_ROOT: {
+        field: "COWORK_ARCH_PROJECT_ROOT",
+        label: "Architecture project root",
+        prompt: "Provide the workspace folder where Rhino project files may be read and written.",
+        docs_url: "https://developer.rhino3d.com/",
+      },
+      RHINO_MCP_BRIDGE_URL: {
+        field: "RHINO_MCP_BRIDGE_URL",
+        label: "Rhino bridge URL",
+        prompt: "Provide the localhost Rhino bridge URL.",
+        docs_url: "https://developer.rhino3d.com/",
+      },
+    },
+  },
+  blender: {
+    id: "blender",
+    name: "Blender",
+    registryEntryId: "blender",
+    authMethods: ["api_key"],
+    readinessAny: [["COWORK_ARCH_PROJECT_ROOT"]],
+    healthTool: "blender.health",
+    links: {
+      dashboard: "https://www.blender.org/",
+      api_keys_docs: "https://docs.blender.org/api/current/",
+    },
+    inputHints: {
+      COWORK_ARCH_PROJECT_ROOT: {
+        field: "COWORK_ARCH_PROJECT_ROOT",
+        label: "Architecture project root",
+        prompt: "Provide the workspace folder where Blender project files may be read and written.",
+        docs_url: "https://docs.blender.org/api/current/",
+      },
+      BLENDER_MCP_BRIDGE_URL: {
+        field: "BLENDER_MCP_BRIDGE_URL",
+        label: "Blender bridge URL",
+        prompt: "Provide the localhost Blender bridge URL.",
+        docs_url: "https://docs.blender.org/api/current/",
+      },
+    },
+  },
+  comfyui: {
+    id: "comfyui",
+    name: "ComfyUI",
+    registryEntryId: "comfyui",
+    authMethods: ["api_key"],
+    readinessAny: [["COWORK_ARCH_PROJECT_ROOT"]],
+    healthTool: "comfyui.health",
+    links: {
+      dashboard: "https://github.com/comfyanonymous/ComfyUI",
+      api_keys_docs: "https://github.com/comfyanonymous/ComfyUI",
+    },
+    inputHints: {
+      COWORK_ARCH_PROJECT_ROOT: {
+        field: "COWORK_ARCH_PROJECT_ROOT",
+        label: "Architecture project root",
+        prompt: "Provide the workspace folder where ComfyUI workflow files and outputs may be read and written.",
+        docs_url: "https://github.com/comfyanonymous/ComfyUI",
+      },
+      COMFYUI_BASE_URL: {
+        field: "COMFYUI_BASE_URL",
+        label: "ComfyUI base URL",
+        prompt: "Provide the localhost ComfyUI API URL.",
+        docs_url: "https://github.com/comfyanonymous/ComfyUI",
+      },
     },
   },
 };

@@ -1,0 +1,63 @@
+{
+  "id": "architecture-design",
+  "name": "Architecture Design",
+  "description": "Orchestrate an architectural concept workflow across Rhino, Blender, and ComfyUI connectors.",
+  "icon": "A",
+  "category": "Use Cases",
+  "prompt": "Architecture concept design workflow.\n\nGoal\n- Turn the user's architecture brief into workspace artifacts using Rhino, Blender, and ComfyUI connector tools when available.\n\nInputs\n- User intent: {{intent}}\n- Project name: {{project_name}}\n- Site/reference assets: {{reference_assets}}\n- Output style: {{output_style}}\n\nWorkflow\n1) Create a project folder at `.cowork/architecture-projects/<project-id>/` and initialize `brief.json` and `manifest.json`.\n2) Check connector readiness with `mcp_rhino.health`, `mcp_blender.health`, and `mcp_comfyui.health`.\n3) Rhino stage: create/open the Rhino project, import site/reference assets, create terrain/setbacks, generate massing, generate or update floor plans, validate the model, capture a viewport, and export a Blender-compatible model.\n4) Blender stage: import the Rhino export, assign materials by layer/object names, set camera/lighting/render engine, render views, and save the scene.\n5) ComfyUI stage: submit a photoreal workflow using the Blender render, prompt, style references, and project context; monitor status and collect outputs.\n6) Update `manifest.json` after every successful stage with file paths, tool results, warnings, and decisions.\n7) Produce a concise report with artifacts, assumptions, unresolved constraints, and recommended next steps.\n\nRules\n- Prefer connector tools over native UI automation.\n- Use computer-use only as a fallback when a connector path is unavailable.\n- Never claim an app action succeeded without tool output or a saved artifact path.\n- Keep all generated files in the project folder unless the user approves another destination.\n- Ask before overwriting source CAD files, deleting files, or running long/expensive renders.\n- Label outputs as concept design, not code-compliant construction documents.\n",
+  "parameters": [
+    {
+      "name": "intent",
+      "type": "string",
+      "description": "Natural-language architecture design request",
+      "required": true
+    },
+    {
+      "name": "project_name",
+      "type": "string",
+      "description": "Project name or working title",
+      "required": false,
+      "default": "architecture-concept"
+    },
+    {
+      "name": "reference_assets",
+      "type": "string",
+      "description": "Workspace paths or notes for site images, CAD files, sketches, and mood boards",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "output_style",
+      "type": "string",
+      "description": "Desired visual style or design direction",
+      "required": false,
+      "default": "modern architectural concept"
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to design, model, render, or iterate an architectural concept, floor plan, house, building massing, site plan, facade, or photoreal architecture visualization.",
+      "dontUseWhen": "Do not use when the user only wants a high-level written strategy, a building-code/legal opinion, or structural/MEP engineering certification.",
+      "outputs": "Project manifest, Rhino model outputs, Blender scene/render outputs, ComfyUI images, decisions, warnings, and next-step checklist.",
+      "successCriteria": "Connector-backed workflow evidence exists for app actions, artifacts stay in the workspace project folder, and risky changes or long renders require approval.",
+      "examples": {
+        "positive": [
+          "Design a modern cliff house and render it",
+          "Create a floor plan and Blender render from this site image",
+          "Use Rhino, Blender, and ComfyUI to make an architectural concept",
+          "Generate a house massing study and photoreal views"
+        ],
+        "negative": [
+          "Explain residential zoning law in California",
+          "Certify this structure is safe",
+          "Write a high-level business plan for an architecture firm",
+          "Calculate stamped MEP drawings"
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "high"
+    }
+  }
+}

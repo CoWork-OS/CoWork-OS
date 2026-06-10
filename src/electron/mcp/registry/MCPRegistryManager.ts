@@ -119,6 +119,9 @@ const SHIPPED_LOCAL_CONNECTOR_IDS = new Set([
   "vercel",
   "monday",
   "maps",
+  "rhino",
+  "blender",
+  "comfyui",
   "miro",
   "supabase",
   "excalidraw",
@@ -235,6 +238,9 @@ function getConnectorEntries(): MCPRegistryEntry[] {
   const vercelCommand = getConnectorCommandArgs("vercel-mcp");
   const mondayCommand = getConnectorCommandArgs("monday-mcp");
   const mapsCommand = getConnectorCommandArgs("maps-mcp");
+  const rhinoCommand = getConnectorCommandArgs("rhino-mcp");
+  const blenderCommand = getConnectorCommandArgs("blender-mcp");
+  const comfyuiCommand = getConnectorCommandArgs("comfyui-mcp");
   // API-key connectors
   const apolloCommand = getConnectorCommandArgs("apollo-mcp");
   const clayCommand = getConnectorCommandArgs("clay-mcp");
@@ -974,6 +980,98 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       category: "productivity",
       verified: true,
       featured: true,
+    },
+    {
+      id: "rhino",
+      name: "Rhino",
+      description:
+        "Rhino architecture connector for CoWork OS. Drives a local Rhino bridge for site, massing, floor plan, viewport, and export operations.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: rhinoCommand.command,
+      defaultArgs: rhinoCommand.args,
+      defaultEnv: {
+        COWORK_ARCH_PROJECT_ROOT: "",
+        RHINO_MCP_BRIDGE_URL: "http://127.0.0.1:17641",
+        RHINO_MCP_BRIDGE_TIMEOUT_MS: "120000",
+      },
+      tools: [
+        { name: "rhino.health", description: "Check Rhino bridge availability" },
+        { name: "rhino.create_project", description: "Create a Rhino architecture project workspace" },
+        { name: "rhino.import_site_image", description: "Import site/reference imagery" },
+        { name: "rhino.generate_massing", description: "Generate building massing" },
+        { name: "rhino.generate_floor_plan", description: "Generate room layouts and labels" },
+        { name: "rhino.export_model", description: "Export model for Blender or delivery" },
+      ],
+      tags: ["rhino", "architecture", "cad", "3d", "connector"],
+      category: "creative",
+      verified: true,
+    },
+    {
+      id: "blender",
+      name: "Blender",
+      description:
+        "Blender architecture connector for CoWork OS. Drives a local Blender bridge for model import, materials, cameras, lighting, and renders.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: blenderCommand.command,
+      defaultArgs: blenderCommand.args,
+      defaultEnv: {
+        COWORK_ARCH_PROJECT_ROOT: "",
+        BLENDER_MCP_BRIDGE_URL: "http://127.0.0.1:17642",
+        BLENDER_MCP_BRIDGE_TIMEOUT_MS: "120000",
+      },
+      tools: [
+        { name: "blender.health", description: "Check Blender bridge availability" },
+        { name: "blender.import_model", description: "Import a Rhino-exported model" },
+        { name: "blender.assign_materials_by_layer", description: "Assign materials using layer/object names" },
+        { name: "blender.setup_camera", description: "Create or update a render camera" },
+        { name: "blender.render_view", description: "Render a camera view" },
+      ],
+      tags: ["blender", "architecture", "rendering", "3d", "connector"],
+      category: "creative",
+      verified: true,
+    },
+    {
+      id: "comfyui",
+      name: "ComfyUI",
+      description:
+        "ComfyUI connector for CoWork OS. Submits local ComfyUI workflows, monitors jobs, and collects generated outputs.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: comfyuiCommand.command,
+      defaultArgs: comfyuiCommand.args,
+      defaultEnv: {
+        COWORK_ARCH_PROJECT_ROOT: "",
+        COMFYUI_BASE_URL: "http://127.0.0.1:8188",
+        COMFYUI_MCP_TIMEOUT_MS: "60000",
+        COMFYUI_WORKFLOW_DIR: "",
+      },
+      tools: [
+        { name: "comfyui.health", description: "Check ComfyUI API availability" },
+        { name: "comfyui.list_workflows", description: "List local workflow JSON files" },
+        { name: "comfyui.submit_workflow", description: "Submit a ComfyUI workflow graph" },
+        { name: "comfyui.submit_flux_photoreal_pass", description: "Submit a Flux-style photoreal workflow graph" },
+        { name: "comfyui.collect_outputs", description: "Collect generated output images" },
+      ],
+      tags: ["comfyui", "flux", "image-generation", "architecture", "connector"],
+      category: "creative",
+      verified: true,
     },
     // --- npm-based connectors ---
     {

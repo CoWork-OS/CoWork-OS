@@ -58,7 +58,7 @@
 - **Permission Engine**: layered tool approvals combine explicit modes, per-tool/path/command-prefix/MCP-server rules, session grants, workspace-local rules, profile rules, and hard guardrails; `dangerous_only` adds a lower-friction mode that still prompts on destructive, privacy-sensitive, side-effecting, or ambiguous actions.
 - **Live Terminal Tabs**: Shell work can happen in real PTY-backed terminal tabs. xterm.js handles rendering and keyboard input, node-pty handles OS pseudoterminals, users can create/close tabs, resize the dock, use arrows/Tab/Ctrl+C, and interact with native CLI flows such as `npm login`. See [Terminal Tabs](terminal-tabs.md).
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
-- **150 Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, financial analysis, and more. Bundled workflows now include [LLM Wiki](llm-wiki.md) for persistent research vaults, [manim-video](skills/manim-video.md) for deterministic technical animation, [kami](skills/kami.md) for editorial PDFs and slide decks, [react-best-practices](skills/react-best-practices.md) for React and Next.js implementation work, and `taste-skill` for high-agency frontend design. Optional CLI-based skills (e.g. [aurl](skills/aurl.md) for OpenAPI/GraphQL APIs) appear when the binary is installed.
+- **150 Built-in Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, financial analysis, and more. Bundled workflows now include [LLM Wiki](llm-wiki.md) for persistent research vaults, [manim-video](skills/manim-video.md) for deterministic technical animation, [architecture-design](skills/architecture-design.md) for Rhino/Blender/ComfyUI concept architecture workflows, [kami](skills/kami.md) for editorial PDFs and slide decks, [react-best-practices](skills/react-best-practices.md) for React and Next.js implementation work, and `taste-skill` for high-agency frontend design. Optional CLI-based skills (e.g. [aurl](skills/aurl.md) for OpenAPI/GraphQL APIs) appear when the binary is installed.
 - **Additive Skill Runtime**: Skills can still be proactively shortlisted from task semantics, but they now apply as additive context and scoped runtime directives. They never replace the original task prompt. See [Skills Runtime Model](skills-runtime-model.md).
 
 <p align="center">
@@ -103,6 +103,7 @@
 - **Image Generation**: Multi-provider support (Gemini, OpenAI gpt-image-1/1.5/DALL-E, Azure OpenAI, OpenRouter) with configurable provider ordering
 - **Video Generation**: Text-to-video and image-to-video via new video generation providers. Configure preferred video model in Settings > LLM. Generated videos render inline in the task feed.
 - **Programmatic Technical Animation**: The bundled [manim-video](skills/manim-video.md) skill scaffolds Manim CE projects for math explainers, algorithm walkthroughs, architecture animations, and data stories with local project files, dependency preflight, and draft-first render helpers.
+- **Architecture Design Orchestration**: The bundled [architecture-design](skills/architecture-design.md) skill coordinates local Rhino, Blender, and ComfyUI MCP connectors for concept architecture workflows, keeping briefs, manifests, model exports, renders, and photoreal passes inside a project root with connector evidence for each completed stage.
 - **Editorial Document Design**: The bundled [kami](skills/kami.md) skill scaffolds workspace-local source projects for resumes, one-pagers, white papers, letters, portfolios, diagrams, and slide decks, with PDF/PPTX render helpers and a preserved editorial design system.
 - **React/Next.js Implementation Guidance**: The bundled [react-best-practices](skills/react-best-practices.md) skill applies React and Next.js performance guidance during feature work, enhancements, refactors, reviews, data-fetching changes, bundle-size checks, and rendering-performance fixes.
 - **High-Agency Frontend Design**: The bundled `taste-skill` workflow adds a stricter anti-slop frontend option for React/Next.js-style UI work, with stronger layout variance, typography, motion, dependency-check, and responsive-quality rules than the default frontend guidance.
@@ -464,7 +465,7 @@ Role-specific and workflow bundles that group skills, agent roles, connectors, a
 - **Warning-only local detection**: unmanaged local pack folders remain discoverable in v1, but security findings can surface as warning badges and report details
 - **Remote Pack Registry**: Community-contributed packs catalog with search and category filtering
 - **Extensible**: Create custom packs with JSON manifests in `~/.cowork/extensions/`
-- **Active Context sidebar**: Always-visible right-panel section showing connected MCP connectors with branded Lucide icons (44 connectors supported) and enabled skills, with scrollable sub-sections and 30-second auto-refresh
+- **Active Context sidebar**: Always-visible right-panel section showing connected MCP connectors with branded Lucide icons (47 connectors supported) and enabled skills, with scrollable sub-sections and 30-second auto-refresh
 - **Skill conflict detection**: Warns when multiple packs register the same skill ID, preventing silent overwrites
 - **Admin Policies**: Organization-level controls for allowed/blocked/required packs, installation permissions, and agent limits
 
@@ -1434,7 +1435,7 @@ See [Remote Access](remote-access.md) for details.
 
 ## Enterprise MCP Connectors
 
-**44 pre-built connectors** for enterprise integrations. Install from **Settings > Connectors > Browse Registry**.
+**47 pre-built connectors** for enterprise integrations and local creative workflows. Install from **Settings > Connectors > Browse Registry**.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-11.webp" alt="Connector catalog" width="700">
@@ -1490,6 +1491,9 @@ See [Remote Access](remote-access.md) for details.
 | **Drafts** | Notes (macOS) | create, search drafts |
 | **Fantastical** | Calendar (macOS) | events, schedule |
 | **Tomba** | Email | finder, verifier, domain search |
+| **Rhino** | Architecture/CAD | localhost bridge for site, massing, floor plan, viewport, and export operations |
+| **Blender** | 3D/Rendering | localhost bridge for import, materials, camera, lighting, viewport, render, and scene save operations |
+| **ComfyUI** | Image Generation | local API workflow submission, Flux-style photoreal pass, job status, history, and output collection |
 
 GitHub and Notion prefer native CoWork integrations first, with MCP as fallback. See [Enterprise Connectors](enterprise-connectors.md) for the full catalog and contract.
 
@@ -1525,7 +1529,7 @@ The main composer supports grouped `@` mentions for **Agents**, **Integrations**
 
 Google Workspace uses one OAuth connection for the built-in tools and MCP connector. The default consent set covers Drive, Gmail read/send/modify, Calendar, Spreadsheets, Documents, Tasks, Presentations, Chat messages, and Chat spaces readonly. Existing users with older tokens may need to reconnect when a release adds required scopes; the status check reports missing scopes when reconnect is needed. Destructive or broad Tasks/Slides operations require explicit confirmation fields before the MCP connector executes them.
 
-Configure by clicking any card in **Settings** > **Integrations**. Enterprise MCP connectors (Salesforce, Jira, HubSpot, Slack, etc.) are also managed from the same tab.
+Configure by clicking any card in **Settings** > **Integrations**. Enterprise and local creative MCP connectors (Salesforce, Jira, HubSpot, Rhino, Blender, ComfyUI, etc.) are also managed from the same tab.
 
 ---
 
@@ -1663,7 +1667,7 @@ Run multiple tasks concurrently with configurable limits (1-10, default: 3). Tas
 
 ---
 
-## Built-in Skills (147)
+## Built-in Skills (150)
 
 | Category | Skills |
 |----------|--------|
@@ -1673,6 +1677,7 @@ Run multiple tasks concurrently with configurable limits (1-10, default: 3). Tas
 | **Media** | Spotify, YouTube, SoundCloud |
 | **Image** | Image Generation (Gemini/OpenAI/Azure), Agentic Image Loop |
 | **Documents** | Excel, Word, PDF, PowerPoint |
+| **Architecture / 3D** | Architecture Design |
 | **Frontend** | Frontend Design, React Best Practices, React Native Best Practices, Taste Skill |
 | **Mobile** | iOS Development, Android Development |
 | **Game Dev** | Unity Development, Unreal Engine Development, Game Performance Optimization |

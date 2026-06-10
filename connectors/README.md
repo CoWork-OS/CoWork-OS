@@ -17,5 +17,21 @@ Reference implementations:
 - `connectors/asana-mcp`
 - `connectors/okta-mcp`
 - `connectors/resend-mcp`
+- `connectors/discord-mcp`
+- `connectors/google-workspace-mcp`
+- `connectors/figma-mcp`
+- `connectors/vercel-mcp`
+- `connectors/monday-mcp`
+- `connectors/finance-data-mcp`
+- `connectors/maps-mcp`
+- `connectors/rhino-mcp`
+- `connectors/blender-mcp`
+- `connectors/comfyui-mcp`
+
+Local app connectors that accept file paths, such as Rhino, Blender, and
+ComfyUI, must scope file and directory arguments to a configured project root
+(`COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`) before dispatching to
+the bridge/API. They should also reject non-local bridge URLs and undeclared
+tool names.
 
 See `docs/enterprise-connectors.md` for the Phase 1 connector contract.

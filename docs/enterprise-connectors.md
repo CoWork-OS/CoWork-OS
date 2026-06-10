@@ -1,6 +1,6 @@
 # Enterprise Connectors
 
-This document describes the current shipped MCP connector surface in CoWork OS. The goal is to expose enterprise integrations through a consistent MCP interface while keeping the app decoupled from connector implementation details and avoiding overlap with stronger native integrations.
+This document describes the current shipped MCP connector surface in CoWork OS. The goal is to expose enterprise and local creative integrations through a consistent MCP interface while keeping the app decoupled from connector implementation details and avoiding overlap with stronger native integrations.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-11.webp" alt="Connector catalog" width="700">
@@ -9,14 +9,14 @@ This document describes the current shipped MCP connector surface in CoWork OS. 
 
 ## Phase 1 Goals
 
-- Define a connector contract (naming, inputs, outputs, errors).
+- Define a connector contract (naming, inputs, outputs, errors, and local file boundaries).
 - Provide a reusable MCP connector template for new integrations.
-- Specify MVP tool sets for Salesforce and Jira.
-- Ship Salesforce and Jira connectors as installable MCP servers in the registry UI.
+- Specify MVP tool sets for Salesforce, Jira, and local creative app bridges.
+- Ship bundled and installable connectors in the registry UI.
 
 ## Current Connector Strategy
 
-Shipped enterprise connectors run as MCP servers and expose tools over MCP (stdio, SSE, or WebSocket). Each connector still uses direct APIs under the hood (OAuth, REST, GraphQL), but the app consumes them consistently through MCP.
+Shipped connectors run as MCP servers and expose tools over MCP (stdio, SSE, or WebSocket). Service connectors still use direct APIs under the hood (OAuth, REST, GraphQL), while local creative connectors drive localhost-only app bridges or APIs such as Rhino, Blender, and ComfyUI. The app consumes both styles consistently through MCP.
 
 For some integrations with strong native CoWork paths, the runtime now prefers direct APIs first and only falls back to MCP when needed. Today that applies to GitHub and Notion.
 
@@ -86,25 +86,28 @@ Secure MCP Tunnels enforce relay-side and local policy, including tool allowlist
 
 ## Shipped Connector Allowlist
 
-The shipped connector catalog includes **44 connectors** across CRM, productivity, devtools, communication, legal, and finance categories. Install from **Settings > Connectors > Browse Registry**.
+The shipped connector catalog includes **47 connectors** across CRM, productivity, devtools, communication, legal, finance, and creative categories. Install from **Settings > Connectors > Browse Registry**.
 
-### Enterprise & CRM (11)
+### Enterprise & CRM
 Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend, Discord, Google Workspace
 
-### Dev Tools & Analytics (19)
+### Dev Tools & Analytics
 Figma, Vercel, Monday, Excalidraw, Supabase, Netlify, Honeycomb, Ahrefs, Cloudflare, Tavily, tldraw, Amplitude, Clerk, Grafana, Socket, Metabase, Shadcn UI, GrowthBook, Tomba
 
-### Productivity (11)
+### Productivity
 Miro, Hugging Face, Mermaid Chart, Make, Smartsheet, Airtable, Cal.com, Cloudinary, Mem, Drafts (macOS), Fantastical (macOS)
 
-### Finance & Payments (4)
+### Finance & Payments
 Stripe, PayPal, Square, Attio
 
-### Legal (1)
+### Legal
 Clinical Trials
 
-### Communication (1)
+### Communication
 Mailtrap
+
+### Creative / Architecture
+Rhino, Blender, ComfyUI
 
 ## Connector Contract
 
@@ -116,6 +119,9 @@ Mailtrap
   - `salesforce.create_record`
   - `jira.search_issues`
   - `jira.create_issue`
+  - `rhino.generate_massing`
+  - `blender.render_view`
+  - `comfyui.submit_flux_photoreal_pass`
 
 In the CoWork app, MCP tools are prefixed (default `mcp_`), so agents will see:
 - `mcp_salesforce.search_records`
@@ -132,6 +138,14 @@ Use the following fields where applicable:
 - `requestId`: idempotency and tracing.
 - `idempotencyKey`: for create/update operations.
 - `workspaceId` or `tenantId`: for multi-tenant servers.
+
+Local file-oriented connectors must also:
+
+- require a project root such as `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`
+- reject URL-style file paths
+- normalize file and directory inputs before calling a bridge
+- reject paths that resolve outside the project root
+- keep generated artifacts under the project root unless a user explicitly approves another destination and the connector supports it safely
 
 ### Standard Output Shape (Recommended)
 
@@ -290,6 +304,34 @@ Authentication is OAuth 2.0 with PKCE. Settings uses local callback port `18766`
 
 Destructive or broad Google Workspace MCP actions require explicit confirmation fields, including task-list deletion, task deletion, clearing completed tasks, slide deletion, replace-all-text, and raw Slides `batchUpdate`.
 
+## Local Creative Connectors
+
+Rhino, Blender, and ComfyUI are bundled local connectors for concept architecture and visualization workflows. They are designed for the `architecture-design` skill but can also be called directly when configured.
+
+Common setup:
+
+```sh
+COWORK_ARCH_PROJECT_ROOT=/absolute/path/to/project
+```
+
+| Connector | Default endpoint | Required local dependency | Primary tools |
+|-----------|------------------|---------------------------|---------------|
+| Rhino | `http://127.0.0.1:17641` | Rhino bridge process | `rhino.create_project`, `rhino.import_site_image`, `rhino.generate_massing`, `rhino.generate_floor_plan`, `rhino.export_model`, `rhino.capture_viewport` |
+| Blender | `http://127.0.0.1:17642` | Blender bridge process | `blender.import_model`, `blender.assign_materials_by_layer`, `blender.setup_camera`, `blender.setup_lighting`, `blender.render_view`, `blender.save_scene` |
+| ComfyUI | `http://127.0.0.1:8188` | Local ComfyUI API | `comfyui.list_workflows`, `comfyui.submit_workflow`, `comfyui.submit_flux_photoreal_pass`, `comfyui.get_job_status`, `comfyui.collect_outputs` |
+
+Security and reliability behavior:
+
+- only localhost bridge/API URLs are accepted
+- undeclared tool names are rejected before endpoint dispatch
+- request timeouts are enforced for bridge/API calls
+- non-JSON error bodies are surfaced as readable connector errors
+- project file paths are scoped to `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`
+- ComfyUI photoreal workflows apply `{{prompt}}`, `{{negativePrompt}}`, `{{sourceImagePath}}`, and `{{projectId}}` placeholders before submission
+- ComfyUI output collection can copy images into a project-root-relative `outputDir`
+
+See [Architecture Design Skill](skills/architecture-design.md) for the end-to-end orchestration workflow and artifact layout.
+
 ## Connector Template
 
 A minimal MCP connector template is provided at:
@@ -304,7 +346,7 @@ Use it to bootstrap new connectors quickly. It includes:
 
 ## Built-in Connectors (Local Registry)
 
-**44 connectors** are included in the local MCP registry and appear in **Settings → Connectors → Browse Registry**. All are npm-installable MCP servers (stdio transport) unless noted as manual (bundled connectors).
+**47 connectors** are included in the local MCP registry and appear in **Settings → Connectors → Browse Registry**. All are npm-installable MCP servers (stdio transport) unless noted as manual (bundled connectors).
 
 | Category | Connectors |
 |----------|------------|
@@ -314,6 +356,7 @@ Use it to bootstrap new connectors quickly. It includes:
 | **Dev Tools** | Hugging Face, Ahrefs, Mermaid Chart, Cloudflare, Honeycomb, Tavily, tldraw, Amplitude, Clerk, Grafana, Socket, Metabase, Shadcn UI, GrowthBook, Tomba |
 | **Finance** | Stripe, PayPal, Square, Attio |
 | **Legal** | Clinical Trials |
+| **Creative / Architecture** | Rhino, Blender, ComfyUI |
 
 Not shipped in the current connector catalog: Slack, DocuSign, Outreach (removed from Tier-1). Slack remains available as a channel gateway. GitHub and Notion prefer native CoWork integrations first, with MCP as fallback.
 

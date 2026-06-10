@@ -86,6 +86,7 @@ export default defineConfig({
           { text: 'Inbox Agent', link: '/inbox-agent' },
           { text: 'Skill Store & External Skills', link: '/skill-store-and-external-skills' },
           { text: 'manim-video skill', link: '/skills/manim-video' },
+          { text: 'Architecture Design skill', link: '/skills/architecture-design' },
           { text: 'Release Notes 0.5.49', link: '/release-notes-0.5.49' },
           { text: 'Release Notes 0.5.48', link: '/release-notes-0.5.48' },
           { text: 'Release Notes 0.5.47', link: '/release-notes-0.5.47' },

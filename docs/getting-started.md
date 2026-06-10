@@ -541,8 +541,11 @@ Install enterprise connectors from **Settings** > **Integrations** > **Browse Re
 | **Okta** | Identity | API token + domain |
 | **Discord** | Community | Bot token + application ID |
 | **Google Workspace** | Productivity | Shared OAuth in-app flow; reconnect when newer required scopes are missing |
+| **Rhino** | Architecture/CAD | Localhost Rhino bridge + `COWORK_ARCH_PROJECT_ROOT` |
+| **Blender** | 3D/Rendering | Localhost Blender bridge + `COWORK_ARCH_PROJECT_ROOT` |
+| **ComfyUI** | Image Generation | Local ComfyUI API + `COWORK_ARCH_PROJECT_ROOT` |
 
-Each connector provides tools like `search`, `get`, `create`, and `update` for its respective service. **44 connectors** are available in total, including Stripe, Tavily, Grafana, Metabase, Socket, and more. See [Enterprise Connectors](enterprise-connectors.md) for the full catalog.
+Most service connectors provide tools like `search`, `get`, `create`, and `update` for their respective APIs. Local creative connectors provide app-specific tools for Rhino, Blender, and ComfyUI; their file arguments must stay inside `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`. **47 connectors** are available in total, including Stripe, Tavily, Grafana, Metabase, Socket, Rhino, Blender, ComfyUI, and more. See [Enterprise Connectors](enterprise-connectors.md) for the full catalog.
 
 ### Social Integrations (Optional)
 
@@ -691,7 +694,7 @@ Don't use system folders like `/System` or `/Applications`.
 5. **Goal Mode**: Define success criteria and let the agent auto-retry until verification passes
 6. **Custom Skills**: Create reusable workflows with custom prompts in Settings > Custom Skills
 7. **MCP Servers**: Connect to external tools via MCP in Settings > MCP Servers
-8. **Enterprise Connectors**: Install from 44 connectors (Salesforce, Jira, HubSpot, Stripe, Tavily, Grafana, and more) via Settings > Connectors
+8. **Enterprise Connectors**: Install from 47 connectors (Salesforce, Jira, HubSpot, Stripe, Tavily, Grafana, Rhino, Blender, ComfyUI, and more) via Settings > Connectors
 9. **Cloud Storage/Productivity**: Connect Notion, Box, OneDrive, Google Workspace (Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks/Chat), Dropbox, or SharePoint — click their cards in Settings > Integrations
 10. **Parallel Tasks**: Run multiple tasks concurrently (configure in Settings > Task Queue)
 11. **Guardrails**: Set token/cost budgets and blocked commands in Settings > Guardrails

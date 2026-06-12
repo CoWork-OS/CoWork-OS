@@ -37,7 +37,7 @@ Mention options are built from local configured state. The resolver is intention
 Configured integration rules:
 
 - Built-in integrations require both `enabled` state and local credentials. This covers Notion, Box, OneDrive, Dropbox, SharePoint, and AgentMail.
-- Built-in Google Workspace splits into **Gmail**, **Google Drive**, and **Google Calendar** when OAuth has an access token or refresh token. The connected Google Workspace MCP connector can also split into service-specific options such as **Google Docs**, **Google Sheets**, **Google Slides**, **Google Tasks**, and **Google Chat** based on its available tools. The menu does not show a single generic Google Workspace item for prompt mentions.
+- Google Workspace splits into service-specific options such as **Gmail**, **Google Drive**, **Google Calendar**, **Google Docs**, **Google Sheets**, **Google Slides**, **Google Tasks**, and **Google Chat** when OAuth credentials and native or MCP-backed tools are available. The **Google Calendar** option merges native `calendar_action` and MCP `google-workspace.calendar_*` tools into one chip when both are connected. The menu does not show a single generic Google Workspace item for prompt mentions.
 - Gateway channels show connected enabled channels such as Slack. If more than one channel of the same type is connected, the label includes the workspace or channel name.
 - MCP connectors appear only when connected/configured. Multi-service MCP connectors split by detected service tool groups; otherwise the menu shows one connector option.
 - Inbox appears as an internal integration-style option when a mailbox backend is available through Google Workspace, AgentMail, or a connected email channel.

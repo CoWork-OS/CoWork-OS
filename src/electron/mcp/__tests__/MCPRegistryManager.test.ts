@@ -104,6 +104,9 @@ describe("MCPRegistryManager install defaults", () => {
     expect(ids).toContain("egnyte");
     expect(googleWorkspaceTools).toEqual(
       expect.arrayContaining([
+        "google-workspace.calendar_events_list",
+        "google-workspace.calendar_availability_get",
+        "google-workspace.calendar_event_create",
         "google-workspace.tasks_create",
         "google-workspace.tasks_complete",
         "google-workspace.slides_create",

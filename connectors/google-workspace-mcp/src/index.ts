@@ -283,6 +283,10 @@ const REQUIRED_GOOGLE_WORKSPACE_SCOPES = [
   'https://www.googleapis.com/auth/chat.spaces.readonly',
 ];
 
+const GOOGLE_CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3';
+const MAX_CALENDAR_BATCH_READ_EVENTS = 50;
+const RFC3339_WITH_ZONE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 let cachedAccessToken = GOOGLE_ACCESS_TOKEN;
 let tokenExpiry = 0;
 
@@ -418,6 +422,101 @@ function randomObjectId(prefix: string): string {
 
 function numberOrDefault(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function calendarUrl(path: string): string {
+  return `${GOOGLE_CALENDAR_API_BASE}${path}`;
+}
+
+function encodeCalendarId(calendarId?: unknown): string {
+  const id = typeof calendarId === 'string' && calendarId.trim() ? calendarId.trim() : 'primary';
+  return encodeURIComponent(id);
+}
+
+function requireStringArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array`);
+  }
+  const items = value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean);
+  if (items.length === 0) {
+    throw new Error(`${label} must include at least one non-empty string`);
+  }
+  return items;
+}
+
+function normalizeCalendarDateField(value: unknown, label: string): Record<string, any> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object with dateTime or date`);
+  }
+  const dateField = value as Record<string, any>;
+  const body = pickPresentFields(dateField, ['dateTime', 'date', 'timeZone']);
+  if (!body.dateTime && !body.date) {
+    throw new Error(`${label} must include dateTime or date`);
+  }
+  if (body.dateTime) {
+    body.dateTime = requireRfc3339DateTime(body.dateTime, `${label}.dateTime`);
+  }
+  return body;
+}
+
+function buildCalendarEventBody(args: Record<string, any>, requireCoreFields: boolean): Record<string, any> {
+  const body = pickPresentFields(args, ['summary', 'description', 'location', 'visibility', 'transparency']);
+  if (hasOwn(args, 'start') && args.start !== undefined) {
+    body.start = normalizeCalendarDateField(args.start, 'start');
+  }
+  if (hasOwn(args, 'end') && args.end !== undefined) {
+    body.end = normalizeCalendarDateField(args.end, 'end');
+  }
+  if (hasOwn(args, 'attendees') && args.attendees !== undefined) {
+    if (!Array.isArray(args.attendees)) {
+      throw new Error('attendees must be an array');
+    }
+    body.attendees = args.attendees.map((attendee: unknown) => {
+      if (!attendee || typeof attendee !== 'object' || Array.isArray(attendee)) {
+        throw new Error('attendees entries must be objects with email');
+      }
+      const email = requireNonEmptyString((attendee as Record<string, any>).email, 'attendee email');
+      return { ...pickPresentFields(attendee as Record<string, any>, ['displayName', 'optional']), email };
+    });
+  }
+  if (hasOwn(args, 'attendeeEmails') && args.attendeeEmails !== undefined) {
+    const attendeesFromEmails = requireStringArray(args.attendeeEmails, 'attendeeEmails').map((email) => ({ email }));
+    body.attendees = [...(body.attendees || []), ...attendeesFromEmails];
+  }
+  if (hasOwn(args, 'reminders') && args.reminders !== undefined) {
+    body.reminders = args.reminders;
+  }
+  if (hasOwn(args, 'conferenceData') && args.conferenceData !== undefined) {
+    body.conferenceData = args.conferenceData;
+  }
+  if (requireCoreFields) {
+    body.summary = requireNonEmptyString(body.summary, 'summary');
+    if (!body.start) throw new Error('Missing start');
+    if (!body.end) throw new Error('Missing end');
+  }
+  if (Object.keys(body).length === 0) {
+    throw new Error('At least one calendar event field must be provided');
+  }
+  return body;
+}
+
+function requireRfc3339DateTime(value: unknown, label: string): string {
+  const text = requireNonEmptyString(value, label);
+  if (!RFC3339_WITH_ZONE_RE.test(text)) {
+    throw new Error(`${label} must be an RFC3339 datetime with Z or an explicit UTC offset`);
+  }
+  return text;
+}
+
+function requireValidTimeWindow(timeMinValue: unknown, timeMaxValue: unknown): { timeMin: string; timeMax: string } {
+  const timeMin = requireRfc3339DateTime(timeMinValue, 'timeMin');
+  const timeMax = requireRfc3339DateTime(timeMaxValue, 'timeMax');
+  if (Date.parse(timeMin) >= Date.parse(timeMax)) {
+    throw new Error('timeMin must be before timeMax');
+  }
+  return { timeMin, timeMax };
 }
 
 // ==================== Tool Definitions ====================
@@ -680,6 +779,208 @@ const tools: MCPTool[] = [
         },
       },
       required: ['fileId'],
+      additionalProperties: false,
+    },
+  },
+
+  // ── Calendar ─────────────────────────────────────────────
+  {
+    name: 'google-workspace.calendar_calendars_list',
+    description: 'List calendars visible to the authenticated Google Calendar user',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        maxResults: { type: 'number', description: 'Maximum calendars to return (default: 100, max: 250)', default: 100 },
+        pageToken: { type: 'string', description: 'Page token from a previous response' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'google-workspace.calendar_events_list',
+    description: 'List or search Google Calendar events in a calendar',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', description: 'Calendar ID (defaults to primary)' },
+        query: { type: 'string', description: 'Free-text event search query' },
+        timeMin: { type: 'string', description: 'Lower event start bound, RFC3339 datetime' },
+        timeMax: { type: 'string', description: 'Upper event start bound, RFC3339 datetime' },
+        maxResults: { type: 'number', description: 'Maximum events to return (default: 20, max: 250)', default: 20 },
+        pageToken: { type: 'string', description: 'Page token from a previous response' },
+        singleEvents: { type: 'boolean', description: 'Expand recurring events into instances (default: true)', default: true },
+        orderBy: { type: 'string', enum: ['startTime', 'updated'], description: 'Event ordering' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'google-workspace.calendar_event_get',
+    description: 'Get a Google Calendar event by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', description: 'Calendar ID (defaults to primary)' },
+        eventId: { type: 'string', description: 'Google Calendar event ID' },
+      },
+      required: ['eventId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'google-workspace.calendar_events_batch_get',
+    description: 'Get multiple Google Calendar events by ID from one calendar',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', description: 'Calendar ID (defaults to primary)' },
+        eventIds: {
+          type: 'array',
+          description: 'Google Calendar event IDs to read in order',
+          items: { type: 'string' },
+        },
+      },
+      required: ['eventIds'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'google-workspace.calendar_availability_get',
+    description: 'Look up busy windows for one or more Google calendars before scheduling',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarIds: {
+          type: 'array',
+          description: 'Calendar IDs such as primary, a coworker email, or a room/resource email',
+          items: { type: 'string' },
+        },
+        timeMin: { type: 'string', description: 'Required RFC3339 datetime with timezone offset or Z' },
+        timeMax: { type: 'string', description: 'Required RFC3339 datetime with timezone offset or Z' },
+        timeZone: { type: 'string', description: 'IANA timezone for returned busy timestamps' },
+      },
+      required: ['calendarIds', 'timeMin', 'timeMax'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'google-workspace.calendar_event_create',
+    description: 'Create a Google Calendar event. Confirm with the user before calling.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', description: 'Calendar ID (defaults to primary)' },
+        summary: { type: 'string', description: 'Event title' },
+        description: { type: 'string', description: 'Event description' },
+        location: { type: 'string', description: 'Event location' },
+        start: {
+          type: 'object',
+          description: 'Event start object with dateTime or date, plus optional timeZone',
+          properties: {
+            dateTime: { type: 'string', description: 'RFC3339 start datetime' },
+            date: { type: 'string', description: 'All-day start date (YYYY-MM-DD)' },
+            timeZone: { type: 'string', description: 'IANA timezone' },
+          },
+        },
+        end: {
+          type: 'object',
+          description: 'Event end object with dateTime or date, plus optional timeZone',
+          properties: {
+            dateTime: { type: 'string', description: 'RFC3339 end datetime' },
+            date: { type: 'string', description: 'All-day end date (YYYY-MM-DD)' },
+            timeZone: { type: 'string', description: 'IANA timezone' },
+          },
+        },
+        attendees: {
+          type: 'array',
+          description: 'Attendee objects with email',
+          items: {
+            type: 'object',
+            description: 'Attendee object',
+            properties: {
+              email: { type: 'string', description: 'Attendee email address' },
+              displayName: { type: 'string', description: 'Optional display name' },
+              optional: { type: 'boolean', description: 'Whether attendance is optional' },
+            },
+            required: ['email'],
+          },
+        },
+        attendeeEmails: {
+          type: 'array',
+          description: 'Convenience list of attendee email addresses',
+          items: { type: 'string' },
+        },
+        sendUpdates: { type: 'string', enum: ['all', 'externalOnly', 'none'], description: 'Who receives event update emails' },
+        conferenceDataVersion: { type: 'number', description: 'Set to 1 when creating conference data' },
+        conferenceData: { type: 'object', description: 'Optional Google Calendar conferenceData object' },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true after the user explicitly confirms creating this calendar event',
+        },
+      },
+      required: ['summary', 'start', 'end', 'confirm'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'google-workspace.calendar_event_update',
+    description: 'Update a Google Calendar event. Confirm with the user before calling.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', description: 'Calendar ID (defaults to primary)' },
+        eventId: { type: 'string', description: 'Google Calendar event ID' },
+        summary: { type: 'string', description: 'Event title' },
+        description: { type: 'string', description: 'Event description' },
+        location: { type: 'string', description: 'Event location' },
+        start: { type: 'object', description: 'Event start object with dateTime or date, plus optional timeZone' },
+        end: { type: 'object', description: 'Event end object with dateTime or date, plus optional timeZone' },
+        attendees: {
+          type: 'array',
+          description: 'Attendee objects with email',
+          items: {
+            type: 'object',
+            description: 'Attendee object',
+            properties: {
+              email: { type: 'string', description: 'Attendee email address' },
+              displayName: { type: 'string', description: 'Optional display name' },
+              optional: { type: 'boolean', description: 'Whether attendance is optional' },
+            },
+            required: ['email'],
+          },
+        },
+        attendeeEmails: {
+          type: 'array',
+          description: 'Convenience list of attendee email addresses',
+          items: { type: 'string' },
+        },
+        sendUpdates: { type: 'string', enum: ['all', 'externalOnly', 'none'], description: 'Who receives event update emails' },
+        conferenceDataVersion: { type: 'number', description: 'Set to 1 when updating conference data' },
+        conferenceData: { type: 'object', description: 'Optional Google Calendar conferenceData object' },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true after the user explicitly confirms updating this calendar event',
+        },
+      },
+      required: ['eventId', 'confirm'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'google-workspace.calendar_event_delete',
+    description: 'Delete a Google Calendar event. Confirm with the user before calling.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', description: 'Calendar ID (defaults to primary)' },
+        eventId: { type: 'string', description: 'Google Calendar event ID' },
+        sendUpdates: { type: 'string', enum: ['all', 'externalOnly', 'none'], description: 'Who receives cancellation emails' },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true after the user explicitly confirms deleting this calendar event',
+        },
+      },
+      required: ['eventId', 'confirm'],
       additionalProperties: false,
     },
   },
@@ -1263,6 +1564,136 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(args.fileId)}`,
       undefined,
       params,
+    );
+    return { ok: true, data: result };
+  },
+
+  // ── Calendar ─────────────────────────────────────────────
+
+  'google-workspace.calendar_calendars_list': async (args) => {
+    const params = pickQueryParams(args, ['pageToken']);
+    params.maxResults = String(Math.min(numberOrDefault(args.maxResults, 100), 250));
+    const result = await googleRequest(
+      'GET',
+      calendarUrl('/users/me/calendarList'),
+      undefined,
+      params,
+    );
+    return { ok: true, data: result };
+  },
+
+  'google-workspace.calendar_events_list': async (args) => {
+    const calendarId = encodeCalendarId(args.calendarId);
+    const params = pickQueryParams(args, ['query', 'timeMin', 'timeMax', 'pageToken', 'orderBy']);
+    if (params.query) {
+      params.q = params.query;
+      delete params.query;
+    }
+    params.maxResults = String(Math.min(numberOrDefault(args.maxResults, 20), 250));
+    params.singleEvents = String(args.singleEvents ?? true);
+    const result = await googleRequest(
+      'GET',
+      calendarUrl(`/calendars/${calendarId}/events`),
+      undefined,
+      params,
+    );
+    return { ok: true, data: result };
+  },
+
+  'google-workspace.calendar_event_get': async (args) => {
+    const calendarId = encodeCalendarId(args.calendarId);
+    const eventId = requireNonEmptyString(args.eventId, 'eventId');
+    const result = await googleRequest(
+      'GET',
+      calendarUrl(`/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`),
+    );
+    return { ok: true, data: result };
+  },
+
+  'google-workspace.calendar_events_batch_get': async (args) => {
+    const calendarIdRaw = typeof args.calendarId === 'string' && args.calendarId.trim() ? args.calendarId.trim() : 'primary';
+    const calendarId = encodeURIComponent(calendarIdRaw);
+    const eventIds = requireStringArray(args.eventIds, 'eventIds');
+    if (eventIds.length > MAX_CALENDAR_BATCH_READ_EVENTS) {
+      throw new Error(`eventIds supports at most ${MAX_CALENDAR_BATCH_READ_EVENTS} events per batch`);
+    }
+    const events = await Promise.all(
+      eventIds.map(async (eventId) => {
+        try {
+          return {
+            eventId,
+            data: await googleRequest(
+              'GET',
+              calendarUrl(`/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`),
+            ),
+          };
+        } catch (error: any) {
+          return {
+            eventId,
+            error: error?.message || String(error),
+          };
+        }
+      }),
+    );
+    return { ok: true, data: { calendarId: calendarIdRaw, events } };
+  },
+
+  'google-workspace.calendar_availability_get': async (args) => {
+    const calendarIds = requireStringArray(args.calendarIds, 'calendarIds');
+    const { timeMin, timeMax } = requireValidTimeWindow(args.timeMin, args.timeMax);
+    const body: Record<string, any> = {
+      timeMin,
+      timeMax,
+      items: calendarIds.map((id) => ({ id })),
+    };
+    if (args.timeZone) body.timeZone = String(args.timeZone);
+    const result = await googleRequest(
+      'POST',
+      calendarUrl('/freeBusy'),
+      body,
+    );
+    return { ok: true, data: result };
+  },
+
+  'google-workspace.calendar_event_create': async (args) => {
+    requireConfirmation(args, 'creating a Google Calendar event');
+    const calendarId = encodeCalendarId(args.calendarId);
+    const body = buildCalendarEventBody(args, true);
+    const params = pickQueryParams(args, ['sendUpdates', 'conferenceDataVersion']);
+    const result = await googleRequest(
+      'POST',
+      calendarUrl(`/calendars/${calendarId}/events`),
+      body,
+      Object.keys(params).length ? params : undefined,
+    );
+    return { ok: true, data: result };
+  },
+
+  'google-workspace.calendar_event_update': async (args) => {
+    requireConfirmation(args, 'updating a Google Calendar event');
+    const calendarId = encodeCalendarId(args.calendarId);
+    const eventId = requireNonEmptyString(args.eventId, 'eventId');
+    const body = buildCalendarEventBody(args, false);
+    const params = pickQueryParams(args, ['sendUpdates', 'conferenceDataVersion']);
+    const result = await googleRequest(
+      'PATCH',
+      calendarUrl(`/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`),
+      body,
+      Object.keys(params).length ? params : undefined,
+    );
+    return { ok: true, data: result };
+  },
+
+  'google-workspace.calendar_event_delete': async (args) => {
+    requireConfirmation(args, 'deleting a Google Calendar event');
+    const calendarId = encodeCalendarId(args.calendarId);
+    const eventId = requireNonEmptyString(args.eventId, 'eventId');
+    const params = pickQueryParams(args, ['sendUpdates']);
+    const result = await googleRequest(
+      'DELETE',
+      calendarUrl(`/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`),
+      undefined,
+      Object.keys(params).length ? params : undefined,
     );
     return { ok: true, data: result };
   },

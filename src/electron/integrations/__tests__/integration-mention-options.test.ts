@@ -134,7 +134,7 @@ describe("buildIntegrationMentionOptionsFromState", () => {
     });
   });
 
-  it("splits multi-service MCP Google Workspace tools by service including Tasks and Slides", () => {
+  it("splits multi-service MCP Google Workspace tools by service including Calendar, Tasks, and Slides", () => {
     const options = buildIntegrationMentionOptionsFromState({
       mcp: {
         settings: {
@@ -156,6 +156,7 @@ describe("buildIntegrationMentionOptionsFromState", () => {
             status: "connected",
             tools: [
               { name: "drive_files_list", inputSchema: { type: "object" } },
+              { name: "calendar_availability_get", inputSchema: { type: "object" } },
               { name: "docs_create", inputSchema: { type: "object" } },
               { name: "sheets_create", inputSchema: { type: "object" } },
               { name: "tasks_create", inputSchema: { type: "object" } },
@@ -169,18 +170,67 @@ describe("buildIntegrationMentionOptionsFromState", () => {
     expect(options.map((option) => option.label)).toEqual([
       "Browser",
       "Google Drive",
+      "Google Calendar",
       "Google Docs",
       "Google Sheets",
       "Google Tasks",
       "Google Slides",
     ]);
     expect(options.flatMap((option) => option.tools)).toContain("mcp_drive_files_list");
+    expect(options.find((option) => option.label === "Google Calendar")?.tools).toEqual([
+      "mcp_calendar_availability_get",
+    ]);
     expect(options.find((option) => option.label === "Google Tasks")?.tools).toEqual([
       "mcp_tasks_create",
     ]);
     expect(options.find((option) => option.label === "Google Slides")?.tools).toEqual([
       "mcp_slides_batch_update",
     ]);
+  });
+
+  it("merges native and MCP Google Calendar mentions into one chip", () => {
+    const options = buildIntegrationMentionOptionsFromState({
+      builtins: {
+        googleWorkspace: {
+          enabled: true,
+          connectionMode: "workspace",
+          refreshToken: "refresh",
+          scopes: GOOGLE_WORKSPACE_DEFAULT_SCOPES,
+          timeoutMs: 20000,
+        },
+      },
+      mcp: {
+        settings: {
+          toolNamePrefix: "mcp_",
+          servers: [
+            {
+              id: "google-workspace",
+              name: "Google Workspace",
+              enabled: true,
+              transport: "stdio",
+              env: { GOOGLE_REFRESH_TOKEN: "refresh" },
+            },
+          ],
+        },
+        statuses: [
+          {
+            id: "google-workspace",
+            name: "Google Workspace",
+            status: "connected",
+            tools: [{ name: "calendar_availability_get", inputSchema: { type: "object" } }],
+          },
+        ],
+      },
+    });
+
+    const calendarOptions = options.filter((option) => option.label === "Google Calendar");
+    expect(calendarOptions).toHaveLength(1);
+    expect(calendarOptions[0].id).toBe("builtin:google-calendar");
+    expect(calendarOptions[0].tools).toEqual([
+      "calendar_action",
+      "mcp_calendar_availability_get",
+    ]);
+    expect(calendarOptions[0].status).toBe("connected");
   });
 
   it("shows unknown MCP servers only when connected", () => {

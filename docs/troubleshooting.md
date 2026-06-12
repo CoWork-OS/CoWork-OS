@@ -201,7 +201,7 @@ For maintainers, auth-like MCP disconnects are left in an error state instead of
 
 The composer only shows configured integrations that are locally usable. It does not run live health checks while typing.
 
-Check that the integration is enabled and has local credentials. For Google Workspace, the menu should show service-specific entries instead of a single Google Workspace item: Gmail, Google Drive, and Google Calendar for built-in tools, plus Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat when the Google Workspace MCP connector exposes those tools. For gateway channels such as Slack, the channel must be connected and enabled. For MCP connectors, the connector must be connected/configured.
+Check that the integration is enabled and has local credentials. For Google Workspace, the menu should show service-specific entries instead of a single Google Workspace item: Gmail, Google Drive, Google Calendar, Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat when native or MCP-backed tools are available. Google Calendar is still one mention chip when both native `calendar_action` and MCP `google-workspace.calendar_*` tools are connected. For gateway channels such as Slack, the channel must be connected and enabled. For MCP connectors, the connector must be connected/configured.
 
 See [Composer Mentions](composer-mentions.md).
 

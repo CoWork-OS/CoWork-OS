@@ -115,7 +115,7 @@ CoWork OS is a **security-first, GUI-first, CLI-capable local AI super app and e
 
 #### Composer Routing
 - [x] Grouped `@` autocomplete for Agents, Integrations, and Files
-- [x] Configured integration mention resolver with Google Workspace split into built-in Gmail, Google Drive, and Google Calendar plus MCP-backed Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat when available
+- [x] Configured integration mention resolver with Google Workspace split into service-specific Gmail, Google Drive, Google Calendar, Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat entries when native or MCP-backed tools are available, including merged native/MCP Google Calendar routing
 - [ ] **Google OAuth verification (in progress)**: bundled OAuth client submitted for Gmail-only scopes (`gmail.readonly`, `gmail.send`, `gmail.modify`, `gmail.labels`). Awaiting Google approval and CASA security assessment. Until verified, Gmail Only mode requires a custom OAuth client; Full Workspace mode remains available. Privacy Policy and Terms of Service updated with Limited Use compliance, encryption details, and data retention clauses.
 - [x] Rich inline integration chips in the composer, sent user bubbles, and restored task/session history
 - [x] Soft `integrationMentions` runtime guidance without changing `allowedTools`

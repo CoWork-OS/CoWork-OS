@@ -100,7 +100,7 @@ Integration auth failures are surfaced through `src/electron/notifications/integ
 
 Current producers are:
 
-- Google Workspace API helpers for Gmail, Calendar, and Drive token refresh or scope failures
+- Google Workspace API helpers for Gmail, Calendar, Drive, and shared native/MCP token refresh or scope failures
 - X (Twitter) tool failures that indicate login, challenge, verification, or authorization blocking
 - MCP connector tool/status errors that look like auth failures
 

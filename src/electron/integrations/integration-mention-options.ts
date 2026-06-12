@@ -485,7 +485,9 @@ function splitMcpServerOptions(input: {
     groups.set(def.key, group);
   });
 
-  if (groups.size > 1) {
+  const shouldSplitServices =
+    groups.size > 1 || (groups.size > 0 && (input.serverId === "google-workspace" || input.capabilityId === "google-workspace"));
+  if (shouldSplitServices) {
     return Array.from(groups.values()).map(({ def, exactTools }) => ({
       id: `mcp:${input.serverId}:${def.key}`,
       label: def.label,
@@ -534,16 +536,36 @@ function slugify(value: string): string {
 }
 
 function dedupeOptions(options: IntegrationMentionOption[]): IntegrationMentionOption[] {
-  const seen = new Set<string>();
+  const seenIds = new Set<string>();
+  const indexByProviderKey = new Map<string, number>();
   const deduped: IntegrationMentionOption[] = [];
   for (const option of options) {
-    if (seen.has(option.id)) continue;
-    seen.add(option.id);
-    deduped.push({
+    if (seenIds.has(option.id)) continue;
+    seenIds.add(option.id);
+
+    const cleaned: IntegrationMentionOption = {
       ...option,
       aliases: Array.from(new Set(option.aliases.filter(hasText) as string[])),
       tools: Array.from(new Set(option.tools.filter(hasText) as string[])),
-    });
+    };
+    const existingIndex = indexByProviderKey.get(cleaned.providerKey);
+    if (existingIndex !== undefined) {
+      const existing = deduped[existingIndex]!;
+      deduped[existingIndex] = {
+        ...existing,
+        aliases: Array.from(new Set([...existing.aliases, ...cleaned.aliases].filter(hasText) as string[])),
+        tools: Array.from(new Set([...existing.tools, ...cleaned.tools].filter(hasText) as string[])),
+        promptHint:
+          existing.promptHint === cleaned.promptHint
+            ? existing.promptHint
+            : `${existing.promptHint} ${cleaned.promptHint}`,
+        status: existing.status === "connected" || cleaned.status === "connected" ? "connected" : "configured",
+      };
+      continue;
+    }
+
+    indexByProviderKey.set(cleaned.providerKey, deduped.length);
+    deduped.push(cleaned);
   }
   return deduped;
 }

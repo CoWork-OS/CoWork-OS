@@ -1517,18 +1517,18 @@ See [Integration Setup, Skill Proposals, and Bootstrap Lifecycle](integration-sk
 
 ## Cloud Storage And Productivity Integrations
 
-The main composer supports grouped `@` mentions for **Agents**, **Integrations**, and **Files**. The Integrations section only shows configured, locally usable integrations. Google Workspace splits into service-specific options: built-in **Gmail**, **Google Drive**, and **Google Calendar** plus MCP-backed **Google Docs**, **Google Sheets**, **Google Slides**, **Google Tasks**, and **Google Chat** when those tools are available. Selecting an integration inserts an icon+name chip, preserves clean prompt text such as `@Gmail`, and sends `integrationMentions` metadata as soft routing guidance without granting permissions or restricting tools. See [Composer Mentions](composer-mentions.md).
+The main composer supports grouped `@` mentions for **Agents**, **Integrations**, and **Files**. The Integrations section only shows configured, locally usable integrations. Google Workspace splits into service-specific options: **Gmail**, **Google Drive**, **Google Calendar**, **Google Docs**, **Google Sheets**, **Google Slides**, **Google Tasks**, and **Google Chat** when native or MCP-backed tools are available. The **Google Calendar** option merges native `calendar_action` and MCP `google-workspace.calendar_*` tools into one first-class calendar surface. Selecting an integration inserts an icon+name chip, preserves clean prompt text such as `@Gmail`, and sends `integrationMentions` metadata as soft routing guidance without granting permissions or restricting tools. See [Composer Mentions](composer-mentions.md).
 
 | Service | Tool | Actions |
 |---------|------|---------|
 | **Notion** | `notion_action` | Search, read, create, update, query data sources |
 | **Box** | `box_action` | Search, read, upload, manage files |
 | **OneDrive** | `onedrive_action` | Search, read, upload, manage files |
-| **Google Workspace** | `gmail_action`, `google_drive_action`, `calendar_action`, `google-workspace.*` MCP tools | Gmail, Drive, and Calendar natively; Docs, Sheets, Slides, Tasks, and Chat through the shared Google Workspace MCP connector |
+| **Google Workspace** | `gmail_action`, `google_drive_action`, `calendar_action`, `google-workspace.*` MCP tools | Gmail, Drive, and Calendar natively; Calendar availability/event tools plus Docs, Sheets, Slides, Tasks, and Chat through the shared Google Workspace MCP connector |
 | **Dropbox** | `dropbox_action` | List, search, upload, manage files |
 | **SharePoint** | `sharepoint_action` | Search sites, manage drive items |
 
-Google Workspace uses one OAuth connection for the built-in tools and MCP connector. The default consent set covers Drive, Gmail read/send/modify, Calendar, Spreadsheets, Documents, Tasks, Presentations, Chat messages, and Chat spaces readonly. Existing users with older tokens may need to reconnect when a release adds required scopes; the status check reports missing scopes when reconnect is needed. Destructive or broad Tasks/Slides operations require explicit confirmation fields before the MCP connector executes them.
+Google Workspace uses one OAuth connection for the built-in tools and MCP connector. The default consent set covers Drive, Gmail read/send/modify, Calendar, Spreadsheets, Documents, Tasks, Presentations, Chat messages, and Chat spaces readonly. Existing users with older tokens may need to reconnect when a release adds required scopes; the status check reports missing scopes when reconnect is needed. Calendar event writes and destructive or broad Tasks/Slides operations require explicit confirmation fields before the MCP connector executes them.
 
 Configure by clicking any card in **Settings** > **Integrations**. Enterprise and local creative MCP connectors (Salesforce, Jira, HubSpot, Rhino, Blender, ComfyUI, etc.) are also managed from the same tab.
 

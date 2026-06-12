@@ -23,7 +23,7 @@ For the full inbox workspace, see [Inbox Agent](inbox-agent.md).
 | Capability | Primary | Fallback | Notes |
 |------------|---------|----------|-------|
 | **Inbox** | `gmail_action` | `email_imap_unread` → Email channel history | Prompts use "prefer X; if unavailable use Y" |
-| **Calendar** | `calendar_action` (Google) | `apple_calendar_action` (macOS) | For conflict checks, digest |
+| **Calendar** | `calendar_action` (Google), `google-workspace.calendar_*` MCP tools | `apple_calendar_action` (macOS) | For conflict checks, availability, event reads/writes, digest |
 | **Tasks** | `google-workspace.tasks_*`, Notion, Things, Apple Reminders | — | If configured; delete and clear-completed flows require confirmation |
 | **Google Slides** | `google-workspace.slides_*` | Local presentation artifacts | Connected deck creation and practical mutations; delete, replace-all, and raw batch updates require confirmation |
 

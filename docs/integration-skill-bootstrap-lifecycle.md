@@ -124,7 +124,7 @@ When OAuth succeeds, provider tokens are written into connector env:
 - Jira -> `JIRA_ACCESS_TOKEN`, optional `JIRA_REFRESH_TOKEN`, auto-fill `JIRA_BASE_URL` from OAuth resources when available
 - HubSpot -> `HUBSPOT_ACCESS_TOKEN`, optional `HUBSPOT_REFRESH_TOKEN`
 - Slack -> `SLACK_ACCESS_TOKEN`, optional `SLACK_REFRESH_TOKEN`
-- Gmail / Google Calendar / Google Drive -> `GOOGLE_ACCESS_TOKEN`, optional `GOOGLE_REFRESH_TOKEN`
+- Gmail / Google Calendar / Google Drive / Google Workspace MCP -> `GOOGLE_ACCESS_TOKEN`, optional `GOOGLE_REFRESH_TOKEN`, with the shared `GOOGLE_SCOPES` set used to detect reconnects for added services
 
 Client credentials are also persisted where applicable:
 

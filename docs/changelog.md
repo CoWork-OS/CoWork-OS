@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Google Calendar MCP tools**: added Calendar coverage to the Google Workspace MCP connector, including calendar listing, event list/read/batch read, availability/freeBusy lookup, and confirmed event create/update/delete. Composer mentions now merge these `google-workspace.calendar_*` tools with native `calendar_action` under one Google Calendar chip.
 - **Memory Write Governance docs**: documented approval modes for durable archive, curated, background, and external memory writes; clarified the pending approval queue lifecycle; documented sensitive external-memory blocking before queue persistence; and corrected storage docs to distinguish encrypted settings/fields from the normal SQLite database file.
 - **Architecture design orchestration**: added bundled Rhino, Blender, and ComfyUI MCP connectors plus the `architecture-design` skill for concept architecture workflows. The connectors are local-only, enforce project-root file boundaries, expose registry/capability metadata, and document setup, safety, and artifact expectations across the connector and skill docs.
 - **Cross-platform desktop location**: `get_current_location` now works on macOS (Core Location), Windows (Windows.Devices.Geolocation via PowerShell), and Linux (GeoClue2 via gdbus). Each platform uses a bundled helper script that outputs a standard JSON envelope; the `DesktopLocationService` tries the first available provider. The macOS helper now includes the `com.apple.security.personal-information.location` entitlement required for Core Location authorization. Location access requires explicit one-time user permission on each platform and cannot be auto-approved or persisted.
@@ -98,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Message-box shortcut docs**: clarified that skill-backed slash picker selections insert the command token for user context before launch, and added Claude-for-Legal intake-card implementation landmarks and tests.
-- **Google Workspace OAuth and mentions**: expanded the shared Google Workspace OAuth defaults for Tasks, Presentations, Docs, Sheets, and Chat; status checks now report missing scopes so older connections can reconnect. Composer/docs now describe Google Workspace as service-specific options for built-in Gmail/Drive/Calendar plus MCP-backed Docs/Sheets/Slides/Tasks/Chat.
+- **Google Workspace OAuth and mentions**: expanded the shared Google Workspace OAuth defaults for Tasks, Presentations, Docs, Sheets, and Chat; status checks now report missing scopes so older connections can reconnect. Composer/docs now describe Google Workspace as service-specific options for Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, and Chat, with Google Calendar able to merge native and MCP-backed tools.
 - **Managed Agents concept docs**: refreshed Managed Agents, Agents Hub, Mission Control, architecture, getting started, docs home, README, and status documentation so the current model is explicit: clicked-agent detail is a single-pane configuration surface, and test/preview/starter prompt actions open normal main-window tasks rather than running in a private sidebar chat.
 - **macOS unsigned DMG distribution**: release builds continue to publish unsigned macOS DMG/ZIP artifacts without requiring a personal Developer ID certificate. macOS smoke tests explicitly allow the unsigned fallback, and user-facing docs now explain the **System Settings > Privacy & Security > Open Anyway** flow required by Gatekeeper on first launch.
 - **Renderer task-surface performance**: documented the lazy `MainContent` / `RightPanel` boundaries, task-view skeleton, surface-specific CSS ownership, lazy markdown/code rendering, renderer perf startup marks, and `npm run qa:renderer-perf` validation path.
@@ -862,7 +863,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Google Workspace Integration** - Unified access to Gmail, Google Calendar, and Google Drive
   - **Shared OAuth Authentication**: Single sign-in for all Google services
   - **Gmail Tools**: `gmail_action` for sending emails, reading messages, creating drafts, searching
-  - **Calendar Tools**: `google_calendar_action` for creating, updating, and managing events
+  - **Calendar Tools**: `calendar_action` for native event management, with `google-workspace.calendar_*` MCP tools available for Calendar list/read/availability/event CRUD when the Google Workspace MCP connector is configured
   - **Drive Tools**: Enhanced `google_drive_action` with improved error handling
   - **Settings UI**: Google Workspace is accessible as a card in **Settings** > **Integrations**
 - **Gateway Channel Enhancements** - Improved channel implementations

@@ -28,7 +28,7 @@ Release `0.5.42` is a Windows installer hotfix for `0.5.41` with composer routin
 - **Automation concept docs**: README, Features, Core Automation, docs home, and Development now clarify that task automations are a shortcut into `Scheduled Tasks`, not a separate Workflow Intelligence loop or routine authoring path.
 - **Bundled-skill docs**: README, Features, Skill Store, development guidance, docs home, and status docs now reflect `react-best-practices` and the bundled skill count.
 - **Shortcut docs**: README, Features, Plugin Packs, Skills Runtime Model, Skill Store, Development, Use Cases, docs home, changelog, and this release note now describe the current message-box shortcut model, alias precedence, parameter behavior, and CoWork Shortcuts pack.
-- **Integration display in the composer**: Google Workspace is shown as Gmail, Google Drive, and Google Calendar in the `@` menu; gateway channels and MCP connectors appear only when locally usable.
+- **Integration display in the composer**: Google Workspace is shown as service-specific Gmail, Google Drive, Google Calendar, Docs, Sheets, Slides, Tasks, and Chat entries in the `@` menu when native or MCP-backed tools are locally usable; gateway channels and MCP connectors appear only when locally usable.
 
 ## Notes
 

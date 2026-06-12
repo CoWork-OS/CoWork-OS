@@ -4,7 +4,7 @@
   "description": "Draft a daily digest based on calendar + tasks. Stops before sending.",
   "icon": "👨‍👩‍👧‍👦",
   "category": "Use Cases",
-  "prompt": "Daily digest workflow.\n\nGoal\n- Draft a clear digest message for visibility (calendar + tasks).\n\nInputs\n- Range: {{range}}\n- Recipient description (who this is for): {{recipient}}\n- Tone: {{tone}}\n\nSteps\n1) Collect calendar events for the chosen range (\"{{range}}\").\n   - Use apple_calendar_action if available; otherwise use google_calendar_action.\n2) Collect task/reminder signals:\n   - Use apple_reminders_action if available.\n   - Also list relevant scheduled tasks (schedule_task list) if any.\n3) Draft a digest message in tone \"{{tone}}\" aimed at \"{{recipient}}\".\n   - Keep it short, scannable, and specific times.\n4) STOP BEFORE SENDING. Ask me to confirm the message and where to send it.\n",
+  "prompt": "Daily digest workflow.\n\nGoal\n- Draft a clear digest message for visibility (calendar + tasks).\n\nInputs\n- Range: {{range}}\n- Recipient description (who this is for): {{recipient}}\n- Tone: {{tone}}\n\nSteps\n1) Collect calendar events for the chosen range (\"{{range}}\").\n   - Use calendar_action or google-workspace.calendar_events_list for Google Calendar if configured; otherwise use apple_calendar_action if available.\n2) Collect task/reminder signals:\n   - Use apple_reminders_action if available.\n   - Also list relevant scheduled tasks (schedule_task list) if any.\n3) Draft a digest message in tone \"{{tone}}\" aimed at \"{{recipient}}\".\n   - Keep it short, scannable, and specific times.\n4) STOP BEFORE SENDING. Ask me to confirm the message and where to send it.\n",
   "parameters": [
     {
       "name": "range",

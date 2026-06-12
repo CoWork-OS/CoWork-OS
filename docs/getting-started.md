@@ -520,9 +520,9 @@ Open **Settings** > **Integrations** and click any card to configure productivit
 - **Dropbox** — list, search, and manage files
 - **SharePoint** — search sites and manage drive items
 
-After an integration is configured, type `@` in the main message box to pick it from the grouped **Agents**, **Integrations**, and **Files** menu. Google Workspace appears as service-specific options such as Gmail, Google Drive, Google Calendar, Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat when those tools are available. Selecting an integration inserts an icon+name chip and sends soft routing metadata with the prompt. See [Composer Mentions](composer-mentions.md).
+After an integration is configured, type `@` in the main message box to pick it from the grouped **Agents**, **Integrations**, and **Files** menu. Google Workspace appears as service-specific options such as Gmail, Google Drive, Google Calendar, Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat when native or MCP-backed tools are available. Selecting an integration inserts an icon+name chip and sends soft routing metadata with the prompt. See [Composer Mentions](composer-mentions.md).
 
-Google Workspace uses one shared OAuth connection for built-in tools and the Google Workspace MCP connector. If an existing connection is missing newer scopes for services such as Tasks or Slides, reconnect from **Settings > Integrations > Google Workspace** and leave the default scope set enabled.
+Google Workspace uses one shared OAuth connection for built-in tools and the Google Workspace MCP connector. If an existing connection is missing newer scopes for services such as Calendar MCP tools, Tasks, or Slides, reconnect from **Settings > Integrations > Google Workspace** and leave the default scope set enabled.
 
 For slash-searchable app commands and workflow shortcuts, type `/` in the same message box. The `/` picker is separate from `@` mentions and uses the skills/plugin-pack system for workflow aliases. Selecting a skill-backed workflow inserts the command into the composer so you can add more text before sending. Legal practice workflows can also ask for structured matter details in the main task view. See [Message Box Shortcuts](message-box-shortcuts.md) and [Claude-for-Legal Workflows](claude-for-legal.md).
 

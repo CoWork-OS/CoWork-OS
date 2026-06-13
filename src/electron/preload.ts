@@ -253,10 +253,17 @@ import type {
 import type { UiTimelineEvent } from "../shared/timeline-events";
 
 const ALLOWED_MESSAGE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
+const ALLOWED_MESSAGE_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
+const ALLOWED_MESSAGE_MEDIA_TYPES = [
+  ...ALLOWED_MESSAGE_IMAGE_TYPES,
+  ...ALLOWED_MESSAGE_VIDEO_TYPES,
+] as const;
 const ALLOWED_IMAGE_FILE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
+const ALLOWED_VIDEO_FILE_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 const MAX_IMAGES_PER_MESSAGE = 5;
 const MAX_TOTAL_TASK_IMAGE_BYTES = 125 * 1024 * 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_VIDEO_ATTACHMENT_BYTES = 500 * 1024 * 1024;
 const MANAGED_IMAGE_TEMP_PREFIX = "cowork-image-";
 const MIME_TYPE_EXTENSION_MAP: Record<string, string> = {
   "image/jpeg": ".jpg",
@@ -374,18 +381,24 @@ function validateSendMessageAttachments(images?: ImageAttachment[]): ImageAttach
       }
 
       const mimeType = image.mimeType;
-      if (!ALLOWED_MESSAGE_IMAGE_TYPES.includes(mimeType)) {
+      if (!ALLOWED_MESSAGE_MEDIA_TYPES.includes(mimeType)) {
         throw new Error(
-          `Image attachment at index ${index} has unsupported mime type: ${String(mimeType)}.`,
+          `Attachment at index ${index} has unsupported mime type: ${String(mimeType)}.`,
         );
       }
+      const isVideo = ALLOWED_MESSAGE_VIDEO_TYPES.includes(
+        mimeType as (typeof ALLOWED_MESSAGE_VIDEO_TYPES)[number],
+      );
 
       const hasData = typeof image.data === "string" && image.data.trim().length > 0;
       const hasFilePath = isAbsoluteImagePath(image.filePath);
       if (hasData === hasFilePath) {
         throw new Error(
-          `Image attachment at index ${index} must provide exactly one of data or filePath.`,
+          `Attachment at index ${index} must provide exactly one of data or filePath.`,
         );
+      }
+      if (isVideo && hasData) {
+        throw new Error(`Video attachment at index ${index} must use filePath.`);
       }
 
       let data: string | undefined;
@@ -393,12 +406,15 @@ function validateSendMessageAttachments(images?: ImageAttachment[]): ImageAttach
       let resolvedFileSize: number | undefined;
       if (hasFilePath && image.filePath) {
         if (!path.isAbsolute(image.filePath)) {
-          throw new Error(`Image attachment at index ${index} filePath must be an absolute path.`);
+          throw new Error(`Attachment at index ${index} filePath must be an absolute path.`);
         }
         const extension = path.extname(image.filePath).toLowerCase();
-        if (!ALLOWED_IMAGE_FILE_EXTENSIONS.has(extension)) {
+        const allowedExtensions = isVideo
+          ? ALLOWED_VIDEO_FILE_EXTENSIONS
+          : ALLOWED_IMAGE_FILE_EXTENSIONS;
+        if (!allowedExtensions.has(extension)) {
           throw new Error(
-            `Image attachment at index ${index} has unsupported file extension: ${extension}.`,
+            `Attachment at index ${index} has unsupported file extension: ${extension}.`,
           );
         }
         let stat: fs.Stats;
@@ -406,21 +422,24 @@ function validateSendMessageAttachments(images?: ImageAttachment[]): ImageAttach
           stat = fs.statSync(image.filePath);
         } catch (error) {
           throw new Error(
-            `Image attachment at index ${index} filePath could not be read: ${String((error as Error).message)}`,
+            `Attachment at index ${index} filePath could not be read: ${String((error as Error).message)}`,
           );
         }
         if (!stat.isFile()) {
           throw new Error(
-            `Image attachment at index ${index} filePath must point to a regular file.`,
+            `Attachment at index ${index} filePath must point to a regular file.`,
           );
         }
+        const maxAttachmentBytes = isVideo
+          ? MAX_VIDEO_ATTACHMENT_BYTES
+          : MAX_IMAGE_ATTACHMENT_BYTES;
         if (
           stat.size === 0 ||
           !Number.isInteger(stat.size) ||
           stat.size <= 0 ||
-          stat.size > MAX_IMAGE_ATTACHMENT_BYTES
+          stat.size > maxAttachmentBytes
         ) {
-          throw new Error(`Image attachment at index ${index} file size is invalid.`);
+          throw new Error(`Attachment at index ${index} file size is invalid.`);
         }
         resolvedFileSize = stat.size;
         filePath = image.filePath;
@@ -434,18 +453,23 @@ function validateSendMessageAttachments(images?: ImageAttachment[]): ImageAttach
 
       const sizeBytes = Number(image.sizeBytes);
       if (hasFilePath && typeof resolvedFileSize === "number" && sizeBytes !== resolvedFileSize) {
-        throw new Error(`Image attachment at index ${index} sizeBytes must match attachment size.`);
+        throw new Error(`Attachment at index ${index} sizeBytes must match attachment size.`);
       }
       if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || !Number.isInteger(sizeBytes)) {
-        throw new Error(`Image attachment at index ${index} has invalid sizeBytes.`);
+        throw new Error(`Attachment at index ${index} has invalid sizeBytes.`);
       }
-      if (sizeBytes > MAX_IMAGE_ATTACHMENT_BYTES) {
+      const maxAttachmentBytes = isVideo
+        ? MAX_VIDEO_ATTACHMENT_BYTES
+        : MAX_IMAGE_ATTACHMENT_BYTES;
+      if (sizeBytes > maxAttachmentBytes) {
         throw new Error(
-          `Image attachment at index ${index} exceeds ${MAX_IMAGE_ATTACHMENT_BYTES} bytes.`,
+          `Attachment at index ${index} exceeds ${maxAttachmentBytes} bytes.`,
         );
       }
 
-      totalBytes += sizeBytes;
+      if (!isVideo) {
+        totalBytes += sizeBytes;
+      }
       if (totalBytes > MAX_TOTAL_TASK_IMAGE_BYTES) {
         throw new Error("Total image payload exceeds 125MB limit.");
       }

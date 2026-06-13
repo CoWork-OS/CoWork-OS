@@ -26,6 +26,7 @@ Use cases:
 - Turn a successful one-off task into a recurring same-thread follow-up from the task menu
 - Founder-directed autonomous company operations ("zero-human company" loop)
 - Everything Workbench for generated docs, sheets, decks, web pages, PDFs, and previews
+- Video attachment analysis for uploaded MP4, MOV, and WebM files, with extracted screenshots visible in the task timeline
 - Smart-home orchestration via integrations
 - "Figure it out" fallback orchestration for hard tasks
 - Location-aware local errands, nearby services, and walking route planning
@@ -41,9 +42,11 @@ Cowork OS supports these via:
 - Location + Maps: `get_current_location` for desktop coordinates (macOS, Windows, Linux) + Maps MCP for nearby search, place details, walking routes, and ranked errand options
 - Company-ops primitives: venture workspace kit, digital twin operators, strategic planner, and Mission Control ops monitoring
 - Everything Workbench: task output cards, sidebar/fullscreen artifact workspaces, follow-up composer, and refresh-after-edit behavior for generated knowledge-work artifacts
+- Video attachments: uploaded videos are copied into the workspace, sampled into contact sheets and representative frames, passed to image-capable models, and shown inline in the task timeline
 
 For the full founder-operated company recipe, see [Zero-Human Company Operations](zero-human-company.md).
 For the unified artifact workflow, see [Everything Workbench](everything-workbench.md).
+For uploaded video analysis, see [Video Attachments](video-attachments.md).
 For live website testing inside the app, see [Browser Workbench](browser-workbench.md).
 For turning existing tasks into recurring thread follow-ups or standalone scheduled checks, see [Task Automations](task-automations.md).
 For message-box app commands and skill-backed workflow shortcuts, see [Message Box Shortcuts](message-box-shortcuts.md).

@@ -80,6 +80,15 @@ describe("dev-log-utils", () => {
     ).toBe("info");
   });
 
+  it("does not treat run_command start lines with ffprobe log-level arguments as errors", () => {
+    expect(
+      inferDevLogLevel(
+        '[electron] [TaskExecutor] [Executor:task]   │ ⚙ Tool #1 "run_command" start | input={"command":"ffprobe -v error -show_streams video.mov"}',
+        "stdout",
+      ),
+    ).toBe("info");
+  });
+
   it("keeps non-error stderr notes out of the error bucket", () => {
     expect(
       inferDevLogLevel(

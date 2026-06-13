@@ -273,6 +273,74 @@ describe("TaskMessageSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts supported mp4 video attachments by file path", () => {
+    const result = TaskMessageSchema.safeParse({
+      taskId: "550e8400-e29b-41d4-a716-446655440000",
+      message: "Review this recording",
+      images: [
+        {
+          filePath: "/tmp/example.mp4",
+          mimeType: "video/mp4",
+          filename: "example.mp4",
+          sizeBytes: 1024,
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts quicktime mov video attachments by file path", () => {
+    const result = TaskMessageSchema.safeParse({
+      taskId: "550e8400-e29b-41d4-a716-446655440000",
+      message: "Review this recording",
+      images: [
+        {
+          filePath: "/tmp/example.mov",
+          mimeType: "video/quicktime",
+          filename: "example.mov",
+          sizeBytes: 1024,
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects video attachments with unsupported file extensions", () => {
+    const result = TaskMessageSchema.safeParse({
+      taskId: "550e8400-e29b-41d4-a716-446655440000",
+      message: "Review this recording",
+      images: [
+        {
+          filePath: "/tmp/example.avi",
+          mimeType: "video/mp4",
+          filename: "example.avi",
+          sizeBytes: 1024,
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects video attachments sent as base64 payloads", () => {
+    const result = TaskMessageSchema.safeParse({
+      taskId: "550e8400-e29b-41d4-a716-446655440000",
+      message: "Review this recording",
+      images: [
+        {
+          data: "AA==",
+          mimeType: "video/mp4",
+          filename: "example.mp4",
+          sizeBytes: 1024,
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("ApprovalResponseSchema", () => {

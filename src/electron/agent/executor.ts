@@ -76,6 +76,8 @@ import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as os from "os";
 import { createHash } from "crypto";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { AgentDaemon } from "./daemon";
 import { ToolRegistry } from "./tools/registry";
 import { ToolBatchExecutor } from "./runtime/tool-batch-executor";
@@ -751,6 +753,10 @@ const isLLMImageContent = (block: LLMContent): block is LLMImageContent => {
   );
 };
 
+const execFileAsync = promisify(execFile);
+const VIDEO_ATTACHMENT_MIME_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const VIDEO_FRAME_SAMPLE_LIMIT = 10;
+
 /**
  * TaskExecutor handles the execution of a single task
  * It implements the plan-execute-observe agent loop
@@ -821,6 +827,7 @@ export class TaskExecutor {
   private toolSchemaHash = "";
   private promptCacheMode: LLMPromptCacheMode = "disabled";
   private promptCacheProviderFamily: PromptCacheProviderFamily = "unsupported";
+  private emittedVideoPreviewArtifactPaths = new Set<string>();
   private promptCacheInvalidationReason: string | null = null;
   private currentPromptCacheContext: {
     surface: PromptCacheSurface;
@@ -31275,9 +31282,236 @@ Return ONLY a JSON object:
       .join("\n");
   }
 
+  private isVideoAttachment(attachment: ImageAttachment): boolean {
+    return VIDEO_ATTACHMENT_MIME_TYPES.has(attachment.mimeType);
+  }
+
+  private getVideoPreviewImagePaths(video: ImageAttachment): string[] {
+    const imagePaths = [
+      video.videoContactSheetPath,
+      ...(video.videoFramePaths?.slice(-1) || []),
+    ].filter((filePath): filePath is string => Boolean(filePath));
+    return Array.from(new Set(imagePaths));
+  }
+
+  private toWorkspaceRelativeArtifactPath(filePath: string): string {
+    const workspacePath =
+      (this as Any).workspace && typeof (this as Any).workspace.path === "string"
+        ? String((this as Any).workspace.path)
+        : "";
+    if (!workspacePath.trim()) return filePath;
+
+    const workspaceRoot = path.resolve(workspacePath);
+    const resolvedFilePath = path.resolve(filePath);
+    const relativePath = path.relative(workspaceRoot, resolvedFilePath);
+    if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+      return filePath;
+    }
+    return relativePath.split(path.sep).join("/");
+  }
+
+  private getVideoFrameOutputDir(label: string, videoHash: string): string {
+    const safeStem = path
+      .basename(label, path.extname(label))
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "video";
+    const workspacePath =
+      (this as Any).workspace && typeof (this as Any).workspace.path === "string"
+        ? String((this as Any).workspace.path)
+        : "";
+    const frameRoot = workspacePath.trim()
+      ? path.join(workspacePath, ".cowork", "video-frames")
+      : path.join(os.tmpdir(), "cowork-video-frames");
+    return path.join(frameRoot, `${safeStem}-${videoHash}-${Date.now()}`);
+  }
+
+  private emitVideoPreviewArtifacts(video: ImageAttachment, label: string): void {
+    const previewPaths = this.getVideoPreviewImagePaths(video);
+    if (previewPaths.length === 0) return;
+
+    const state = this as Any;
+    if (!(state.emittedVideoPreviewArtifactPaths instanceof Set)) {
+      state.emittedVideoPreviewArtifactPaths = new Set<string>();
+    }
+    const emitted = state.emittedVideoPreviewArtifactPaths as Set<string>;
+    const contactSheetPath = video.videoContactSheetPath
+      ? path.resolve(video.videoContactSheetPath)
+      : "";
+
+    for (const previewPath of previewPaths) {
+      const resolvedPreviewPath = path.resolve(previewPath);
+      if (emitted.has(resolvedPreviewPath)) continue;
+      emitted.add(resolvedPreviewPath);
+
+      const artifactKind =
+        contactSheetPath && resolvedPreviewPath === contactSheetPath
+          ? "contact sheet"
+          : "representative frame";
+      this.emitEvent("artifact_created", {
+        path: this.toWorkspaceRelativeArtifactPath(previewPath),
+        mimeType: "image/jpeg",
+        type: "image",
+        label: `Video ${artifactKind}: ${label}`,
+        source: "video_attachment",
+      });
+    }
+  }
+
+  private async loadVideoPreviewImagesFromCache(
+    video: ImageAttachment,
+  ): Promise<LLMImageContent[]> {
+    const uniquePaths = this.getVideoPreviewImagePaths(video);
+    const images: LLMImageContent[] = [];
+    for (const imagePath of uniquePaths) {
+      try {
+        images.push(await loadImageFromFile(imagePath));
+      } catch {
+        return [];
+      }
+    }
+    return images;
+  }
+
+  private async probeVideoDurationSeconds(filePath: string): Promise<number | null> {
+    try {
+      const { stdout } = await execFileAsync(
+        "ffprobe",
+        [
+          "-v",
+          "error",
+          "-show_entries",
+          "format=duration",
+          "-of",
+          "default=noprint_wrappers=1:nokey=1",
+          filePath,
+        ],
+        { timeout: 10_000, maxBuffer: 1024 * 1024 },
+      );
+      const duration = Number.parseFloat(String(stdout).trim());
+      return Number.isFinite(duration) && duration > 0 ? duration : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async buildVideoAttachmentContent(
+    video: ImageAttachment,
+  ): Promise<{ note: string; images: LLMImageContent[] }> {
+    const label = video.filename || video.filePath || "video attachment";
+    if (!video.filePath) {
+      return {
+        note: `Video attachment "${label}" was provided without a readable file path, so no frames could be extracted.`,
+        images: [],
+      };
+    }
+
+    const cachedImages = await this.loadVideoPreviewImagesFromCache(video);
+    if (cachedImages.length > 0) {
+      this.emitVideoPreviewArtifacts(video, label);
+      return {
+        note: `Video attachment "${label}" is available at ${video.filePath}. Attached images include a contact sheet and representative frame extracted from the video.`,
+        images: cachedImages,
+      };
+    }
+
+    const videoHash = createHash("sha256")
+      .update(`${video.filePath}:${video.sizeBytes}`)
+      .digest("hex")
+      .slice(0, 16);
+    const frameDir = this.getVideoFrameOutputDir(label, videoHash);
+    await fsPromises.mkdir(frameDir, { recursive: true });
+
+    const durationSeconds = await this.probeVideoDurationSeconds(video.filePath);
+    const frameRate =
+      durationSeconds && durationSeconds > 0
+        ? Math.max(0.05, Math.min(2, VIDEO_FRAME_SAMPLE_LIMIT / durationSeconds))
+        : 1;
+    const framePattern = path.join(frameDir, "frame_%03d.jpg");
+    const contactSheetPath = path.join(frameDir, "contact_sheet.jpg");
+
+    try {
+      await execFileAsync(
+        "ffmpeg",
+        [
+          "-v",
+          "error",
+          "-y",
+          "-i",
+          video.filePath,
+          "-vf",
+          `fps=${frameRate.toFixed(4)},scale=640:-1`,
+          "-frames:v",
+          String(VIDEO_FRAME_SAMPLE_LIMIT),
+          framePattern,
+        ],
+        { timeout: 45_000, maxBuffer: 2 * 1024 * 1024 },
+      );
+
+      const framePaths = (await fsPromises.readdir(frameDir))
+        .filter((fileName) => /^frame_\d+\.jpg$/i.test(fileName))
+        .sort()
+        .map((fileName) => path.join(frameDir, fileName));
+      if (framePaths.length === 0) {
+        throw new Error("ffmpeg produced no frames");
+      }
+
+      try {
+        await execFileAsync(
+          "ffmpeg",
+          [
+            "-v",
+            "error",
+            "-y",
+            "-pattern_type",
+            "glob",
+            "-i",
+            path.join(frameDir, "frame_*.jpg"),
+            "-filter_complex",
+            "scale=402:-1,tile=5x2",
+            contactSheetPath,
+          ],
+          { timeout: 20_000, maxBuffer: 2 * 1024 * 1024 },
+        );
+      } catch (error) {
+        logger.warn(
+          `[TaskExecutor] Video contact sheet generation failed: ${String((error as Error).message)}`,
+        );
+      }
+
+      video.videoFramePaths = framePaths;
+      video.videoContactSheetPath = fs.existsSync(contactSheetPath)
+        ? contactSheetPath
+        : undefined;
+      this.emitVideoPreviewArtifacts(video, label);
+
+      const previewPaths = this.getVideoPreviewImagePaths(video);
+      const images: LLMImageContent[] = [];
+      for (const imagePath of Array.from(new Set(previewPaths))) {
+        images.push(await loadImageFromFile(imagePath));
+      }
+
+      return {
+        note: `Video attachment "${label}" is available at ${video.filePath}. I extracted ${framePaths.length} representative frame(s); attached images include a contact sheet and a representative full frame.`,
+        images,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      logger.warn(`[TaskExecutor] Skipping video frame extraction: ${message}`);
+      this.emitEvent("log", {
+        message: `Video frame extraction skipped for "${label}": ${message}`,
+      });
+      return {
+        note: `Video attachment "${label}" is available at ${video.filePath}, but frames could not be extracted automatically (${message}). Use ffmpeg/ffprobe on the file path if detailed video inspection is needed.`,
+        images: [],
+      };
+    }
+  }
+
   /**
-   * Build user message content, optionally including image attachments.
-   * Returns a plain string when no images, or an LLMContent[] when images are present.
+   * Build user message content, optionally including visual attachments.
+   * Returns a plain string when no visual content is available, or LLMContent[]
+   * when image/video-derived frames are present.
    * Validates each image against the current provider's limits and skips invalid ones.
    */
   private async buildUserContent(
@@ -31291,23 +31525,34 @@ Return ONLY a JSON object:
     const providerType = this.provider.type;
     const providerCaps = getProviderImageCaps(providerType);
     if (!providerCaps.supportsImages) {
-      const message =
-        "I can't analyze attached images with the current model. Switch to an image-capable model/provider and resend the image.";
-      logger.warn(`[TaskExecutor] ${message} Current provider: ${providerType}`);
-      this.emitEvent("assistant_message", { message });
+      const hasVideo = images.some((attachment) => this.isVideoAttachment(attachment));
+      const hasImage = images.some((attachment) => !this.isVideoAttachment(attachment));
+      const warningMessage =
+        hasVideo && !hasImage
+          ? "I can't analyze attached videos with the current model. Switch to an image-capable model/provider and resend the video."
+          : hasVideo
+            ? "I can't analyze attached images or videos with the current model. Switch to an image-capable model/provider and resend the attachments."
+            : "I can't analyze attached images with the current model. Switch to an image-capable model/provider and resend the image.";
+      logger.warn(`[TaskExecutor] ${warningMessage} Current provider: ${providerType}`);
+      this.emitEvent("assistant_message", { message: warningMessage });
       this.emitEvent("log", {
-        message: `Image skipped: current provider "${providerType}" does not support image input.`,
+        message: `Visual attachment skipped: current provider "${providerType}" does not support image input.`,
       });
-      return message;
+      return warningMessage;
     }
 
     const validImages: LLMContent[] = [];
+    const attachmentNotes: string[] = [];
 
     for (const img of images) {
-      let imageContent: LLMImageContent;
+      const imageContents: LLMImageContent[] = [];
       try {
-        if (img.filePath) {
-          imageContent = await loadImageFromFile(img.filePath);
+        if (this.isVideoAttachment(img)) {
+          const videoContent = await this.buildVideoAttachmentContent(img);
+          attachmentNotes.push(videoContent.note);
+          imageContents.push(...videoContent.images);
+        } else if (img.filePath) {
+          const imageContent = await loadImageFromFile(img.filePath);
           imageContent.originalSizeBytes = img.sizeBytes;
           if (img.mimeType && img.mimeType !== imageContent.mimeType) {
             imageContent.mimeType = img.mimeType as LLMImageMimeType;
@@ -31321,36 +31566,42 @@ Return ONLY a JSON object:
           if (img.tempFile) {
             fs.promises.unlink(tempFilePath).catch(() => {});
           }
+          imageContents.push(imageContent);
         } else {
-          imageContent = {
+          imageContents.push({
             type: "image",
             data: img.data || "",
             mimeType: img.mimeType as LLMImageMimeType,
             originalSizeBytes: img.sizeBytes,
-          };
+          });
         }
       } catch (error) {
         logger.warn(
-          `[TaskExecutor] Skipping image attachment: ${String((error as Error).message)}`,
+          `[TaskExecutor] Skipping visual attachment: ${String((error as Error).message)}`,
         );
         this.emitEvent("log", {
-          message: `Image skipped: ${error instanceof Error ? error.message : "unknown error"}`,
+          message: `Visual attachment skipped: ${error instanceof Error ? error.message : "unknown error"}`,
         });
         continue;
       }
 
-      const error = validateImageForProvider(imageContent, providerType);
-      if (error) {
-        logger.warn(`[TaskExecutor] Skipping image: ${error}`);
-        this.emitEvent("log", { message: `Image skipped: ${error}` });
-      } else {
-        validImages.push(imageContent);
+      for (const imageContent of imageContents) {
+        const error = validateImageForProvider(imageContent, providerType);
+        if (error) {
+          logger.warn(`[TaskExecutor] Skipping image: ${error}`);
+          this.emitEvent("log", { message: `Image skipped: ${error}` });
+        } else {
+          validImages.push(imageContent);
+        }
       }
     }
+    const text = attachmentNotes.length > 0
+      ? `${message}\n\nVideo processing notes:\n${attachmentNotes.map((note) => `- ${note}`).join("\n")}\n\nUse the attached extracted video frames/contact sheet as the primary visual evidence. Do not inspect the original video with shell, glob, or file tools unless the user explicitly asks for deeper local media forensics.`
+      : message;
     if (validImages.length === 0) {
-      return message;
+      return text;
     }
-    return [{ type: "text", text: message }, ...validImages];
+    return [{ type: "text", text }, ...validImages];
   }
 
   /**

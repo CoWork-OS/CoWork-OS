@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Video attachment analysis**: uploaded `.mp4`, `.mov`, and `.webm` files are copied into the workspace, sampled into representative frames, passed to image-capable models, and shown as contact-sheet/full-frame image artifacts in the task timeline. Added [Video Attachments](video-attachments.md) documentation.
 - **Google Calendar MCP tools**: added Calendar coverage to the Google Workspace MCP connector, including calendar listing, event list/read/batch read, availability/freeBusy lookup, and confirmed event create/update/delete. Composer mentions now merge these `google-workspace.calendar_*` tools with native `calendar_action` under one Google Calendar chip.
 - **Memory Write Governance docs**: documented approval modes for durable archive, curated, background, and external memory writes; clarified the pending approval queue lifecycle; documented sensitive external-memory blocking before queue persistence; and corrected storage docs to distinguish encrypted settings/fields from the normal SQLite database file.
 - **Architecture design orchestration**: added bundled Rhino, Blender, and ComfyUI MCP connectors plus the `architecture-design` skill for concept architecture workflows. The connectors are local-only, enforce project-root file boundaries, expose registry/capability metadata, and document setup, safety, and artifact expectations across the connector and skill docs.

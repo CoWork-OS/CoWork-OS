@@ -44,6 +44,7 @@ This keeps the agent next to the work product. A spreadsheet can be selected and
 - **Terminal tabs**: Direct CLI work opens in xterm.js + node-pty terminal tabs under the message box, with native macOS shell and Windows `cmd.exe` behavior, keyboard shortcuts, Tab completion, interactive prompts, resizing, and closeable tabs. See [Terminal Tabs](terminal-tabs.md).
 - **PDF and LaTeX**: Source-first LaTeX workflows preserve the editable `.tex` file and pair it with the compiled PDF in one artifact workbench when a local TeX engine is available.
 - **Uploaded PDFs**: PDF attachments are imported into `.cowork/uploads/...`, summarized into a compact attachment block, and read more deeply on demand with `parse_document`. The attachment block preserves the workspace-relative path, page count, extraction status, OCR/scan signals, and a short excerpt without inlining the full PDF into every prompt. Visual/layout PDF questions use `read_pdf_visual` instead.
+- **Uploaded videos**: MP4, MOV, and WebM attachments are imported into `.cowork/uploads/...`, sampled into representative frames, and analyzed through image-capable model input. The extracted contact sheet and representative frame are stored under `.cowork/video-frames/...` and emitted as inline image artifacts in the task timeline. See [Video Attachments](video-attachments.md).
 - **General previews**: The format-aware file preview popup remains available for files that do not have a dedicated artifact workbench.
 
 ## Positioning Boundary
@@ -75,6 +76,7 @@ The product promise is "one app for the everyday work most people currently spli
 - [Spreadsheet Artifacts](spreadsheet-artifacts.md)
 - [Presentation Artifacts and PPTX Preview](pptx-generation-and-preview.md)
 - [Web Page Artifacts](web-page-artifacts.md)
+- [Video Attachments](video-attachments.md)
 - [Browser Workbench](browser-workbench.md)
 - [Browser V2 Architecture](browser-v2-architecture.md)
 - [Terminal Tabs](terminal-tabs.md)

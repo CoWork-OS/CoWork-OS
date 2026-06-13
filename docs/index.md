@@ -102,6 +102,9 @@ hero:
       text: Web Page Artifacts
       link: /web-page-artifacts
     - theme: alt
+      text: Video Attachments
+      link: /video-attachments
+    - theme: alt
       text: Browser Workbench
       link: /browser-workbench
     - theme: alt
@@ -171,6 +174,8 @@ features:
     details: Format-aware in-app preview popup for HTML, Markdown, code (with syntax highlighting), JSON tree view, CSV/TSV tables, XLSX, DOCX, PDF, images (fit/actual-size toggle, dimensions, alpha checkerboard), video, audio (with duration), LaTeX, and PPTX. Each format adapts the modal width, header subtitle metadata, and per-format actions; Copy path / Show in Finder / Open externally / Close are unified across every format.
   - title: Smart PDF Attachments
     details: Uploaded PDFs are copied into the workspace, summarized with page/extraction/OCR metadata and an untrusted-content boundary, then read on demand with parse_document for summaries, Q&A, extraction, comparison, and transformation. Visual PDF layout questions stay on read_pdf_visual.
+  - title: Video Attachments
+    details: Uploaded MP4, MOV, and WebM files are copied into the workspace, sampled into representative frames, and sent to image-capable models as visual input. CoWork stores contact sheets and representative full frames under `.cowork/video-frames/...` and shows them inline in the task timeline as image artifacts.
   - title: Spreadsheet Artifacts
     details: Task-created spreadsheet files render as compact artifact cards. Excel workbooks and CSV/TSV open into a persisted resizable right sidebar by default; Numbers, Google Sheets shortcut, ODS, and XLSB outputs keep external-app/folder actions. Editable sheets can expand into a fullscreen spreadsheet workbench with selection, copy, zoom, add row/column, save, model picker, voice input, attachments, and follow-up task context.
   - title: Document Artifacts

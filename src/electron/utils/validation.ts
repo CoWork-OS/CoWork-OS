@@ -32,6 +32,8 @@ const MAX_TITLE_LENGTH = 500;
 const MAX_PROMPT_LENGTH = 500000; // ~125K tokens; fits within 200K-token model context
 const MAX_IMAGES_PER_MESSAGE = 5;
 const MAX_TOTAL_TASK_IMAGE_BYTES = 125 * 1024 * 1024;
+const MAX_IMAGE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_VIDEO_ATTACHMENT_BYTES = 500 * 1024 * 1024;
 const MAX_OAUTH_TOKEN_LENGTH = 16 * 1024;
 const LOOM_MAILBOX_FOLDER_ERROR =
   "LOOM mailbox folder contains invalid characters";
@@ -339,14 +341,24 @@ export const ImageAttachmentSchema = z
   .object({
     data: z.string().trim().min(1).optional(),
     filePath: z.string().trim().max(MAX_PATH_LENGTH).optional(),
-    mimeType: z.enum(["image/jpeg", "image/png", "image/gif", "image/webp"]),
+    mimeType: z.enum([
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "video/mp4",
+      "video/quicktime",
+      "video/webm",
+    ]),
     filename: z.string().max(255).optional(),
     sizeBytes: z
       .number()
       .int()
       .positive()
-      .max(25 * 1024 * 1024), // 25MB absolute max
+      .max(MAX_VIDEO_ATTACHMENT_BYTES),
     tempFile: z.boolean().optional(),
+    videoFramePaths: z.array(z.string().trim().max(MAX_PATH_LENGTH)).max(12).optional(),
+    videoContactSheetPath: z.string().trim().max(MAX_PATH_LENGTH).optional(),
   })
   .superRefine((data, ctx) => {
     const hasData =
@@ -363,6 +375,24 @@ export const ImageAttachmentSchema = z
       return;
     }
 
+    const isVideo = data.mimeType.startsWith("video/");
+    if (isVideo && hasData) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["filePath"],
+        message: "Video attachment must use a file path.",
+      });
+      return;
+    }
+
+    if (!isVideo && data.sizeBytes > MAX_IMAGE_ATTACHMENT_BYTES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sizeBytes"],
+        message: `Image attachment exceeds ${MAX_IMAGE_ATTACHMENT_BYTES} bytes.`,
+      });
+    }
+
     if (hasFilePath && data.filePath) {
       if (!path.isAbsolute(data.filePath)) {
         ctx.addIssue({
@@ -374,18 +404,22 @@ export const ImageAttachmentSchema = z
       }
 
       const ext = path.extname(data.filePath).toLowerCase();
-      const supportedExtensions = new Set([
+      const supportedImageExtensions = new Set([
         ".jpg",
         ".jpeg",
         ".png",
         ".gif",
         ".webp",
       ]);
+      const supportedVideoExtensions = new Set([".mp4", ".mov", ".webm"]);
+      const supportedExtensions = isVideo
+        ? supportedVideoExtensions
+        : supportedImageExtensions;
       if (!supportedExtensions.has(ext)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["filePath"],
-          message: `Unsupported image extension "${ext}".`,
+          message: `Unsupported ${isVideo ? "video" : "image"} extension "${ext}".`,
         });
       }
     }
@@ -452,6 +486,9 @@ export const TaskMessageSchema = z
     }
 
     const totalImageBytes = data.images.reduce((sum, image) => {
+      if (String(image.mimeType || "").startsWith("video/")) {
+        return sum;
+      }
       const sizeBytes = Number(image.sizeBytes);
       return Number.isFinite(sizeBytes) && sizeBytes > 0
         ? sum + sizeBytes

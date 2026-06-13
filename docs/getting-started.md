@@ -353,6 +353,17 @@ Interactive browser tasks use the visible Browser Workbench by default. For form
 
 Browser Use Cloud stealth browsers are available only as an explicit opt-in backend. Configure `BROWSER_USE_API_KEY`, then request `browser_provider: "browser-use-cloud"` for a public HTTP(S) site. Cloud mode is blocked for localhost, private networks, `file:` URLs, generated local HTML artifacts, and intranet-style hostnames; use the default visible Browser Workbench for those targets. Browser Use Cloud sessions are stopped by `browser_close`, and retryable pending-stop results include the Browser Use session id if the stop API fails.
 
+### 7. Inspect An Uploaded Video
+
+Attach an `.mp4`, `.mov`, or `.webm` file and ask:
+
+```
+Title: Inspect the demo recording
+Description: Review the attached video. Summarize the visible UI states, any failures, and the final outcome.
+```
+
+CoWork samples the video into representative still frames for image-capable models. The task timeline shows the extracted contact sheet and representative full frame as inline image artifacts, so you can inspect the same screenshots the agent used. See [Video Attachments](video-attachments.md).
+
 ## Understanding the UI
 
 ### Sidebar (Left)

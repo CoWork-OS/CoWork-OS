@@ -66,6 +66,9 @@ export function isIgnorableDevLogLine(line) {
 
 export function inferDevLogLevel(line, stream = "stdout") {
   const text = String(line).toLowerCase();
+  if (/\btool #\d+\s+"run_command"\s+start\b/.test(text)) {
+    return stream === "stderr" ? "warn" : "info";
+  }
   if (/\bfailed\s*=\s*0\b/.test(text) && !/\bfailed\s*=\s*[1-9]\d*\b/.test(text)) {
     return "info";
   }

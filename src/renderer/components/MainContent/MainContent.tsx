@@ -240,6 +240,36 @@ import {
   pickFocusedCards,
 } from "./focused-cards";
 import { TaskAutomationModal, isTurnThisIntoRoutinePrompt, taskCanBecomeRoutineFromFollowUp } from "./TaskAutomationModal";
+
+const VISUAL_ATTACHMENT_MIME_SET = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+]);
+
+const guessVisualAttachmentMimeType = (fileName: string, mimeType?: string): string | undefined => {
+  if (mimeType && VISUAL_ATTACHMENT_MIME_SET.has(mimeType)) return mimeType;
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (lower.endsWith(".webm")) return "video/webm";
+  return undefined;
+};
+
+const isVideoVisualAttachmentMimeType = (mimeType: string | undefined): boolean =>
+  Boolean(mimeType && mimeType.startsWith("video/"));
+
+const joinWorkspaceRelativePath = (workspacePath: string, relativePath: string): string =>
+  `${workspacePath.replace(/[\\/]+$/, "")}/${relativePath.replace(/^[\\/]+/, "")}`;
+
 import {
   type TaskFeedRow,
   type SelectedSkillModalState,
@@ -6224,30 +6254,32 @@ function MainContentComponent({
         importedAttachments = await importAttachmentsToWorkspace();
       }
 
-      // Build native ImageAttachment[] from image-type attachments so the LLM
-      // can see the actual pixels (vision) instead of relying on OCR text only.
-      const IMAGE_MIME_SET = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
-      const nativeImageAttachments: ImageAttachment[] = [];
-      for (let i = 0; i < pendingAttachments.length; i++) {
-        const pa = pendingAttachments[i];
-        if (!pa.mimeType || !IMAGE_MIME_SET.has(pa.mimeType)) continue;
-        if (pa.dataBase64) {
-          nativeImageAttachments.push({
-            data: pa.dataBase64,
-            mimeType: pa.mimeType as ImageAttachment["mimeType"],
-            filename: pa.name,
-            sizeBytes: pa.size,
-          });
-        } else if (pa.path) {
-          nativeImageAttachments.push({
-            filePath: pa.path,
-            mimeType: pa.mimeType as ImageAttachment["mimeType"],
-            filename: pa.name,
-            sizeBytes: pa.size,
-          });
-        }
-      }
-      const imagePayload = nativeImageAttachments.length > 0 ? nativeImageAttachments : undefined;
+      // Build native visual attachments from imported workspace files so the
+      // executor can read stable paths and process images/video frames.
+      const nativeVisualAttachments: ImageAttachment[] =
+        workspace?.path && importedAttachments.length > 0
+          ? importedAttachments
+              .flatMap((attachment): ImageAttachment[] => {
+                const mimeType = guessVisualAttachmentMimeType(
+                  attachment.fileName,
+                  attachment.mimeType,
+                );
+                if (!mimeType) return [];
+                return [
+                  {
+                    filePath: joinWorkspaceRelativePath(workspace.path, attachment.relativePath),
+                    mimeType: mimeType as ImageAttachment["mimeType"],
+                    filename: attachment.fileName,
+                    sizeBytes: attachment.size,
+                  },
+                ];
+              })
+          : [];
+      const imagePayload = nativeVisualAttachments.length > 0 ? nativeVisualAttachments : undefined;
+      const textPromptAttachments = importedAttachments.filter((attachment) => {
+        const mimeType = guessVisualAttachmentMimeType(attachment.fileName, attachment.mimeType);
+        return !isVideoVisualAttachmentMimeType(mimeType);
+      });
 
       // Compose text message (with OCR fallback for non-image files)
       const appSlashMessageText =
@@ -6259,7 +6291,7 @@ function MainContentComponent({
       const composeResult = await composeMessageWithAttachments(
         workspace?.path,
         appSlashMessageText,
-        importedAttachments,
+        textPromptAttachments,
       );
       const hasExtractionWarnings = composeResult.extractionWarnings.length > 0;
       if (hasExtractionWarnings) {

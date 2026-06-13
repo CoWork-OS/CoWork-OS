@@ -3148,20 +3148,33 @@ export interface ComparisonAgentSpec {
   assignedAgentRoleId?: string;
 }
 
-/** Image attachment for sending images with messages */
+export type VisualAttachmentMimeType =
+  | "image/jpeg"
+  | "image/png"
+  | "image/gif"
+  | "image/webp"
+  | "video/mp4"
+  | "video/quicktime"
+  | "video/webm";
+
+/** Visual attachment for sending images or videos with messages. */
 export interface ImageAttachment {
   /** Base64-encoded image data (legacy path). Prefer filePath when possible. */
   data?: string;
-  /** Absolute path to image file on disk (preferred to avoid IPC payload copies). */
+  /** Absolute path to media file on disk (preferred to avoid IPC payload copies). */
   filePath?: string;
-  /** MIME type of the image */
-  mimeType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  /** MIME type of the visual attachment. */
+  mimeType: VisualAttachmentMimeType;
   /** Original filename (for display) */
   filename?: string;
   /** File size in bytes */
   sizeBytes: number;
   /** Internal hint when filePath points to a file generated in-process and may be ephemeral */
   tempFile?: boolean;
+  /** Cached extracted video frame image paths for repeated executor turns. */
+  videoFramePaths?: string[];
+  /** Cached extracted video contact sheet path for repeated executor turns. */
+  videoContactSheetPath?: string;
 }
 
 /** Quoted assistant message attached to a follow-up so the backend can treat it as explicit context. */

@@ -1,6 +1,6 @@
 # Public Adoption Stats
 
-Generated at: 2026-06-14T07:56:33.495Z
+Generated at: 2026-06-15T09:33:31.992Z
 
 These numbers are acquisition and download-intent signals for CoWork OS. They do **not** measure active users, first launch, successful task completion, model configuration, retention, prompts, files, emails, or any in-app content.
 
@@ -8,37 +8,37 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Metric | Value |
 |---|---:|
-| GitHub stars | 358 |
-| GitHub forks | 52 |
+| GitHub stars | 359 |
+| GitHub forks | 53 |
 | GitHub watchers | 2 |
 | GitHub open issues | 9 |
 | Latest release | v0.5.49 |
 | Latest release date | 2026-06-08 |
-| Installer/server downloads, lifetime | 974 |
-| Installer/server downloads, since previous snapshot | 4 |
+| Installer/server downloads, lifetime | 981 |
+| Installer/server downloads, since previous snapshot | 7 |
 | npm latest version | 0.5.49 |
-| npm downloads, last day | 3 |
-| npm downloads, last week | 334 |
-| npm downloads, last month | 1,590 |
-| GitHub views, last 14-ish days | 1,362 total / 503 unique |
-| GitHub clones, last 14-ish days | 3,619 total / 921 unique |
+| npm downloads, last day | 8 |
+| npm downloads, last week | 259 |
+| npm downloads, last month | 1,555 |
+| GitHub views, last 14-ish days | 1,326 total / 489 unique |
+| GitHub clones, last 14-ish days | 3,997 total / 956 unique |
 
 ## Release Downloads By Platform
 
 | Platform | Lifetime downloads | Delta |
 |---|---:|---:|
-| macos | 569 | +2 |
+| macos | 570 | +1 |
 | server | 25 | +0 |
-| windows | 380 | +2 |
+| windows | 386 | +6 |
 
 ## Recent Release Assets
 
 | Release | Asset | Platform | Downloads | Delta |
 |---|---|---|---:|---:|
-| v0.5.49 | CoWork-OS-0.5.49-arm64-mac.zip | macos | 3 | +1 |
-| v0.5.49 | CoWork-OS-0.5.49-arm64.dmg | macos | 8 | +1 |
+| v0.5.49 | CoWork-OS-0.5.49-arm64-mac.zip | macos | 3 | +0 |
+| v0.5.49 | CoWork-OS-0.5.49-arm64.dmg | macos | 9 | +1 |
 | v0.5.49 | cowork-os-server-linux-x64-v0.5.49.tar.gz | server | 2 | +0 |
-| v0.5.49 | CoWork-OS-Setup-0.5.49.exe | windows | 25 | +2 |
+| v0.5.49 | CoWork-OS-Setup-0.5.49.exe | windows | 31 | +6 |
 | v0.5.48 | CoWork-OS-0.5.48-arm64-mac.zip | macos | 5 | +0 |
 | v0.5.48 | CoWork-OS-0.5.48-arm64.dmg | macos | 26 | +0 |
 | v0.5.48 | cowork-os-server-linux-x64-v0.5.48.tar.gz | server | 3 | +0 |
@@ -60,37 +60,31 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | Google | 380 | 196 |
-| 2 | github.com | 283 | 100 |
+| 1 | Google | 337 | 173 |
+| 2 | github.com | 304 | 105 |
 | 3 | Bing | 21 | 14 |
-| 4 | search.brave.com | 9 | 6 |
-| 5 | DuckDuckGo | 8 | 5 |
-| 6 | srclog.com | 8 | 1 |
-| 7 | t.co | 6 | 3 |
-| 8 | yandex.ru | 5 | 2 |
-| 9 | chatgpt.com | 4 | 3 |
-| 10 | doubao.com | 3 | 2 |
+| 4 | DuckDuckGo | 9 | 6 |
+| 5 | srclog.com | 8 | 1 |
+| 6 | reddit.com | 5 | 3 |
+| 7 | search.brave.com | 4 | 3 |
+| 8 | Yahoo | 4 | 1 |
+| 9 | chatgpt.com | 3 | 3 |
+| 10 | perplexity.ai | 3 | 3 |
 
 ## Top GitHub Paths
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | /CoWork-OS/CoWork-OS | 580 | 404 |
-| 2 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-1.webp | 55 | 44 |
-| 3 | /CoWork-OS/CoWork-OS/issues | 54 | 22 |
-| 4 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.48 | 52 | 27 |
-| 5 | /cowork-os/cowork-os | 30 | 27 |
-| 6 | /CoWork-OS/CoWork-OS/tree/main | 29 | 20 |
-| 7 | /CoWork-OS/CoWork-OS/discussions | 27 | 16 |
-| 8 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.49 | 20 | 16 |
-| 9 | /CoWork-OS/CoWork-OS/pulls | 20 | 15 |
-| 10 | /CoWork-OS/CoWork-OS/tree/main/resources/skills/taste-skill | 14 | 12 |
-
-## Documentation Follow-up
-
-Heartbeat run `2e973eac-c4a0-4fdd-8bd5-af36d5cb64e6` reviewed this snapshot against the current project-management context using the repository copy from `main` as an alternative input source.
-
-No immediate product documentation follow-up is required from this stats snapshot alone. The file already states the core interpretation boundaries: these are public acquisition and download-intent signals, not active usage, retention, task success, model configuration, or telemetry. Keep future website or launch-material references aligned with that framing, and consume `data/adoption/public-stats-latest.json` for implementation work.
+| 1 | /CoWork-OS/CoWork-OS | 550 | 396 |
+| 2 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-1.webp | 56 | 43 |
+| 3 | /CoWork-OS/CoWork-OS/issues | 44 | 18 |
+| 4 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.48 | 35 | 20 |
+| 5 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.49 | 29 | 23 |
+| 6 | /cowork-os/cowork-os | 27 | 24 |
+| 7 | /CoWork-OS/CoWork-OS/discussions | 25 | 14 |
+| 8 | /CoWork-OS/CoWork-OS/tree/main | 22 | 20 |
+| 9 | /CoWork-OS/CoWork-OS/tree/main/resources/skills/taste-skill | 21 | 18 |
+| 10 | /CoWork-OS/CoWork-OS/pulls | 19 | 15 |
 
 ## Data Policy
 

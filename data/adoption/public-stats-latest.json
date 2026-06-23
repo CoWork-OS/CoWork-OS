@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-22T09:20:22.353Z",
-  "generatedDay": "2026-06-22",
+  "generatedAt": "2026-06-23T06:58:37.375Z",
+  "generatedDay": "2026-06-23",
   "privacy": {
     "source": "Public GitHub/npm APIs plus owner-only GitHub traffic APIs when available.",
     "appTelemetry": false,
@@ -16,10 +16,10 @@
       "stars": 364,
       "forks": 57,
       "watchers": 2,
-      "openIssues": 9,
+      "openIssues": 10,
       "archived": false,
-      "pushedAt": "2026-06-21T08:08:32Z",
-      "updatedAt": "2026-06-21T08:08:36Z"
+      "pushedAt": "2026-06-22T09:20:25Z",
+      "updatedAt": "2026-06-22T09:20:29Z"
     },
     "releases": {
       "releaseCount": 59,
@@ -29,13 +29,13 @@
         "publishedAt": "2026-06-08T10:07:49Z",
         "htmlUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.5.49"
       },
-      "totalAssetDownloadCount": 1618,
-      "totalInstallAssetDownloadCount": 1099,
-      "metadataAssetDownloadCount": 519,
+      "totalAssetDownloadCount": 1627,
+      "totalInstallAssetDownloadCount": 1100,
+      "metadataAssetDownloadCount": 527,
       "platformTotals": {
         "macos": 641,
         "server": 30,
-        "windows": 428
+        "windows": 429
       },
       "assets": [
         {
@@ -59,8 +59,8 @@
           "sizeBytes": 259088366,
           "downloadCount": 13,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.49/CoWork-OS-0.5.49-arm64-mac.zip",
-          "previousDownloadCount": 8,
-          "deltaSincePreviousSnapshot": 5
+          "previousDownloadCount": 13,
+          "deltaSincePreviousSnapshot": 0
         },
         {
           "releaseTag": "v0.5.49",
@@ -83,8 +83,8 @@
           "sizeBytes": 269132642,
           "downloadCount": 20,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.49/CoWork-OS-0.5.49-arm64.dmg",
-          "previousDownloadCount": 15,
-          "deltaSincePreviousSnapshot": 5
+          "previousDownloadCount": 20,
+          "deltaSincePreviousSnapshot": 0
         },
         {
           "releaseTag": "v0.5.49",
@@ -129,10 +129,10 @@
           "assetName": "CoWork-OS-Setup-0.5.49.exe",
           "platform": "windows",
           "sizeBytes": 229612889,
-          "downloadCount": 60,
+          "downloadCount": 61,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.49/CoWork-OS-Setup-0.5.49.exe",
-          "previousDownloadCount": 58,
-          "deltaSincePreviousSnapshot": 2
+          "previousDownloadCount": 60,
+          "deltaSincePreviousSnapshot": 1
         },
         {
           "releaseTag": "v0.5.49",
@@ -143,8 +143,8 @@
           "sizeBytes": 239356,
           "downloadCount": 3,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.49/CoWork-OS-Setup-0.5.49.exe.blockmap",
-          "previousDownloadCount": 2,
-          "deltaSincePreviousSnapshot": 1
+          "previousDownloadCount": 3,
+          "deltaSincePreviousSnapshot": 0
         },
         {
           "releaseTag": "v0.5.49",
@@ -153,9 +153,9 @@
           "assetName": "latest-mac.yml",
           "platform": "metadata",
           "sizeBytes": 515,
-          "downloadCount": 79,
+          "downloadCount": 87,
           "browserDownloadUrl": "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.49/latest-mac.yml",
-          "previousDownloadCount": 71,
+          "previousDownloadCount": 79,
           "deltaSincePreviousSnapshot": 8
         },
         {
@@ -3325,13 +3325,13 @@
   },
   "deltas": {
     "releaseDownloads": {
-      "totalDeltaSincePreviousSnapshot": 12,
+      "totalDeltaSincePreviousSnapshot": 1,
       "platformDeltasSincePreviousSnapshot": {
-        "macos": 10,
+        "macos": 0,
         "server": 0,
-        "windows": 2
+        "windows": 1
       }
     },
-    "previousSnapshotGeneratedAt": "2026-06-21T08:08:30.256Z"
+    "previousSnapshotGeneratedAt": "2026-06-22T09:20:22.353Z"
   }
 }

@@ -29,6 +29,21 @@ function normalizeDevLogLevel(env) {
   process.stdout.write("[dev-start] COWORK_LOG_LEVEL=debug ignored for local dev; using info.\n");
 }
 
+function enableSystemCaForMacDev(env) {
+  if (process.platform !== "darwin") return;
+  if (String(env.COWORK_DEV_USE_SYSTEM_CA || "").trim() === "0") return;
+
+  const nodeOptions = String(env.NODE_OPTIONS || "").trim();
+  if (/(?:^|\s)--use-(?:system|bundled|openssl)-ca(?:\s|$)/.test(nodeOptions)) {
+    return;
+  }
+
+  env.NODE_OPTIONS = [nodeOptions, "--use-system-ca"].filter(Boolean).join(" ");
+  process.stdout.write(
+    "[dev-start] Enabled NODE_OPTIONS=--use-system-ca for macOS dev TLS trust.\n",
+  );
+}
+
 async function isPortAvailable(port) {
   return new Promise((resolve) => {
     const server = net.createServer();
@@ -240,6 +255,7 @@ const childEnv = {
 };
 delete childEnv.ELECTRON_RUN_AS_NODE;
 normalizeDevLogLevel(childEnv);
+enableSystemCaForMacDev(childEnv);
 
 const electronStatus = getElectronBinaryStatus();
 if (electronStatus.installed && !electronStatus.ready) {

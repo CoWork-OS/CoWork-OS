@@ -6710,6 +6710,9 @@ export async function setupIpcHandlers(
           updatedSettings.openaiCompatible = undefined;
           updatedSettings.cachedOpenAICompatibleModels = undefined;
           break;
+        case "moa":
+          updatedSettings.moa = undefined;
+          break;
         default:
           clearCustomProviderConfig(resolvedProviderType);
           break;
@@ -6855,6 +6858,8 @@ export async function setupIpcHandlers(
         "OpenAI-compatible provider",
       ),
       openaiCompatibleBaseUrl,
+      moaDefaultPreset: validatedConfig.moa?.defaultPreset,
+      moaPresets: validatedConfig.moa?.presets,
       providerApiKey: validateOptionalProviderApiKey(
         customProviderConfig?.apiKey,
         `Custom provider ${resolvedProviderType}`,

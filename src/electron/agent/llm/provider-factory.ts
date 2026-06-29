@@ -41,6 +41,7 @@ import { PiProvider } from "./pi-provider";
 import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider";
 import { OpenCodeGoProvider } from "./opencode-go-provider";
+import { MoaProvider, type ResolvedMoaSlot } from "./moa-provider";
 import { GitHubCopilotProvider } from "./github-copilot-provider";
 import { isOpenCodeGoBaseUrl } from "./opencode-go-routing";
 import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
@@ -59,6 +60,8 @@ import type {
   LLMReasoningEffort,
   LlmProfile,
   LLMProviderFallbackConfig,
+  MoaModelSlot,
+  MoaPreset,
   PromptCachingSettings,
 } from "../../../shared/types";
 import { getUserDataDir } from "../../utils/user-data-dir";
@@ -697,6 +700,8 @@ function normalizeProviderConfig(config: LLMProviderConfig): LLMProviderConfig {
     openaiCompatibleBaseUrl: normalizeOptionalString(
       config.openaiCompatibleBaseUrl,
     ),
+    moaDefaultPreset: normalizeOptionalString(config.moaDefaultPreset),
+    moaPresets: config.moaPresets,
     providerApiKey: normalizeSecret(config.providerApiKey),
     providerBaseUrl: normalizeOptionalString(config.providerBaseUrl),
   };
@@ -992,6 +997,10 @@ export interface LLMSettings {
     baseUrl?: string;
     model?: string;
   } & ProviderRoutingSettings;
+  moa?: {
+    defaultPreset?: string;
+    presets?: Record<string, MoaPreset>;
+  } & ProviderRoutingSettings;
   customProviders?: Record<string, CustomProviderConfig>;
   /** Text-to-image model selection. Default tried first; backup used on failure. */
   imageGeneration?: {
@@ -1096,6 +1105,8 @@ export interface ResolvedTaskModelSelection {
   providerType: LLMProviderType;
   modelId: string;
   modelKey: string;
+  contextModelKey?: string;
+  contextModelId?: string;
   llmProfileUsed: LlmProfile;
   resolvedModelKey: string;
   modelSource: "explicit_override" | "profile_model" | "provider_default";
@@ -1207,11 +1218,137 @@ export class LLMProviderFactory {
     normalizeNode(settings.kimi);
     normalizeNode(settings.pi);
     normalizeNode(settings.openaiCompatible);
+    normalizeNode(settings.moa);
 
     if (settings.customProviders) {
       for (const provider of Object.values(settings.customProviders)) {
         normalizeNode(provider);
       }
+    }
+  }
+
+  private static getEnabledMoaPresets(settings: LLMSettings): MoaPreset[] {
+    return Object.values(settings.moa?.presets || {}).filter(
+      (preset) =>
+        preset &&
+        preset.enabled !== false &&
+        typeof preset.id === "string" &&
+        preset.id.trim().length > 0,
+    );
+  }
+
+  private static resolveMoaPreset(
+    settings: LLMSettings,
+    presetId?: string,
+  ): MoaPreset | undefined {
+    const normalizedPresetId = normalizeModelKey(presetId);
+    if (normalizedPresetId && settings.moa?.presets?.[normalizedPresetId]) {
+      return settings.moa.presets[normalizedPresetId];
+    }
+    const defaultPreset = normalizeModelKey(settings.moa?.defaultPreset);
+    if (defaultPreset && settings.moa?.presets?.[defaultPreset]) {
+      return settings.moa.presets[defaultPreset];
+    }
+    return this.getEnabledMoaPresets(settings)[0];
+  }
+
+  private static isMoaSlotConfigured(
+    settings: LLMSettings,
+    slot?: MoaModelSlot,
+  ): boolean {
+    if (!slot?.providerType || !normalizeModelKey(slot.modelKey)) return false;
+    if (slot.providerType === "moa") return false;
+    return this.isProviderConfigured(settings, slot.providerType);
+  }
+
+  private static isMoaPresetConfigured(
+    settings: LLMSettings,
+    preset?: MoaPreset,
+  ): boolean {
+    if (!preset || preset.enabled === false) return false;
+    if (!this.isMoaSlotConfigured(settings, preset.aggregator)) return false;
+    return (preset.referenceModels || []).some((slot) =>
+      this.isMoaSlotConfigured(settings, slot),
+    );
+  }
+
+  private static resolveMoaSlotModelId(
+    settings: LLMSettings,
+    slot: MoaModelSlot,
+  ): string {
+    return this.resolveModelIdForProvider(
+      settings,
+      slot.providerType,
+      slot.modelKey,
+      "explicit_override",
+    );
+  }
+
+  private static resolveMoaSlotCandidates(
+    settings: LLMSettings,
+    slot: MoaModelSlot,
+  ): ResolvedMoaSlot[] {
+    if (slot.providerType === "moa") {
+      throw new Error("Mixture of Agents presets cannot reference another MoA preset.");
+    }
+
+    const candidates: ResolvedMoaSlot[] = [];
+    const seen = new Set<string>();
+    const addCandidate = (providerType: LLMProviderType, modelKey: string): void => {
+      const resolvedProviderType = resolveCustomProviderId(providerType);
+      if (!resolvedProviderType || resolvedProviderType === "moa") return;
+      if (!this.isProviderConfigured(settings, resolvedProviderType)) return;
+
+      const normalizedModelKey =
+        normalizeModelKey(modelKey) ||
+        this.getProviderDefaultModelKey(settings, resolvedProviderType);
+      if (!normalizedModelKey) return;
+
+      const dedupeKey = `${resolvedProviderType}:${normalizedModelKey}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+
+      const modelId = this.resolveModelIdForProvider(
+        settings,
+        resolvedProviderType,
+        normalizedModelKey,
+        "explicit_override",
+      );
+      candidates.push({
+        modelId,
+        provider: this.createProvider({
+          type: resolvedProviderType,
+          model: modelId,
+        }),
+      });
+    };
+
+    addCandidate(slot.providerType, slot.modelKey);
+    for (const entry of this.getProviderFailoverSettings(
+      settings,
+      slot.providerType,
+    ).fallbackProviders) {
+      addCandidate(entry.providerType, entry.modelKey || "");
+    }
+
+    return candidates;
+  }
+
+  private static resolveMoaContextModel(
+    settings: LLMSettings,
+    presetId?: string,
+  ): { contextModelKey?: string; contextModelId?: string } {
+    const preset = this.resolveMoaPreset(settings, presetId);
+    if (!preset?.aggregator || preset.aggregator.providerType === "moa") {
+      return {};
+    }
+    try {
+      return {
+        contextModelKey: preset.aggregator.modelKey,
+        contextModelId: this.resolveMoaSlotModelId(settings, preset.aggregator),
+      };
+    } catch {
+      return { contextModelKey: preset.aggregator.modelKey };
     }
   }
 
@@ -1275,6 +1412,10 @@ export class LLMProviderFactory {
         return Boolean(
           settings.openaiCompatible?.baseUrl &&
           settings.openaiCompatible?.model,
+        );
+      case "moa":
+        return this.getEnabledMoaPresets(settings).some((preset) =>
+          this.isMoaPresetConfigured(settings, preset),
         );
       default:
         return false;
@@ -1358,6 +1499,9 @@ export class LLMProviderFactory {
         if (!settings.openaiCompatible && createIfMissing)
           settings.openaiCompatible = {};
         return settings.openaiCompatible;
+      case "moa":
+        if (!settings.moa && createIfMissing) settings.moa = {};
+        return settings.moa;
       default:
         return undefined;
     }
@@ -1444,6 +1588,7 @@ export class LLMProviderFactory {
     if (next.kimi) applyDefaults("kimi");
     if (next.pi) applyDefaults("pi");
     if (next.openaiCompatible) applyDefaults("openai-compatible");
+    if (next.moa) applyDefaults("moa");
 
     if (next.customProviders) {
       for (const customProviderType of Object.keys(next.customProviders)) {
@@ -1514,9 +1659,12 @@ export class LLMProviderFactory {
       providerType,
       false,
     );
+    const shouldInheritGlobalFallbacks = providerType !== "moa";
     return {
       fallbackProviders:
-        configured?.fallbackProviders ?? settings.fallbackProviders ?? [],
+        configured?.fallbackProviders ??
+        (shouldInheritGlobalFallbacks ? settings.fallbackProviders : undefined) ??
+        [],
       failoverPrimaryRetryCooldownSeconds:
         configured?.failoverPrimaryRetryCooldownSeconds ??
         settings.failoverPrimaryRetryCooldownSeconds ??
@@ -1532,6 +1680,10 @@ export class LLMProviderFactory {
   ): string {
     const azureDeployment =
       settings.azure?.deployment || settings.azure?.deployments?.[0];
+
+    if (providerType === "moa") {
+      return modelKey;
+    }
 
     if (providerType === "anthropic") {
       if (modelKey.startsWith("claude-")) {
@@ -1722,10 +1874,16 @@ export class LLMProviderFactory {
       }
     }
 
+    const contextModel =
+      providerType === "moa"
+        ? this.resolveMoaContextModel(settings, resolvedModelKey)
+        : {};
+
     return {
       providerType,
       modelId,
       modelKey: resolvedModelKey,
+      ...contextModel,
       llmProfileUsed,
       resolvedModelKey,
       modelSource,
@@ -2071,33 +2229,40 @@ export class LLMProviderFactory {
       overrideConfig?.azureAnthropicDeployment ||
       settings.azureAnthropic?.deployment ||
       settings.azureAnthropic?.deployments?.[0];
+    const resolvedModel =
+      providerType === "moa"
+        ? normalizeModelKey(overrideConfig?.model) ||
+          normalizeModelKey(settings.moa?.defaultPreset) ||
+          this.getEnabledMoaPresets(settings)[0]?.id ||
+          normalizeModelKey(settings.modelKey) ||
+          ""
+        : normalizeOpenAIModelForAuth(
+            overrideConfig?.model,
+            providerType === "openai" ? settings.openai?.authMethod : undefined,
+          ) ||
+          this.getModelId(
+            settings.modelKey,
+            providerType,
+            settings.ollama?.model,
+            settings.gemini?.model,
+            settings.openrouter?.model,
+            settings.deepseek?.model,
+            normalizeOpenAIModelForAuth(
+              settings.openai?.model,
+              settings.openai?.authMethod,
+            ),
+            azureDeployment,
+            azureAnthropicDeployment,
+            settings.groq?.model,
+            settings.xai?.model,
+            settings.kimi?.model,
+            settings.customProviders,
+            settings.bedrock?.model,
+          );
 
     const config: LLMProviderConfig = {
       type: providerType,
-      model:
-        normalizeOpenAIModelForAuth(
-          overrideConfig?.model,
-          providerType === "openai" ? settings.openai?.authMethod : undefined,
-        ) ||
-        this.getModelId(
-          settings.modelKey,
-          providerType,
-          settings.ollama?.model,
-          settings.gemini?.model,
-          settings.openrouter?.model,
-          settings.deepseek?.model,
-          normalizeOpenAIModelForAuth(
-            settings.openai?.model,
-            settings.openai?.authMethod,
-          ),
-          azureDeployment,
-          azureAnthropicDeployment,
-          settings.groq?.model,
-          settings.xai?.model,
-          settings.kimi?.model,
-          settings.customProviders,
-          settings.bedrock?.model,
-        ),
+      model: resolvedModel,
       // Anthropic config - from settings only
       anthropicApiKey:
         normalizeSecret(overrideConfig?.anthropicApiKey) ||
@@ -2238,6 +2403,10 @@ export class LLMProviderFactory {
       openaiCompatibleBaseUrl:
         overrideConfig?.openaiCompatibleBaseUrl ||
         settings.openaiCompatible?.baseUrl,
+      // Mixture-of-Agents virtual provider config
+      moaDefaultPreset:
+        overrideConfig?.moaDefaultPreset || settings.moa?.defaultPreset,
+      moaPresets: overrideConfig?.moaPresets || settings.moa?.presets,
       // Custom provider config
       providerApiKey:
         normalizeSecret(overrideConfig?.providerApiKey) || customConfig?.apiKey,
@@ -2314,6 +2483,16 @@ export class LLMProviderFactory {
           apiKey: config.openaiCompatibleApiKey || "",
           baseUrl,
           defaultModel: config.model,
+        });
+        break;
+      }
+      case "moa": {
+        const settings = this.loadSettings();
+        provider = new MoaProvider({
+          defaultPreset: config.model || config.moaDefaultPreset,
+          presets: config.moaPresets || settings.moa?.presets,
+          resolveSlot: (slot: MoaModelSlot) =>
+            this.resolveMoaSlotCandidates(settings, slot),
         });
         break;
       }
@@ -2416,6 +2595,10 @@ export class LLMProviderFactory {
     if (providerType === "openai-compatible") {
       const settings = this.loadSettings();
       return settings.openaiCompatible?.model || "";
+    }
+
+    if (providerType === "moa") {
+      return typeof modelKey === "string" ? modelKey.trim() : "";
     }
 
     // For Bedrock, prefer an explicit Bedrock model ID if configured.
@@ -2582,6 +2765,11 @@ export class LLMProviderFactory {
         configured: !!(
           settings.openaiCompatible?.baseUrl && settings.openaiCompatible?.model
         ),
+      },
+      {
+        type: "moa" as LLMProviderType,
+        name: "Mixture of Agents",
+        configured: this.isProviderConfigured(settings, "moa"),
       },
     ];
 
@@ -3124,6 +3312,27 @@ export class LLMProviderFactory {
         };
       }
 
+      case "moa": {
+        const enabledPresets = this.getEnabledMoaPresets(settings);
+        const currentModel =
+          normalizeModelKey(settings.moa?.defaultPreset) ||
+          enabledPresets[0]?.id ||
+          "";
+        const modelList = enabledPresets.map((preset) => ({
+          key: preset.id,
+          displayName: preset.name || preset.id,
+          description:
+            preset.description ||
+            `${preset.referenceModels?.length || 0} advisors, ${preset.aggregator.providerType}/${preset.aggregator.modelKey} aggregator`,
+        }));
+        return {
+          currentModel,
+          models: attachMetadata(
+            ensureCurrentModel(modelList, currentModel, "Mixture of Agents preset"),
+          ),
+        };
+      }
+
       default: {
         const currentModel = settings.modelKey;
         const modelList = Object.entries(MODELS).map(([key, value]) => ({
@@ -3225,6 +3434,13 @@ export class LLMProviderFactory {
           ...settings.openaiCompatible,
           model: modelKey,
         };
+        break;
+      case "moa":
+        updated.moa = {
+          ...settings.moa,
+          defaultPreset: modelKey,
+        };
+        updated.modelKey = modelKey as ModelKey;
         break;
       case "anthropic":
         updated.modelKey = modelKey as ModelKey;

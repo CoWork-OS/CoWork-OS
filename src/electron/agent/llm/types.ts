@@ -14,6 +14,7 @@ import type {
   WebSearchMode,
   WorkerRoleKind,
   HumanInputPolicy,
+  MoaPreset,
 } from "../../../shared/types";
 
 export type { LLMProviderType, AzureReasoningEffort, OpenAIReasoningEffort, LLMTextVerbosity };
@@ -93,6 +94,9 @@ export interface LLMProviderConfig {
   // OpenAI-compatible endpoint
   openaiCompatibleApiKey?: string;
   openaiCompatibleBaseUrl?: string;
+  // Mixture-of-Agents virtual provider
+  moaDefaultPreset?: string;
+  moaPresets?: Record<string, MoaPreset>;
   // Generic provider support
   providerApiKey?: string;
   providerBaseUrl?: string;
@@ -220,6 +224,11 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
     supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
   },
   "openai-compatible": {
+    supportsImages: true,
+    maxImageBytes: 20 * 1024 * 1024,
+    supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  },
+  moa: {
     supportsImages: true,
     maxImageBytes: 20 * 1024 * 1024,
     supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],

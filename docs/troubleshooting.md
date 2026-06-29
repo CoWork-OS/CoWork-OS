@@ -89,7 +89,7 @@ npm run build:cli
 Local one-shot CLI runs prefer a hidden Electron app-entry mode so OS-encrypted settings can be read with the same desktop app identity. If providers are missing:
 
 1. Confirm the CLI and desktop app are from the same install/profile.
-2. Open the desktop app and verify **Settings > LLM** has a working provider route.
+2. Open the desktop app and verify **Settings > AI & Models** has a working provider route.
 3. Run the CLI with diagnostics:
 
    ```bash
@@ -99,6 +99,30 @@ Local one-shot CLI runs prefer a hidden Electron app-entry mode so OS-encrypted 
 4. If running from source, rebuild both Electron and CLI artifacts.
 
 See [CoWork OS CLI](cli.md) for the full local-vs-remote model.
+
+## OpenAI or MoA fails on a corporate Mac with Zscaler
+
+Corporate TLS inspection tools such as Zscaler can install a company root certificate that macOS trusts, while Electron/Node provider calls still fail with errors such as `fetch failed`. This can show up most clearly when OpenAI is used inside a Mixture of Agents preset, because MoA performs multiple provider calls in one task.
+
+For source development on macOS, `npm run dev` enables Node's system certificate store by default:
+
+```bash
+NODE_OPTIONS=--use-system-ca
+```
+
+To confirm whether this behavior matters, compare with:
+
+```bash
+COWORK_DEV_USE_SYSTEM_CA=0 npm run dev
+```
+
+If requests still fail, export your Zscaler or company root CA certificate as a PEM file and run:
+
+```bash
+NODE_EXTRA_CA_CERTS=/path/to/zscaler-root.pem npm run dev
+```
+
+Then test the OpenAI provider directly before testing a [Mixture of Agents](mixture-of-agents.md) preset. In developer logs, a healthy MoA task should show advisor calls with `toolsOffered: 0` and the aggregator call with the original tool count.
 
 ## macOS "Killed: 9" during setup
 

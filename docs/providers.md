@@ -2,7 +2,7 @@
 
 CoWork OS is **free and open source**. To run tasks, configure your own model credentials or use local models.
 
-> **First-run recommendation**: Start with **Sign in with ChatGPT** if you already have a ChatGPT subscription, or use a detected local Ollama model if one is installed. API-key providers, including OpenRouter, Claude, Gemini, Groq, and OpenAI API, are available in **Settings > LLM**. The onboarding provider picker marks OpenRouter, Gemini, and Groq with **Free** where a free usage path is available. You can explore the app without AI, but running tasks requires one connected and tested model route.
+> **First-run recommendation**: Start with **Sign in with ChatGPT** if you already have a ChatGPT subscription, or use a detected local Ollama model if one is installed. API-key providers, including OpenRouter, Claude, Gemini, Groq, and OpenAI API, are available in **Settings > AI & Models**. The onboarding provider picker marks OpenRouter, Gemini, and Groq with **Free** where a free usage path is available. You can explore the app without AI, but running tasks requires one connected and tested model route.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-10.webp" alt="LLM provider settings" width="700">
@@ -22,6 +22,7 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 | OpenAI (ChatGPT OAuth) | Sign in with ChatGPT account | Uses your ChatGPT subscription |
 | AWS Bedrock | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS |
 | Azure OpenAI | API key + endpoint in Settings | Pay-per-token via Azure |
+| Mixture of Agents | Presets composed from already-configured providers | No separate billing; each selected provider bills normally |
 | Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
 | HuggingFace Local AI | Install `hf-agents` and run `llama.cpp` locally | **Free** (runs locally) |
 | Groq | API key in Settings | Free usage available subject to Groq's current limits; pay-per-token beyond free limits |
@@ -64,7 +65,7 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 
 CoWork OS can route a task through an explicit provider/model fallback chain instead of relying on a single primary provider.
 
-Configure this in **Settings > LLM**:
+Configure this in **Settings > AI & Models**:
 
 - choose your primary provider/model
 - add fallback providers in order
@@ -74,11 +75,36 @@ Fallback chains are used when a provider is unavailable, rate-limited, rejected 
 
 For LLM chains, retryable provider failures such as `429` rate limits and transient upstream errors move execution to the next configured provider/model in the ordered list. Once a fallback route is active, CoWork OS preserves that working route briefly so retries do not immediately bounce back to the primary provider.
 
-You can control when the primary route is tried again in **Settings > LLM > Provider Failover > Retry primary after (seconds)**:
+You can control when the primary route is tried again in **Settings > AI & Models > Provider Failover > Retry primary after (seconds)**:
 
 - leave it blank to use the default 60-second cooldown
 - set it to `0` to retry the primary on the next route refresh
 - set a value up to `3600` seconds to keep the active fallback route longer before probing the primary again
+
+---
+
+## Mixture of Agents
+
+Mixture of Agents is a virtual LLM provider for preset-based model collaboration. A preset runs one or more reference advisor models first, then passes their bounded advisory notes to a final aggregator model that answers the task.
+
+Configure it in **Settings > AI & Models > AI Model > Mixture of Agents**:
+
+- create an enabled preset
+- choose the aggregator provider/model
+- add reference advisor provider/model slots
+- tune advisor token limits, advisory context size, and advisor concurrency
+- save settings, then select **Mixture of Agents** as the provider and the preset as the model
+
+Advisor calls are intentionally tool-free. The aggregator receives the original task messages, tools, and tool choice, so workspace edits, shell commands, browser actions, and MCP calls still happen through the final route.
+
+MoA has two failover layers:
+
+- slot-level failover from each selected provider's own fallback chain
+- optional MoA-provider failover for falling back from the whole preset to another provider/model
+
+MoA does not automatically inherit global fallback providers. Configure MoA provider failover only when you want the entire preset to fall back after the MoA route fails.
+
+See [Mixture of Agents](mixture-of-agents.md) for preset design, runtime behavior, UI testing, and corporate TLS troubleshooting.
 
 ---
 
@@ -280,7 +306,7 @@ OpenRouter's Pareto Code Router is available as a normal OpenRouter model select
 | `openrouter/pareto-code` | Pareto Code Router | You want OpenRouter to choose a strong coding model from its coding frontier |
 | `openrouter/pareto-code:nitro` | Pareto Code Router (Nitro) | You want the same coding-score routing, but prefer the fastest measured model in the selected tier |
 
-When one of those models is selected, **Settings > LLM > OpenRouter** shows a **Pareto Router** field for the optional minimum coding score.
+When one of those models is selected, **Settings > AI & Models > OpenRouter** shows a **Pareto Router** field for the optional minimum coding score.
 
 - `min_coding_score` is a decimal number from `0` to `1`; do not enter percentages such as `80`.
 - Leave the field blank to let OpenRouter use its default strongest/high coding tier.

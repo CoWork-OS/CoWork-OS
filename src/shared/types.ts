@@ -8955,6 +8955,7 @@ export const BUILTIN_LLM_PROVIDER_TYPES = [
   "kimi",
   "pi",
   "openai-compatible",
+  "moa",
 ] as const;
 
 export const CUSTOM_LLM_PROVIDER_TYPES = [
@@ -9017,6 +9018,7 @@ export const MULTI_LLM_PROVIDER_DISPLAY: Record<
     icon: "\u{1F517}",
     color: "#64748b",
   },
+  moa: { name: "Mixture of Agents", icon: "\u{2699}\uFE0F", color: "#0f766e" },
   "nano-gpt": { name: "NanoGPT", icon: "\u{2728}", color: "#22c55e" },
 };
 
@@ -9065,6 +9067,26 @@ export interface ProviderRoutingSettings {
 export interface LLMProviderFallbackConfig {
   providerType: LLMProviderType;
   modelKey?: string;
+}
+
+export interface MoaModelSlot {
+  providerType: LLMProviderType;
+  modelKey: string;
+  maxTokens?: number;
+  temperature?: number;
+  roleInstruction?: string;
+}
+
+export interface MoaPreset {
+  id: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  referenceModels: MoaModelSlot[];
+  aggregator: MoaModelSlot;
+  maxReferenceTokens?: number;
+  maxReferenceCharsPerModel?: number;
+  concurrency?: number;
 }
 
 export type OpenAIReasoningEffort = "low" | "medium" | "high" | "xhigh";
@@ -9189,6 +9211,10 @@ export interface LLMSettingsData {
     apiKey?: string;
     baseUrl?: string;
     model?: string;
+  } & ProviderRoutingSettings;
+  moa?: {
+    defaultPreset?: string;
+    presets?: Record<string, MoaPreset>;
   } & ProviderRoutingSettings;
   hfAgents?: {
     baseUrl?: string;

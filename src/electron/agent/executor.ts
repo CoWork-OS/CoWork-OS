@@ -4668,9 +4668,9 @@ ${transcript}
 `;
 
     // Scale budget to model context size. On large-context models (200K+) we use the
-    // full COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS (4096). On small-context models we cap
+    // full COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS (6144). On small-context models we cap
     // proportionally so the summary doesn't dominate. Codex uses no explicit limit;
-    // we cap at 4096 which yields ~16 KB of rich structured text.
+    // we cap at 6144 which yields ~24 KB of rich structured text.
     const availableTokens = this.contextManager.getAvailableTokens();
     const scaledMax = Math.min(
       COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
@@ -32229,7 +32229,9 @@ Return ONLY a JSON object:
     this.modelKey = selection.modelKey;
     this.llmProfileUsed = selection.llmProfileUsed;
     this.resolvedModelKey = selection.resolvedModelKey;
-    this.contextManager = new ContextManager(this.modelKey);
+    this.contextManager = new ContextManager(
+      selection.contextModelKey || this.modelKey,
+    );
   }
 
   private rebuildProviderFailoverSelections(

@@ -62,7 +62,7 @@ On first launch, choose the easiest working model route for your machine:
 
 The onboarding flow keeps your answers in the renderer while you are moving through setup. CoWork writes the profile, provider choice, memory preference, and related settings only when you confirm the final recap. The recap is a fixed review frame with a scrollable body, so long work-context notes do not push the final action off screen.
 
-If you use the API-key path, open **Settings > LLM** and choose a provider:
+If you use the API-key path, open **Settings > AI & Models** and choose a provider:
 
    - **Claude** - Claude API key or Claude subscription token
    - **Google Gemini** - Gemini models through Google AI Studio; free usage is available subject to Google's current limits (API key from [aistudio.google.com](https://aistudio.google.com/apikey))
@@ -84,6 +84,8 @@ If you use the API-key path, open **Settings > LLM** and choose a provider:
 6. Click **Test Connection** to verify
 7. Save settings
 
+After you have at least two working model routes, you can optionally create a [Mixture of Agents](mixture-of-agents.md) preset in **Settings > AI & Models > AI Model > Mixture of Agents**. Choose one aggregator model and one or more advisor models, save the preset, then select **Mixture of Agents** as the active provider and the preset as the model for tasks that benefit from model diversity.
+
 <p align="center">
   <img src="../resources/branding/images/cowork-os-10.webp" alt="AI model provider settings" width="700">
   <br><em>Settings centralizes provider credentials, fallback routing, and model selection.</em>
@@ -93,12 +95,14 @@ If you use the API-key path, open **Settings > LLM** and choose a provider:
 
 After your primary provider works, open:
 
-- **Settings > LLM** to set ordered fallback providers/models
+- **Settings > AI & Models** to set ordered fallback providers/models
 - **Settings > Web Search** to set primary and fallback search providers such as Tavily, Exa, Brave, SerpAPI, or Google
 
 CoWork OS uses those ordered chains when a provider is unavailable, rate-limited, or lacks the needed capability for a task.
 
-For LLM providers, retryable failures such as `429` rate limits immediately advance to the next configured fallback provider/model. In **Settings > LLM > Provider Failover**, `Retry primary after (seconds)` controls when CoWork OS should probe the primary route again after failover:
+Mixture of Agents uses the same underlying provider routes for its slots. Slot providers keep their own fallback chains, while MoA provider failover is configured separately when you want the whole preset to fall back after MoA fails.
+
+For LLM providers, retryable failures such as `429` rate limits immediately advance to the next configured fallback provider/model. In **Settings > AI & Models > Provider Failover**, `Retry primary after (seconds)` controls when CoWork OS should probe the primary route again after failover:
 
 - blank uses the default 60-second cooldown
 - `0` retries the primary on the next route refresh

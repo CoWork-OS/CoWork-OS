@@ -57,6 +57,9 @@ hero:
       text: Side Chat
       link: /side-chat
     - theme: alt
+      text: Mixture of Agents
+      link: /mixture-of-agents
+    - theme: alt
       text: Claude-for-Legal
       link: /claude-for-legal
     - theme: alt
@@ -158,8 +161,8 @@ features:
     details: Local-first runtime with approvals, guardrails, and governance controls for production agent workflows.
   - title: Linux Server Package
     details: GitHub Releases can ship a Linux x64 server tarball for VPS/systemd installs, with built daemon assets, full resources, connector runtimes, checksum verification, Control Plane smoke tests, and fail-closed managed deployment posture checks. It runs `coworkd-node` without launching the desktop UI.
-  - title: 35 LLM Provider Options
-    details: Connect to Claude, GPT, Gemini, Ollama, OpenRouter, Grok through xAI API keys or SuperGrok OAuth, and more. Bring your own keys, use supported subscription logins, switch models per task or workflow phase, use OpenRouter Pareto Code/Nitro for coding-score-based routing, and get default-on prompt caching on supported routes.
+  - title: 36 LLM Provider Options
+    details: Connect to Claude, GPT, Gemini, Ollama, OpenRouter, Grok through xAI API keys or SuperGrok OAuth, and more. Bring your own keys, use supported subscription logins, switch models per task or workflow phase, combine advisors and aggregators with Mixture of Agents presets, use OpenRouter Pareto Code/Nitro for coding-score-based routing, and get default-on prompt caching on supported routes.
   - title: 17 Messaging Channels
     details: WhatsApp, Telegram, Discord, Slack, iMessage, Teams, Google Chat, Feishu/Lark, WeCom, and more. Chat with your AI from anywhere, with channel/chat/thread specialization for workspace, agent role, prompt guidance, tool policy, and shared-memory opt-in.
   - title: Chat Mode

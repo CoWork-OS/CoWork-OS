@@ -77,6 +77,8 @@ import {
   type OpenAIReasoningEffort,
   type LLMTextVerbosity,
   type LLMProviderFallbackConfig,
+  type MoaModelSlot,
+  type MoaPreset,
 } from "../../shared/types";
 import { CUSTOM_PROVIDER_MAP } from "../../shared/llm-provider-catalog";
 import {
@@ -1220,6 +1222,7 @@ const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
   "nano-gpt": <Sparkles {...S} />,
   bedrock: <Hexagon {...S} />,
   pi: <Pi {...S} />,
+  moa: <UsersRound {...S} />,
   "hf-agents": <Zap {...S} />,
 };
 
@@ -1955,6 +1958,8 @@ export function Settings({
         return settings.pi || {};
       case "openai-compatible":
         return settings.openaiCompatible || {};
+      case "moa":
+        return settings.moa || {};
       default:
         return {};
     }
@@ -2017,16 +2022,21 @@ export function Settings({
             return settings.pi;
           case "openai-compatible":
             return settings.openaiCompatible;
+          case "moa":
+            return settings.moa;
           default:
             return undefined;
         }
       })() || {};
 
+    const shouldInheritGlobalFallbacks = providerType !== "moa";
     return {
       fallbackProviders:
         Object.prototype.hasOwnProperty.call(routing, "fallbackProviders")
           ? routing.fallbackProviders
-          : settings.fallbackProviders,
+          : shouldInheritGlobalFallbacks
+            ? settings.fallbackProviders
+            : undefined,
       failoverPrimaryRetryCooldownSeconds:
         Object.prototype.hasOwnProperty.call(
           routing,
@@ -2107,6 +2117,9 @@ export function Settings({
       case "openai-compatible":
         patchSettings("openaiCompatible");
         return;
+      case "moa":
+        patchSettings("moa");
+        return;
       default:
         return;
     }
@@ -2161,6 +2174,14 @@ export function Settings({
         return piModel || settings.pi?.model || "";
       case "openai-compatible":
         return openaiCompatModel || settings.openaiCompatible?.model || "";
+      case "moa":
+        return (
+          settings.moa?.defaultPreset ||
+          Object.values(settings.moa?.presets || {}).find(
+            (preset) => preset.enabled !== false,
+          )?.id ||
+          ""
+        );
       default:
         return settings.modelKey || "";
     }
@@ -2239,6 +2260,233 @@ export function Settings({
       claudeCredentials,
     );
     setProviderRoutingModels(providerModels);
+  };
+
+  const getMoaProviderOptions = (): ProviderInfo[] => {
+    return providers
+      .filter((provider) => provider.type !== "moa")
+      .sort((a, b) => Number(b.configured) - Number(a.configured));
+  };
+
+  const getDefaultMoaProviderType = (): LLMProviderType => {
+    return (
+      getMoaProviderOptions().find((provider) => provider.configured)?.type ||
+      getMoaProviderOptions()[0]?.type ||
+      "anthropic"
+    );
+  };
+
+  const getMoaModelOptions = (
+    providerType: LLMProviderType,
+    currentModelKey?: string,
+  ): ModelOption[] => {
+    const deduped = new Map<string, ModelOption>();
+    const addOption = (value?: string, label?: string) => {
+      const normalized = value?.trim();
+      if (!normalized || deduped.has(normalized)) return;
+      deduped.set(normalized, { key: normalized, displayName: label || normalized });
+    };
+    for (const model of providerModelOptionsByType[providerType] || []) {
+      addOption(model.key, model.displayName);
+    }
+    addOption(getProviderPrimaryModel(providerType));
+    addOption(currentModelKey);
+    return Array.from(deduped.values());
+  };
+
+  const createDefaultMoaSlot = (
+    providerType: LLMProviderType = getDefaultMoaProviderType(),
+  ): MoaModelSlot => {
+    return {
+      providerType,
+      modelKey:
+        providerModelOptionsByType[providerType]?.[0]?.key ||
+        getProviderPrimaryModel(providerType) ||
+        "",
+    };
+  };
+
+  const updateMoaPreset = (
+    presetId: string,
+    updater: (preset: MoaPreset) => MoaPreset,
+  ) => {
+    setSettings((prev) => {
+      const presets = { ...(prev.moa?.presets || {}) };
+      const existing = presets[presetId];
+      if (!existing) return prev;
+      const updated = updater(existing);
+      presets[presetId] = updated;
+      const defaultPreset = prev.moa?.defaultPreset || presetId;
+      return {
+        ...prev,
+        modelKey: prev.providerType === "moa" ? defaultPreset : prev.modelKey,
+        moa: {
+          ...prev.moa,
+          defaultPreset,
+          presets,
+        },
+      };
+    });
+  };
+
+  const handleAddMoaPreset = () => {
+    const providerOptions = getMoaProviderOptions();
+    const aggregatorProvider =
+      providerOptions.find((provider) => provider.configured)?.type ||
+      providerOptions[0]?.type ||
+      "anthropic";
+    const referenceProvider =
+      providerOptions.find((provider) => provider.type !== aggregatorProvider)?.type ||
+      aggregatorProvider;
+    const id = `mixture-${Date.now().toString(36)}`;
+    const preset: MoaPreset = {
+      id,
+      name: "New mixture",
+      enabled: true,
+      referenceModels: [createDefaultMoaSlot(referenceProvider)],
+      aggregator: createDefaultMoaSlot(aggregatorProvider),
+      maxReferenceTokens: 1024,
+      maxReferenceCharsPerModel: 12000,
+      concurrency: 4,
+    };
+    void loadProviderModelsForType(aggregatorProvider);
+    void loadProviderModelsForType(referenceProvider);
+    setSettings((prev) => ({
+      ...prev,
+      providerType: "moa",
+      modelKey: id,
+      moa: {
+        ...prev.moa,
+        defaultPreset: id,
+        presets: {
+          ...(prev.moa?.presets || {}),
+          [id]: preset,
+        },
+      },
+    }));
+  };
+
+  const handleDeleteMoaPreset = (presetId: string) => {
+    setSettings((prev) => {
+      const presets = { ...(prev.moa?.presets || {}) };
+      delete presets[presetId];
+      const nextDefault =
+        prev.moa?.defaultPreset === presetId
+          ? Object.values(presets).find((preset) => preset.enabled !== false)?.id
+          : prev.moa?.defaultPreset;
+      return {
+        ...prev,
+        modelKey: prev.providerType === "moa" && nextDefault ? nextDefault : prev.modelKey,
+        moa: {
+          ...prev.moa,
+          defaultPreset: nextDefault,
+          presets,
+        },
+      };
+    });
+  };
+
+  const updateMoaSlotProvider = (
+    presetId: string,
+    slotKind: "aggregator" | "reference",
+    providerType: LLMProviderType,
+    referenceIndex?: number,
+  ) => {
+    void loadProviderModelsForType(providerType);
+    const nextSlot = createDefaultMoaSlot(providerType);
+    updateMoaPreset(presetId, (preset) => {
+      if (slotKind === "aggregator") {
+        return { ...preset, aggregator: nextSlot };
+      }
+      const references = [...preset.referenceModels];
+      if (typeof referenceIndex === "number") {
+        references[referenceIndex] = nextSlot;
+      }
+      return { ...preset, referenceModels: references };
+    });
+  };
+
+  const updateMoaReference = (
+    presetId: string,
+    index: number,
+    patch: Partial<MoaModelSlot>,
+  ) => {
+    updateMoaPreset(presetId, (preset) => {
+      const references = [...preset.referenceModels];
+      references[index] = { ...references[index], ...patch };
+      return { ...preset, referenceModels: references };
+    });
+  };
+
+  const sanitizeMoaSlot = (slot?: MoaModelSlot): MoaModelSlot | null => {
+    const providerType = slot?.providerType;
+    const modelKey = slot?.modelKey?.trim();
+    if (!providerType || providerType === "moa" || !modelKey) return null;
+    return {
+      providerType,
+      modelKey,
+      ...(typeof slot.maxTokens === "number" && Number.isFinite(slot.maxTokens)
+        ? { maxTokens: Math.max(1, Math.floor(slot.maxTokens)) }
+        : {}),
+      ...(typeof slot.temperature === "number" && Number.isFinite(slot.temperature)
+        ? { temperature: Math.max(0, Math.min(2, slot.temperature)) }
+        : {}),
+      ...(slot.roleInstruction?.trim()
+        ? { roleInstruction: slot.roleInstruction.trim() }
+        : {}),
+    };
+  };
+
+  const sanitizeMoaPresets = (
+    presets?: Record<string, MoaPreset>,
+  ): Record<string, MoaPreset> => {
+    const sanitized: Record<string, MoaPreset> = {};
+    for (const [presetId, preset] of Object.entries(presets || {})) {
+      const id = preset.id?.trim() || presetId.trim();
+      const aggregator = sanitizeMoaSlot(preset.aggregator);
+      const referenceModels = (preset.referenceModels || [])
+        .map((slot) => sanitizeMoaSlot(slot))
+        .filter(Boolean) as MoaModelSlot[];
+      if (!id || !aggregator || referenceModels.length === 0) continue;
+      sanitized[id] = {
+        id,
+        name: preset.name?.trim() || id,
+        ...(preset.description?.trim()
+          ? { description: preset.description.trim() }
+          : {}),
+        enabled: preset.enabled !== false,
+        referenceModels: referenceModels.slice(0, 8),
+        aggregator,
+        ...(typeof preset.maxReferenceTokens === "number" &&
+        Number.isFinite(preset.maxReferenceTokens)
+          ? {
+              maxReferenceTokens: Math.max(
+                64,
+                Math.min(8192, Math.floor(preset.maxReferenceTokens)),
+              ),
+            }
+          : {}),
+        ...(typeof preset.maxReferenceCharsPerModel === "number" &&
+        Number.isFinite(preset.maxReferenceCharsPerModel)
+          ? {
+              maxReferenceCharsPerModel: Math.max(
+                500,
+                Math.min(50000, Math.floor(preset.maxReferenceCharsPerModel)),
+              ),
+            }
+          : {}),
+        ...(typeof preset.concurrency === "number" &&
+        Number.isFinite(preset.concurrency)
+          ? {
+              concurrency: Math.max(
+                1,
+                Math.min(8, Math.floor(preset.concurrency)),
+              ),
+            }
+          : {}),
+      };
+    }
+    return sanitized;
   };
 
   const loadClaudeModels = async (
@@ -3123,7 +3371,24 @@ export function Settings({
   };
 
   const handleProviderSelect = (providerType: LLMProviderType) => {
-    setSettings((prev) => ({ ...prev, providerType }));
+    setSettings((prev) => {
+      if (providerType !== "moa") return { ...prev, providerType };
+      const defaultPreset =
+        prev.moa?.defaultPreset ||
+        Object.values(prev.moa?.presets || {}).find(
+          (preset) => preset.enabled !== false,
+        )?.id ||
+        "";
+      return {
+        ...prev,
+        providerType,
+        modelKey: defaultPreset || prev.modelKey,
+        moa: {
+          ...prev.moa,
+          defaultPreset: defaultPreset || prev.moa?.defaultPreset,
+        },
+      };
+    });
 
     const resolvedCustomType = resolveCustomProviderId(providerType);
     const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedCustomType);
@@ -3190,6 +3455,15 @@ export function Settings({
       window.electronAPI.getLocalAIServerStatus?.().then((result: Any) => {
         if (result) setHfServerStatus(result);
       });
+    } else if (providerType === "moa") {
+      const slots = Object.values(settingsRef.current.moa?.presets || {}).flatMap(
+        (preset) => [preset.aggregator, ...(preset.referenceModels || [])],
+      );
+      for (const slot of slots) {
+        if (slot.providerType !== "moa") {
+          void loadProviderModelsForType(slot.providerType);
+        }
+      }
     }
   };
 
@@ -3588,6 +3862,14 @@ export function Settings({
 
       const sanitizedCustomProviders =
         sanitizeCustomProviders(customProviders) || {};
+      const sanitizedMoaPresets = sanitizeMoaPresets(currentSettings.moa?.presets);
+      const moaDefaultPreset =
+        currentSettings.moa?.defaultPreset &&
+        sanitizedMoaPresets[currentSettings.moa.defaultPreset]
+          ? currentSettings.moa.defaultPreset
+          : Object.values(sanitizedMoaPresets).find(
+              (preset) => preset.enabled !== false,
+            )?.id;
       const resolvedProviderTypeForSave = resolveCustomProviderId(
         currentSettings.providerType as LLMProviderType,
       );
@@ -3678,6 +3960,10 @@ export function Settings({
       // when switching between providers
       const settingsToSave: LLMSettingsData = {
         ...currentSettings,
+        modelKey:
+          currentSettings.providerType === "moa" && moaDefaultPreset
+            ? moaDefaultPreset
+            : currentSettings.modelKey,
         // Always include anthropic settings
         anthropic: {
           ...anthropicCredentialSettings,
@@ -3808,6 +4094,15 @@ export function Settings({
           model: openaiCompatModel || undefined,
           ...routingFor("openai-compatible"),
           ...failoverFor("openai-compatible"),
+        },
+        moa: {
+          defaultPreset: moaDefaultPreset,
+          presets:
+            Object.keys(sanitizedMoaPresets).length > 0
+              ? sanitizedMoaPresets
+              : undefined,
+          ...routingFor("moa"),
+          ...failoverFor("moa"),
         },
         imageGeneration:
           imageGenDefaultProvider ||
@@ -3954,6 +4249,13 @@ export function Settings({
 
       const sanitizedCustomProviders =
         sanitizeCustomProviders(customProviders) || {};
+      const sanitizedMoaPresets = sanitizeMoaPresets(settings.moa?.presets);
+      const moaDefaultPreset =
+        settings.moa?.defaultPreset && sanitizedMoaPresets[settings.moa.defaultPreset]
+          ? settings.moa.defaultPreset
+          : Object.values(sanitizedMoaPresets).find(
+              (preset) => preset.enabled !== false,
+            )?.id;
       const azureSettings = buildAzureSettings();
       const azureAnthropicSettings = buildAzureAnthropicSettings();
       const anthropicCredentialSettings = {
@@ -4097,6 +4399,16 @@ export function Settings({
                 model: openaiCompatModel || undefined,
               }
             : undefined,
+        moa:
+          settings.providerType === "moa"
+            ? {
+                defaultPreset: moaDefaultPreset,
+                presets:
+                  Object.keys(sanitizedMoaPresets).length > 0
+                    ? sanitizedMoaPresets
+                    : undefined,
+              }
+            : undefined,
         customProviders:
           Object.keys(sanitizedCustomProviders).length > 0
             ? sanitizedCustomProviders
@@ -4168,6 +4480,16 @@ export function Settings({
   };
   const routingEnabled = providerRouting.profileRoutingEnabled === true;
   const providerPrimaryModel = getProviderPrimaryModel(currentProviderType);
+  const moaPresets = settings.moa?.presets || {};
+  const moaPresetList = Object.values(moaPresets);
+  const selectedMoaPresetId =
+    settings.moa?.defaultPreset ||
+    moaPresetList.find((preset) => preset.enabled !== false)?.id ||
+    "";
+  const selectedMoaPreset = selectedMoaPresetId
+    ? moaPresets[selectedMoaPresetId]
+    : undefined;
+  const moaProviderOptions = getMoaProviderOptions();
   const strongRoutingModel =
     providerRouting.strongModelKey || providerPrimaryModel;
   const cheapRoutingModel =
@@ -4193,6 +4515,31 @@ export function Settings({
   }, [
     currentProviderType,
     providerFailover.fallbackProviders,
+    loadProviderModelsForType,
+    providerModelOptionsByType,
+  ]);
+
+  useEffect(() => {
+    if (currentProviderType !== "moa") return;
+    const providerTypes = new Set<LLMProviderType>();
+    for (const preset of moaPresetList) {
+      if (preset.aggregator?.providerType && preset.aggregator.providerType !== "moa") {
+        providerTypes.add(preset.aggregator.providerType);
+      }
+      for (const slot of preset.referenceModels || []) {
+        if (slot.providerType && slot.providerType !== "moa") {
+          providerTypes.add(slot.providerType);
+        }
+      }
+    }
+    for (const providerType of providerTypes) {
+      if (!providerModelOptionsByType[providerType]) {
+        void loadProviderModelsForType(providerType);
+      }
+    }
+  }, [
+    currentProviderType,
+    moaPresetList,
     loadProviderModelsForType,
     providerModelOptionsByType,
   ]);
@@ -5002,6 +5349,120 @@ export function Settings({
       </div>
     </div>
   );
+
+  const renderMoaSlotEditor = (
+    presetId: string,
+    slot: MoaModelSlot,
+    slotKind: "aggregator" | "reference",
+    referenceIndex?: number,
+  ) => {
+    const modelOptions = getMoaModelOptions(slot.providerType, slot.modelKey);
+    const updateSlot = (patch: Partial<MoaModelSlot>) => {
+      if (slotKind === "aggregator") {
+        updateMoaPreset(presetId, (preset) => ({
+          ...preset,
+          aggregator: { ...preset.aggregator, ...patch },
+        }));
+      } else if (typeof referenceIndex === "number") {
+        updateMoaReference(presetId, referenceIndex, patch);
+      }
+    };
+
+    return (
+      <div
+        className="settings-section"
+        style={{ marginTop: "10px", padding: "12px" }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(120px, 180px) minmax(180px, 1fr)",
+            gap: "10px",
+          }}
+        >
+          <div>
+            <label className="settings-label">Provider</label>
+            <select
+              className="settings-select"
+              value={slot.providerType}
+              onChange={(event) =>
+                updateMoaSlotProvider(
+                  presetId,
+                  slotKind,
+                  event.target.value as LLMProviderType,
+                  referenceIndex,
+                )
+              }
+            >
+              {moaProviderOptions.map((provider) => (
+                <option key={provider.type} value={provider.type}>
+                  {provider.name}
+                  {provider.configured ? "" : " (not configured)"}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="settings-label">Model</label>
+            {modelOptions.length > 0 ? (
+              <SearchableSelect
+                options={modelOptions.map((model) => ({
+                  value: model.key,
+                  label: model.displayName,
+                }))}
+                value={slot.modelKey}
+                onChange={(modelKey) => updateSlot({ modelKey })}
+                placeholder="Select a model..."
+              />
+            ) : (
+              <input
+                className="settings-input"
+                value={slot.modelKey}
+                onChange={(event) => updateSlot({ modelKey: event.target.value })}
+                placeholder="model-id"
+              />
+            )}
+          </div>
+        </div>
+        <label className="settings-label" style={{ marginTop: "10px" }}>
+          Role instruction
+        </label>
+        <textarea
+          className="settings-input"
+          rows={2}
+          value={slot.roleInstruction || ""}
+          onChange={(event) =>
+            updateSlot({ roleInstruction: event.target.value })
+          }
+          placeholder={
+            slotKind === "aggregator"
+              ? "Optional aggregation guidance"
+              : "Optional advisor focus"
+          }
+        />
+        {slotKind === "reference" && (
+          <div style={{ marginTop: "10px", maxWidth: "220px" }}>
+            <label className="settings-label">Max advisor tokens</label>
+            <input
+              className="settings-input"
+              type="number"
+              min={64}
+              max={8192}
+              value={slot.maxTokens || ""}
+              onChange={(event) =>
+                updateSlot({
+                  maxTokens: event.target.value
+                    ? Number(event.target.value)
+                    : undefined,
+                })
+              }
+              placeholder="Preset default"
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderLLMPanel = () => (
     <div className="llm-provider-panel">
@@ -6344,6 +6805,284 @@ export function Settings({
                 />
               )}
             </div>
+          </>
+        )}
+
+        {settings.providerType === "moa" && (
+          <>
+            <div className="settings-section">
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                }}
+              >
+                <div>
+                  <h3>Mixture of Agents Presets</h3>
+                  <p className="settings-description">
+                    Presets appear as virtual models. Advisors run without
+                    tools; the aggregator acts with the normal CoWork tool loop.
+                  </p>
+                </div>
+                <button
+                  className="button-small button-secondary"
+                  type="button"
+                  onClick={handleAddMoaPreset}
+                >
+                  Add Preset
+                </button>
+              </div>
+
+              {moaPresetList.length > 0 ? (
+                <div style={{ marginTop: "12px" }}>
+                  <label className="settings-label">Selected preset</label>
+                  <select
+                    className="settings-select"
+                    value={selectedMoaPresetId}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        modelKey: event.target.value,
+                        moa: {
+                          ...prev.moa,
+                          defaultPreset: event.target.value,
+                        },
+                      }))
+                    }
+                  >
+                    {moaPresetList.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name || preset.id}
+                        {preset.enabled === false ? " (disabled)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <p className="settings-description" style={{ marginTop: "12px" }}>
+                  No presets configured.
+                </p>
+              )}
+            </div>
+
+            {selectedMoaPreset && (
+              <div className="settings-section">
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                  }}
+                >
+                  <h3>Preset Details</h3>
+                  <button
+                    className="button-small button-secondary"
+                    type="button"
+                    onClick={() => handleDeleteMoaPreset(selectedMoaPreset.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                <label className="settings-label">Name</label>
+                <input
+                  className="settings-input"
+                  value={selectedMoaPreset.name}
+                  onChange={(event) =>
+                    updateMoaPreset(selectedMoaPreset.id, (preset) => ({
+                      ...preset,
+                      name: event.target.value,
+                    }))
+                  }
+                />
+
+                <label className="settings-label" style={{ marginTop: "10px" }}>
+                  Description
+                </label>
+                <input
+                  className="settings-input"
+                  value={selectedMoaPreset.description || ""}
+                  onChange={(event) =>
+                    updateMoaPreset(selectedMoaPreset.id, (preset) => ({
+                      ...preset,
+                      description: event.target.value,
+                    }))
+                  }
+                  placeholder="Optional"
+                />
+
+                <label
+                  className="settings-label"
+                  style={{
+                    marginTop: "12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedMoaPreset.enabled !== false}
+                    onChange={(event) =>
+                      updateMoaPreset(selectedMoaPreset.id, (preset) => ({
+                        ...preset,
+                        enabled: event.target.checked,
+                      }))
+                    }
+                  />
+                  Enabled
+                </label>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                    gap: "10px",
+                    marginTop: "12px",
+                  }}
+                >
+                  <div>
+                    <label className="settings-label">Advisor tokens</label>
+                    <input
+                      className="settings-input"
+                      type="number"
+                      min={64}
+                      max={8192}
+                      value={selectedMoaPreset.maxReferenceTokens || 1024}
+                      onChange={(event) =>
+                        updateMoaPreset(selectedMoaPreset.id, (preset) => ({
+                          ...preset,
+                          maxReferenceTokens: Number(event.target.value),
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="settings-label">Advisor chars</label>
+                    <input
+                      className="settings-input"
+                      type="number"
+                      min={500}
+                      max={50000}
+                      value={
+                        selectedMoaPreset.maxReferenceCharsPerModel || 12000
+                      }
+                      onChange={(event) =>
+                        updateMoaPreset(selectedMoaPreset.id, (preset) => ({
+                          ...preset,
+                          maxReferenceCharsPerModel: Number(event.target.value),
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="settings-label">Concurrency</label>
+                    <input
+                      className="settings-input"
+                      type="number"
+                      min={1}
+                      max={8}
+                      value={selectedMoaPreset.concurrency || 4}
+                      onChange={(event) =>
+                        updateMoaPreset(selectedMoaPreset.id, (preset) => ({
+                          ...preset,
+                          concurrency: Number(event.target.value),
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {selectedMoaPreset && (
+              <div className="settings-section">
+                <h3>Aggregator</h3>
+                <p className="settings-description">
+                  The aggregator is the acting model and receives tools.
+                </p>
+                {renderMoaSlotEditor(
+                  selectedMoaPreset.id,
+                  selectedMoaPreset.aggregator,
+                  "aggregator",
+                )}
+              </div>
+            )}
+
+            {selectedMoaPreset && (
+              <div className="settings-section">
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                  }}
+                >
+                  <div>
+                    <h3>Advisors</h3>
+                    <p className="settings-description">
+                      Advisors analyze the transcript in parallel without tools.
+                    </p>
+                  </div>
+                  <button
+                    className="button-small button-secondary"
+                    type="button"
+                    disabled={selectedMoaPreset.referenceModels.length >= 8}
+                    onClick={() =>
+                      updateMoaPreset(selectedMoaPreset.id, (preset) => ({
+                        ...preset,
+                        referenceModels: [
+                          ...preset.referenceModels,
+                          createDefaultMoaSlot(),
+                        ],
+                      }))
+                    }
+                  >
+                    Add Advisor
+                  </button>
+                </div>
+
+                {selectedMoaPreset.referenceModels.map((slot, index) => (
+                  <div key={`${selectedMoaPreset.id}:ref:${index}`}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginTop: "12px",
+                      }}
+                    >
+                      <strong>Advisor {index + 1}</strong>
+                      <button
+                        className="button-small button-secondary"
+                        type="button"
+                        disabled={selectedMoaPreset.referenceModels.length <= 1}
+                        onClick={() =>
+                          updateMoaPreset(selectedMoaPreset.id, (preset) => ({
+                            ...preset,
+                            referenceModels: preset.referenceModels.filter(
+                              (_, refIndex) => refIndex !== index,
+                            ),
+                          }))
+                        }
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    {renderMoaSlotEditor(
+                      selectedMoaPreset.id,
+                      slot,
+                      "reference",
+                      index,
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
 

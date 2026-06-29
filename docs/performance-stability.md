@@ -25,8 +25,24 @@ During live multitask review runs, the following resource issues were observed:
 |----------|-------|------|
 | `MAX_RENDERER_TASK_EVENTS` | 600 | `src/renderer/App.tsx` |
 | `MAX_RENDERER_CHILD_EVENTS` | 300 | `src/renderer/App.tsx` |
+| `DEFAULT_MAX_EVENT_PAYLOAD_BYTES` | 750 KiB | `src/renderer/utils/task-event-append.ts` |
+| `MAX_LARGE_EVENT_STRING_CHARS` | 32 KiB | `src/renderer/utils/task-event-append.ts` |
+| `MAX_COMMAND_OUTPUT_CHARS` | 16 KiB | `src/renderer/utils/task-event-append.ts` |
 
 The renderer caps task events in memory using `capTaskEvents()`, which prioritizes structural events (approvals, plan steps, errors) over noise events (progress updates, streaming). Child event arrays from sub-agents are capped at a lower threshold since they're secondary context.
+
+Large renderer events (`command_output`, tool call/result payloads, and timeline command output) are trimmed before they are retained in renderer state. Command output fields (`output`, `stdout`, `stderr`, and `command`) use the tighter 16 KiB field cap so noisy terminal streams cannot dominate the in-memory task event array.
+
+### Command Output Windows
+
+| Constant | Value | File |
+|----------|-------|------|
+| `MAX_COMMAND_OUTPUT_SESSION_CHARS` | 50 KiB | `src/renderer/utils/task-event-derived.ts`, `src/renderer/components/MainContent/MainContent.tsx` |
+| `MAX_COMMAND_OUTPUT_SESSIONS` | 12 | `src/renderer/utils/task-event-derived.ts`, `src/renderer/components/MainContent/MainContent.tsx` |
+| `MAX_OUTPUT_SIZE` | 100 KiB | `src/electron/agent/tools/shell-tools.ts` |
+| `MAX_OUTPUT_BYTES` | 100 KiB | `src/electron/agent/tools/code-exec-tools.ts` |
+
+Backend shell and code-execution tools cap raw command output before returning it to the executor. The renderer then keeps only the tail of each visible command-output session and limits how many command-output sessions remain expanded in task views.
 
 ### Child Event Polling Stop
 
@@ -191,9 +207,13 @@ When serialized grep matches exceed 50 KB, matches are removed from the end unti
 | Constant | Value |
 |----------|-------|
 | `MAX_TIMELINE_STRING_CHARS` | 60,000 |
+| `TIMELINE_PAYLOAD_STORAGE_BYTE_LIMIT` | 256 KiB |
+| `MAX_TIMELINE_PAYLOAD_PREVIEW_CHARS` | 4,096 |
 | `MAX_TIMELINE_SANITIZE_DEPTH` | 12 |
+| `MAX_TIMELINE_ARRAY_ITEMS` | 200 |
+| `MAX_TIMELINE_OBJECT_KEYS` | 200 |
 
-All timeline events are sanitized before IPC transmission. Base64 images are replaced with metadata stubs. Strings exceeding 60k characters are truncated with a notice.
+Timeline event payloads are sanitized before storage. Base64 images and binary-like values are replaced with metadata stubs, strings exceeding 60k characters are truncated with a notice, circular references and unsupported scalar types are omitted, and arrays/objects are bounded. After field-level sanitization, the serialized payload is capped at 256 KiB; oversized payloads retain a compact summary plus a short serialized preview.
 
 **Files:** `src/electron/agent/tools/grep-tools.ts`, `src/electron/agent/timeline-payload-sanitizer.ts`
 

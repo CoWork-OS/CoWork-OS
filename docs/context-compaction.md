@@ -16,7 +16,7 @@ Task starts → Context grows with each LLM turn
     4. Insert summary as pinned message
     5. Flush summary to memory for cross-session recall
                     ↓
-    Agent continues with ~50% context free
+    Agent continues near the 55% utilization target
     + comprehensive summary of all prior work
 ```
 
@@ -32,15 +32,15 @@ Compaction triggers at **90% context utilization** — aligned with OpenAI Codex
 
 ### Compaction Target
 
-After compaction, context is reduced to **~50% utilization**. The freed ~40% provides ample room for the summary block plus ongoing conversation.
+After compaction, context is reduced to **~55% utilization**. The freed ~35% provides room for the summary block plus ongoing conversation.
 
 ### Summary Budget
 
-The summary LLM call is allocated up to **4,096 output tokens** (~16 KB of structured text). This is scaled proportionally for small-context models (capped at 8% of available tokens) to prevent the summary from dominating the context window.
+The summary LLM call is allocated up to **6,144 output tokens** (~24 KB of structured text). This is scaled proportionally for small-context models (capped at 8% of available tokens) to prevent the summary from dominating the context window.
 
 | Model Context | Max Summary Tokens | Approximate Summary Length |
 |---|---|---|
-| 200K+ (Claude, GPT-4o) | 4,096 | ~16 KB / 9 detailed sections |
+| 200K+ (Claude, GPT-4o) | 6,144 | ~24 KB / 9 detailed sections |
 | 16K (GPT-3.5) | ~640 | ~2.5 KB / condensed sections |
 
 ### Chat Mode History Strategy
@@ -84,7 +84,7 @@ When preparing the dropped conversation for summarization, messages are formatte
 
 Long messages are truncated with a head+tail strategy (70% head / 30% tail) to preserve both the beginning and any trailing instructions.
 
-The total transcript budget for the summarizer is **60,000 characters** (~15,000 tokens), providing rich context for the summary LLM call.
+The total transcript budget for the summarizer is **90,000 characters** (~22,500 tokens), providing rich context for the summary LLM call.
 
 ## Timeline UI
 
@@ -162,19 +162,19 @@ Compaction behavior is controlled by constants in `src/electron/agent/executor-h
 | Constant | Default | Description |
 |---|---|---|
 | `PROACTIVE_COMPACTION_THRESHOLD` | `0.90` | Context utilization ratio that triggers compaction |
-| `PROACTIVE_COMPACTION_TARGET` | `0.50` | Target utilization after compaction |
-| `COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS` | `4096` | Maximum tokens for the summary LLM call |
+| `PROACTIVE_COMPACTION_TARGET` | `0.55` | Target utilization after compaction |
+| `COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS` | `6144` | Maximum tokens for the summary LLM call |
 | `COMPACTION_SUMMARY_MIN_OUTPUT_TOKENS` | `500` | Minimum viable summary budget |
-| `COMPACTION_SUMMARY_MAX_INPUT_CHARS` | `60000` | Maximum transcript characters sent to summarizer |
+| `COMPACTION_SUMMARY_MAX_INPUT_CHARS` | `90000` | Maximum transcript characters sent to summarizer |
 
 ## Comparison with Other Tools
 
 | Feature | CoWork OS | Codex CLI | Higher-threshold CLI |
 |---|---|---|---|
 | Trigger threshold | 90% | 90% | ~95% |
-| Summary budget | 4,096 tokens | Unlimited | Undisclosed (~3-5K observed) |
+| Summary budget | 6,144 tokens | Unlimited | Undisclosed (~3-5K observed) |
 | Summary structure | 9 sections (structured) | 4 sections (structured) | Unstructured |
-| Post-compaction target | 50% utilization | ~10-15% (full replacement) | Undisclosed |
+| Post-compaction target | 55% utilization | ~10-15% (full replacement) | Undisclosed |
 | Approach | Selective removal + summary | Full history replacement | Selective + summary |
 | Customizable | Constants in source | Config + prompt override | CLAUDE.md + /compact args |
 | Memory persistence | MemoryService + kit log | Ghost snapshots | Background summarization |
@@ -199,7 +199,7 @@ Compaction behavior is controlled by constants in `src/electron/agent/executor-h
 
 1. **Pre-compaction checkpoint** — Before any message removal, the runtime writes a durable checkpoint with structured summary + verbatim evidence packet
 2. **Pre-compaction flush** — If context slack < 1,200 tokens, a durable summary is flushed to memory *before* any messages are removed
-3. **Proactive compaction** — At 90% utilization, `proactiveCompactWithMeta()` compacts to 50%
+3. **Proactive compaction** — At 90% utilization, `proactiveCompactWithMeta()` compacts to 55%
 4. **Summary generation** — `buildCompactionSummaryBlock()` calls the LLM with the structured prompt
 5. **Overflow guard** — Ensures summary + remaining messages stay below 95%
 6. **Pinned insertion** — Summary upserted as a pinned `<cowork_compaction_summary>` user message

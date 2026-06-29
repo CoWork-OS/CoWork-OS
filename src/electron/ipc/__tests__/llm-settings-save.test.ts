@@ -130,6 +130,43 @@ describe("buildSavedLLMSettings", () => {
     });
   });
 
+  it("preserves MoA presets while merging partial saves", () => {
+    const existingSettings: LLMSettingsData = {
+      providerType: "moa",
+      modelKey: "frontier-council",
+      moa: {
+        defaultPreset: "frontier-council",
+        presets: {
+          "frontier-council": {
+            id: "frontier-council",
+            name: "Frontier Council",
+            referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
+            aggregator: { providerType: "anthropic", modelKey: "sonnet-4-5" },
+          },
+        },
+        profileRoutingEnabled: true,
+        strongModelKey: "frontier-council",
+        cheapModelKey: "frontier-council",
+      },
+    };
+
+    const validated: LLMSettingsData = {
+      providerType: "moa",
+      modelKey: "frontier-council",
+      moa: {
+        defaultPreset: "frontier-council",
+      },
+    };
+
+    const saved = buildSavedLLMSettings(validated, existingSettings);
+
+    expect(saved.moa?.defaultPreset).toBe("frontier-council");
+    expect(saved.moa?.presets?.["frontier-council"]).toEqual(
+      existingSettings.moa?.presets?.["frontier-council"],
+    );
+    expect(saved.moa?.profileRoutingEnabled).toBe(true);
+  });
+
   it("preserves OpenAI OAuth tokens when saving unrelated settings changes", () => {
     const existingSettings: LLMSettingsData = {
       providerType: "openai",

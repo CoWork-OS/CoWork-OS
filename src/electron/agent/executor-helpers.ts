@@ -184,11 +184,11 @@ export const PRE_COMPACTION_FLUSH_MAX_OUTPUT_TOKENS = 220;
 export const PRE_COMPACTION_FLUSH_MIN_TOKEN_DELTA = 250;
 
 // Proactive compaction: trigger at 90% utilization (aligned with Codex CLI's 90%
-// threshold; Claude Code uses ~95%). Compacts down to 50% utilization, freeing ~40%
+// threshold; Claude Code uses ~95%). Compacts down to 55% utilization, freeing ~35%
 // of the context window for a comprehensive structured summary + ongoing conversation.
 // Reference: Codex uses 20 000 tokens for preserved user messages and places no
-// explicit limit on summary output. We cap summary output at 4096 tokens (≈ Claude's
-// default max output) which is enough for a thorough 9-section handoff summary.
+// explicit limit on summary output. We cap summary output at 6144 tokens, which is
+// enough for a thorough 9-section handoff summary without dominating small contexts.
 export const PROACTIVE_COMPACTION_THRESHOLD = 0.9;
 export const PROACTIVE_COMPACTION_TARGET = 0.55;
 export const COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS = 6144;

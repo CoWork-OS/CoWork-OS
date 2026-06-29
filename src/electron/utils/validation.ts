@@ -794,6 +794,46 @@ export const OpenAICompatibleSettingsSchema = z
   })
   .optional();
 
+const MoaModelSlotSchema = z
+  .object({
+    providerType: LLMProviderTypeSchema,
+    modelKey: z.string().trim().min(1).max(200),
+    maxTokens: z.number().int().min(1).max(32768).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    roleInstruction: z.string().max(2000).optional(),
+  })
+  .strict();
+
+export const MoaSettingsSchema = z
+  .object({
+    defaultPreset: z.string().trim().min(1).max(120).optional(),
+    presets: z
+      .record(
+        z.string().trim().min(1).max(120),
+        z
+          .object({
+            id: z.string().trim().min(1).max(120),
+            name: z.string().trim().min(1).max(200),
+            description: z.string().max(1000).optional(),
+            enabled: z.boolean().optional(),
+            referenceModels: z.array(MoaModelSlotSchema).min(1).max(8),
+            aggregator: MoaModelSlotSchema,
+            maxReferenceTokens: z.number().int().min(64).max(8192).optional(),
+            maxReferenceCharsPerModel: z
+              .number()
+              .int()
+              .min(500)
+              .max(50000)
+              .optional(),
+            concurrency: z.number().int().min(1).max(8).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+    ...ProviderRoutingSettingsSchema,
+  })
+  .optional();
+
 export const CustomProviderConfigSchema = z.object({
   apiKey: z.string().max(500).optional(),
   model: z.string().max(200).optional(),
@@ -926,6 +966,7 @@ export const LLMSettingsSchema = z.object({
   xai: XAISettingsSchema,
   kimi: KimiSettingsSchema,
   openaiCompatible: OpenAICompatibleSettingsSchema,
+  moa: MoaSettingsSchema,
   customProviders: CustomProvidersSchema,
   imageGeneration: z
     .object({

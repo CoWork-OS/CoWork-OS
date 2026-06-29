@@ -483,6 +483,12 @@ node bin/coworkctl.js call account.get '{"accountId":"<accountId>"}'
 node bin/coworkctl.js call account.remove '{"accountId":"<accountId>"}'
 ```
 
+Managed account statuses are `draft`, `pending_signup`, `pending_verification`, `active`, `blocked`, `disabled`, and `error`. `account.list` accepts optional `provider` and `status` filters. `account.upsert` requires `provider` for new records, merges incoming secrets into existing secrets by default, and replaces the full secret set only when `clearSecrets:true` is passed.
+
+Operational limits are enforced before records are stored: up to 500 accounts, 64 secrets per account, 4,096 characters per secret value, 64 KiB metadata JSON per account, 8,000 characters of notes, 2,048 characters per URL, and 500 characters for `lastError`.
+
+Secrets are redacted from normal `account.list` and `account.get` responses. Without secret access, responses expose `secretKeys` and `secretCount` only. Remote Control Plane clients receive raw `secrets` only when they request `includeSecrets:true` and authenticate as an admin client; `account.upsert` and `account.remove` also require the `admin` scope.
+
 ### Option 2: Configure via env import
 
 CoWork OS supports an explicit, opt-in import path:

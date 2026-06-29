@@ -177,7 +177,7 @@ export class BrowserTools {
 
   private shouldPreferVisibleWorkbench(input: unknown): boolean {
     const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-    if (this.getRequestedBrowserProvider(input) === "browser-use-cloud") return false;
+    if (this.shouldRouteToBrowserUseCloud(input)) return false;
     const automationMode =
       BuiltinToolsSettingsManager.getComputerUseAutomationSettings().browserAutomationMode;
     const forceHeadless =
@@ -203,7 +203,7 @@ export class BrowserTools {
 
   private canStartVisibleWorkbench(input: unknown): boolean {
     const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-    if (this.getRequestedBrowserProvider(input) === "browser-use-cloud") return false;
+    if (this.shouldRouteToBrowserUseCloud(input)) return false;
     if (
       toolInput.force_headless === true ||
       toolInput.mode === "headless" ||
@@ -259,11 +259,24 @@ export class BrowserTools {
     return await this.requestVisibleWorkbenchApproval(input, url);
   }
 
-  private getRequestedBrowserProvider(input: unknown): BrowserProvider {
+  private isBrowserUseCloudProviderRequested(input: unknown): boolean {
     const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
     const provider = typeof toolInput.browser_provider === "string" ? toolInput.browser_provider.trim() : "";
-    if (provider === "browser-use-cloud") return "browser-use-cloud";
-    return "local";
+    return provider === "browser-use-cloud";
+  }
+
+  private isBrowserUseCloudConfigured(): boolean {
+    return Boolean(
+      this.browserUseCloudClient || BrowserUseCloudClient.resolveApiKey(this.getBrowserUseCloudSettings()),
+    );
+  }
+
+  private shouldRouteToBrowserUseCloud(input: unknown): boolean {
+    return this.isBrowserUseCloudProviderRequested(input) && this.isBrowserUseCloudConfigured();
+  }
+
+  private static isBrowserUseCloudConfiguredForToolSchema(): boolean {
+    return Boolean(BrowserUseCloudClient.resolveApiKey(BrowserUseCloudClient.loadSettings()));
   }
 
   private getBrowserUseCloudSettings(): BrowserUseCloudSettings {
@@ -547,6 +560,87 @@ export class BrowserTools {
    * Get the tool definitions for browser automation
    */
   static getToolDefinitions() {
+    const browserUseCloudConfigured = BrowserTools.isBrowserUseCloudConfiguredForToolSchema();
+    const browserNavigateProperties: Record<string, Any> = {
+      url: {
+        type: "string",
+        description: "The URL to navigate to",
+      },
+      wait_until: {
+        type: "string",
+        enum: ["load", "domcontentloaded", "networkidle"],
+        description: "When to consider navigation complete. Default: load",
+      },
+      headless: {
+        type: "boolean",
+        description:
+          "Compatibility flag for legacy Playwright fallback. Ignored for normal visible in-app browser workbench routing.",
+      },
+      force_headless: {
+        type: "boolean",
+        description:
+          "Force the legacy headless Playwright path. Use only when the user explicitly asks for background/headless browsing.",
+      },
+      profile: {
+        type: "string",
+        description:
+          "Optional profile. Presets: 'user' (system Chrome signed-in), 'chrome-relay' (extension relay), 'workspace' (workspace default). " +
+          "Or any name for .cowork/browser-profiles/<name>.",
+      },
+      browser_channel: {
+        type: "string",
+        enum: ["chromium", "chrome", "brave"],
+        description:
+          'Which browser binary to use (default: chromium). "chrome" requires Google Chrome; "brave" requires Brave (or BRAVE_PATH).',
+      },
+      confirm_real_browser_control: {
+        type: "boolean",
+        description: "Required only when profile='user' asks CoWork to control the system Chrome profile.",
+      },
+      session_id: {
+        type: "string",
+        description: "Optional visible in-app browser workbench session id. Defaults to the active task browser session.",
+      },
+    };
+    if (browserUseCloudConfigured) {
+      Object.assign(browserNavigateProperties, {
+        browser_provider: {
+          type: "string",
+          enum: ["browser-use-cloud"],
+          description:
+            'Explicitly use a configured Browser Use Cloud stealth browser. Omit for local browser control.',
+        },
+        proxy_country_code: {
+          type: "string",
+          description:
+            "Browser Use Cloud proxy country code, such as 'us' or 'de'. Use 'none' to disable Browser Use proxy routing.",
+        },
+        browser_use_profile_id: {
+          type: "string",
+          description: "Optional Browser Use profile id for persistent cloud browser cookies/state.",
+        },
+        browser_timeout_minutes: {
+          type: "number",
+          description: "Browser Use Cloud session timeout in minutes. Clamped to 1-240.",
+        },
+        enable_recording: {
+          type: "boolean",
+          description: "Enable Browser Use Cloud recording for this browser session.",
+        },
+        browser_screen_width: {
+          type: "number",
+          description: "Optional Browser Use Cloud browser screen width.",
+        },
+        browser_screen_height: {
+          type: "number",
+          description: "Optional Browser Use Cloud browser screen height.",
+        },
+        allow_resizing: {
+          type: "boolean",
+          description: "Allow Browser Use Cloud viewport resizing for this session.",
+        },
+      });
+    }
     return [
       {
         name: "browser_attach",
@@ -587,84 +681,7 @@ export class BrowserTools {
           "Use browser_navigate ONLY when you need to interact with the page (click, fill forms, take screenshots) or when the page requires JavaScript rendering.",
         input_schema: {
           type: "object" as const,
-          properties: {
-            url: {
-              type: "string",
-              description: "The URL to navigate to",
-            },
-            wait_until: {
-              type: "string",
-              enum: ["load", "domcontentloaded", "networkidle"],
-              description: "When to consider navigation complete. Default: load",
-            },
-            headless: {
-              type: "boolean",
-              description:
-                "Compatibility flag for legacy Playwright fallback. Ignored for normal visible in-app browser workbench routing.",
-            },
-            force_headless: {
-              type: "boolean",
-              description:
-                "Force the legacy headless Playwright path. Use only when the user explicitly asks for background/headless browsing.",
-            },
-            profile: {
-              type: "string",
-              description:
-                "Optional profile. Presets: 'user' (system Chrome signed-in), 'chrome-relay' (extension relay), 'workspace' (workspace default). " +
-                "Or any name for .cowork/browser-profiles/<name>.",
-            },
-            browser_channel: {
-              type: "string",
-              enum: ["chromium", "chrome", "brave"],
-              description:
-                'Which browser binary to use (default: chromium). "chrome" requires Google Chrome; "brave" requires Brave (or BRAVE_PATH).',
-            },
-            browser_provider: {
-              type: "string",
-              enum: ["browser-use-cloud"],
-              description:
-                'Explicitly use a Browser Use Cloud stealth browser. Omit for the default visible in-app Browser Workbench.',
-            },
-            proxy_country_code: {
-              type: "string",
-              description:
-                "Browser Use Cloud proxy country code, such as 'us' or 'de'. Use 'none' to disable Browser Use proxy routing.",
-            },
-            browser_use_profile_id: {
-              type: "string",
-              description: "Optional Browser Use profile id for persistent cloud browser cookies/state.",
-            },
-            browser_timeout_minutes: {
-              type: "number",
-              description: "Browser Use Cloud session timeout in minutes. Clamped to 1-240.",
-            },
-            enable_recording: {
-              type: "boolean",
-              description: "Enable Browser Use Cloud recording for this browser session.",
-            },
-            browser_screen_width: {
-              type: "number",
-              description: "Optional Browser Use Cloud browser screen width.",
-            },
-            browser_screen_height: {
-              type: "number",
-              description: "Optional Browser Use Cloud browser screen height.",
-            },
-            allow_resizing: {
-              type: "boolean",
-              description: "Allow Browser Use Cloud viewport resizing for this session.",
-            },
-            confirm_real_browser_control: {
-              type: "boolean",
-              description:
-                "Required only when profile='user' asks CoWork to control the system Chrome profile.",
-            },
-            session_id: {
-              type: "string",
-              description:
-                "Optional visible in-app browser workbench session id. Defaults to the active task browser session.",
-            },
-          },
+          properties: browserNavigateProperties,
           required: ["url"],
         },
       },
@@ -1333,7 +1350,14 @@ export class BrowserTools {
             return visibleResult;
           }
         }
-        if (this.getRequestedBrowserProvider(input) === "browser-use-cloud") {
+        if (this.isBrowserUseCloudProviderRequested(input) && !this.isBrowserUseCloudConfigured()) {
+          this.daemon.logEvent(this.taskId, "browser_action", {
+            action: "browser_use_cloud_fallback_unconfigured",
+            url: input?.url,
+            fallback: "local",
+          });
+        }
+        if (this.shouldRouteToBrowserUseCloud(input)) {
           const url = this.ensureVisibleNavigationAllowed(input?.url);
           if (isPrivateOrLocalBrowserTarget(url)) {
             return {

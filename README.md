@@ -63,16 +63,16 @@ Generated 2026-06-29T08:24:38.821Z. These are public GitHub/npm adoption signals
 - **Local AI super app** — CoWork OS keeps coding, email, research, browser testing, documents, spreadsheets, presentations, PDFs, channels, devices, automations, memory, providers, and approvals in one governed local workspace.
 - **GUI-first, CLI-capable agent operations** — Agents Hub, Mission Control, task timelines, visual boards, teams, devices, and automations remain the main operator console, while the `cowork` CLI gives terminal users the same local runtime for quick prompts and one-shot tasks.
 - **First-class `cowork` CLI** — Type `cowork` for an interactive terminal UI or `cowork run "task"` for a local one-shot run. Normal local CLI use shares desktop provider/settings state and does not require a Control Plane token; `--remote` is the explicit token-gated path. [CoWork CLI](docs/cli.md)
-- **Long-running agent runtime** — Chat, Execute, Plan, Analyze, Verified, Think With Me, Collaborative, Multi-LLM, `/multitask`, structured input cards, Side Chat, adaptive recovery, and visible routing/fallback state make agent work inspectable while it is running. [Chat mode](docs/chat-mode.md) · [Side Chat](docs/side-chat.md) · [Multitask](docs/multitask.md)
+- **Long-running agent runtime** — Chat, Execute, Plan, Analyze, Verified, Think With Me, Collaborative, Multi-LLM, Mixture of Agents, `/multitask`, structured input cards, Side Chat, adaptive recovery, and visible routing/fallback state make agent work inspectable while it is running. [Chat mode](docs/chat-mode.md) · [Mixture of Agents](docs/mixture-of-agents.md) · [Side Chat](docs/side-chat.md) · [Multitask](docs/multitask.md)
 - **Everything Workbench** — Generated documents, spreadsheets, decks, web pages, PDFs, previews, and file outputs open beside the agent with follow-up context, so everyday knowledge work can be created and revised inside CoWork. [Learn more](docs/everything-workbench.md)
 - **Developer workbench** — Real xterm.js + node-pty terminal tabs, title-bar terminal/browser toggles, Browser Workbench, responsive Browser V2 automation, screenshots, diagnostics, and visible web testing keep repo work, CLI work, and live app QA in the same workspace. [Terminal Tabs](docs/terminal-tabs.md) · [Browser Workbench](docs/browser-workbench.md)
 - **Inbox and channels** — Inbox Agent handles local-first mail triage, Ask Inbox evidence search, drafts, send/reply/forward, commitments, and `@Inbox` routing, while the gateway supports 17 messaging channels with specialization by workspace, agent role, guidance, and tool policy. [Inbox Agent](docs/inbox-agent.md) · [Channels](docs/channels.md)
 - **Automation and memory loop** — Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, Chronicle, Knowledge Graph, durable runtime context, and Usage Insights form a reviewable learning loop instead of an invisible background process. [Workflow Intelligence](docs/workflow-intelligence.md) · [Chronicle](docs/chronicle.md)
-- **Integrations, providers, and skills** — 35 LLM provider options, configurable fallback chains, provider-aware prompt caching, 47 MCP connectors, 36 bundled packs, 150 built-in skills, Composer `@` mentions, message-box `/` shortcuts, Plugin Store, Skill Store, and external skill directories make the app extensible without giving up local control. [Providers](docs/providers.md) · [Plugin Packs](docs/plugin-packs.md)
+- **Integrations, providers, and skills** — 36 LLM provider options, configurable fallback chains, Mixture of Agents presets, provider-aware prompt caching, 47 MCP connectors, 36 bundled packs, 150 built-in skills, Composer `@` mentions, message-box `/` shortcuts, Plugin Store, Skill Store, and external skill directories make the app extensible without giving up local control. [Providers](docs/providers.md) · [Mixture of Agents](docs/mixture-of-agents.md) · [Plugin Packs](docs/plugin-packs.md)
 - **Ops and portability** — Zero-Human Company Ops, Digital Twin personas, managed devices, remote access, profiles, profile import/export, and best-fit workflow packs support both personal work and founder/operator-style autonomous company loops.
 - **Local-first security** — Your data and API keys stay on your machine. Approval workflows, sandboxed execution, configurable guardrails, encrypted storage, session-scoped location prompts, private-memory filtering, and a verified automated test suite keep high-agency work bounded and reviewable.
 
-Recent high-impact additions change the day-to-day product shape: the `cowork` CLI, Browser Use Cloud routing, Codex Security workflows, automation outcome reporting, real terminal tabs, visible Browser Workbench, Side Chat, message-box shortcuts, Everything Workbench artifacts, and Secure MCP Tunnels. Detailed feature inventory remains below for deeper evaluation.
+Recent high-impact additions change the day-to-day product shape: the `cowork` CLI, Mixture of Agents model presets, Browser Use Cloud routing, Codex Security workflows, automation outcome reporting, real terminal tabs, visible Browser Workbench, Side Chat, message-box shortcuts, Everything Workbench artifacts, and Secure MCP Tunnels. Detailed feature inventory remains below for deeper evaluation.
 
 ### Ideas & Media
 
@@ -145,7 +145,7 @@ Release maintainers can create this unsigned DMG/ZIP with `npm run package:mac:u
 
 > **Windows first launch:** Windows SmartScreen may show a warning for unrecognized apps. Click **More info** > **Run anyway** to proceed.
 
-> First launch asks how you want to power AI: sign in with an existing ChatGPT subscription, use a local Ollama model if one is installed, or add an API key for Claude, OpenAI API, Gemini, OpenRouter, Groq, and other providers. OpenRouter, Gemini through Google AI Studio, and Groq are marked when a free option is available. You can explore the app without AI, but tasks require one working model route.
+> First launch asks how you want to power AI: sign in with an existing ChatGPT subscription, use a local Ollama model if one is installed, or add an API key for Claude, OpenAI API, Gemini, OpenRouter, Groq, and other providers. OpenRouter, Gemini through Google AI Studio, and Groq are marked when a free option is available. After at least two model routes work, you can create a Mixture of Agents preset that combines them. You can explore the app without AI, but tasks require one working model route.
 
 ### Or Install via npm
 
@@ -181,7 +181,7 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 ## How It Works
 
-1. **Choose an AI route** — The easiest path for many users is **Sign in with ChatGPT**. If CoWork detects a local Ollama model, it offers that private local route. API-key providers are available for Claude, OpenAI API, Gemini, OpenRouter, Groq, and others, with free-option badges shown where applicable.
+1. **Choose an AI route** — The easiest path for many users is **Sign in with ChatGPT**. If CoWork detects a local Ollama model, it offers that private local route. API-key providers are available for Claude, OpenAI API, Gemini, OpenRouter, Groq, and others, with free-option badges shown where applicable. Once several routes are configured, Mixture of Agents can use them as advisor and aggregator slots.
 2. **Create a task or start from Ideas** — Describe what you want in the desktop app ("create a weekly plan", "create a quarterly report spreadsheet", "draft a DOCX memo", "build a small landing page"), begin from a curated Ideas prompt, or run a one-shot terminal task with `cowork run "..."`. No workspace needed — a private starter workspace is used automatically if you don't select one.
 3. **Choose a mode** — Pick **Chat**, **Execute**, **Plan**, **Analyze**, or **Verified** for the runtime behavior, then optionally toggle **Autonomous** (auto-approve actions), **Collaborative** (multi-agent perspectives), or **Multi-LLM** (compare providers with a judge) per task. For one-shot parallel lane work, start with `/multitask [N] <task>`.
 4. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts. Parallel tool bursts are grouped into lane summaries, shell commands stay visible, and the workspace can open real terminal tabs for direct interactive CLI work.
@@ -279,7 +279,7 @@ The top of this README is intentionally opinionated about what matters first. Th
 | **Knowledge work artifacts** | Editable document artifacts, spreadsheet artifacts, presentation artifacts, web page artifacts, paired LaTeX/PDF outputs, smart PDF attachments, format-aware file preview, designed editorial documents, generated images, generated videos, and programmatic Manim technical videos |
 | **Inbox and communications** | Inbox Agent, Classic and Today inbox modes, Ask Inbox, hybrid mailbox search, editable AI drafts, manual reply/reply-all/forward, sender cleanup, commitments, Gmail forwarding automations, `@Inbox` routing, voice mode, outbound calls, and 17 messaging channels |
 | **Automation and memory** | Routines, scheduled tasks, webhooks, event triggers, Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, adaptive style learning, Usage Insights, persistent memory, Knowledge Graph, ChatGPT history import, durable runtime context, context compaction, Supermemory, and Chronicle |
-| **Integrations and extensibility** | 35 LLM provider options, ordered LLM/search fallback chains, provider-aware prompt caching, 47 MCP connectors, native and MCP-backed Google Workspace coverage, 36 bundled plugin packs, 338 pack skills, 263 pack shortcuts, 42 pack agent roles, 150 built-in skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support |
+| **Integrations and extensibility** | 36 LLM provider options, Mixture of Agents presets, ordered LLM/search fallback chains, provider-aware prompt caching, 47 MCP connectors, native and MCP-backed Google Workspace coverage, 36 bundled plugin packs, 338 pack skills, 263 pack shortcuts, 42 pack agent roles, 150 built-in skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support |
 | **Operations and deployment** | Profiles, profile import/export, Devices, remote workspaces, remote task dispatch, remote file picking, Control Plane, Linux server package, self-hosting, Tailscale/SSH remote access, Zero-Human Company Ops, Digital Twin personas, company-linked operator agents, and best-fit Support/IT/Sales workflow packs |
 | **Safety and reliability** | Approval workflows, sandboxed execution, workspace/profile permission rules, network/sandbox policy controls, private-memory filtering, session-scoped location approvals, command/path containment, import scanning and quarantine, encrypted storage, local-first data handling, renderer event caps, off-main-thread memory recall, and long-session cleanup |
 
@@ -424,7 +424,7 @@ Health pulls personal signals into a private, action-oriented view for readiness
 
 ### LLM Providers
 
-35 provider options, with 14 built-in providers and 21 compatible/gateway providers. Use cloud APIs, supported subscription logins, or fully offline Ollama, configure an ordered fallback chain for runtime failover, and get default-on prompt caching on supported Claude and GPT-style routes. Claude supports both direct API keys and Claude subscription tokens from `claude setup-token`; Grok supports both xAI API keys and SuperGrok browser OAuth with `grok-4.3` as the default subscription model. [Learn more](docs/providers.md)
+36 provider options across built-in, compatible/gateway, local, subscription, and virtual routes. Use cloud APIs, supported subscription logins, fully offline Ollama, or Mixture of Agents presets that fan out to advisor models before a final aggregator answers. Configure ordered fallback chains for runtime failover and get default-on prompt caching on supported Claude and GPT-style routes. Claude supports both direct API keys and Claude subscription tokens from `claude setup-token`; Grok supports both xAI API keys and SuperGrok browser OAuth with `grok-4.3` as the default subscription model. [Learn more](docs/providers.md) | [Mixture of Agents](docs/mixture-of-agents.md)
 
 <p align="center">
   <img src="resources/branding/images/cowork-os-10.webp" alt="AI model provider settings" width="700">
@@ -508,7 +508,7 @@ Every tracked file follows a shared parser/linter model with freshness windows, 
                               ↕
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Execution Layer                               │
-│  File Ops │ Skills │ Browser │ LLM Providers (35) │ MCP         │
+│  File Ops │ Skills │ Browser │ LLM Providers (36) │ MCP         │
 │  Infrastructure (E2B Sandboxes │ Domains │ Wallet │ x402)       │
 └─────────────────────────────────────────────────────────────────┘
                               ↕
@@ -568,6 +568,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Composer Mentions](docs/composer-mentions.md) | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing |
 | [Message Box Shortcuts](docs/message-box-shortcuts.md) | `/` picker for deterministic app commands and skill-backed workflow shortcuts |
 | [Side Chat](docs/side-chat.md) | Right-side read-only questions about an active running session without steering or stopping the parent task |
+| [Mixture of Agents](docs/mixture-of-agents.md) | Virtual LLM provider that runs advisor models before a final aggregator model answers |
 | [Claude-for-Legal Workflows](docs/claude-for-legal.md) | Bundled legal practice slash commands, editable picker selection, and main-view matter intake cards |
 | [Multitask Command](docs/multitask.md) | `/multitask [N] <task>` lane fan-out through collaborative team runs |
 | [Use Case Showcase](docs/showcase.md) | Comprehensive guide to what you can build and automate |

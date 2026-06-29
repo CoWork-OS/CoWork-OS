@@ -227,6 +227,9 @@ export function buildSavedLLMSettings(
         existingSettings.openaiCompatible,
       ),
     ),
+    moa: cleanProviderSettings(
+      mergeProviderSettings(validated.moa, existingSettings.moa),
+    ),
     customProviders: cleanCustomProviders(
       validated.customProviders ?? existingSettings.customProviders,
     ),

@@ -59,6 +59,18 @@ Run the app with hot reload:
 npm run dev
 ```
 
+On macOS, development startup enables Node's system certificate store by default with `NODE_OPTIONS=--use-system-ca`. This helps provider calls work on corporate networks where tools such as Zscaler install a company root certificate into the macOS trust store. To opt out for comparison, run:
+
+```bash
+COWORK_DEV_USE_SYSTEM_CA=0 npm run dev
+```
+
+If a corporate root certificate still is not trusted by Node, export it as PEM and use:
+
+```bash
+NODE_EXTRA_CA_CERTS=/path/to/company-root.pem npm run dev
+```
+
 `npm run dev` checks **Settings → Appearance → Developer logging** (default: off).
 When enabled, each captured run writes a readable text log and a structured JSONL log:
 

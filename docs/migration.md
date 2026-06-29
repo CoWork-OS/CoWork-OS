@@ -88,7 +88,7 @@ Moving to CoWork OS provides several advantages:
 
 | Feature | Benefit |
 |---------|---------|
-| **35 LLM provider options** | Built-in + compatible gateways with BYOK and supported subscription flexibility, including OpenRouter Pareto Code routing and Grok through xAI API key or SuperGrok OAuth |
+| **36 LLM provider options** | Built-in + compatible gateways with BYOK and supported subscription flexibility, including OpenRouter Pareto Code routing, Grok through xAI API key or SuperGrok OAuth, and Mixture of Agents presets |
 | **Local LLM support** | Run completely free and offline with Ollama |
 | **Native desktop app** | Full desktop UX on macOS and Windows (menu bar on macOS, system tray on Windows) |
 | **GUI-first agent management** | Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through Agents Hub and Mission Control |

@@ -16,7 +16,7 @@ CoWork OS is a **security-first, GUI-first, CLI-capable local AI super app and e
 - **Renderer Performance**: Sidebar and timeline virtualization in the `CoWork-OS/CoWork-OS` repo use `@chenglou/pretext` for text measurement and keep long task feeds responsive
 - **Security-First Design**: 4,932 automated tests across 390 test files, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
 - **Imported Capability Security**: managed skill and pack imports are staged, scanned, reported, and quarantined when blocked instead of being activated directly
-- **Multi-Provider Support**: 35 LLM provider options including free local models via Ollama, OpenRouter coding routers, and Grok through xAI API key or SuperGrok OAuth
+- **Multi-Provider Support**: 36 LLM provider options including free local models via Ollama, OpenRouter coding routers, Grok through xAI API key or SuperGrok OAuth, and Mixture of Agents presets
 - **Local-First Architecture**: Your data stays on your machine, BYOK model
 
 ## What's Built and Working
@@ -578,7 +578,7 @@ Expected behavior:
 ### Core Strengths
 - **Security**: 4,932 automated tests across 390 test files, configurable guardrails, layered permission rules, approval workflows, and brute-force protection
 - **Multi-Channel**: WhatsApp, Telegram, Discord, Slack, iMessage integration
-- **Multi-Provider**: 35 LLM provider options and compatible gateways, including Claude, GPT, Gemini, Bedrock, OpenRouter Pareto Code routing, Ollama, and Grok through xAI API key or SuperGrok OAuth
+- **Multi-Provider**: 36 LLM provider options and compatible gateways, including Claude, GPT, Gemini, Bedrock, OpenRouter Pareto Code routing, Ollama, Grok through xAI API key or SuperGrok OAuth, and Mixture of Agents presets
 - **GUI-first Agents + CLI entrypoint**: Agents Hub, Mission Control, visual task timelines, boards, and approval dialogs for creating, spawning, assigning, and monitoring many agents, plus `cowork` for local terminal starts against the same runtime
 - **Local-First**: Your data stays on your machine, BYOK model
 - **Extensible**: MCP support (Client, Host, Registry), 150 built-in skills, and plugin packs

@@ -66,7 +66,7 @@ The artifact workbench should not narrow the product category. CoWork OS also co
 
 ## Proof Points to Reuse in Messaging
 
-- 35 LLM provider options, including Grok through xAI API key or SuperGrok OAuth
+- 36 LLM provider options, including Grok through xAI API key or SuperGrok OAuth and Mixture of Agents presets
 - 17 messaging channels
 - 150 built-in skills
 - GUI-first agent spawning and management through Agents Hub, Mission Control, task timelines, and visual boards

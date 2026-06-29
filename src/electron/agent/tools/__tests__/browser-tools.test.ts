@@ -5,6 +5,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { BrowserTools } from "../browser-tools";
 import { GuardrailManager } from "../../../guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
+import { BrowserUseCloudClient } from "../../browser/browser-use-cloud-client";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -35,6 +36,27 @@ describe("BrowserTools browser_navigate", () => {
       daemon,
     };
   };
+
+  it("does not advertise Browser Use Cloud options when Cloud is not configured", () => {
+    vi.spyOn(BrowserUseCloudClient, "resolveApiKey").mockReturnValue("");
+
+    const navigateTool = BrowserTools.getToolDefinitions().find(
+      (tool) => tool.name === "browser_navigate",
+    );
+
+    expect(navigateTool?.input_schema.properties).not.toHaveProperty("browser_provider");
+    expect(navigateTool?.input_schema.properties).not.toHaveProperty("proxy_country_code");
+  });
+
+  it("advertises Browser Use Cloud options only when Cloud is configured", () => {
+    vi.spyOn(BrowserUseCloudClient, "resolveApiKey").mockReturnValue("browser-use-key");
+
+    const navigateTool = BrowserTools.getToolDefinitions().find(
+      (tool) => tool.name === "browser_navigate",
+    );
+
+    expect(navigateTool?.input_schema.properties).toHaveProperty("browser_provider");
+  });
 
   it("returns success=false when navigation receives HTTP 4xx/5xx", async () => {
     const { tools } = makeTools();
@@ -294,6 +316,7 @@ describe("BrowserTools browser_navigate", () => {
       cdpUrl: "https://cdp.browser-use.example/session?apiKey=secret",
       liveUrl: "https://live.browser-use.example/session",
     };
+    (tools as Any).browserUseCloudClient = {};
     (tools as Any).ensureBrowserUseCloudConfigured = vi.fn().mockImplementation(async () => {
       (tools as Any).browserService = {
         navigate: vi.fn().mockResolvedValue({
@@ -334,11 +357,52 @@ describe("BrowserTools browser_navigate", () => {
     );
   });
 
+  it("falls back to local navigation when Browser Use Cloud is requested but unconfigured", async () => {
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue(null),
+      navigate: vi.fn(),
+    };
+    const { tools, daemon } = makeTools(browserWorkbenchService);
+    (tools as Any).getBrowserUseCloudClient = vi.fn().mockReturnValue(null);
+    (tools as Any).ensureBrowserUseCloudConfigured = vi.fn();
+    (tools as Any).browserService = {
+      navigate: vi.fn().mockResolvedValue({
+        url: "https://example.com",
+        title: "Example Domain",
+        status: 200,
+        isError: false,
+      }),
+      close: vi.fn(),
+    };
+
+    const result = await tools.executeTool("browser_navigate", {
+      url: "https://example.com",
+      browser_provider: "browser-use-cloud",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.browserProvider).toBeUndefined();
+    expect((tools as Any).ensureBrowserUseCloudConfigured).not.toHaveBeenCalled();
+    expect((tools as Any).browserService.navigate).toHaveBeenCalledWith(
+      "https://example.com",
+      "load",
+    );
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "browser_action",
+      expect.objectContaining({
+        action: "browser_use_cloud_fallback_unconfigured",
+        fallback: "local",
+      }),
+    );
+  });
+
   it("rejects Browser Use Cloud navigation for local and private targets", async () => {
     const { tools } = makeTools({
       getSession: vi.fn().mockReturnValue(null),
       navigate: vi.fn(),
     });
+    (tools as Any).browserUseCloudClient = {};
     (tools as Any).ensureBrowserUseCloudConfigured = vi.fn();
 
     const result = await tools.executeTool("browser_navigate", {

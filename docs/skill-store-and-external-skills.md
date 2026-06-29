@@ -239,6 +239,11 @@ Current limits:
 - only ClawHub has dedicated third-party marketplace browsing inside the GUI today
 - other external skill stores do not yet have dedicated search adapters unless added explicitly
 - compatibility depends on the store exposing installable skill artifacts in a format CoWork can import
+- raw JSON manifests and raw `SKILL.md` imports are capped at 512 KiB
+- each imported bundle file is capped at 512 KiB
+- imported Git and ClawHub bundles are capped at 5 MiB total extracted content
+- ClawHub ZIP responses are capped at 5 MiB before extraction
+- imported bundles are capped at 200 files
 
 ## Why This Capability Matters
 

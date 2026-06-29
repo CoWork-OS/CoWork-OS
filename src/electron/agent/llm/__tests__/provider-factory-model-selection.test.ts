@@ -142,6 +142,40 @@ describe("LLMProviderFactory model status", () => {
     expect(status.models.map((model) => model.key)).toContain("gpt-5.3-codex-spark");
   });
 
+  it("lists enabled MoA presets as provider models", () => {
+    const settings: LLMSettings = {
+      providerType: "moa",
+      modelKey: "frontier-council",
+      moa: {
+        defaultPreset: "frontier-council",
+        presets: {
+          "frontier-council": {
+            id: "frontier-council",
+            name: "Frontier Council",
+            enabled: true,
+            referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
+            aggregator: { providerType: "anthropic", modelKey: "sonnet-4-5" },
+          },
+          disabled: {
+            id: "disabled",
+            name: "Disabled",
+            enabled: false,
+            referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
+            aggregator: { providerType: "anthropic", modelKey: "sonnet-4-5" },
+          },
+        },
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+    vi.spyOn(LLMProviderFactory, "getAvailableProviders").mockReturnValue([]);
+
+    const status = LLMProviderFactory.getConfigStatus();
+
+    expect(status.currentModel).toBe("frontier-council");
+    expect(status.models.map((model) => model.key)).toContain("frontier-council");
+    expect(status.models.map((model) => model.key)).not.toContain("disabled");
+  });
+
   it("filters retired Claude models from cached Anthropic model lists", async () => {
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
       providerType: "anthropic",
@@ -360,6 +394,125 @@ describe("LLMProviderFactory model selection persistence", () => {
     );
 
     expect(updated.azure?.reasoningEffort).toBe("high");
+  });
+
+  it("stores selected MoA preset in MoA settings", () => {
+    const settings: LLMSettings = {
+      providerType: "moa",
+      modelKey: "frontier-council",
+      moa: {
+        defaultPreset: "frontier-council",
+        presets: {
+          "frontier-council": {
+            id: "frontier-council",
+            name: "Frontier Council",
+            referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
+            aggregator: { providerType: "anthropic", modelKey: "sonnet-4-5" },
+          },
+          "fast-council": {
+            id: "fast-council",
+            name: "Fast Council",
+            referenceModels: [{ providerType: "openai", modelKey: "gpt-4o-mini" }],
+            aggregator: { providerType: "openai", modelKey: "gpt-4o" },
+          },
+        },
+      },
+    };
+
+    const updated = LLMProviderFactory.applyModelSelection(settings, "fast-council");
+
+    expect(updated.providerType).toBe("moa");
+    expect(updated.modelKey).toBe("fast-council");
+    expect(updated.moa?.defaultPreset).toBe("fast-council");
+  });
+});
+
+describe("LLMProviderFactory MoA routing", () => {
+  it("resolves the preset as model id and aggregator as context model", () => {
+    const settings: LLMSettings = {
+      providerType: "moa",
+      modelKey: "frontier-council",
+      anthropic: { apiKey: "anthropic-key" },
+      openai: { apiKey: "openai-key", model: "gpt-4o" },
+      moa: {
+        defaultPreset: "frontier-council",
+        presets: {
+          "frontier-council": {
+            id: "frontier-council",
+            name: "Frontier Council",
+            referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
+            aggregator: { providerType: "anthropic", modelKey: "sonnet-4-5" },
+          },
+        },
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection();
+
+    expect(resolved.providerType).toBe("moa");
+    expect(resolved.modelKey).toBe("frontier-council");
+    expect(resolved.modelId).toBe("frontier-council");
+    expect(resolved.contextModelKey).toBe("sonnet-4-5");
+    expect(resolved.contextModelId).toContain("claude-sonnet-4-5");
+  });
+
+  it("does not inherit global failover providers for MoA presets", () => {
+    const settings: LLMSettings = {
+      providerType: "moa",
+      modelKey: "frontier-council",
+      fallbackProviders: [
+        { providerType: "openrouter", modelKey: "openai/gpt-4o" },
+      ],
+      openai: { apiKey: "openai-key", model: "gpt-4o" },
+      openrouter: { apiKey: "openrouter-key", model: "openai/gpt-4o" },
+      moa: {
+        defaultPreset: "frontier-council",
+        presets: {
+          "frontier-council": {
+            id: "frontier-council",
+            name: "Frontier Council",
+            referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
+            aggregator: { providerType: "openai", modelKey: "gpt-4o" },
+          },
+        },
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const primary = LLMProviderFactory.resolveTaskModelSelection();
+    const chain = LLMProviderFactory.resolveProviderFailoverChain(primary);
+
+    expect(chain.map((entry) => entry.providerType)).toEqual(["moa"]);
+  });
+
+  it("honors explicit MoA failover providers", () => {
+    const settings: LLMSettings = {
+      providerType: "moa",
+      modelKey: "frontier-council",
+      openai: { apiKey: "openai-key", model: "gpt-4o" },
+      openrouter: { apiKey: "openrouter-key", model: "openai/gpt-4o" },
+      moa: {
+        defaultPreset: "frontier-council",
+        fallbackProviders: [
+          { providerType: "openrouter", modelKey: "openai/gpt-4o" },
+        ],
+        presets: {
+          "frontier-council": {
+            id: "frontier-council",
+            name: "Frontier Council",
+            referenceModels: [{ providerType: "openai", modelKey: "gpt-4o" }],
+            aggregator: { providerType: "openai", modelKey: "gpt-4o" },
+          },
+        },
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const primary = LLMProviderFactory.resolveTaskModelSelection();
+    const chain = LLMProviderFactory.resolveProviderFailoverChain(primary);
+
+    expect(chain.map((entry) => entry.providerType)).toEqual(["moa", "openrouter"]);
   });
 });
 

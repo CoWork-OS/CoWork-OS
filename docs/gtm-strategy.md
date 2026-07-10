@@ -68,7 +68,7 @@ The artifact workbench should not narrow the product category. CoWork OS also co
 
 - 36 LLM provider options, including Grok through xAI API key or SuperGrok OAuth and Mixture of Agents presets
 - 17 messaging channels
-- 150 built-in skills
+- 151 built-in skills
 - GUI-first agent spawning and management through Agents Hub, Mission Control, task timelines, and visual boards
 - Coding, email, web design, research, automations, channels, devices, and artifact workspaces in one app
 - Everything Workbench for docs, sheets, decks, web pages, live websites, PDFs, and previews

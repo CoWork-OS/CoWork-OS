@@ -86,6 +86,7 @@ import {
   WorkspaceRepository,
   TaskRepository,
   TaskEventRepository,
+  TaskSessionMetadataRepository,
   TaskTraceRepository,
   ArtifactRepository,
   SkillRepository,
@@ -93,6 +94,7 @@ import {
   WorkspacePermissionRuleRepository,
   ChannelSpecializationRepository,
 } from "../database/repositories";
+import { SessionRetentionService } from "../sessions/SessionRetentionService";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
 import { ActivityRepository } from "../activity/ActivityRepository";
 import { MentionRepository } from "../agents/MentionRepository";
@@ -1526,6 +1528,13 @@ export async function setupIpcHandlers(
   const workspaceRepo = new WorkspaceRepository(db);
   const taskRepo = new TaskRepository(db);
   const taskEventRepo = new TaskEventRepository(db);
+  const taskSessionMetadataRepo = new TaskSessionMetadataRepository(db);
+  const sessionRetentionService = new SessionRetentionService(
+    taskRepo,
+    taskEventRepo,
+    taskSessionMetadataRepo,
+    workspaceRepo,
+  );
   const taskTraceRepo = new TaskTraceRepository(taskRepo, taskEventRepo);
   const artifactRepo = new ArtifactRepository(db);
   const skillRepo = new SkillRepository(db);
@@ -5123,6 +5132,7 @@ export async function setupIpcHandlers(
         limit?: number;
         offset?: number;
         prioritizeSidebar?: boolean;
+        includeArchivedSessions?: boolean;
         excludeSources?: Array<NonNullable<Task["source"]>>;
         cursor?: {
           id?: string;
@@ -5140,6 +5150,7 @@ export async function setupIpcHandlers(
       const startedAt = Date.now();
       const tasks = taskRepo.findAll(limit, offset, {
         prioritizeSidebar: opts?.prioritizeSidebar === true,
+        includeArchivedSessions: opts?.includeArchivedSessions !== false,
         excludeSources: opts?.excludeSources,
         cursor: opts?.cursor,
       });
@@ -5166,6 +5177,7 @@ export async function setupIpcHandlers(
         limit?: number;
         offset?: number;
         prioritizeSidebar?: boolean;
+        includeArchivedSessions?: boolean;
         excludeSources?: Array<NonNullable<Task["source"]>>;
         cursor?: {
           id?: string;
@@ -5183,6 +5195,7 @@ export async function setupIpcHandlers(
       const startedAt = Date.now();
       const tasks = taskRepo.findSidebarSummaries(limit, offset, {
         prioritizeSidebar: opts?.prioritizeSidebar === true,
+        includeArchivedSessions: opts?.includeArchivedSessions === true,
         excludeSources: opts?.excludeSources,
         cursor: opts?.cursor,
       });
@@ -5400,6 +5413,15 @@ export async function setupIpcHandlers(
       throw new Error(`Task not found: ${validated}`);
     }
     return task;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_ARCHIVE, async (_, id: string) => {
+    const validated = validateInput(UUIDSchema, id, "task ID");
+    const task = taskRepo.findById(validated);
+    if (!task) {
+      throw new Error(`Task not found: ${validated}`);
+    }
+    return sessionRetentionService.archiveSession(task.sessionId || task.id);
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_DELETE, async (_, id: string) => {

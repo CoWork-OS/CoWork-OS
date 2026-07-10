@@ -16,7 +16,7 @@ There are two different concepts in the product:
    These are individual skills installed into the managed skills directory and surfaced in the Skills settings area.
    This is the capability documented here.
 
-Bundled skills such as [`manim-video`](skills/manim-video.md) and [`kami`](skills/kami.md) do not need installation from the Skill Store. They ship with the app and are available immediately.
+Bundled skills such as [`manim-video`](skills/manim-video.md), [`kami`](skills/kami.md), and [`unbroker`](skills/unbroker.md) do not need installation from the Skill Store. They ship with the app and are available immediately.
 
 ## Supported Skill Sources
 
@@ -228,6 +228,8 @@ Important safeguards and behaviors:
 This does **not** mean every third-party skill is safe by default.
 Users should still treat external skills as untrusted until reviewed.
 
+Bundled privacy-sensitive workflows can also carry their own domain guardrails. For example, [`unbroker`](skills/unbroker.md) is a built-in privacy/security skill for authorized data-broker removal, but it still requires recorded consent and refuses unauthorized OSINT, stalking, skip tracing, public-record deletion, and legal-advice requests.
+
 ## Current Scope and Limits
 
 Current scope:
@@ -249,7 +251,7 @@ Current limits:
 
 This gives CoWork OS an important ecosystem advantage:
 - users can start with bundled skills
-- bundled examples now include workflows such as `llm-wiki`, `kami`, `react-best-practices`, and `taste-skill`
+- bundled examples now include workflows such as `llm-wiki`, `kami`, `react-best-practices`, `unbroker`, and `taste-skill`
 - adopt curated CoWork registry skills
 - pull in popular ClawHub skills directly from the app
 - bring skills from other ecosystems without waiting for a custom marketplace integration

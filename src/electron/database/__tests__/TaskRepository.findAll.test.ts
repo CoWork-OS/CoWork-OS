@@ -27,6 +27,18 @@ describe("TaskRepository.findAll", () => {
     expect(all).toHaveBeenCalledWith(100, 0);
   });
 
+  it("can exclude archived sessions from task queries", () => {
+    const { repository, prepare, all } = createRepository();
+
+    repository.findAll(25, 0, { includeArchivedSessions: false });
+
+    const sql = prepare.mock.calls[0]?.[0] || "";
+    expect(sql).toContain("task_session_metadata");
+    expect(sql).toContain("archived_at IS NOT NULL");
+    expect(sql).toContain("COALESCE(NULLIF(tasks.session_id, ''), tasks.id)");
+    expect(all).toHaveBeenCalledWith(25, 0);
+  });
+
   it("touches a task updated timestamp", () => {
     const beforeRow = {
       id: "task-1",

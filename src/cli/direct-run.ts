@@ -13,9 +13,15 @@ import {
   SkillRepository,
   TaskEventRepository,
   TaskRepository,
+  TaskSessionMetadataRepository,
   WorkspacePermissionRuleRepository,
   WorkspaceRepository,
 } from "../electron/database/repositories";
+import {
+  SessionRetentionService,
+  type SessionRetentionFilters,
+  type TaskSessionSummary,
+} from "../electron/sessions/SessionRetentionService";
 import { AgentDaemon } from "../electron/agent/daemon";
 import { LLMProviderFactory } from "../electron/agent/llm";
 import { SearchProviderFactory } from "../electron/agent/search";
@@ -62,6 +68,7 @@ interface DirectRunArgs {
     | "sessions-show"
     | "sessions-export"
     | "sessions-rename"
+    | "sessions-archive"
     | "sessions-delete"
     | "sessions-prune"
     | "tasks-list"
@@ -116,6 +123,17 @@ interface DirectRunArgs {
   workspaceName?: string;
   title?: string;
   workspaceId?: string;
+  olderThan?: string;
+  newerThan?: string;
+  after?: string;
+  before?: string;
+  source?: string;
+  cwdFilter?: string;
+  endReason?: string;
+  minTokens?: number;
+  maxTokens?: number;
+  minCost?: number;
+  maxCost?: number;
   shellAccess?: boolean;
   detach?: boolean;
   detachedWorker?: boolean;
@@ -124,6 +142,9 @@ interface DirectRunArgs {
   cliOnly?: boolean;
   interruptedCli?: boolean;
   includeSecrets?: boolean;
+  includeArchived?: boolean;
+  all?: boolean;
+  vacuum?: boolean;
   yes?: boolean;
   dryRun?: boolean;
   json?: boolean;
@@ -443,6 +464,9 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
       case "--sessions-rename":
         args.command = "sessions-rename";
         break;
+      case "--sessions-archive":
+        args.command = "sessions-archive";
+        break;
       case "--sessions-delete":
         args.command = "sessions-delete";
         break;
@@ -624,6 +648,50 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
         args.workspaceId = next || "";
         i++;
         break;
+      case "--older-than":
+        args.olderThan = next || "";
+        i++;
+        break;
+      case "--newer-than":
+        args.newerThan = next || "";
+        i++;
+        break;
+      case "--after":
+        args.after = next || "";
+        i++;
+        break;
+      case "--before":
+        args.before = next || "";
+        i++;
+        break;
+      case "--source":
+        args.source = next || "";
+        i++;
+        break;
+      case "--cwd-filter":
+        args.cwdFilter = next || "";
+        i++;
+        break;
+      case "--end-reason":
+        args.endReason = next || "";
+        i++;
+        break;
+      case "--min-tokens":
+        args.minTokens = sanitizeNonNegativeNumber(next);
+        i++;
+        break;
+      case "--max-tokens":
+        args.maxTokens = sanitizeNonNegativeNumber(next);
+        i++;
+        break;
+      case "--min-cost":
+        args.minCost = sanitizeNonNegativeNumber(next);
+        i++;
+        break;
+      case "--max-cost":
+        args.maxCost = sanitizeNonNegativeNumber(next);
+        i++;
+        break;
       case "--shell":
         args.shellAccess = true;
         break;
@@ -649,6 +717,15 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
       case "--include-secrets":
         args.includeSecrets = true;
         break;
+      case "--include-archived":
+        args.includeArchived = true;
+        break;
+      case "--all":
+        args.all = true;
+        break;
+      case "--vacuum":
+        args.vacuum = true;
+        break;
       case "--yes":
       case "-y":
         args.yes = true;
@@ -672,8 +749,20 @@ async function runLocalMetadataCommand(
 ): Promise<number | null> {
   const db = dbManager.getDatabase();
   const tasks = new TaskRepository(db);
+  const taskEvents = new TaskEventRepository(db);
   const workspaces = new WorkspaceRepository(db);
   const approvals = new ApprovalRepository(db);
+  const sessionMetadata = new TaskSessionMetadataRepository(db);
+  const sessionRetention = new SessionRetentionService(
+    tasks,
+    taskEvents,
+    sessionMetadata,
+    workspaces,
+  );
+
+  if (String(args.command).startsWith("sessions-")) {
+    await migrateLegacySessionMetadata(sessionMetadata);
+  }
 
   switch (args.command) {
     case "doctor": {
@@ -788,7 +877,7 @@ async function runLocalMetadataCommand(
       if (!args.taskId) throw new Error("Usage: cowork tail <taskId> [--limit <n>]");
       const task = tasks.findById(args.taskId);
       if (!task) throw new Error(`Task not found: ${args.taskId}`);
-      const events = new TaskEventRepository(db).findRecentByTaskId(args.taskId, args.limit || 200);
+      const events = taskEvents.findRecentByTaskId(args.taskId, args.limit || 200);
       writeEvent(
         args,
         { type: "task_events", task, events },
@@ -851,17 +940,19 @@ async function runLocalMetadataCommand(
       return 0;
     }
     case "sessions-list":
-      return await listSessions(tasks, args);
+      return listSessions(sessionRetention, args);
     case "sessions-show":
-      return await showSession(tasks, args);
+      return showSession(sessionRetention, sessionMetadata, args);
     case "sessions-export":
-      return await exportSession(tasks, args);
+      return await exportSession(sessionRetention, args);
     case "sessions-rename":
-      return await renameSession(tasks, args);
+      return renameSession(sessionRetention, args);
+    case "sessions-archive":
+      return archiveSession(sessionRetention, args);
     case "sessions-delete":
-      return await deleteSession(tasks, args);
+      return archiveSession(sessionRetention, args);
     case "sessions-prune":
-      return await pruneSessions(tasks, args);
+      return await pruneSessions(sessionRetention, taskEvents, args);
     case "tasks-list":
       return listCliTasks(tasks, args);
     case "tasks-cancel":
@@ -917,46 +1008,51 @@ async function runLocalMetadataCommand(
   }
 }
 
-async function listSessions(taskRepo: TaskRepository, args: DirectRunArgs): Promise<number> {
-  const metadata = await readSessionMetadata();
-  const sessions = buildSessionSummaries(taskRepo.findAll(args.limit || 1000))
-    .filter((session) => !metadata[session.id]?.archivedAt);
-  const limited = sessions.slice(0, args.limit || 50);
+function listSessions(sessionRetention: SessionRetentionService, args: DirectRunArgs): number {
+  const limited = sessionRetention.listSessions({
+    limit: args.limit || 50,
+    includeArchived: args.includeArchived,
+  });
   writeEvent(
     args,
-    { type: "sessions", sessions: limited, metadata },
+    { type: "sessions", sessions: limited },
     limited.length
       ? limited
-          .map((session) => {
-            const name = metadata[session.id]?.name || session.title || "Untitled";
-            return `${session.id}  ${name}  tasks=${session.count}  latest=${session.latestStatus}  updated=${formatDate(session.updatedAt)}`;
-          })
+          .map(formatSessionSummaryLine)
           .join("\n")
       : "No local sessions found.",
   );
   return 0;
 }
 
-async function showSession(taskRepo: TaskRepository, args: DirectRunArgs): Promise<number> {
+function showSession(
+  sessionRetention: SessionRetentionService,
+  sessionMetadata: TaskSessionMetadataRepository,
+  args: DirectRunArgs,
+): number {
   const sessionId = requireSessionId(args);
-  const rows = tasksForSession(taskRepo, sessionId, args.limit || 200);
-  const metadata = await readSessionMetadata();
+  const rows = sessionRetention.tasksForSession(sessionId, args.limit || 200);
+  const metadata = sessionMetadata.findBySessionId(sessionId);
   if (rows.length === 0) throw new Error(`Session not found: ${sessionId}`);
   writeEvent(
     args,
-    { type: "session", sessionId, metadata: metadata[sessionId] || null, tasks: rows },
+    { type: "session", sessionId, metadata: metadata || null, tasks: rows },
     [
       `Session: ${sessionId}`,
-      ...(metadata[sessionId]?.name ? [`Name: ${metadata[sessionId].name}`] : []),
+      ...(metadata?.name ? [`Name: ${metadata.name}`] : []),
+      ...(metadata?.archivedAt ? [`Archived: ${formatDate(metadata.archivedAt)}`] : []),
       ...rows.map((task) => `${formatDate(task.updatedAt || task.createdAt)}  ${task.status}  ${task.id}  ${task.title}`),
     ].join("\n"),
   );
   return 0;
 }
 
-async function exportSession(taskRepo: TaskRepository, args: DirectRunArgs): Promise<number> {
+async function exportSession(
+  sessionRetention: SessionRetentionService,
+  args: DirectRunArgs,
+): Promise<number> {
   const sessionId = requireSessionId(args);
-  const rows = tasksForSession(taskRepo, sessionId, args.limit || 1000);
+  const rows = sessionRetention.tasksForSession(sessionId, args.limit || 1000);
   if (rows.length === 0) throw new Error(`Session not found: ${sessionId}`);
   const payload = {
     type: "session_export",
@@ -973,58 +1069,120 @@ async function exportSession(taskRepo: TaskRepository, args: DirectRunArgs): Pro
   return 0;
 }
 
-async function renameSession(taskRepo: TaskRepository, args: DirectRunArgs): Promise<number> {
+function renameSession(sessionRetention: SessionRetentionService, args: DirectRunArgs): number {
   const sessionId = requireSessionId(args);
   const name = (args.name || args.title || "").trim();
   if (!name) throw new Error("Usage: cowork sessions rename <sessionId> <name>");
-  if (tasksForSession(taskRepo, sessionId, 1).length === 0) throw new Error(`Session not found: ${sessionId}`);
-  const metadata = await readSessionMetadata();
-  metadata[sessionId] = { ...(metadata[sessionId] || {}), name, updatedAt: Date.now() };
-  await writeSessionMetadata(metadata);
+  sessionRetention.renameSession(sessionId, name);
   writeEvent(args, { type: "session_renamed", sessionId, name }, `Renamed session ${sessionId} to "${name}".`);
   return 0;
 }
 
-async function deleteSession(taskRepo: TaskRepository, args: DirectRunArgs): Promise<number> {
+function archiveSession(sessionRetention: SessionRetentionService, args: DirectRunArgs): number {
   const sessionId = requireSessionId(args);
-  const rows = tasksForSession(taskRepo, sessionId, 10000);
+  const rows = sessionRetention.tasksForSession(sessionId, 10000);
   if (rows.length === 0) throw new Error(`Session not found: ${sessionId}`);
-  if (!args.yes) {
+  if (args.command === "sessions-delete" && !args.yes) {
     writeEvent(
       args,
-      { type: "session_delete_preview", sessionId, taskCount: rows.length, requiresYes: true },
-      `Session ${sessionId} has ${rows.length} task(s). Re-run with --yes to archive it from CLI lists.`,
+      { type: "session_archive_preview", sessionId, taskCount: rows.length, requiresYes: true },
+      `Session ${sessionId} has ${rows.length} task(s). Re-run with --yes to archive it.`,
     );
     return 1;
   }
-  const metadata = await readSessionMetadata();
-  metadata[sessionId] = { ...(metadata[sessionId] || {}), archivedAt: Date.now(), updatedAt: Date.now() };
-  await writeSessionMetadata(metadata);
-  writeEvent(args, { type: "session_archived", sessionId, taskCount: rows.length }, `Archived session ${sessionId} from CLI lists. No task data was deleted.`);
+  const result = sessionRetention.archiveSession(sessionId);
+  writeEvent(
+    args,
+    { type: "session_archived", sessionId, taskCount: result.taskCount, metadata: result.metadata },
+    `Archived session ${sessionId}. No task data was deleted.`,
+  );
   return 0;
 }
 
-async function pruneSessions(taskRepo: TaskRepository, args: DirectRunArgs): Promise<number> {
-  const days = args.days || 30;
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-  const metadata = await readSessionMetadata();
-  const sessions = buildSessionSummaries(taskRepo.findAll(10000)).filter(
-    (session) => session.updatedAt < cutoff && session.terminal && !metadata[session.id]?.archivedAt,
+function buildSessionRetentionFilters(args: DirectRunArgs): SessionRetentionFilters {
+  const hasExplicitWindowOrSelection = Boolean(
+    args.all ||
+      args.olderThan ||
+      args.newerThan ||
+      args.after ||
+      args.before ||
+      args.title ||
+      args.source ||
+      args.cwdFilter ||
+      args.providerType ||
+      args.model ||
+      args.endReason ||
+      typeof args.minTokens === "number" ||
+      typeof args.maxTokens === "number" ||
+      typeof args.minCost === "number" ||
+      typeof args.maxCost === "number",
   );
-  const taskCount = sessions.reduce((sum, session) => sum + session.count, 0);
-  if (!args.yes) {
+  const olderThanMs =
+    args.all
+      ? undefined
+      : parseDurationMs(args.olderThan) ??
+        (hasExplicitWindowOrSelection
+          ? undefined
+          : (args.days || 30) * 24 * 60 * 60 * 1000);
+
+  return {
+    limit: args.limit || 10000,
+    includeArchived: args.includeArchived,
+    all: args.all,
+    olderThanMs,
+    newerThanMs: parseDurationMs(args.newerThan),
+    afterMs: parseTimestampMs(args.after),
+    beforeMs: parseTimestampMs(args.before),
+    title: args.title,
+    source: args.source,
+    cwd: args.cwdFilter,
+    provider: args.providerType,
+    model: args.model,
+    endReason: args.endReason,
+    minTokens: args.minTokens,
+    maxTokens: args.maxTokens,
+    minCost: args.minCost,
+    maxCost: args.maxCost,
+  };
+}
+
+function formatSessionSummaryLine(session: TaskSessionSummary): string {
+  const archived = session.archivedAt ? "  archived" : "";
+  const pinned = session.pinned ? "  pinned" : "";
+  const tokenPart = session.totalTokens > 0 ? `  tokens=${session.totalTokens}` : "";
+  const costPart = session.totalCost > 0 ? `  cost=${session.totalCost.toFixed(4)}` : "";
+  return `${session.id}  ${session.title || "Untitled"}  tasks=${session.count}  latest=${session.latestStatus}  updated=${formatDate(session.updatedAt)}${tokenPart}${costPart}${pinned}${archived}`;
+}
+
+async function pruneSessions(
+  sessionRetention: SessionRetentionService,
+  taskEvents: TaskEventRepository,
+  args: DirectRunArgs,
+): Promise<number> {
+  const filters = buildSessionRetentionFilters(args);
+  const preview = await sessionRetention.pruneSessions(filters, { dryRun: !args.yes || args.dryRun });
+  if (!args.yes || args.dryRun) {
     writeEvent(
       args,
-      { type: "sessions_prune_preview", days, sessions: sessions.length, taskCount, requiresYes: true },
-      `Would archive ${sessions.length} terminal session(s) (${taskCount} task(s)) older than ${days} day(s) from CLI lists. Re-run with --yes.`,
+      { type: "sessions_prune_preview", ...preview, requiresYes: !args.yes },
+      preview.sessions.length
+        ? [
+            `Would delete ${preview.sessionCount} terminal session(s) (${preview.taskCount} task(s)).`,
+            ...preview.sessions.slice(0, 20).map(formatSessionSummaryLine),
+            ...(preview.sessions.length > 20 ? [`...and ${preview.sessions.length - 20} more.`] : []),
+            ...(args.yes ? [] : ["Re-run with --yes to delete the listed sessions."]),
+          ].join("\n")
+        : "No matching terminal sessions found.",
     );
-    return sessions.length ? 1 : 0;
+    return preview.sessions.length && !args.yes ? 1 : 0;
   }
-  for (const session of sessions) {
-    metadata[session.id] = { ...(metadata[session.id] || {}), archivedAt: Date.now(), updatedAt: Date.now() };
-  }
-  await writeSessionMetadata(metadata);
-  writeEvent(args, { type: "sessions_archived", days, sessions: sessions.length, taskCount }, `Archived ${sessions.length} session(s) from CLI lists. No task data was deleted.`);
+  const result = await sessionRetention.pruneSessions(filters, { dryRun: false });
+  const vacuumed = args.vacuum ? taskEvents.vacuumIfNeeded(0) : false;
+  writeEvent(
+    args,
+    { type: "sessions_pruned", ...result, vacuumed },
+    `Deleted ${result.sessionCount} session(s) and ${result.taskCount} task(s).${vacuumed ? " Vacuum completed." : ""}`,
+  );
   return 0;
 }
 
@@ -1611,44 +1769,6 @@ function shouldImportEnvForCommand(command: DirectRunArgs["command"]): boolean {
   return command === "run" || command === "providers-configure";
 }
 
-function buildSessionSummaries(tasks: Task[]): Array<{
-  id: string;
-  title: string;
-  count: number;
-  latestStatus: Task["status"];
-  updatedAt: number;
-  terminal: boolean;
-}> {
-  const groups = new Map<string, Task[]>();
-  for (const task of tasks) {
-    const sessionId = task.sessionId || task.id;
-    const existing = groups.get(sessionId) || [];
-    existing.push(task);
-    groups.set(sessionId, existing);
-  }
-  return [...groups.entries()]
-    .map(([id, rows]) => {
-      const sorted = [...rows].sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
-      const latest = sorted[0];
-      return {
-        id,
-        title: latest?.title || "Untitled",
-        count: rows.length,
-        latestStatus: latest?.status || "pending",
-        updatedAt: latest?.updatedAt || latest?.createdAt || 0,
-        terminal: rows.every((task) => isTerminalTaskStatus(task.status)),
-      };
-    })
-    .sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-function tasksForSession(taskRepo: TaskRepository, sessionId: string, limit: number): Task[] {
-  const lineage = taskRepo.findBySessionId(sessionId, limit);
-  if (lineage.length > 0) return lineage;
-  const single = taskRepo.findById(sessionId);
-  return single ? [single] : [];
-}
-
 function getCliOwnership(task: Task | undefined | null): CliTaskOwnership | undefined {
   const cli = task?.agentConfig?.cli;
   if (!cli || cli.owner !== "cowork-run" || typeof cli.runId !== "string") return undefined;
@@ -1755,6 +1875,32 @@ function requireSessionId(args: DirectRunArgs): string {
 
 type SessionMetadata = Record<string, { name?: string; updatedAt?: number; archivedAt?: number }>;
 
+async function migrateLegacySessionMetadata(
+  metadataRepo: TaskSessionMetadataRepository,
+): Promise<void> {
+  const metadata = await readSessionMetadata();
+  const entries = Object.entries(metadata);
+  if (entries.length === 0) return;
+
+  let imported = 0;
+  for (const [sessionId, value] of entries) {
+    if (!sessionId || metadataRepo.findBySessionId(sessionId)) continue;
+    metadataRepo.upsert(sessionId, {
+      name: value?.name,
+      archivedAt: value?.archivedAt,
+    });
+    imported += 1;
+  }
+
+  if (imported === 0) return;
+  try {
+    const file = sessionMetadataPath();
+    await fs.rename(file, `${file}.migrated`);
+  } catch {
+    // Leaving the legacy file in place is harmless; existing database rows win.
+  }
+}
+
 async function readSessionMetadata(): Promise<SessionMetadata> {
   try {
     const text = await fs.readFile(sessionMetadataPath(), "utf8");
@@ -1763,12 +1909,6 @@ async function readSessionMetadata(): Promise<SessionMetadata> {
   } catch {
     return {};
   }
-}
-
-async function writeSessionMetadata(metadata: SessionMetadata): Promise<void> {
-  const file = sessionMetadataPath();
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(metadata, null, 2));
 }
 
 function sessionMetadataPath(): string {
@@ -2117,6 +2257,44 @@ function sanitizeDays(raw: unknown): number | undefined {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) return undefined;
   return Math.min(36500, Math.floor(value));
+}
+
+function sanitizeNonNegativeNumber(raw: unknown): number | undefined {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return undefined;
+  return value;
+}
+
+function parseDurationMs(raw: unknown): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const text = String(raw).trim().toLowerCase();
+  if (!text) return undefined;
+  const match = text.match(/^(\d+(?:\.\d+)?)(ms|s|m|h|d|w|mo|y)?$/);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  const unit = match[2] || "d";
+  const multipliers: Record<string, number> = {
+    ms: 1,
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+    w: 7 * 24 * 60 * 60 * 1000,
+    mo: 30 * 24 * 60 * 60 * 1000,
+    y: 365 * 24 * 60 * 60 * 1000,
+  };
+  return Math.floor(value * multipliers[unit]);
+}
+
+function parseTimestampMs(raw: unknown): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const text = String(raw).trim();
+  if (!text) return undefined;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.floor(numeric);
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function formatDoctor(payload: Record<string, unknown>): string {

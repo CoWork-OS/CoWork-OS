@@ -27,6 +27,7 @@ Use cases:
 - Founder-directed autonomous company operations ("zero-human company" loop)
 - Everything Workbench for generated docs, sheets, decks, web pages, PDFs, and previews
 - Video attachment analysis for uploaded MP4, MOV, and WebM files, with extracted screenshots visible in the task timeline
+- Consent-gated data broker and people-search cleanup with the bundled `unbroker` skill
 - Smart-home orchestration via integrations
 - "Figure it out" fallback orchestration for hard tasks
 - Location-aware local errands, nearby services, and walking route planning
@@ -43,6 +44,7 @@ Cowork OS supports these via:
 - Company-ops primitives: venture workspace kit, digital twin operators, strategic planner, and Mission Control ops monitoring
 - Everything Workbench: task output cards, sidebar/fullscreen artifact workspaces, follow-up composer, and refresh-after-edit behavior for generated knowledge-work artifacts
 - Video attachments: uploaded videos are copied into the workspace, sampled into contact sheets and representative frames, passed to image-capable models, and shown inline in the task timeline
+- Privacy cleanup: the bundled `unbroker` skill can run authorized broker exposure discovery, opt-out/deletion queues, local ledgers, human-task digests, and recurring rechecks after consent is recorded
 
 For the full founder-operated company recipe, see [Zero-Human Company Operations](zero-human-company.md).
 For the unified artifact workflow, see [Everything Workbench](everything-workbench.md).
@@ -614,4 +616,24 @@ Variant (urgent medical):
 ```
 Find the nearest urgent care clinic or walk-in doctor's office that is open right now.
 Use get_current_location, rank by walking or driving distance, and show opening hours.
+```
+
+### 22) Authorized Data Broker Cleanup (Unbroker)
+
+Prompt:
+```
+Use the unbroker skill to remove my personal data from data brokers and people-search sites.
+
+Ask me for the intake details you need in one pass.
+Record my consent before scanning or submitting anything.
+Keep the PII ledger local.
+Use the deterministic pdd.py next queue, record every outcome, and do not mark anything confirmed_removed until a verifying re-scan shows it is gone.
+Do not use this for unauthorized OSINT, public-record deletion, legal advice, or CAPTCHA-solver/fingerprint-spoofing work.
+At the end, give me the status report, one consolidated human-task digest, and the next recheck date.
+```
+
+Variant (recurring monitoring):
+```
+Use unbroker to set up recurring monitoring for my own broker exposure after the initial removals.
+Record consent, explain where local data will be stored, and schedule only the recheck flow after the first status report.
 ```

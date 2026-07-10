@@ -9,6 +9,7 @@ import type Database from "better-sqlite3";
 import {
   TaskRepository,
   TaskEventRepository,
+  TaskSessionMetadataRepository,
   WorkspaceRepository,
   ApprovalRepository,
   WorkspacePermissionRuleRepository,
@@ -17,6 +18,11 @@ import {
   AnnotationRepository,
   MemoryType,
 } from "../database/repositories";
+import { SessionRetentionService } from "../sessions/SessionRetentionService";
+import {
+  loadSessionRetentionSettings,
+  saveSessionRetentionSettings,
+} from "../sessions/session-retention-settings";
 import { ActivityRepository } from "../activity/ActivityRepository";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
 import { AgentTeamRepository } from "../agents/AgentTeamRepository";
@@ -371,6 +377,26 @@ function getAllElectronWindows(): Any[] {
   return [];
 }
 
+function parseSessionRetentionDurationMs(raw: unknown): number | undefined {
+  const text = String(raw || "").trim().toLowerCase();
+  const match = text.match(/^(\d+(?:\.\d+)?)(ms|s|m|h|d|w|mo|y)?$/);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  const unit = match[2] || "d";
+  const multipliers: Record<string, number> = {
+    ms: 1,
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+    w: 7 * 24 * 60 * 60 * 1000,
+    mo: 30 * 24 * 60 * 60 * 1000,
+    y: 365 * 24 * 60 * 60 * 1000,
+  };
+  return Math.floor(value * multipliers[unit]);
+}
+
 /**
  * AgentDaemon is the core orchestrator that manages task execution
  * It coordinates between the database, task executors, and UI
@@ -521,8 +547,11 @@ export class AgentDaemon extends EventEmitter {
 
     // Deferred database maintenance: prune old events and vacuum
     setTimeout(() => {
-      this.runDatabaseMaintenance();
-      this.maintenanceIntervalHandle = setInterval(() => this.runDatabaseMaintenance(), 24 * 60 * 60 * 1000);
+      void this.runDatabaseMaintenance();
+      this.maintenanceIntervalHandle = setInterval(
+        () => void this.runDatabaseMaintenance(),
+        24 * 60 * 60 * 1000,
+      );
     }, 60_000);
   }
 
@@ -625,14 +654,77 @@ export class AgentDaemon extends EventEmitter {
    * Periodic database maintenance: prune old task events for terminal tasks
    * older than 90 days and vacuum the database if freelist exceeds threshold.
    */
-  private runDatabaseMaintenance(): void {
+  private async runDatabaseMaintenance(): Promise<void> {
     try {
       const repo = new TaskEventRepository(this.dbManager.getDatabase());
       const pruned = repo.pruneOldEvents(90);
       if (pruned > 0) log.info(`DB maintenance: pruned ${pruned} old events`);
       repo.vacuumIfNeeded(500);
+      await this.runSessionAutoPrune(repo);
     } catch (error) {
       log.error("DB maintenance failed:", error);
+    }
+  }
+
+  private async runSessionAutoPrune(taskEventRepo: TaskEventRepository): Promise<void> {
+    const settings = loadSessionRetentionSettings();
+    const autoPrune = settings.autoPrune;
+    if (autoPrune?.enabled !== true) return;
+
+    const minIntervalHours =
+      typeof autoPrune.minIntervalHours === "number" && Number.isFinite(autoPrune.minIntervalHours)
+        ? Math.max(1, autoPrune.minIntervalHours)
+        : 24;
+    const lastRunAt =
+      typeof autoPrune.lastRunAt === "number" && Number.isFinite(autoPrune.lastRunAt)
+        ? autoPrune.lastRunAt
+        : 0;
+    if (Date.now() - lastRunAt < minIntervalHours * 60 * 60 * 1000) return;
+
+    const olderThanMs = parseSessionRetentionDurationMs(autoPrune.olderThan || "90d");
+    if (!olderThanMs) {
+      log.warn("Session auto-prune skipped because olderThan is invalid.");
+      return;
+    }
+
+    const db = this.dbManager.getDatabase();
+    const sessionRetention = new SessionRetentionService(
+      new TaskRepository(db),
+      taskEventRepo,
+      new TaskSessionMetadataRepository(db),
+      new WorkspaceRepository(db),
+    );
+    const result = await sessionRetention.pruneSessions(
+      {
+        olderThanMs,
+        includeArchived: autoPrune.includeArchived === true,
+      },
+      {
+        deleteTask: async (task) => {
+          if (!task.worktreePath && !task.worktreeBranch) return;
+          try {
+            await this.worktreeManager.cleanup(task.id, true);
+          } catch (error) {
+            log.warn(`Session auto-prune worktree cleanup failed for ${task.id}:`, error);
+          }
+        },
+      },
+    );
+
+    if (autoPrune.vacuum === true) {
+      taskEventRepo.vacuumIfNeeded(0);
+    }
+    saveSessionRetentionSettings({
+      ...settings,
+      autoPrune: {
+        ...autoPrune,
+        lastRunAt: Date.now(),
+      },
+    });
+    if (result.sessionCount > 0) {
+      log.info(
+        `Session auto-prune deleted ${result.sessionCount} session(s) and ${result.taskCount} task(s)`,
+      );
     }
   }
 

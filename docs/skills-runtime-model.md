@@ -86,6 +86,7 @@ Example:
 
 - `manim-video` can add artifact expectations and project-scaffolding context for a local Manim workspace, but it still does not replace the user's original animation request.
 - `kami` can add scaffold/render expectations for a workspace-local document project, but it still does not replace the user's original document request or mutate the bundled templates.
+- `unbroker` can add consent, local-ledger, disclosure, and verification guardrails for data-broker removal work, but it still does not replace the user's original privacy-cleanup request or authorize unrelated people-search activity.
 
 Composer integration mentions are separate from skill application. `integrationMentions` can add soft routing guidance such as "prefer Gmail tools", but it does not apply a skill, grant permissions, or become `allowedTools`. See [Composer Mentions](composer-mentions.md).
 
@@ -172,7 +173,7 @@ The same principle applies after a skill is loaded: skill-expanded content shoul
 
 ## Slash Commands and Message Box Shortcuts
 
-Skill slash commands remain deterministic. `/simplify`, `/batch`, `/llm-wiki`, direct skill IDs, and plugin-pack aliases still map to `use_skill`, but the result is now applied additively.
+Skill slash commands remain deterministic. `/simplify`, `/batch`, `/llm-wiki`, direct skill IDs such as `/unbroker`, and plugin-pack aliases still map to `use_skill`, but the result is now applied additively.
 
 That means:
 

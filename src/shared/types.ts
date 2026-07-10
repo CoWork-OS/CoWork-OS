@@ -7792,6 +7792,7 @@ export const IPC_CHANNELS = {
   TASK_CONTINUE: "task:continue",
   TASK_FORK_SESSION: "task:forkSession",
   TASK_RENAME: "task:rename",
+  TASK_ARCHIVE: "task:archive",
   TASK_DELETE: "task:delete",
   DIALOG_SELECT_FOLDER: "dialog:selectFolder",
   DIALOG_SELECT_FILES: "dialog:selectFiles",

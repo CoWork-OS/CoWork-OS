@@ -75,6 +75,16 @@ const VALUE_FLAGS = new Set([
   "--permission-mode",
   "--session-id",
   "--days",
+  "--older-than",
+  "--newer-than",
+  "--after",
+  "--before",
+  "--source",
+  "--end-reason",
+  "--min-tokens",
+  "--max-tokens",
+  "--min-cost",
+  "--max-cost",
   "--output",
   "--query",
   "--category",
@@ -916,7 +926,14 @@ async function providers(ctx: CommandContext): Promise<number> {
 
 async function sessions(ctx: CommandContext): Promise<number> {
   const sub = ctx.parsed.rest[0] || "list";
-  if (sub === "list") return runDirectCommandProcess(ctx, ["--sessions-list", "--limit", String(parseLimit(ctx, 50))]);
+  if (sub === "list") {
+    return runDirectCommandProcess(ctx, [
+      "--sessions-list",
+      "--limit",
+      String(parseLimit(ctx, 50)),
+      ...(hasFlag(ctx.parsed, "--include-archived") ? ["--include-archived"] : []),
+    ]);
+  }
   if (sub === "show") {
     const id = ctx.parsed.rest[1];
     if (!id) return usageError("Usage: cowork sessions show <sessionId>");
@@ -940,6 +957,11 @@ async function sessions(ctx: CommandContext): Promise<number> {
     if (!id || !name) return usageError("Usage: cowork sessions rename <sessionId> <name>");
     return runDirectCommandProcess(ctx, ["--sessions-rename", "--session-id", id, "--name", name]);
   }
+  if (sub === "archive") {
+    const id = ctx.parsed.rest[1];
+    if (!id) return usageError("Usage: cowork sessions archive <sessionId>");
+    return runDirectCommandProcess(ctx, ["--sessions-archive", "--session-id", id]);
+  }
   if (sub === "delete") {
     const id = ctx.parsed.rest[1];
     if (!id) return usageError("Usage: cowork sessions delete <sessionId> --yes");
@@ -948,12 +970,15 @@ async function sessions(ctx: CommandContext): Promise<number> {
   if (sub === "prune") {
     return runDirectCommandProcess(ctx, [
       "--sessions-prune",
-      "--days",
-      String(parseDays(ctx, 30)),
+      ...sessionPruneDirectArgs(ctx),
       ...(hasFlag(ctx.parsed, "--yes") ? ["--yes"] : []),
+      ...(hasFlag(ctx.parsed, "--dry-run") ? ["--dry-run"] : []),
+      ...(hasFlag(ctx.parsed, "--include-archived") ? ["--include-archived"] : []),
+      ...(hasFlag(ctx.parsed, "--all") ? ["--all"] : []),
+      ...(hasFlag(ctx.parsed, "--vacuum") ? ["--vacuum"] : []),
     ]);
   }
-  process.stderr.write("Usage: cowork sessions list|show|export|rename|delete|prune\n");
+  process.stderr.write("Usage: cowork sessions list|show|export|rename|archive|delete|prune\n");
   return 1;
 }
 
@@ -1337,6 +1362,34 @@ function parseDays(ctx: CommandContext, fallback: number): number {
   return Math.max(1, Math.min(36500, Math.floor(value)));
 }
 
+function sessionPruneDirectArgs(ctx: CommandContext): string[] {
+  const out: string[] = [];
+  const pushValue = (flag: string, directFlag = flag) => {
+    const value = getFlag(ctx.parsed, flag);
+    if (!value) return;
+    out.push(directFlag, value);
+  };
+
+  pushValue("--days");
+  pushValue("--older-than");
+  pushValue("--newer-than");
+  pushValue("--after");
+  pushValue("--before");
+  pushValue("--source");
+  pushValue("--title");
+  pushValue("--cwd", "--cwd-filter");
+  pushValue("--provider");
+  pushValue("--model");
+  pushValue("--end-reason");
+  pushValue("--min-tokens");
+  pushValue("--max-tokens");
+  pushValue("--min-cost");
+  pushValue("--max-cost");
+  pushValue("--limit");
+
+  return out;
+}
+
 function sanitizeLimit(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(1, Math.min(2000, Math.floor(value)));
@@ -1505,7 +1558,7 @@ function usage(): void {
       "  cowork providers list",
       "  cowork providers configure <provider> [--api-key <key>] [--model <model>]",
       "  cowork providers fallback list|add|remove",
-      "  cowork sessions list|show|export|rename|delete|prune",
+      "  cowork sessions list|show|export|rename|archive|delete|prune",
       "  cowork logs latest|tail|grep",
       "  cowork tools list|info|enable|disable",
       "  cowork mcp list|add|remove|enable|disable|test",

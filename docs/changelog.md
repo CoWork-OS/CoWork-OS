@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bundled `unbroker` skill**: added a global consent-gated privacy cleanup workflow for authorized data-broker and people-search opt-outs, with a local PII ledger, deterministic `pdd.py` action queue, human-task digest, recurring recheck support, and related docs. Added [Unbroker Skill](skills/unbroker.md).
 - **Mixture of Agents docs**: documented the new virtual LLM provider, preset configuration, advisor/aggregator runtime flow, failover behavior, UI testing path, and corporate TLS/Zscaler troubleshooting. Added [Mixture of Agents](mixture-of-agents.md).
 - **Video attachment analysis**: uploaded `.mp4`, `.mov`, and `.webm` files are copied into the workspace, sampled into representative frames, passed to image-capable models, and shown as contact-sheet/full-frame image artifacts in the task timeline. Added [Video Attachments](video-attachments.md) documentation.
 - **Google Calendar MCP tools**: added Calendar coverage to the Google Workspace MCP connector, including calendar listing, event list/read/batch read, availability/freeBusy lookup, and confirmed event create/update/delete. Composer mentions now merge these `google-workspace.calendar_*` tools with native `calendar_action` under one Google Calendar chip.

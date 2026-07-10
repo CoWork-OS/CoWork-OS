@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bundled `unbroker` skill**: added a global consent-gated privacy cleanup workflow for authorized data-broker and people-search opt-outs, with a local PII ledger, deterministic `pdd.py` action queue, human-task digest, recurring recheck support, and related docs. Added [Unbroker Skill](docs/skills/unbroker.md).
 - **Mixture of Agents docs**: documented the new virtual LLM provider, preset configuration, advisor/aggregator runtime flow, failover behavior, UI testing path, and corporate TLS/Zscaler troubleshooting. Added [Mixture of Agents](docs/mixture-of-agents.md).
 - **Video attachment analysis**: uploaded `.mp4`, `.mov`, and `.webm` files are copied into the workspace, sampled into representative frames, passed to image-capable models, and shown as contact-sheet/full-frame image artifacts in the task timeline. Added [Video Attachments](docs/video-attachments.md) documentation.
 

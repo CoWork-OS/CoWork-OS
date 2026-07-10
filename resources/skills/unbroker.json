@@ -1,0 +1,71 @@
+{
+  "id": "unbroker",
+  "name": "unbroker",
+  "description": "Find and remove authorized personal information exposures from data brokers and people-search sites with a consent-gated local workflow.",
+  "icon": "🛡️",
+  "category": "Security",
+  "prompt": "# unbroker\n\nBundled upstream source: https://github.com/NousResearch/hermes-agent/tree/main/optional-skills/security/unbroker\n\nUse this skill when the user asks to remove their own, a family member's, or an explicitly authorized client's personal information from data brokers or people-search sites; opt out of brokers such as Spokeo, Whitepages, Intelius, BeenVerified, Radaris, FastPeopleSearch, TruePeopleSearch, or similar sites; file CCPA/CPRA/GDPR deletion requests; clean up after doxxing or harassment; or set up recurring broker exposure monitoring.\n\nDo not use this skill to find, enrich, or aggregate personal data about someone who has not authorized the removal; for stalking, doxxing, OSINT targeting, skip tracing, or identity verification; as legal advice; to remove public records themselves; or for unrelated privacy/security scans.\n\nExecution workflow:\n1. Read `{baseDir}/SKILL.md` before taking action. It is the authoritative workflow and includes the autonomy contract, consent gates, legal lanes, broker planning, and verification rules.\n2. Use the local engine at `{baseDir}/scripts/pdd.py` through CoWork's shell/run_command capability. Start with `python3 {baseDir}/scripts/pdd.py setup --auto` and `python3 {baseDir}/scripts/pdd.py doctor`.\n3. Keep private runtime data under `PDD_DATA_DIR` when the user gives a workspace-specific location. Otherwise the engine defaults to the CoWork runtime home (`COWORK_HOME` or `COWORK_USER_DATA_DIR`) and then falls back to the legacy upstream `HERMES_HOME` path.\n4. Require recorded consent before scanning or removal. Use `pdd.py intake ... --consent` to create a subject and do not bypass the CLI consent gate.\n5. Drive the run from `pdd.py next <subject_id>` until there are no actions left. Execute the ordered actions, record outcomes through `pdd.py record`, and present only the consolidated human-task digest at the end.\n6. Map upstream tool names to CoWork capabilities: `terminal` means shell/run_command; `web_extract` means web fetch/search/extraction tools; `browser_*` means available browser automation tools; `delegate_task` means CoWork multi-agent orchestration when available; `cronjob` means CoWork scheduling/automation.\n7. Never disclose more PII than the action's planned `disclosure_fields`, never use CAPTCHA-solver services or fingerprint spoofing, and mark `confirmed_removed` only after a verifying re-scan shows the listing is gone.\n8. For California subjects, read `{baseDir}/references/legal/drop.md` when `next` surfaces the DROP one-shot. For broker-specific flows, read only the relevant broker JSON under `{baseDir}/references/brokers/` and the relevant method sections in `{baseDir}/references/methods.md`.\n9. Finish with the subject status report, human-task digest, next wake/recheck date, and any privacy or legal caveats that remain.\n\nSuccess criteria:\n- The user has an explicit consent-gated subject record and local ledger.\n- Broker scanning, opt-out, email, and verification actions are executed or queued according to the deterministic `pdd.py next` plan.\n- Human-only work is consolidated into one digest instead of interrupting the run.\n- The final report distinguishes submitted, awaiting processing, confirmed removed, blocked, and human-task states without overstating legal or deletion certainty.",
+  "parameters": [],
+  "enabled": true,
+  "requires": {
+    "tools": [
+      "run_command"
+    ],
+    "bins": [
+      "python3"
+    ]
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "author": "SHL0MS / Nous Research, ported by CoWork OS",
+    "homepage": "https://github.com/NousResearch/hermes-agent/tree/main/optional-skills/security/unbroker",
+    "repository": "https://github.com/NousResearch/hermes-agent",
+    "license": "Code MIT; broker dataset includes CC BY-NC-SA 4.0-derived BADBOOL data",
+    "tags": [
+      "privacy",
+      "security",
+      "data-broker",
+      "opt-out",
+      "ccpa",
+      "cpra",
+      "gdpr",
+      "doxxing"
+    ],
+    "routing": {
+      "keywords": [
+        "unbroker",
+        "data broker",
+        "people-search",
+        "people search",
+        "opt out",
+        "remove my data",
+        "delete me",
+        "ccpa deletion",
+        "cpra deletion",
+        "gdpr erasure",
+        "doxxing"
+      ],
+      "useWhen": "Use when the user asks to remove authorized personal information from data brokers or people-search sites, file broker opt-outs or privacy-law deletion requests, clean up data-broker exposure after doxxing, or monitor broker re-listing.",
+      "dontUseWhen": "Do not use to discover or enrich personal data about an unauthorized person, for stalking/doxxing/skip-tracing/OSINT targeting, for legal advice, for deleting public records themselves, or for unrelated security/privacy scans.",
+      "outputs": "Consent-gated local subject record, broker exposure ledger, opt-out/deletion action progress, consolidated human-task digest, status report, and next recheck schedule.",
+      "successCriteria": "Uses the local pdd.py engine with recorded consent, follows planned disclosure fields and broker workflows, records every outcome in the ledger, and reports verified removal status without overstating deletion certainty.",
+      "examples": {
+        "positive": [
+          "Use unbroker to remove my data from data brokers.",
+          "Opt me out of Spokeo, Whitepages, and people-search sites.",
+          "I was doxxed; clean up my broker exposure with my consent.",
+          "Set up recurring monitoring so brokers do not relist me."
+        ],
+        "negative": [
+          "Find someone's current address and relatives.",
+          "Build an OSINT profile for this person.",
+          "Delete my court records from the county website.",
+          "Run a generic security audit of this repository."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "high"
+    }
+  }
+}

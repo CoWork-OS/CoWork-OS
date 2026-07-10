@@ -895,6 +895,29 @@ Output findings by severity with remediation steps.
 
 ---
 
+### Personal Data Broker Cleanup
+
+Find and remove authorized personal information exposure from data brokers and people-search sites with a consent-gated local workflow.
+
+**What it handles:**
+- Recorded consent intake before scanning or removal
+- Exposure scans for data brokers and people-search listings
+- Broker opt-out, deletion, CCPA/CPRA/GDPR, and recheck queues
+- Local PII ledger with disclosed fields, evidence, and verification state
+- Consolidated human-task digest for CAPTCHA, ID, phone, fax, or other human-only work
+- Recurring monitoring for broker re-listing
+
+**Example prompt:**
+```
+Use the unbroker skill to remove my data from data brokers and people-search sites.
+Ask for the intake details you need, record my consent before acting, keep the ledger local,
+and give me one final human-task digest instead of interrupting for every broker.
+```
+
+**Powered by:** bundled [unbroker](skills/unbroker.md) skill, local shell tools, browser automation, optional email and scheduling capabilities
+
+---
+
 ## Remote & Multi-Surface Operations
 
 ### Chat-Driven Deployment
@@ -1820,7 +1843,7 @@ Rate the attractiveness of entering with a [specific angle].
 | **Content & Marketing** | Blog, social, email campaigns, SEO, copywriting | Marketing pack, marketing strategist skill |
 | **Personal Productivity** | Briefings, inbox, multi-channel messaging, task capture | 17 channels, scheduling, 10+ productivity skills |
 | **Team & Management** | Sprints, 1-on-1 prep, status reports, digital twins | EM pack, PM pack, 10 persona templates |
-| **Security** | Vulnerability scanning, compliance, dependency auditing | Security audit skill, dependency check skill |
+| **Security** | Vulnerability scanning, compliance, dependency auditing, authorized data-broker privacy cleanup | Security audit skill, dependency check skill, Unbroker skill |
 | **Remote Ops** | Chat-driven deployment, headless mode, WebSocket API | Gateway, headless daemon, remote access |
 | **Voice & Audio** | Calls, TTS, STT, dictation, music/speaker control | ElevenLabs MCP, Whisper, Spotify/Sonos/BluOS MCP |
 | **Smart Home & IoT** | Lighting, sleep devices, cameras, ambiance scenes | OpenHue MCP, Eight Sleep MCP, RTSP/ONVIF tools |

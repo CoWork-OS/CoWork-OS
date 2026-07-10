@@ -232,6 +232,144 @@ export class WorkspaceRepository {
   }
 }
 
+export interface TaskSessionMetadata {
+  sessionId: string;
+  name?: string;
+  archivedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export class TaskSessionMetadataRepository {
+  constructor(private db: Database.Database) {}
+
+  findBySessionId(sessionId: string): TaskSessionMetadata | undefined {
+    const normalizedSessionId = String(sessionId || "").trim();
+    if (!normalizedSessionId) return undefined;
+    const row = this.db
+      .prepare("SELECT * FROM task_session_metadata WHERE session_id = ?")
+      .get(normalizedSessionId) as Any;
+    return row ? this.mapRow(row) : undefined;
+  }
+
+  findBySessionIds(sessionIds: string[]): Map<string, TaskSessionMetadata> {
+    const normalizedSessionIds = Array.from(
+      new Set(
+        sessionIds
+          .map((id) => (typeof id === "string" ? id.trim() : ""))
+          .filter(Boolean),
+      ),
+    );
+    const out = new Map<string, TaskSessionMetadata>();
+    if (normalizedSessionIds.length === 0) return out;
+
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < normalizedSessionIds.length; i += CHUNK_SIZE) {
+      const chunk = normalizedSessionIds.slice(i, i + CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const rows = this.db
+        .prepare(`
+          SELECT * FROM task_session_metadata
+          WHERE session_id IN (${placeholders})
+        `)
+        .all(...chunk) as Any[];
+      for (const row of rows) {
+        const metadata = this.mapRow(row);
+        out.set(metadata.sessionId, metadata);
+      }
+    }
+
+    return out;
+  }
+
+  upsert(sessionId: string, updates: { name?: string | null; archivedAt?: number | null }): TaskSessionMetadata {
+    const normalizedSessionId = String(sessionId || "").trim();
+    if (!normalizedSessionId) {
+      throw new Error("Session id is required.");
+    }
+    const now = Date.now();
+    const existing = this.findBySessionId(normalizedSessionId);
+    const name =
+      Object.prototype.hasOwnProperty.call(updates, "name")
+        ? normalizeOptionalSessionMetadataText(updates.name)
+        : existing?.name ?? null;
+    const archivedAt =
+      Object.prototype.hasOwnProperty.call(updates, "archivedAt")
+        ? normalizeOptionalSessionMetadataNumber(updates.archivedAt)
+        : existing?.archivedAt ?? null;
+
+    this.db
+      .prepare(`
+        INSERT INTO task_session_metadata (
+          session_id, name, archived_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          name = excluded.name,
+          archived_at = excluded.archived_at,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        normalizedSessionId,
+        name,
+        archivedAt,
+        existing?.createdAt ?? now,
+        now,
+      );
+
+    const metadata = this.findBySessionId(normalizedSessionId);
+    if (!metadata) {
+      throw new Error(`Failed to save session metadata: ${normalizedSessionId}`);
+    }
+    return metadata;
+  }
+
+  rename(sessionId: string, name: string): TaskSessionMetadata {
+    return this.upsert(sessionId, { name });
+  }
+
+  archive(sessionId: string, archivedAt = Date.now()): TaskSessionMetadata {
+    return this.upsert(sessionId, { archivedAt });
+  }
+
+  unarchive(sessionId: string): TaskSessionMetadata {
+    return this.upsert(sessionId, { archivedAt: null });
+  }
+
+  delete(sessionId: string): void {
+    const normalizedSessionId = String(sessionId || "").trim();
+    if (!normalizedSessionId) return;
+    this.db
+      .prepare("DELETE FROM task_session_metadata WHERE session_id = ?")
+      .run(normalizedSessionId);
+  }
+
+  private mapRow(row: Any): TaskSessionMetadata {
+    return {
+      sessionId: String(row.session_id || ""),
+      name: row.name || undefined,
+      archivedAt:
+        typeof row.archived_at === "number" && Number.isFinite(row.archived_at)
+          ? row.archived_at
+          : undefined,
+      createdAt: Number(row.created_at || 0),
+      updatedAt: Number(row.updated_at || 0),
+    };
+  }
+}
+
+function normalizeOptionalSessionMetadataText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+function normalizeOptionalSessionMetadataNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : null;
+}
+
 export class TaskRepository {
   private static readonly UPDATE_FIELD_TO_COLUMN: Partial<Record<keyof Task, string>> = {
     prompt: "prompt",
@@ -672,6 +810,7 @@ export class TaskRepository {
     offset = 0,
     options?: {
       prioritizeSidebar?: boolean;
+      includeArchivedSessions?: boolean;
       excludeSources?: Array<NonNullable<Task["source"]>>;
       cursor?: {
         id?: string;
@@ -695,12 +834,22 @@ export class TaskRepository {
     const excludedSources = Array.isArray(options?.excludeSources)
       ? options.excludeSources.filter((source): source is NonNullable<Task["source"]> => Boolean(source))
       : [];
+    const includeArchivedSessions = options?.includeArchivedSessions !== false;
     const cursor = options?.prioritizeSidebar
       ? TaskRepository.buildSidebarCursorPredicate(options.cursor)
       : { sql: "", args: [] };
     const whereClauses = [
       ...(excludedSources.length > 0
         ? [`COALESCE(source, 'manual') NOT IN (${excludedSources.map(() => "?").join(", ")})`]
+        : []),
+      ...(!includeArchivedSessions
+        ? [
+            `NOT EXISTS (
+              SELECT 1 FROM task_session_metadata
+              WHERE task_session_metadata.session_id = COALESCE(NULLIF(tasks.session_id, ''), tasks.id)
+                AND task_session_metadata.archived_at IS NOT NULL
+            )`,
+          ]
         : []),
       ...(cursor.sql ? [cursor.sql] : []),
     ];
@@ -720,6 +869,7 @@ export class TaskRepository {
     offset = 0,
     options?: {
       prioritizeSidebar?: boolean;
+      includeArchivedSessions?: boolean;
       excludeSources?: Array<NonNullable<Task["source"]>>;
       cursor?: {
         id?: string;
@@ -743,12 +893,22 @@ export class TaskRepository {
     const excludedSources = Array.isArray(options?.excludeSources)
       ? options.excludeSources.filter((source): source is NonNullable<Task["source"]> => Boolean(source))
       : [];
+    const includeArchivedSessions = options?.includeArchivedSessions !== false;
     const cursor = options?.prioritizeSidebar
       ? TaskRepository.buildSidebarCursorPredicate(options.cursor)
       : { sql: "", args: [] };
     const whereClauses = [
       ...(excludedSources.length > 0
         ? [`COALESCE(source, 'manual') NOT IN (${excludedSources.map(() => "?").join(", ")})`]
+        : []),
+      ...(!includeArchivedSessions
+        ? [
+            `NOT EXISTS (
+              SELECT 1 FROM task_session_metadata
+              WHERE task_session_metadata.session_id = COALESCE(NULLIF(tasks.session_id, ''), tasks.id)
+                AND task_session_metadata.archived_at IS NOT NULL
+            )`,
+          ]
         : []),
       ...(cursor.sql ? [cursor.sql] : []),
     ];

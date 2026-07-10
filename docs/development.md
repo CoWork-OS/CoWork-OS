@@ -402,6 +402,28 @@ npm run skills:check
 
 The routing eval includes a React workspace feature prompt so the skill remains discoverable for React/Next.js implementation work without colliding with React Native guidance.
 
+### Testing `unbroker`
+
+The bundled `unbroker` skill has Python helper scripts and a local PII ledger. When editing it, keep test data in a temporary `PDD_DATA_DIR` and validate both the skill contract and the deterministic engine:
+
+```bash
+python3 -m py_compile resources/skills/unbroker/scripts/*.py
+PDD_DATA_DIR=/tmp/cowork-unbroker-qa python3 resources/skills/unbroker/scripts/pdd.py doctor
+PDD_DATA_DIR=/tmp/cowork-unbroker-qa python3 resources/skills/unbroker/scripts/pdd.py setup --auto
+PDD_DATA_DIR=/tmp/cowork-unbroker-qa-smoke python3 resources/skills/unbroker/scripts/pdd.py intake \
+  --full-name "Test Person" \
+  --email test@example.com \
+  --city Oakland \
+  --state CA \
+  --residency US-CA \
+  --consent \
+  --consent-method self
+PDD_DATA_DIR=/tmp/cowork-unbroker-qa-smoke python3 resources/skills/unbroker/scripts/pdd.py next <subject_id>
+npm run skills:check
+```
+
+The smoke subject should be fake test data only. The skill stores sensitive PII under `PDD_DATA_DIR`, `COWORK_HOME/unbroker`, `COWORK_USER_DATA_DIR/unbroker`, or the legacy upstream `HERMES_HOME/unbroker` fallback, so never point validation at a real operator ledger unless the test is explicitly about migration or recovery.
+
 ### Everything Workbench artifact model
 
 The shared positioning and UX contract is documented in [Everything Workbench](./everything-workbench.md). Treat generated documents, spreadsheets, presentations, web pages, PDFs, and previews as one artifact workbench family:

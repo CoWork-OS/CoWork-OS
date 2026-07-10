@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-05-11T09:59:23.757Z",
+  "generatedAt": "2026-07-06T16:05:27.893Z",
   "skills": [
     {
       "id": "1password",
@@ -2107,6 +2107,27 @@
       "category": "Marketing",
       "updatedAt": "2026-05-11",
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/twitter.json"
+    },
+    {
+      "id": "unbroker",
+      "name": "unbroker",
+      "description": "Find and remove authorized personal information exposures from data brokers and people-search sites with a consent-gated local workflow.",
+      "version": "1.0.0",
+      "author": "SHL0MS / Nous Research, ported by CoWork OS",
+      "tags": [
+        "privacy",
+        "security",
+        "data-broker",
+        "opt-out",
+        "ccpa",
+        "cpra",
+        "gdpr",
+        "doxxing"
+      ],
+      "icon": "🛡️",
+      "category": "Security",
+      "updatedAt": "2026-07-06",
+      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/unbroker.json"
     },
     {
       "id": "unity-development",

@@ -7623,7 +7623,7 @@ function MainContentComponent({
     if (!task || remoteSession) return;
     closeTaskHeaderMenu();
     try {
-      await window.electronAPI.deleteTask(task.id);
+      await window.electronAPI.archiveTask(task.id);
       onSelectTask?.(null);
       await onTasksChanged?.();
     } catch (error) {

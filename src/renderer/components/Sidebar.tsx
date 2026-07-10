@@ -1228,7 +1228,7 @@ function SidebarComponent({
     setMenuOpenTaskId(null);
     setArchiveActionError(null);
     try {
-      await window.electronAPI.deleteTask(taskId);
+      await window.electronAPI.archiveTask(taskId);
       if (selectedTaskId === taskId) {
         onSelectTask(null);
       }

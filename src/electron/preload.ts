@@ -2437,6 +2437,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     limit?: number;
     offset?: number;
     prioritizeSidebar?: boolean;
+    includeArchivedSessions?: boolean;
     excludeSources?: string[];
     cursor?: {
       id?: string;
@@ -2451,6 +2452,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     limit?: number;
     offset?: number;
     prioritizeSidebar?: boolean;
+    includeArchivedSessions?: boolean;
     excludeSources?: string[];
     cursor?: {
       id?: string;
@@ -2484,6 +2486,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.TASK_RENAME, { id, title }),
   updateTaskWorkspace: (taskId: string, workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, { taskId, workspaceId }),
+  archiveTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_ARCHIVE, id),
   deleteTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_DELETE, id),
 
   // Task event streaming
@@ -5272,6 +5275,7 @@ export interface ElectronAPI {
     limit?: number;
     offset?: number;
     prioritizeSidebar?: boolean;
+    includeArchivedSessions?: boolean;
     excludeSources?: string[];
     cursor?: {
       id?: string;
@@ -5285,6 +5289,7 @@ export interface ElectronAPI {
     limit?: number;
     offset?: number;
     prioritizeSidebar?: boolean;
+    includeArchivedSessions?: boolean;
     excludeSources?: string[];
     cursor?: {
       id?: string;
@@ -5313,6 +5318,7 @@ export interface ElectronAPI {
   killCommand: (taskId: string, force?: boolean) => Promise<boolean>;
   renameTask: (id: string, title: string) => Promise<void>;
   updateTaskWorkspace: (taskId: string, workspaceId: string) => Promise<Any>;
+  archiveTask: (id: string) => Promise<Any>;
   deleteTask: (id: string) => Promise<void>;
   onTaskEvent: (callback: (event: Any) => void) => () => void;
   onTaskLearningEvent: (callback: (event: TaskLearningProgress) => void) => () => void;

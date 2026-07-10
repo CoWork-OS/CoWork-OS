@@ -1012,6 +1012,14 @@ export class DatabaseManager {
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
       );
 
+      CREATE TABLE IF NOT EXISTS task_session_metadata (
+        session_id TEXT PRIMARY KEY,
+        name TEXT,
+        archived_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS eval_cases (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -1540,6 +1548,8 @@ export class DatabaseManager {
         ON tasks(workspace_id, completed_at DESC);
       CREATE INDEX IF NOT EXISTS idx_tasks_completed_at
         ON tasks(completed_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_task_session_metadata_archived
+        ON task_session_metadata(archived_at);
       CREATE INDEX IF NOT EXISTS idx_hook_sessions_task ON hook_sessions(task_id);
       CREATE INDEX IF NOT EXISTS idx_hook_session_locks_expires ON hook_session_locks(expires_at);
       CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id);

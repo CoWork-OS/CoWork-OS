@@ -581,7 +581,7 @@ Expected behavior:
 - **Multi-Provider**: 36 LLM provider options and compatible gateways, including Claude, GPT, Gemini, Bedrock, OpenRouter Pareto Code routing, Ollama, Grok through xAI API key or SuperGrok OAuth, and Mixture of Agents presets
 - **GUI-first Agents + CLI entrypoint**: Agents Hub, Mission Control, visual task timelines, boards, and approval dialogs for creating, spawning, assigning, and monitoring many agents, plus `cowork` for local terminal starts against the same runtime
 - **Local-First**: Your data stays on your machine, BYOK model
-- **Extensible**: MCP support (Client, Host, Registry), 150 built-in skills, and plugin packs
+- **Extensible**: MCP support (Client, Host, Registry), 151 built-in skills, and plugin packs
 
 ### Feature Highlights
 - Everyday Office-style document creation and review (Excel, Word, PDF, PowerPoint)

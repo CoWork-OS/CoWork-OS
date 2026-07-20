@@ -1,9 +1,20 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { Task, TaskEvent } from "../../../shared/types";
 import { DispatchedAgentsPanel } from "../DispatchedAgentsPanel";
+
+const originalTimezone = process.env.TZ;
+
+beforeAll(() => {
+  process.env.TZ = "UTC";
+});
+
+afterAll(() => {
+  if (originalTimezone === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTimezone;
+});
 
 function render(element: React.ReactElement): string {
   return renderToStaticMarkup(element);

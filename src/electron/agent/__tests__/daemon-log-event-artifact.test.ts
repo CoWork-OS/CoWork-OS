@@ -282,6 +282,7 @@ describe("AgentDaemon.persistTimelineEvent", () => {
       logActivityForEvent: vi.fn(),
       emitTaskEvent,
       maybeEmitTeamThought: vi.fn(),
+      maybeMaterializeMailComposeInlineFrame: vi.fn(),
       captureToMemory: vi.fn().mockResolvedValue(undefined),
     } as Any;
 

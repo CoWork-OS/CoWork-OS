@@ -65,6 +65,8 @@ describe("ExternalMemoryProvider", () => {
         sessionId: "session-1",
         source: "turn_sync",
       },
+      origin: "background",
+      taskId: "task-1",
     });
     expect(mocks.forget).toHaveBeenCalledWith({
       workspace,

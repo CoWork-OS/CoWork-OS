@@ -49,6 +49,9 @@ describe("AgentDaemon follow-up permission overrides", () => {
       workspaceRepo: {
         findById: vi.fn().mockReturnValue(workspace),
       },
+      annotationRepo: {
+        listOpenByTask: vi.fn().mockReturnValue([]),
+      },
       logEvent: vi.fn(),
     } as Any;
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
@@ -135,6 +138,9 @@ describe("AgentDaemon follow-up permission overrides", () => {
       },
       workspaceRepo: {
         findById: vi.fn().mockReturnValue(workspace),
+      },
+      annotationRepo: {
+        listOpenByTask: vi.fn().mockReturnValue([]),
       },
       logEvent: vi.fn(),
     } as Any;

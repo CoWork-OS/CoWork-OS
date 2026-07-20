@@ -30,7 +30,7 @@
   <a href="docs/terminal-tabs.md">Terminal Tabs</a> &middot;
   <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.49.md">Release Notes 0.5.49</a> &middot;
+  <a href="docs/release-notes-0.5.50.md">Release Notes 0.5.50</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -103,7 +103,7 @@ See [Everyday Agent](docs/everyday-agent.md), [Workflow Intelligence](docs/workf
 
 ### Latest Release
 
-**`0.5.49`** is the current package version. It adds the `cowork` CLI, Browser Use Cloud routing, bundled Codex Security workflows, automation outcome reporting, Mission Control automation visibility, Usage Insights token heatmaps, prompt composer link chips, public adoption stats, and a broad security/reliability hardening pass. Start with [Release Notes 0.5.49](docs/release-notes-0.5.49.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
+**`0.5.50`** is the next release candidate. It adds GPT-5.6 ChatGPT subscription controls, Mixture of Agents orchestration, Browser Workbench annotations, inline email compose frames, video attachment analysis, approval-gated visible browser/computer use, governed memory writes, Google Calendar and architecture connectors, session retention controls, and the bundled `unbroker` privacy workflow. Start with [Release Notes 0.5.50](docs/release-notes-0.5.50.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
 
 The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox compose/send upgrades, runtime network/sandbox policy controls, Dreaming memory curation, and `/multitask` lane fan-out. See [Release Notes 0.5.45](docs/release-notes-0.5.45.md), [Managed Agents](docs/managed-agents.md), [Claude-for-Legal Workflows](docs/claude-for-legal.md), [Multitask Command](docs/multitask.md), and [Dreaming](docs/dreaming.md).
 
@@ -567,7 +567,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Beginner's Guide](docs/cowork-school.md) | Practical guide to what CoWork OS is for and which workflows to try first |
-| [Release Notes 0.5.49](docs/release-notes-0.5.49.md) | What is new in the latest release |
+| [Release Notes 0.5.50](docs/release-notes-0.5.50.md) | What is new in the upcoming release |
 | [Composer Mentions](docs/composer-mentions.md) | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing |
 | [Message Box Shortcuts](docs/message-box-shortcuts.md) | `/` picker for deterministic app commands and skill-backed workflow shortcuts |
 | [Side Chat](docs/side-chat.md) | Right-side read-only questions about an active running session without steering or stopping the parent task |

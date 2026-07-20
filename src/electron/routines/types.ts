@@ -5,6 +5,10 @@ import type { CronService } from "../cron";
 import type { EventTriggerService } from "../triggers/EventTriggerService";
 import type { TriggerCondition } from "../triggers/types";
 import type { HooksConfig } from "../hooks/types";
+import type {
+  RoutineWorkflowDefinition,
+  RoutineWorkflowNode,
+} from "../../shared/routine-workflow";
 
 export type RoutineExecutionTargetKind =
   | "workspace"
@@ -163,6 +167,10 @@ export interface RoutineDefinition {
   outputs: RoutineOutput[];
   approvalPolicy: RoutineApprovalPolicy;
   connectorPolicy: RoutineConnectorPolicy;
+  /** Optional deterministic Routine v2 graph. Legacy routines omit this. */
+  workflow?: RoutineWorkflowDefinition;
+  /** Identifier of the active immutable workflow version. */
+  activeWorkflowVersionId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -229,6 +237,7 @@ export interface RoutineRun {
   sourceEventSummary?: string;
   backingTaskId?: string;
   backingManagedSessionId?: string;
+  workflowRunId?: string;
   outputStatus: RoutineOutputStatus;
   errorSummary?: string;
   artifactsSummary?: string;
@@ -289,6 +298,16 @@ export interface RoutineServiceDeps {
   getManagedSessionSnapshot?: (
     sessionId: string,
   ) => Promise<RoutineManagedSessionSnapshot | null> | RoutineManagedSessionSnapshot | null;
+  executeWorkflowAction?: (params: {
+    routine: Routine;
+    workflow: RoutineWorkflowDefinition;
+    node: RoutineWorkflowNode;
+    input: Record<string, unknown>;
+    runId: string;
+    stepId: string;
+    dryRun: boolean;
+    signal: AbortSignal;
+  }) => Promise<Record<string, unknown>>;
 }
 
 export interface CompiledRoutineTarget {

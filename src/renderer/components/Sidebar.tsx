@@ -46,7 +46,7 @@ interface SidebarProps {
   workspace: Workspace | null;
   tasks: Task[];
   selectedTaskId: string | null;
-  isHomeActive?: boolean;
+  isAutomationsActive?: boolean;
   isIdeasActive?: boolean;
   isInboxAgentActive?: boolean;
   isAgentsActive?: boolean;
@@ -57,7 +57,7 @@ interface SidebarProps {
   isLoadingMoreTasks?: boolean;
   completionAttentionTaskIds?: string[];
   onSelectTask: (id: string | null) => void;
-  onOpenHome?: () => void;
+  onOpenAutomations?: () => void;
   onOpenIdeas?: () => void;
   onOpenInboxAgent?: () => void;
   onOpenAgents?: () => void;
@@ -563,7 +563,7 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
   return (
     prev.workspace?.id === next.workspace?.id &&
     prev.selectedTaskId === next.selectedTaskId &&
-    prev.isHomeActive === next.isHomeActive &&
+    prev.isAutomationsActive === next.isAutomationsActive &&
     prev.isIdeasActive === next.isIdeasActive &&
     prev.isInboxAgentActive === next.isInboxAgentActive &&
     prev.isAgentsActive === next.isAgentsActive &&
@@ -589,7 +589,7 @@ function SidebarComponent({
   workspace,
   tasks,
   selectedTaskId,
-  isHomeActive = false,
+  isAutomationsActive = false,
   isIdeasActive = false,
   isInboxAgentActive = false,
   isAgentsActive = false,
@@ -599,7 +599,7 @@ function SidebarComponent({
   isLoadingSessions = false,
   completionAttentionTaskIds = [],
   onSelectTask,
-  onOpenHome,
+  onOpenAutomations,
   onOpenIdeas,
   onOpenInboxAgent,
   onOpenAgents,
@@ -1934,9 +1934,9 @@ function SidebarComponent({
 
           <button
             type="button"
-            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isHomeActive ? "active" : ""}`}
-            onClick={onOpenHome}
-            aria-pressed={isHomeActive}
+            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isAutomationsActive ? "active" : ""}`}
+            onClick={onOpenAutomations}
+            aria-pressed={isAutomationsActive}
             title="Automations"
           >
             <span className="cli-btn-text">

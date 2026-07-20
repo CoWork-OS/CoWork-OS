@@ -11,6 +11,7 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const DEFAULT_PORT = 5173;
 const MAX_PORT_SCAN_ATTEMPTS = 25;
 const REACT_READY_TIMEOUT_MS = 30_000;
+const ELECTRON_SINGLE_INSTANCE_EXIT_CODE = 73;
 const cwdRequire = createRequire(path.join(process.cwd(), "package.json"));
 
 function parsePort(value, fallback = DEFAULT_PORT) {
@@ -115,6 +116,27 @@ function getElectronBinaryStatus() {
   } catch {
     return { installed: true, ready: false, binaryPath: null };
   }
+}
+
+function findRunningElectronDevPid(electronBinary) {
+  if (process.platform === "win32" || !electronBinary) return null;
+  const result = spawnSync("ps", ["-axo", "pid=,command="], {
+    encoding: "utf8",
+  });
+  if ((result.status ?? 1) !== 0) return null;
+  for (const line of String(result.stdout || "").split(/\r?\n/)) {
+    const match = line.trim().match(/^(\d+)\s+(.+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const command = match[2];
+    if (
+      pid !== process.pid &&
+      (command === electronBinary || command.startsWith(`${electronBinary} `))
+    ) {
+      return pid;
+    }
+  }
+  return null;
 }
 
 function getNativeSqliteStatus(env) {
@@ -271,6 +293,14 @@ if (electronStatus.installed && !electronStatus.ready) {
 }
 
 if (electronStatus.installed && electronStatus.ready) {
+  const runningElectronPid = findRunningElectronDevPid(electronStatus.binaryPath);
+  if (runningElectronPid) {
+    process.stderr.write(
+      `[dev-start] Existing CoWork OS development instance detected (PID ${runningElectronPid}). ` +
+        "Quit the running app before `npm run dev`; rebranding or relaunching the same Electron bundle while it is active can abort before JavaScript startup.\n",
+    );
+    process.exit(ELECTRON_SINGLE_INSTANCE_EXIT_CODE);
+  }
   try {
     runOptionalDevBranding(childEnv);
   } catch (error) {
@@ -372,6 +402,14 @@ electron.once("error", (error) => {
 
 electron.once("exit", (code) => {
   if (shuttingDown) return;
+  if (code === ELECTRON_SINGLE_INSTANCE_EXIT_CODE) {
+    process.stderr.write(
+      "[dev-start] Electron startup was blocked by an existing CoWork OS instance. " +
+        "Quit the running app, then run `npm run dev` again.\n",
+    );
+    shutdown(code);
+    return;
+  }
   process.stdout.write(`[dev-start] Electron exited with code ${code ?? 0}.\n`);
   shutdown(code ?? 0);
 });

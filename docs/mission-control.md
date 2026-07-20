@@ -14,7 +14,8 @@ Access it from **Settings** > **Mission Control**. For company-ops workflows, yo
 Mission Control now sits alongside the other operational entry points:
 
 - **Devices** for machine-level task routing and remote execution
-- **Settings > Automations** for routines, core automation, queueing, scheduling, triggers, briefing, and Workflow Intelligence policies
+- main-sidebar **Automations** for structured flow authoring, activation, approvals, and step-level Activity
+- **Settings > Automations** for prompt-based routines, core automation, queueing, scheduling, triggers, briefing, and Workflow Intelligence policies
 - **Settings > Memory Hub** for durable memory, structured observations, and future Dreaming candidate review
 - **Settings > Companies** for company graph editing and operator assignment
 

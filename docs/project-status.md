@@ -12,7 +12,7 @@ CoWork OS is a **security-first, GUI-first, CLI-capable local AI super app and e
 - **Personal AI Gateway**: Connect your AI assistant to WhatsApp, Telegram, Discord, Slack, and iMessage
 - **Everything Workbench**: Create, open, review, edit, and revise generated documents, spreadsheets, presentations, web pages, PDFs, and previews from the same local-first task workspace
 - **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices tab
-- **Automations Surface**: One settings group for queueing, scheduling, triggers, briefing, and Workflow Intelligence suggestions/reflection/Dreaming; task view can also create task-sourced routines that continue the current thread by default
+- **Automation Studio**: A main-sidebar Discover/Library/Builder/Activity surface for versioned structured flows, dry runs, variables, branches, approvals, signed webhooks, durable activity, cancellation, and restart recovery; advanced queueing, prompt-based routines, schedules, triggers, briefing, and Workflow Intelligence remain grouped in Settings
 - **Renderer Performance**: Sidebar and timeline virtualization in the `CoWork-OS/CoWork-OS` repo use `@chenglou/pretext` for text measurement and keep long task feeds responsive
 - **Security-First Design**: 4,932 automated tests across 390 test files, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
 - **Imported Capability Security**: managed skill and pack imports are staged, scanned, reported, and quarantined when blocked instead of being activated directly
@@ -290,7 +290,8 @@ CoWork OS is a **security-first, GUI-first, CLI-capable local AI super app and e
 - [x] Update settings
 - [x] Guardrail settings (budgets, limits)
 - [x] Queue settings (concurrency)
-- [x] Automations settings group (queue, Workflow Intelligence, scheduled, hooks, triggers, briefing)
+- [x] Main-sidebar Automation Studio (structured flow discovery, library, builder, dry-run/scope review, activation, and activity)
+- [x] Advanced Automations settings group (prompt-based routines, queue, Workflow Intelligence, scheduled, hooks, triggers, briefing)
 - [x] Task-sourced same-thread and new-task automations from task view overflow menu
 - [x] Custom Skills management
 - [x] Quarantined Imports sections for skills and plugin packs with report, retry scan, and removal actions

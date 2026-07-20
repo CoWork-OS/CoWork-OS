@@ -1,11 +1,19 @@
 import { randomUUID } from "crypto";
 import type { AgentConfig } from "../../shared/types";
+import type {
+  RoutineWorkflowApprovalRequest,
+  RoutineWorkflowDefinition,
+  RoutineWorkflowEventEnvelope,
+  RoutineWorkflowRunRecord,
+  RoutineWorkflowStepRecord,
+  RoutineWorkflowTestRequest,
+  WorkflowValidationResult,
+} from "../../shared/routine-workflow";
 import { MCPSettingsManager } from "../mcp/settings";
 import { generateHookToken } from "../hooks/settings";
 import type { HookMappingConfig, HooksConfig } from "../hooks/types";
 import type { CronDeliveryConfig, CronEvent } from "../cron/types";
 import { CHANNEL_TYPES, type ChannelType } from "../gateway/channels/types";
-import type { EventTriggerService } from "../triggers/EventTriggerService";
 import type { EventTrigger, TriggerCondition, TriggerEvent, TriggerHistoryEntry } from "../triggers/types";
 import type {
   Routine,
@@ -27,9 +35,19 @@ import type {
   RoutineTrigger,
   RoutineWebhookResponseOutput,
 } from "./types";
+import { getWorkflowCapabilities } from "./workflow/catalog";
+import { RoutineWorkflowEngine } from "./workflow/engine";
+import { generateRoutineWorkflowDraft } from "./workflow/generator";
+import { RoutineWorkflowRepository } from "./workflow/repository";
+import { validateRoutineWorkflow } from "./workflow/validation";
+import { GoogleWorkspaceSettingsManager } from "../settings/google-workspace-manager";
+import { getGoogleWorkspaceSettingsForAccount, hasGoogleWorkspaceTokens } from "../../shared/google-workspace";
+import { RoutineWorkflowSecretStore } from "./workflow/secret-store";
+import { createLogger } from "../utils/logger";
 
 const DEFAULT_EVENT_COOLDOWN_MS = 60_000;
 const DEFAULT_RUN_LIST_LIMIT = 50;
+const logger = createLogger("RoutineService");
 
 type RoutineRunRecord = RoutineRun & {
   runKey?: string;
@@ -53,7 +71,16 @@ export class RoutineService {
       | "getManagedSessionSnapshot"
       | "onHooksConfigChanged"
       | "onTriggerMutation"
+      | "executeWorkflowAction"
     >;
+
+  private readonly workflowRepository: RoutineWorkflowRepository;
+  private readonly workflowEngine: RoutineWorkflowEngine;
+  private readonly workflowSecretStore = new RoutineWorkflowSecretStore();
+  private workflowInboxTimer: NodeJS.Timeout | null = null;
+  private workflowMaintenanceTimer: NodeJS.Timeout | null = null;
+  private workflowInboxActive = 0;
+  private workflowRecoveryReady = false;
 
   constructor(deps: RoutineServiceDeps) {
     this.deps = {
@@ -61,6 +88,11 @@ export class RoutineService {
       now: deps.now ?? (() => Date.now()),
     };
     this.ensureSchema();
+    this.workflowRepository = new RoutineWorkflowRepository(this.deps.db, this.deps.now);
+    this.workflowEngine = new RoutineWorkflowEngine(this.workflowRepository, {
+      now: this.deps.now,
+      executeAction: this.deps.executeWorkflowAction,
+    });
   }
 
   list(): Routine[] {
@@ -75,6 +107,224 @@ export class RoutineService {
       .prepare("SELECT * FROM automation_routines WHERE id = ?")
       .get(id) as Any | undefined;
     return row ? this.mapRow(row) : null;
+  }
+
+  getWorkflowCapabilities() {
+    return getWorkflowCapabilities();
+  }
+
+  getActiveWorkflowDefinition(routineId: string): RoutineWorkflowDefinition | null {
+    const routine = this.get(routineId);
+    const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+    return version ? structuredClone(version.definition) : null;
+  }
+
+  validateWorkflow(
+    workflow: RoutineWorkflowDefinition,
+    allowIncomplete = false,
+  ): WorkflowValidationResult {
+    return validateRoutineWorkflow(workflow, { allowIncomplete });
+  }
+
+  generateWorkflowDraft(prompt: string) {
+    const normalized = String(prompt || "").trim();
+    if (!normalized) throw new Error("Describe the workflow you want to create.");
+    return generateRoutineWorkflowDraft(normalized);
+  }
+
+  saveWorkflowDraft(routineId: string, workflow: RoutineWorkflowDefinition) {
+    const routine = this.get(routineId);
+    if (!routine) throw new Error(`Routine not found: ${routineId}`);
+    const validation = validateRoutineWorkflow(workflow, { allowIncomplete: true });
+    if (validation.issues.some((issue) => issue.severity === "error")) {
+      throw new Error(validation.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" "));
+    }
+    const version = this.workflowRepository.createVersion(routineId, workflow, "draft");
+    this.persist(toCompatibilityRoutine({
+      ...routine,
+      workflow: structuredClone(workflow),
+      updatedAt: this.deps.now(),
+    }));
+    return { version, validation };
+  }
+
+  async activateWorkflowVersion(routineId: string, versionId: string): Promise<Routine | null> {
+    const routine = this.get(routineId);
+    const version = this.workflowRepository.getVersion(versionId);
+    if (!routine || !version || version.routineId !== routineId) return null;
+    const validation = validateRoutineWorkflow(version.definition);
+    if (!validation.valid) {
+      throw new Error(validation.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" "));
+    }
+    this.assertWorkflowSecretsReady(version.definition);
+    this.assertWorkflowAccountReady(version.definition, validation.requiredScopes);
+    this.workflowRepository.activateVersion(routineId, versionId);
+    const updated = toCompatibilityRoutine({
+      ...routine,
+      enabled: true,
+      workflow: structuredClone(version.definition),
+      triggers: normalizeTriggers(deriveRoutineTriggersFromWorkflow(version.definition)),
+      activeWorkflowVersionId: versionId,
+      updatedAt: this.deps.now(),
+    });
+    const synced = await this.syncRoutine(updated, routine);
+    this.persist(synced);
+    return synced;
+  }
+
+  listWorkflowVersions(routineId: string) {
+    return this.workflowRepository.listVersions(routineId);
+  }
+
+  listWorkflowRuns(routineId?: string, limit = DEFAULT_RUN_LIST_LIMIT) {
+    return this.workflowRepository.listRuns(routineId, limit);
+  }
+
+  listWorkflowRunSteps(runId: string) {
+    return this.workflowRepository.listSteps(runId);
+  }
+
+  listWorkflowEvents(routineId?: string, limit = DEFAULT_RUN_LIST_LIMIT) {
+    return this.workflowRepository.listEvents(routineId, limit);
+  }
+
+  listWorkflowEventSamples(source?: string, limit = 20) {
+    return this.workflowRepository.listEventSamples(source, limit);
+  }
+
+  listWorkflowSecrets() {
+    return this.workflowSecretStore.list();
+  }
+
+  upsertWorkflowSecret(input: { id?: string; name: string; value: string }) {
+    return this.workflowSecretStore.upsert(input);
+  }
+
+  removeWorkflowSecret(id: string) {
+    const referencedBy = this.list()
+      .filter((routine) => routine.enabled)
+      .filter((routine) => {
+        const workflow = this.getActiveWorkflowDefinition(routine.id);
+        return Boolean(
+          workflow &&
+            flattenWorkflowNodes(workflow.nodes).some(
+              (node) => node.operation === "custom.webhook" && node.config.secretRef === id,
+            ),
+        );
+      })
+      .map((routine) => routine.name);
+    if (referencedBy.length > 0) {
+      throw new Error(
+        `Turn off the flows using this secret before removing it: ${referencedBy.join(", ")}.`,
+      );
+    }
+    return this.workflowSecretStore.remove(id);
+  }
+
+  async testWorkflow(request: RoutineWorkflowTestRequest) {
+    const routine = request.routineId ? this.get(request.routineId) : null;
+    const workflow = request.workflow || routine?.workflow;
+    if (!workflow) throw new Error("A workflow draft is required for testing.");
+    const testRoutine = routine || toCompatibilityRoutine({
+      id: `workflow-test:${randomUUID()}`,
+      name: "Workflow test",
+      enabled: false,
+      workspaceId: "workflow-test",
+      instructions: "Test a deterministic workflow draft.",
+      executionTarget: { kind: "workspace" },
+      contextBindings: {},
+      triggers: [{ id: "manual", type: "manual", enabled: true }],
+      outputs: [{ kind: "task_only" }],
+      approvalPolicy: { mode: "auto_safe" },
+      connectorPolicy: { mode: "prefer", connectorIds: [] },
+      workflow,
+      createdAt: this.deps.now(),
+      updatedAt: this.deps.now(),
+    });
+    const run = await this.workflowEngine.start({
+      routine: testRoutine,
+      workflow,
+      workflowVersionId: routine?.activeWorkflowVersionId || `draft:${randomUUID()}`,
+      trigger: request.sampleEvent || { source: "test", timestamp: this.deps.now() },
+      idempotencyKey: `test:${randomUUID()}`,
+      dryRun: request.dryRun !== false,
+    });
+    return { run, steps: this.workflowRepository.listSteps(run.id) };
+  }
+
+  enqueueWorkflowEvent(envelope: RoutineWorkflowEventEnvelope) {
+    const routine = this.get(envelope.routineId);
+    const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+    if (!routine || !routine.enabled || !version) {
+      throw new Error("The target Routine v2 workflow is not active.");
+    }
+    const event = this.workflowRepository.enqueueEvent(envelope);
+    void this.processWorkflowInbox();
+    return event;
+  }
+
+  async respondToWorkflowApproval(request: RoutineWorkflowApprovalRequest) {
+    const run = this.workflowRepository.getRun(request.runId);
+    if (!run) throw new Error(`Workflow run not found: ${request.runId}`);
+    const routine = this.get(run.routineId);
+    const version = this.workflowRepository.getVersion(run.workflowVersionId);
+    if (!routine || !version) throw new Error("The workflow definition for this run is unavailable.");
+    const updated = await this.workflowEngine.respondToApproval({
+      routine,
+      workflow: version.definition,
+      runId: run.id,
+      stepId: request.stepId,
+      approved: request.approved,
+    });
+    this.refreshRoutineRunFromWorkflow(updated.id);
+    return updated;
+  }
+
+  cancelWorkflowRun(runId: string) {
+    const run = this.workflowEngine.cancel(runId);
+    if (run) this.refreshRoutineRunFromWorkflow(run.id);
+    return run;
+  }
+
+  async retryWorkflowRun(runId: string) {
+    const previous = this.workflowRepository.getRun(runId);
+    if (!previous) throw new Error(`Workflow run not found: ${runId}`);
+    const routine = this.get(previous.routineId);
+    const version = this.workflowRepository.getVersion(previous.workflowVersionId);
+    if (!routine || !version) throw new Error("The workflow definition for this run is unavailable.");
+    const context = previous.context as Record<string, Any>;
+    return this.startDeterministicWorkflow(routine, version.definition, version.id, {
+      trigger: isPlainRecord(context.trigger) ? context.trigger : {},
+      idempotencyKey: `retry:${previous.id}:${this.deps.now()}`,
+      sourceSummary: `Retry of workflow run ${previous.id}`,
+      triggerId: previous.triggerNodeId,
+      triggerType: "manual",
+    });
+  }
+
+  startWorkflowRuntime(): void {
+    if (this.workflowInboxTimer) return;
+    this.workflowRecoveryReady = false;
+    this.workflowRepository.requeueProcessingEvents();
+    this.workflowInboxTimer = setInterval(() => void this.processWorkflowInbox(), 1_000);
+    this.workflowMaintenanceTimer = setInterval(
+      () => this.pruneExpiredWorkflowData(),
+      6 * 60 * 60 * 1_000,
+    );
+    this.workflowMaintenanceTimer.unref?.();
+    this.pruneExpiredWorkflowData();
+    void this.recoverWorkflowRuns().finally(() => {
+      this.workflowRecoveryReady = true;
+      void this.processWorkflowInbox();
+    });
+  }
+
+  stopWorkflowRuntime(): void {
+    if (this.workflowInboxTimer) clearInterval(this.workflowInboxTimer);
+    if (this.workflowMaintenanceTimer) clearInterval(this.workflowMaintenanceTimer);
+    this.workflowInboxTimer = null;
+    this.workflowMaintenanceTimer = null;
+    this.workflowRecoveryReady = false;
   }
 
   async listRuns(routineId?: string, limit = DEFAULT_RUN_LIST_LIMIT): Promise<RoutineRun[]> {
@@ -135,7 +385,7 @@ export class RoutineService {
 
   async create(input: RoutineCreate): Promise<Routine> {
     const now = this.deps.now();
-    const routine = toCompatibilityRoutine({
+    let routine = toCompatibilityRoutine({
       id: randomUUID(),
       name: input.name.trim(),
       description: clean(input.description),
@@ -144,13 +394,41 @@ export class RoutineService {
       instructions: normalizeInstructions(input.instructions ?? input.prompt),
       executionTarget: normalizeExecutionTarget(input.executionTarget),
       contextBindings: normalizeContextBindings(input.contextBindings),
-      triggers: normalizeTriggers(input.triggers || []),
+      triggers: normalizeTriggers(
+        input.triggers?.length
+          ? input.triggers
+          : input.workflow
+            ? deriveRoutineTriggersFromWorkflow(input.workflow)
+            : [],
+      ),
       outputs: normalizeOutputs(input.outputs || []),
       approvalPolicy: normalizeApprovalPolicy(input.approvalPolicy),
       connectorPolicy: normalizeConnectorPolicy(input.connectorPolicy, input.connectors),
+      workflow: input.workflow ? structuredClone(input.workflow) : undefined,
+      activeWorkflowVersionId: input.activeWorkflowVersionId,
       createdAt: now,
       updatedAt: now,
     });
+
+    if (routine.workflow) {
+      const validation = validateRoutineWorkflow(routine.workflow, { allowIncomplete: !routine.enabled });
+      if (!validation.valid) {
+        throw new Error(validation.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" "));
+      }
+      if (routine.enabled) {
+        this.assertWorkflowSecretsReady(routine.workflow);
+        this.assertWorkflowAccountReady(routine.workflow, validation.requiredScopes);
+      }
+      const version = this.workflowRepository.createVersion(
+        routine.id,
+        routine.workflow,
+        routine.enabled ? "active" : "draft",
+      );
+      routine = toCompatibilityRoutine({
+        ...routine,
+        activeWorkflowVersionId: version.status === "active" ? version.id : undefined,
+      });
+    }
 
     const synced = await this.syncRoutine(routine, null);
     this.persist(synced);
@@ -161,7 +439,7 @@ export class RoutineService {
     const existing = this.get(id);
     if (!existing) return null;
 
-    const updated = toCompatibilityRoutine({
+    let updated = toCompatibilityRoutine({
       ...existing,
       name: patch.name !== undefined ? patch.name.trim() : existing.name,
       description:
@@ -190,8 +468,45 @@ export class RoutineService {
         patch.connectorPolicy !== undefined || patch.connectors !== undefined
           ? normalizeConnectorPolicy(patch.connectorPolicy, patch.connectors)
           : existing.connectorPolicy,
+      workflow: patch.workflow !== undefined ? structuredClone(patch.workflow) : existing.workflow,
+      activeWorkflowVersionId: existing.activeWorkflowVersionId,
       updatedAt: this.deps.now(),
     });
+
+    if (patch.workflow !== undefined) {
+      const validation = validateRoutineWorkflow(updated.workflow!, { allowIncomplete: !updated.enabled });
+      if (!validation.valid) {
+        throw new Error(validation.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" "));
+      }
+      if (updated.enabled) {
+        this.assertWorkflowSecretsReady(updated.workflow!);
+        this.assertWorkflowAccountReady(updated.workflow!, validation.requiredScopes);
+      }
+      const version = this.workflowRepository.createVersion(
+        updated.id,
+        updated.workflow!,
+        updated.enabled ? "active" : "draft",
+      );
+      updated = toCompatibilityRoutine({
+        ...updated,
+        activeWorkflowVersionId: version.status === "active" ? version.id : existing.activeWorkflowVersionId,
+      });
+    } else if (patch.enabled === true && !existing.enabled) {
+      const activeVersion = this.resolveActiveWorkflowVersion(existing);
+      if (activeVersion) {
+        const validation = validateRoutineWorkflow(activeVersion.definition);
+        if (!validation.valid) {
+          throw new Error(
+            validation.issues
+              .filter((issue) => issue.severity === "error")
+              .map((issue) => issue.message)
+              .join(" "),
+          );
+        }
+        this.assertWorkflowSecretsReady(activeVersion.definition);
+        this.assertWorkflowAccountReady(activeVersion.definition, validation.requiredScopes);
+      }
+    }
 
     const synced = await this.syncRoutine(updated, existing);
     this.persist(synced);
@@ -212,6 +527,7 @@ export class RoutineService {
 
     this.deps.db.prepare("DELETE FROM automation_routines WHERE id = ?").run(id);
     this.deps.db.prepare("DELETE FROM routine_runs WHERE routine_id = ?").run(id);
+    this.workflowRepository.deleteRoutineData(id);
     if (hooksTouched) {
       this.deps.onHooksConfigChanged?.(this.deps.loadHooksSettings());
     }
@@ -254,6 +570,26 @@ export class RoutineService {
         enabled: true,
       } satisfies RoutineManualTrigger);
 
+    const workflowVersion = this.resolveActiveWorkflowVersion(routine);
+    if (workflowVersion) {
+      return this.startDeterministicWorkflow(
+        routine,
+        workflowVersion.definition,
+        workflowVersion.id,
+        {
+          trigger: {
+            source: "manual",
+            timestamp: this.deps.now(),
+            routineId: routine.id,
+          },
+          idempotencyKey: `manual:${routine.id}:${this.deps.now()}`,
+          sourceSummary: "Manual workflow run",
+          triggerId: manualTrigger.id,
+          triggerType: manualTrigger.type,
+        },
+      );
+    }
+
     const execution = await this.dispatchRoutineExecution(routine, manualTrigger, {
       prompt: buildRoutinePrompt(routine, "manual", [
         "Manual trigger context:",
@@ -286,6 +622,7 @@ export class RoutineService {
     if (event.action !== "started" && event.action !== "finished") return;
     const routineMatch = this.findRoutineByManagedResource("managedCronJobId", event.jobId);
     if (!routineMatch) return;
+    if (this.resolveActiveWorkflowVersion(routineMatch.routine)) return;
 
     const runKey = `cron:${event.jobId}:${event.runAtMs ?? event.nextRunAtMs ?? this.deps.now()}`;
     const existing = this.findRunByKey(runKey);
@@ -323,11 +660,75 @@ export class RoutineService {
     });
   }
 
+  async runScheduledWorkflow(routineId: string, jobId: string, runAtMs: number) {
+    const routine = this.get(routineId);
+    const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+    if (!routine || !routine.enabled || !version) {
+      throw new Error("Scheduled Routine v2 workflow is not active.");
+    }
+    const trigger = routine.triggers.find(
+      (candidate): candidate is RoutineScheduleTrigger =>
+        candidate.type === "schedule" && candidate.managedCronJobId === jobId,
+    );
+    const run = await this.startDeterministicWorkflow(routine, version.definition, version.id, {
+      trigger: {
+        source: "schedule",
+        timestamp: runAtMs,
+        jobId,
+        scheduledAt: new Date(runAtMs).toISOString(),
+      },
+      idempotencyKey: `cron:${jobId}:${runAtMs}`,
+      sourceSummary: `Scheduled workflow run at ${new Date(runAtMs).toISOString()}`,
+      triggerId: trigger?.id || version.definition.starterNodeId,
+      triggerType: "schedule",
+    });
+    return {
+      runId: run.workflowRunId || run.id,
+      status: run.status,
+      resultText: run.artifactsSummary,
+      error: run.errorSummary,
+    };
+  }
+
+  async runWebhookWorkflow(
+    routineId: string,
+    payload: Record<string, unknown>,
+    metadata?: Record<string, string>,
+  ) {
+    const routine = this.get(routineId);
+    const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+    if (!routine || !routine.enabled || !version) {
+      throw new Error("Webhook Routine v2 workflow is not active.");
+    }
+    const trigger = routine.triggers.find(
+      (candidate): candidate is RoutineApiTrigger =>
+        candidate.type === "api" &&
+        (!metadata?.triggerId || candidate.id === metadata.triggerId),
+    );
+    const externalId = [payload.id, payload.eventId, payload.event_id, payload.deliveryId]
+      .find((value): value is string | number => typeof value === "string" || typeof value === "number");
+    const idempotencyKey = externalId
+      ? `webhook:${routine.id}:${String(externalId)}`
+      : `webhook:${routine.id}:${this.deps.now()}:${JSON.stringify(payload)}`;
+    const run = await this.startDeterministicWorkflow(routine, version.definition, version.id, {
+      trigger: { ...payload, source: "webhook", timestamp: this.deps.now() },
+      idempotencyKey,
+      sourceSummary: metadata?.hookPath ? `Webhook: ${metadata.hookPath}` : "Webhook workflow",
+      triggerId: trigger?.id || version.definition.starterNodeId,
+      triggerType: "api",
+    });
+    return {
+      runId: run.workflowRunId || run.id,
+      status: run.status,
+    };
+  }
+
   recordEventTriggerFire(payload: {
     trigger: EventTrigger;
     event: TriggerEvent;
     historyEntry: TriggerHistoryEntry;
   }): void {
+    if (payload.historyEntry.actionResult === "workflow_queued") return;
     const routineMatch = this.findRoutineByManagedResource(
       "managedEventTriggerId",
       payload.trigger.id,
@@ -349,6 +750,28 @@ export class RoutineService {
         : undefined,
       artifactsSummary: payload.historyEntry.actionResult,
     });
+  }
+
+  async interceptManagedEventTrigger(trigger: EventTrigger, event: TriggerEvent) {
+    const routineMatch = this.findRoutineByManagedResource("managedEventTriggerId", trigger.id);
+    if (!routineMatch) return { handled: false };
+    const version = this.resolveActiveWorkflowVersion(routineMatch.routine);
+    if (!version) return { handled: false };
+    const payload = {
+      ...event.fields,
+      source: event.source,
+      timestamp: event.timestamp,
+    };
+    this.enqueueWorkflowEvent({
+      routineId: routineMatch.routine.id,
+      triggerNodeId: version.definition.starterNodeId,
+      source: event.source,
+      idempotencyKey: `${trigger.id}:${event.timestamp}:${JSON.stringify(event.fields)}`,
+      receivedAt: event.timestamp,
+      payload,
+      summary: summarizeTriggerEvent(event),
+    });
+    return { handled: true, actionResult: "workflow_queued" };
   }
 
   recordApiTriggerDispatch(payload: {
@@ -410,6 +833,7 @@ export class RoutineService {
         source_event_summary TEXT,
         backing_task_id TEXT,
         backing_managed_session_id TEXT,
+        workflow_run_id TEXT,
         output_status TEXT NOT NULL DEFAULT 'none',
         error_summary TEXT,
         artifacts_summary TEXT,
@@ -420,8 +844,6 @@ export class RoutineService {
       );
       CREATE INDEX IF NOT EXISTS idx_routine_runs_routine
       ON routine_runs(routine_id, started_at DESC, created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_routine_runs_run_key
-      ON routine_runs(run_key);
       CREATE INDEX IF NOT EXISTS idx_routine_runs_backing_task
       ON routine_runs(routine_id, backing_task_id);
     `);
@@ -435,8 +857,15 @@ export class RoutineService {
     if (!columnExists(this.deps.db, "routine_runs", "dedupe_key")) {
       this.deps.db.exec("ALTER TABLE routine_runs ADD COLUMN dedupe_key TEXT");
     }
+    if (!columnExists(this.deps.db, "routine_runs", "workflow_run_id")) {
+      this.deps.db.exec("ALTER TABLE routine_runs ADD COLUMN workflow_run_id TEXT");
+    }
     this.reconcileRoutineRunDedupeKeys();
     this.deps.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_routine_runs_run_key
+      ON routine_runs(run_key);
+      CREATE INDEX IF NOT EXISTS idx_routine_runs_workflow
+      ON routine_runs(workflow_run_id);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_routine_runs_dedupe_key
       ON routine_runs(dedupe_key)
       WHERE dedupe_key IS NOT NULL;
@@ -499,6 +928,7 @@ export class RoutineService {
       backingManagedSessionId: row.backing_managed_session_id
         ? String(row.backing_managed_session_id)
         : undefined,
+      workflowRunId: row.workflow_run_id ? String(row.workflow_run_id) : undefined,
       outputStatus: String(row.output_status || "none") as RoutineRun["outputStatus"],
       errorSummary: row.error_summary ? String(row.error_summary) : undefined,
       artifactsSummary: row.artifacts_summary ? String(row.artifacts_summary) : undefined,
@@ -589,17 +1019,25 @@ export class RoutineService {
 
     const agentConfig = this.buildRoutineAgentConfig(routine);
     const targetTaskId = getRoutineTargetTaskId(routine);
+    const workflowMode = Boolean(routine.workflow && routine.activeWorkflowVersionId);
     const payload = {
       name: `Routine: ${routine.name}`,
       description: routine.description,
       enabled: routine.enabled && trigger.enabled,
       workspaceId: routine.workspaceId,
-      taskPrompt: buildRoutinePrompt(routine, "schedule"),
+      taskPrompt: workflowMode
+        ? `Execute active Routine v2 workflow ${routine.id}.`
+        : buildRoutinePrompt(routine, "schedule"),
       taskTitle: routine.name,
       schedule: trigger.schedule,
-      runMode: targetTaskId ? ("thread_follow_up" as const) : ("new_task" as const),
-      targetTaskId,
-      threadAutomation: targetTaskId
+      runMode: workflowMode
+        ? ("workflow" as const)
+        : targetTaskId
+          ? ("thread_follow_up" as const)
+          : ("new_task" as const),
+      workflowRoutineId: workflowMode ? routine.id : undefined,
+      targetTaskId: workflowMode ? undefined : targetTaskId,
+      threadAutomation: !workflowMode && targetTaskId
         ? {
             sourceTaskId: targetTaskId,
             sourceTaskTitle: routine.contextBindings.metadata?.sourceTaskTitle,
@@ -653,20 +1091,23 @@ export class RoutineService {
 
     if (routine.enabled && trigger.enabled) {
       const targetTaskId = getRoutineTargetTaskId(routine);
+      const workflowMode = Boolean(routine.workflow && routine.activeWorkflowVersionId);
       const mapping: HookMappingConfig = {
         id: managedHookMappingId,
         token,
         match: { path },
-        action: targetTaskId ? "task_message" : "agent",
-        targetTaskId,
+        action: workflowMode ? "workflow" : targetTaskId ? "task_message" : "agent",
+        targetTaskId: workflowMode ? undefined : targetTaskId,
         name: routine.name,
         workspaceId: routine.workspaceId,
-        messageTemplate: buildRoutinePrompt(routine, "api", [
-          "API request context:",
-          "- Source: {{source}}",
-          "- Type: {{type}}",
-          "- Request text: {{text}}",
-        ]),
+        messageTemplate: workflowMode
+          ? undefined
+          : buildRoutinePrompt(routine, "api", [
+              "API request context:",
+              "- Source: {{source}}",
+              "- Type: {{type}}",
+              "- Request text: {{text}}",
+            ]),
         agentConfig: this.buildRoutineAgentConfig(routine),
         metadata: {
           routineId: routine.id,
@@ -826,6 +1267,196 @@ export class RoutineService {
     return Object.keys(config).length > 0 ? config : undefined;
   }
 
+  private resolveActiveWorkflowVersion(routine: Routine) {
+    if (routine.activeWorkflowVersionId) {
+      const version = this.workflowRepository.getVersion(routine.activeWorkflowVersionId);
+      if (version?.status === "active") return version;
+    }
+    return this.workflowRepository.getActiveVersion(routine.id);
+  }
+
+  private assertWorkflowAccountReady(
+    workflow: RoutineWorkflowDefinition,
+    requiredScopes: string[],
+  ): void {
+    if (requiredScopes.length === 0) return;
+    const accountEmail = workflow.accountBindings?.["google-workspace"];
+    const settings = getGoogleWorkspaceSettingsForAccount(
+      GoogleWorkspaceSettingsManager.loadSettings(),
+      accountEmail,
+    );
+    if (!settings.enabled || !hasGoogleWorkspaceTokens(settings)) {
+      throw new Error("Connect Google Workspace before turning on this flow.");
+    }
+    const granted = new Set((settings.scopes || []).map((scope) => scope.toLocaleLowerCase()));
+    const missing = requiredScopes.filter((scope) => !googleScopeIsCovered(scope, granted));
+    if (missing.length > 0) {
+      throw new Error(
+        `Reconnect Google Workspace and grant the required scopes: ${missing
+          .map((scope) => scope.replace("https://www.googleapis.com/auth/", ""))
+          .join(", ")}.`,
+      );
+    }
+  }
+
+  private assertWorkflowSecretsReady(workflow: RoutineWorkflowDefinition): void {
+    for (const node of flattenWorkflowNodes(workflow.nodes)) {
+      if (node.operation !== "custom.webhook") continue;
+      const secretRef = typeof node.config.secretRef === "string" ? node.config.secretRef.trim() : "";
+      if (!secretRef) throw new Error(`Select a signing secret for ${node.name}.`);
+      this.workflowSecretStore.resolve(secretRef);
+    }
+  }
+
+  private async startDeterministicWorkflow(
+    routine: Routine,
+    workflow: RoutineWorkflowDefinition,
+    workflowVersionId: string,
+    params: {
+      trigger: Record<string, unknown>;
+      eventId?: string;
+      idempotencyKey: string;
+      sourceSummary: string;
+      triggerId: string;
+      triggerType: RoutineTrigger["type"];
+      dryRun?: boolean;
+    },
+  ): Promise<RoutineRun> {
+    const workflowRun = await this.workflowEngine.start({
+      routine,
+      workflow,
+      workflowVersionId,
+      trigger: params.trigger,
+      eventId: params.eventId,
+      idempotencyKey: params.idempotencyKey,
+      dryRun: params.dryRun,
+    });
+    const run = this.upsertRun({
+      runKey: `workflow:${workflowRun.id}`,
+      routineId: routine.id,
+      triggerId: params.triggerId,
+      triggerType: params.triggerType,
+      status: mapWorkflowRunStatus(workflowRun.status),
+      startedAt: workflowRun.startedAt || workflowRun.createdAt,
+      finishedAt: workflowRun.finishedAt,
+      sourceEventSummary: params.sourceSummary,
+      workflowRunId: workflowRun.id,
+      outputStatus: "none",
+      errorSummary: workflowRun.error,
+      artifactsSummary: summarizeWorkflowRun(workflowRun, this.workflowRepository.listSteps(workflowRun.id)),
+    });
+    return run;
+  }
+
+  private async processWorkflowInbox(): Promise<void> {
+    if (!this.workflowRecoveryReady) return;
+    while (this.workflowInboxActive < 4) {
+      const event = this.workflowRepository.claimNextEvent();
+      if (!event) return;
+      this.workflowInboxActive += 1;
+      void this.processWorkflowEvent(event).finally(() => {
+        this.workflowInboxActive = Math.max(0, this.workflowInboxActive - 1);
+        void this.processWorkflowInbox();
+      });
+    }
+  }
+
+  private async processWorkflowEvent(event: ReturnType<RoutineWorkflowRepository["enqueueEvent"]>): Promise<void> {
+    try {
+      const routine = this.get(event.routineId);
+      const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+      if (!routine || !routine.enabled || !version) {
+        this.workflowRepository.updateEvent(event.id, {
+          status: "cancelled",
+          error: "Routine was disabled or removed before this event was processed.",
+        });
+        return;
+      }
+      const routineTrigger = routine.triggers.find((trigger) => trigger.id === event.triggerNodeId);
+      const run = await this.startDeterministicWorkflow(routine, version.definition, version.id, {
+        trigger: event.payload,
+        eventId: event.id,
+        idempotencyKey: event.idempotencyKey,
+        sourceSummary: event.summary || `${event.source} event`,
+        triggerId: routineTrigger?.id || event.triggerNodeId,
+        triggerType: routineTrigger?.type || "manual",
+      });
+      this.workflowRepository.updateEvent(event.id, {
+        status: run.status === "failed" ? "failed" : "completed",
+        runId: run.workflowRunId,
+        error: run.errorSummary,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (event.attemptCount < 5) {
+        this.workflowRepository.updateEvent(event.id, {
+          status: "pending",
+          error: message,
+          availableAt: this.deps.now() + Math.min(60_000, 1_000 * 2 ** event.attemptCount),
+        });
+      } else {
+        this.workflowRepository.updateEvent(event.id, { status: "failed", error: message });
+      }
+    }
+  }
+
+  private async recoverWorkflowRuns(): Promise<void> {
+    for (const run of this.workflowRepository.listRecoverableRuns()) {
+      const routine = this.get(run.routineId);
+      const version = this.workflowRepository.getVersion(run.workflowVersionId);
+      if (!routine || !version) {
+        this.workflowRepository.updateRun(run.id, {
+          status: "failed",
+          error: "Workflow definition was unavailable during recovery.",
+          finishedAt: this.deps.now(),
+        });
+        continue;
+      }
+      const recovered = this.workflowEngine.recoverInterruptedRun(version.definition, run.id);
+      if (recovered?.status === "waiting_for_approval") {
+        this.refreshRoutineRunFromWorkflow(run.id);
+        continue;
+      }
+      await this.workflowEngine.continueRun(routine, version.definition, run.id).catch((error) => {
+        this.workflowRepository.updateRun(run.id, {
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+          finishedAt: this.deps.now(),
+        });
+      });
+      this.refreshRoutineRunFromWorkflow(run.id);
+    }
+  }
+
+  private pruneExpiredWorkflowData(): void {
+    try {
+      this.workflowRepository.pruneExpiredData((workflowVersionId) => {
+        const version = this.workflowRepository.getVersion(workflowVersionId);
+        return version?.definition.settings?.retainStepDataDays || 30;
+      });
+    } catch (error) {
+      logger.warn("Workflow retention maintenance failed:", error);
+    }
+  }
+
+  private refreshRoutineRunFromWorkflow(workflowRunId: string): void {
+    const workflowRun = this.workflowRepository.getRun(workflowRunId);
+    if (!workflowRun) return;
+    const row = this.deps.db
+      .prepare("SELECT * FROM routine_runs WHERE workflow_run_id = ? ORDER BY updated_at DESC LIMIT 1")
+      .get(workflowRunId) as Any | undefined;
+    if (!row) return;
+    const existing = this.mapRunRecord(row);
+    this.upsertRun({
+      ...existing,
+      workflowRunId,
+      status: mapWorkflowRunStatus(workflowRun.status),
+      finishedAt: workflowRun.finishedAt,
+      errorSummary: workflowRun.error,
+      artifactsSummary: summarizeWorkflowRun(workflowRun, this.workflowRepository.listSteps(workflowRunId)),
+    });
+  }
+
   private async dispatchRoutineExecution(
     routine: Routine,
     trigger: RoutineTrigger,
@@ -952,6 +1583,10 @@ export class RoutineService {
 
     for (const row of rows) {
       const run = this.mapRunRecord(row);
+      if (run.workflowRunId) {
+        this.refreshRoutineRunFromWorkflow(run.workflowRunId);
+        continue;
+      }
       if (run.backingTaskId && this.deps.getTaskSnapshot && isCronTimeoutSummary(run.errorSummary)) {
         await this.refreshTaskBackedRun(run);
         continue;
@@ -1018,6 +1653,7 @@ export class RoutineService {
     sourceEventSummary?: string;
     backingTaskId?: string;
     backingManagedSessionId?: string;
+    workflowRunId?: string;
     outputStatus: RoutineRun["outputStatus"];
     errorSummary?: string;
     artifactsSummary?: string;
@@ -1034,9 +1670,9 @@ export class RoutineService {
       .prepare(
         `INSERT OR REPLACE INTO routine_runs
          (id, routine_id, trigger_id, trigger_type, status, started_at, finished_at, source_event_summary,
-          backing_task_id, backing_managed_session_id, output_status, error_summary, artifacts_summary,
+          backing_task_id, backing_managed_session_id, workflow_run_id, output_status, error_summary, artifacts_summary,
           run_key, dedupe_key, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1049,6 +1685,7 @@ export class RoutineService {
         input.sourceEventSummary || null,
         input.backingTaskId || null,
         input.backingManagedSessionId || null,
+        input.workflowRunId || null,
         input.outputStatus,
         input.errorSummary || null,
         input.artifactsSummary || null,
@@ -1069,6 +1706,7 @@ export class RoutineService {
       sourceEventSummary: input.sourceEventSummary,
       backingTaskId: input.backingTaskId,
       backingManagedSessionId: input.backingManagedSessionId,
+      workflowRunId: input.workflowRunId,
       outputStatus: input.outputStatus,
       errorSummary: input.errorSummary,
       artifactsSummary: input.artifactsSummary,
@@ -1103,10 +1741,16 @@ export class RoutineService {
     runKey?: string;
     backingTaskId?: string;
     backingManagedSessionId?: string;
+    workflowRunId?: string;
   }): string | null {
     const normalizedManagedSessionId = String(input.backingManagedSessionId || "").trim();
     if (normalizedManagedSessionId) {
       return `managed:${input.routineId}:${normalizedManagedSessionId}`;
+    }
+
+    const normalizedWorkflowRunId = String(input.workflowRunId || "").trim();
+    if (normalizedWorkflowRunId) {
+      return `workflow:${input.routineId}:${normalizedWorkflowRunId}`;
     }
 
     const normalizedTaskId = String(input.backingTaskId || "").trim();
@@ -1453,6 +2097,80 @@ function normalizeTriggers(triggers: RoutineTrigger[]): RoutineTrigger[] {
         return base;
     }
   });
+}
+
+function deriveRoutineTriggersFromWorkflow(workflow: RoutineWorkflowDefinition): RoutineTrigger[] {
+  const starter = workflow.nodes.find((node) => node.id === workflow.starterNodeId && node.kind === "starter");
+  if (!starter) return [];
+  const config = starter.config;
+  const value = (key: string): string | undefined => {
+    const candidate = config[key];
+    if (typeof candidate === "string" || typeof candidate === "number") return String(candidate);
+    return undefined;
+  };
+  // Structured workflows have their own durable, deduplicated inbox. Do not
+  // apply the legacy trigger cooldown or rapid source events would be lost.
+  const base = { id: starter.id, enabled: true, cooldownMs: 0 };
+  switch (starter.operation) {
+    case "starter.schedule": {
+      const kind = value("scheduleKind") || "cron";
+      const expression = value("expression") || "0 9 * * 1-5";
+      if (kind === "every") {
+        return [{ ...base, type: "schedule", schedule: { kind: "every", everyMs: Math.max(60_000, Number(expression) * 60_000) } }];
+      }
+      if (kind === "at") {
+        const atMs = Number.isFinite(Number(expression)) ? Number(expression) : Date.parse(expression);
+        return [{ ...base, type: "schedule", schedule: { kind: "at", atMs } }];
+      }
+      return [{ ...base, type: "schedule", schedule: { kind: "cron", expr: expression, tz: value("timezone") } }];
+    }
+    case "starter.gmail_message":
+      return [{
+        ...base,
+        type: "mailbox_event",
+        provider: "gmail",
+        eventType: "message_received",
+        subjectContains: value("subjectContains"),
+        labelContains: value("label"),
+      }];
+    case "starter.chat_message":
+    case "starter.chat_mention":
+    case "starter.chat_reaction":
+    case "starter.chat_member_joined":
+      return [{
+        ...base,
+        type: "channel_event",
+        channelType: "google_chat",
+        chatId: value("spaceName"),
+        textContains: value("textPattern"),
+        senderContains: value("sender"),
+      }];
+    case "starter.sheet_changed":
+      return [{
+        ...base,
+        type: "connector_event",
+        connectorId: "google-workspace",
+        changeType: "sheet_changed",
+        resourceUriContains: value("spreadsheetId"),
+      }];
+    case "starter.drive_item_added":
+    case "starter.drive_file_edited":
+    case "starter.drive_folder_item_edited":
+    case "starter.meeting_relative":
+    case "starter.meeting_outputs_ready":
+    case "starter.form_response":
+      return [{
+        ...base,
+        type: "connector_event",
+        connectorId: "google-workspace",
+        changeType: starter.operation.replace(/^starter\./, ""),
+        resourceUriContains:
+          value("folderId") || value("fileId") || value("formId") || value("calendarId"),
+      }];
+    case "starter.manual":
+    default:
+      return [{ ...base, type: "manual" }];
+  }
 }
 
 function normalizeConditions(conditions?: TriggerCondition[]): TriggerCondition[] {
@@ -1827,10 +2545,64 @@ function dedupeRoutineRuns(runs: RoutineRunRecord[]): RoutineRun[] {
 }
 
 function routineRunDedupeKey(run: RoutineRunRecord): string | null {
+  if (run.workflowRunId) return `workflow:${run.routineId}:${run.workflowRunId}`;
   if (run.backingTaskId) return `task:${run.routineId}:${run.backingTaskId}`;
   if (run.backingManagedSessionId) return `managed:${run.routineId}:${run.backingManagedSessionId}`;
   if (run.runKey) return `key:${run.routineId}:${run.runKey}`;
   return null;
+}
+
+function mapWorkflowRunStatus(status: RoutineWorkflowRunRecord["status"]): RoutineRunStatus {
+  switch (status) {
+    case "queued":
+      return "queued";
+    case "running":
+      return "running";
+    case "waiting_for_approval":
+      return "needs_user_action";
+    case "completed":
+      return "completed";
+    case "partial_success":
+      return "partial_success";
+    case "cancelled":
+    case "failed":
+      return "failed";
+  }
+}
+
+function summarizeWorkflowRun(
+  run: RoutineWorkflowRunRecord,
+  steps: RoutineWorkflowStepRecord[],
+): string {
+  const completed = steps.filter((step) => step.status === "completed").length;
+  const waiting = steps.filter((step) => step.status === "waiting_for_approval").length;
+  const failed = steps.filter((step) => step.status === "failed").length;
+  return [
+    `Workflow run ${run.id}`,
+    `${completed}/${steps.length} steps completed`,
+    waiting > 0 ? `${waiting} approval${waiting === 1 ? "" : "s"} pending` : "",
+    failed > 0 ? `${failed} failed` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function flattenWorkflowNodes(nodes: RoutineWorkflowDefinition["nodes"]): RoutineWorkflowDefinition["nodes"] {
+  return nodes.flatMap((node) => [node, ...flattenWorkflowNodes(node.children || [])]);
+}
+
+function googleScopeIsCovered(requiredScope: string, granted: Set<string>): boolean {
+  const required = requiredScope.toLocaleLowerCase();
+  if (granted.has(required)) return true;
+  if (required.endsWith("/gmail.readonly") && granted.has("https://www.googleapis.com/auth/gmail.modify")) {
+    return true;
+  }
+  if (required.includes("/drive.") && granted.has("https://www.googleapis.com/auth/drive")) {
+    return true;
+  }
+  return false;
 }
 
 function preferRoutineRun(a: RoutineRunRecord, b: RoutineRunRecord): RoutineRunRecord {

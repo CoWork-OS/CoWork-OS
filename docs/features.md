@@ -222,16 +222,25 @@ CoWork OS now includes a dedicated Devices tab for running and observing work ac
 
 See [Remote Access](remote-access.md) for connection patterns and [Mission Control](mission-control.md) for the company-level control surface.
 
-### Automations Control Center
+### Automation Studio and Advanced Controls
 
-Automation features are now grouped together in `Settings > Automations`:
+Select **Automations** in the main sidebar to open Automation Studio. The main-screen Studio is the structured flow authoring and operations surface:
+
+- **Discover**: describe an outcome, choose a proven template, or begin with a blank flow
+- **Library**: inspect structured flows, enabled state, recent run state, step count, and update time
+- **Builder**: configure one starter, ordered actions, typed variables, explicit Yes/No branches, workspace/account bindings, required Google scopes, reliability settings, dry runs, drafts, activation, manual runs, and turn-off controls
+- **Activity**: inspect version-pinned runs and steps, attempts, redacted output, approvals, errors, cancellation, and backing tasks
+
+Every activation is immutable. Saving a later draft cannot change the starter, account binding, secret references, actions, or limits used by the active version. The runtime adds a durable deduplicated event inbox, bounded execution, approval gates, cancellation propagation, restart recovery, sensitive-key redaction, and retention cleanup. See [Automation Studio](automation-studio.md).
+
+Advanced and compatibility features remain grouped under `Settings > Automations`:
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-6.webp" alt="Automations control center" width="700">
   <br><em>Automations separate core runtime settings, scheduled tasks, webhooks, triggers, and briefing workflows.</em>
 </p>
 
-- **Routines**: the primary automation abstraction for saved instructions, execution target, triggers, outputs, approval policy, connector policy, and recent runs
+- **Routines**: prompt-based saved instructions plus execution target, triggers, outputs, approval policy, connector policy, and recent runs; structured Studio flows reuse the Routine shell but add a versioned graph and deterministic runtime
 - **Workflow Intelligence**: Memory, Heartbeat, internal Reflection, Dreaming, and reviewable Suggestions form one always-on runtime owned by automation profiles
 - **Task Queue**: concurrency, queueing, and background execution policy
 - **Workflow Intelligence settings**: target-scoped evidence, hypotheses, critique, winner selection, suggestion dispatch, feedback learning, and guarded auto-create policy
@@ -243,19 +252,20 @@ Automation features are now grouped together in `Settings > Automations`:
 Ownership model:
 
 - `Mission Control` is the cockpit around the core runtime
-- `Routines` are the main user-facing automation object
+- main-sidebar `Automation Studio` is the primary visual multi-step flow surface
+- `Routines` remain the saved automation shell and the prompt-based compatibility surface
 - `Scheduled Tasks`, `Webhooks`, and `Event Triggers` remain low-level or generated infrastructure
 - `Triggers` are ingress and normalized evidence only
 - `Devices` are execution routing only
 - `Digital Twins` are optional persona presets and are not direct cognition owners
 
-The home dashboard also surfaces recent automation runs so background work is visible without opening Settings. See [Core Automation](core-automation.md).
+The home dashboard also surfaces recent automation runs. Use main-sidebar **Automations → Activity** for structured step-level evidence, or the advanced Settings pages for prompt-based routines and compiled backends. See [Core Automation](core-automation.md).
 
 Task view can also create a task-sourced routine from the selected task with `... > Add automation...`. The popup is prefilled from the task title/prompt, keeps the source task reference and `cowork://tasks/<taskId>` deeplink, continues the same thread by default, and compiles schedule/API/event triggers to the lower-level cron, webhook, or event engines as needed. See [Task Automations](task-automations.md).
 
 ### Routines
 
-`Routines` are now the main way to define saved automation in CoWork OS.
+`Routines` are the compatibility shell for saved automation in CoWork OS. Use main-sidebar Automation Studio for a structured multi-step graph; use **Settings → Automations → Routines** for prompt-based instructions and lower-level policy/target configuration.
 
 Each routine can carry:
 
@@ -279,7 +289,8 @@ Supported trigger types include:
 
 Current product stance:
 
-- use `Routines` first when you want one automation object with observability and policy
+- use Automation Studio first when you want a visual, deterministic, multi-step flow with testing, variables, branching, approvals, and versioned activation
+- use prompt-based `Routines` when one saved instruction block and its execution target/policy are the right abstraction
 - use `Scheduled Tasks`, `Webhooks`, or `Event Triggers` directly only when you intentionally want the lower-level surface
 - treat `Workflow Intelligence` as the always-on cognitive runtime, not as a routine trigger
 

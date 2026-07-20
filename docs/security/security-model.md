@@ -126,6 +126,23 @@ When CoWork asks for approval on export-sensitive actions, the prompt can includ
 Session-wide "Approve all" and high-autonomy permission modes do not silently allow this class of
 action. Export stays fail-closed to an explicit prompt.
 
+## Automation Studio Security
+
+Structured flows add a workflow-specific safety layer on top of the normal permission engine:
+
+- activation validates the graph, required fields, bounded settings, connected Google account/scopes, preview status, and signed-webhook secret references;
+- every live run is pinned to an immutable active version, so saving a draft cannot change live starter/account/action policy;
+- `external_write` and `data_export` actions require approval under the default/safe flow policies, and data export cannot be bypassed by a per-step safe override;
+- external writes and exports receive at most one automatic attempt;
+- custom MCP tools are resolved live, checked against the Routine connector allowlist, and validated against the tool's current input schema before invocation;
+- signed webhooks require HTTPS, apply network policy, reject private/reserved destinations before and after DNS resolution, pin the validated address, reject redirects, cap bodies/timeouts, and include HMAC plus idempotency headers;
+- signing secrets stay in secure settings and workflow definitions retain only a secret id;
+- durable input/output storage applies sensitive-key redaction and version-aware retention cleanup;
+- cancellation propagates into CoWork agent tasks, Google requests/uploads, and signed webhooks. Arbitrary MCP servers may not support mid-call abort, so remote completion must still be verified;
+- interrupted running/retrying steps resume in an explicit outcome-verification approval state rather than being replayed automatically.
+
+See [Automation Studio](../automation-studio.md#secrets-connector-policy-and-data-handling) for the complete workflow runtime and operator contract.
+
 ## Sandboxing
 
 ### macOS (Primary)

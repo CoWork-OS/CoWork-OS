@@ -2,9 +2,20 @@
  * Tests for cron schedule computation
  */
 
-import { describe, it, expect, beforeEach, vi as _vi, afterEach } from "vitest";
+import { afterAll, beforeAll, describe, it, expect, beforeEach, vi as _vi, afterEach } from "vitest";
 import { computeNextRunAtMs } from "../schedule";
 import type { CronSchedule } from "../types";
+
+const originalTimezone = process.env.TZ;
+
+beforeAll(() => {
+  process.env.TZ = "UTC";
+});
+
+afterAll(() => {
+  if (originalTimezone === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTimezone;
+});
 
 describe("computeNextRunAtMs", () => {
   describe("at schedule (one-time)", () => {
@@ -237,6 +248,44 @@ describe("computeNextRunAtMs", () => {
         expect(resultDate.getUTCMonth()).toBe(1); // February (0-indexed)
         expect(resultDate.getUTCDate()).toBe(1);
       }
+    });
+  });
+
+  describe("cron timezones", () => {
+    it("evaluates the cron expression in its configured IANA timezone", () => {
+      const now = new Date("2025-01-15T06:30:00.000Z").getTime();
+      const schedule: CronSchedule = {
+        kind: "cron",
+        expr: "0 9 * * *",
+        tz: "Europe/Istanbul",
+      };
+
+      const result = computeNextRunAtMs(schedule, now);
+
+      expect(new Date(result!).toISOString()).toBe("2025-01-16T06:00:00.000Z");
+    });
+
+    it("skips a local time that does not exist during the DST spring transition", () => {
+      const now = new Date("2025-03-09T05:00:00.000Z").getTime();
+      const schedule: CronSchedule = {
+        kind: "cron",
+        expr: "30 2 * * *",
+        tz: "America/New_York",
+      };
+
+      const result = computeNextRunAtMs(schedule, now);
+
+      expect(new Date(result!).toISOString()).toBe("2025-03-10T06:30:00.000Z");
+    });
+
+    it("returns undefined for an invalid timezone", () => {
+      const schedule: CronSchedule = {
+        kind: "cron",
+        expr: "0 9 * * *",
+        tz: "Mars/Olympus_Mons",
+      };
+
+      expect(computeNextRunAtMs(schedule, Date.now())).toBeUndefined();
     });
   });
 

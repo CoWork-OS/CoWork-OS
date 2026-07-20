@@ -4722,6 +4722,42 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runRoutineNow: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_RUN_NOW, id),
   regenerateRoutineApiToken: (routineId: string, triggerId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_REGENERATE_API_TOKEN, { routineId, triggerId }),
+  getRoutineWorkflowCapabilities: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_CAPABILITIES),
+  validateRoutineWorkflow: (workflow: Any, allowIncomplete?: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_VALIDATE, { workflow, allowIncomplete }),
+  generateRoutineWorkflow: (prompt: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_GENERATE, prompt),
+  saveRoutineWorkflowDraft: (routineId: string, workflow: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_SAVE_DRAFT, { routineId, workflow }),
+  listRoutineWorkflowVersions: (routineId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_VERSIONS, routineId),
+  activateRoutineWorkflowVersion: (routineId: string, versionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_ACTIVATE, { routineId, versionId }),
+  testRoutineWorkflow: (request: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_TEST, request),
+  listRoutineWorkflowRuns: (routineId?: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_RUNS, { routineId, limit }),
+  listRoutineWorkflowRunSteps: (runId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_STEPS, runId),
+  listRoutineWorkflowEvents: (routineId?: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_EVENTS, { routineId, limit }),
+  listRoutineWorkflowEventSamples: (source?: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_EVENT_SAMPLES, { source, limit }),
+  respondToRoutineWorkflowApproval: (request: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_RESPOND_APPROVAL, request),
+  retryRoutineWorkflowRun: (runId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_RETRY, runId),
+  cancelRoutineWorkflowRun: (runId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_CANCEL, runId),
+  enqueueRoutineWorkflowEvent: (envelope: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_ENQUEUE_EVENT, envelope),
+  listRoutineWorkflowSecrets: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_SECRETS),
+  upsertRoutineWorkflowSecret: (input: { id?: string; name: string; value: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_UPSERT_SECRET, input),
+  removeRoutineWorkflowSecret: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_REMOVE_SECRET, id),
 
   // Daily Briefing (extended)
   getLatestBriefing: (workspaceId: string) =>
@@ -6729,6 +6765,24 @@ export interface ElectronAPI {
   removeRoutine: (id: string) => Promise<boolean>;
   runRoutineNow: (id: string) => Promise<Any | null>;
   regenerateRoutineApiToken: (routineId: string, triggerId: string) => Promise<Any | null>;
+  getRoutineWorkflowCapabilities: () => Promise<Any>;
+  validateRoutineWorkflow: (workflow: Any, allowIncomplete?: boolean) => Promise<Any>;
+  generateRoutineWorkflow: (prompt: string) => Promise<Any>;
+  saveRoutineWorkflowDraft: (routineId: string, workflow: Any) => Promise<Any>;
+  listRoutineWorkflowVersions: (routineId: string) => Promise<Any[]>;
+  activateRoutineWorkflowVersion: (routineId: string, versionId: string) => Promise<Any | null>;
+  testRoutineWorkflow: (request: Any) => Promise<Any>;
+  listRoutineWorkflowRuns: (routineId?: string, limit?: number) => Promise<Any[]>;
+  listRoutineWorkflowRunSteps: (runId: string) => Promise<Any[]>;
+  listRoutineWorkflowEvents: (routineId?: string, limit?: number) => Promise<Any[]>;
+  listRoutineWorkflowEventSamples: (source?: string, limit?: number) => Promise<Any[]>;
+  respondToRoutineWorkflowApproval: (request: Any) => Promise<Any>;
+  retryRoutineWorkflowRun: (runId: string) => Promise<Any>;
+  cancelRoutineWorkflowRun: (runId: string) => Promise<Any | null>;
+  enqueueRoutineWorkflowEvent: (envelope: Any) => Promise<Any>;
+  listRoutineWorkflowSecrets: () => Promise<Any[]>;
+  upsertRoutineWorkflowSecret: (input: { id?: string; name: string; value: string }) => Promise<Any>;
+  removeRoutineWorkflowSecret: (id: string) => Promise<boolean>;
 
   // Control Plane (WebSocket Gateway)
   getControlPlaneSettings: () => Promise<ControlPlaneSettingsData>;

@@ -4,15 +4,16 @@ Task automations turn an existing task into scheduled or triggered follow-up wor
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-6.webp" alt="Automations dashboard" width="700">
-  <br><em>Saved automations and scheduled work are managed from the Automations surface.</em>
+  <br><em>Task-sourced prompt automations and their compiled scheduled work remain visible in the advanced Automations settings.</em>
 </p>
 
 ## Where It Fits
 
-CoWork's automation model has three layers:
+CoWork's automation model has four related layers:
 
 - `Workflow Intelligence` is the always-on cognitive runtime.
-- `Routines` are the primary saved automation product for instructions, targets, triggers, outputs, policy, and observability.
+- main-sidebar `Automation Studio` builds versioned deterministic multi-step flows.
+- `Routines` are the shared saved-automation shell and the prompt-based product for instructions, targets, triggers, outputs, policy, and observability.
 - `Scheduled Tasks`, `Webhooks`, and `Event Triggers` are lower-level execution engines used directly by advanced users and as compiled backends for routines.
 
 Task automations create task-sourced `Routines`. A routine can then compile to the lower-level engine that matches its trigger:
@@ -21,7 +22,7 @@ Task automations create task-sourced `Routines`. A routine can then compile to t
 - API triggers compile into `Webhooks`
 - event triggers compile into `Event Triggers`
 
-This keeps the task menu on the same routine-first automation path as the rest of the product while still using the durable cron, hook, and event infrastructure underneath.
+This keeps the task menu on the prompt-based Routine path while still using the durable cron, hook, and event infrastructure underneath. Use [Automation Studio](automation-studio.md) when the automation needs an explicit structured action graph, variables, branches, dry-run scope review, or step-level approvals.
 
 ## Task Overflow Menu
 

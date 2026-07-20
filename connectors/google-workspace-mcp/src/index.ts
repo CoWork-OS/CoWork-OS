@@ -625,6 +625,19 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'google-workspace.sheets_values_clear',
+    description: 'Clear values from a spreadsheet range',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        spreadsheetId: { type: 'string', description: 'The spreadsheet ID' },
+        range: { type: 'string', description: 'A1 notation range to clear' },
+      },
+      required: ['spreadsheetId', 'range'],
+      additionalProperties: false,
+    },
+  },
 
   // ── Docs ─────────────────────────────────────────────────
   {
@@ -779,6 +792,19 @@ const tools: MCPTool[] = [
         },
       },
       required: ['fileId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'google-workspace.drive_folders_create',
+    description: 'Create a folder in Google Drive',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Folder name' },
+        parentId: { type: 'string', description: 'Optional parent folder ID' },
+      },
+      required: ['name'],
       additionalProperties: false,
     },
   },
@@ -1420,6 +1446,15 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
     return { ok: true, data: result };
   },
 
+  'google-workspace.sheets_values_clear': async (args) => {
+    const result = await googleRequest(
+      'POST',
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(args.spreadsheetId)}/values/${encodeURIComponent(args.range)}:clear`,
+      {},
+    );
+    return { ok: true, data: result };
+  },
+
   // ── Docs ─────────────────────────────────────────────────
 
   'google-workspace.docs_create': async (args) => {
@@ -1564,6 +1599,21 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(args.fileId)}`,
       undefined,
       params,
+    );
+    return { ok: true, data: result };
+  },
+
+  'google-workspace.drive_folders_create': async (args) => {
+    const body: Record<string, any> = {
+      name: args.name,
+      mimeType: 'application/vnd.google-apps.folder',
+    };
+    if (args.parentId) body.parents = [args.parentId];
+    const result = await googleRequest(
+      'POST',
+      'https://www.googleapis.com/drive/v3/files',
+      body,
+      { fields: 'id,name,mimeType,parents,webViewLink' },
     );
     return { ok: true, data: result };
   },

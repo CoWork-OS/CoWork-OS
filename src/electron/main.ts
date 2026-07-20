@@ -28,6 +28,7 @@ import {
   getNotificationService,
   setHeartbeatWakeSubmitter,
   setHookAgentDispatchObserver,
+  setHookWorkflowDispatchObserver,
   setHookTriggerEmitter,
 } from "./ipc/handlers";
 import { setupMissionControlHandlers } from "./ipc/mission-control-handlers";
@@ -190,6 +191,8 @@ import { EventTriggerService } from "./triggers/EventTriggerService";
 import { setupTriggerHandlers } from "./ipc/trigger-handlers";
 import { setupRoutineHandlers } from "./ipc/routine-handlers";
 import { RoutineService } from "./routines/service";
+import { createRoutineWorkflowActionExecutor } from "./routines/workflow/action-executor";
+import { GoogleWorkspaceWorkflowStarterWatcher } from "./routines/workflow/google-starter-watcher";
 import { DailyBriefingService } from "./briefing/DailyBriefingService";
 import {
   syncDailyBriefingCronJob,
@@ -265,6 +268,7 @@ let symphonyService: SymphonyService | null = null;
 let automationOutcomeService: AutomationOutcomeService | null = null;
 let eventTriggerService: EventTriggerService | null = null;
 let routineService: RoutineService | null = null;
+let workflowStarterWatcher: GoogleWorkspaceWorkflowStarterWatcher | null = null;
 let coreTraceService: CoreTraceService | null = null;
 let coreMemoryCandidateService: CoreMemoryCandidateService | null = null;
 let coreMemoryDistiller: CoreMemoryDistiller | null = null;
@@ -1073,6 +1077,7 @@ applyStableUserDataPath();
 
 const CLI_DIRECT_RUN_FLAG = "--cowork-cli-direct-run";
 const CLI_APPROVAL_RESPONSE_FLAG = "--cowork-cli-approval-response";
+const DEV_SINGLE_INSTANCE_EXIT_CODE = 73;
 
 function isCliDirectRunMode(): boolean {
   return process.argv.includes(CLI_DIRECT_RUN_FLAG);
@@ -1158,7 +1163,15 @@ function isForegroundUserTask(task: Task): boolean {
   return source === "manual" || source === "api";
 }
 if (!gotTheLock) {
-  app.quit();
+  if (process.env.NODE_ENV === "development") {
+    console.error(
+      `[startup] Another CoWork OS instance is already using ${getUserDataDir()}. ` +
+        "Quit the existing app before running `npm run dev` so the new Electron main process and Vite renderer use the same build.",
+    );
+    app.exit(DEV_SINGLE_INSTANCE_EXIT_CODE);
+  } else {
+    app.quit();
+  }
 } else {
   function flushPendingTaskDeeplink(): void {
     const taskId = pendingTaskDeeplinkId;
@@ -2046,6 +2059,12 @@ if (!gotTheLock) {
             workspaceId: workspace.id,
             workspacePath: workspace.path,
           };
+        },
+        executeWorkflow: async ({ routineId, jobId, runAtMs }) => {
+          if (!routineService) {
+            throw new Error("Routine service has not finished starting.");
+          }
+          return routineService.runScheduledWorkflow(routineId, jobId, runAtMs);
         },
         createTask: async (params) => {
           const isManagedBriefing =
@@ -3387,6 +3406,28 @@ if (!gotTheLock) {
       setupTriggerHandlers(currentTriggerService, syncMcpTriggerSubscriptions);
       const managedSessionService = new ManagedSessionService(db, agentDaemon);
       const routineTaskRepo = new TaskRepository(db);
+      const executeWorkflowAction = createRoutineWorkflowActionExecutor({
+        createAgentTask: async (params) => {
+          const task = await agentDaemon.createTask({
+            title: params.title,
+            prompt: params.prompt,
+            workspaceId: params.workspaceId,
+            source: "api",
+          });
+          return { id: task.id };
+        },
+        getTaskSnapshot: (taskId) => {
+          const task = routineTaskRepo.findById(taskId);
+          if (!task) return null;
+          return {
+            status: task.status,
+            resultSummary: task.resultSummary,
+            semanticSummary: task.semanticSummary,
+            error: task.error,
+          };
+        },
+        cancelAgentTask: (taskId) => agentDaemon.cancelTask(taskId),
+      });
       routineService = new RoutineService({
         db,
         getCronService: () => cronService,
@@ -3462,8 +3503,15 @@ if (!gotTheLock) {
           }
         },
         onTriggerMutation: syncMcpTriggerSubscriptions,
+        executeWorkflowAction,
       });
       setupRoutineHandlers(routineService);
+      routineService.startWorkflowRuntime();
+      workflowStarterWatcher = new GoogleWorkspaceWorkflowStarterWatcher(db, routineService);
+      workflowStarterWatcher.start();
+      currentTriggerService.setFireInterceptor((trigger, event) =>
+        routineService!.interceptManagedEventTrigger(trigger, event),
+      );
       void routineService.reconcileStaleTimeoutRuns().catch((error) => {
         logger.debug("[Routines] Failed to reconcile stale timeout runs:", error);
       });
@@ -3479,6 +3527,10 @@ if (!gotTheLock) {
       agentDaemon.on("task_status", refreshRoutineRunsForTask);
       setHookAgentDispatchObserver((payload) => {
         routineService?.recordApiTriggerDispatch(payload);
+      });
+      setHookWorkflowDispatchObserver(async ({ routineId, payload, metadata }) => {
+        if (!routineService) throw new Error("Routine service is not available");
+        return routineService.runWebhookWorkflow(routineId, payload, metadata);
       });
       MailboxAutomationHub.configure({
         triggerService: eventTriggerService,
@@ -4060,6 +4112,10 @@ if (!gotTheLock) {
 
     // Destroy tray
     trayManager.destroy();
+
+    routineService?.stopWorkflowRuntime();
+    workflowStarterWatcher?.stop();
+    workflowStarterWatcher = null;
 
     // Stop cron service (async to properly shutdown webhook server)
     if (cronService) {

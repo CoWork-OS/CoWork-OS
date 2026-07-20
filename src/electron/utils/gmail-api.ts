@@ -39,6 +39,7 @@ export interface GmailRequestOptions {
   query?: Record<string, string | number | boolean | string[] | undefined>;
   body?: Any;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface GmailRequestResult {
@@ -91,6 +92,8 @@ export async function gmailRequest(
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const abort = () => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener("abort", abort, { once: true });
 
     try {
       const response = await fetch(url, {
@@ -120,11 +123,17 @@ export async function gmailRequest(
       };
     } catch (error: Any) {
       if (error?.name === "AbortError") {
+        if (options.signal?.aborted) {
+          throw options.signal.reason instanceof Error
+            ? options.signal.reason
+            : new Error("Gmail API request was cancelled");
+        }
         throw new Error("Gmail API request timed out");
       }
       throw error;
     } finally {
       clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", abort);
     }
   };
 

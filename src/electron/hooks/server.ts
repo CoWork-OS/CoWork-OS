@@ -81,6 +81,12 @@ export interface HooksServerHandlers {
     message: string;
   }) => Promise<void>;
 
+  onWorkflow?: (action: {
+    routineId: string;
+    payload: Record<string, unknown>;
+    metadata?: Record<string, string>;
+  }) => Promise<{ runId: string; status: string }>;
+
   /**
    * Respond to an approval request for a task
    */
@@ -635,6 +641,31 @@ export class HooksServer {
         }
       } else {
         this.sendJsonResponse(res, 503, { success: false, error: "Agent handler not configured" });
+      }
+    } else if (action.kind === "workflow") {
+      if (this.handlers.onWorkflow) {
+        try {
+          const result = await this.handlers.onWorkflow({
+            routineId: action.routineId,
+            payload: action.payload,
+            metadata: action.metadata,
+          });
+          this.sendJsonResponse(
+            res,
+            action.response?.statusCode ?? 202,
+            {
+              success: true,
+              status: result.status,
+              runId: result.runId,
+              ...(action.response?.message ? { message: action.response.message } : {}),
+            },
+          );
+        } catch (error) {
+          log.error("Workflow handler error:", error);
+          this.sendJsonResponse(res, 500, { success: false, error: String(error) });
+        }
+      } else {
+        this.sendJsonResponse(res, 503, { success: false, error: "Workflow handler not configured" });
       }
     } else if (action.kind === "task_message") {
       if (this.handlers.onTaskMessage) {

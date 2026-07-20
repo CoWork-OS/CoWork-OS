@@ -327,6 +327,13 @@ export class MCPClientManager extends EventEmitter {
     return this.toolServerMap.get(toolName) || null;
   }
 
+  getConnectorIdForTool(toolName: string): string | null {
+    const serverId = this.getServerIdForTool(toolName);
+    if (!serverId) return null;
+    const server = MCPSettingsManager.getServer(serverId);
+    return server ? this.detectConnectorId(server) : null;
+  }
+
   async syncTriggerResourceSubscriptions(
     triggers: Array<{ serverId?: string; connectorId?: string; resourceUri?: string }>,
   ): Promise<void> {

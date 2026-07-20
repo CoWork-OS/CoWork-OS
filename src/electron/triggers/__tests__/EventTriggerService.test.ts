@@ -2,6 +2,18 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { EventTriggerService } from "../EventTriggerService";
 import { EventTriggerServiceDeps, TriggerEvent } from "../types";
 
+const nativeSqliteAvailable = await import("better-sqlite3")
+  .then((module) => {
+    try {
+      const probe = new module.default(":memory:");
+      probe.close();
+      return true;
+    } catch {
+      return false;
+    }
+  })
+  .catch(() => false);
+
 function makeDeps(overrides: Partial<EventTriggerServiceDeps> = {}): EventTriggerServiceDeps {
   return {
     createTask: vi.fn().mockResolvedValue({ id: "new-task-1" }),
@@ -119,6 +131,54 @@ describe("EventTriggerService", () => {
     expect(deps.createTask).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: "Handle deployment" }),
     );
+  });
+
+  it("allows Routine v2 to intercept a matched trigger before task creation", async () => {
+    const interceptor = vi.fn().mockResolvedValue({ handled: true, actionResult: "workflow_queued" });
+    service.setFireInterceptor(interceptor);
+    const trigger = service.addTrigger({
+      name: "Workflow",
+      enabled: true,
+      source: "channel_message",
+      conditions: [],
+      action: { type: "create_task", config: { prompt: "Legacy task" } },
+      workspaceId: "ws-1",
+    });
+
+    await service.evaluateEvent(makeMessageEvent("run workflow"));
+
+    expect(interceptor).toHaveBeenCalledTimes(1);
+    expect(deps.createTask).not.toHaveBeenCalled();
+    expect(service.getHistory(trigger.id)[0]?.actionResult).toBe("workflow_queued");
+  });
+
+  (nativeSqliteAvailable ? it : it.skip)("queues events while task capacity is full and replays them later", async () => {
+    const Database = (await import("better-sqlite3")).default;
+    const db = new Database(":memory:");
+    let activeCount = 4;
+    const localDeps = makeDeps({ getActiveTaskCount: () => activeCount });
+    const localService = new EventTriggerService(localDeps, db);
+    localService.start();
+    localService.addTrigger({
+      name: "Queued",
+      enabled: true,
+      source: "channel_message",
+      conditions: [],
+      action: { type: "create_task", config: { prompt: "Queued event" } },
+      workspaceId: "ws-1",
+    });
+
+    await localService.evaluateEvent(makeMessageEvent("queued"));
+    expect(db.prepare("SELECT COUNT(*) AS count FROM event_trigger_queue").get().count).toBe(1);
+    expect(localDeps.createTask).not.toHaveBeenCalled();
+
+    activeCount = 0;
+    await localService.drainPendingEvents();
+
+    expect(localDeps.createTask).toHaveBeenCalledTimes(1);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM event_trigger_queue").get().count).toBe(0);
+    localService.stop();
+    db.close();
   });
 
   it("does not fire disabled triggers", async () => {

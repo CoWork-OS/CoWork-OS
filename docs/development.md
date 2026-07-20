@@ -222,6 +222,40 @@ Use `npm run build:react` output as a budget check: the main renderer entry shou
 `450 kB`. If the entry chunk grows unexpectedly, rebuild with sourcemaps and inspect the generated
 `dist/renderer/assets/index-*.js.map` to identify newly eager modules.
 
+## Automation Studio
+
+Automation Studio is the main-sidebar structured-flow surface. It is separate from the prompt-based Routine editor and advanced automation tabs in Settings, while reusing the Routine shell for workspace, approval policy, connector policy, trigger compilation, and product-level run summaries. See [Automation Studio](automation-studio.md) for the full operator, runtime, security, persistence, troubleshooting, and validation contract.
+
+Implementation rules:
+
+- Route `currentView === "automations"` from `src/renderer/App.tsx` to `AutomationStudioPanel`; keep `src/renderer/components/Settings.tsx` free of that panel.
+- Keep the workflow exchange contract in `src/shared/routine-workflow.ts` serializable and versioned. Do not import Electron-only code into it.
+- Register every `routine:workflow*` channel through `setupRoutineHandlers` before the renderer loads, and expose only the typed preload methods. `npm run dev:react` cannot validate this route because it has no Electron preload or IPC handlers.
+- Run `RoutineService.ensureSchema()` before workflow repository indexes that depend on compatibility columns such as `routine_runs.workflow_run_id`. Database upgrades must remain additive and must not require deleting app data.
+- Save every structured edit as a new draft version. Runtime starter polling, action account resolution, activation validation, and recovery must resolve the immutable active version rather than the mutable compatibility `routine.workflow` draft.
+- Recover queued/running runs before draining new inbox events. Requeue `processing` events at startup and move interrupted running/retrying steps to explicit outcome verification instead of replaying them automatically.
+- Thread one `AbortSignal` through the engine, action adapters, Google requests/uploads, signed webhook transport, and backing agent cancellation. Keep external-write/data-export automatic attempts capped at one.
+- Enforce connector allowlists and validate custom MCP arguments against the live tool schema immediately before invocation.
+- Redact sensitive-key payloads before persistence and keep retention maintenance version-aware.
+- Preserve `.automation-studio-main` as the vertical scroll owner. Catalog and Activity panes may scroll internally; fixed viewport heights must not trap the lower test/scope panel. Keep long card text wrapping and responsive builder collapse covered by layout tests.
+
+Focused validation:
+
+```bash
+npx vitest run \
+  src/electron/routines/workflow/__tests__/validation.test.ts \
+  src/electron/routines/workflow/__tests__/repository.test.ts \
+  src/electron/routines/workflow/__tests__/engine.test.ts \
+  src/electron/routines/workflow/__tests__/action-executor.test.ts \
+  src/electron/routines/workflow/__tests__/google-starter-watcher.test.ts \
+  src/renderer/components/__tests__/automation-studio-placement.test.ts \
+  src/renderer/components/__tests__/automation-studio-layout.test.ts \
+  src/renderer/components/__tests__/automation-studio-branching.test.ts
+npm run type-check
+npm run build:electron
+npm run build:react
+```
+
 ## Task Automation UI
 
 Task view supports `... > Add automation...`, a renderer-side shortcut that creates a task-sourced routine from the current task. Schedule, API, and event triggers then compile to the existing cron, webhook, and event-trigger engines.

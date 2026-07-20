@@ -12254,6 +12254,13 @@ let hookAgentDispatchObserver:
       response?: { statusCode?: number; message?: string; includeTaskId?: boolean };
     }) => void)
   | null = null;
+let hookWorkflowDispatchObserver:
+  | ((payload: {
+      routineId: string;
+      payload: Record<string, unknown>;
+      metadata?: Record<string, string>;
+    }) => Promise<{ runId: string; status: string }>)
+  | null = null;
 
 /**
  * Get the hooks server instance
@@ -12281,6 +12288,18 @@ export function setHookAgentDispatchObserver(
     | null,
 ): void {
   hookAgentDispatchObserver = observer;
+}
+
+export function setHookWorkflowDispatchObserver(
+  observer:
+    | ((payload: {
+        routineId: string;
+        payload: Record<string, unknown>;
+        metadata?: Record<string, string>;
+      }) => Promise<{ runId: string; status: string }>)
+    | null,
+): void {
+  hookWorkflowDispatchObserver = observer;
 }
 
 /**
@@ -12398,6 +12417,12 @@ async function setupHooksHandlers(agentDaemon: AgentDaemon): Promise<void> {
           .catch((err) => {
             logger.error("[Hooks] Failed to process task message:", err);
           });
+      },
+      onWorkflow: async (action) => {
+        if (!hookWorkflowDispatchObserver) {
+          throw new Error("Routine workflow service is not available");
+        }
+        return hookWorkflowDispatchObserver(action);
       },
       onApprovalRespond: async (action) => {
         logger.debug(

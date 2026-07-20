@@ -403,6 +403,31 @@ Then inspect:
 logs/dev-latest.log
 ```
 
+## Automation Studio issues
+
+Open structured flows from **Automations** in the main sidebar. Automation Studio is not under Settings; **Settings > Automations** contains the advanced prompt-based Routine, queue, schedule, hook, trigger, briefing, and Workflow Intelligence controls.
+
+If Studio reports `No handler registered for 'routine:workflowCapabilities'`, the renderer is not connected to the matching Electron runtime. Do not use `npm run dev:react` for this check. Start the desktop application with `npm run dev`. If the error persists, follow the required runtime triage order:
+
+1. Inspect `logs/dev-latest.log`.
+2. Inspect `logs/dev-latest.jsonl` when structured process/IPC fields help.
+3. If the capture is missing or stale, run `npm run dev:log` and reproduce once.
+4. Look for handler registration, preload, `did_finish_load`, `app_shell_ready`, renderer-process, and GPU-process failures.
+
+If the Studio content is misaligned, clipped, or cannot scroll, confirm that `App.tsx` renders `<main className="main-content automation-studio-main">` and that `automation-studio.css` leaves that main element with `overflow-y: auto`. The Studio must not inherit the normal task-content width cap or a fixed-height/hidden-overflow parent. Run the `automation-studio-placement` and `automation-studio-layout` tests after shell or CSS changes.
+
+If `npm run dev` reports an existing development instance, or reaches the OpenAI OAuth startup message and then exits without `did_finish_load` or `app_shell_ready`, quit the existing CoWork OS app from its menu or Dock and retry. CoWork intentionally permits only one Electron process per user-data directory so two runtimes cannot contend on SQLite or mark each other's work as orphaned. The dev launcher detects an existing process before rebranding the Electron bundle because macOS can abort inside application registration if that same bundle is modified and relaunched while active. Removing `dist` does not stop an already running Electron process.
+
+If **Turn on** fails, read the inline validation message and check required fields, graph cycles, preview operations, workflow limits, the selected Google account and scopes, and signed-webhook secret references. Saving a draft is intentionally more permissive than activation.
+
+If a Google starter does not fire, confirm the flow is on, inspect the active version rather than a newer draft, reconnect Google Workspace when scopes are missing, and allow the first poll to establish a non-replay baseline cursor. Gmail and Drive page tokens continue across bounded poll windows, so large backlogs may require later polls.
+
+If Activity shows a step waiting for approval after restart, verify whether the remote action already happened before selecting **Approve once**. The runtime intentionally does not repeat an interrupted action whose external outcome is unknown.
+
+If startup reports a missing `workflow_run_id` column, do not delete the app database. Current `RoutineService.ensureSchema()` adds compatibility columns before creating their indexes. Confirm the current Electron build is running and inspect the migration failure in the dev log.
+
+See [Automation Studio](automation-studio.md#troubleshooting) for connector-policy, secret-removal, signed-webhook, pagination, cancellation, recovery, and developer validation details.
+
 ## Task automation creation issues
 
 If `... > Add automation...` is missing from task view:

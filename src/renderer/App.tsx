@@ -183,6 +183,7 @@ const BrowserView = lazy(() =>
 const HomeDashboard = lazy(() =>
   import("./components/HomeDashboard").then((module) => ({ default: module.HomeDashboard })),
 );
+const AutomationStudioPanel = lazy(() => import("./components/AutomationStudioPanel"));
 const HealthPanel = lazy(() =>
   import("./components/HealthPanel").then((module) => ({ default: module.HealthPanel })),
 );
@@ -608,6 +609,7 @@ function updateTaskPreservingIdentity(
 
 type AppView =
   | "home"
+  | "automations"
   | "main"
   | "settings"
   | "browser"
@@ -5747,6 +5749,7 @@ export function App() {
       </div>
       {(currentView === "main" ||
         currentView === "home" ||
+        currentView === "automations" ||
         currentView === "devices" ||
         currentView === "health" ||
         currentView === "ideas" ||
@@ -5763,7 +5766,7 @@ export function App() {
                 workspace={currentWorkspace}
                 tasks={tasks}
                 selectedTaskId={selectedTaskId}
-                isHomeActive={currentView === "home"}
+                isAutomationsActive={currentView === "automations"}
                 isIdeasActive={currentView === "ideas"}
                 isInboxAgentActive={currentView === "inboxAgent"}
                 isAgentsActive={currentView === "agents"}
@@ -5775,7 +5778,7 @@ export function App() {
                 isLoadingMoreTasks={isLoadingMoreTasks}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
                 onSelectTask={handleSelectTaskFromShell}
-                onOpenHome={() => setCurrentView("home")}
+                onOpenAutomations={() => setCurrentView("automations")}
                 onOpenIdeas={() => setCurrentView("ideas")}
                 onOpenInboxAgent={() => setCurrentView("inboxAgent")}
                 onOpenAgents={() => setCurrentView("agents")}
@@ -5801,7 +5804,17 @@ export function App() {
                 currentView === "main" ? <TaskViewSkeleton /> : <LazyViewFallback />
               }
             >
-              {currentView === "home" ? (
+              {currentView === "automations" ? (
+                <main className="main-content automation-studio-main">
+                  <AutomationStudioPanel
+                    workspaceId={currentWorkspace?.id}
+                    onOpenTask={(taskId) => {
+                      setSelectedTaskId(taskId);
+                      setCurrentView("main");
+                    }}
+                  />
+                </main>
+              ) : currentView === "home" ? (
                 <HomeDashboard
                   workspace={currentWorkspace}
                   tasks={tasks}

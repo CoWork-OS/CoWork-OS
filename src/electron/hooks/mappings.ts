@@ -243,6 +243,19 @@ function buildActionFromMapping(
     };
   }
 
+  if (mapping.action === "workflow") {
+    return {
+      ok: true,
+      action: {
+        kind: "workflow",
+        routineId: mapping.metadata?.routineId || "",
+        payload: ctx.payload,
+        metadata: mapping.metadata,
+        response: mapping.response,
+      },
+    };
+  }
+
   const message = renderTemplate(mapping.messageTemplate ?? "", ctx);
   if (mapping.action === "task_message") {
     return {
@@ -286,7 +299,7 @@ function buildActionFromMapping(
 function mergeAction(
   base: HookAction,
   override: HookTransformResult,
-  defaultAction: "wake" | "agent" | "task_message",
+  defaultAction: "wake" | "agent" | "task_message" | "workflow",
 ): HookMappingResult {
   if (!override) {
     return validateAction(base);
@@ -295,7 +308,8 @@ function mergeAction(
   const kind = (override.kind ?? base.kind ?? defaultAction) as
     | "wake"
     | "agent"
-    | "task_message";
+    | "task_message"
+    | "workflow";
 
   if (kind === "wake") {
     const baseWake = base.kind === "wake" ? base : undefined;
@@ -316,6 +330,18 @@ function mergeAction(
       workspaceId: override.workspaceId ?? baseTaskMessage?.workspaceId,
       message,
       response: override.response ?? baseTaskMessage?.response,
+    });
+  }
+
+
+  if (kind === "workflow") {
+    const baseWorkflow = base.kind === "workflow" ? base : undefined;
+    return validateAction({
+      kind: "workflow",
+      routineId: baseWorkflow?.routineId || "",
+      payload: baseWorkflow?.payload || {},
+      metadata: override.metadata ?? baseWorkflow?.metadata,
+      response: override.response ?? baseWorkflow?.response,
     });
   }
 
@@ -355,6 +381,13 @@ function validateAction(action: HookAction): HookMappingResult {
   if (action.kind === "wake") {
     if (!action.text?.trim()) {
       return { ok: false, error: "hook mapping requires text" };
+    }
+    return { ok: true, action };
+  }
+
+  if (action.kind === "workflow") {
+    if (!action.routineId.trim()) {
+      return { ok: false, error: "workflow hook mapping requires metadata.routineId" };
     }
     return { ok: true, action };
   }

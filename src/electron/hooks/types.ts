@@ -60,7 +60,7 @@ export interface HookMappingConfig {
     type?: string;
   };
   token?: string;
-  action?: "wake" | "agent" | "task_message";
+  action?: "wake" | "agent" | "task_message" | "workflow";
   targetTaskId?: string;
   wakeMode?: "now" | "next-heartbeat";
   name?: string;
@@ -98,7 +98,7 @@ export interface HookMappingResolved {
   matchSource?: string;
   matchType?: string;
   token?: string;
-  action: "wake" | "agent" | "task_message";
+  action: "wake" | "agent" | "task_message" | "workflow";
   targetTaskId?: string;
   wakeMode?: "now" | "next-heartbeat";
   name?: string;
@@ -202,12 +202,23 @@ export type HookAction =
       taskId: string;
       workspaceId?: string;
       message: string;
-    response?: {
-      statusCode?: number;
-      message?: string;
-      includeTaskId?: boolean;
+      response?: {
+        statusCode?: number;
+        message?: string;
+        includeTaskId?: boolean;
+      };
+    }
+  | {
+      kind: "workflow";
+      routineId: string;
+      payload: Record<string, unknown>;
+      metadata?: Record<string, string>;
+      response?: {
+        statusCode?: number;
+        message?: string;
+        includeTaskId?: boolean;
+      };
     };
-  };
 
 export type HookMappingResult =
   | { ok: true; action: HookAction }

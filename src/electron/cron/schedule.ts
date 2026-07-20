@@ -52,7 +52,7 @@ export function computeNextRunAtMs(schedule: CronSchedule, nowMs: number): numbe
  * - "0 0 1 * *" - First of every month
  * - "0/15 * * * *" - Every 15 minutes (step syntax)
  */
-function computeNextCronRun(expr: string, now: Date, _tz?: string): number | undefined {
+function computeNextCronRun(expr: string, now: Date, tz?: string): number | undefined {
   const parts = expr.split(/\s+/);
   if (parts.length !== 5) {
     console.warn("[Cron] Invalid cron expression (expected 5 fields):", expr);
@@ -83,11 +83,9 @@ function computeNextCronRun(expr: string, now: Date, _tz?: string): number | und
   const maxIterations = 365 * 2 * 24 * 60; // ~2 years of minutes
 
   for (let i = 0; i < maxIterations; i++) {
-    const month = candidate.getMonth() + 1; // 1-12
-    const day = candidate.getDate();
-    const dow = candidate.getDay(); // 0-6, 0 = Sunday
-    const hour = candidate.getHours();
-    const minute = candidate.getMinutes();
+    const parts = getCronDateParts(candidate, tz);
+    if (!parts) return undefined;
+    const { month, day, dow, hour, minute } = parts;
 
     // Check if this time matches the cron expression
     if (
@@ -106,6 +104,71 @@ function computeNextCronRun(expr: string, now: Date, _tz?: string): number | und
 
   // No valid time found within 2 years
   return undefined;
+}
+
+type CronDateParts = {
+  month: number;
+  day: number;
+  dow: number;
+  hour: number;
+  minute: number;
+};
+
+const cronFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const DOW_BY_SHORT_NAME: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+function getCronDateParts(date: Date, timeZone?: string): CronDateParts | null {
+  if (!timeZone) {
+    return {
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+      dow: date.getDay(),
+      hour: date.getHours(),
+      minute: date.getMinutes(),
+    };
+  }
+
+  try {
+    let formatter = cronFormatterCache.get(timeZone);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hourCycle: "h23",
+        month: "numeric",
+        day: "numeric",
+        weekday: "short",
+        hour: "numeric",
+        minute: "numeric",
+      });
+      // Invalid IANA zones throw when the formatter is first used.
+      formatter.format(date);
+      cronFormatterCache.set(timeZone, formatter);
+    }
+    const values = Object.fromEntries(
+      formatter
+        .formatToParts(date)
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
+    );
+    return {
+      month: Number(values.month),
+      day: Number(values.day),
+      dow: DOW_BY_SHORT_NAME[values.weekday],
+      hour: Number(values.hour),
+      minute: Number(values.minute),
+    };
+  } catch {
+    console.warn(`[Cron] Invalid timezone: ${timeZone}`);
+    return null;
+  }
 }
 
 /**

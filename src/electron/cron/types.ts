@@ -57,7 +57,7 @@ export interface CronWorkspaceContext {
   runWorkspaceRelativePath?: string;
 }
 
-export type CronJobRunMode = "new_task" | "thread_follow_up";
+export type CronJobRunMode = "new_task" | "thread_follow_up" | "workflow";
 
 export interface CronThreadAutomationConfig {
   sourceTaskId?: string;
@@ -125,6 +125,8 @@ export interface CronJob {
    */
   runMode?: CronJobRunMode;
   targetTaskId?: string;
+  /** Routine v2 identifier used when runMode is `workflow`. */
+  workflowRoutineId?: string;
   threadAutomation?: CronThreadAutomationConfig;
   // Advanced options
   timeoutMs?: number; // Maximum execution time (default: no timeout)
@@ -249,6 +251,16 @@ export interface CronServiceDeps {
     allowUserInput?: boolean;
     agentConfig?: AgentConfig;
   }) => Promise<{ queued: boolean }>;
+  executeWorkflow?: (params: {
+    routineId: string;
+    jobId: string;
+    runAtMs: number;
+  }) => Promise<{
+    runId: string;
+    status: "queued" | "running" | "completed" | "partial_success" | "needs_user_action" | "failed";
+    resultText?: string;
+    error?: string;
+  }>;
   // Optional task status hooks (enables waiting for completion + delivering final output)
   getTaskStatus?: (
     taskId: string,

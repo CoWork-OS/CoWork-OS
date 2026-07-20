@@ -49,6 +49,21 @@ session, workspace, or profile rules.
 For the full evaluation order, rule precedence, and persistence model, see
 [Permission System](permission-system.md).
 
+### Automation Studio Approvals
+
+Main-sidebar Automation Studio classifies each step as read, local write, external write, or data export. New flows default to confirming external work; data exports always pause in a live run. A step's **Skip for safe actions** option applies only to read/local work and cannot suppress external-write or export approval.
+
+Before turning on a flow:
+
+1. run a dry test and inspect the previewed destinations and payload shape;
+2. review every required Google scope and the selected account;
+3. keep connector allowlists narrow when a flow can call MCP tools;
+4. use a dedicated signing secret for each webhook receiver and rotate it by turning off affected flows first;
+5. verify any interrupted remote action before approving a post-restart retry;
+6. remember that stored-payload redaction is key-based defense in depth, not permission to place secrets in ordinary free-text fields.
+
+See [Automation Studio](automation-studio.md#approval-policy) for the policy matrix, signed webhook controls, cancellation boundaries, recovery rules, and retention behavior.
+
 ### Workspace Rule Management
 
 Workspace-local permission rules are visible in **Settings > System & Security** for the active

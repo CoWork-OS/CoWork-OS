@@ -77,6 +77,60 @@ describeWithSqlite("RoutineService", () => {
     });
   });
 
+  it("upgrades a legacy routine_runs table before creating workflow indexes", () => {
+    db.exec(`
+      DROP TABLE routine_runs;
+      CREATE TABLE routine_runs (
+        id TEXT PRIMARY KEY,
+        routine_id TEXT NOT NULL,
+        trigger_id TEXT NOT NULL,
+        trigger_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER,
+        source_event_summary TEXT,
+        backing_task_id TEXT,
+        backing_managed_session_id TEXT,
+        output_status TEXT NOT NULL DEFAULT 'none',
+        error_summary TEXT,
+        artifacts_summary TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `);
+
+    expect(
+      () =>
+        new RoutineServiceCtor({
+          db,
+          getCronService: () => cronService as Any,
+          getEventTriggerService: () => eventTriggerService,
+          loadHooksSettings: () => hooksSettings,
+          saveHooksSettings: (settings) => {
+            hooksSettings = settings;
+          },
+        }),
+    ).not.toThrow();
+
+    const columns = db.prepare("PRAGMA table_info(routine_runs)").all() as Array<{
+      name: string;
+    }>;
+    const indexes = db.prepare("PRAGMA index_list(routine_runs)").all() as Array<{
+      name: string;
+    }>;
+
+    expect(columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["run_key", "dedupe_key", "workflow_run_id"]),
+    );
+    expect(indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "idx_routine_runs_run_key",
+        "idx_routine_runs_workflow",
+        "idx_routine_runs_dedupe_key",
+      ]),
+    );
+  });
+
   it("creates managed schedule, api, and connector-event triggers", async () => {
     const routine = await routineService.create({
       name: "PR Triage",

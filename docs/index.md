@@ -27,6 +27,9 @@ hero:
       text: Core Automation
       link: /core-automation
     - theme: alt
+      text: Automation Studio
+      link: /automation-studio
+    - theme: alt
       text: Task Automations
       link: /task-automations
     - theme: alt
@@ -214,7 +217,7 @@ features:
   - title: Core Automation
     details: Workflow Intelligence now forms the strict always-on core: Memory is the source of truth, Heartbeat schedules reflection, Dreaming curates reviewable memory candidates, Suggestions are reviewable outputs, and Mission Control remains the cockpit.
   - title: Automations
-    details: The automations surface now separates core automation from trigger ingress, device routing, schedules, webhooks, and optional twin features. Existing tasks can become task-sourced routines from the task overflow menu, continue the same thread by default, and compile schedule/API/event triggers to lower-level engines.
+    details: Main-sidebar Automation Studio provides Discover, Library, Builder, and Activity for versioned structured flows with dry runs, variables, Yes/No branches, approvals, cancellation, recovery, and retained evidence. Advanced Settings keeps prompt-based routines, queueing, schedules, webhooks, triggers, briefing, and Workflow Intelligence policy; tasks can still become same-thread or new-task automations from the task menu.
   - title: Heartbeat V3
     details: Default two-lane background automation with cheap Pulse checks, selective Dispatch escalation, signal compression, automation-profile ownership, and truthful Mission Control state that separates Heartbeat agents, global runtime queue pressure, and workspace board work.
   - title: 151 Built-in Skills

@@ -72,6 +72,7 @@ interface CronServiceState {
       | "resolveTemplateVariables"
       | "resolveWorkspaceContext"
       | "findActiveTaskForJob"
+      | "executeWorkflow"
     >
   > & {
     nowMs: () => number;
@@ -88,6 +89,7 @@ interface CronServiceState {
     resolveTemplateVariables?: CronServiceDeps["resolveTemplateVariables"];
     resolveWorkspaceContext?: CronServiceDeps["resolveWorkspaceContext"];
     findActiveTaskForJob?: CronServiceDeps["findActiveTaskForJob"];
+    executeWorkflow?: CronServiceDeps["executeWorkflow"];
   };
   store: CronStoreFile | null;
   timer: ReturnType<typeof setTimeout> | null;
@@ -119,6 +121,7 @@ export class CronService {
         resolveTemplateVariables: deps.resolveTemplateVariables,
         resolveWorkspaceContext: deps.resolveWorkspaceContext,
         findActiveTaskForJob: deps.findActiveTaskForJob,
+        executeWorkflow: deps.executeWorkflow,
       },
       store: null,
       timer: null,
@@ -322,6 +325,7 @@ export class CronService {
         taskTitle: input.taskTitle,
         runMode: input.runMode,
         targetTaskId: input.targetTaskId,
+        workflowRoutineId: input.workflowRoutineId,
         threadAutomation: input.threadAutomation,
         // Advanced options
         timeoutMs: input.timeoutMs,
@@ -396,9 +400,14 @@ export class CronService {
         if (patch.runMode === "new_task") {
           job.targetTaskId = undefined;
           job.threadAutomation = undefined;
+          job.workflowRoutineId = undefined;
+        } else if (patch.runMode === "workflow") {
+          job.targetTaskId = undefined;
+          job.threadAutomation = undefined;
         }
       }
       if (patch.targetTaskId !== undefined) job.targetTaskId = patch.targetTaskId;
+      if (patch.workflowRoutineId !== undefined) job.workflowRoutineId = patch.workflowRoutineId;
       if (patch.threadAutomation !== undefined) job.threadAutomation = patch.threadAutomation;
       // Apply patch - advanced options
       if (patch.timeoutMs !== undefined) job.timeoutMs = patch.timeoutMs;
@@ -743,7 +752,33 @@ export class CronService {
           : {}),
       };
 
-      if (job.runMode === "thread_follow_up") {
+      if (job.runMode === "workflow") {
+        shouldPollTaskStatus = false;
+        const routineId = job.workflowRoutineId?.trim();
+        if (!routineId || !deps.executeWorkflow) {
+          status = "needs_user_action";
+          errorMsg = "Scheduled workflow execution is not available in this runtime";
+        } else {
+          const workflowResult = await deps.executeWorkflow({
+            routineId,
+            jobId: job.id,
+            runAtMs: nowMs,
+          });
+          resultText = workflowResult.resultText;
+          errorMsg = workflowResult.error;
+          status =
+            workflowResult.status === "completed"
+              ? "ok"
+              : workflowResult.status === "partial_success"
+                ? "partial_success"
+                : workflowResult.status === "needs_user_action"
+                  ? "needs_user_action"
+                  : workflowResult.status === "failed"
+                    ? "error"
+                    : "partial_success";
+          log.info(`Job ${job.name} executed Routine v2 run ${workflowResult.runId}`);
+        }
+      } else if (job.runMode === "thread_follow_up") {
         shouldPollTaskStatus = false;
         taskId = job.targetTaskId?.trim();
         if (!taskId) {

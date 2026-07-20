@@ -46,6 +46,7 @@ export interface GoogleDriveRequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   body?: Record<string, Any>;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface GoogleDriveRequestResult {
@@ -92,6 +93,8 @@ export async function googleDriveRequest(
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const abort = () => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener("abort", abort, { once: true });
 
     try {
       const response = await fetch(url, {
@@ -121,11 +124,17 @@ export async function googleDriveRequest(
       };
     } catch (error: Any) {
       if (error?.name === "AbortError") {
+        if (options.signal?.aborted) {
+          throw options.signal.reason instanceof Error
+            ? options.signal.reason
+            : new Error("Google Drive API request was cancelled");
+        }
         throw new Error("Google Drive API request timed out");
       }
       throw error;
     } finally {
       clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", abort);
     }
   };
 
@@ -152,6 +161,7 @@ export async function googleDriveUpload(
   fileId: string,
   data: Uint8Array,
   contentType: string,
+  signal?: AbortSignal,
 ): Promise<GoogleDriveRequestResult> {
   const url = `${GOOGLE_DRIVE_UPLOAD_BASE}/files/${fileId}?uploadType=media`;
 
@@ -165,6 +175,8 @@ export async function googleDriveUpload(
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const abort = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", abort, { once: true });
 
     try {
       const response = await fetch(url, {
@@ -194,11 +206,17 @@ export async function googleDriveUpload(
       };
     } catch (error: Any) {
       if (error?.name === "AbortError") {
+        if (signal?.aborted) {
+          throw signal.reason instanceof Error
+            ? signal.reason
+            : new Error("Google Drive upload was cancelled");
+        }
         throw new Error("Google Drive upload request timed out");
       }
       throw error;
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
     }
   };
 

@@ -30,6 +30,11 @@ export class EventTriggerService {
   private running = false;
   private deps: EventTriggerServiceDeps;
   private db: Any; // better-sqlite3 database instance
+  private queueTimer: NodeJS.Timeout | null = null;
+  private drainingQueue = false;
+  private fireInterceptor:
+    | ((trigger: EventTrigger, event: TriggerEvent) => Promise<{ handled: boolean; actionResult?: string }>)
+    | null = null;
 
   constructor(deps: EventTriggerServiceDeps, db?: Any) {
     this.deps = deps;
@@ -43,12 +48,38 @@ export class EventTriggerService {
     if (this.running) return;
     this.running = true;
     this.loadFromDB();
+    if (this.db) {
+      this.db
+        .prepare(
+          `UPDATE event_trigger_queue
+           SET status = 'pending', available_at = ?,
+               error = COALESCE(error, 'Recovered after application restart.'), updated_at = ?
+           WHERE status = 'processing'`,
+        )
+        .run(Date.now(), Date.now());
+      this.queueTimer = setInterval(() => void this.drainQueuedEvents(), 1_000);
+      void this.drainQueuedEvents();
+    }
     this.log("[EventTriggerService] Started with", this.triggers.size, "triggers");
   }
 
   stop(): void {
     this.running = false;
+    if (this.queueTimer) clearInterval(this.queueTimer);
+    this.queueTimer = null;
     this.log("[EventTriggerService] Stopped");
+  }
+
+  setFireInterceptor(
+    interceptor:
+      | ((trigger: EventTrigger, event: TriggerEvent) => Promise<{ handled: boolean; actionResult?: string }>)
+      | null,
+  ): void {
+    this.fireInterceptor = interceptor;
+  }
+
+  async drainPendingEvents(): Promise<void> {
+    await this.drainQueuedEvents();
   }
 
   // ── CRUD ────────────────────────────────────────────────────────
@@ -116,7 +147,15 @@ export class EventTriggerService {
     if (!this.running) return;
 
     const activeCount = this.deps.getActiveTaskCount?.() ?? 0;
-    if (activeCount >= 4) return;
+    if (activeCount >= 4 && this.db) {
+      this.enqueueEvent(event);
+      return;
+    }
+
+    await this.evaluateEventNow(event);
+  }
+
+  private async evaluateEventNow(event: TriggerEvent): Promise<void> {
 
     for (const trigger of this.triggers.values()) {
       if (!trigger.enabled) continue;
@@ -157,6 +196,12 @@ export class EventTriggerService {
     };
 
     try {
+      const intercepted = await this.fireInterceptor?.(trigger, event);
+      if (intercepted?.handled) {
+        historyEntry.actionResult = intercepted.actionResult || "workflow_queued";
+        this.recordHistory(trigger, event, historyEntry);
+        return;
+      }
       const action = trigger.action;
       const cfg = action.config;
 
@@ -218,7 +263,14 @@ export class EventTriggerService {
       historyEntry.actionResult = `error: ${error instanceof Error ? error.message : String(error)}`;
     }
 
-    // Record history
+    this.recordHistory(trigger, event, historyEntry);
+  }
+
+  private recordHistory(
+    trigger: EventTrigger,
+    event: TriggerEvent,
+    historyEntry: TriggerHistoryEntry,
+  ): void {
     if (!this.history.has(trigger.id)) {
       this.history.set(trigger.id, []);
     }
@@ -232,6 +284,64 @@ export class EventTriggerService {
       this.deps.onTriggerFired?.({ trigger, event, historyEntry });
     } catch (error) {
       this.deps.log?.(`Trigger "${trigger.name}" post-fire hook failed:`, error);
+    }
+  }
+
+  private enqueueEvent(event: TriggerEvent): void {
+    if (!this.db) return;
+    const id = randomUUID();
+    const dedupeKey = `${event.source}:${event.timestamp}:${stableStringify(event.fields)}`;
+    try {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO event_trigger_queue
+           (id, dedupe_key, event_json, status, attempt_count, available_at, created_at, updated_at)
+           VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`,
+        )
+        .run(id, dedupeKey, JSON.stringify(event), Date.now(), Date.now(), Date.now());
+    } catch (error) {
+      this.log("[EventTriggerService] Failed to queue event:", error);
+    }
+  }
+
+  private async drainQueuedEvents(): Promise<void> {
+    if (!this.running || !this.db || this.drainingQueue) return;
+    if ((this.deps.getActiveTaskCount?.() ?? 0) >= 4) return;
+    this.drainingQueue = true;
+    try {
+      while ((this.deps.getActiveTaskCount?.() ?? 0) < 4) {
+        const now = Date.now();
+        const row = this.db
+          .prepare(
+            `SELECT * FROM event_trigger_queue
+             WHERE status = 'pending' AND available_at <= ?
+             ORDER BY created_at ASC LIMIT 1`,
+          )
+          .get(now) as Any | undefined;
+        if (!row) return;
+        this.db
+          .prepare("UPDATE event_trigger_queue SET status = 'processing', attempt_count = attempt_count + 1, updated_at = ? WHERE id = ?")
+          .run(now, row.id);
+        try {
+          const event = JSON.parse(String(row.event_json)) as TriggerEvent;
+          await this.evaluateEventNow(event);
+          this.db.prepare("DELETE FROM event_trigger_queue WHERE id = ?").run(row.id);
+        } catch (error) {
+          const attemptCount = Number(row.attempt_count || 0) + 1;
+          const message = error instanceof Error ? error.message : String(error);
+          if (attemptCount >= 5) {
+            this.db
+              .prepare("UPDATE event_trigger_queue SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+              .run(message, Date.now(), row.id);
+          } else {
+            this.db
+              .prepare("UPDATE event_trigger_queue SET status = 'pending', error = ?, available_at = ?, updated_at = ? WHERE id = ?")
+              .run(message, Date.now() + Math.min(60_000, 1_000 * 2 ** attemptCount), Date.now(), row.id);
+          }
+        }
+      }
+    } finally {
+      this.drainingQueue = false;
     }
   }
 
@@ -269,6 +379,20 @@ export class EventTriggerService {
           task_id TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_trigger_history_trigger ON event_trigger_history(trigger_id, fired_at DESC);
+
+        CREATE TABLE IF NOT EXISTS event_trigger_queue (
+          id TEXT PRIMARY KEY,
+          dedupe_key TEXT NOT NULL UNIQUE,
+          event_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          available_at INTEGER NOT NULL,
+          error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_trigger_queue_pending
+        ON event_trigger_queue(status, available_at, created_at);
       `);
     } catch {
       // Tables already exist
@@ -383,4 +507,15 @@ export class EventTriggerService {
     if (this.deps.log) this.deps.log(...args);
     else console.log(...args);
   }
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableStringify(child)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }

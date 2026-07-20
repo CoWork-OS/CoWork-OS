@@ -36,6 +36,7 @@ export interface GoogleCalendarRequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   body?: Any;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface GoogleCalendarRequestResult {
@@ -82,6 +83,8 @@ export async function googleCalendarRequest(
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const abort = () => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener("abort", abort, { once: true });
 
     try {
       const response = await fetch(url, {
@@ -111,11 +114,17 @@ export async function googleCalendarRequest(
       };
     } catch (error: Any) {
       if (error?.name === "AbortError") {
+        if (options.signal?.aborted) {
+          throw options.signal.reason instanceof Error
+            ? options.signal.reason
+            : new Error("Google Calendar API request was cancelled");
+        }
         throw new Error("Google Calendar API request timed out");
       }
       throw error;
     } finally {
       clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", abort);
     }
   };
 

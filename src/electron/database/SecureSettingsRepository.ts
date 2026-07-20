@@ -81,6 +81,7 @@ export type SettingsCategory =
   | "webaccess"
   | "browser-use"
   | "adaptive-style-engine"
+  | "routine-workflow-secrets"
   | "awareness-state"
   | "autonomy-chief-of-staff"
   | "supermemory"

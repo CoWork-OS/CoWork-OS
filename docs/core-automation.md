@@ -14,27 +14,28 @@ The core runtime is **Workflow Intelligence**:
 
 Everything else is a surrounding surface:
 
-- `Routines` are the top-level saved automation product, but not part of the always-on cognitive core
+- main-sidebar `Automation Studio` is the visual structured-flow product, but not part of the always-on cognitive core
+- `Routines` are the saved automation shell and prompt-based compatibility product, but not part of the always-on cognitive core
 - `Mission Control` is the cockpit for observing and configuring the core
 - `Triggers` are ingress and signal normalization only
 - `Devices` are execution routing only
 - `Digital Twins` are optional persona presets and are not part of core ownership
 
-`Routines` now sit above several lower-level engines:
+Structured Studio flows and prompt-based Routines sit above several lower-level engines:
 
 - schedule triggers compile into `Scheduled Tasks`
 - API triggers compile into `Webhooks`
 - event triggers compile into `Event Triggers`
 
-That makes `Routines` the main user-facing automation abstraction without redefining the actual core runtime boundary.
+That makes main-sidebar Automation Studio the primary visual multi-step workflow surface while preserving Routines as the shared saved-automation shell. Neither redefines the actual core runtime boundary. See [Automation Studio](automation-studio.md).
 
 Task view can also create a task-sourced routine with `... > Add automation...`. That flow is not a new core cognition loop; it is a task-prefilled routine authoring shortcut that can continue the existing thread by default or create new tasks on each run. Schedule triggers still compile to `Scheduled Tasks`, API triggers compile to `Webhooks`, and event triggers compile to `Event Triggers`, with the source task title, task ID, and `cowork://tasks/<taskId>` reference preserved. See [Task Automations](task-automations.md).
 
-`Settings > Automations > Routines` is the primary observability surface for task-sourced automations. When a routine compiles to a cron job, `Settings > Automations > Scheduled Tasks` also shows aggregate run health, the latest result, delivery status, recent run history, and links to generated sessions or continued threads so lower-level scheduled work can be audited without digging through the general task list.
+Use main-sidebar **Automations → Activity** for structured workflow run and step evidence. `Settings > Automations > Routines` remains the primary observability surface for task-sourced and prompt-based automations. When a routine compiles to a cron job, `Settings > Automations > Scheduled Tasks` also shows aggregate run health, the latest result, delivery status, recent run history, and links to generated sessions or continued threads so lower-level scheduled work can be audited without digging through the general task list.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-6.webp" alt="Automations control center" width="700">
-  <br><em>The Automations surface separates scheduled work, triggered work, and core automation controls.</em>
+  <br><em>The advanced Settings surface separates prompt-based routines, scheduled work, triggered work, and core automation controls; structured flows live in the main Automations tab.</em>
 </p>
 
 ## Ownership Model

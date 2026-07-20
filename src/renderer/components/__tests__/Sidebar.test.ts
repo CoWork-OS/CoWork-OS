@@ -9,6 +9,26 @@ import { Sidebar, truncateSidebarTitleToFit } from "../Sidebar";
 const stylesPath = fileURLToPath(new URL("../../styles/index.css", import.meta.url));
 
 describe("Sidebar top-level destinations", () => {
+  it("marks Automations as the active main-screen destination", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(Sidebar, {
+        workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
+        tasks: [] as Any,
+        selectedTaskId: null,
+        isAutomationsActive: true,
+        onSelectTask: () => {},
+        onOpenAutomations: () => {},
+        onOpenSettings: () => {},
+        onOpenMissionControl: () => {},
+        onTasksChanged: () => {},
+      }),
+    );
+
+    expect(markup).toMatch(
+      /<button[^>]*class="[^"]*\bactive\b[^"]*"[^>]*aria-pressed="true"[^>]*title="Automations"/,
+    );
+  });
+
   it("truncates sidebar titles to the available width", () => {
     const measureByCharacters = (value: string) => value.length;
 
@@ -57,7 +77,7 @@ describe("Sidebar top-level destinations", () => {
         selectedTaskId: null,
         isAgentsActive: true,
         onSelectTask: () => {},
-        onOpenHome: () => {},
+        onOpenAutomations: () => {},
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
@@ -86,7 +106,7 @@ describe("Sidebar top-level destinations", () => {
         selectedTaskId: null,
         isMissionControlActive: true,
         onSelectTask: () => {},
-        onOpenHome: () => {},
+        onOpenAutomations: () => {},
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
@@ -117,7 +137,7 @@ describe("Sidebar top-level destinations", () => {
           updateMode: "electron-updater",
         } as Any,
         onSelectTask: () => {},
-        onOpenHome: () => {},
+        onOpenAutomations: () => {},
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
@@ -154,7 +174,7 @@ describe("Sidebar top-level destinations", () => {
         ] as Any,
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenHome: () => {},
+        onOpenAutomations: () => {},
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
@@ -196,7 +216,7 @@ describe("Sidebar top-level destinations", () => {
         completionAttentionTaskIds: ["task-1"],
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenHome: () => {},
+        onOpenAutomations: () => {},
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
@@ -247,7 +267,7 @@ describe("Sidebar top-level destinations", () => {
         ] as Any,
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenHome: () => {},
+        onOpenAutomations: () => {},
         onOpenIdeas: () => {},
         onOpenInboxAgent: () => {},
         onOpenAgents: () => {},

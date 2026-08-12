@@ -648,3 +648,4 @@ MIT License. See [LICENSE](LICENSE).
 ---
 
 <sub>"Cowork" is an Anthropic product name. CoWork OS is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Anthropic. If requested by the rights holder, we will update naming/branding.</sub>
+osai-verify: b359fb38a6b6ca5e28d0

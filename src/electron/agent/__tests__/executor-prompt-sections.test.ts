@@ -5,6 +5,7 @@ import {
   composePromptSections,
   resolvePromptSections,
 } from "../executor-prompt-sections";
+import { ContentBuilder } from "../content/ContentBuilder";
 
 describe("executor-prompt-sections", () => {
   it("buildModeDomainContract returns execute/code guidance", () => {
@@ -67,5 +68,31 @@ describe("executor-prompt-sections", () => {
 
     expect(sessionResolve).toHaveBeenCalledTimes(1);
     expect(turnResolve).toHaveBeenCalledTimes(2);
+  });
+
+  it("never drops a required planner turn contract when optional context is oversized", async () => {
+    const result = await ContentBuilder.buildExecutionPrompt({
+      workspaceId: "ws-1",
+      workspacePath: "/tmp",
+      taskPrompt: "Review a document",
+      identityPrompt: "Identity",
+      safetyCorePrompt: "Safety",
+      baseInstructionPrompt: "Base",
+      inputPolicyPrompt: "Input",
+      workspaceContextPrompt: "Workspace",
+      currentTimePrompt: "Now",
+      modeDomainContractPrompt: "Mode",
+      webSearchModeContract: "Web",
+      guidelinesPrompt: "optional ".repeat(3_000),
+      turnGuidancePrompt: "PLANNER_JSON_CONTRACT_REQUIRED",
+      turnGuidanceMaxTokens: 100,
+      turnGuidanceRequired: true,
+      executionMode: "execute",
+      taskDomain: "research",
+      totalBudgetTokens: 1_000,
+    });
+
+    expect(result.droppedSections).not.toContain("turn_guidance");
+    expect(result.prompt).toContain("PLANNER_JSON_CONTRACT_REQUIRED");
   });
 });

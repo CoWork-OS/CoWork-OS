@@ -255,6 +255,21 @@ describe("TaskExecutor tool allow-list semantics", () => {
     expect(allowlist.has("read_pdf_visual")).toBe(false);
   });
 
+  it("recognizes Turkish document review steps as read-only analysis", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    expect(
+      (executor as Any).isReadOnlyDocumentAnalysisStepDescription(
+        "Metni bölüm bölüm oku ve karakter tutarlılığını incele.",
+      ),
+    ).toBe(true);
+    expect(
+      (executor as Any).isReadOnlyDocumentAnalysisStepDescription(
+        "İnceleme sonuçlarını yeni bir DOCX dosyasına yaz ve kaydet.",
+      ),
+    ).toBe(false);
+  });
+
   it("adds read_pdf_visual only for explicit PDF layout analysis steps", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = {

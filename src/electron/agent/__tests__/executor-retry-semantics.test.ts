@@ -133,6 +133,42 @@ describe("TaskExecutor executeUnlocked retry semantics", () => {
 });
 
 describe("TaskExecutor provider failover retry semantics", () => {
+  it("does not replay an identical Ollama request after a local timeout", async () => {
+    const executor = createRetryExecutor() as Any;
+    executor.llmCallSequence = 0;
+    executor.providerRetryV2Enabled = true;
+    executor.recordObservedOutputThroughput = vi.fn();
+    executor.provider = { type: "ollama", createMessage: vi.fn() };
+    executor.modelId = "qwen3.8:27b-q8_0";
+    executor.modelKey = "qwen3.8:27b-q8_0";
+    executor.providerFailoverIndex = 0;
+    executor.providerFailoverSelections = [];
+    executor.appendRoutingFallbackStep = vi.fn();
+    const requestFn = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          "Ollama request timed out after 5 minutes. The model may be too slow or not responding.",
+        ),
+      );
+
+    await expect(
+      executor.callLLMWithRetry(requestFn, "oversized local request", 3),
+    ).rejects.toThrow(/timed out/i);
+
+    expect(requestFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not schedule task-level transient recovery for explicitly bounded failures", () => {
+    const executor = createRetryExecutor() as Any;
+    expect(
+      executor.isTransientProviderError({
+        message: "Document review synthesis timed out after 120s",
+        retryable: false,
+      }),
+    ).toBe(false);
+  });
+
   it("preserves image-aware failover context when retrying without an explicit modality override", async () => {
     const executor = createRetryExecutor() as Any;
     executor.llmCallSequence = 0;
@@ -790,8 +826,8 @@ describe("TaskExecutor planning warmup tool routing", () => {
       surfaceCoverage: { executor: true },
     });
 
-    expect(
-      executor.shouldWarmPlanningPromptCacheWithTools("openrouter-openai", "executor"),
-    ).toBe(false);
+    expect(executor.shouldWarmPlanningPromptCacheWithTools("openrouter-openai", "executor")).toBe(
+      false,
+    );
   });
 });

@@ -365,11 +365,7 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
 
     await (executor as Any).execute();
 
-    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
-      "task-1",
-      brief,
-      expect.any(Object),
-    );
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith("task-1", brief, expect.any(Object));
   });
 
   it("counts planCompletedEffectively as execution evidence during finalization", () => {
@@ -430,13 +426,15 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
     executor.task.agentConfig = {
       executionMode: "plan",
     };
-    (executor as Any).emitAnswerFirstResponse = vi.fn(async function emitAnswerFirstStub(this: Any) {
-      const text =
-        "I don't feel guilt, but this is a serious ethical risk and should be handled responsibly.";
-      this.lastAssistantOutput = text;
-      this.lastNonVerificationOutput = text;
-      this.lastAssistantText = text;
-    });
+    (executor as Any).emitAnswerFirstResponse = vi.fn(
+      async function emitAnswerFirstStub(this: Any) {
+        const text =
+          "I don't feel guilt, but this is a serious ethical risk and should be handled responsibly.";
+        this.lastAssistantOutput = text;
+        this.lastNonVerificationOutput = text;
+        this.lastAssistantText = text;
+      },
+    );
 
     await (executor as Any).execute();
 
@@ -458,12 +456,14 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
       executionMode: "execute",
       taskIntent: "advice",
     };
-    (executor as Any).emitAnswerFirstResponse = vi.fn(async function emitAnswerFirstStub(this: Any) {
-      const text = "I don't feel guilt, but job impacts should be handled responsibly.";
-      this.lastAssistantOutput = text;
-      this.lastNonVerificationOutput = text;
-      this.lastAssistantText = text;
-    });
+    (executor as Any).emitAnswerFirstResponse = vi.fn(
+      async function emitAnswerFirstStub(this: Any) {
+        const text = "I don't feel guilt, but job impacts should be handled responsibly.";
+        this.lastAssistantOutput = text;
+        this.lastNonVerificationOutput = text;
+        this.lastAssistantText = text;
+      },
+    );
 
     await (executor as Any).execute();
 
@@ -781,7 +781,11 @@ Verification complete: this routine produced a review-backed build-health conclu
       source: "cron",
     });
     (executor as Any).toolResultMemory = [
-      { tool: "http_request", summary: "GitHub Actions run metadata HTTP 200", timestamp: Date.now() },
+      {
+        tool: "http_request",
+        summary: "GitHub Actions run metadata HTTP 200",
+        timestamp: Date.now(),
+      },
       { tool: "http_request", summary: "GitHub check-runs HTTP 200", timestamp: Date.now() },
     ];
 
@@ -891,11 +895,13 @@ End with a final section titled "Verification Evidence".`,
       { tool: "task_history", summary: "Read previous routine history", timestamp: Date.now() },
     ];
 
-    expect((executor as Any).isBuildHealthCommandEvidenceStep({
-      id: "1",
-      description: "Required build/check commands executed.",
-      status: "pending",
-    })).toBe(true);
+    expect(
+      (executor as Any).isBuildHealthCommandEvidenceStep({
+        id: "1",
+        description: "Required build/check commands executed.",
+        status: "pending",
+      }),
+    ).toBe(true);
     expect((executor as Any).hasBuildHealthCommandOrApiEvidence()).toBe(false);
 
     (executor as Any).toolResultMemory = [
@@ -915,7 +921,11 @@ End with a final section titled "Verification Evidence".`,
     });
     (executor as Any).toolResultMemory = [
       { tool: "web_fetch", summary: "Fetched CI pipeline health", timestamp: Date.now() },
-      { tool: "web_search", summary: "Searched unresolved community questions", timestamp: Date.now() },
+      {
+        tool: "web_search",
+        summary: "Searched unresolved community questions",
+        timestamp: Date.now(),
+      },
     ];
 
     await (executor as Any).execute();
@@ -1107,7 +1117,7 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
     (executor as Any).toolResultMemory = [
       {
         tool: "web_search",
-        summary: "query \"AI agent trends\" returned sources",
+        summary: 'query "AI agent trends" returned sources',
         timestamp: Date.now(),
       },
     ];
@@ -1277,7 +1287,7 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
     (executor as Any).toolResultMemory = [
       {
         tool: "web_search",
-        summary: "query \"AI agent trends\" returned sources",
+        summary: 'query "AI agent trends" returned sources',
         timestamp: Date.now(),
       },
     ];
@@ -1322,7 +1332,7 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
     (executor as Any).toolResultMemory = [
       {
         tool: "web_search",
-        summary: "query \"AI agent trends\" returned sources",
+        summary: 'query "AI agent trends" returned sources',
         timestamp: Date.now(),
       },
     ];
@@ -1544,7 +1554,9 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
           },
         ],
       };
-      throw new Error("Task failed: mutation-required contract unmet - Write the remaining validation artifact");
+      throw new Error(
+        "Task failed: mutation-required contract unmet - Write the remaining validation artifact",
+      );
     });
 
     await (executor as Any).execute();
@@ -1658,7 +1670,7 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
     );
   });
 
-  it("waives timeout-failed research steps when tool evidence exists but no step completed", () => {
+  it("reports timed out research when tool evidence exists but no substantive answer was produced", () => {
     const executor = createExecuteHarness({
       title: "Compare repositories",
       prompt: "Research two GitHub repositories and compare their current stats.",
@@ -1693,8 +1705,10 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
       "task-1",
       "Found repository stats from web sources.",
       expect.objectContaining({
+        terminalKind: "timed_out",
         terminalStatus: "partial_success",
-        waiveFailedStepIds: ["1"],
+        failureClass: "budget_exhausted",
+        waiveFailedStepIds: [],
       }),
     );
   });
@@ -1723,8 +1737,16 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
       };
       this.softDeadlineTriggered = true;
       this.toolResultMemory = [
-        { tool: "web_search", summary: "Found candidate GitHub repositories.", timestamp: Date.now() },
-        { tool: "http_request", summary: "Fetched GitHub repository stats.", timestamp: Date.now() },
+        {
+          tool: "web_search",
+          summary: "Found candidate GitHub repositories.",
+          timestamp: Date.now(),
+        },
+        {
+          tool: "http_request",
+          summary: "Fetched GitHub repository stats.",
+          timestamp: Date.now(),
+        },
       ];
     });
 
@@ -1735,8 +1757,10 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
       "task-1",
       expect.stringContaining("Captured tool progress:"),
       expect.objectContaining({
+        terminalKind: "timed_out",
         terminalStatus: "partial_success",
-        waiveFailedStepIds: ["1"],
+        failureClass: "budget_exhausted",
+        waiveFailedStepIds: [],
       }),
     );
   });
@@ -1764,7 +1788,8 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
   it("suppresses artifact requirements with don't edit variant", () => {
     const executor = createExecuteHarness({
       title: "Architecture review",
-      prompt: "Analyze the codebase architecture. Don't edit any files. Report back with a summary.",
+      prompt:
+        "Analyze the codebase architecture. Don't edit any files. Report back with a summary.",
       lastOutput: "Architecture summary.",
     });
 
@@ -1795,9 +1820,7 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
 
   it("does not false-positive on 'database is in read-only mode, fix it'", () => {
     expect(
-      detectReadOnlyConstraint(
-        "The database is in read-only mode, fix it so writes work again.",
-      ),
+      detectReadOnlyConstraint("The database is in read-only mode, fix it so writes work again."),
     ).toBe(false);
   });
 

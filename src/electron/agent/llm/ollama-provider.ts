@@ -9,6 +9,23 @@ import {
   LLMToolUse,
 } from "./types";
 
+function supportsOllamaThinkingControl(model: string): boolean {
+  const normalized = String(model || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^[^/]+\//, "");
+  return /^(?:qwen3|deepseek-r1|gpt-oss|magistral)(?:[.:-]|$)/.test(normalized);
+}
+
+function isUnsupportedThinkingResponse(status: number, message: string): boolean {
+  return (
+    status === 400 &&
+    /(?:does not|doesn't) support thinking|unsupported[^\n]*think|unknown (?:field|parameter)[^\n]*think/i.test(
+      message,
+    )
+  );
+}
+
 /**
  * Ollama API provider implementation
  * Supports local and remote Ollama servers
@@ -65,20 +82,43 @@ export class OllamaProvider implements LLMProvider {
       console.log(`[Ollama] Sending request to model: ${request.model}`);
       const startTime = Date.now();
 
-      const response = await fetch(`${this.baseUrl}/api/chat`, {
+      const chatUrl = `${this.baseUrl}/api/chat`;
+      const requestBody: Record<string, unknown> = {
+        model: request.model,
+        messages,
+        stream: false,
+        options: {
+          num_predict: request.maxTokens,
+        },
+        ...(tools && tools.length > 0 && { tools }),
+      };
+      if (supportsOllamaThinkingControl(request.model)) {
+        // Ollama enables reasoning by default for supported models. Disable it
+        // so private reasoning cannot consume the final-answer token budget.
+        requestBody.think = false;
+      }
+
+      let response = await fetch(chatUrl, {
         method: "POST",
         headers,
         signal: timeoutController.signal,
-        body: JSON.stringify({
-          model: request.model,
-          messages,
-          stream: false,
-          options: {
-            num_predict: request.maxTokens,
-          },
-          ...(tools && tools.length > 0 && { tools }),
-        }),
+        body: JSON.stringify(requestBody),
       });
+
+      if (!response.ok) {
+        const error = await response.text();
+        if (requestBody.think === false && isUnsupportedThinkingResponse(response.status, error)) {
+          const { think: _think, ...retryBody } = requestBody;
+          response = await fetch(chatUrl, {
+            method: "POST",
+            headers,
+            signal: timeoutController.signal,
+            body: JSON.stringify(retryBody),
+          });
+        } else {
+          throw new Error(`Ollama API error: ${response.status} - ${error}`);
+        }
+      }
 
       clearTimeout(timeoutId);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -167,13 +207,14 @@ export class OllamaProvider implements LLMProvider {
       }));
     } catch (error: Any) {
       const message = error?.message || String(error);
-      const isLocalhost =
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(this.baseUrl);
+      const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(this.baseUrl);
       const isUnavailable =
         /(fetch failed|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT)/i.test(message);
 
       if (isLocalhost && isUnavailable) {
-        console.info(`[OllamaProvider] Ollama is not reachable at ${this.baseUrl}; returning no models`);
+        console.info(
+          `[OllamaProvider] Ollama is not reachable at ${this.baseUrl}; returning no models`,
+        );
       } else {
         console.warn(`[OllamaProvider] Failed to fetch Ollama models: ${message}`);
       }
@@ -282,7 +323,7 @@ export class OllamaProvider implements LLMProvider {
             typeof toolCall.function.arguments === "string"
               ? JSON.parse(toolCall.function.arguments)
               : toolCall.function.arguments || {};
-        } catch  {
+        } catch {
           console.error("Failed to parse tool arguments:", toolCall.function.arguments);
           args = {};
         }
@@ -295,14 +336,31 @@ export class OllamaProvider implements LLMProvider {
       }
     }
 
+    const hasToolCalls = Boolean(message.tool_calls && message.tool_calls.length > 0);
+    const hasFinalContent = Boolean(message.content?.trim());
+    const hasThinkingOnly = !hasFinalContent && !hasToolCalls && Boolean(message.thinking?.trim());
+
+    if (hasThinkingOnly) {
+      console.warn(
+        "[Ollama] Response contained reasoning without a final answer; treating it as token exhaustion",
+        {
+          thinkingChars: message.thinking?.length || 0,
+          doneReason: response.done_reason,
+        },
+      );
+    }
+
     // Determine stop reason
     let stopReason: LLMResponse["stopReason"] = "end_turn";
-    if (message.tool_calls && message.tool_calls.length > 0) {
+    if (hasToolCalls) {
       stopReason = "tool_use";
-    } else if (response.done_reason === "length") {
+    } else if (response.done_reason === "length" || hasThinkingOnly) {
       stopReason = "max_tokens";
     } else if (response.done_reason === "stop") {
-      stopReason = "stop_sequence";
+      // Ollama uses "stop" for a normal completed response. Mapping it to
+      // stop_sequence prevents the executor from accepting usable text as the
+      // end of a step and can cause repeated empty follow-up calls.
+      stopReason = "end_turn";
     }
 
     return {
@@ -350,6 +408,7 @@ interface OllamaChatResponse {
   message: {
     role: string;
     content: string;
+    thinking?: string;
     tool_calls?: OllamaToolCall[];
   };
   done: boolean;

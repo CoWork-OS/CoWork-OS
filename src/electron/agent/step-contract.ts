@@ -46,10 +46,12 @@ const CANONICAL_ARTIFACT_EXTENSION_LIST = [
 
 const CANONICAL_ARTIFACT_EXTENSION_SET = new Set<string>(CANONICAL_ARTIFACT_EXTENSION_LIST);
 export { CANONICAL_ARTIFACT_EXTENSION_SET as CANONICAL_ARTIFACT_EXTENSION_SET_EXPORT };
-const CANONICAL_EXTENSIONS_WITH_DOT = CANONICAL_ARTIFACT_EXTENSION_LIST.map((extension) => `.${extension}`);
-const CANONICAL_EXTENSION_PATTERN = CANONICAL_ARTIFACT_EXTENSION_LIST
-  .map((extension) => extension.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-  .join("|");
+const CANONICAL_EXTENSIONS_WITH_DOT = CANONICAL_ARTIFACT_EXTENSION_LIST.map(
+  (extension) => `.${extension}`,
+);
+const CANONICAL_EXTENSION_PATTERN = CANONICAL_ARTIFACT_EXTENSION_LIST.map((extension) =>
+  extension.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+).join("|");
 
 export const CANONICAL_ARTIFACT_EXTENSION_REGEX = new RegExp(
   `\\.(${CANONICAL_EXTENSION_PATTERN})\\b`,
@@ -70,12 +72,14 @@ const COMMAND_PREFIX_REGEX =
 const SHELL_OPERATOR_REGEX = /(?:\|\||&&|[|;<>])/;
 const URL_LIKE_REGEX = /^[a-z][a-z0-9+.-]*:\/\//i;
 const STRONG_WRITE_VERB_REGEX =
-  /\b(write|create|draft|generate|produce|compose|build|save|author|scaffold|bootstrap|initialize|implement|configure|add|edit|update|append|rewrite)\b/;
+  /\b(write|create|draft|generate|produce|compose|build|save|author|scaffold|bootstrap|initialize|implement|configure|add|edit|update|append|rewrite|delete|remove|rename|move|modify|replace|fix|refactor)\b/;
 const PASSIVE_ARTIFACT_WRITE_CUE_REGEX =
   /\b(saved|written|created|generated|produced|updated|edited|rewritten|appended|stored|placed)\s+(?:as|to|at|in|under)\b/;
 
 function normalizeWithLeadingDot(extension: string): string {
-  const raw = String(extension || "").trim().toLowerCase();
+  const raw = String(extension || "")
+    .trim()
+    .toLowerCase();
   if (!raw) return "";
   return raw.startsWith(".") ? raw : `.${raw}`;
 }
@@ -169,7 +173,9 @@ export function extractArtifactPathCandidates(text: string): string[] {
   while (bareMatch) {
     const token = String(bareMatch[0] || "").trim();
     const start = bareMatch.index;
-    const inCommandSnippet = commandSnippetRanges.some((range) => start >= range.start && start < range.end);
+    const inCommandSnippet = commandSnippetRanges.some(
+      (range) => start >= range.start && start < range.end,
+    );
     if (!inCommandSnippet && token) {
       candidates.add(token);
     }
@@ -221,9 +227,12 @@ export function descriptionHasReadOnlyIntent(text: string): boolean {
 export function descriptionHasDiscoveryIntent(text: string): boolean {
   const desc = String(text || "").toLowerCase();
   return (
-    /\b(search|locate|find|discover|identify|inventory|catalog|survey|enumerate|scan|detect)\b/.test(desc) ||
-    /\bclarify\s+scope\b/.test(desc)
-  ) && !descriptionHasWriteIntent(desc);
+    (/\b(search|locate|find|discover|identify|inventory|catalog|survey|enumerate|scan|detect)\b/.test(
+      desc,
+    ) ||
+      /\bclarify\s+scope\b/.test(desc)) &&
+    !descriptionHasWriteIntent(desc)
+  );
 }
 
 export function descriptionHasSummaryCue(text: string): boolean {

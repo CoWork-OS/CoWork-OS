@@ -46,6 +46,35 @@ bounded_research=true
     expect(routed.domain).toBe("research");
   });
 
+  it("routes Turkish manuscript review as high-complexity research execution", () => {
+    const routed = IntentRouter.route(
+      "Yapay_Zeka_Yan_Koltukta_Baski_Hazir_v7_word_pass4",
+      "Bu kitabı detaylı olarak incele; eksik ve çelişkili noktaları, bölüm geçişlerini ve karakter devamlılığını listele.",
+    );
+
+    expect(routed.intent).toBe("execution");
+    expect(routed.domain).toBe("research");
+    expect(routed.complexity).toBe("high");
+    expect(routed.conversationMode).toBe("task");
+    expect(routed.signals).toContain("document-analysis");
+  });
+
+  it("does not treat booking documentation as a book document-analysis task", () => {
+    const routed = IntentRouter.route("Booking docs", "review the booking documentation");
+
+    expect(routed.signals).not.toContain("document-analysis");
+    expect(routed.complexity).not.toBe("high");
+  });
+
+  it("does not treat function character counts as character-continuity analysis", () => {
+    const routed = IntentRouter.route(
+      "Function output",
+      "analyze how many characters this function returns",
+    );
+
+    expect(routed.signals).not.toContain("document-analysis");
+  });
+
   it("keeps compile-to-code prompts in code domain when paired with technical context", () => {
     const prompt = "Compile the TypeScript codebase and fix build errors in the repo.";
     const routed = IntentRouter.route("Fix compile failures", prompt);
@@ -185,7 +214,10 @@ bounded_research=true
     });
 
     it("routes 'ignore X and do Y' pattern", () => {
-      const routed = IntentRouter.route("", "ignore the bug fixes and work on the dashboard instead");
+      const routed = IntentRouter.route(
+        "",
+        "ignore the bug fixes and work on the dashboard instead",
+      );
       expect(routed.intent).toBe("redirect");
     });
 
@@ -218,7 +250,10 @@ bounded_research=true
     });
 
     it("routes 'forget that, work on X instead' negate-and-pivot pattern", () => {
-      const routed = IntentRouter.route("", "forget that approach and instead focus on the API layer");
+      const routed = IntentRouter.route(
+        "",
+        "forget that approach and instead focus on the API layer",
+      );
       expect(routed.intent).toBe("redirect");
       expect(routed.signals).toContain("redirect-negate-pivot");
     });

@@ -31,6 +31,8 @@ export interface BuildExecutionPromptParams {
   completionGuidancePrompt?: string;
   turnGuidancePrompt?: string;
   turnGuidanceMaxTokens?: number;
+  /** Keep turn-specific protocol text (for example the planner JSON contract) non-droppable. */
+  turnGuidanceRequired?: boolean;
   coreInstructions?: string;
   executionMode: ExecutionMode;
   taskDomain: TaskDomain;
@@ -87,7 +89,8 @@ function makeSection(
     layerKind: options?.layerKind,
     cacheScope: options?.cacheScope,
     stableInputHash:
-      options?.stableInputHash || (options?.cacheScope === "session" ? hashPromptSectionInput(normalized) : undefined),
+      options?.stableInputHash ||
+      (options?.cacheScope === "session" ? hashPromptSectionInput(normalized) : undefined),
   };
 }
 
@@ -204,16 +207,11 @@ export class ContentBuilder {
             layerKind: "always",
             cacheScope: "session",
           }),
-          makeSection(
-            "safety_core",
-            params.safetyCorePrompt || SHARED_PROMPT_POLICY_CORE,
-            920,
-            {
-              required: true,
-              layerKind: "always",
-              cacheScope: "session",
-            },
-          ),
+          makeSection("safety_core", params.safetyCorePrompt || SHARED_PROMPT_POLICY_CORE, 920, {
+            required: true,
+            layerKind: "always",
+            cacheScope: "session",
+          }),
           makeSection("base_instruction", params.baseInstructionPrompt, 1800, {
             required: true,
             layerKind: "always",
@@ -308,12 +306,17 @@ export class ContentBuilder {
             layerKind: "optional",
             cacheScope: "session",
           }),
-          makeSection("turn_guidance", params.turnGuidancePrompt, params.turnGuidanceMaxTokens ?? 1100, {
-            required: false,
-            dropPriority: 10,
-            layerKind: "optional",
-            cacheScope: "turn",
-          }),
+          makeSection(
+            "turn_guidance",
+            params.turnGuidancePrompt,
+            params.turnGuidanceMaxTokens ?? 1100,
+            {
+              required: params.turnGuidanceRequired === true,
+              dropPriority: 10,
+              layerKind: params.turnGuidanceRequired === true ? "always" : "optional",
+              cacheScope: "turn",
+            },
+          ),
         ];
 
     const resolvedSections = await resolvePromptSections(sections, params.sectionCache);

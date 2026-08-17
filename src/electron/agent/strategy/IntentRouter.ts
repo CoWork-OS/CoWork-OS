@@ -28,6 +28,23 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export class IntentRouter {
+  private static hasDocumentAnalysisSignal(text: string): boolean {
+    const normalized = String(text || "").toLowerCase();
+    const documentScope =
+      /\.(?:docx|pdf|epub|md|txt)\b/.test(normalized) ||
+      /(?:^|[^\p{L}\p{N}_])(?:books?|manuscripts?|documents?|chapters?|character|kitap|metin|belge|doküman|bölüm|karakter)(?=$|[^\p{L}\p{N}_])/u.test(
+        normalized,
+      );
+    const analysisIntent =
+      /(?:^|[^\p{L}\p{N}_])(?:analy[sz]e|review|inspect|evaluate|summari[sz]e|contradiction|continuity|transition)(?=$|[^\p{L}\p{N}_])/u.test(
+        normalized,
+      ) ||
+      /(?:^|[^\p{L}\p{N}_])(?:incele|analiz|değerlendir|özetle|çelişki|tutarlılık|devamlılık|geçiş|eksik)(?=$|[^\p{L}\p{N}_])/u.test(
+        normalized,
+      );
+    return documentScope && analysisIntent;
+  }
+
   private static normalizeSkillInvocationQuery(text: string): string {
     return String(text || "")
       .toLowerCase()
@@ -166,6 +183,7 @@ export class IntentRouter {
     if (writingSignal) return "writing";
 
     const researchSignal =
+      this.hasDocumentAnalysisSignal(lower) ||
       /\b(research|investigate|look up|find out|analyze|analysis|compare|benchmark|sources?|citations?|market scan|trend)\b/.test(
         lower,
       );
@@ -178,8 +196,7 @@ export class IntentRouter {
     const localCue =
       /\b(?:near\s+me|nearby|close(?:st)?|walk(?:ing)?|walkable|walking\s+distance|open\s+now|nearest|around\s+me)\b/.test(
         lower,
-      ) ||
-      /\bwhere\s+can\s+i\b[\s\S]{0,80}\b(?:walk|buy|get|find|pick\s+up)\b/.test(lower);
+      ) || /\bwhere\s+can\s+i\b[\s\S]{0,80}\b(?:walk|buy|get|find|pick\s+up)\b/.test(lower);
     const placeNeedCue =
       /\b(?:buy|get|find|pick\s+up|purchase|shop|store|dress|clothes|clothing|apparel|pharmacy|coffee|restaurant|food|gift|flowers|shoes|umbrella)\b/.test(
         lower,
@@ -196,7 +213,14 @@ export class IntentRouter {
     const sanitizedPrompt = this.stripStrategyContext(String(prompt || ""));
     const text = `${title || ""}\n${sanitizedPrompt}`.trim();
     const lower = text.toLowerCase();
-    const scores: IntentScores = { chat: 0, advice: 0, planning: 0, execution: 0, thinking: 0, redirect: 0 };
+    const scores: IntentScores = {
+      chat: 0,
+      advice: 0,
+      planning: 0,
+      execution: 0,
+      thinking: 0,
+      redirect: 0,
+    };
     const signals: string[] = [];
 
     const add = (
@@ -252,6 +276,8 @@ export class IntentRouter {
         lower,
       ),
     );
+    const documentAnalysisSignal = this.hasDocumentAnalysisSignal(lower);
+    add("execution", 6, "document-analysis", documentAnalysisSignal);
     add(
       "execution",
       2,
@@ -266,12 +292,7 @@ export class IntentRouter {
       "path-or-command",
       /`[^`]+`|\/[a-z0-9_./-]+|\bnpm\b|\byarn\b|\bpnpm\b|\bgit\b/.test(lower),
     );
-    add(
-      "execution",
-      4,
-      "explicit-skill-invocation",
-      this.isExplicitSkillInvocation(lower),
-    );
+    add("execution", 4, "explicit-skill-invocation", this.isExplicitSkillInvocation(lower));
     const shellCommandMentioned =
       /\b(ssh|scp|sftp|ping|traceroute|mtr|nc|netcat|telnet|dig|nslookup|nmap|ifconfig|ipconfig|route)\b/.test(
         lower,
@@ -302,12 +323,7 @@ export class IntentRouter {
         lower,
       ),
     );
-    add(
-      "execution",
-      5,
-      "local-errand-location",
-      this.hasLocalErrandLocationIntent(lower),
-    );
+    add("execution", 5, "local-errand-location", this.hasLocalErrandLocationIntent(lower));
     const cloudProviderMentioned =
       /\b(box|dropbox|one[\s-]?drive|google drive|sharepoint|notion|i[\s-]?cloud(?:\s+drive)?)\b/.test(
         lower,
@@ -322,12 +338,7 @@ export class IntentRouter {
       "cloud-storage-file-access",
       cloudProviderMentioned && cloudFileObjectMentioned,
     );
-    add(
-      "execution",
-      2,
-      "cloud-storage-query",
-      cloudProviderMentioned && cloudQueryIntent,
-    );
+    add("execution", 2, "cloud-storage-query", cloudProviderMentioned && cloudQueryIntent);
     add(
       "execution",
       3,
@@ -345,16 +356,19 @@ export class IntentRouter {
         /\b(create|generate|make)\s+(?:an?\s+)?(?:image|picture|photo|illustration)\s+(?:of|with|about|for|on|explaining?)\b/i.test(
           lower,
         ) ||
-        /\b(create|generate|make)\s+(?:an?\s+)?(?:infographic|poster)(?:\s+image)?\b/i.test(
-          lower,
-        ),
+        /\b(create|generate|make)\s+(?:an?\s+)?(?:infographic|poster)(?:\s+image)?\b/i.test(lower),
     );
 
     // Redirect / re-scope intent — user is pivoting away from prior work to a new direction.
     // Scored separately so it can win decisively over "execution" when both are present.
     const redirectSignals = this.getRedirectSignals(lower);
     add("redirect", 5, "redirect-ignore-pivot", redirectSignals.includes("redirect-ignore-pivot"));
-    add("redirect", 5, "redirect-explicit-pivot", redirectSignals.includes("redirect-explicit-pivot"));
+    add(
+      "redirect",
+      5,
+      "redirect-explicit-pivot",
+      redirectSignals.includes("redirect-explicit-pivot"),
+    );
     add("redirect", 4, "redirect-contrast", redirectSignals.includes("redirect-contrast"));
     add("redirect", 4, "redirect-negate-pivot", redirectSignals.includes("redirect-negate-pivot"));
     add("redirect", 3, "redirect-scope-narrow", redirectSignals.includes("redirect-scope-narrow"));
@@ -467,7 +481,13 @@ export class IntentRouter {
       intent = "chat";
     }
 
-    const confidenceBase = Math.max(chatLike, planningLike, executionLike, thinkingLike, redirectLike);
+    const confidenceBase = Math.max(
+      chatLike,
+      planningLike,
+      executionLike,
+      thinkingLike,
+      redirectLike,
+    );
     const confidenceSpread = Math.abs(planningLike + executionLike - chatLike);
     const confidence = clamp(0.55 + confidenceBase * 0.08 + confidenceSpread * 0.02, 0.55, 0.95);
 
@@ -476,7 +496,10 @@ export class IntentRouter {
         ? "chat"
         : intent === "thinking"
           ? "think"
-          : intent === "execution" || intent === "workflow" || intent === "deep_work" || intent === "redirect"
+          : intent === "execution" ||
+              intent === "workflow" ||
+              intent === "deep_work" ||
+              intent === "redirect"
             ? "task"
             : "hybrid";
 
@@ -484,7 +507,12 @@ export class IntentRouter {
       intent === "advice" || intent === "planning" || intent === "mixed" || intent === "thinking";
 
     let complexity: TaskComplexity;
-    if (wordCount > 150 || actionVerbCount >= 4 || (hasMultipleSteps && actionVerbCount >= 2)) {
+    if (
+      documentAnalysisSignal ||
+      wordCount > 150 ||
+      actionVerbCount >= 4 ||
+      (hasMultipleSteps && actionVerbCount >= 2)
+    ) {
       complexity = "high";
     } else if (wordCount > 60 || actionVerbCount >= 2 || hasMultipleSteps) {
       complexity = "medium";

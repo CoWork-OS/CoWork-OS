@@ -31,6 +31,7 @@ const NPM_EXEC_PATH = (() => {
 })();
 const cwdRequire = createRequire(path.join(process.cwd(), "package.json"));
 const scriptRequire = createRequire(import.meta.url);
+const { getNpmInstallModeArgs } = scriptRequire("./npm_install_mode.cjs");
 
 function resolveFromCwd(specifier) {
   // Try CWD first (dev/source builds), then script location (global npm install)
@@ -346,8 +347,7 @@ function ensureBetterSqlite3(env, installRootDir) {
       "--no-fund",
       "--ignore-scripts=false",
       "--foreground-scripts",
-      "--omit=dev",
-      "--package-lock=false",
+      ...getNpmInstallModeArgs(installRootDir),
       "--no-save",
       `better-sqlite3@${BETTER_SQLITE3_VERSION}`,
     ],

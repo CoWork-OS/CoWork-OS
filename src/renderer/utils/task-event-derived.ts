@@ -325,6 +325,33 @@ function getCompletionSummaryText(event: TaskEvent): string {
   return [summary, verification].filter((value) => value.length > 0).join("\n\n");
 }
 
+function normalizeCompletionTextForComparison(value: string): string {
+  return value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function getCompletionComparableTexts(event: TaskEvent): Set<string> {
+  if (getEffectiveTaskEventType(event) !== "task_completed") return new Set();
+  const payload = asObject(event.payload);
+  const resultSummary =
+    typeof payload.resultSummary === "string" ? payload.resultSummary.trim() : "";
+  const semanticSummary =
+    typeof payload.semanticSummary === "string" ? payload.semanticSummary.trim() : "";
+  const fullSummary = getCompletionSummaryText(event);
+  const comparableSummaries = resultSummary
+    ? [resultSummary, fullSummary]
+    : [semanticSummary, fullSummary];
+
+  return new Set(
+    comparableSummaries
+      .map(normalizeCompletionTextForComparison)
+      .filter((value) => value.length > 0),
+  );
+}
+
 function derivePlanSteps(events: TaskEvent[]): PlanStep[] {
   const planEvent = events.find((event) => getEffectiveTaskEventType(event) === "plan_created");
   const planPayload = asObject(planEvent?.payload);
@@ -686,13 +713,16 @@ function deriveBaseTimelineItems(filteredEvents: TaskEvent[]): BaseTimelineItem[
   const eventItems: BaseTimelineItem[] = [];
   let currentBlock: TaskEvent[] = [];
   let currentBlockIndices: number[] = [];
-  const lastCompletionSummaryByTask = new Map<string, { summary: string; timestamp: number }>();
+  const lastCompletionSummaryByTask = new Map<
+    string,
+    { comparableTexts: Set<string>; timestamp: number }
+  >();
 
   for (const event of filteredEvents) {
-    const summary = getCompletionSummaryText(event);
-    if (!summary) continue;
+    const comparableTexts = getCompletionComparableTexts(event);
+    if (comparableTexts.size === 0) continue;
     lastCompletionSummaryByTask.set(event.taskId, {
-      summary,
+      comparableTexts,
       timestamp: event.timestamp,
     });
   }
@@ -737,11 +767,12 @@ function deriveBaseTimelineItems(filteredEvents: TaskEvent[]): BaseTimelineItem[
       if (getEffectiveTaskEventType(event) === "assistant_message") {
         const payload = asObject(event.payload);
         const message = typeof payload.message === "string" ? payload.message.trim() : "";
+        const comparableMessage = normalizeCompletionTextForComparison(message);
         const completion = lastCompletionSummaryByTask.get(event.taskId);
         if (
-          message &&
+          comparableMessage &&
           completion &&
-          completion.summary === message &&
+          completion.comparableTexts.has(comparableMessage) &&
           event.timestamp <= completion.timestamp
         ) {
           continue;

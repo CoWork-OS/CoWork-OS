@@ -65,6 +65,18 @@ npm init -y
 npm install --ignore-scripts /path/to/cowork-os-<version>.tgz
 ```
 
+## `npm run dev` reports `vite: command not found`
+
+This means the source checkout's development dependencies are missing. Restore the lockfile-defined dependency tree and native Electron modules, then retry:
+
+```bash
+npm ci --ignore-scripts --no-audit --no-fund
+npm run setup
+npm run dev
+```
+
+The `cowork-os` launcher's runtime repair detects Git source checkouts (including linked worktrees) and preserves development dependencies. Normal packaged npm installs still omit development-only packages.
+
 ## CoWork CLI issues
 
 The `cowork` command has a local mode and an explicit remote mode. Normal local use should not require a Control Plane token.

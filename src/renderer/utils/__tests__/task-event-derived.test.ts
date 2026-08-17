@@ -24,6 +24,84 @@ function makeEvent(
 }
 
 describe("deriveSharedTaskEventUiState action blocks", () => {
+  it("coalesces a legacy final response that differs only by Markdown whitespace", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("assistant-final", 100, "timeline_step_updated", {
+          legacyType: "assistant_message",
+          internal: false,
+          message: "Finished draft.\n\nThank you,\nAlmarion",
+        }),
+        makeEvent("task-complete", 200, "timeline_step_finished", {
+          legacyType: "task_completed",
+          message: "Task completed with partial results",
+          resultSummary: "Finished draft.\n\nThank you,  \nAlmarion",
+        }),
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+      workspace: null,
+      verboseSteps: true,
+    });
+
+    expect(
+      shared.baseTimelineItems
+        .filter((item) => item.kind === "event")
+        .map((item) => (item.kind === "event" ? item.event.id : "")),
+    ).toEqual(["task-complete"]);
+  });
+
+  it("coalesces a final response when the completion has a separate semantic summary", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("assistant-final", 100, "timeline_step_updated", {
+          legacyType: "assistant_message",
+          internal: false,
+          message: "Final paragraph with the requested details.",
+        }),
+        makeEvent("task-complete", 200, "timeline_step_finished", {
+          legacyType: "task_completed",
+          message: "Task completed with partial results",
+          resultSummary: "Final paragraph with the requested details.",
+          semanticSummary: "Analyze Image .cowork/uploads/image.png",
+        }),
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+      workspace: null,
+      verboseSteps: true,
+    });
+
+    expect(
+      shared.baseTimelineItems
+        .filter((item) => item.kind === "event")
+        .map((item) => (item.kind === "event" ? item.event.id : "")),
+    ).toEqual(["task-complete"]);
+  });
+
+  it("preserves a distinct assistant response before the completion", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("assistant-progress", 100, "timeline_step_updated", {
+          legacyType: "assistant_message",
+          internal: false,
+          message: "Here is an earlier draft.",
+        }),
+        makeEvent("task-complete", 200, "timeline_step_finished", {
+          legacyType: "task_completed",
+          resultSummary: "Here is the revised final draft.",
+        }),
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+      workspace: null,
+      verboseSteps: true,
+    });
+
+    expect(
+      shared.baseTimelineItems
+        .filter((item) => item.kind === "event")
+        .map((item) => (item.kind === "event" ? item.event.id : "")),
+    ).toEqual(["assistant-progress", "task-complete"]);
+  });
+
   it("keeps a persisted completion as the final Verbose timeline item", () => {
     const shared = deriveSharedTaskEventUiState({
       rawEvents: [

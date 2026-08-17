@@ -30,6 +30,8 @@ npm run build:cli      # compile the standalone cowork CLI
 npm run package        # package desktop installers (.dmg on macOS, .exe on Windows)
 ```
 
+If a globally installed `cowork-os` command is linked to this source checkout, its runtime dependency repair preserves the checkout's development dependencies. Packaged npm installs continue to omit development-only packages.
+
 Once complete, the packaged app will be in the `release/` folder:
 - **`*.dmg`** — macOS installer image
 - **`*.exe`** — Windows NSIS installer

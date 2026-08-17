@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Linked source-checkout dependency repair**: the `cowork-os` launcher and native SQLite recovery now preserve lockfile-defined versions and development dependencies when a global command is linked to a Git checkout, preventing runtime self-healing from upgrading Electron or removing Vite, Vitest, TypeScript, and other local development tools. Packaged npm installs continue to repair runtime dependencies without installing the development toolchain.
 - **Timeline completion ordering**: preserve the final task completion event, suppress stage chatter emitted after completion, retain relevant tool output, and sanitize namespaced tool tags before rendering.
 - **Planning and document-analysis reliability**: hardened document source discovery and extraction, chunk retries, evidence reduction, local Ollama budget selection, and recovery from incomplete planner output.
 

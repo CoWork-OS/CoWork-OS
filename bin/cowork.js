@@ -3,6 +3,9 @@
 const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const {
+  getRuntimeDependencyRepairArgs,
+} = require('../scripts/npm_install_mode.cjs');
 
 const packageDir = path.resolve(__dirname, '..');
 const packageJsonPath = path.join(packageDir, 'package.json');
@@ -87,9 +90,10 @@ function ensureRuntimeDeps() {
     '--no-audit',
     '--no-fund',
     '--ignore-scripts',
-    '--omit=dev',
-    '--package-lock=false',
-    ...missing.map((dep) => `${dep.name}@${dep.version}`)
+    ...getRuntimeDependencyRepairArgs(
+      packageDir,
+      missing.map((dep) => `${dep.name}@${dep.version}`)
+    )
   ];
 
   console.log(

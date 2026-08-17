@@ -232,13 +232,29 @@ describe("VoiceService", () => {
       );
     });
 
-    it("should throw for local TTS provider (not available in main process)", async () => {
-      service.updateSettings({
-        enabled: true,
-        ttsProvider: "local",
-      });
+    it("should dispatch local TTS to the system voice runtime", async () => {
+      const synthesize = vi.fn().mockResolvedValue(Buffer.from("system wav"));
+      const systemService = new VoiceService({
+        settings: { enabled: true, ttsProvider: "local" },
+        systemVoiceRuntime: {
+          getCapabilities: () => ({
+            systemTts: { available: true, adapter: "macos-say" },
+            systemStt: { available: false, adapter: null, reason: "Unavailable" },
+          }),
+          synthesize,
+          transcribe: vi.fn(),
+          stop: vi.fn(),
+        },
+      } as Any);
 
-      await expect(service.speak("Hello")).rejects.toThrow("Local TTS is not available");
+      const result = await systemService.speak("Hello");
+
+      expect(synthesize).toHaveBeenCalledWith("Hello", {
+        language: "en-US",
+        speechRate: 1,
+      });
+      expect(result).toEqual(Buffer.from("system wav"));
+      systemService.dispose();
     });
 
     it("should emit speakingStart event", async () => {

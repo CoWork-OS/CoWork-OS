@@ -4899,6 +4899,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Voice Mode
   getVoiceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_GET_SETTINGS),
+  getVoiceCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_GET_CAPABILITIES),
   saveVoiceSettings: (settings: Partial<VoiceSettingsData>) =>
     ipcRenderer.invoke(IPC_CHANNELS.VOICE_SAVE_SETTINGS, settings),
   getVoiceState: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_GET_STATE),
@@ -8188,6 +8189,7 @@ export interface ElectronAPI {
   }) => Promise<ChannelSpecializationData | null>;
   // Voice Mode APIs
   getVoiceSettings: () => Promise<VoiceSettingsData>;
+  getVoiceCapabilities: () => Promise<VoiceCapabilitiesData>;
   saveVoiceSettings: (settings: Partial<VoiceSettingsData>) => Promise<VoiceSettingsData>;
   getVoiceState: () => Promise<VoiceStateData>;
   voiceSpeak: (
@@ -8310,6 +8312,19 @@ export interface TunnelStatusData {
 export type VoiceProvider = "elevenlabs" | "openai" | "azure" | "local";
 export type VoiceInputMode = "push_to_talk" | "voice_activity" | "disabled";
 export type VoiceResponseMode = "auto" | "manual" | "smart";
+
+export interface VoiceCapabilitiesData {
+  systemTts: {
+    available: boolean;
+    adapter: "macos-say" | "windows-sapi" | "espeak" | null;
+    reason?: string;
+  };
+  systemStt: {
+    available: boolean;
+    adapter: "macos-say" | "windows-sapi" | "espeak" | null;
+    reason?: string;
+  };
+}
 
 export interface VoiceSettingsData {
   enabled: boolean;

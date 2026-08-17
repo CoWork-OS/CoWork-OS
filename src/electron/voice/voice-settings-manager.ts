@@ -20,6 +20,7 @@ import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
+import { getSystemVoiceCapabilities } from "./system-voice";
 
 // Legacy file names for migration
 const LEGACY_SETTINGS_FILE = "voice-settings.json";
@@ -126,7 +127,7 @@ export class VoiceSettingsManager {
   /**
    * Save voice settings to encrypted database
    */
-  static saveSettings(settings: VoiceSettings): void {
+  static saveSettings(settings: VoiceSettings): VoiceSettings {
     try {
       // Validate and prepare settings for storage
       const validatedSettings = this.validateSettings(settings);
@@ -141,6 +142,7 @@ export class VoiceSettingsManager {
 
       this.cachedSettings = validatedSettings;
       logger.debug("Settings saved to encrypted database");
+      return validatedSettings;
     } catch (error) {
       logger.error("Failed to save settings:", error);
       throw error;
@@ -153,8 +155,7 @@ export class VoiceSettingsManager {
   static updateSettings(partial: Partial<VoiceSettings>): VoiceSettings {
     const current = this.loadSettings();
     const updated = { ...current, ...partial };
-    this.saveSettings(updated);
-    return updated;
+    return this.saveSettings(updated);
   }
 
   /**
@@ -387,6 +388,14 @@ export class VoiceSettingsManager {
       validated.ttsProvider = DEFAULT_VOICE_SETTINGS.ttsProvider;
     }
     if (!["elevenlabs", "openai", "azure", "local"].includes(validated.sttProvider)) {
+      validated.sttProvider = DEFAULT_VOICE_SETTINGS.sttProvider;
+    }
+
+    const capabilities = getSystemVoiceCapabilities();
+    if (validated.ttsProvider === "local" && !capabilities.systemTts.available) {
+      validated.ttsProvider = DEFAULT_VOICE_SETTINGS.ttsProvider;
+    }
+    if (validated.sttProvider === "local" && !capabilities.systemStt.available) {
       validated.sttProvider = DEFAULT_VOICE_SETTINGS.sttProvider;
     }
 

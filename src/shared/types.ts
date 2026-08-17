@@ -8581,6 +8581,7 @@ export const IPC_CHANNELS = {
 
   // Voice Mode (TTS/STT)
   VOICE_GET_SETTINGS: "voice:getSettings",
+  VOICE_GET_CAPABILITIES: "voice:getCapabilities",
   VOICE_SAVE_SETTINGS: "voice:saveSettings",
   VOICE_GET_STATE: "voice:getState",
   VOICE_SPEAK: "voice:speak",
@@ -12344,6 +12345,19 @@ export const DEFAULT_PERSONALITY_CONFIG_V2: PersonalityConfigV2 = {
  * Voice provider options
  */
 export type VoiceProvider = "elevenlabs" | "openai" | "azure" | "local";
+
+export type SystemVoiceAdapter = "macos-say" | "windows-sapi" | "espeak" | null;
+
+export interface VoiceProviderCapability {
+  available: boolean;
+  adapter: SystemVoiceAdapter;
+  reason?: string;
+}
+
+export interface VoiceCapabilities {
+  systemTts: VoiceProviderCapability;
+  systemStt: VoiceProviderCapability;
+}
 
 /**
  * Voice input mode - when to listen for voice input

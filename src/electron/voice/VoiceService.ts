@@ -12,10 +12,15 @@ import { EventEmitter } from "events";
 import {
   VoiceSettings,
   VoiceState,
+  VoiceCapabilities,
   ElevenLabsVoice,
   DEFAULT_VOICE_SETTINGS,
 } from "../../shared/types";
 import { createLogger } from "../utils/logger";
+import {
+  createSystemVoiceRuntime,
+  type SystemVoiceRuntime,
+} from "./system-voice";
 
 // ElevenLabs API configuration
 const ELEVENLABS_API_BASE = "https://api.elevenlabs.io/v1";
@@ -28,15 +33,18 @@ const logger = createLogger("VoiceService");
 export interface VoiceServiceOptions {
   settings?: Partial<VoiceSettings>;
   onStateChange?: (state: VoiceState) => void;
+  systemVoiceRuntime?: SystemVoiceRuntime;
 }
 
 export class VoiceService extends EventEmitter {
   private settings: VoiceSettings;
   private state: VoiceState;
+  private readonly systemVoiceRuntime: SystemVoiceRuntime;
 
   constructor(options: VoiceServiceOptions = {}) {
     super();
     this.settings = { ...DEFAULT_VOICE_SETTINGS, ...options.settings };
+    this.systemVoiceRuntime = options.systemVoiceRuntime || createSystemVoiceRuntime();
     this.state = {
       isActive: false,
       isListening: false,
@@ -89,6 +97,10 @@ export class VoiceService extends EventEmitter {
     return { ...this.state };
   }
 
+  getCapabilities(): VoiceCapabilities {
+    return this.systemVoiceRuntime.getCapabilities();
+  }
+
   /**
    * Check if speech-to-text transcription is available
    * Returns true if an STT provider with valid API keys is configured
@@ -105,7 +117,7 @@ export class VoiceService extends EventEmitter {
         // ElevenLabs uses OpenAI or Azure for STT
         return !!openaiApiKey || !!(azureApiKey && azureEndpoint);
       case "local":
-        return false; // Not available in main process
+        return this.systemVoiceRuntime.getCapabilities().systemStt.available;
       default:
         return false;
     }
@@ -135,7 +147,7 @@ export class VoiceService extends EventEmitter {
       this.updateState({ isSpeaking: true, isProcessing: true, error: undefined });
       this.emit("speakingStart", text);
 
-      let audioBuffer: ArrayBuffer;
+      let audioBuffer: ArrayBuffer | Buffer;
 
       switch (this.settings.ttsProvider) {
         case "elevenlabs":
@@ -148,10 +160,11 @@ export class VoiceService extends EventEmitter {
           audioBuffer = await this.azureTTS(text);
           break;
         case "local":
-          // Local TTS requires browser APIs - not available in main process
-          throw new Error(
-            "Local TTS is not available in the main process. Please use ElevenLabs, OpenAI, or Azure.",
-          );
+          audioBuffer = await this.systemVoiceRuntime.synthesize(text, {
+            language: this.settings.language,
+            speechRate: this.settings.speechRate,
+          });
+          break;
         default:
           throw new Error(`Unknown TTS provider: ${this.settings.ttsProvider}`);
       }
@@ -159,7 +172,7 @@ export class VoiceService extends EventEmitter {
       this.updateState({ isProcessing: false });
 
       // Return audio data as Buffer for renderer to play
-      return Buffer.from(audioBuffer);
+      return Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
     } catch (error) {
       console.error("[VoiceService] TTS error:", error);
       this.updateState({ error: (error as Error).message, isSpeaking: false, isProcessing: false });
@@ -180,6 +193,7 @@ export class VoiceService extends EventEmitter {
    * Stop current speech
    */
   stopSpeaking(): void {
+    this.systemVoiceRuntime.stop();
     this.updateState({ isSpeaking: false });
     this.emit("speakingEnd");
   }
@@ -211,10 +225,10 @@ export class VoiceService extends EventEmitter {
           transcript = await this.azureSTT(audioData);
           break;
         case "local":
-          // Local STT requires browser APIs - not available in main process
-          throw new Error(
-            "Local STT is not available in the main process. Please use OpenAI Whisper or Azure.",
-          );
+          transcript = await this.systemVoiceRuntime.transcribe(audioData, {
+            language: this.settings.language,
+          });
+          break;
         case "elevenlabs":
           // ElevenLabs doesn't have an STT API - redirect to OpenAI if key available
           if (this.settings.openaiApiKey) {

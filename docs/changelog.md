@@ -7,21 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.51] - 2026-08-17
+
 ### Added
 
+- **Release notes for 0.5.51**: see [Release Notes 0.5.51](release-notes-0.5.51.md).
 - **Agent security with Numbat**: added a disabled-by-default, checksum-verified Numbat runtime with monitor/enforce modes, bounded tool-call projections, rule provenance, findings and decisions, scheduled scans, incident case bundles, retention controls, CLI operations, and optional external hooks. Numbat can add restrictions but cannot grant permissions or suppress ordinary approvals.
 - **Bounded long-document analysis**: added deterministic read-only review for named `.docx`, `.pdf`, `.md`, and `.txt` sources, including safe workspace discovery, extraction, overlapping analysis windows, complete coverage accounting, evidence reduction, split retry, cancellation, and partial-success reporting when final synthesis times out.
+- **Native System Voice TTS**: added capability detection and local text-to-speech adapters for macOS `say`, Windows PowerShell/SAPI, and Linux `espeak`. System speech recognition remains explicitly reported as unavailable so users can select OpenAI or Azure Whisper when transcription is needed.
 
 ### Changed
 
 - **WSL native window frame**: WSL/WSLg sessions now retain the operating system window frame and render the in-app toolbar as a non-draggable row. This remains a best-effort compatibility path pending visual validation on representative WSL hosts.
 - **Sidebar update action**: moved the update action into the sidebar footer so it remains available without occupying the main task header.
+- **Long-session timeline performance**: added bounded timeline pages, cursor-based history loading, replay-tail transport, detail hydration, payload byte budgets, truncation metadata, renderer caches, and large-session profiling fixtures to keep task switching and replay predictable.
+- **Runtime and dependency maintenance**: refreshed the Electron, SQLite, provider, messaging, charting, and packaging dependency set; expanded native/runtime compatibility checks; and refactored the main application architecture and CLI/daemon boundaries without changing the local-first product model.
+- **Persistent UI density**: power density selection now persists across restarts and is applied during early renderer bootstrap to reduce visual layout changes during startup.
 
 ### Fixed
 
 - **Linked source-checkout dependency repair**: the `cowork-os` launcher and native SQLite recovery now preserve lockfile-defined versions and development dependencies when a global command is linked to a Git checkout, preventing runtime self-healing from upgrading Electron or removing Vite, Vitest, TypeScript, and other local development tools. Packaged npm installs continue to repair runtime dependencies without installing the development toolchain.
 - **Timeline completion ordering**: preserve the final task completion event, suppress stage chatter emitted after completion, retain relevant tool output, and sanitize namespaced tool tags before rendering.
 - **Planning and document-analysis reliability**: hardened document source discovery and extraction, chunk retries, evidence reduction, local Ollama budget selection, and recovery from incomplete planner output.
+- **Timeline final-response coalescing**: prevent duplicate final responses and preserve the intended completion/tool-output ordering during replay and live rendering.
+- **Browser navigation and renderer recovery**: restricted Browser Workbench navigation to approved web schemes and added renderer-crash handling so invalid destinations and renderer failures surface controlled recovery behavior.
 
 ## [0.5.50] - 2026-07-20
 
@@ -1185,6 +1194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.5.51 | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery |
 | 0.5.50 | 2026-07-20 | GPT-5.6 subscription controls, Mixture of Agents, browser annotations, inline mail review, video analysis, governed memory writes, safer visible automation, session retention, and new connector/skill workflows |
 | 0.5.49 | 2026-06-08 | CoWork CLI, Browser Use Cloud, Codex Security workflows, automation outcomes, Usage Insights heatmaps, composer link chips, public adoption stats, and security hardening |
 | 0.5.48 | 2026-05-28 | Side Chat, Secure MCP Tunnels, YouTube video intelligence, timeline/sidebar paging, scheduler/routine reliability, and runtime safety fixes |
@@ -1212,7 +1222,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.50...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.51...HEAD
+[0.5.51]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.50...v0.5.51
 [0.5.50]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.49...v0.5.50
 [0.5.49]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.48...v0.5.49
 [0.5.48]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.47...v0.5.48

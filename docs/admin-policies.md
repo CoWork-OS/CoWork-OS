@@ -1,8 +1,8 @@
 # Admin Policies
 
-Admin Policies provide organization-level control over plugin packs, connectors, agents, Everyday Agent, and installation permissions. Policies are enforced at the IPC handler level, meaning the backend rejects policy-violating operations regardless of how they're triggered.
+Admin Policies provide organization-level control over plugin packs, connectors, agents, Everyday Agent, runtime security, and installation permissions. UI-independent enforcement occurs in backend IPC handlers and the central tool-policy pipeline.
 
-Access from **Settings** > **Admin Policies** (requires Power density mode).
+Access from **Settings > System & Security > Admin Policies** (requires Power density mode).
 
 ---
 
@@ -12,8 +12,8 @@ Access from **Settings** > **Admin Policies** (requires Power density mode).
 
 Policies are stored as JSON in the CoWork OS user data directory:
 
-```
-~/.cowork/policies.json
+```text
+<active CoWork user-data directory>/policies.json
 ```
 
 The file is created when policies are first saved via the Admin Policies panel. If the file doesn't exist, permissive defaults apply (everything allowed, nothing blocked or required).
@@ -26,6 +26,7 @@ The file is created when policies are first saved via the Admin Policies panel. 
 | **Connector policies** | Which MCP connectors are blocked |
 | **Agent policies** | Heartbeat frequency limits, concurrent agent caps |
 | **Everyday Agent policies** | Product block, bundle blocks, review-only mode, cadence and background-work caps |
+| **Runtime policies** | Permission/sandbox/network limits, telemetry, and Numbat agent-security policy |
 | **Installation policies** | Whether users can create, install from git, or install from URL |
 | **Organization settings** | Org name, org plugin directory path |
 
@@ -42,14 +43,19 @@ Policies are enforced in the following IPC handlers:
 | `pluginPack:installGit` | Blocked if `allowGitInstall` is false |
 | `pluginPack:installUrl` | Blocked if `allowUrlInstall` is false |
 
+`runtime.agentSecurity` is evaluated before normal user approval and tool
+execution. Its Numbat decision can only continue to the existing policy layers
+or deny the action; it cannot grant an action or override another denial. See
+[Agent Security with Numbat](agent-security-numbat.md).
+
 ---
 
 ## Policy Schema
 
 ```json
 {
-  "version": 1,
-  "updatedAt": "2025-01-15T12:00:00Z",
+  "version": 2,
+  "updatedAt": "2026-08-17T12:00:00Z",
   "packs": {
     "allowed": [],
     "blocked": ["unwanted-pack"],
@@ -71,6 +77,40 @@ Policies are enforced in the following IPC handlers:
     "activeHours": {
       "enabled": false,
       "windows": []
+    }
+  },
+  "runtime": {
+    "allowedPermissionModes": [],
+    "allowedSandboxTypes": ["macos", "docker"],
+    "requireSandboxForShell": false,
+    "allowUnsandboxedShell": false,
+    "network": {
+      "defaultAction": "allow",
+      "allowedDomains": [],
+      "blockedDomains": [],
+      "allowShellNetwork": false
+    },
+    "autoReview": {
+      "enabled": true
+    },
+    "telemetry": {
+      "enabled": false
+    },
+    "agentSecurity": {
+      "enabled": false,
+      "mode": "monitor",
+      "ruleProfile": "recommended",
+      "customRuleDirs": [],
+      "failurePolicy": "open",
+      "timeoutMs": 1500,
+      "retentionDays": 30,
+      "scheduledScan": {
+        "enabled": false,
+        "intervalHours": 24
+      },
+      "externalHooks": {
+        "management": "manual"
+      }
     }
   },
   "general": {
@@ -118,6 +158,21 @@ Policies are enforced in the following IPC handlers:
 | `maxHeartbeatCadenceMinutes` | `number` | `60` | >= 5 | Clamps local Everyday Agent heartbeat cadence. |
 | `maxConcurrentBackgroundWork` | `number` | `1` | >= 1 | Caps concurrent Everyday Agent background jobs. |
 | `activeHours` | `object` | disabled | — | Optional organization active-hours ceiling. |
+
+#### `runtime.agentSecurity`
+
+| Field | Type | Default | Range / values | Description |
+|-------|------|---------|----------------|-------------|
+| `enabled` | `boolean` | `false` | — | Enables local Numbat inspection. |
+| `mode` | `string` | `monitor` | `monitor`, `enforce` | Records findings only or permits Numbat denials. |
+| `ruleProfile` | `string` | `recommended` | `builtin`, `recommended`, `custom` | Selects the rule source. |
+| `customRuleDirs` | `string[]` | `[]` | Absolute safe directories | Extra rules for the custom profile; symlinks and writable directories are rejected. |
+| `failurePolicy` | `string` | `open` | `open`, `deny_high_risk` | Controls behavior when enforcement cannot produce a decision. |
+| `timeoutMs` | `number` | `1500` | `250`–`5000` | Maximum live-hook evaluation time. |
+| `retentionDays` | `number` | `30` | `1`–`365` | Retention window for resolved findings, decisions, and diagnostics. |
+| `scheduledScan.enabled` | `boolean` | `false` | — | Enables periodic endpoint-artifact scans. |
+| `scheduledScan.intervalHours` | `number` | `24` | `1`–`168` | Scheduled scan interval. |
+| `externalHooks.management` | `string` | `manual` | `manual` | Requires explicit install/uninstall confirmation for external-agent hooks. |
 
 #### `general`
 
@@ -172,7 +227,7 @@ If no custom `orgPluginDir` is configured, CoWork OS checks `~/.cowork/org-plugi
 
 ## Admin Policies Panel
 
-The Admin Policies panel is accessible from **Settings** > **Admin Policies** (visible in Power density mode only).
+The Admin Policies panel is accessible from **Settings > System & Security > Admin Policies** (visible in Power density mode only).
 
 ### Sections
 
@@ -199,6 +254,15 @@ The Admin Policies panel is accessible from **Settings** > **Admin Policies** (v
 - Max Heartbeat Cadence — maximum profile cadence in minutes
 - Max Background Work — concurrent background-work cap
 
+**Agent Security Runtime**
+- Enable or disable the policy
+- Choose monitor or enforce mode
+- Select built-in, recommended, or custom rules
+- Set failure handling, timeout, retention, and scheduled scans
+
+Operational findings, diagnostics, scans, and external-agent hook management
+are under **Settings > System & Security > Agent Security**.
+
 **Installation Permissions**
 - Allow custom plugin packs (scaffold)
 - Allow installation from Git repositories
@@ -206,7 +270,9 @@ The Admin Policies panel is accessible from **Settings** > **Admin Policies** (v
 
 ### Saving
 
-Click "Save Policies" to persist changes to `~/.cowork/policies.json`. Changes take effect immediately — no restart required. The "Reset" button reloads the last saved state.
+Click "Save Policies" to persist changes to the active user-data directory's
+`policies.json`. Changes take effect immediately — no restart required. The
+"Reset" button reloads the last saved state.
 
 ---
 

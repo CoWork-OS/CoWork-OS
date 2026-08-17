@@ -70,6 +70,24 @@ reverse shells, runtime permission bypass, secret-manager egress, SSH
 persistence, container host escape, and sudoers tampering. All other built-in
 rules remain detection-only.
 
+Policy defaults and accepted ranges are:
+
+| Field | Default | Accepted values |
+|---|---:|---|
+| `enabled` | `false` | Boolean |
+| `mode` | `monitor` | `monitor`, `enforce` |
+| `ruleProfile` | `recommended` | `builtin`, `recommended`, `custom` |
+| `customRuleDirs` | `[]` | Absolute safe directories used by `custom` |
+| `failurePolicy` | `open` | `open`, `deny_high_risk` |
+| `timeoutMs` | `1500` | `250`–`5000` |
+| `retentionDays` | `30` | `1`–`365` |
+| `scheduledScan.enabled` | `false` | Boolean |
+| `scheduledScan.intervalHours` | `24` | `1`–`168` |
+
+The full policy lives at `runtime.agentSecurity` in the active user-data
+directory's `policies.json`. See [Admin Policies](admin-policies.md) for the
+complete schema.
+
 ## Operations
 
 The desktop Agent Security panel exposes runtime health, recent findings,
@@ -82,6 +100,7 @@ Equivalent local CLI commands include:
 ```bash
 cowork security status --refresh
 cowork security findings
+cowork security finding <finding-id> acknowledged
 cowork security decisions
 cowork security inventory --refresh
 cowork security scan
@@ -89,6 +108,7 @@ cowork security check-rules
 cowork security hooks status codex
 cowork security hooks install codex --yes
 cowork security hooks uninstall codex --yes
+cowork security prune --yes
 ```
 
 Add `--remote` to use the Control Plane. Read operations require `read` scope;
@@ -114,3 +134,22 @@ permissions. Records are redacted again before database ingestion.
 Retention pruning preserves open findings. Resolved/acknowledged findings,
 decisions, and diagnostics older than the configured retention period are
 removed. Case bundles are not automatically pruned.
+
+## Troubleshooting
+
+If status reports `unavailable`:
+
+1. Run `cowork security status --refresh` and inspect the reported runtime
+   error.
+2. In a source checkout, run `npm run numbat:build`, followed by
+   `npm run numbat:verify`.
+3. For an offline verification, set `COWORK_NUMBAT_OFFLINE=1`; the command will
+   fail if the checksum-pinned source or Go SDK is not already cached.
+4. If using `COWORK_NUMBAT_BINARY`, also set the exact
+   `COWORK_NUMBAT_SHA256`. Symlinks, writable binaries, ownership mismatches,
+   and checksum mismatches are rejected.
+
+Do not enable enforcement until runtime health is `ok` and the selected rules
+pass `cowork security check-rules`. The emergency
+`COWORK_AGENT_SECURITY_DISABLED=1` switch disables evaluation locally; it does
+not edit the saved organization policy.

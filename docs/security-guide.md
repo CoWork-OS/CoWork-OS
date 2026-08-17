@@ -49,6 +49,12 @@ session, workspace, or profile rules.
 For the full evaluation order, rule precedence, and persistence model, see
 [Permission System](permission-system.md).
 
+### Agent Security with Numbat
+
+CoWork can add a Numbat-backed agent-security decision before the ordinary permission and approval layers. The integration is disabled by default and receives a bounded projection of the pending tool call rather than the full task transcript. In **Monitor** mode it records findings without blocking; in **Enforce** mode a Numbat denial can block the action, but an allow result cannot grant permission, suppress an approval, or weaken sandbox and network controls.
+
+Configure the runtime under **Settings > System & Security > Agent Security** or through `runtime.agentSecurity` in the admin policy. Keep enforcement off until binary provenance, health, and rules have been checked. See [Agent Security with Numbat](agent-security-numbat.md) for defaults, failure policy, rule sources, CLI operations, retention, and incident case bundles.
+
 ### Automation Studio Approvals
 
 Main-sidebar Automation Studio classifies each step as read, local write, external write, or data export. New flows default to confirming external work; data exports always pause in a live run. A step's **Skip for safe actions** option applies only to read/local work and cannot suppress external-write or export approval.
@@ -559,7 +565,7 @@ If you discover a security vulnerability:
 2. Use GitHub Security Advisories (Security tab > Report a vulnerability)
 3. Include reproduction steps and impact assessment
 
-See [SECURITY.md](SECURITY.md) for full details.
+See [SECURITY.md](../SECURITY.md) for full details.
 
 ---
 

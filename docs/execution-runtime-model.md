@@ -76,6 +76,8 @@ Descriptions are intentionally capped so provider tool arrays do not grow withou
 
 `parse_document` is the ordinary PDF reading path. Uploaded PDFs are not fully injected into the initial user message; the renderer includes a compact attachment block with filename, workspace-relative path, page count, extraction status, OCR/scan metadata, and a short excerpt. When a task asks to summarize, answer questions from, extract from, compare, or transform the PDF beyond that excerpt, executor guidance tells the model to call `parse_document` on the attached path. `read_pdf_visual` stays reserved for visual layout, formatting, chart/diagram appearance, scanned-page appearance, and similar page-image analysis.
 
+Direct read-only reviews of named `.docx`, `.pdf`, `.md`, or `.txt` sources can use the bounded long-document analysis path. It deterministically discovers safe workspace files, extracts text, divides every source into overlapping windows, analyzes all windows, and reduces evidence into a final answer with recorded coverage. File mutation requests stay on the ordinary agent path, and visual PDF questions still use `read_pdf_visual`. See [Long-Document Analysis](document-analysis.md).
+
 Explicit chat mode normally bypasses the task pipeline. A narrow exception auto-promotes chat turns with uploaded PDF attachment metadata into read-only analysis mode when deeper PDF reading is required, so `parse_document` can run without enabling mutating tools.
 
 ## Provenance-Aware Tool Results

@@ -193,6 +193,7 @@ Once the app opens, the most important places to know are:
 - **Home**: quick launch plus recent sessions and recent automation activity
 - **Everything Workbench**: generated documents, spreadsheets, decks, web pages, PDFs, and previews open from task output cards into resizable sidebar or fullscreen artifact workspaces. Use this as the default place for everyday generated knowledge work: review or edit the file, then ask the agent for changes without switching to a separate Word, Excel, PowerPoint, browser, or chat app. See [Everything Workbench](everything-workbench.md).
 - **Uploaded PDFs**: attach a PDF to a task or chat turn when you want CoWork to summarize it, answer questions from it, extract clauses, or transform it. The first prompt includes only a compact PDF excerpt plus page/extraction metadata and the workspace-relative path; CoWork reads the full PDF on demand with the document parser. PDF excerpts are treated as untrusted document data, and visual layout questions use the visual PDF reader instead.
+- **Long-document reviews**: ask for a read-only review of named `.docx`, `.pdf`, `.md`, or `.txt` files to use bounded extraction, full coverage accounting, and evidence reduction. Requests that edit the source remain on the normal task path. See [Long-Document Analysis](document-analysis.md).
 - **Message box shortcuts**: type `/` in the main message box to search app commands and skill-backed workflow shortcuts in one menu. Use `/side` to ask read-only questions about the selected running session from the right panel, `/schedule` for standalone scheduled tasks, `/schedule here` for scheduled follow-ups in the selected thread, `/clear` to clear the current task view without deleting history, `/plan <task>` for Plan mode, `/cost <task>` for estimates, `/multitask [N] <task>` for bounded parallel lane work, or shortcuts such as `/strategy`, `/batch-rename`, and `/gmail-summary-drive` from the bundled CoWork Shortcuts pack. Skill-backed selections insert the slash token first so you can add context before sending; Claude-for-Legal workflows can then show structured matter-context cards in the task view. See [Message Box Shortcuts](message-box-shortcuts.md), [Side Chat](side-chat.md), [Multitask Command](multitask.md), and [Claude-for-Legal Workflows](claude-for-legal.md).
 - **Task menu**: open a task and use the three-dot menu beside the title for pin/rename/archive, copy working directory/task ID/deeplink/Markdown, fork session, view outputs, or turn the current task into a same-thread or new-task automation. See [Task Automations](task-automations.md).
 - **Automations**: open the main-sidebar Automation Studio to discover templates, build a versioned structured flow, test it without external writes, turn it on, and inspect step-level activity. See [Automation Studio](automation-studio.md).
@@ -722,9 +723,9 @@ Don't use system folders like `/System` or `/Applications`.
 
 ### Learn More
 
-- [Full README](README.md) - Complete documentation
-- [Implementation Summary](IMPLEMENTATION_SUMMARY.md) - Technical details
-- [Project Status](PROJECT_STATUS.md) - Feature status
+- [Full README](../README.md) - Complete documentation
+- [Implementation Summary](../IMPLEMENTATION_SUMMARY.md) - Technical details
+- [Project Status](../PROJECT_STATUS.md) - Feature status
 
 ## Getting Help
 

@@ -219,6 +219,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${RUNNER_OS}" = "macOS" ]; then
+            npm run numbat:build
             COWORK_MAC_UNSIGNED=1 node scripts/run_electron_builder.mjs --mac --publish never
           else
             npm run package

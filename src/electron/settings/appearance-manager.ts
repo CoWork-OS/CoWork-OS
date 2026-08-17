@@ -12,6 +12,7 @@ import {
   ThemeMode,
   VisualTheme,
   AccentColor,
+  UI_DENSITIES,
   UiDensity,
   TimelineVerbosity,
 } from "../../shared/types";
@@ -388,7 +389,7 @@ function isValidAccentColor(value: unknown): value is AccentColor {
 }
 
 function isValidUiDensity(value: unknown): value is UiDensity {
-  return value === "focused" || value === "full";
+  return UI_DENSITIES.includes(value as UiDensity);
 }
 
 function isValidTimelineVerbosity(value: unknown): value is TimelineVerbosity {

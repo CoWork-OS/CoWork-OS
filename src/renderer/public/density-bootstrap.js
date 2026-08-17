@@ -1,12 +1,13 @@
 (function () {
   try {
+    const validDensities = ["focused", "full", "power"];
     const savedDensity = localStorage.getItem("uiDensity");
-    if (savedDensity === "focused" || savedDensity === "full") {
+    if (validDensities.includes(savedDensity)) {
       const root = document.documentElement;
-      root.classList.remove("density-focused", "density-full");
+      root.classList.remove(...validDensities.map((density) => `density-${density}`));
       root.classList.add(`density-${savedDensity}`);
     }
-  } catch  {
+  } catch {
     // Intentionally ignore bootstrap errors to avoid blocking app load.
   }
 })();

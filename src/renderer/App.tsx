@@ -90,6 +90,7 @@ import {
   TASK_TIMELINE_SINGLE_EVENT_BYTE_LIMIT,
 } from "../shared/task-timeline-limits";
 import { invalidateGlobalMeasurer } from "./utils/pretext-adapter";
+import { applyUiDensityClass } from "./utils/ui-density";
 import {
   hasTaskOutputs,
   resolveTaskOutputSummaryFromCompletionEvent,
@@ -2645,8 +2646,7 @@ export function App() {
     root.classList.add(`accent-${accentColor}`);
 
     // Apply density class
-    root.classList.remove("density-focused", "density-full");
-    root.classList.add(`density-${uiDensity}`);
+    applyUiDensityClass(root, uiDensity);
 
     // Cache density in localStorage for instant restore on next startup
     try {

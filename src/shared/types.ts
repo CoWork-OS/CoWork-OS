@@ -16,7 +16,8 @@ export type AccentColor =
   | "green"
   | "teal"
   | "coral";
-export type UiDensity = "focused" | "full" | "power";
+export const UI_DENSITIES = ["focused", "full", "power"] as const;
+export type UiDensity = (typeof UI_DENSITIES)[number];
 export type TimelineVerbosity = "summary" | "verbose";
 
 export interface AppearanceSettings {

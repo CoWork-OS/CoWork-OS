@@ -46,7 +46,7 @@ vi.mock("../../database/SecureSettingsRepository", () => ({
 
 import { AppearanceManager } from "../appearance-manager";
 
-describe("AppearanceManager developer logging settings", () => {
+describe("AppearanceManager settings", () => {
   let originalCwd: string;
   let originalNodeEnv: string | undefined;
   let tempDir: string;
@@ -159,5 +159,12 @@ describe("AppearanceManager developer logging settings", () => {
         onboardingCompletedAt: "2026-02-01T22:32:08.325Z",
       }),
     );
+  });
+
+  it("persists power density across a cache reset", () => {
+    AppearanceManager.saveSettings({ uiDensity: "power" });
+    AppearanceManager.clearCache();
+
+    expect(AppearanceManager.loadSettings().uiDensity).toBe("power");
   });
 });

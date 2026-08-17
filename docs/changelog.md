@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent security with Numbat**: added a disabled-by-default, checksum-verified Numbat runtime with monitor/enforce modes, bounded tool-call projections, rule provenance, findings and decisions, scheduled scans, incident case bundles, retention controls, CLI operations, and optional external hooks. Numbat can add restrictions but cannot grant permissions or suppress ordinary approvals.
+- **Bounded long-document analysis**: added deterministic read-only review for named `.docx`, `.pdf`, `.md`, and `.txt` sources, including safe workspace discovery, extraction, overlapping analysis windows, complete coverage accounting, evidence reduction, split retry, cancellation, and partial-success reporting when final synthesis times out.
+
+### Changed
+
+- **WSL native window frame**: WSL/WSLg sessions now retain the operating system window frame and render the in-app toolbar as a non-draggable row. This remains a best-effort compatibility path pending visual validation on representative WSL hosts.
+- **Sidebar update action**: moved the update action into the sidebar footer so it remains available without occupying the main task header.
+
+### Fixed
+
+- **Timeline completion ordering**: preserve the final task completion event, suppress stage chatter emitted after completion, retain relevant tool output, and sanitize namespaced tool tags before rendering.
+- **Planning and document-analysis reliability**: hardened document source discovery and extraction, chunk retries, evidence reduction, local Ollama budget selection, and recovery from incomplete planner output.
+
 ## [0.5.50] - 2026-07-20
 
 ### Added

@@ -582,6 +582,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Browser Workbench](docs/browser-workbench.md) | Visible in-app browser for website testing, responsive viewport QA, screenshots, annotation, diagnostics, and Browser V2 automation |
 | [Browser V2 Architecture](docs/browser-v2-architecture.md) | Unified browser session manager, adapters, snapshot refs, diagnostics, safety, and verification contract |
 | [Chat Mode](docs/chat-mode.md) | Direct chat mode, same-session follow-ups, and the narrow PDF-attachment read-only analysis exception |
+| [Long-Document Analysis](docs/document-analysis.md) | Bounded read-only review of named DOCX, PDF, Markdown, and text sources with complete coverage accounting |
 | [Platform Updates](docs/integration-skill-bootstrap-lifecycle.md) | Detailed implementation notes for integration setup, skill proposals, workspace-kit contracts, and bootstrap lifecycle |
 | [Channels](docs/channels.md) | Messaging channel setup (17 channels) |
 | [Channel User Guides](docs/channel-user-guides.md) | End-user features and best practices across all messaging channels |
@@ -606,6 +607,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Task Automations](docs/task-automations.md) | Create task-sourced routines and scheduled thread follow-ups from a task's overflow menu |
 | [Heartbeat v3](docs/heartbeat-v3.md) | Default two-lane heartbeat architecture, signals, Pulse, Dispatch, and automation-profile-backed operator semantics |
 | [Security Guide](docs/security-guide.md) | Security model and best practices |
+| [Agent Security with Numbat](docs/agent-security-numbat.md) | Optional monitor/enforce security decisions, policy defaults, CLI operations, provenance, and retention |
 | [Enterprise Connectors](docs/enterprise-connectors.md) | MCP connector development |
 | [Secure MCP Tunnels](docs/secure-mcp-tunnels.md) | Self-hosted outbound-only private MCP access, relay setup, policy controls, and audit logs |
 | [Self-Hosting](docs/self-hosting.md) | Docker and systemd deployment |

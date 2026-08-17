@@ -72,6 +72,7 @@ export default defineConfig({
           { text: 'Trust Boundaries', link: '/security/trust-boundaries' },
           { text: 'Best Practices', link: '/security/best-practices' },
           { text: 'Configuration Guide', link: '/security/configuration-guide' },
+          { text: 'Agent Security with Numbat', link: '/agent-security-numbat' },
         ],
       },
       {
@@ -81,6 +82,7 @@ export default defineConfig({
           { text: 'Channel Comparison', link: '/channel-comparison' },
           { text: 'Composer Mentions', link: '/composer-mentions' },
           { text: 'CoWork CLI', link: '/cli' },
+          { text: 'Long-Document Analysis', link: '/document-analysis' },
           { text: 'Side Chat', link: '/side-chat' },
           { text: 'Terminal Tabs', link: '/terminal-tabs' },
           { text: 'Inbox Agent', link: '/inbox-agent' },

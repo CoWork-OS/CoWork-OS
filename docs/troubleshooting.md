@@ -1,5 +1,21 @@
 # Troubleshooting
 
+## WSL/WSLg title bar or window controls look wrong
+
+When the Electron process is running on Linux under WSL, CoWork keeps the native window frame enabled and renders the in-app toolbar as a normal non-draggable row. Detection requires `process.platform === "linux"` plus either `WSL_DISTRO_NAME` or a kernel release containing `Microsoft`.
+
+Check the environment from the same shell that launches CoWork:
+
+```bash
+echo "$WSL_DISTRO_NAME"
+uname -r
+npm run dev
+```
+
+Use `npm run dev`, not `npm run dev:react`, so the renderer receives the Electron preload APIs and platform flags. Restart CoWork after moving between a native Linux session and WSL. If neither WSL signal is present, native-frame mode is not selected automatically.
+
+This is a best-effort WSL/WSLg compatibility path, not a claim of general Linux desktop support. Title-bar appearance and control placement depend on the Windows host, WSLg, desktop theme, and window manager, so release validation still requires a real WSL visual check.
+
 ## macOS app won't launch with "Apple could not verify"
 
 CoWork OS macOS DMGs are currently unsigned. On first launch, macOS may show **"Apple could not verify CoWork OS is free of malware"** or **`"CoWork OS" was blocked to protect your Mac`**.

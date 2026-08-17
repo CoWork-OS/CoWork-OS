@@ -1,1 +1,1 @@
-resources/numbat/patches/*.patch -whitespace
+resources/numbat/patches/*.patch text eol=lf -whitespace

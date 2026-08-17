@@ -125,6 +125,9 @@ npm run dev:log
 | `npm run qa:eval:run` | Replay eval suite (deterministic or hooks mode) |
 | `npm run qa:eval:enforce-regressions` | Enforce production-fix -> eval-case policy |
 | `npm run qa:renderer-perf` | Replay renderer task-surface performance fixtures, including noisy failure storms |
+| `npm run qa:perf:fixtures` | Run timeline repository, renderer stream, renderer fixture, and profiler regression tests |
+| `npm run qa:perf:profile` | Capture an isolated Electron task-switch profile and optional budget report |
+| `npm run qa:perf:large-session` | Run the production-budget profile with 15,529 events and a requested 231 MiB payload |
 | `npm run qa:timeline:backfill` | Recompute timeline completion telemetry for `task_completed` timeline events |
 | `npm run qa:timeline:enforce` | Enforce timeline reliability thresholds from completion telemetry |
 | `npm run qa:reliability` | Reliability loop (`qa:eval:run` + battery script) |
@@ -216,6 +219,8 @@ npm run build:react
 npm run qa:renderer-perf
 npm run type-check
 ```
+
+For timeline paging, large task histories, event-detail retention, or interrupted-task replay changes, also run `npm run qa:perf:fixtures` and `npm run qa:perf:large-session`. The architecture, compatibility behavior, memory ceilings, and focused test list are documented in [Long-Session Timeline Performance](long-session-performance.md).
 
 Use `npm run build:react` output as a budget check: the main renderer entry should remain below
 `900 kB` minified, the Settings initial chunk below `700 kB` minified, and built global CSS below

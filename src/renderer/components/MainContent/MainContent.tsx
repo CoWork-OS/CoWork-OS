@@ -504,6 +504,7 @@ interface MainContentProps {
   timelineHistoryError?: string | null;
   onLoadMoreTimelineHistory?: () => void | Promise<void>;
   onLoadTaskEventDetail?: (eventId: string, taskId: string) => void | Promise<void>;
+  onReleaseTaskEventDetail?: (eventId: string, taskId: string) => void;
   remoteSession?: { deviceId: string; deviceName: string } | null;
   replayControls?: ReplayControls;
 }
@@ -693,6 +694,7 @@ function VirtualizedTaskFeedRow({
 
   return (
     <div
+      data-task-feed-virtual-row={itemKey}
       style={{
         position: "absolute",
         top: offsetTop,
@@ -1040,7 +1042,12 @@ const TaskConversationRenderedRows = memo(function TaskConversationRenderedRows(
     };
   }, [useVirtualizedFeed, renderableFeedRows.length]);
 
-  const { virtualItems: virtualFeedRows, totalHeight: virtualFeedTotalHeight } = useVirtualList({
+  const {
+    virtualItems: virtualFeedRows,
+    totalHeight: virtualFeedTotalHeight,
+    visibleStartIndex,
+    isAtBottom,
+  } = useVirtualList({
     items: renderableFeedRows,
     containerRef: mainBodyRef as React.RefObject<HTMLElement | null>,
     getItemHeight: (row) => feedRowHeights.get(row.key) ?? row.estimatedHeight,
@@ -1050,6 +1057,25 @@ const TaskConversationRenderedRows = memo(function TaskConversationRenderedRows(
     scrollOffsetTop: conversationFlowOffsetTop,
     suppressAutoScrollOnItemsChange: suppressVirtualAutoScroll,
   });
+  useEffect(() => {
+    if (
+      !useVirtualizedFeed ||
+      !hasMoreTimelineHistory ||
+      isLoadingTimelineHistory ||
+      isAtBottom ||
+      visibleStartIndex > 2
+    ) {
+      return;
+    }
+    handleLoadMoreTimelineHistory();
+  }, [
+    handleLoadMoreTimelineHistory,
+    hasMoreTimelineHistory,
+    isAtBottom,
+    isLoadingTimelineHistory,
+    useVirtualizedFeed,
+    visibleStartIndex,
+  ]);
   const renderedFeedRows = useMemo(
     () => (useVirtualizedFeed ? virtualFeedRows.map((row) => row.item) : renderableFeedRows),
     [useVirtualizedFeed, virtualFeedRows, renderableFeedRows],
@@ -3254,6 +3280,7 @@ function MainContentComponent({
   timelineHistoryError = null,
   onLoadMoreTimelineHistory,
   onLoadTaskEventDetail,
+  onReleaseTaskEventDetail,
   remoteSession = null,
   replayControls,
 }: MainContentProps) {
@@ -5503,21 +5530,23 @@ function MainContentComponent({
 
   // Toggle an event's expanded state using its ID
   const toggleEventExpanded = useCallback((eventId: string) => {
-    setToggledEvents((prev) => {
-      const next = new Set(prev);
-      if (next.has(eventId)) {
-        next.delete(eventId);
-      } else {
-        next.add(eventId);
-        const event = events.find((candidate) => candidate.id === eventId);
-        const detailId = event ? getTruncatedTaskEventDetailId(event) : null;
-        if (detailId && task?.id) {
-          void onLoadTaskEventDetail?.(detailId, task.id);
-        }
-      }
+    const event = events.find((candidate) => candidate.id === eventId);
+    const detailId = event
+      ? getTruncatedTaskEventDetailId(event) || event.eventId || event.id
+      : null;
+    const wasExpanded = toggledEvents.has(eventId);
+    setToggledEvents((current) => {
+      const next = new Set(current);
+      if (wasExpanded) next.delete(eventId);
+      else next.add(eventId);
       return next;
     });
-  }, [events, onLoadTaskEventDetail]);
+    if (!detailId || !task?.id) return;
+    if (wasExpanded) onReleaseTaskEventDetail?.(detailId, task.id);
+    else if (getTruncatedTaskEventDetailId(event!)) {
+      void onLoadTaskEventDetail?.(detailId, task.id);
+    }
+  }, [events, onLoadTaskEventDetail, onReleaseTaskEventDetail, task?.id, toggledEvents]);
 
   const isImageFileEvent = useCallback((event: TaskEvent): boolean => {
     return getInlinePreviewKindForTaskEvent(event) === "image";
@@ -10459,6 +10488,7 @@ function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps
     prev.timelineHistoryError === next.timelineHistoryError &&
     prev.onLoadMoreTimelineHistory === next.onLoadMoreTimelineHistory &&
     prev.onLoadTaskEventDetail === next.onLoadTaskEventDetail &&
+    prev.onReleaseTaskEventDetail === next.onReleaseTaskEventDetail &&
     getRemoteSessionSignature(prev.remoteSession) === getRemoteSessionSignature(next.remoteSession) &&
     prev.replayControls === next.replayControls &&
     prev.onOpenSpreadsheetArtifact === next.onOpenSpreadsheetArtifact &&

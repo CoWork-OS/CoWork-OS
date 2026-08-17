@@ -2,6 +2,8 @@
 
 This document covers performance optimizations and stability fixes applied to CoWork OS to address resource issues observed during multitask runs (collaborative team reviews, parallel agent execution).
 
+Large single-task histories use a separate bounded paging, virtualization, remote transport, checkpoint/resume, and profiling contract. See [Long-Session Timeline Performance](long-session-performance.md).
+
 ## Problem Statement
 
 During live multitask review runs, the following resource issues were observed:

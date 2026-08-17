@@ -4,6 +4,7 @@ import {
   Task,
   TaskEvent,
   TaskEventDetailResult,
+  TaskTimelinePageCursor,
   TaskTimelinePageRequest,
   TaskTimelinePageResult,
   TaskTraceRunDetail,
@@ -37,6 +38,15 @@ import {
 } from "../../shared/types";
 import { isActiveTaskStatus, normalizeTaskLifecycleState } from "../../shared/task-status";
 import { isTimelineEventType, normalizeTaskEventToTimelineV2 } from "../../shared/timeline-v2";
+import {
+  TASK_TIMELINE_HISTORY_BYTE_LIMIT,
+  TASK_TIMELINE_HISTORY_LIMIT,
+  TASK_TIMELINE_MAX_PAGE_BYTE_LIMIT,
+  TASK_TIMELINE_MAX_PAGE_LIMIT,
+  TASK_TIMELINE_MAX_SINGLE_EVENT_BYTE_LIMIT,
+  TASK_TIMELINE_PAYLOAD_PREVIEW_CHARS,
+  TASK_TIMELINE_SINGLE_EVENT_BYTE_LIMIT,
+} from "../../shared/task-timeline-limits";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
 import {
   sanitizeTimelineEventForStorage,
@@ -1791,13 +1801,16 @@ export class TaskEventRepository {
     "task_analysis",
     "executing",
   ] as const;
-  private static readonly DEFAULT_TIMELINE_PAGE_LIMIT = 160;
-  private static readonly MAX_TIMELINE_PAGE_LIMIT = 600;
-  private static readonly DEFAULT_TIMELINE_PAGE_BYTE_LIMIT = 512 * 1024;
-  private static readonly MAX_TIMELINE_PAGE_BYTE_LIMIT = 2 * 1024 * 1024;
-  private static readonly DEFAULT_TIMELINE_SINGLE_EVENT_BYTE_LIMIT = 64 * 1024;
-  private static readonly MAX_TIMELINE_SINGLE_EVENT_BYTE_LIMIT = 256 * 1024;
-  private static readonly TRUNCATED_PAYLOAD_PREVIEW_CHARS = 4096;
+  private static readonly DEFAULT_TIMELINE_PAGE_LIMIT = TASK_TIMELINE_HISTORY_LIMIT;
+  private static readonly MAX_TIMELINE_PAGE_LIMIT = TASK_TIMELINE_MAX_PAGE_LIMIT;
+  private static readonly DEFAULT_TIMELINE_PAGE_BYTE_LIMIT = TASK_TIMELINE_HISTORY_BYTE_LIMIT;
+  private static readonly MAX_TIMELINE_PAGE_BYTE_LIMIT = TASK_TIMELINE_MAX_PAGE_BYTE_LIMIT;
+  private static readonly DEFAULT_TIMELINE_SINGLE_EVENT_BYTE_LIMIT =
+    TASK_TIMELINE_SINGLE_EVENT_BYTE_LIMIT;
+  private static readonly MAX_TIMELINE_SINGLE_EVENT_BYTE_LIMIT =
+    TASK_TIMELINE_MAX_SINGLE_EVENT_BYTE_LIMIT;
+  private static readonly TRUNCATED_PAYLOAD_PREVIEW_CHARS =
+    TASK_TIMELINE_PAYLOAD_PREVIEW_CHARS;
   private static readonly TIMELINE_ADDITIONAL_TASK_ID_CHUNK_SIZE = 500;
 
   constructor(private db: Database.Database) {}
@@ -1959,6 +1972,131 @@ export class TaskEventRepository {
     return this.mapRowsToEvents(rows).events;
   }
 
+  findByTaskIdAndTypes(taskId: string, types: string[], maxEvents?: number): TaskEvent[] {
+    const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
+    const normalizedTypes = Array.from(
+      new Set(
+        (Array.isArray(types) ? types : [])
+          .map((type) => (typeof type === "string" ? type.trim() : ""))
+          .filter(Boolean),
+      ),
+    );
+    if (!normalizedTaskId || normalizedTypes.length === 0) return [];
+    const placeholders = normalizedTypes.map(() => "?").join(", ");
+    const safeLimit =
+      typeof maxEvents === "number" && Number.isFinite(maxEvents) && maxEvents > 0
+        ? Math.floor(maxEvents)
+        : null;
+    const rows = this.db
+      .prepare(`
+        SELECT * FROM task_events
+        WHERE task_id = ?
+          AND COALESCE(legacy_type, type) IN (${placeholders})
+        ORDER BY COALESCE(seq, timestamp) ${safeLimit ? "DESC" : "ASC"}, timestamp ${safeLimit ? "DESC" : "ASC"}, id ${safeLimit ? "DESC" : "ASC"}
+        ${safeLimit ? "LIMIT ?" : ""}
+      `)
+      .all(normalizedTaskId, ...normalizedTypes, ...(safeLimit ? [safeLimit] : [])) as Any[];
+    if (safeLimit) rows.reverse();
+    return this.mapRowsToEvents(rows).events;
+  }
+
+  findLatestConversationSnapshot(taskId: string): TaskEvent | null {
+    const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
+    if (!normalizedTaskId) return null;
+    const row = this.db
+      .prepare(`
+        SELECT * FROM task_events
+        WHERE task_id = ?
+          AND COALESCE(legacy_type, type) = 'conversation_snapshot'
+        ORDER BY COALESCE(seq, timestamp) DESC, timestamp DESC, id DESC
+        LIMIT 1
+      `)
+      .get(normalizedTaskId) as Any;
+    return row ? this.mapRowsToEvents([row], { persistMigrations: false }).events[0] ?? null : null;
+  }
+
+  findEventCursorById(taskId: string, eventId: string): TaskTimelinePageCursor | null {
+    const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
+    const normalizedEventId = typeof eventId === "string" ? eventId.trim() : "";
+    if (!normalizedTaskId || !normalizedEventId) return null;
+    const row = this.db
+      .prepare(`
+        SELECT id, COALESCE(seq, timestamp) AS timeline_order, timestamp
+        FROM task_events
+        WHERE task_id = ? AND (id = ? OR event_id = ?)
+        ORDER BY COALESCE(seq, timestamp) DESC, timestamp DESC, id DESC
+        LIMIT 1
+      `)
+      .get(normalizedTaskId, normalizedEventId, normalizedEventId) as
+      | { id?: string; timeline_order?: number; timestamp?: number }
+      | undefined;
+    if (!row?.id) return null;
+    return {
+      order: Number(row.timeline_order) || Number(row.timestamp) || 0,
+      timestamp: Number(row.timestamp) || 0,
+      id: row.id,
+    };
+  }
+
+  findReplayTailAfterCursor(
+    taskId: string,
+    afterCursor: TaskTimelinePageCursor,
+    types: string[],
+    limit = 200,
+  ): TaskEvent[] {
+    const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
+    const normalizedTypes = Array.from(
+      new Set(
+        (Array.isArray(types) ? types : [])
+          .map((type) => (typeof type === "string" ? type.trim() : ""))
+          .filter(Boolean),
+      ),
+    );
+    const boundaryOrder =
+      typeof afterCursor?.order === "number" && Number.isFinite(afterCursor.order)
+        ? Math.floor(afterCursor.order)
+        : 0;
+    const boundaryTimestamp =
+      typeof afterCursor?.timestamp === "number" && Number.isFinite(afterCursor.timestamp)
+        ? Math.floor(afterCursor.timestamp)
+        : 0;
+    const boundaryId =
+      typeof afterCursor?.id === "string" && afterCursor.id.trim() ? afterCursor.id.trim() : "";
+    const safeLimit =
+      typeof limit === "number" && Number.isFinite(limit)
+        ? Math.min(1000, Math.max(1, Math.floor(limit)))
+        : 200;
+    if (!normalizedTaskId || normalizedTypes.length === 0) return [];
+    const placeholders = normalizedTypes.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(`
+        SELECT * FROM task_events
+        WHERE task_id = ?
+          AND (
+            COALESCE(seq, timestamp) > ?
+            OR (
+              COALESCE(seq, timestamp) = ?
+              AND (timestamp > ? OR (timestamp = ? AND id > ?))
+            )
+          )
+          AND COALESCE(legacy_type, type) IN (${placeholders})
+        ORDER BY COALESCE(seq, timestamp) DESC, timestamp DESC, id DESC
+        LIMIT ?
+      `)
+      .all(
+        normalizedTaskId,
+        boundaryOrder,
+        boundaryOrder,
+        boundaryTimestamp,
+        boundaryTimestamp,
+        boundaryId,
+        ...normalizedTypes,
+        safeLimit,
+      ) as Any[];
+    rows.reverse();
+    return this.mapRowsToEvents(rows, { persistMigrations: false }).events;
+  }
+
   findTimelinePage(request: TaskTimelinePageRequest): TaskTimelinePageResult {
     const taskId = typeof request.taskId === "string" ? request.taskId.trim() : "";
     if (!taskId) {
@@ -2041,9 +2179,26 @@ export class TaskEventRepository {
       this.db
         .prepare(`
         SELECT
-          *,
+          id,
+          task_id,
+          timestamp,
+          type,
+          CASE
+            WHEN LENGTH(CAST(COALESCE(payload, '') AS BLOB)) > ${singleEventByteLimit}
+              THEN SUBSTR(COALESCE(payload, ''), 1, ${TaskEventRepository.TRUNCATED_PAYLOAD_PREVIEW_CHARS})
+            ELSE payload
+          END AS payload,
+          schema_version,
+          event_id,
+          seq,
+          ts,
+          status,
+          step_id,
+          group_id,
+          actor,
+          legacy_type,
           COALESCE(seq, timestamp) AS timeline_order,
-          LENGTH(COALESCE(payload, '')) AS payload_bytes
+          LENGTH(CAST(COALESCE(payload, '') AS BLOB)) AS payload_bytes
         FROM task_events
         WHERE ${scopeWhere}
           ${cursorWhere}
@@ -2096,10 +2251,14 @@ export class TaskEventRepository {
       rows = selectRows("task_id = ?", [taskId]);
     }
 
+    const metadataRowCount = rows.length;
     const selectedRows: Any[] = [];
     let payloadBytes = 0;
     let largestEventPayloadBytes = 0;
     let truncatedEventCount = 0;
+    let hydratedEventCount = 0;
+    let hydratedPayloadBytes = 0;
+    let previewPayloadBytes = 0;
     let stoppedByByteLimit = false;
 
     for (const row of rows.slice(0, safeLimit)) {
@@ -2115,8 +2274,22 @@ export class TaskEventRepository {
       }
 
       payloadBytes = nextPayloadBytes;
+      const rawHydratedBytes = Buffer.byteLength(String(row.payload ?? ""), "utf8");
+      const hydratedBytes =
+        rowPayloadBytes > singleEventByteLimit
+          ? Buffer.byteLength(
+              String(row.payload ?? "").slice(
+                0,
+                TaskEventRepository.TRUNCATED_PAYLOAD_PREVIEW_CHARS,
+              ),
+              "utf8",
+            )
+          : rawHydratedBytes;
+      hydratedEventCount += 1;
+      hydratedPayloadBytes += hydratedBytes;
       if (rowPayloadBytes > singleEventByteLimit) {
         truncatedEventCount += 1;
+        previewPayloadBytes += hydratedBytes;
         selectedRows.push(this.buildTimelineTruncatedPayloadRow(row, rowPayloadBytes));
       } else {
         selectedRows.push(row);
@@ -2132,6 +2305,20 @@ export class TaskEventRepository {
       largestEventPayloadBytes = Math.max(largestEventPayloadBytes, rowPayloadBytes);
       payloadBytes = Math.min(rowPayloadBytes, singleEventByteLimit);
       truncatedEventCount = rowPayloadBytes > singleEventByteLimit ? 1 : 0;
+      const rawHydratedBytes = Buffer.byteLength(String(row.payload ?? ""), "utf8");
+      const hydratedBytes =
+        rowPayloadBytes > singleEventByteLimit
+          ? Buffer.byteLength(
+              String(row.payload ?? "").slice(
+                0,
+                TaskEventRepository.TRUNCATED_PAYLOAD_PREVIEW_CHARS,
+              ),
+              "utf8",
+            )
+          : rawHydratedBytes;
+      hydratedEventCount = 1;
+      hydratedPayloadBytes = hydratedBytes;
+      previewPayloadBytes = rowPayloadBytes > singleEventByteLimit ? hydratedBytes : 0;
       selectedRows.push(
         rowPayloadBytes > singleEventByteLimit
           ? this.buildTimelineTruncatedPayloadRow(row, rowPayloadBytes)
@@ -2142,7 +2329,12 @@ export class TaskEventRepository {
     const oldestSelected = selectedRows[selectedRows.length - 1];
     const planContextRow =
       cursorWhere.length === 0
-        ? this.findLatestTimelineContextRow(taskId, "plan_created", selectedRows)
+        ? this.findLatestTimelineContextRow(
+            taskId,
+            "plan_created",
+            selectedRows,
+            singleEventByteLimit,
+          )
         : null;
     const selectedRowsForEvents = planContextRow ? [...selectedRows, planContextRow] : selectedRows;
     if (planContextRow) {
@@ -2150,8 +2342,25 @@ export class TaskEventRepository {
         typeof planContextRow.payload_bytes === "number" && Number.isFinite(planContextRow.payload_bytes)
           ? planContextRow.payload_bytes
           : Buffer.byteLength(String(planContextRow.payload ?? ""), "utf8");
-      payloadBytes += planPayloadBytes;
+      payloadBytes += Math.min(planPayloadBytes, singleEventByteLimit);
       largestEventPayloadBytes = Math.max(largestEventPayloadBytes, planPayloadBytes);
+      const rawHydratedBytes = Buffer.byteLength(String(planContextRow.payload ?? ""), "utf8");
+      const hydratedBytes =
+        planPayloadBytes > singleEventByteLimit
+          ? Buffer.byteLength(
+              String(planContextRow.payload ?? "").slice(
+                0,
+                TaskEventRepository.TRUNCATED_PAYLOAD_PREVIEW_CHARS,
+              ),
+              "utf8",
+            )
+          : rawHydratedBytes;
+      hydratedEventCount += 1;
+      hydratedPayloadBytes += hydratedBytes;
+      if (planPayloadBytes > singleEventByteLimit) {
+        truncatedEventCount += 1;
+        previewPayloadBytes += hydratedBytes;
+      }
     }
 
     const selectedRowsAscending = [...selectedRowsForEvents].sort((a, b) => {
@@ -2186,6 +2395,11 @@ export class TaskEventRepository {
         payloadBytes,
         truncatedEventCount,
         largestEventPayloadBytes,
+        metadataRowCount,
+        hydratedEventCount,
+        hydratedPayloadBytes,
+        previewPayloadBytes,
+        databaseReadBytesEstimate: hydratedPayloadBytes,
         ...this.deriveTimelinePageSummary(events),
       },
       warnings: this.buildTimelinePageWarnings(taskId, payloadBytes, largestEventPayloadBytes, truncatedEventCount),
@@ -2196,6 +2410,7 @@ export class TaskEventRepository {
     taskId: string,
     effectiveType: string,
     selectedRows: Any[],
+    singleEventByteLimit: number,
   ): Any | null {
     if (!taskId || !effectiveType) return null;
     const selectedIds = new Set(
@@ -2206,9 +2421,26 @@ export class TaskEventRepository {
     const row = this.db
       .prepare(`
         SELECT
-          *,
+          id,
+          task_id,
+          timestamp,
+          type,
+          CASE
+            WHEN LENGTH(CAST(COALESCE(payload, '') AS BLOB)) > ${singleEventByteLimit}
+              THEN SUBSTR(COALESCE(payload, ''), 1, ${TaskEventRepository.TRUNCATED_PAYLOAD_PREVIEW_CHARS})
+            ELSE payload
+          END AS payload,
+          schema_version,
+          event_id,
+          seq,
+          ts,
+          status,
+          step_id,
+          group_id,
+          actor,
+          legacy_type,
           COALESCE(seq, timestamp) AS timeline_order,
-          LENGTH(COALESCE(payload, '')) AS payload_bytes
+          LENGTH(CAST(COALESCE(payload, '') AS BLOB)) AS payload_bytes
         FROM task_events
         WHERE task_id = ?
           AND COALESCE(legacy_type, type) IN (?)
@@ -2217,7 +2449,10 @@ export class TaskEventRepository {
       `)
       .get(taskId, effectiveType) as Any;
     if (!row || selectedIds.has(String(row.id ?? ""))) return null;
-    return row;
+    const payloadBytes = Number(row.payload_bytes) || 0;
+    return payloadBytes > singleEventByteLimit
+      ? this.buildTimelineTruncatedPayloadRow(row, payloadBytes)
+      : row;
   }
 
   findEventDetailById(
@@ -2248,7 +2483,7 @@ export class TaskEventRepository {
     const selectScopedRow = (scopeWhere: string, scopeArgs: Any[]): Any =>
       this.db
         .prepare(`
-          SELECT *, LENGTH(COALESCE(payload, '')) AS payload_bytes
+          SELECT *, LENGTH(CAST(COALESCE(payload, '') AS BLOB)) AS payload_bytes
           FROM task_events
           WHERE (id = ? OR event_id = ?)
             AND ${scopeWhere}
@@ -2279,7 +2514,7 @@ export class TaskEventRepository {
       }
     } else {
       row = this.db
-        .prepare("SELECT *, LENGTH(COALESCE(payload, '')) AS payload_bytes FROM task_events WHERE id = ? OR event_id = ? LIMIT 1")
+        .prepare("SELECT *, LENGTH(CAST(COALESCE(payload, '') AS BLOB)) AS payload_bytes FROM task_events WHERE id = ? OR event_id = ? LIMIT 1")
         .get(normalizedEventId, normalizedEventId) as Any;
     }
     if (!row) return { event: null, payloadBytes: 0 };

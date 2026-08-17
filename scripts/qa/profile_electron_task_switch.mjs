@@ -18,6 +18,7 @@ const DEFAULT_STARTUP_TIMEOUT_MS = 120_000;
 const DEFAULT_SWITCH_TIMEOUT_MS = 5_000;
 const DEFAULT_SETTLE_MS = 150;
 const DEFAULT_FIXTURE_TASKS = 12;
+const DEFAULT_FIXTURE_EVENTS = 8;
 const METRIC_NAMES = [
   "mark.task_switch_start_at_ms",
   "mark.task_header_ready_at_ms",
@@ -42,6 +43,8 @@ const BUDGET_PROFILES = {
     sidebarReadyMs: 4_000,
     timelinePageSerializedP95Bytes: 768 * 1024,
     timelinePageSerializedMaxBytes: 1024 * 1024,
+    rendererHeapGrowthMaxBytes: 128 * 1024 * 1024,
+    virtualFeedDomNodesMax: 24,
     backgroundBeforeSidebarMax: 0,
   },
   "dev-fast": {
@@ -54,6 +57,8 @@ const BUDGET_PROFILES = {
     sidebarReadyMs: 4_000,
     timelinePageSerializedP95Bytes: 768 * 1024,
     timelinePageSerializedMaxBytes: 1024 * 1024,
+    rendererHeapGrowthMaxBytes: 128 * 1024 * 1024,
+    virtualFeedDomNodesMax: 24,
     backgroundBeforeSidebarMax: 0,
   },
   dev: {
@@ -66,6 +71,8 @@ const BUDGET_PROFILES = {
     sidebarReadyMs: 8_000,
     timelinePageSerializedP95Bytes: 768 * 1024,
     timelinePageSerializedMaxBytes: 1024 * 1024,
+    rendererHeapGrowthMaxBytes: 192 * 1024 * 1024,
+    virtualFeedDomNodesMax: 24,
     backgroundBeforeSidebarMax: 0,
   },
 };
@@ -91,6 +98,14 @@ Options:
   --fixture-user-data-dir=<path>
                                 Use a specific fixture userData directory instead of a temp directory.
   --fixture-task-count=<count>  Number of fixture sidebar sessions to seed. Default: ${DEFAULT_FIXTURE_TASKS}
+  --fixture-turn-count=<count>  Minimum user/assistant turns in the large fixture task.
+  --fixture-event-count=<count> Total events in the large fixture task. Default: ${DEFAULT_FIXTURE_EVENTS}
+  --fixture-total-payload-mb=<count>
+                                Approximate total payload size for the large fixture task.
+  --fixture-heavy-event-every=<count>
+                                Add a larger payload at this event interval.
+  --fixture-heavy-event-kb=<count>
+                                Size of each larger event payload. Default: 256 KB.
   --keep-profile                Keep generated fixture profile after the run.
   --log=<path>                  Read existing dev log evidence, especially useful with --mode=attach.
   --no-build                    Skip build:react/build:electron before launch.
@@ -112,6 +127,8 @@ Budget overrides:
   COWORK_PROFILE_SIDEBAR_READY_MS
   COWORK_PROFILE_TIMELINE_SERIALIZED_P95_BYTES
   COWORK_PROFILE_TIMELINE_SERIALIZED_MAX_BYTES
+  COWORK_PROFILE_RENDERER_HEAP_GROWTH_MAX_BYTES
+  COWORK_PROFILE_VIRTUAL_FEED_DOM_NODES_MAX
   COWORK_PROFILE_BACKGROUND_BEFORE_SIDEBAR_MAX
 `;
 }
@@ -158,6 +175,11 @@ export function parseCliArgs(argv, env = process.env) {
     profileMode: "fixture",
     fixtureUserDataDir: null,
     fixtureTaskCount: DEFAULT_FIXTURE_TASKS,
+    fixtureTurnCount: 0,
+    fixtureEventCount: DEFAULT_FIXTURE_EVENTS,
+    fixtureTotalPayloadMb: 0,
+    fixtureHeavyEventEvery: 0,
+    fixtureHeavyEventKb: 256,
     keepProfile: false,
     logPath: null,
     quiet: true,
@@ -287,6 +309,45 @@ export function parseCliArgs(argv, env = process.env) {
       continue;
     }
 
+    const fixtureTurnCount = getArgValue(arg, "--fixture-turn-count");
+    if (fixtureTurnCount != null) {
+      options.fixtureTurnCount = parsePositiveInt(fixtureTurnCount, "--fixture-turn-count");
+      continue;
+    }
+
+    const fixtureEventCount = getArgValue(arg, "--fixture-event-count");
+    if (fixtureEventCount != null) {
+      options.fixtureEventCount = parsePositiveInt(fixtureEventCount, "--fixture-event-count");
+      continue;
+    }
+
+    const fixtureTotalPayloadMb = getArgValue(arg, "--fixture-total-payload-mb");
+    if (fixtureTotalPayloadMb != null) {
+      options.fixtureTotalPayloadMb = parsePositiveInt(
+        fixtureTotalPayloadMb,
+        "--fixture-total-payload-mb",
+      );
+      continue;
+    }
+
+    const fixtureHeavyEventEvery = getArgValue(arg, "--fixture-heavy-event-every");
+    if (fixtureHeavyEventEvery != null) {
+      options.fixtureHeavyEventEvery = parsePositiveInt(
+        fixtureHeavyEventEvery,
+        "--fixture-heavy-event-every",
+      );
+      continue;
+    }
+
+    const fixtureHeavyEventKb = getArgValue(arg, "--fixture-heavy-event-kb");
+    if (fixtureHeavyEventKb != null) {
+      options.fixtureHeavyEventKb = parsePositiveInt(
+        fixtureHeavyEventKb,
+        "--fixture-heavy-event-kb",
+      );
+      continue;
+    }
+
     const logPath = getArgValue(arg, "--log");
     if (logPath != null) {
       options.logPath = logPath;
@@ -366,6 +427,16 @@ function getBudget(profile, env = process.env) {
       env,
       "COWORK_PROFILE_TIMELINE_SERIALIZED_MAX_BYTES",
       base.timelinePageSerializedMaxBytes,
+    ),
+    rendererHeapGrowthMaxBytes: readBudgetOverride(
+      env,
+      "COWORK_PROFILE_RENDERER_HEAP_GROWTH_MAX_BYTES",
+      base.rendererHeapGrowthMaxBytes,
+    ),
+    virtualFeedDomNodesMax: readBudgetOverride(
+      env,
+      "COWORK_PROFILE_VIRTUAL_FEED_DOM_NODES_MAX",
+      base.virtualFeedDomNodesMax,
     ),
     backgroundBeforeSidebarMax: readBudgetOverride(
       env,
@@ -530,7 +601,7 @@ function createFixtureUserDataDir(options) {
   return { userDataDir, temporary: true };
 }
 
-function seedFixtureProfile(userDataDir, fixtureTaskCount, env) {
+function seedFixtureProfile(userDataDir, options, env) {
   fs.mkdirSync(userDataDir, { recursive: true });
   const workspacePath = path.join(userDataDir, "fixture-workspace");
   fs.mkdirSync(workspacePath, { recursive: true });
@@ -580,7 +651,26 @@ try {
   const existing = db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE title LIKE 'Perf fixture task %'").get();
   const existingCount = Number(existing?.count || 0);
   const now = Date.now();
-  for (let index = existingCount; index < ${fixtureTaskCount}; index += 1) {
+  const configuredEventCount = Math.max(
+    ${DEFAULT_FIXTURE_EVENTS},
+    ${options.fixtureEventCount},
+    (${options.fixtureTurnCount} || 0) * 2
+  );
+  const targetPayloadBytes = Math.max(0, ${options.fixtureTotalPayloadMb}) * 1024 * 1024;
+  const basePayloadChars = targetPayloadBytes > 0
+    ? Math.max(32, Math.floor(targetPayloadBytes / configuredEventCount))
+    : 0;
+  const eventTypes = [
+    "user_message",
+    "assistant_message",
+    "tool_call",
+    "tool_result",
+    "command_output",
+    "progress_update",
+    "file_modified",
+    "log"
+  ];
+  for (let index = existingCount; index < ${options.fixtureTaskCount}; index += 1) {
     const taskNumber = String(index + 1).padStart(2, "0");
     const task = taskRepo.create({
       title: "Perf fixture task " + taskNumber,
@@ -595,17 +685,58 @@ try {
       },
       resultSummary: "Fixture task ready for profile switching."
     });
-    for (let eventIndex = 0; eventIndex < 8; eventIndex += 1) {
+    const eventCount = index === 0 ? configuredEventCount : ${DEFAULT_FIXTURE_EVENTS};
+    for (let eventIndex = 0; eventIndex < eventCount; eventIndex += 1) {
+      const isHeavy = index === 0 && ${options.fixtureHeavyEventEvery} > 0 &&
+        eventIndex > 0 && eventIndex % ${options.fixtureHeavyEventEvery} === 0;
+      const payloadChars = isHeavy
+        ? Math.max(basePayloadChars, ${options.fixtureHeavyEventKb} * 1024)
+        : basePayloadChars;
+      const eventType = eventIndex === 0
+        ? "task_created"
+        : eventTypes[eventIndex % eventTypes.length];
       eventRepo.create({
         taskId: task.id,
         timestamp: now - (index * 1000) + eventIndex,
-        type: eventIndex === 0 ? "task_created" : "log",
+        type: eventType,
         payload: {
           message: "Fixture timeline row " + (eventIndex + 1) + " for task " + taskNumber,
+          content: payloadChars > 0 ? "x".repeat(payloadChars) : undefined,
+          tool: eventType === "tool_call" || eventType === "tool_result" ? "fixture_tool" : undefined,
+          result: eventType === "tool_result" && payloadChars > 0 ? "x".repeat(payloadChars) : undefined,
           fixture: true
         }
       });
     }
+  }
+  const fixtureTaskCount = Number(
+    db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE title LIKE 'Perf fixture task %'").get()?.count || 0
+  );
+  if (fixtureTaskCount < ${options.fixtureTaskCount}) {
+    throw new Error(
+      "Fixture verification failed: expected at least ${options.fixtureTaskCount} tasks, found " + fixtureTaskCount
+    );
+  }
+  const primaryTask = db.prepare("SELECT id FROM tasks WHERE title = 'Perf fixture task 01' LIMIT 1").get();
+  const primaryStats = primaryTask
+    ? db.prepare(\`SELECT COUNT(*) AS event_count,
+        COALESCE(SUM(LENGTH(CAST(COALESCE(payload, '') AS BLOB))), 0) AS payload_bytes
+        FROM task_events WHERE task_id = ?\`).get(primaryTask.id)
+    : null;
+  const primaryEventCount = Number(primaryStats?.event_count || 0);
+  const primaryPayloadBytes = Number(primaryStats?.payload_bytes || 0);
+  if (primaryEventCount < configuredEventCount) {
+    throw new Error(
+      "Fixture verification failed: expected at least " + configuredEventCount +
+      " primary events, found " + primaryEventCount + ". Use a fresh fixture profile."
+    );
+  }
+  const minimumPayloadBytes = Math.floor(targetPayloadBytes * 0.75);
+  if (targetPayloadBytes > 0 && primaryPayloadBytes < minimumPayloadBytes) {
+    throw new Error(
+      "Fixture verification failed: expected at least " + minimumPayloadBytes +
+      " payload bytes, found " + primaryPayloadBytes + ". Use a fresh fixture profile."
+    );
   }
 } finally {
   dbManager.close();
@@ -689,7 +820,7 @@ async function launchApp(options, logs) {
   }
 
   if (options.profileMode === "fixture" && fixtureProfile) {
-    seedFixtureProfile(fixtureProfile.userDataDir, options.fixtureTaskCount, env);
+    seedFixtureProfile(fixtureProfile.userDataDir, options, env);
   }
 
   const children = [];
@@ -719,11 +850,15 @@ async function launchApp(options, logs) {
     delete env.COWORK_DEV_SERVER_URL;
   }
 
-  const electron = spawn(getElectronBinary(), [`--remote-debugging-port=${cdpPort}`, "."], {
+  const electron = spawn(
+    getElectronBinary(),
+    ["--enable-precise-memory-info", `--remote-debugging-port=${cdpPort}`, "."],
+    {
     cwd: repoRoot,
     env,
     stdio: ["ignore", "pipe", "pipe"],
-  });
+    },
+  );
   createLineCapture(electron, "electron", logs);
   children.push(electron);
 
@@ -984,6 +1119,9 @@ function snapshotInPage(metricNames) {
     selectedTaskTitle: rows.find((row) => row.selected)?.title || null,
     selectedTaskIndex: rows.find((row) => row.selected)?.index ?? null,
     bodyTextLength: document.body?.innerText?.length ?? 0,
+    rendererHeapUsedBytes: performance.memory?.usedJSHeapSize ?? null,
+    documentNodeCount: document.getElementsByTagName("*").length,
+    virtualFeedDomNodes: document.querySelectorAll("[data-task-feed-virtual-row]").length,
   };
 }
 
@@ -1207,6 +1345,14 @@ async function runTaskSwitches(cdp, options) {
         firstRowsMark == null ? null : firstRowsMark.atMs - effectiveStartedAt,
       frameGapsMs: metricDelta(before, after, "renderer.frame_gap_ms"),
       longTasksMs: metricDelta(before, after, "renderer.long_task_ms"),
+      rendererHeapBeforeBytes: before.rendererHeapUsedBytes,
+      rendererHeapAfterBytes: after.rendererHeapUsedBytes,
+      rendererHeapDeltaBytes:
+        Number.isFinite(before.rendererHeapUsedBytes) && Number.isFinite(after.rendererHeapUsedBytes)
+          ? after.rendererHeapUsedBytes - before.rendererHeapUsedBytes
+          : null,
+      documentNodeCount: after.documentNodeCount,
+      virtualFeedDomNodes: after.virtualFeedDomNodes,
     });
   }
   return switches;
@@ -1378,6 +1524,15 @@ function buildReport(options, launchInfo, target, initialSnapshot, finalSnapshot
       renderer: {
         frameGapMs: summarizeValues(frameGaps),
         longTaskMs: summarizeValues(longTasks),
+        heapInitialBytes: initialSnapshot.rendererHeapUsedBytes,
+        heapFinalBytes: finalSnapshot.rendererHeapUsedBytes,
+        heapGrowthBytes:
+          Number.isFinite(initialSnapshot.rendererHeapUsedBytes) &&
+          Number.isFinite(finalSnapshot.rendererHeapUsedBytes)
+            ? finalSnapshot.rendererHeapUsedBytes - initialSnapshot.rendererHeapUsedBytes
+            : null,
+        documentNodeCount: finalSnapshot.documentNodeCount,
+        virtualFeedDomNodes: finalSnapshot.virtualFeedDomNodes,
       },
       ipc: logMetrics.ipc,
       ipcRenderer: logMetrics.ipcRenderer,
@@ -1445,6 +1600,24 @@ export function evaluateBudgets(report, budget) {
   }
   addMaxFailure(failures, "renderer long task", renderer.longTaskMs, budget.longTaskMaxMs);
   addMaxFailure(failures, "renderer frame gap", renderer.frameGapMs, budget.frameGapMaxMs);
+  if (Number.isFinite(budget.rendererHeapGrowthMaxBytes)) {
+    if (!Number.isFinite(renderer.heapGrowthBytes)) {
+      failures.push("renderer heap growth: missing measurement");
+    } else if (renderer.heapGrowthBytes > budget.rendererHeapGrowthMaxBytes) {
+      failures.push(
+        `renderer heap growth: ${renderer.heapGrowthBytes.toFixed(0)}B over budget ${budget.rendererHeapGrowthMaxBytes}B`,
+      );
+    }
+  }
+  if (
+    Number.isFinite(renderer.virtualFeedDomNodes) &&
+    Number.isFinite(budget.virtualFeedDomNodesMax) &&
+    renderer.virtualFeedDomNodes > budget.virtualFeedDomNodesMax
+  ) {
+    failures.push(
+      `virtual feed DOM nodes: ${renderer.virtualFeedDomNodes} over budget ${budget.virtualFeedDomNodesMax}`,
+    );
+  }
   addStartupFailure(
     failures,
     "app shell ready",
@@ -1511,6 +1684,8 @@ function printReport(report, budget, budgetFailures, outputPath) {
   console.log(`  timeline rows: ${formatSummary(report.summary.taskSwitch.timelineFirstRowsReadyMs)}`);
   console.log(`  frame gaps: ${formatSummary(report.summary.renderer.frameGapMs)}`);
   console.log(`  long tasks: ${formatSummary(report.summary.renderer.longTaskMs)}`);
+  console.log(`  renderer heap growth: ${report.summary.renderer.heapGrowthBytes || 0}B`);
+  console.log(`  virtual feed DOM nodes: ${report.summary.renderer.virtualFeedDomNodes || 0}`);
   if (budget) {
     console.log(`  budget profile: ${budget.profile}`);
     if (budgetFailures.length === 0) {
@@ -1555,6 +1730,7 @@ async function main() {
     await cdp.connect();
     await cdp.send("Runtime.enable");
     await cdp.send("Page.enable");
+    await cdp.send("Page.bringToFront");
 
     const initialSnapshot = await waitForAppReady(cdp, options);
     const switches = await runTaskSwitches(cdp, options);

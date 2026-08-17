@@ -74,6 +74,12 @@ describe("TaskEventRepository.findTimelinePage", () => {
     const detail = repo.findEventDetailById("evt-large");
     expect(detail.event?.payload?.text).toBe(largeText);
     expect(detail.payloadBytes).toBeGreaterThan(64 * 1024);
+    expect(page.summary.databaseReadBytesEstimate).toBeLessThan(16 * 1024);
+    const timelineQuery = db.preparedSqls.find(
+      (sql) => sql.includes("timeline_order") && sql.includes("CASE"),
+    );
+    expect(timelineQuery).not.toContain("SELECT\n          *");
+    expect(timelineQuery).toContain("SUBSTR");
   });
 
   it("scopes event detail lookups to the selected task and allowed child output events", () => {

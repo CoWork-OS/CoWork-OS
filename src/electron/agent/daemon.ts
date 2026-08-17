@@ -47,6 +47,7 @@ import {
   TaskVerificationEvidenceBundle,
   TaskStatus,
   TaskEvent,
+  TaskTimelinePageCursor,
   EventType,
   TaskOutputSummary,
   IPC_CHANNELS,
@@ -218,6 +219,29 @@ const FORK_REPLAY_EVENT_TYPES = new Set([
   "citations_collected",
   "progress_update",
 ]);
+
+const RESUME_PLAN_DEFINITION_EVENT_TYPES = ["plan_created", "plan_updated"] as const;
+const RESUME_PLAN_STATE_EVENT_TYPES = [
+  "step_started",
+  "step_completed",
+  "step_failed",
+  "step_skipped",
+  "step_feedback",
+] as const;
+const RESUME_STATE_EVENT_TYPES = [
+  "conversation_snapshot",
+  "user_message",
+  "assistant_message",
+  "task_list_created",
+  "task_list_updated",
+  "task_list_completed",
+  "context_summarized",
+  "llm_usage",
+  "skill_selected",
+  "skill_invoked",
+] as const;
+const MAX_RESUME_TAIL_EVENTS = 200;
+const MAX_RESUME_PLAN_STATE_EVENTS = 400;
 
 // Memory management constants
 const MAX_CACHED_EXECUTORS = 2; // Maximum number of completed task executors to keep in memory
@@ -1209,10 +1233,22 @@ export class AgentDaemon extends EventEmitter {
         `[AgentDaemon] Found ${orphanedTasks.length} orphaned task(s) from previous session`,
       );
       for (const task of orphanedTasks) {
-        const events = this.getTaskEventsForReplay(task.id);
-        const hasSnapshot = events.some((e) => this.isLegacyEventType(e, "conversation_snapshot"));
-        const hasPlan = events.some(
-          (e) => this.isLegacyEventType(e, "plan_created") && e.payload?.plan,
+        const workspace = this.workspaceRepo.findById(task.workspaceId);
+        const checkpoint = workspace
+          ? TranscriptStore.loadCheckpointSync(workspace.path, task.id)
+          : null;
+        const snapshot = this.eventRepo.findLatestConversationSnapshot(task.id);
+        const planEvents = this.eventRepo.findByTaskIdAndTypes(
+          task.id,
+          [...RESUME_PLAN_DEFINITION_EVENT_TYPES],
+          1,
+        );
+        const hasSnapshot = Boolean(checkpoint || snapshot);
+        const hasPlan = planEvents.some(
+          (event) =>
+            RESUME_PLAN_DEFINITION_EVENT_TYPES.includes(
+              this.resolveLegacyEventType(event) as (typeof RESUME_PLAN_DEFINITION_EVENT_TYPES)[number],
+            ) && Boolean(event.payload?.plan),
         );
 
         if (hasSnapshot || hasPlan) {
@@ -1628,12 +1664,21 @@ export class AgentDaemon extends EventEmitter {
       throw new Error(`Workspace ${task.workspaceId} not found - cannot resume task`);
     }
 
-    // Fetch all events for this task
-    const events = this.getTaskEventsForReplay(task.id);
+    const checkpoint = TranscriptStore.loadCheckpointSync(workspace.path, task.id);
+    const events = this.getTaskEventsForResume(task.id, workspace.path);
 
     // Check if we have meaningful state to restore from
-    const hasSnapshot = events.some((e) => this.isLegacyEventType(e, "conversation_snapshot"));
-    const planEvent = events.filter((e) => this.isLegacyEventType(e, "plan_created")).pop();
+    const hasSnapshot =
+      Boolean(checkpoint) ||
+      events.some((e) => this.isLegacyEventType(e, "conversation_snapshot"));
+    const planEvent = events
+      .filter(
+        (event) =>
+          RESUME_PLAN_DEFINITION_EVENT_TYPES.includes(
+            this.resolveLegacyEventType(event) as (typeof RESUME_PLAN_DEFINITION_EVENT_TYPES)[number],
+          ) && Boolean(event.payload?.plan),
+      )
+      .pop();
     const hasPlan = planEvent && planEvent.payload?.plan;
 
     if (!hasSnapshot && !hasPlan) {
@@ -1677,12 +1722,16 @@ export class AgentDaemon extends EventEmitter {
       const rawPlan = planEvent!.payload.plan as Plan;
       const completedStepIds = new Set<string>();
       const failedStepIds = new Set<string>();
+      const skippedStepIds = new Set<string>();
       for (const event of events) {
         if (this.isLegacyEventType(event, "step_completed") && event.payload?.step?.id) {
           completedStepIds.add(event.payload.step.id);
         }
         if (this.isLegacyEventType(event, "step_failed") && event.payload?.step?.id) {
           failedStepIds.add(event.payload.step.id);
+        }
+        if (this.isLegacyEventType(event, "step_skipped") && event.payload?.step?.id) {
+          skippedStepIds.add(event.payload.step.id);
         }
       }
       const restoredPlan: Plan = {
@@ -1693,6 +1742,8 @@ export class AgentDaemon extends EventEmitter {
             ? ("completed" as const)
             : failedStepIds.has(step.id)
               ? ("failed" as const)
+              : skippedStepIds.has(step.id)
+                ? ("skipped" as const)
               : ("pending" as const),
         })),
       };
@@ -5155,16 +5206,6 @@ export class AgentDaemon extends EventEmitter {
     return this.extractCheckpointEventText(payload).length > 0;
   }
 
-  private collectMeaningfulExchangeEvents(taskId: string): TaskEvent[] {
-    return this.getTaskEventsForReplay(taskId).filter((event) => {
-      const effectiveType =
-        typeof event.legacyType === "string" && event.legacyType.trim().length > 0
-          ? event.legacyType
-          : event.type;
-      return this.isMeaningfulExchangeEvent(effectiveType, event.payload);
-    });
-  }
-
   private getSnapshotSummaryBlock(payload: Record<string, unknown>): string {
     if (
       typeof payload.explicitChatSummaryBlock === "string" &&
@@ -5344,21 +5385,57 @@ export class AgentDaemon extends EventEmitter {
       typeof params.legacyType === "string" && params.legacyType.trim().length > 0
         ? params.legacyType
         : params.event.type;
-    const meaningfulEvents = this.collectMeaningfulExchangeEvents(params.task.id);
-    const meaningfulExchangeCount = meaningfulEvents.length;
+    const isMeaningfulExchange = this.isMeaningfulExchangeEvent(
+      effectiveType,
+      params.legacyPayload,
+    );
+    if (
+      effectiveType !== "conversation_snapshot" &&
+      effectiveType !== "task_completed" &&
+      !isMeaningfulExchange
+    ) {
+      return;
+    }
+
     const latestCheckpoint = await TranscriptStore.loadCheckpoint(
       params.workspacePath,
       params.task.id,
     );
-    const latestSnapshotEvent = [...this.getTaskEventsForReplay(params.task.id)]
-      .reverse()
-      .find((event) => {
-        const type =
-          typeof event.legacyType === "string" && event.legacyType.trim().length > 0
-            ? event.legacyType
-            : event.type;
-        return type === "conversation_snapshot";
-      });
+    const meaningfulEvents = this.eventRepo
+      .findByTaskIdAndTypes(params.task.id, ["user_message", "assistant_message"], 24)
+      .filter((event) =>
+        this.isMeaningfulExchangeEvent(this.resolveLegacyEventType(event), event.payload),
+      )
+      .slice(-12);
+    const checkpointBaseCount = Math.max(
+      0,
+      Number(latestCheckpoint?.sourceMetadata?.meaningfulExchangeCount) || 0,
+    );
+    const checkpointSourceEventId = latestCheckpoint?.sourceEventId?.trim() || "";
+    const checkpointTimestamp =
+      Number(latestCheckpoint?.sourceTimestamp ?? latestCheckpoint?.timestamp ?? 0) || 0;
+    const checkpointCursor = checkpointSourceEventId
+      ? this.eventRepo.findEventCursorById(params.task.id, checkpointSourceEventId)
+      : latestCheckpoint
+        ? { order: checkpointTimestamp, timestamp: checkpointTimestamp, id: "" }
+        : null;
+    const messagesSinceCheckpoint = checkpointCursor
+      ? this.eventRepo
+          .findReplayTailAfterCursor(
+            params.task.id,
+            checkpointCursor,
+            ["user_message", "assistant_message"],
+            12,
+          )
+          .filter((event) =>
+            this.isMeaningfulExchangeEvent(this.resolveLegacyEventType(event), event.payload),
+          ).length
+      : meaningfulEvents.length;
+    const meaningfulExchangeCount = checkpointBaseCount + messagesSinceCheckpoint;
+    const latestSnapshotEvent =
+      effectiveType === "conversation_snapshot"
+        ? params.event
+        : this.eventRepo.findLatestConversationSnapshot(params.task.id);
     const latestSnapshotPayload =
       latestSnapshotEvent?.payload && typeof latestSnapshotEvent.payload === "object"
         ? (latestSnapshotEvent.payload as Record<string, unknown>)
@@ -5391,12 +5468,11 @@ export class AgentDaemon extends EventEmitter {
     }
 
     if (
-      this.isMeaningfulExchangeEvent(effectiveType, params.legacyPayload) &&
-      meaningfulExchangeCount > 0
+      isMeaningfulExchange && meaningfulExchangeCount > 0
     ) {
       const PERIODIC_EXCHANGE_INTERVAL = 12;
       if (meaningfulExchangeCount % PERIODIC_EXCHANGE_INTERVAL === 0) {
-        const messageWindow = meaningfulEvents.slice(-PERIODIC_EXCHANGE_INTERVAL);
+        const messageWindow = meaningfulEvents;
         const evidencePacket = this.buildCheckpointEvidencePacket(params.task.id, messageWindow);
         if (
           latestCheckpoint?.checkpointKind === "periodic" &&
@@ -7016,6 +7092,78 @@ export class AgentDaemon extends EventEmitter {
     return this.eventRepo.findByTaskId(taskId);
   }
 
+  private getTaskEventsForResume(taskId: string, workspacePath: string): TaskEvent[] {
+    const startedAt = Date.now();
+    const checkpoint = TranscriptStore.loadCheckpointSync(workspacePath, taskId);
+    const snapshot = checkpoint ? null : this.eventRepo.findLatestConversationSnapshot(taskId);
+    const planDefinitionEvents = this.eventRepo.findByTaskIdAndTypes(
+      taskId,
+      [...RESUME_PLAN_DEFINITION_EVENT_TYPES],
+      1,
+    );
+    const planStateEvents = this.eventRepo.findByTaskIdAndTypes(
+      taskId,
+      [...RESUME_PLAN_STATE_EVENT_TYPES],
+      MAX_RESUME_PLAN_STATE_EVENTS,
+    );
+
+    let boundaryCursor: TaskTimelinePageCursor | null = null;
+    if (checkpoint) {
+      const sourceEventId =
+        typeof checkpoint.sourceEventId === "string" ? checkpoint.sourceEventId.trim() : "";
+      boundaryCursor = sourceEventId
+        ? this.eventRepo.findEventCursorById(taskId, sourceEventId)
+        : null;
+      if (!boundaryCursor) {
+        const timestamp =
+          Number(checkpoint.sourceTimestamp ?? checkpoint.timestamp ?? 0) || 0;
+        boundaryCursor = { order: timestamp, timestamp, id: "" };
+      }
+    } else if (snapshot) {
+      boundaryCursor = {
+        order: Number(snapshot.seq ?? snapshot.ts ?? snapshot.timestamp) || 0,
+        timestamp: Number(snapshot.timestamp) || 0,
+        id: snapshot.id,
+      };
+    }
+
+    const tailEvents = boundaryCursor
+      ? this.eventRepo.findReplayTailAfterCursor(
+          taskId,
+          boundaryCursor,
+          [...RESUME_STATE_EVENT_TYPES],
+          MAX_RESUME_TAIL_EVENTS,
+        )
+      : this.eventRepo.findByTaskIdAndTypes(
+          taskId,
+          [...RESUME_STATE_EVENT_TYPES],
+          MAX_RESUME_TAIL_EVENTS,
+        );
+    const events = [
+      ...(snapshot ? [snapshot] : []),
+      ...planDefinitionEvents,
+      ...planStateEvents,
+      ...tailEvents,
+    ];
+    const uniqueEvents = Array.from(
+      new Map(events.map((event) => [event.eventId || event.id, event])).values(),
+    ).sort((a, b) => {
+      const aOrder = Number(a.seq ?? a.ts ?? a.timestamp) || 0;
+      const bOrder = Number(b.seq ?? b.ts ?? b.timestamp) || 0;
+      return aOrder - bOrder || a.timestamp - b.timestamp || a.id.localeCompare(b.id);
+    });
+    log.info("[TaskResumeReplay]", {
+      taskId,
+      source: checkpoint ? "checkpoint" : snapshot ? "snapshot" : "legacy_bounded",
+      checkpointTimestamp: checkpoint?.timestamp,
+      snapshotTimestamp: snapshot?.timestamp,
+      boundaryCursor,
+      eventCount: uniqueEvents.length,
+      dbMs: Date.now() - startedAt,
+    });
+    return uniqueEvents;
+  }
+
   private resolveLegacyEventType(event: TaskEvent): string {
     return typeof event.legacyType === "string" && event.legacyType.length > 0
       ? event.legacyType
@@ -7039,27 +7187,20 @@ export class AgentDaemon extends EventEmitter {
   }
 
   getTaskEvents(taskId: string, options?: { limit?: number; types?: string[] }): TaskEvent[] {
-    const all = this.eventRepo.findByTaskId(taskId);
     const normalizedTypes = (options?.types || [])
       .map((t) => (typeof t === "string" ? t.trim() : ""))
       .filter(Boolean);
-    const filtered =
-      normalizedTypes.length > 0
-        ? all.filter(
-            (event) =>
-              normalizedTypes.includes(event.type) ||
-              (typeof event.legacyType === "string" && normalizedTypes.includes(event.legacyType)),
-          )
-        : all;
     const limit =
       typeof options?.limit === "number" && Number.isFinite(options.limit)
         ? Math.min(Math.max(options.limit, 1), 200)
         : undefined;
-    if (typeof limit !== "number") {
-      return filtered;
+    if (normalizedTypes.length > 0) {
+      return this.eventRepo.findByTaskIdAndTypes(taskId, normalizedTypes, limit);
     }
-    // Return the most recent events, preserving chronological order.
-    return filtered.slice(Math.max(filtered.length - limit, 0));
+    if (typeof limit === "number") {
+      return this.eventRepo.findRecentByTaskId(taskId, limit);
+    }
+    return this.eventRepo.findByTaskId(taskId);
   }
 
   /**
@@ -9674,7 +9815,7 @@ export class AgentDaemon extends EventEmitter {
       executor = new TaskExecutor(effectiveTask, effectiveWorkspace, this);
 
       // Rebuild conversation history from saved events
-      const events = this.getTaskEventsForReplay(taskId);
+      const events = this.getTaskEventsForResume(taskId, effectiveWorkspace.path);
       if (events.length > 0) {
         executor.rebuildConversationFromEvents(events);
       }

@@ -44,6 +44,12 @@ import { registerStrategicPlannerMethods } from "../electron/control-plane/regis
 import { getStrategicPlannerService } from "../electron/control-plane/StrategicPlannerService";
 import { resolvePathWithinRoot } from "../electron/control-plane/path-containment";
 import { evaluateControlPlaneDeploymentPosture } from "../electron/control-plane/deployment-posture";
+import {
+  buildTaskEventDetailForTransport,
+  buildTaskTimelinePageForTransport,
+  sanitizeTaskEventDetailRequest,
+  sanitizeTaskTimelinePageRequest,
+} from "../electron/control-plane/task-event-transport";
 
 export interface ControlPlaneMethodDeps {
   agentDaemon: AgentDaemon;
@@ -1004,6 +1010,28 @@ export function registerControlPlaneMethods(
     }));
 
     return { events };
+  });
+
+  server.registerMethod(Methods.TASK_TIMELINE_PAGE, async (client, params) => {
+    requireScope(client, "admin");
+    const request = sanitizeTaskTimelinePageRequest(params);
+    return buildTaskTimelinePageForTransport({
+      request,
+      taskRepo,
+      eventRepo,
+      sanitizeValue: sanitizeForBroadcast,
+    });
+  });
+
+  server.registerMethod(Methods.TASK_EVENT_DETAIL, async (client, params) => {
+    requireScope(client, "admin");
+    const request = sanitizeTaskEventDetailRequest(params);
+    return buildTaskEventDetailForTransport({
+      request,
+      taskRepo,
+      eventRepo,
+      sanitizeValue: sanitizeForBroadcast,
+    });
   });
 
   server.registerMethod(Methods.TASK_GET, async (client, params) => {

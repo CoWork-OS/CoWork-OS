@@ -3179,6 +3179,11 @@ export interface TaskTimelinePageSummary {
   payloadBytes: number;
   truncatedEventCount: number;
   largestEventPayloadBytes: number;
+  metadataRowCount?: number;
+  hydratedEventCount?: number;
+  hydratedPayloadBytes?: number;
+  previewPayloadBytes?: number;
+  databaseReadBytesEstimate?: number;
   planStepCount?: number;
   hasChecklist?: boolean;
   outputEventCount?: number;

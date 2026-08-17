@@ -44,6 +44,27 @@ describe("profile_electron_task_switch", () => {
     });
   });
 
+  it("parses deterministic large-session fixture options", () => {
+    expect(
+      parseCliArgs(
+        [
+          "--fixture-turn-count=741",
+          "--fixture-event-count=15529",
+          "--fixture-total-payload-mb=231",
+          "--fixture-heavy-event-every=50",
+          "--fixture-heavy-event-kb=256",
+        ],
+        {},
+      ),
+    ).toMatchObject({
+      fixtureTurnCount: 741,
+      fixtureEventCount: 15529,
+      fixtureTotalPayloadMb: 231,
+      fixtureHeavyEventEvery: 50,
+      fixtureHeavyEventKb: 256,
+    });
+  });
+
   it("summarizes p95 with the same nearest-rank convention as perf logs", () => {
     expect(summarizeValues([5, 10, 20, 100])).toMatchObject({
       n: 4,
@@ -153,6 +174,113 @@ describe("profile_electron_task_switch", () => {
         "background before sidebar_ready: no log evidence",
       ]),
     );
+  });
+
+  it("enforces renderer heap growth and virtual feed DOM budgets", () => {
+    const failures = evaluateBudgets(
+      {
+        startup: {
+          appShellReadyMs: 100,
+          sidebarReadyMs: 200,
+          backgroundBeforeSidebar: [],
+        },
+        evidence: {
+          logCaptureAvailable: true,
+          quietMode: true,
+        },
+        summary: {
+          taskSwitch: {
+            failed: 0,
+            headerReadyMs: summarizeValues([10]),
+            timelineDataReceivedMs: summarizeValues([20]),
+            timelineFirstRowsReadyMs: summarizeValues([30]),
+          },
+          renderer: {
+            longTaskMs: summarizeValues([]),
+            frameGapMs: summarizeValues([]),
+            heapGrowthBytes: 129 * 1024 * 1024,
+            virtualFeedDomNodes: 25,
+          },
+          ipc: {
+            "task:timelinePage": {
+              serializedBytes: summarizeValues([1024]),
+            },
+          },
+        },
+      },
+      {
+        taskHeaderReadyP95Ms: 75,
+        timelineDataReceivedP95Ms: 75,
+        timelineFirstRowsReadyP95Ms: 125,
+        longTaskMaxMs: 80,
+        frameGapMaxMs: 120,
+        appShellReadyMs: 2_000,
+        sidebarReadyMs: 4_000,
+        timelinePageSerializedP95Bytes: 768 * 1024,
+        timelinePageSerializedMaxBytes: 1024 * 1024,
+        rendererHeapGrowthMaxBytes: 128 * 1024 * 1024,
+        virtualFeedDomNodesMax: 24,
+        backgroundBeforeSidebarMax: 0,
+      },
+    );
+
+    expect(failures).toEqual(
+      expect.arrayContaining([
+        "renderer heap growth: 135266304B over budget 134217728B",
+        "virtual feed DOM nodes: 25 over budget 24",
+      ]),
+    );
+  });
+
+  it("fails closed when renderer heap measurement is missing", () => {
+    const failures = evaluateBudgets(
+      {
+        startup: {
+          appShellReadyMs: 100,
+          sidebarReadyMs: 200,
+          backgroundBeforeSidebar: [],
+        },
+        evidence: {
+          logCaptureAvailable: true,
+          quietMode: true,
+        },
+        summary: {
+          taskSwitch: {
+            failed: 0,
+            headerReadyMs: summarizeValues([10]),
+            timelineDataReceivedMs: summarizeValues([20]),
+            timelineFirstRowsReadyMs: summarizeValues([30]),
+          },
+          renderer: {
+            longTaskMs: summarizeValues([]),
+            frameGapMs: summarizeValues([]),
+            heapGrowthBytes: null,
+            virtualFeedDomNodes: 1,
+          },
+          ipc: {
+            "task:timelinePage": {
+              serializedBytes: summarizeValues([1024]),
+            },
+          },
+        },
+      },
+      {
+        taskHeaderReadyP95Ms: 75,
+        timelineDataReceivedP95Ms: 75,
+        timelineFirstRowsReadyP95Ms: 125,
+        longTaskMaxMs: 80,
+        frameGapMaxMs: 120,
+        appShellReadyMs: 2_000,
+        sidebarReadyMs: 4_000,
+        timelinePageSerializedP95Bytes: 768 * 1024,
+        timelinePageSerializedMaxBytes: 1024 * 1024,
+        rendererHeapGrowthMaxBytes: 128 * 1024 * 1024,
+        virtualFeedDomNodesMax: 24,
+        backgroundBeforeSidebarMax: 0,
+      },
+    );
+
+    expect(failures).toContain("renderer heap growth: missing measurement");
   });
 
   it("does not count quiet-mode disabled service logs as background work", () => {

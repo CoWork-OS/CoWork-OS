@@ -265,6 +265,8 @@ export const Methods = {
   TASK_GET: "task.get",
   TASK_LIST: "task.list",
   TASK_EVENTS: "task.events",
+  TASK_TIMELINE_PAGE: "task.timelinePage",
+  TASK_EVENT_DETAIL: "task.eventDetail",
   TASK_CANCEL: "task.cancel",
   TASK_SEND_MESSAGE: "task.sendMessage",
   MANAGED_AGENT_LIST: "managedAgent.list",

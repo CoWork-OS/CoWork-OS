@@ -100,7 +100,11 @@ import { EverydayAgentService } from "../everyday-agent/EverydayAgentService";
 import { normalizeImagesForRemote, sanitizeTaskMessageParams } from "./sanitize";
 import { AgentConfigSchema, validateInput } from "../utils/validation";
 import {
+  buildTaskEventDetailForTransport,
   buildTaskEventHistoryForTransport,
+  buildTaskTimelinePageForTransport,
+  sanitizeTaskEventDetailRequest,
+  sanitizeTaskTimelinePageRequest,
   serializeTaskEventForTransport,
 } from "./task-event-transport";
 import { resolvePathWithinRoot } from "./path-containment";
@@ -1431,6 +1435,24 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         eventRepo,
       }).map((event) => serializeTaskEventForTransport(event, sanitizeForBroadcast));
       return { events };
+    }
+    case Methods.TASK_TIMELINE_PAGE: {
+      const request = sanitizeTaskTimelinePageRequest(params);
+      return buildTaskTimelinePageForTransport({
+        request,
+        taskRepo,
+        eventRepo,
+        sanitizeValue: sanitizeForBroadcast,
+      });
+    }
+    case Methods.TASK_EVENT_DETAIL: {
+      const request = sanitizeTaskEventDetailRequest(params);
+      return buildTaskEventDetailForTransport({
+        request,
+        taskRepo,
+        eventRepo,
+        sanitizeValue: sanitizeForBroadcast,
+      });
     }
     case Methods.TASK_CANCEL: {
       const { taskId } = sanitizeTaskIdParams(params);
@@ -3259,6 +3281,28 @@ function registerTaskAndWorkspaceMethods(
       eventRepo,
     }).map((event) => serializeTaskEventForTransport(event, sanitizeForBroadcast));
     return { events };
+  });
+
+  server.registerMethod(Methods.TASK_TIMELINE_PAGE, async (client, params) => {
+    requireScope(client, "admin");
+    const request = sanitizeTaskTimelinePageRequest(params);
+    return buildTaskTimelinePageForTransport({
+      request,
+      taskRepo,
+      eventRepo,
+      sanitizeValue: sanitizeForBroadcast,
+    });
+  });
+
+  server.registerMethod(Methods.TASK_EVENT_DETAIL, async (client, params) => {
+    requireScope(client, "admin");
+    const request = sanitizeTaskEventDetailRequest(params);
+    return buildTaskEventDetailForTransport({
+      request,
+      taskRepo,
+      eventRepo,
+      sanitizeValue: sanitizeForBroadcast,
+    });
   });
 
   server.registerMethod(Methods.TASK_GET, async (client, params) => {

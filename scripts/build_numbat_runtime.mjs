@@ -69,15 +69,31 @@ function fail(message) {
   process.exit(1);
 }
 
-function sha256(filePath) {
+function sha256(filePath, { stripMacSignature = false } = {}) {
+  let hashPath = filePath;
+  let temporaryDir;
+  if (stripMacSignature && process.platform === "darwin") {
+    temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-numbat-hash-"));
+    const unsignedCopy = path.join(temporaryDir, path.basename(filePath));
+    fs.copyFileSync(filePath, unsignedCopy);
+    const result = spawnSync("codesign", ["--remove-signature", unsignedCopy], {
+      stdio: "ignore",
+    });
+    if (result.status === 0) hashPath = unsignedCopy;
+  }
+
   const hash = createHash("sha256");
-  hash.update(fs.readFileSync(filePath));
-  return hash.digest("hex");
+  try {
+    hash.update(fs.readFileSync(hashPath));
+    return hash.digest("hex");
+  } finally {
+    if (temporaryDir) fs.rmSync(temporaryDir, { recursive: true, force: true });
+  }
 }
 
-function verifyFile(filePath, expected, label) {
+function verifyFile(filePath, expected, label, options = {}) {
   if (!fs.existsSync(filePath)) fail(`${label} is missing: ${filePath}`);
-  const actual = sha256(filePath);
+  const actual = sha256(filePath, options);
   if (actual !== expected) {
     fail(`${label} checksum mismatch: expected ${expected}, got ${actual}`);
   }
@@ -211,7 +227,9 @@ function verifyGeneratedTarget(targetKey) {
   const target = manifest.targets?.[targetKey];
   if (!target?.path || !target.sha256) fail(`Manifest has no built target ${targetKey}`);
   const binaryPath = path.resolve(outputResourceDir, target.path);
-  verifyFile(binaryPath, target.sha256, `Numbat ${targetKey} runtime`);
+  verifyFile(binaryPath, target.sha256, `Numbat ${targetKey} runtime`, {
+    stripMacSignature: true,
+  });
   if (process.platform !== "win32") {
     const stat = fs.lstatSync(binaryPath);
     if (stat.isSymbolicLink() || (stat.mode & 0o022) !== 0) {
@@ -307,7 +325,7 @@ try {
   );
   if (process.platform !== "win32") fs.chmodSync(temporaryOutput, 0o755);
   fs.renameSync(temporaryOutput, outputPath);
-  const binarySha = sha256(outputPath);
+  const binarySha = sha256(outputPath, { stripMacSignature: true });
   manifest.targets ||= {};
   manifest.targets[requestedTarget] = {
     path: path.relative(outputResourceDir, outputPath).split(path.sep).join("/"),

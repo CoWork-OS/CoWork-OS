@@ -194,9 +194,25 @@ function validateUpdaterMetadata(releaseDir) {
 }
 
 async function sha256File(filePath) {
+  let hashPath = filePath;
+  let temporaryDir;
+  if (process.platform === "darwin") {
+    temporaryDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-numbat-hash-"));
+    const unsignedCopy = path.join(temporaryDir, path.basename(filePath));
+    await fs.copyFile(filePath, unsignedCopy);
+    const result = runStatus("codesign", ["--remove-signature", unsignedCopy], {
+      shell: false,
+    });
+    if (result.status === 0) hashPath = unsignedCopy;
+  }
+
   const hash = createHash("sha256");
-  hash.update(await fs.readFile(filePath));
-  return hash.digest("hex");
+  try {
+    hash.update(await fs.readFile(hashPath));
+    return hash.digest("hex");
+  } finally {
+    if (temporaryDir) await fs.rm(temporaryDir, { recursive: true, force: true });
+  }
 }
 
 async function validateNumbatRuntime(resourcesRoot, targetKey) {

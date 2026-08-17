@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { getUserDataDir } from "../../utils/user-data-dir";
 
@@ -26,9 +28,26 @@ export interface ResolvedNumbatBinary {
 }
 
 function sha256File(filePath: string): string {
+  let hashPath = filePath;
+  let temporaryDir: string | undefined;
+  if (process.platform === "darwin") {
+    temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-numbat-hash-"));
+    const unsignedCopy = path.join(temporaryDir, path.basename(filePath));
+    fs.copyFileSync(filePath, unsignedCopy);
+    const result = spawnSync("codesign", ["--remove-signature", unsignedCopy], {
+      encoding: "utf8",
+      stdio: "ignore",
+    });
+    if (result.status === 0) hashPath = unsignedCopy;
+  }
+
   const hash = createHash("sha256");
-  hash.update(fs.readFileSync(filePath));
-  return hash.digest("hex");
+  try {
+    hash.update(fs.readFileSync(hashPath));
+    return hash.digest("hex");
+  } finally {
+    if (temporaryDir) fs.rmSync(temporaryDir, { recursive: true, force: true });
+  }
 }
 
 function assertSafeBinary(filePath: string, expectedSha256: string): void {

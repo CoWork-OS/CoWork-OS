@@ -1818,39 +1818,6 @@ function SidebarComponent({
 
   return (
     <div className="sidebar cli-sidebar">
-      {updateInfo?.available && !updateDismissed && (
-        <div className="sidebar-update-slot">
-          <button
-            type="button"
-            className="update-banner"
-            aria-label="Open update settings"
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              onViewUpdate?.();
-            }}
-          >
-            Update
-          </button>
-          <button
-            type="button"
-            className="update-banner-dismiss"
-            aria-label="Dismiss update banner"
-            onClick={(event) => {
-              event.stopPropagation();
-              setUpdateDismissed(true);
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M9 3L3 9M3 3L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-        </div>
-      )}
-
       {/* New Session Button */}
       <div className="sidebar-header">
         <div className="cli-header-actions sidebar-nav">
@@ -2375,6 +2342,46 @@ function SidebarComponent({
               Settings
             </span>
           </button>
+          {updateInfo?.available && !updateDismissed && (
+            <div className="sidebar-update-actions">
+              <button
+                type="button"
+                className="update-banner"
+                aria-label="Open update settings"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onViewUpdate?.();
+                }}
+              >
+                Update
+              </button>
+              <button
+                type="button"
+                className="update-banner-dismiss"
+                aria-label="Dismiss update banner"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setUpdateDismissed(true);
+                }}
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M9 3L3 9M3 3L9 9"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -1264,18 +1264,14 @@ html.platform-darwin .title-bar-left {
    Update Notification Pill
    ============================================ */
 
-.sidebar-update-slot {
-  position: absolute;
-  top: 8px;
-  left: 118px;
-  right: 12px;
-  z-index: 1002;
+.sidebar-update-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  margin-left: auto;
   min-width: 0;
   height: 26px;
-  pointer-events: none;
-  -webkit-app-region: no-drag;
 }
 
 .update-banner {
@@ -1297,7 +1293,6 @@ html.platform-darwin .title-bar-left {
   font-weight: 650;
   position: relative;
   z-index: 1;
-  pointer-events: auto;
   cursor: pointer;
   -webkit-app-region: no-drag;
   transition:
@@ -1324,7 +1319,6 @@ html.platform-darwin .title-bar-left {
   border-radius: 4px;
   color: var(--color-text-muted);
   cursor: pointer;
-  pointer-events: auto;
   flex-shrink: 0;
   transition: color 0.15s ease, background 0.15s ease;
 }

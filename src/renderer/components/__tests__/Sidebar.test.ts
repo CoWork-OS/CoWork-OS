@@ -153,6 +153,14 @@ describe("Sidebar top-level destinations", () => {
 
     expect(markup).toMatch(/class="[^"]*\bupdate-banner\b[^"]*"/);
     expect(markup).toContain(">Update</button>");
+    expect(markup).toMatch(
+      /class="sidebar-footer cli-sidebar-footer"[\s\S]*Settings[\s\S]*class="sidebar-update-actions"[\s\S]*>Update<\/button>/,
+    );
+    expect(markup).not.toContain("sidebar-update-slot");
+    const source = readFileSync(stylesPath, "utf8");
+    expect(source).toMatch(
+      /\.sidebar-update-actions\s*\{[\s\S]*justify-content:\s*flex-end;[\s\S]*margin-left:\s*auto;/,
+    );
     expect(markup).not.toContain("0.5.46");
     expect(markup).not.toContain("Dismiss update notification");
   });

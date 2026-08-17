@@ -24,6 +24,52 @@ function makeEvent(
 }
 
 describe("deriveSharedTaskEventUiState action blocks", () => {
+  it("keeps a persisted completion as the final Verbose timeline item", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("build-start", 100, "timeline_group_started", {
+          stage: "BUILD",
+          groupLabel: "BUILD",
+          legacyType: "step_started",
+        }),
+        makeEvent("task-complete", 200, "timeline_step_finished", {
+          legacyType: "task_completed",
+          message: "Task completed successfully",
+          resultSummary: "Final review with all findings.",
+          terminalStatus: "ok",
+        }),
+        makeEvent("build-finished", 201, "timeline_group_finished", {
+          stage: "BUILD",
+          groupLabel: "BUILD",
+          legacyType: "step_completed",
+        }),
+        makeEvent("deliver-start", 202, "timeline_group_started", {
+          stage: "DELIVER",
+          groupLabel: "DELIVER",
+          legacyType: "step_started",
+        }),
+        makeEvent("deliver-finished", 203, "timeline_group_finished", {
+          stage: "DELIVER",
+          groupLabel: "DELIVER",
+          legacyType: "step_completed",
+        }),
+      ],
+      task: {
+        id: "task-1",
+        status: "completed",
+      } as Any,
+      workspace: null,
+      verboseSteps: true,
+    });
+
+    const finalItem = shared.baseTimelineItems.at(-1);
+    expect(finalItem?.kind).toBe("event");
+    if (finalItem?.kind !== "event") {
+      throw new Error("Expected a final completion event");
+    }
+    expect(finalItem.event.id).toBe("task-complete");
+  });
+
   it("keeps a stable action-block id while the same block grows", () => {
     const baseEvents = [
       makeEvent("user-1", 100, "user_message", { message: "check steps" }),

@@ -6,11 +6,12 @@ export interface ToolCallTextSanitizationResult {
 
 const XML_TOOL_PATTERNS: RegExp[] = [
   /<tool_call\b[\s\S]*?<\/tool_call>/gi,
+  /<tool_use\b[\s\S]*?<\/tool_use>/gi,
   /<tool_result\b[\s\S]*?<\/tool_result>/gi,
   /<tool\b[^>]*>[\s\S]*?<\/tool>/gi,
   /<function_call\b[\s\S]*?<\/function_call>/gi,
-  /<\/?(?:tool_call|tool_result|tool|function_call)\b[^>]*>/gi,
-  /<\/?[a-z0-9_-]+:(?:tool_call|tool_result|tool|function_call)\b[^>]*>/gi,
+  /<\/?(?:tool_call|tool_use|tool_result|tool|function_call)\b[^>]*>/gi,
+  /<\/?[a-z0-9_-]+:(?:tool_call|tool_use|tool_result|tool|function_call)\b[^>]*>/gi,
   /<tool_name>\s*[^<]+<\/tool_name>\s*<parameters>\s*[\s\S]*?<\/parameters>/gi,
   /<tool_name>\s*[^<]+<\/tool_name>/gi,
   /<parameters>\s*[\s\S]*?<\/parameters>/gi,
@@ -25,13 +26,16 @@ const TOOL_TEXT_MARKERS = [
   "</parameters>",
   "<tool_call>",
   "</tool_call>",
+  "<tool_use",
+  "</tool_use>",
+  ":tool_use",
   "<tool_result>",
   "</tool_result>",
   "<tool ",
   "</tool>",
-  "\"tool_name\"",
-  "\"tool\"",
-  "\"tool_call\"",
+  '"tool_name"',
+  '"tool"',
+  '"tool_call"',
   "[TOOL_CALL]",
   "[/TOOL_CALL]",
   "[TOOL_RESULT]",
@@ -45,18 +49,18 @@ const PLAIN_TOOL_TRANSCRIPT_MARKERS = [
   "assistant to=run_command",
   "assistant to=skill",
   "assistant to=skill_list",
-  "\"cwd\":",
-  "\"timeout_ms\":",
+  '"cwd":',
+  '"timeout_ms":',
   // Full-width CJK bracket separators appear in raw Claude tool-call streams
   "】【",
   // Generic JSON parameter patterns common across all tools
-  "\"pattern\":",
-  "\"file_path\":",
-  "\"command\":",
-  "\"query\":",
-  "\"tool\":",
-  "\"input\":",
-  "\"arguments\":",
+  '"pattern":',
+  '"file_path":',
+  '"command":',
+  '"query":',
+  '"tool":',
+  '"input":',
+  '"arguments":',
 ];
 
 const INLINE_TOOL_JSON_PATTERNS: RegExp[] = [
@@ -70,7 +74,9 @@ function looksLikePlainToolTranscript(input: string): boolean {
     /\b(?:assistant\s+)?to=[a-z_][\w-]*\b/i.test(input) || lower.includes("to=run_command");
   if (!hasTranscriptLead) return false;
   // One marker is sufficient when paired with a clear to=[tool] lead
-  const markerHits = PLAIN_TOOL_TRANSCRIPT_MARKERS.filter((marker) => lower.includes(marker)).length;
+  const markerHits = PLAIN_TOOL_TRANSCRIPT_MARKERS.filter((marker) =>
+    lower.includes(marker),
+  ).length;
   return markerHits >= 1;
 }
 
@@ -146,7 +152,10 @@ function stripLeadingPlainToolTranscriptPrefix(input: string): { text: string; r
   };
 }
 
-function stripEmptyObjectThenInlineTranscriptPrefix(input: string): { text: string; removed: number } {
+function stripEmptyObjectThenInlineTranscriptPrefix(input: string): {
+  text: string;
+  removed: number;
+} {
   const lines = input.split(/\r?\n/);
   if (lines.length < 2) {
     return { text: input, removed: 0 };

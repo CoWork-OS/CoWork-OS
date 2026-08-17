@@ -151,15 +151,13 @@ function isStageBoundaryTimelineGroupEvent(event: TaskEvent): boolean {
 
   const payload = getTimelineGroupPayload(event);
 
-  const stage =
-    typeof payload.stage === "string" ? payload.stage.trim().toUpperCase() : "";
+  const stage = typeof payload.stage === "string" ? payload.stage.trim().toUpperCase() : "";
   if (stage && SUMMARY_HIDDEN_STAGE_NAMES.has(stage)) {
     return true;
   }
 
   const groupIdRaw = getTimelineGroupId(event);
-  const normalizedGroupId =
-    typeof groupIdRaw === "string" ? groupIdRaw.trim().toLowerCase() : "";
+  const normalizedGroupId = typeof groupIdRaw === "string" ? groupIdRaw.trim().toLowerCase() : "";
   return normalizedGroupId.length > 0 && SUMMARY_HIDDEN_STAGE_GROUP_IDS.has(normalizedGroupId);
 }
 
@@ -223,7 +221,11 @@ function getEventMessage(event: TaskEvent): string {
 const VERBOSE_DUPLICATE_WINDOW_MS = 15_000;
 
 function normalizeFailureTextForDedupe(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, " ").replace(/[.。]+$/g, "").trim();
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[.。]+$/g, "")
+    .trim();
 }
 
 function getComparableFailureText(event: TaskEvent): string {
@@ -257,7 +259,9 @@ function isTimelineErrorStepFailureDuplicate(current: TaskEvent, previous: TaskE
     currentEffectiveType === "step_failed" || previousEffectiveType === "step_failed";
   if (!hasFailedStep) return false;
 
-  if (Math.abs((current.timestamp ?? 0) - (previous.timestamp ?? 0)) > VERBOSE_DUPLICATE_WINDOW_MS) {
+  if (
+    Math.abs((current.timestamp ?? 0) - (previous.timestamp ?? 0)) > VERBOSE_DUPLICATE_WINDOW_MS
+  ) {
     return false;
   }
 
@@ -270,10 +274,7 @@ export function filterAdjacentDuplicateTimelineFailures(events: TaskEvent[]): Ta
   const out: TaskEvent[] = [];
   for (const event of events) {
     const previousVisibleEvent = out[out.length - 1];
-    if (
-      previousVisibleEvent &&
-      isTimelineErrorStepFailureDuplicate(event, previousVisibleEvent)
-    ) {
+    if (previousVisibleEvent && isTimelineErrorStepFailureDuplicate(event, previousVisibleEvent)) {
       if (event.type === "timeline_error") {
         continue;
       }
@@ -297,9 +298,7 @@ function getToolCorrelationId(payload: Record<string, unknown>): string {
       : "";
   if (callId) return callId;
   const id =
-    typeof payload.id === "string" && payload.id.trim().length > 0
-      ? payload.id.trim()
-      : "";
+    typeof payload.id === "string" && payload.id.trim().length > 0 ? payload.id.trim() : "";
   return id;
 }
 
@@ -415,12 +414,16 @@ function isLowValueVerboseLifecycleEvent(event: TaskEvent): boolean {
 
   // timeline_step_finished events echo tool/step completion that is already
   // visible from tool_result or timeline_group_finished events.
-  // Only keep task-level cancellation/failure notices.
+  // Keep terminal task outcomes as well: task_completed carries the final
+  // resultSummary that Verbose mode must render as the assistant response.
   if (event.type === "timeline_step_finished") {
     const payload = asObject(event.payload);
-    const legacyType =
-      typeof payload.legacyType === "string" ? payload.legacyType : "";
-    if (legacyType === "task_cancelled" || event.status === "failed") {
+    const legacyType = typeof payload.legacyType === "string" ? payload.legacyType : "";
+    if (
+      effectiveType === "task_completed" ||
+      legacyType === "task_cancelled" ||
+      event.status === "failed"
+    ) {
       return false;
     }
     return true;
@@ -435,10 +438,7 @@ function isLowValueVerboseLifecycleEvent(event: TaskEvent): boolean {
   }
 
   if (event.type === "log") {
-    return (
-      /^\[planning\]/i.test(message) ||
-      /^\[skill-routing\]/i.test(message)
-    );
+    return /^\[planning\]/i.test(message) || /^\[skill-routing\]/i.test(message);
   }
 
   return false;
@@ -470,8 +470,17 @@ export function filterVerboseTimelineNoise(events: TaskEvent[]): TaskEvent[] {
       .map((event) => event.taskId),
   );
   const taskIdsAfterBlockingFailure = new Set<string>();
+  const completedTaskIds = new Set<string>();
   for (const event of events) {
+    const effectiveType = getEffectiveTaskEventType(event);
+    if (effectiveType === "task_started" || effectiveType === "user_message") {
+      completedTaskIds.delete(event.taskId);
+      taskIdsAfterBlockingFailure.delete(event.taskId);
+    }
     if (cancelledTaskIds.has(event.taskId) && isLlmRequestCancelledEvent(event)) continue;
+    if (completedTaskIds.has(event.taskId) && isStageBoundaryTimelineGroupEvent(event)) {
+      continue;
+    }
     if (
       taskIdsAfterBlockingFailure.has(event.taskId) &&
       event.type === "timeline_group_started" &&
@@ -480,7 +489,7 @@ export function filterVerboseTimelineNoise(events: TaskEvent[]): TaskEvent[] {
       continue;
     }
     if (isLowValueVerboseLifecycleEvent(event)) continue;
-    if (getEffectiveTaskEventType(event) === "progress_update") continue;
+    if (effectiveType === "progress_update") continue;
     const exactId =
       typeof event.eventId === "string" && event.eventId.trim().length > 0
         ? event.eventId.trim()
@@ -503,6 +512,9 @@ export function filterVerboseTimelineNoise(events: TaskEvent[]): TaskEvent[] {
       lastSeenByKey.set(duplicateKey, event.timestamp ?? 0);
     }
     out.push(event);
+    if (effectiveType === "task_completed") {
+      completedTaskIds.add(event.taskId);
+    }
     if (isVerbosePostFailureCutoffEvent(event)) {
       taskIdsAfterBlockingFailure.add(event.taskId);
     }

@@ -31,9 +31,9 @@ function makeEvent(
 describe("task event visibility helpers", () => {
   it("includes artifact_created as an important summary event", () => {
     expect(IMPORTANT_EVENT_TYPES).toContain("artifact_created");
-    expect(isImportantTaskEvent(makeEvent("artifact_created", { path: "artifacts/report.md" }))).toBe(
-      true,
-    );
+    expect(
+      isImportantTaskEvent(makeEvent("artifact_created", { path: "artifacts/report.md" })),
+    ).toBe(true);
   });
 
   it("keeps schedule_task tool_result visible in summary mode", () => {
@@ -118,7 +118,10 @@ describe("task event visibility helpers", () => {
 
   it("keeps task_completed visible in summary mode for completed tasks", () => {
     expect(
-      shouldShowTaskEventInSummaryMode(makeEvent("task_completed", { message: "All set." }), "completed"),
+      shouldShowTaskEventInSummaryMode(
+        makeEvent("task_completed", { message: "All set." }),
+        "completed",
+      ),
     ).toBe(true);
   });
 
@@ -169,16 +172,14 @@ describe("task event visibility helpers", () => {
 
   it("keeps generic stage-start cards in the verbose step feed", () => {
     expect(
-      shouldShowTaskEventInStepFeed(
-        makeEvent("timeline_group_started", { stage: "DISCOVER" }),
-        { verboseSteps: true },
-      ),
+      shouldShowTaskEventInStepFeed(makeEvent("timeline_group_started", { stage: "DISCOVER" }), {
+        verboseSteps: true,
+      }),
     ).toBe(true);
     expect(
-      shouldShowTaskEventInStepFeed(
-        makeEvent("timeline_group_started", { stage: "BUILD" }),
-        { verboseSteps: true },
-      ),
+      shouldShowTaskEventInStepFeed(makeEvent("timeline_group_started", { stage: "BUILD" }), {
+        verboseSteps: true,
+      }),
     ).toBe(true);
   });
 
@@ -248,16 +249,56 @@ describe("task event visibility helpers", () => {
         { legacyType: "user_message", message: "Follow-up: please keep going." },
         { id: "user-visible", timestamp: t0 },
       ),
-      makeEvent("timeline_step_updated", { message: "Progress update" }, { id: "a", timestamp: t0 }),
-      makeEvent("timeline_step_updated", { message: "Tackling: Do the real work" }, { id: "b", timestamp: t0 + 500 }),
-      makeEvent("timeline_step_updated", { legacyType: "log", message: "Execution strategy active" }, { id: "c", timestamp: t0 + 1000 }),
-      makeEvent("timeline_step_updated", { legacyType: "tool_call", tool: "web_search" }, { id: "d", timestamp: t0 + 2000 }),
-      makeEvent("timeline_step_updated", { legacyType: "tool_result", tool: "web_search" }, { id: "e", timestamp: t0 + 3000 }),
-      makeEvent("timeline_step_updated", { legacyType: "llm_routing_changed" }, { id: "f", timestamp: t0 + 4000 }),
-      makeEvent("timeline_step_updated", { legacyType: "llm_usage" }, { id: "g", timestamp: t0 + 5000 }),
-      makeEvent("timeline_step_updated", { legacyType: "plan_created" }, { id: "h", timestamp: t0 + 6000 }),
-      makeEvent("timeline_step_updated", { legacyType: "task_analysis" }, { id: "i", timestamp: t0 + 7000 }),
-      makeEvent("timeline_step_updated", { legacyType: "progress_update", message: "Starting execution" }, { id: "j", timestamp: t0 + 8000 }),
+      makeEvent(
+        "timeline_step_updated",
+        { message: "Progress update" },
+        { id: "a", timestamp: t0 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
+        { message: "Tackling: Do the real work" },
+        { id: "b", timestamp: t0 + 500 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
+        { legacyType: "log", message: "Execution strategy active" },
+        { id: "c", timestamp: t0 + 1000 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
+        { legacyType: "tool_call", tool: "web_search" },
+        { id: "d", timestamp: t0 + 2000 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
+        { legacyType: "tool_result", tool: "web_search" },
+        { id: "e", timestamp: t0 + 3000 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
+        { legacyType: "llm_routing_changed" },
+        { id: "f", timestamp: t0 + 4000 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
+        { legacyType: "llm_usage" },
+        { id: "g", timestamp: t0 + 5000 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
+        { legacyType: "plan_created" },
+        { id: "h", timestamp: t0 + 6000 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
+        { legacyType: "task_analysis" },
+        { id: "i", timestamp: t0 + 7000 },
+      ),
+      makeEvent(
+        "timeline_step_updated",
+        { legacyType: "progress_update", message: "Starting execution" },
+        { id: "j", timestamp: t0 + 8000 },
+      ),
       makeEvent(
         "timeline_step_updated",
         { legacyType: "assistant_message", message: "Here is the actual response." },
@@ -309,12 +350,80 @@ describe("task event visibility helpers", () => {
   it("hides timeline_step_finished events but keeps task cancellation", () => {
     const t0 = 1_000_000;
     const filtered = filterVerboseTimelineNoise([
-      makeEvent("timeline_step_finished", { legacyType: "step_completed", message: "glob completed" }, { id: "a", timestamp: t0 }),
-      makeEvent("timeline_step_finished", { legacyType: "step_completed", message: "list_directory completed" }, { id: "b", timestamp: t0 + 1000 }),
-      makeEvent("timeline_step_finished", { legacyType: "task_cancelled", message: "Task was stopped by user" }, { id: "c", timestamp: t0 + 2000 }),
-      makeEvent("timeline_step_finished", { message: "Step finished" }, { id: "d", timestamp: t0 + 3000 }),
+      makeEvent(
+        "timeline_step_finished",
+        { legacyType: "step_completed", message: "glob completed" },
+        { id: "a", timestamp: t0 },
+      ),
+      makeEvent(
+        "timeline_step_finished",
+        { legacyType: "step_completed", message: "list_directory completed" },
+        { id: "b", timestamp: t0 + 1000 },
+      ),
+      makeEvent(
+        "timeline_step_finished",
+        { legacyType: "task_cancelled", message: "Task was stopped by user" },
+        { id: "c", timestamp: t0 + 2000 },
+      ),
+      makeEvent(
+        "timeline_step_finished",
+        { message: "Step finished" },
+        { id: "d", timestamp: t0 + 3000 },
+      ),
     ]);
     expect(filtered.map((e) => e.id)).toEqual(["c"]);
+  });
+
+  it("keeps the completed result and hides stage chatter emitted after it", () => {
+    const t0 = 1_000_000;
+    const filtered = filterVerboseTimelineNoise([
+      makeEvent(
+        "timeline_step_finished",
+        {
+          legacyType: "task_completed",
+          message: "Task completed successfully",
+          resultSummary: "Final review with all findings.",
+          terminalStatus: "ok",
+        },
+        { id: "task-complete", timestamp: t0 },
+      ),
+      makeEvent(
+        "timeline_group_finished",
+        { stage: "BUILD", groupLabel: "BUILD", message: "Completed BUILD" },
+        { id: "build-finished", timestamp: t0 + 1, groupId: "stage:build" },
+      ),
+      makeEvent(
+        "timeline_group_started",
+        { stage: "DELIVER", groupLabel: "DELIVER", message: "Starting DELIVER" },
+        { id: "deliver-start", timestamp: t0 + 2, groupId: "stage:deliver" },
+      ),
+      makeEvent(
+        "timeline_group_finished",
+        { stage: "DELIVER", groupLabel: "DELIVER", message: "Completed DELIVER" },
+        { id: "deliver-finished", timestamp: t0 + 3, groupId: "stage:deliver" },
+      ),
+    ]);
+
+    expect(filtered.map((event) => event.id)).toEqual(["task-complete"]);
+  });
+
+  it("restores stage boundaries after a completed task receives a follow-up run", () => {
+    const filtered = filterVerboseTimelineNoise([
+      makeEvent("task_completed", {}, { id: "completed", timestamp: 1_000 }),
+      makeEvent(
+        "timeline_group_finished",
+        { stage: "DELIVER" },
+        { id: "trailing-deliver", timestamp: 1_001 },
+      ),
+      makeEvent("user_message", {}, { id: "follow-up", timestamp: 2_000 }),
+      makeEvent(
+        "timeline_group_started",
+        { stage: "BUILD" },
+        { id: "resumed-build", timestamp: 2_001 },
+      ),
+    ]);
+
+    expect(filtered.map((event) => event.id)).toEqual(["completed", "follow-up", "resumed-build"]);
   });
 
   it("keeps stage starts in verbose mode so running activity does not disappear after pause", () => {
@@ -402,11 +511,31 @@ describe("task event visibility helpers", () => {
 
   it("hides low-value internal lifecycle chatter in verbose mode", () => {
     const filtered = filterVerboseTimelineNoise([
-      makeEvent("log", { message: "[planning] Using strong model profile for execution plan creation" }, { id: "plan-log" }),
-      makeEvent("progress_update", { message: "Starting execution of 5 steps" }, { id: "start-exec" }),
-      makeEvent("progress_update", { message: "Completed step 2: Review repository activity" }, { id: "done-step" }),
-      makeEvent("timeline_group_finished", { stage: "BUILD", message: "Completed BUILD" }, { id: "build-finished" }),
-      makeEvent("progress_update", { message: "Tackling: Review repository activity" }, { id: "useful" }),
+      makeEvent(
+        "log",
+        { message: "[planning] Using strong model profile for execution plan creation" },
+        { id: "plan-log" },
+      ),
+      makeEvent(
+        "progress_update",
+        { message: "Starting execution of 5 steps" },
+        { id: "start-exec" },
+      ),
+      makeEvent(
+        "progress_update",
+        { message: "Completed step 2: Review repository activity" },
+        { id: "done-step" },
+      ),
+      makeEvent(
+        "timeline_group_finished",
+        { stage: "BUILD", message: "Completed BUILD" },
+        { id: "build-finished" },
+      ),
+      makeEvent(
+        "progress_update",
+        { message: "Tackling: Review repository activity" },
+        { id: "useful" },
+      ),
     ]);
     expect(filtered).toEqual([]);
   });

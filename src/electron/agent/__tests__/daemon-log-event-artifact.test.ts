@@ -31,7 +31,7 @@ function createDaemonLike(taskOverrides: Record<string, unknown> = {}) {
       completionGateBlocks: 0,
       evidenceGateFails: 0,
     },
-    getCurrentEventSeq: vi.fn().mockReturnValue(0),
+    getCurrentEventSeq: vi.fn().mockImplementation(() => seq),
     nextEventSeq: vi.fn().mockImplementation(() => {
       seq += 1;
       return seq;
@@ -59,6 +59,28 @@ function createDaemonLike(taskOverrides: Record<string, unknown> = {}) {
 }
 
 describe("AgentDaemon.logEvent artifact normalization", () => {
+  it("persists a completion after re-entrant DELIVER stage events", () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.activeTimelineStageByTask.set("task-1", "BUILD");
+    daemonLike.transitionTimelineStage = (AgentDaemon.prototype as Any).transitionTimelineStage;
+
+    AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "task_completed", {
+      message: "Task completed successfully",
+      resultSummary: "Final answer",
+      terminalStatus: "ok",
+    });
+
+    const persistedEvents = (daemonLike.persistTimelineEvent as Any).mock.calls.map(
+      ([event]: [Any]) => event,
+    );
+    expect(persistedEvents.map((event: Any) => event.payload.legacyType)).toEqual([
+      "step_completed",
+      "step_started",
+      "task_completed",
+    ]);
+    expect(persistedEvents.map((event: Any) => event.seq)).toEqual([2, 3, 4]);
+  });
+
   it("normalizes relative artifact paths to absolute workspace paths and assigns stable label", () => {
     const daemonLike = createDaemonLike();
 

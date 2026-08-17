@@ -43,7 +43,25 @@ function sha256File(filePath: string): string {
 
   const hash = createHash("sha256");
   try {
-    hash.update(fs.readFileSync(hashPath));
+    const data = fs.readFileSync(hashPath);
+    if (process.platform === "darwin" && data.readUInt32LE(0) === 0xfeedfacf) {
+      const commandCount = data.readUInt32LE(16);
+      let offset = 32;
+      for (let index = 0; index < commandCount; index += 1) {
+        const command = data.readUInt32LE(offset);
+        const commandSize = data.readUInt32LE(offset + 4);
+        if (
+          command === 0x19 &&
+          data.toString("ascii", offset + 8, offset + 24).startsWith("__LINKEDIT")
+        ) {
+          data.fill(0, offset + 32, offset + 40);
+          data.fill(0, offset + 48, offset + 56);
+        }
+        if (commandSize < 8) break;
+        offset += commandSize;
+      }
+    }
+    hash.update(data);
     return hash.digest("hex");
   } finally {
     if (temporaryDir) fs.rmSync(temporaryDir, { recursive: true, force: true });

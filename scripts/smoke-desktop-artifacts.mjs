@@ -193,6 +193,22 @@ function validateUpdaterMetadata(releaseDir) {
   run(process.execPath, ["scripts/release-artifact-names.mjs", "--check", "--dir", releaseDir]);
 }
 
+function normalizeMacMachO(buffer) {
+  if (process.platform !== "darwin" || buffer.readUInt32LE(0) !== 0xfeedfacf) return;
+  const commandCount = buffer.readUInt32LE(16);
+  let offset = 32;
+  for (let index = 0; index < commandCount; index += 1) {
+    const command = buffer.readUInt32LE(offset);
+    const commandSize = buffer.readUInt32LE(offset + 4);
+    if (command === 0x19 && buffer.toString("ascii", offset + 8, offset + 24).startsWith("__LINKEDIT")) {
+      buffer.fill(0, offset + 32, offset + 40);
+      buffer.fill(0, offset + 48, offset + 56);
+    }
+    if (commandSize < 8) break;
+    offset += commandSize;
+  }
+}
+
 async function sha256File(filePath) {
   let hashPath = filePath;
   let temporaryDir;
@@ -208,7 +224,9 @@ async function sha256File(filePath) {
 
   const hash = createHash("sha256");
   try {
-    hash.update(await fs.readFile(hashPath));
+    const data = await fs.readFile(hashPath);
+    if (process.platform === "darwin") normalizeMacMachO(data);
+    hash.update(data);
     return hash.digest("hex");
   } finally {
     if (temporaryDir) await fs.rm(temporaryDir, { recursive: true, force: true });

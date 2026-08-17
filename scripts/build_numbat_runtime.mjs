@@ -101,6 +101,13 @@ function run(command, args, options = {}) {
   return result;
 }
 
+function tarPath(filePath) {
+  if (process.platform !== "win32") return filePath;
+  const normalized = path.resolve(filePath).replaceAll("\\", "/");
+  const driveMatch = normalized.match(/^([A-Za-z]):\/(.*)$/);
+  return driveMatch ? `/${driveMatch[1].toLowerCase()}/${driveMatch[2]}` : normalized;
+}
+
 async function download(url, outputPath, expectedSha256, label) {
   if (fs.existsSync(outputPath) && sha256(outputPath) === expectedSha256) return;
   if (process.env.COWORK_NUMBAT_OFFLINE === "1") {
@@ -167,7 +174,7 @@ async function ensureGo(cacheDir) {
       { cwd: cacheDir },
     );
   } else {
-    run("tar", ["-xzf", archivePath, "-C", sdkRoot]);
+    run("tar", ["-xzf", tarPath(archivePath), "-C", tarPath(sdkRoot)]);
   }
   const resolved = findGo(cacheDir);
   if (!resolved) fail("Pinned Go SDK extraction did not produce the go executable");
@@ -241,7 +248,7 @@ const goBinary = await ensureGo(cacheDir);
 const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-numbat-build-"));
 
 try {
-  run("tar", ["-xzf", sourceArchive, "-C", temporaryRoot]);
+  run("tar", ["-xzf", tarPath(sourceArchive), "-C", tarPath(temporaryRoot)]);
   const sourceEntries = fs
     .readdirSync(temporaryRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory());

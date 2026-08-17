@@ -10,10 +10,10 @@
 
 import { EventEmitter } from "events";
 import {
-  VoiceSettings,
-  VoiceState,
-  VoiceCapabilities,
-  ElevenLabsVoice,
+  type VoiceSettings,
+  type VoiceState,
+  type VoiceCapabilities,
+  type ElevenLabsVoice,
   DEFAULT_VOICE_SETTINGS,
 } from "../../shared/types";
 import { createLogger } from "../utils/logger";

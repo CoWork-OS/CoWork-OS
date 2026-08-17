@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  VoiceSettings as VoiceSettingsType,
-  VoiceProvider,
-  VoiceInputMode,
-  VoiceResponseMode,
-  VoiceState,
-  ElevenLabsVoice,
+  type VoiceSettings as VoiceSettingsType,
+  type VoiceProvider,
+  type VoiceInputMode,
+  type VoiceResponseMode,
+  type VoiceState,
+  type VoiceCapabilities,
+  type ElevenLabsVoice,
   OPENAI_VOICES,
   VOICE_LANGUAGES,
   DEFAULT_VOICE_SETTINGS,
@@ -52,6 +53,7 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
     isProcessing: false,
     audioLevel: 0,
   });
+  const [capabilities, setCapabilities] = useState<VoiceCapabilities | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [elevenLabsVoices, setElevenLabsVoices] = useState<ElevenLabsVoice[]>([]);
@@ -105,8 +107,12 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
   const loadSettings = async () => {
     try {
       setLoading(true);
-      const loaded = await window.electronAPI.getVoiceSettings();
+      const [loaded, loadedCapabilities] = await Promise.all([
+        window.electronAPI.getVoiceSettings(),
+        window.electronAPI.getVoiceCapabilities(),
+      ]);
       setSettings(loaded);
+      setCapabilities(loadedCapabilities);
 
       // Load ElevenLabs voices if API key is configured
       if (loaded.elevenLabsApiKey) {
@@ -347,6 +353,7 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
     } catch (error) {
       console.error("Test speech failed:", error);
     } finally {
+      await window.electronAPI.voiceStopSpeaking();
       setTestingSpeech(false);
     }
   };
@@ -435,12 +442,16 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
           <button
             className={`llm-provider-tab ${settings.ttsProvider === "local" ? "active" : ""}`}
             onClick={() => handleTTSProviderChange("local")}
-            disabled={saving}
+            disabled={saving || !capabilities?.systemTts.available}
+            title={capabilities?.systemTts.reason}
           >
             <span className="llm-provider-tab-label">System</span>
-            <span className="llm-provider-tab-status" />
+            {capabilities?.systemTts.available && <span className="llm-provider-tab-status" />}
           </button>
         </div>
+        {capabilities && !capabilities.systemTts.available && (
+          <p className="settings-hint">{capabilities.systemTts.reason}</p>
+        )}
       </div>
 
       {/* ElevenLabs Configuration */}
@@ -767,12 +778,16 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
           <button
             className={`llm-provider-tab ${settings.sttProvider === "local" ? "active" : ""}`}
             onClick={() => handleSTTProviderChange("local")}
-            disabled={saving}
+            disabled={saving || !capabilities?.systemStt.available}
+            title={capabilities?.systemStt.reason}
           >
             <span className="llm-provider-tab-label">System</span>
-            <span className="llm-provider-tab-status" />
+            {capabilities?.systemStt.available && <span className="llm-provider-tab-status" />}
           </button>
         </div>
+        {capabilities && !capabilities.systemStt.available && (
+          <p className="settings-hint">{capabilities.systemStt.reason}</p>
+        )}
       </div>
 
       {/* Voice Input Mode */}

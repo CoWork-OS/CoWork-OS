@@ -45,7 +45,7 @@ const SYSTEM_STT_UNAVAILABLE =
 function resolveCommandFromPath(command: string): string | null {
   const extensions =
     process.platform === "win32"
-      ? (process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM").split(";")
+      ? ["", ...(process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM").split(";")]
       : [""];
 
   for (const directory of (process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
@@ -60,6 +60,15 @@ function resolveCommandFromPath(command: string): string | null {
       } catch {
         // Continue searching PATH.
       }
+    }
+  }
+
+  if (process.platform === "darwin" && command === "say") {
+    try {
+      accessSync("/usr/bin/say", fsConstants.X_OK);
+      return "/usr/bin/say";
+    } catch {
+      // The built-in command is unavailable.
     }
   }
   return null;
@@ -82,8 +91,7 @@ function detectSystemTts(
   });
 
   if (platform === "darwin") {
-    const command =
-      resolveCommand("say") || (process.platform === "darwin" ? "/usr/bin/say" : null);
+    const command = resolveCommand("say");
     return command
       ? available("macos-say", command)
       : unavailable("macOS System Voice requires the built-in say command.");

@@ -7,6 +7,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const ORIGINAL_COWORK_USER_DATA_DIR = process.env.COWORK_USER_DATA_DIR;
+const mockSystemCapabilities = vi.hoisted(() => ({
+  systemTts: { available: true, adapter: "macos-say" as const },
+  systemStt: { available: false, adapter: null, reason: "Unavailable" },
+}));
+
+vi.mock("../system-voice", () => ({
+  getSystemVoiceCapabilities: () => mockSystemCapabilities,
+}));
 
 // Define mock functions at module scope before imports
 const mockRepositorySave = vi.fn();
@@ -348,6 +356,26 @@ describe("VoiceSettingsManager", () => {
       const updated = VoiceSettingsManager.updateSettings({ volume: 90 });
 
       expect(updated.volume).toBe(90);
+    });
+
+    it("should retain System TTS when the platform adapter is available", () => {
+      mockRepositoryLoad.mockReturnValue({ ...DEFAULT_VOICE_SETTINGS });
+
+      const updated = VoiceSettingsManager.updateSettings({ ttsProvider: "local" });
+
+      expect(updated.ttsProvider).toBe("local");
+    });
+
+    it("should reject System STT when no desktop adapter is available", () => {
+      mockRepositoryLoad.mockReturnValue({ ...DEFAULT_VOICE_SETTINGS });
+
+      const updated = VoiceSettingsManager.updateSettings({ sttProvider: "local" });
+
+      expect(updated.sttProvider).toBe(DEFAULT_VOICE_SETTINGS.sttProvider);
+      expect(mockRepositorySave).toHaveBeenCalledWith(
+        "voice",
+        expect.objectContaining({ sttProvider: DEFAULT_VOICE_SETTINGS.sttProvider }),
+      );
     });
   });
 

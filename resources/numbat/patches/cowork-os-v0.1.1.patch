@@ -1,0 +1,339 @@
+diff --git a/docs/schema/v0.2.0/enforcement-record.schema.json b/docs/schema/v0.2.0/enforcement-record.schema.json
+index 8d4f20c..e7c69e8 100644
+--- a/docs/schema/v0.2.0/enforcement-record.schema.json
++++ b/docs/schema/v0.2.0/enforcement-record.schema.json
+@@ -42,6 +42,7 @@
+       "enum": [
+         "claude-code",
+         "cowork",
++        "cowork-os",
+         "codex",
+         "gemini-cli",
+         "cursor",
+diff --git a/docs/schema/v0.2.0/event-record.schema.json b/docs/schema/v0.2.0/event-record.schema.json
+index 0bb4e6e..7d9a7d2 100644
+--- a/docs/schema/v0.2.0/event-record.schema.json
++++ b/docs/schema/v0.2.0/event-record.schema.json
+@@ -27,6 +27,7 @@
+       "enum": [
+         "claude-code",
+         "cowork",
++        "cowork-os",
+         "codex",
+         "gemini-cli",
+         "cursor",
+diff --git a/docs/schema/v0.2.0/finding-record.schema.json b/docs/schema/v0.2.0/finding-record.schema.json
+index 32fd3a1..f962b33 100644
+--- a/docs/schema/v0.2.0/finding-record.schema.json
++++ b/docs/schema/v0.2.0/finding-record.schema.json
+@@ -53,6 +53,7 @@
+       "enum": [
+         "claude-code",
+         "cowork",
++        "cowork-os",
+         "codex",
+         "gemini-cli",
+         "cursor",
+diff --git a/docs/schema/v0.2.0/indicator-record.schema.json b/docs/schema/v0.2.0/indicator-record.schema.json
+index e5d8631..8967b15 100644
+--- a/docs/schema/v0.2.0/indicator-record.schema.json
++++ b/docs/schema/v0.2.0/indicator-record.schema.json
+@@ -30,6 +30,7 @@
+       "enum": [
+         "claude-code",
+         "cowork",
++        "cowork-os",
+         "codex",
+         "gemini-cli",
+         "cursor",
+diff --git a/internal/hook/hook.go b/internal/hook/hook.go
+index b066712..bfe8bd4 100644
+--- a/internal/hook/hook.go
++++ b/internal/hook/hook.go
+@@ -34,6 +34,7 @@ import (
+ const (
+ 	AgentClaude   = "claude"
+ 	AgentCodex    = "codex"
++	AgentCoworkOS = "cowork-os"
+ 	AgentGemini   = "gemini"
+ 	AgentCursor   = "cursor"
+ 	AgentWindsurf = "windsurf"
+@@ -64,6 +65,7 @@ const (
+ var agentModelByCLI = map[string]string{
+ 	AgentClaude:      model.AgentClaudeCode,
+ 	AgentCodex:       model.AgentCodex,
++	AgentCoworkOS:    model.AgentCoworkOS,
+ 	AgentGemini:      model.AgentGeminiCLI,
+ 	AgentCursor:      model.AgentCursor,
+ 	AgentWindsurf:    model.AgentWindsurf,
+@@ -93,6 +95,7 @@ var agentModelByCLI = map[string]string{
+ var agentList = []string{
+ 	AgentClaude,
+ 	AgentCodex,
++	AgentCoworkOS,
+ 	AgentGemini,
+ 	AgentCursor,
+ 	AgentWindsurf,
+@@ -259,6 +262,25 @@ func ResolveLifecycle(agent, raw string) (Lifecycle, error) {
+ 			return lc, nil
+ 		}
+ 		return "", fmt.Errorf("unknown codex hook event %q", raw)
++	case AgentCoworkOS:
++		switch strings.ToLower(raw) {
++		case "session-start":
++			return LifecycleSessionStart, nil
++		case "session-end":
++			return LifecycleSessionEnd, nil
++		case "prompt", "prompt-submit":
++			return LifecyclePromptSubmit, nil
++		case "permission-requested", "permission-approved":
++			return LifecyclePermission, nil
++		case "permission-denied":
++			return LifecyclePermissionDenied, nil
++		case "pre-tool":
++			return LifecycleCodexPreTool, nil
++		case "post-tool", "post-tool-failure":
++			return LifecycleCodexPostTool, nil
++		default:
++			return "", fmt.Errorf("unknown cowork-os hook event %q", raw)
++		}
+ 	case AgentGemini:
+ 		if lc, ok := resolveGeminiEvent(raw); ok {
+ 			return lc, nil
+@@ -818,6 +840,13 @@ func ParseAgent(s string) (string, error) {
+ // decision on PreToolUse and Stop: ask preserves its normal approval policy,
+ // while stop permits the already-requested termination.
+ func PassthroughResponse(agent string, lc Lifecycle) map[string]any {
++	if agent == AgentCoworkOS {
++		return map[string]any{
++			"protocol_version": "cowork-os/numbat-hook/v1",
++			"decision":         "no_override",
++			"health":           "ok",
++		}
++	}
+ 	if agent == AgentCline {
+ 		return map[string]any{"cancel": false}
+ 	}
+@@ -861,6 +890,13 @@ func DenyResponse(agent, reason string) (map[string]any, bool) {
+ 	switch agent {
+ 	case AgentClaude, AgentCodex:
+ 		return ClaudeDenyResponse(reason), true
++	case AgentCoworkOS:
++		return map[string]any{
++			"protocol_version": "cowork-os/numbat-hook/v1",
++			"decision":         "deny",
++			"health":           "ok",
++			"reason":           reason,
++		}, true
+ 	case AgentCursor:
+ 		return map[string]any{
+ 			"permission":    "deny",
+@@ -918,6 +954,8 @@ func EnforceEligible(agent, event string, lc Lifecycle) bool {
+ 		return lc == LifecyclePreTool
+ 	case AgentCodex:
+ 		return CodexEnforceEligible(lc)
++	case AgentCoworkOS:
++		return CodexEnforceEligible(lc)
+ 	case AgentCursor:
+ 		if lc == LifecycleCursorPreTool {
+ 			return true
+@@ -1094,9 +1132,17 @@ func Map(lc Lifecycle, agent, sourceAgent, eventID string, payload map[string]an
+ 	case LifecycleVSCodePostTool:
+ 		classifyVSCodeTool(&ev, &r, true)
+ 	case LifecycleCodexPreTool:
+-		classifyCodexTool(&ev, &r, false)
++		if agent == AgentCoworkOS {
++			classifyCoworkOSTool(&ev, &r, false)
++		} else {
++			classifyCodexTool(&ev, &r, false)
++		}
+ 	case LifecycleCodexPostTool:
+-		classifyCodexTool(&ev, &r, true)
++		if agent == AgentCoworkOS {
++			classifyCoworkOSTool(&ev, &r, true)
++		} else {
++			classifyCodexTool(&ev, &r, true)
++		}
+ 	case LifecycleGeminiPreTool:
+ 		classifyGeminiTool(&ev, &r, false)
+ 	case LifecycleGeminiPostTool:
+@@ -1721,6 +1767,66 @@ func classifyCodexTool(ev *model.Event, r *resolver, post bool) {
+ 	}
+ }
+ 
++// classifyCoworkOSTool maps CoWork OS's deliberately minimal action projection.
++// The host never forwards arbitrary tool inputs; tool_class and the bounded
++// tool_input object are the complete live-inspection contract.
++func classifyCoworkOSTool(ev *model.Event, r *resolver, post bool) {
++	name := r.toolName()
++	ev.ToolName = name
++	class := strings.ToLower(r.envStr("tool_class"))
++	input := r.toolInput()
++	if post && class != "shell" {
++		mapToolResult(ev, name)
++		if r.toolErrored() {
++			ev.Tags = append(ev.Tags, model.TagToolError)
++		}
++		return
++	}
++	switch class {
++	case "shell":
++		ev.Command = firstString(input, "command")
++		if post {
++			ev.EventType = model.EventCommandResult
++			if code, ok := r.exitCode(); ok {
++				ev.ExitCode = &code
++			}
++			if ms, ok := r.durationMs(); ok {
++				ev.DurationMs = &ms
++			}
++		} else {
++			ev.EventType = model.EventCommandExec
++		}
++	case "file_read":
++		ev.EventType = model.EventFileRead
++		ev.FilePath = firstString(input, "path")
++	case "file_write":
++		ev.EventType = model.EventFileWrite
++		ev.FilePath = firstString(input, "path")
++	case "file_delete":
++		ev.EventType = model.EventFileDelete
++		ev.FilePath = firstString(input, "path")
++	case "network":
++		target := firstString(input, "url")
++		ev.EventType = model.EventNetworkIndicator
++		ev.URL = hookNetworkTargetURL(target)
++		ev.ContentPreview = preview(target)
++		ev.Tags = append(ev.Tags, model.TagNetwork)
++	case "mcp":
++		ev.EventType = model.EventToolCall
++		ev.MCPServer = firstString(input, "mcp_server")
++		ev.MCPTool = firstString(input, "mcp_tool")
++	default:
++		if post {
++			ev.EventType = model.EventToolResult
++		} else {
++			ev.EventType = model.EventToolCall
++		}
++	}
++	if post && r.toolErrored() {
++		ev.Tags = append(ev.Tags, model.TagToolError)
++	}
++}
++
+ // geminiToolFamily classifies a Gemini CLI tool name into one of the activity
+ // families numbat reasons about. Gemini names its built-in tools differently from
+ // Claude/Codex/Copilot: the shell tool is "run_shell_command", file reads are
+diff --git a/internal/hook/install.go b/internal/hook/install.go
+index 42c6ab9..d31650f 100644
+--- a/internal/hook/install.go
++++ b/internal/hook/install.go
+@@ -203,7 +203,7 @@ func AgentSupportsHooks(agent string) bool {
+ // synchronous pre-tool blocking contract that numbat implements.
+ func AgentSupportsEnforcement(agent string) bool {
+ 	switch agent {
+-	case AgentClaude, AgentCodex, AgentCursor, AgentCopilot, AgentVSCode, AgentGemini,
++	case AgentClaude, AgentCodex, AgentCoworkOS, AgentCursor, AgentCopilot, AgentVSCode, AgentGemini,
+ 		AgentWindsurf, AgentAntigravity, AgentFactory, AgentGrok, AgentDevin, AgentHermes,
+ 		AgentOpenClaw, AgentPi, AgentKimi, AgentQwen, AgentCline, AgentAmp, AgentAuggie, AgentKiro, AgentGoose, AgentKilo, AgentOpenHands, AgentCrush, AgentJunie:
+ 		return true
+@@ -225,7 +225,7 @@ func EnforceAgentUsage() string {
+ func InstallAgentNames() []string {
+ 	out := make([]string, 0, len(agentList)-2)
+ 	for _, agent := range agentList {
+-		if agent != AgentVSCode && agent != AgentOpenHands {
++		if agent != AgentVSCode && agent != AgentOpenHands && agent != AgentCoworkOS {
+ 			out = append(out, agent)
+ 		}
+ 	}
+diff --git a/internal/model/event.go b/internal/model/event.go
+index c187384..ab4142e 100644
+--- a/internal/model/event.go
++++ b/internal/model/event.go
+@@ -23,7 +23,10 @@ const (
+ 	AgentClaudeCode = "claude-code"
+ 	// AgentCowork is Claude local-agent-mode / Dispatch, parsed from at-rest
+ 	// audit logs only.
+-	AgentCowork    = "cowork"
++	AgentCowork   = "cowork"
++	// AgentCoworkOS is the CoWork OS host integration. It is deliberately
++	// distinct from Anthropic Cowork's at-rest audit source above.
++	AgentCoworkOS  = "cowork-os"
+ 	AgentCodex     = "codex"
+ 	AgentGeminiCLI = "gemini-cli"
+ 	AgentCursor    = "cursor"
+@@ -168,7 +171,7 @@ func IsValidEventType(t EventType) bool {
+ 
+ var (
+ 	sourceAgents = map[string]struct{}{
+-		AgentClaudeCode: {}, AgentCowork: {}, AgentCodex: {},
++		AgentClaudeCode: {}, AgentCowork: {}, AgentCoworkOS: {}, AgentCodex: {},
+ 		AgentGeminiCLI: {}, AgentCursor: {}, AgentWindsurf: {},
+ 		AgentCopilot: {}, AgentVSCode: {}, AgentOpenCode: {},
+ 		AgentOpenClaw: {}, AgentAntigravity: {}, AgentFactory: {},
+diff --git a/internal/hook/cowork_os_test.go b/internal/hook/cowork_os_test.go
+new file mode 100644
+index 0000000..9d243d7
+--- /dev/null
++++ b/internal/hook/cowork_os_test.go
+@@ -0,0 +1,59 @@
++package hook
++
++import (
++	"testing"
++
++	"github.com/perplexityai/numbat/internal/model"
++)
++
++func TestCoworkOSLifecycleAndSourceIdentity(t *testing.T) {
++	lifecycle, err := ResolveLifecycle(AgentCoworkOS, "pre-tool")
++	if err != nil {
++		t.Fatalf("ResolveLifecycle: %v", err)
++	}
++	if lifecycle != LifecycleCodexPreTool {
++		t.Fatalf("lifecycle = %q, want %q", lifecycle, LifecycleCodexPreTool)
++	}
++	source, err := ParseAgent(AgentCoworkOS)
++	if err != nil {
++		t.Fatalf("ParseAgent: %v", err)
++	}
++	if source != model.AgentCoworkOS {
++		t.Fatalf("source = %q, want %q", source, model.AgentCoworkOS)
++	}
++	event := Map(lifecycle, AgentCoworkOS, source, "event-1", map[string]any{
++		"hook_event_name": "PreToolUse",
++		"session_id":      "task-1",
++		"cwd":             "/workspace",
++		"tool_name":       "run_command",
++		"tool_class":      "shell",
++		"tool_input": map[string]any{
++			"command": "go test ./...",
++		},
++	})
++	if event.SourceAgent != model.AgentCoworkOS {
++		t.Fatalf("source_agent = %q, want %q", event.SourceAgent, model.AgentCoworkOS)
++	}
++	if event.EventType != model.EventCommandExec || event.Command != "go test ./..." {
++		t.Fatalf("event = %+v", event)
++	}
++}
++
++func TestCoworkOSControlResponses(t *testing.T) {
++	allow := PassthroughResponse(AgentCoworkOS, LifecycleCodexPreTool)
++	if allow["protocol_version"] != "cowork-os/numbat-hook/v1" ||
++		allow["decision"] != "no_override" ||
++		allow["health"] != "ok" {
++		t.Fatalf("allow = %#v", allow)
++	}
++	deny, ok := DenyResponse(AgentCoworkOS, "blocked")
++	if !ok ||
++		deny["protocol_version"] != "cowork-os/numbat-hook/v1" ||
++		deny["decision"] != "deny" ||
++		deny["reason"] != "blocked" {
++		t.Fatalf("deny = %#v, %t", deny, ok)
++	}
++	if !EnforceEligible(AgentCoworkOS, "pre-tool", LifecycleCodexPreTool) {
++		t.Fatal("cowork-os pre-tool must be enforceable")
++	}
++}
+

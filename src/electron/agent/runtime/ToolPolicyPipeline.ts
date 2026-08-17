@@ -4,6 +4,7 @@ import type {
   PermissionEvaluationResult,
   Workspace,
 } from "../../../shared/types";
+import type { AgentSecurityEvaluationResult } from "../../../shared/agent-security";
 import { evaluateMontyToolPolicy } from "../../security/monty-tool-policy";
 import { isToolAllowedQuick } from "../../security/policy-manager";
 import {
@@ -29,12 +30,14 @@ export interface ToolPolicyPipelineOptions {
   permissionEvaluation?: (opts?: {
     approvalType?: ApprovalType | null;
   }) => Promise<PermissionEvaluationResult>;
+  agentSecurityEvaluation?: () => Promise<AgentSecurityEvaluationResult>;
 }
 
 export interface ToolPolicyPipelineResult {
   decision: "allow" | "deny" | "require_approval";
   reason?: string;
   trace: ReturnType<ToolPolicyTraceBuilder["build"]>;
+  agentSecurity?: AgentSecurityEvaluationResult;
 }
 
 function toStageDecision(
@@ -57,6 +60,7 @@ export async function evaluateToolPolicyPipeline(
   const requestedPermissionApprovalType = opts.permissionApprovalType ?? null;
   const resolvedPermissionApprovalType =
     requestedPermissionApprovalType ?? opts.runtimeApprovalType ?? null;
+  let workspaceApprovalReason: string | undefined;
 
   if (opts.deniedTools?.has(opts.toolName)) {
     trace.add("task_restrictions", "deny", "tool denied by task restrictions");
@@ -146,14 +150,7 @@ export async function evaluateToolPolicyPipeline(
       };
     }
     if (workspacePolicy.decision === "require_approval") {
-      const approvalReason =
-        workspacePolicy.reason || "approval required by workspace policy";
-      trace.add("approval", "require_approval", approvalReason);
-      return {
-        decision: "require_approval",
-        reason: approvalReason,
-        trace: trace.build("require_approval"),
-      };
+      workspaceApprovalReason = workspacePolicy.reason || "approval required by workspace policy";
     }
     // Workspace allow/pass does not discharge runtime approval metadata; it is
     // still evaluated by the permission engine or final runtime fallback below.
@@ -173,13 +170,31 @@ export async function evaluateToolPolicyPipeline(
     });
   }
 
-  if (opts.approvalRequired && !opts.permissionEvaluation) {
-    trace.add("approval", "require_approval", "approval required by runtime metadata");
-    return {
-      decision: "require_approval",
-      reason: "approval required by runtime metadata",
-      trace: trace.build("require_approval"),
-    };
+  let agentSecurity: AgentSecurityEvaluationResult | undefined;
+  if (opts.agentSecurityEvaluation) {
+    agentSecurity = await opts.agentSecurityEvaluation();
+    trace.add(
+      "agent_security",
+      agentSecurity.decision === "deny" ? "deny" : "allow",
+      agentSecurity.reason,
+      {
+        health: agentSecurity.health,
+        decisionId: agentSecurity.decisionId,
+        durationMs: agentSecurity.durationMs,
+        failureCode: agentSecurity.failureCode,
+      },
+    );
+    if (agentSecurity.decision === "deny") {
+      return {
+        decision: "deny",
+        reason:
+          agentSecurity.reason || "Action denied. Do not retry or attempt an equivalent action.",
+        trace: trace.build("deny"),
+        agentSecurity,
+      };
+    }
+  } else {
+    trace.add("agent_security", "skip");
   }
 
   if (opts.permissionEvaluation) {
@@ -200,6 +215,7 @@ export async function evaluateToolPolicyPipeline(
         decision: "deny",
         reason: permission.reason.summary,
         trace: trace.build("deny"),
+        agentSecurity,
       };
     }
     if (permission.decision === "ask") {
@@ -207,18 +223,21 @@ export async function evaluateToolPolicyPipeline(
         decision: "require_approval",
         reason: permission.reason.summary,
         trace: trace.build("require_approval"),
+        agentSecurity,
       };
     }
   } else {
     trace.add("permissions", "skip");
   }
 
-  if (opts.approvalRequired) {
-    trace.add("approval", "require_approval", "approval required by runtime metadata");
+  if (workspaceApprovalReason || opts.approvalRequired) {
+    const reason = workspaceApprovalReason || "approval required by runtime metadata";
+    trace.add("approval", "require_approval", reason);
     return {
       decision: "require_approval",
-      reason: "approval required by runtime metadata",
+      reason,
       trace: trace.build("require_approval"),
+      agentSecurity,
     };
   }
 
@@ -226,5 +245,6 @@ export async function evaluateToolPolicyPipeline(
   return {
     decision: "allow",
     trace: trace.build("allow"),
+    agentSecurity,
   };
 }

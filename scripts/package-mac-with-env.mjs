@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Runs `npm run build` then `electron-builder --mac` after loading optional
+ * Runs the pinned Numbat runtime build, `npm run build`, then `electron-builder --mac` after loading optional
  * `.env.mac` from the repo root (gitignored).
  *
  * By default this creates an unsigned DMG/ZIP with an ad hoc signed app bundle.
@@ -31,7 +31,11 @@ function log(msg) {
 }
 
 function isTrueEnv(value) {
-  return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+  return ["1", "true", "yes", "on"].includes(
+    String(value || "")
+      .trim()
+      .toLowerCase(),
+  );
 }
 
 function hasExplicitSigningIdentity() {
@@ -40,14 +44,10 @@ function hasExplicitSigningIdentity() {
 
 function hasNotarizationCredentials() {
   const hasAppleIdCredentials = Boolean(
-    process.env.APPLE_ID &&
-      process.env.APPLE_APP_SPECIFIC_PASSWORD &&
-      process.env.APPLE_TEAM_ID,
+    process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID,
   );
   const hasApiKeyCredentials = Boolean(
-    process.env.APPLE_API_KEY &&
-      process.env.APPLE_API_KEY_ID &&
-      process.env.APPLE_API_ISSUER,
+    process.env.APPLE_API_KEY && process.env.APPLE_API_KEY_ID && process.env.APPLE_API_ISSUER,
   );
   const hasKeychainProfile = Boolean(process.env.APPLE_KEYCHAIN_PROFILE);
   return hasAppleIdCredentials || hasApiKeyCredentials || hasKeychainProfile;
@@ -57,7 +57,9 @@ function configureSigningMode() {
   if (isTrueEnv(process.env.COWORK_MAC_UNSIGNED) || !hasExplicitSigningIdentity()) {
     process.env.COWORK_MAC_UNSIGNED = "1";
     process.env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
-    log("Unsigned macOS packaging enabled with ad hoc app signing; Developer ID auto-discovery is disabled.");
+    log(
+      "Unsigned macOS packaging enabled with ad hoc app signing; Developer ID auto-discovery is disabled.",
+    );
     return;
   }
 
@@ -88,10 +90,7 @@ function loadDotEnvMac() {
     if (eq <= 0) continue;
     const key = line.slice(0, eq).trim();
     let val = line.slice(eq + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
     process.env[key] = val;
@@ -115,6 +114,16 @@ function run(cmd, args) {
 
 loadDotEnvMac();
 configureSigningMode();
+log("Building the pinned Numbat runtime …");
+const numbatBuild = spawnSync("npm", ["run", "numbat:build"], {
+  cwd: ROOT,
+  stdio: "inherit",
+  env: process.env,
+});
+if (numbatBuild.status !== 0) {
+  process.exit(numbatBuild.status ?? 1);
+}
+
 log("Running npm run build …");
 const build = spawnSync("npm", ["run", "build"], {
   cwd: ROOT,
@@ -126,7 +135,12 @@ if (build.status !== 0) {
 }
 
 log("Running electron-builder --mac --publish never …");
-const packageStatus = run(process.execPath, ["scripts/run_electron_builder.mjs", "--mac", "--publish", "never"]);
+const packageStatus = run(process.execPath, [
+  "scripts/run_electron_builder.mjs",
+  "--mac",
+  "--publish",
+  "never",
+]);
 if (packageStatus !== 0) {
   process.exit(packageStatus);
 }

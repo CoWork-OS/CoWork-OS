@@ -1,0 +1,27 @@
+{
+  "version": "v0.1.1-cowork.1",
+  "upstreamVersion": "v0.1.1",
+  "commit": "3d20d782d45001fd3bb200bc5690ce4b9ce0f12b",
+  "schemaVersion": "0.2.0",
+  "adapterProtocol": "cowork-os/numbat-hook/v1",
+  "source": {
+    "url": "https://github.com/perplexityai/numbat/archive/3d20d782d45001fd3bb200bc5690ce4b9ce0f12b.tar.gz",
+    "sha256": "05a5f9cd9d675e4fe8efa952a0e3af2d3c96de02ee94b509d15638dd6b101b44"
+  },
+  "patch": {
+    "path": "patches/cowork-os-v0.1.1.patch",
+    "sha256": "726a64c527c849d01a3048673cf061766dd2297760f691afc157e879e67b3783"
+  },
+  "recommendedRules": [
+    "rules/exec/agent_runtime_bypass_flags.yaml",
+    "rules/exec/destructive_recursive_delete.yaml",
+    "rules/exec/reverse_shell.yaml",
+    "rules/exfil/secret_read_and_egress_oneliner.yaml",
+    "rules/impact/disk_wipe.yaml",
+    "rules/impact/fork_bomb.yaml",
+    "rules/persistence/ssh_authorized_keys.yaml",
+    "rules/privilege/container_host_escape.yaml",
+    "rules/privilege/sudoers_tamper.yaml"
+  ],
+  "targets": {}
+}

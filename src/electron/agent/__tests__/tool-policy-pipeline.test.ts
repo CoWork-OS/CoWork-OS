@@ -189,7 +189,9 @@ describe("ToolPolicyPipeline", () => {
     });
 
     expect(result.decision).toBe("require_approval");
-    expect(result.reason).toBe("Default mode prompts for writes, deletes, shell, and external effects.");
+    expect(result.reason).toBe(
+      "Default mode prompts for writes, deletes, shell, and external effects.",
+    );
     expect(result.trace.finalDecision).toBe("require_approval");
     expect(result.trace.entries).toContainEqual(
       expect.objectContaining({
@@ -309,5 +311,75 @@ describe("ToolPolicyPipeline", () => {
       }),
     );
     expect(permissionEvaluation).toHaveBeenCalledWith({ approvalType: "data_export" });
+  });
+
+  it("evaluates agent security after workspace policy and before permissions", async () => {
+    const order: string[] = [];
+    vi.mocked(evaluateMontyToolPolicy).mockImplementationOnce(async () => {
+      order.push("workspace");
+      return { decision: "pass", reason: null };
+    });
+    const agentSecurityEvaluation = vi.fn(async () => {
+      order.push("agent_security");
+      return {
+        decision: "no_override" as const,
+        health: "ok" as const,
+        durationMs: 4,
+      };
+    });
+    const permissionEvaluation = vi.fn(async () => {
+      order.push("permissions");
+      return {
+        decision: "allow" as const,
+        reason: {
+          type: "mode" as const,
+          mode: "dont_ask",
+          summary: "Permission mode allows this tool.",
+        },
+        suggestions: [],
+        scopePreview: "run_command",
+      };
+    });
+
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "run_command",
+      toolInput: { command: "git status" },
+      agentSecurityEvaluation,
+      permissionEvaluation,
+    });
+
+    expect(result.decision).toBe("allow");
+    expect(order).toEqual(["workspace", "agent_security", "permissions"]);
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "agent_security",
+        decision: "allow",
+      }),
+    );
+  });
+
+  it("treats an agent-security deny as monotonic and skips approval evaluation", async () => {
+    const permissionEvaluation = vi.fn();
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "run_command",
+      toolInput: { command: "rm -rf /" },
+      approvalRequired: true,
+      agentSecurityEvaluation: async () => ({
+        decision: "deny",
+        health: "ok",
+        reason: "Blocked by agent security.",
+        decisionId: "decision-1",
+        durationMs: 3,
+      }),
+      permissionEvaluation,
+    });
+
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toBe("Blocked by agent security.");
+    expect(result.agentSecurity?.decisionId).toBe("decision-1");
+    expect(permissionEvaluation).not.toHaveBeenCalled();
+    expect(result.trace.entries.some((entry) => entry.stage === "approval")).toBe(false);
   });
 });

@@ -314,6 +314,23 @@ export const Methods = {
   CONFIG_SET: "config.set",
   LLM_CONFIGURE: "llm.configure",
 
+  // Agent security operations
+  AGENT_SECURITY_STATUS: "security.status",
+  AGENT_SECURITY_FINDINGS_LIST: "security.findings.list",
+  AGENT_SECURITY_FINDING_UPDATE: "security.finding.update",
+  AGENT_SECURITY_DECISIONS_LIST: "security.decisions.list",
+  AGENT_SECURITY_DIAGNOSTICS_LIST: "security.diagnostics.list",
+  AGENT_SECURITY_INVENTORY_LIST: "security.inventory.list",
+  AGENT_SECURITY_INVENTORY_REFRESH: "security.inventory.refresh",
+  AGENT_SECURITY_SCAN: "security.scan",
+  AGENT_SECURITY_RULES_CHECK: "security.rules.check",
+  AGENT_SECURITY_HOOK_STATUS: "security.hook.status",
+  AGENT_SECURITY_HOOK_INSTALL: "security.hook.install",
+  AGENT_SECURITY_HOOK_UNINSTALL: "security.hook.uninstall",
+  AGENT_SECURITY_CASE_BUILD: "security.case.build",
+  AGENT_SECURITY_CASE_VERIFY: "security.case.verify",
+  AGENT_SECURITY_PRUNE: "security.prune",
+
   // Workspace operations
   WORKSPACE_LIST: "workspace.list",
   WORKSPACE_GET: "workspace.get",

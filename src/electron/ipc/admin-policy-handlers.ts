@@ -88,6 +88,18 @@ export function setupAdminPolicyHandlers(): void {
           ...current.runtime.telemetry,
           ...updates.runtime?.telemetry,
         },
+        agentSecurity: {
+          ...current.runtime.agentSecurity,
+          ...updates.runtime?.agentSecurity,
+          scheduledScan: {
+            ...current.runtime.agentSecurity.scheduledScan,
+            ...updates.runtime?.agentSecurity?.scheduledScan,
+          },
+          externalHooks: {
+            ...current.runtime.agentSecurity.externalHooks,
+            ...updates.runtime?.agentSecurity?.externalHooks,
+          },
+        },
       },
       general: {
         ...current.general,
@@ -109,7 +121,10 @@ export function setupAdminPolicyHandlers(): void {
         savePolicies(current);
         await reconcilePluginPackPolicies();
       } catch (rollbackError) {
-        console.warn("[AdminPolicies] Failed to roll back plugin pack policy update:", rollbackError);
+        console.warn(
+          "[AdminPolicies] Failed to roll back plugin pack policy update:",
+          rollbackError,
+        );
       }
       throw error;
     }

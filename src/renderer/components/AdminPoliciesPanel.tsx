@@ -27,6 +27,24 @@ interface AdminPolicies {
       windows: Array<{ days: number[]; start: string; end: string }>;
     };
   };
+  runtime: {
+    agentSecurity: {
+      enabled: boolean;
+      mode: "monitor" | "enforce";
+      ruleProfile: "builtin" | "recommended" | "custom";
+      customRuleDirs: string[];
+      failurePolicy: "open" | "deny_high_risk";
+      timeoutMs: number;
+      retentionDays: number;
+      scheduledScan: {
+        enabled: boolean;
+        intervalHours: number;
+      };
+      externalHooks: {
+        management: "manual";
+      };
+    };
+  };
   general: {
     allowCustomPacks: boolean;
     allowGitInstall: boolean;
@@ -60,6 +78,19 @@ export function AdminPoliciesPanel() {
   const [allowUrl, setAllowUrl] = useState(true);
   const [orgName, setOrgName] = useState("");
   const [orgDir, setOrgDir] = useState("");
+  const [agentSecurityEnabled, setAgentSecurityEnabled] = useState(false);
+  const [agentSecurityMode, setAgentSecurityMode] = useState<"monitor" | "enforce">("monitor");
+  const [agentSecurityRuleProfile, setAgentSecurityRuleProfile] = useState<
+    "builtin" | "recommended" | "custom"
+  >("recommended");
+  const [agentSecurityCustomRuleDirs, setAgentSecurityCustomRuleDirs] = useState("");
+  const [agentSecurityFailurePolicy, setAgentSecurityFailurePolicy] = useState<
+    "open" | "deny_high_risk"
+  >("open");
+  const [agentSecurityTimeoutMs, setAgentSecurityTimeoutMs] = useState(1500);
+  const [agentSecurityRetentionDays, setAgentSecurityRetentionDays] = useState(30);
+  const [agentSecurityScheduledScan, setAgentSecurityScheduledScan] = useState(false);
+  const [agentSecurityScanIntervalHours, setAgentSecurityScanIntervalHours] = useState(24);
 
   const load = useCallback(async () => {
     try {
@@ -82,6 +113,16 @@ export function AdminPoliciesPanel() {
       setAllowUrl(data.general.allowUrlInstall);
       setOrgName(data.general.orgName || "");
       setOrgDir(data.general.orgPluginDir || "");
+      const security = data.runtime.agentSecurity;
+      setAgentSecurityEnabled(security.enabled);
+      setAgentSecurityMode(security.mode);
+      setAgentSecurityRuleProfile(security.ruleProfile);
+      setAgentSecurityCustomRuleDirs(security.customRuleDirs.join(", "));
+      setAgentSecurityFailurePolicy(security.failurePolicy);
+      setAgentSecurityTimeoutMs(security.timeoutMs);
+      setAgentSecurityRetentionDays(security.retentionDays);
+      setAgentSecurityScheduledScan(security.scheduledScan.enabled);
+      setAgentSecurityScanIntervalHours(security.scheduledScan.intervalHours);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load policies");
     } finally {
@@ -123,6 +164,21 @@ export function AdminPoliciesPanel() {
           forceReviewOnly: everydayReviewOnly,
           maxHeartbeatCadenceMinutes: Math.max(5, everydayMaxCadence),
           maxConcurrentBackgroundWork: Math.max(1, everydayMaxWork),
+        },
+        runtime: {
+          agentSecurity: {
+            enabled: agentSecurityEnabled,
+            mode: agentSecurityMode,
+            ruleProfile: agentSecurityRuleProfile,
+            customRuleDirs: parseList(agentSecurityCustomRuleDirs),
+            failurePolicy: agentSecurityFailurePolicy,
+            timeoutMs: Math.min(5000, Math.max(250, agentSecurityTimeoutMs)),
+            retentionDays: Math.min(365, Math.max(1, agentSecurityRetentionDays)),
+            scheduledScan: {
+              enabled: agentSecurityScheduledScan,
+              intervalHours: Math.min(168, Math.max(1, agentSecurityScanIntervalHours)),
+            },
+          },
         },
         general: {
           allowCustomPacks: allowCustom,
@@ -333,6 +389,133 @@ export function AdminPoliciesPanel() {
               max={20}
               onChange={(e) => setEverydayMaxWork(parseInt(e.target.value) || 1)}
             />
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h3>Agent Security Runtime</h3>
+        <label className="ap-toggle-row">
+          <input
+            type="checkbox"
+            checked={agentSecurityEnabled}
+            onChange={(event) => setAgentSecurityEnabled(event.target.checked)}
+          />
+          <span>Enable Numbat inspection for CoWork agent actions</span>
+        </label>
+        <div className="ap-row">
+          <div className="ap-field ap-field-half">
+            <label className="ap-label">Mode</label>
+            <select
+              className="ap-input"
+              value={agentSecurityMode}
+              onChange={(event) =>
+                setAgentSecurityMode(event.target.value as "monitor" | "enforce")
+              }
+            >
+              <option value="monitor">Monitor</option>
+              <option value="enforce">Enforce</option>
+            </select>
+            <span className="ap-hint">
+              Enforcement can only deny an action; it cannot bypass CoWork permissions.
+            </span>
+          </div>
+          <div className="ap-field ap-field-half">
+            <label className="ap-label">Rule Profile</label>
+            <select
+              className="ap-input"
+              value={agentSecurityRuleProfile}
+              onChange={(event) =>
+                setAgentSecurityRuleProfile(
+                  event.target.value as "builtin" | "recommended" | "custom",
+                )
+              }
+            >
+              <option value="recommended">CoWork recommended</option>
+              <option value="builtin">Numbat built-in</option>
+              <option value="custom">Custom directories</option>
+            </select>
+          </div>
+        </div>
+        {agentSecurityRuleProfile === "custom" && (
+          <div className="ap-field">
+            <label className="ap-label">Custom Rule Directories</label>
+            <input
+              type="text"
+              className="ap-input"
+              value={agentSecurityCustomRuleDirs}
+              onChange={(event) => setAgentSecurityCustomRuleDirs(event.target.value)}
+              placeholder="/absolute/path/to/rules"
+            />
+            <span className="ap-hint">
+              Comma-separated absolute directories. Unsafe ownership or permissions are rejected at
+              runtime.
+            </span>
+          </div>
+        )}
+        <div className="ap-row">
+          <div className="ap-field ap-field-half">
+            <label className="ap-label">Runtime Failure Policy</label>
+            <select
+              className="ap-input"
+              value={agentSecurityFailurePolicy}
+              onChange={(event) =>
+                setAgentSecurityFailurePolicy(event.target.value as "open" | "deny_high_risk")
+              }
+            >
+              <option value="open">Fail open with diagnostic</option>
+              <option value="deny_high_risk">Deny high-risk actions</option>
+            </select>
+          </div>
+          <div className="ap-field ap-field-half">
+            <label className="ap-label">Hook Timeout (ms)</label>
+            <input
+              type="number"
+              className="ap-input"
+              min={250}
+              max={5000}
+              value={agentSecurityTimeoutMs}
+              onChange={(event) =>
+                setAgentSecurityTimeoutMs(Number.parseInt(event.target.value, 10) || 1500)
+              }
+            />
+          </div>
+        </div>
+        <div className="ap-row">
+          <div className="ap-field ap-field-half">
+            <label className="ap-label">Retention (days)</label>
+            <input
+              type="number"
+              className="ap-input"
+              min={1}
+              max={365}
+              value={agentSecurityRetentionDays}
+              onChange={(event) =>
+                setAgentSecurityRetentionDays(Number.parseInt(event.target.value, 10) || 30)
+              }
+            />
+          </div>
+          <div className="ap-field ap-field-half">
+            <label className="ap-label">Scheduled Scan Interval (hours)</label>
+            <input
+              type="number"
+              className="ap-input"
+              min={1}
+              max={168}
+              disabled={!agentSecurityScheduledScan}
+              value={agentSecurityScanIntervalHours}
+              onChange={(event) =>
+                setAgentSecurityScanIntervalHours(Number.parseInt(event.target.value, 10) || 24)
+              }
+            />
+            <label className="ap-toggle-row">
+              <input
+                type="checkbox"
+                checked={agentSecurityScheduledScan}
+                onChange={(event) => setAgentSecurityScheduledScan(event.target.checked)}
+              />
+              <span>Enable scheduled scans</span>
+            </label>
           </div>
         </div>
       </div>

@@ -433,12 +433,7 @@ export type AwarenessWakeReason =
   | "idle_window"
   | "due_soon";
 
-export type GoalStateStatus =
-  | "observed"
-  | "active"
-  | "blocked"
-  | "completed"
-  | "stale";
+export type GoalStateStatus = "observed" | "active" | "blocked" | "completed" | "stale";
 
 export interface GoalState {
   id: string;
@@ -717,17 +712,13 @@ export type VerificationOutcome =
 
 export type VerificationScope = "high_risk" | "normal";
 
-export type VerificationEvidenceMode =
-  | "agent_observable"
-  | "user_observable"
-  | "time_blocked";
+export type VerificationEvidenceMode = "agent_observable" | "user_observable" | "time_blocked";
 
 export const TASK_ERROR_CODES = {
   TURN_LIMIT_EXCEEDED: "TURN_LIMIT_EXCEEDED",
 } as const;
 
-export type TaskErrorCode =
-  (typeof TASK_ERROR_CODES)[keyof typeof TASK_ERROR_CODES];
+export type TaskErrorCode = (typeof TASK_ERROR_CODES)[keyof typeof TASK_ERROR_CODES];
 
 /**
  * Reason for command termination - used to signal the agent why a command ended
@@ -795,6 +786,9 @@ export type EventType =
   | "plan_revision_blocked"
   | "step_timeout"
   | "tool_blocked"
+  | "security_finding"
+  | "security_action_denied"
+  | "security_runtime_degraded"
   | "mode_gate_blocked"
   | "execution_mode_auto_promoted"
   | "plan_contract_conflict"
@@ -935,20 +929,11 @@ export type TimelineEventStatus =
   | "skipped"
   | "cancelled";
 
-export type TimelineEventActor =
-  | "system"
-  | "agent"
-  | "user"
-  | "tool"
-  | "subagent";
+export type TimelineEventActor = "system" | "agent" | "user" | "tool" | "subagent";
 
 export type TimelineStage = "DISCOVER" | "BUILD" | "VERIFY" | "FIX" | "DELIVER";
 
-export type OrchestrationGraphRunStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export type OrchestrationGraphRunStatus = "running" | "completed" | "failed" | "cancelled";
 
 export type OrchestrationGraphNodeStatus =
   | "pending"
@@ -1046,11 +1031,7 @@ export interface OrchestrationNodeNotification {
   verificationReport?: string;
 }
 
-export type WorkerRoleKind =
-  | "researcher"
-  | "implementer"
-  | "verifier"
-  | "synthesizer";
+export type WorkerRoleKind = "researcher" | "implementer" | "verifier" | "synthesizer";
 export type DelegationWorkerRole = WorkerRoleKind | "auto";
 
 export type VerificationVerdict = "PASS" | "FAIL" | "PARTIAL";
@@ -1136,15 +1117,8 @@ export interface RuntimeToolMetadata {
   exposure: "always" | "conditional" | "explicit_only";
 }
 
-export type SessionChecklistItemKind =
-  | "implementation"
-  | "verification"
-  | "other";
-export type SessionChecklistItemStatus =
-  | "pending"
-  | "in_progress"
-  | "completed"
-  | "blocked";
+export type SessionChecklistItemKind = "implementation" | "verification" | "other";
+export type SessionChecklistItemStatus = "pending" | "in_progress" | "completed" | "blocked";
 
 export interface SessionChecklistItem {
   id: string;
@@ -1168,15 +1142,11 @@ export type ToolPolicyStage =
   | "availability"
   | "mode_and_domain"
   | "workspace_script"
+  | "agent_security"
   | "permissions"
   | "approval";
 
-export type ToolPolicyStageDecision =
-  | "allow"
-  | "defer"
-  | "deny"
-  | "require_approval"
-  | "skip";
+export type ToolPolicyStageDecision = "allow" | "defer" | "deny" | "require_approval" | "skip";
 
 export interface ToolPolicyTraceEntry {
   stage: ToolPolicyStage;
@@ -1210,10 +1180,7 @@ export type PermissionRuleSource =
   | "legacy_guardrails"
   | "legacy_builtin_settings";
 
-export type PermissionPersistenceDestination =
-  | "session"
-  | "workspace"
-  | "profile";
+export type PermissionPersistenceDestination = "session" | "workspace" | "profile";
 
 export type PermissionRuleScope =
   | {
@@ -1600,12 +1567,7 @@ export type ApprovalType =
  * Tool risk levels for security policy enforcement
  * Higher levels require more permissions/approval
  */
-export type ToolRiskLevel =
-  | "read"
-  | "write"
-  | "destructive"
-  | "system"
-  | "network";
+export type ToolRiskLevel = "read" | "write" | "destructive" | "system" | "network";
 
 /**
  * Tool groups for policy-based access control
@@ -1615,6 +1577,7 @@ export const TOOL_GROUPS = {
   "group:read": [
     "read_file",
     "read_files",
+    "parse_document",
     "list_directory",
     "search_files",
     "system_info",
@@ -1997,19 +1960,10 @@ export interface SuccessCriteria {
  */
 export type AgentType = "main" | "sub" | "parallel";
 export type ConversationMode = "task" | "chat" | "hybrid" | "think";
-export type ExecutionMode =
-  | "execute"
-  | "chat"
-  | "plan"
-  | "analyze"
-  | "verified"
-  | "debug";
+export type ExecutionMode = "execute" | "chat" | "plan" | "analyze" | "verified" | "debug";
 export type ExecutionModeSource = "user" | "strategy" | "auto_promote";
 
-export type ExternalRuntimePermissionMode =
-  | "approve-reads"
-  | "approve-all"
-  | "deny-all";
+export type ExternalRuntimePermissionMode = "approve-reads" | "approve-all" | "deny-all";
 export type ExternalRuntimeAgent = "codex" | "claude";
 
 export interface ExternalRuntimeConfig {
@@ -2025,10 +1979,7 @@ export type VerificationArtifactPathPolicy =
   | "require_existing"
   | "inline_if_missing"
   | "always_inline";
-export type WorkspacePathAliasPolicy =
-  | "rewrite_and_retry"
-  | "strict_fail"
-  | "disabled";
+export type WorkspacePathAliasPolicy = "rewrite_and_retry" | "strict_fail" | "disabled";
 export type TaskPathRootPolicy = "pin_and_rewrite" | "strict_fail" | "disabled";
 export type TaskDomain =
   | "auto"
@@ -2059,10 +2010,7 @@ export type DirectResponseMode =
   | "terminal_quick_answer"
   | "brief_status_then_execute";
 
-export type PreflightGate =
-  | "preflight_framing"
-  | "workspace_selection"
-  | "artifact_presence";
+export type PreflightGate = "preflight_framing" | "workspace_selection" | "artifact_presence";
 
 export type WorkflowMode = "none" | "workflow" | "deep_work";
 
@@ -2396,13 +2344,7 @@ export interface CliTaskOwnership {
  * Capability dimension for model routing.
  * Used by ModelCapabilityRegistry to select the best model for a task type.
  */
-export type ModelCapability =
-  | "code"
-  | "math"
-  | "research"
-  | "vision"
-  | "fast"
-  | "long_context";
+export type ModelCapability = "code" | "math" | "research" | "vision" | "fast" | "long_context";
 
 /** Memory tier for three-tier promotion system */
 export type MemoryTier = "short" | "medium" | "long";
@@ -2536,11 +2478,7 @@ export interface Task {
   evalRunId?: string;
   awaitingUserInputReasonCode?: string;
   retryReason?: "success_criteria_failed" | "explicit_retry_policy";
-  recoveryClass?:
-    | "user_blocker"
-    | "local_runtime"
-    | "provider_quota"
-    | "external_unknown";
+  recoveryClass?: "user_blocker" | "local_runtime" | "provider_quota" | "external_unknown";
   toolDisabledScope?: "provider" | "global";
   budgetUsage?: {
     turns: number;
@@ -2571,11 +2509,7 @@ export interface Task {
   billingCode?: string; // Billing/cost attribution code
 }
 
-export type SkillApplicationTrigger =
-  | "slash"
-  | "planner"
-  | "model"
-  | "explicit_hint";
+export type SkillApplicationTrigger = "slash" | "planner" | "model" | "explicit_hint";
 
 export interface PendingSkillParameterCollection {
   skillId: string;
@@ -2724,12 +2658,7 @@ export type ImprovementCandidateReadiness =
   | "needs_more_evidence"
   | "unknown";
 
-export type ImprovementRunStatus =
-  | "queued"
-  | "running"
-  | "passed"
-  | "failed"
-  | "cancelled";
+export type ImprovementRunStatus = "queued" | "running" | "passed" | "failed" | "cancelled";
 
 export type ImprovementReviewStatus = "pending" | "accepted" | "dismissed";
 export type ImprovementPromotionMode = "merge" | "github_pr";
@@ -2945,12 +2874,7 @@ export type ImprovementCampaignStatus =
   | "promoted"
   | "failed";
 
-export type ImprovementVariantStatus =
-  | "queued"
-  | "running"
-  | "passed"
-  | "failed"
-  | "cancelled";
+export type ImprovementVariantStatus = "queued" | "running" | "passed" | "failed" | "cancelled";
 
 export interface ImprovementReplayCase {
   id: string;
@@ -3326,19 +3250,8 @@ export interface ListTaskTraceRunsRequest {
 }
 
 export type TaskTraceTab = "transcript" | "debug";
-export type TaskTraceRowActor =
-  | "user"
-  | "agent"
-  | "tool"
-  | "model"
-  | "result"
-  | "system";
-export type TaskTraceBadgeTone =
-  | "neutral"
-  | "active"
-  | "success"
-  | "warning"
-  | "error";
+export type TaskTraceRowActor = "user" | "agent" | "tool" | "model" | "result" | "system";
+export type TaskTraceBadgeTone = "neutral" | "active" | "success" | "warning" | "error";
 
 export interface TaskTraceBadge {
   label: string;
@@ -3598,11 +3511,7 @@ export interface TerminalTabOutputEvent {
   timestamp: number;
 }
 
-export type GithubReviewThreadState =
-  | "open"
-  | "resolved"
-  | "outdated"
-  | "unknown";
+export type GithubReviewThreadState = "open" | "resolved" | "outdated" | "unknown";
 
 export interface GithubPullRequestReviewComment {
   id: string;
@@ -3816,19 +3725,9 @@ export interface Artifact {
   createdAt: number;
 }
 
-export type AnnotationSurfaceType =
-  | "browser"
-  | "diff"
-  | "file"
-  | "artifact"
-  | "message";
+export type AnnotationSurfaceType = "browser" | "diff" | "file" | "artifact" | "message";
 
-export type AnnotationStatus =
-  | "open"
-  | "addressing"
-  | "addressed"
-  | "resolved"
-  | "dismissed";
+export type AnnotationStatus = "open" | "addressing" | "addressed" | "resolved" | "dismissed";
 
 export interface AnnotationViewportRef {
   width: number;
@@ -3988,11 +3887,7 @@ export interface PdfReviewPageSummary {
   truncated: boolean;
 }
 
-export type PdfReviewExtractionMode =
-  | "native"
-  | "ocrmypdf"
-  | "page-ocr"
-  | "fallback";
+export type PdfReviewExtractionMode = "native" | "ocrmypdf" | "page-ocr" | "fallback";
 
 export interface PdfReviewSummary {
   pageCount: number;
@@ -4295,12 +4190,7 @@ export interface Skill {
   id: string;
   name: string;
   description: string;
-  category:
-    | "document"
-    | "spreadsheet"
-    | "presentation"
-    | "organizer"
-    | "custom";
+  category: "document" | "spreadsheet" | "presentation" | "organizer" | "custom";
   prompt: string;
   scriptPath?: string;
   parameters?: Record<string, Any>;
@@ -4346,12 +4236,7 @@ export type AgentAutonomyLevel = "intern" | "specialist" | "lead";
 export type HeartbeatStatus = "idle" | "running" | "sleeping" | "error";
 export type HeartbeatProfile = "observer" | "operator" | "dispatcher";
 export type HeartbeatRunType = "pulse" | "dispatch";
-export type HeartbeatDispatchKind =
-  | "silent"
-  | "suggestion"
-  | "task"
-  | "runbook"
-  | "cron_handoff";
+export type HeartbeatDispatchKind = "silent" | "suggestion" | "task" | "runbook" | "cron_handoff";
 export type HeartbeatPulseResultKind =
   | "idle"
   | "deferred"
@@ -4409,11 +4294,7 @@ export interface AgentToolRestrictions {
   deniedTools?: string[];
 }
 
-export type CompanyLoopType =
-  | "monitor"
-  | "work_generation"
-  | "execution"
-  | "review";
+export type CompanyLoopType = "monitor" | "work_generation" | "execution" | "review";
 
 export type CompanyOutputType =
   | "status_digest"
@@ -4528,12 +4409,7 @@ export interface UpdateAutomationProfileRequest {
   activeHours?: HeartbeatActiveHours | null;
 }
 
-export type CoreTraceSourceSurface =
-  | "heartbeat"
-  | "subconscious"
-  | "memory"
-  | "trigger"
-  | "device";
+export type CoreTraceSourceSurface = "heartbeat" | "subconscious" | "memory" | "trigger" | "device";
 
 export type CoreTraceKind =
   | "pulse_cycle"
@@ -4543,11 +4419,7 @@ export type CoreTraceKind =
   | "harness_experiment"
   | "regression_eval";
 
-export type CoreTraceStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped";
+export type CoreTraceStatus = "running" | "completed" | "failed" | "skipped";
 
 export type CoreTracePhase =
   | "start"
@@ -4582,11 +4454,7 @@ export type CoreMemoryCandidateType =
   | "ignored_noise"
   | "invalidates_prior";
 
-export type CoreMemoryCandidateStatus =
-  | "proposed"
-  | "accepted"
-  | "rejected"
-  | "merged";
+export type CoreMemoryCandidateStatus = "proposed" | "accepted" | "rejected" | "merged";
 
 export interface CoreTrace {
   id: string;
@@ -4698,23 +4566,11 @@ export interface ListCoreMemoryDistillRunsRequest {
   limit?: number;
 }
 
-export type DreamingScopeKind =
-  | "workspace"
-  | "agent_role"
-  | "topic"
-  | "recent_sessions";
+export type DreamingScopeKind = "workspace" | "agent_role" | "topic" | "recent_sessions";
 
-export type DreamingTriggerSource =
-  | "heartbeat"
-  | "task_completion"
-  | "manual"
-  | "system";
+export type DreamingTriggerSource = "heartbeat" | "task_completion" | "manual" | "system";
 
-export type DreamingRunStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped";
+export type DreamingRunStatus = "running" | "completed" | "failed" | "skipped";
 
 export type DreamingCandidateAction =
   | "curated_add"
@@ -4735,12 +4591,7 @@ export type DreamingCandidateTarget =
   | "core_memory"
   | "suggestion_policy";
 
-export type DreamingCandidateStatus =
-  | "proposed"
-  | "accepted"
-  | "rejected"
-  | "applied"
-  | "merged";
+export type DreamingCandidateStatus = "proposed" | "accepted" | "rejected" | "applied" | "merged";
 
 export interface DreamingRun {
   id: string;
@@ -4820,24 +4671,11 @@ export type CoreFailureCategory =
 
 export type CoreFailureSeverity = "low" | "medium" | "high" | "critical";
 
-export type CoreFailureRecordStatus =
-  | "open"
-  | "clustered"
-  | "resolved"
-  | "archived";
+export type CoreFailureRecordStatus = "open" | "clustered" | "resolved" | "archived";
 
-export type CoreFailureClusterStatus =
-  | "open"
-  | "stable"
-  | "evaluating"
-  | "resolved"
-  | "dismissed";
+export type CoreFailureClusterStatus = "open" | "stable" | "evaluating" | "resolved" | "dismissed";
 
-export type CoreEvalCaseStatus =
-  | "draft"
-  | "active"
-  | "failing"
-  | "archived";
+export type CoreEvalCaseStatus = "draft" | "active" | "failing" | "archived";
 
 export type CoreExperimentChangeKind =
   | "automation_profile"
@@ -4944,12 +4782,7 @@ export interface CoreLearningsEntry {
   id: string;
   profileId: string;
   workspaceId?: string;
-  kind:
-    | "failure_cluster"
-    | "eval_case"
-    | "experiment"
-    | "promotion"
-    | "gate_rejection";
+  kind: "failure_cluster" | "eval_case" | "experiment" | "promotion" | "gate_rejection";
   summary: string;
   details?: string;
   relatedClusterId?: string;
@@ -5235,12 +5068,7 @@ export type AgentTeamRunStatus =
   | "failed"
   | "cancelled";
 
-export type AgentTeamRunPhase =
-  | "dispatch"
-  | "think"
-  | "execute"
-  | "synthesize"
-  | "complete";
+export type AgentTeamRunPhase = "dispatch" | "think" | "execute" | "synthesize" | "complete";
 
 export interface AgentTeamRun {
   id: string;
@@ -5265,12 +5093,7 @@ export interface CreateAgentTeamRunRequest {
   multiLlmMode?: boolean;
 }
 
-export type AgentTeamItemStatus =
-  | "todo"
-  | "in_progress"
-  | "blocked"
-  | "done"
-  | "failed";
+export type AgentTeamItemStatus = "todo" | "in_progress" | "blocked" | "done" | "failed";
 
 export interface AgentTeamItem {
   id: string;
@@ -6048,10 +5871,7 @@ export interface CreateAgentThoughtRequest {
 
 /** Event payload for team thought IPC events */
 export interface TeamThoughtEvent {
-  type:
-    | "team_thought_added"
-    | "team_thought_updated"
-    | "team_thought_streaming";
+  type: "team_thought_added" | "team_thought_updated" | "team_thought_streaming";
   timestamp: number;
   runId: string;
   thought: AgentThought;
@@ -6060,10 +5880,7 @@ export interface TeamThoughtEvent {
 /**
  * Default agent roles that come pre-configured
  */
-export const DEFAULT_AGENT_ROLES: Omit<
-  AgentRole,
-  "id" | "createdAt" | "updatedAt"
->[] = [
+export const DEFAULT_AGENT_ROLES: Omit<AgentRole, "id" | "createdAt" | "updatedAt">[] = [
   {
     name: "coder",
     displayName: "Coder",
@@ -6094,8 +5911,7 @@ export const DEFAULT_AGENT_ROLES: Omit<
   {
     name: "researcher",
     displayName: "Researcher",
-    description:
-      "Investigates solutions, analyzes options, and gathers information",
+    description: "Investigates solutions, analyzes options, and gathers information",
     icon: "🔬",
     color: "#10b981",
     capabilities: ["research", "analyze", "document"],
@@ -6159,8 +5975,7 @@ export const DEFAULT_AGENT_ROLES: Omit<
   {
     name: "project_manager",
     displayName: "Project Manager",
-    description:
-      "Coordinates tasks, tracks progress, manages timelines and team workload",
+    description: "Coordinates tasks, tracks progress, manages timelines and team workload",
     icon: "📋",
     color: "#0ea5e9",
     capabilities: ["manage", "plan", "communicate"],
@@ -6208,8 +6023,7 @@ export const DEFAULT_AGENT_ROLES: Omit<
   {
     name: "support",
     displayName: "Support Agent",
-    description:
-      "Handles user queries, troubleshooting, customer communication",
+    description: "Handles user queries, troubleshooting, customer communication",
     icon: "💬",
     color: "#22c55e",
     capabilities: ["communicate", "research", "document"],
@@ -6221,8 +6035,7 @@ export const DEFAULT_AGENT_ROLES: Omit<
   {
     name: "devops",
     displayName: "DevOps Engineer",
-    description:
-      "Manages CI/CD pipelines, deployment, infrastructure and monitoring",
+    description: "Manages CI/CD pipelines, deployment, infrastructure and monitoring",
     icon: "⚙️",
     color: "#f97316",
     capabilities: ["ops", "code", "security"],
@@ -6234,8 +6047,7 @@ export const DEFAULT_AGENT_ROLES: Omit<
   {
     name: "security_analyst",
     displayName: "Security Analyst",
-    description:
-      "Performs security audits, vulnerability assessments, compliance checks",
+    description: "Performs security audits, vulnerability assessments, compliance checks",
     icon: "🔒",
     color: "#ef4444",
     capabilities: ["security", "review", "analyze"],
@@ -6247,8 +6059,7 @@ export const DEFAULT_AGENT_ROLES: Omit<
   {
     name: "assistant",
     displayName: "General Assistant",
-    description:
-      "Versatile helper for miscellaneous tasks, scheduling, and coordination",
+    description: "Versatile helper for miscellaneous tasks, scheduling, and coordination",
     icon: "🤖",
     color: "#64748b",
     capabilities: ["communicate", "research", "manage"],
@@ -6300,8 +6111,7 @@ export const DEFAULT_AGENT_ROLES: Omit<
   {
     name: "finance-document-writer",
     displayName: "Deck/Note Writer",
-    description:
-      "Turns approved analysis into draft decks, memos, and workpapers for human review",
+    description: "Turns approved analysis into draft decks, memos, and workpapers for human review",
     icon: "📝",
     color: "#db2777",
     capabilities: ["write", "document", "research"],
@@ -6662,11 +6472,7 @@ export interface HeartbeatResult {
   error?: string;
 }
 
-export type HeartbeatDecisionMode =
-  | "silent"
-  | "inbox_suggestion"
-  | "task_creation"
-  | "nudge";
+export type HeartbeatDecisionMode = "silent" | "inbox_suggestion" | "task_creation" | "nudge";
 
 export type HeartbeatSignalFamily =
   | "urgent_interrupt"
@@ -6775,12 +6581,7 @@ export interface HeartbeatEvent {
 /**
  * Board column for task organization (Kanban)
  */
-export type BoardColumn =
-  | "backlog"
-  | "todo"
-  | "in_progress"
-  | "review"
-  | "done";
+export type BoardColumn = "backlog" | "todo" | "in_progress" | "review" | "done";
 
 /**
  * Board column definitions for UI
@@ -6973,11 +6774,7 @@ export type MentionType = "request" | "handoff" | "review" | "fyi";
 /**
  * Status of a mention
  */
-export type MentionStatus =
-  | "pending"
-  | "acknowledged"
-  | "completed"
-  | "dismissed";
+export type MentionStatus = "pending" | "acknowledged" | "completed" | "dismissed";
 
 /**
  * An @mention from one agent to another
@@ -7041,19 +6838,9 @@ export type SupervisorProtocolIntent =
   | "escalation_notice"
   | "ack";
 
-export type SupervisorExchangeStatus =
-  | "open"
-  | "acknowledged"
-  | "escalated"
-  | "closed"
-  | "ignored";
+export type SupervisorExchangeStatus = "open" | "acknowledged" | "escalated" | "closed" | "ignored";
 
-export type SupervisorActorKind =
-  | "peer"
-  | "worker"
-  | "supervisor"
-  | "human"
-  | "system";
+export type SupervisorActorKind = "peer" | "worker" | "supervisor" | "human" | "system";
 
 export interface SupervisorEvidenceRef {
   channelId: string;
@@ -7129,11 +6916,7 @@ export interface InfraSandboxInfo {
   region?: string;
 }
 
-export type InfraProviderStatus =
-  | "connected"
-  | "disconnected"
-  | "error"
-  | "not_configured";
+export type InfraProviderStatus = "connected" | "disconnected" | "error" | "not_configured";
 
 export interface InfraStatus {
   enabled: boolean;
@@ -7264,8 +7047,7 @@ export interface ProactiveSuggestion {
 export const EVERYDAY_AGENT_CONSENT_VERSION = 1;
 export const EVERYDAY_AGENT_DEFAULT_PROFILE_ID = "default";
 export const EVERYDAY_AGENT_DEFAULT_MANAGED_AGENT_ID = "cowork-everyday-agent";
-export const EVERYDAY_AGENT_DEFAULT_MANAGED_ENVIRONMENT_ID =
-  "cowork-everyday-agent-local";
+export const EVERYDAY_AGENT_DEFAULT_MANAGED_ENVIRONMENT_ID = "cowork-everyday-agent-local";
 
 export type EverydayCapabilityBundle =
   | "inbox"
@@ -7291,10 +7073,7 @@ export type EverydayActionRisk =
   | "spend"
   | "credential_sensitive";
 
-export type EverydayApprovalPosture =
-  | "review_first"
-  | "trusted_patterns"
-  | "review_only";
+export type EverydayApprovalPosture = "review_first" | "trusted_patterns" | "review_only";
 
 export type EverydayReceiptStatus =
   | "executed"
@@ -7305,12 +7084,7 @@ export type EverydayReceiptStatus =
   | "previewed"
   | "approved";
 
-export type EverydayPreviewStatus =
-  | "pending"
-  | "approved"
-  | "rejected"
-  | "expired"
-  | "blocked";
+export type EverydayPreviewStatus = "pending" | "approved" | "rejected" | "expired" | "blocked";
 
 export interface EverydayCapabilityBundleDefinition {
   id: EverydayCapabilityBundle;
@@ -7321,103 +7095,96 @@ export interface EverydayCapabilityBundleDefinition {
   sensitiveRisks: EverydayActionRisk[];
 }
 
-export const EVERYDAY_AGENT_CAPABILITY_BUNDLES: EverydayCapabilityBundleDefinition[] =
-  [
-    {
-      id: "inbox",
-      label: "Inbox",
-      description: "Triage, summarize, draft, and schedule email work.",
-      surfaces: ["Inbox Agent", "Home", "Mission Control"],
-      defaultEnabled: true,
-      sensitiveRisks: ["execute_sensitive", "data_export"],
-    },
-    {
-      id: "calendar",
-      label: "Calendar",
-      description:
-        "Prepare for events, suggest follow-ups, and draft scheduling changes.",
-      surfaces: ["Mission Control", "Routines"],
-      defaultEnabled: true,
-      sensitiveRisks: ["execute_sensitive", "data_export"],
-    },
-    {
-      id: "browser",
-      label: "Browser",
-      description:
-        "Use the visible Browser Workbench for online tasks and evidence review.",
-      surfaces: ["Browser Workbench", "Task Timeline"],
-      defaultEnabled: true,
-      sensitiveRisks: ["credential_sensitive", "data_export"],
-    },
-    {
-      id: "files",
-      label: "Files",
-      description: "Read local workspace files and suggest cleanup or organization.",
-      surfaces: ["Task Timeline", "Home"],
-      defaultEnabled: false,
-      sensitiveRisks: ["destructive", "data_export"],
-    },
-    {
-      id: "docs",
-      label: "Docs",
-      description:
-        "Summarize and draft document changes through connected document tools.",
-      surfaces: ["Documents", "Task Timeline"],
-      defaultEnabled: true,
-      sensitiveRisks: ["execute_sensitive", "data_export"],
-    },
-    {
-      id: "messages",
-      label: "Messages",
-      description:
-        "Draft replies and coordinate work in private or approved channels.",
-      surfaces: ["Channels", "Inbox Agent"],
-      defaultEnabled: false,
-      sensitiveRisks: ["execute_sensitive", "data_export"],
-    },
-    {
-      id: "github_work",
-      label: "GitHub / Work",
-      description: "Track issues, pull requests, and work-system next actions.",
-      surfaces: ["Mission Control", "Managed Agents"],
-      defaultEnabled: false,
-      sensitiveRisks: ["execute_sensitive", "destructive"],
-    },
-    {
-      id: "memory",
-      label: "Memory",
-      description: "Propose reviewable memories from accepted work and outcomes.",
-      surfaces: ["Memory", "Home"],
-      defaultEnabled: true,
-      sensitiveRisks: ["data_export"],
-    },
-    {
-      id: "screen_context",
-      label: "Screen Context",
-      description:
-        "Use explicitly enabled local screen context as untrusted evidence.",
-      surfaces: ["Chronicle", "Task Timeline"],
-      defaultEnabled: false,
-      sensitiveRisks: ["credential_sensitive", "data_export"],
-    },
-    {
-      id: "remote_devices",
-      label: "Remote Devices",
-      description:
-        "Dispatch approved work to connected devices and inspect their status.",
-      surfaces: ["Devices", "Control Plane"],
-      defaultEnabled: false,
-      sensitiveRisks: ["execute_sensitive", "credential_sensitive"],
-    },
-    {
-      id: "automations",
-      label: "Automations",
-      description: "Create, dry-run, monitor, pause, and revoke trusted routines.",
-      surfaces: ["Routines", "Home"],
-      defaultEnabled: true,
-      sensitiveRisks: ["execute_sensitive", "destructive"],
-    },
-  ];
+export const EVERYDAY_AGENT_CAPABILITY_BUNDLES: EverydayCapabilityBundleDefinition[] = [
+  {
+    id: "inbox",
+    label: "Inbox",
+    description: "Triage, summarize, draft, and schedule email work.",
+    surfaces: ["Inbox Agent", "Home", "Mission Control"],
+    defaultEnabled: true,
+    sensitiveRisks: ["execute_sensitive", "data_export"],
+  },
+  {
+    id: "calendar",
+    label: "Calendar",
+    description: "Prepare for events, suggest follow-ups, and draft scheduling changes.",
+    surfaces: ["Mission Control", "Routines"],
+    defaultEnabled: true,
+    sensitiveRisks: ["execute_sensitive", "data_export"],
+  },
+  {
+    id: "browser",
+    label: "Browser",
+    description: "Use the visible Browser Workbench for online tasks and evidence review.",
+    surfaces: ["Browser Workbench", "Task Timeline"],
+    defaultEnabled: true,
+    sensitiveRisks: ["credential_sensitive", "data_export"],
+  },
+  {
+    id: "files",
+    label: "Files",
+    description: "Read local workspace files and suggest cleanup or organization.",
+    surfaces: ["Task Timeline", "Home"],
+    defaultEnabled: false,
+    sensitiveRisks: ["destructive", "data_export"],
+  },
+  {
+    id: "docs",
+    label: "Docs",
+    description: "Summarize and draft document changes through connected document tools.",
+    surfaces: ["Documents", "Task Timeline"],
+    defaultEnabled: true,
+    sensitiveRisks: ["execute_sensitive", "data_export"],
+  },
+  {
+    id: "messages",
+    label: "Messages",
+    description: "Draft replies and coordinate work in private or approved channels.",
+    surfaces: ["Channels", "Inbox Agent"],
+    defaultEnabled: false,
+    sensitiveRisks: ["execute_sensitive", "data_export"],
+  },
+  {
+    id: "github_work",
+    label: "GitHub / Work",
+    description: "Track issues, pull requests, and work-system next actions.",
+    surfaces: ["Mission Control", "Managed Agents"],
+    defaultEnabled: false,
+    sensitiveRisks: ["execute_sensitive", "destructive"],
+  },
+  {
+    id: "memory",
+    label: "Memory",
+    description: "Propose reviewable memories from accepted work and outcomes.",
+    surfaces: ["Memory", "Home"],
+    defaultEnabled: true,
+    sensitiveRisks: ["data_export"],
+  },
+  {
+    id: "screen_context",
+    label: "Screen Context",
+    description: "Use explicitly enabled local screen context as untrusted evidence.",
+    surfaces: ["Chronicle", "Task Timeline"],
+    defaultEnabled: false,
+    sensitiveRisks: ["credential_sensitive", "data_export"],
+  },
+  {
+    id: "remote_devices",
+    label: "Remote Devices",
+    description: "Dispatch approved work to connected devices and inspect their status.",
+    surfaces: ["Devices", "Control Plane"],
+    defaultEnabled: false,
+    sensitiveRisks: ["execute_sensitive", "credential_sensitive"],
+  },
+  {
+    id: "automations",
+    label: "Automations",
+    description: "Create, dry-run, monitor, pause, and revoke trusted routines.",
+    surfaces: ["Routines", "Home"],
+    defaultEnabled: true,
+    sensitiveRisks: ["execute_sensitive", "destructive"],
+  },
+];
 
 export interface EverydayCapabilitySetting {
   enabled: boolean;
@@ -7470,13 +7237,7 @@ export interface EverydayBrowserProfilePolicy {
 
 export interface EverydayPauseScope {
   id?: string;
-  kind:
-    | "global"
-    | "capability"
-    | "connector"
-    | "workspace"
-    | "device"
-    | "channel";
+  kind: "global" | "capability" | "connector" | "workspace" | "device" | "channel";
   capability?: EverydayCapabilityBundle;
   targetId?: string;
   reason?: string;
@@ -7534,13 +7295,7 @@ export interface EverydayCompiledPolicy {
   allowRealBrowserAttach: boolean;
   alwaysRequireApproval: EverydayActionRisk[];
   permissionRules: Array<{
-    scope:
-      | "tool"
-      | "connector"
-      | "browser_profile"
-      | "channel"
-      | "workspace"
-      | "device";
+    scope: "tool" | "connector" | "browser_profile" | "channel" | "workspace" | "device";
     target: string;
     decision: "allow" | "deny" | "prompt";
     reason: string;
@@ -8014,8 +7769,7 @@ export const IPC_CHANNELS = {
   MC_COMPANY_CREATE: "missionControl:companyCreate",
   MC_COMPANY_UPDATE: "missionControl:companyUpdate",
   MC_COMPANY_PACKAGE_SOURCE_LIST: "missionControl:companyPackageSourceList",
-  MC_COMPANY_PACKAGE_PREVIEW_IMPORT:
-    "missionControl:companyPackagePreviewImport",
+  MC_COMPANY_PACKAGE_PREVIEW_IMPORT: "missionControl:companyPackagePreviewImport",
   MC_COMPANY_PACKAGE_IMPORT: "missionControl:companyPackageImport",
   MC_COMPANY_GRAPH_GET: "missionControl:companyGraphGet",
   MC_COMPANY_SYNC_LIST: "missionControl:companySyncList",
@@ -8120,6 +7874,21 @@ export const IPC_CHANNELS = {
   ADMIN_POLICIES_GET: "admin:policiesGet",
   ADMIN_POLICIES_UPDATE: "admin:policiesUpdate",
   ADMIN_POLICIES_CHECK_PACK: "admin:checkPack",
+  AGENT_SECURITY_STATUS: "agentSecurity:status",
+  AGENT_SECURITY_FINDINGS_LIST: "agentSecurity:findingsList",
+  AGENT_SECURITY_FINDING_UPDATE: "agentSecurity:findingUpdate",
+  AGENT_SECURITY_DECISIONS_LIST: "agentSecurity:decisionsList",
+  AGENT_SECURITY_DIAGNOSTICS_LIST: "agentSecurity:diagnosticsList",
+  AGENT_SECURITY_INVENTORY_LIST: "agentSecurity:inventoryList",
+  AGENT_SECURITY_INVENTORY_REFRESH: "agentSecurity:inventoryRefresh",
+  AGENT_SECURITY_SCAN: "agentSecurity:scan",
+  AGENT_SECURITY_RULES_CHECK: "agentSecurity:rulesCheck",
+  AGENT_SECURITY_HOOK_STATUS: "agentSecurity:hookStatus",
+  AGENT_SECURITY_HOOK_INSTALL: "agentSecurity:hookInstall",
+  AGENT_SECURITY_HOOK_UNINSTALL: "agentSecurity:hookUninstall",
+  AGENT_SECURITY_CASE_BUILD: "agentSecurity:caseBuild",
+  AGENT_SECURITY_CASE_VERIFY: "agentSecurity:caseVerify",
+  AGENT_SECURITY_PRUNE: "agentSecurity:prune",
 
   // Everyday Agent
   EVERYDAY_AGENT_GET_PROFILE: "everydayAgent:getProfile",
@@ -9108,22 +8877,12 @@ export interface MoaPreset {
   concurrency?: number;
 }
 
-export type OpenAIReasoningEffort =
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max"
-  | "ultra";
+export type OpenAIReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 export type AzureReasoningEffort = "low" | "medium" | "high" | "extra_high";
 export type LLMReasoningEffort = OpenAIReasoningEffort | AzureReasoningEffort;
 export type LLMTextVerbosity = "low" | "medium" | "high";
 
-export type PromptCacheSurface =
-  | "executor"
-  | "followUps"
-  | "chatMode"
-  | "sideCalls";
+export type PromptCacheSurface = "executor" | "followUps" | "chatMode" | "sideCalls";
 
 export interface PromptCachingSettings {
   mode?: "auto" | "off";
@@ -9389,11 +9148,7 @@ export type ChannelType =
   | "feishu"
   | "wecom"
   | "x";
-export type ChannelStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "error";
+export type ChannelStatus = "disconnected" | "connecting" | "connected" | "error";
 export type SecurityMode = "open" | "allowlist" | "pairing";
 
 /**
@@ -9493,11 +9248,7 @@ export interface ChannelData {
     selfChatMode?: boolean;
     supervisor?: DiscordSupervisorConfig;
     progressRelayMode?: "minimal" | "curated";
-    groupRoutingMode?:
-      | "all"
-      | "mentionsOnly"
-      | "mentionsOrCommands"
-      | "commandsOnly";
+    groupRoutingMode?: "all" | "mentionsOnly" | "mentionsOrCommands" | "commandsOnly";
     trustedGroupMemoryOptIn?: boolean;
     sendReadReceipts?: boolean;
     deduplicationEnabled?: boolean;
@@ -9540,11 +9291,7 @@ export interface AddChannelRequest {
   // WhatsApp-specific fields
   allowedNumbers?: string[];
   selfChatMode?: boolean;
-  groupRoutingMode?:
-    | "all"
-    | "mentionsOnly"
-    | "mentionsOrCommands"
-    | "commandsOnly";
+  groupRoutingMode?: "all" | "mentionsOnly" | "mentionsOrCommands" | "commandsOnly";
   telegramAllowedGroupChatIds?: string[];
   trustedGroupMemoryOptIn?: boolean;
   sendReadReceipts?: boolean;
@@ -9652,11 +9399,7 @@ export interface UpdateChannelRequest {
     selfChatMode?: boolean;
     supervisor?: DiscordSupervisorConfig;
     progressRelayMode?: "minimal" | "curated";
-    groupRoutingMode?:
-      | "all"
-      | "mentionsOnly"
-      | "mentionsOrCommands"
-      | "commandsOnly";
+    groupRoutingMode?: "all" | "mentionsOnly" | "mentionsOrCommands" | "commandsOnly";
     trustedGroupMemoryOptIn?: boolean;
     sendReadReceipts?: boolean;
     deduplicationEnabled?: boolean;
@@ -9674,13 +9417,7 @@ export interface TestChannelResult {
 
 // Extension / Plugin types
 export type ExtensionType = "channel" | "tool" | "provider" | "integration";
-export type ExtensionState =
-  | "loading"
-  | "loaded"
-  | "registered"
-  | "active"
-  | "error"
-  | "disabled";
+export type ExtensionState = "loading" | "loaded" | "registered" | "active" | "error" | "disabled";
 
 export interface ExtensionCapabilities {
   sendMessage?: boolean;
@@ -9714,11 +9451,7 @@ export interface ExtensionConfig {
 }
 
 // Webhook Tunnel types
-export type TunnelProvider =
-  | "ngrok"
-  | "tailscale"
-  | "cloudflare"
-  | "localtunnel";
+export type TunnelProvider = "ngrok" | "tailscale" | "cloudflare" | "localtunnel";
 export type TunnelStatus = "stopped" | "starting" | "running" | "error";
 
 export interface TunnelConfig {
@@ -9805,13 +9538,7 @@ export interface SecureMcpTunnelAuditEvent {
 }
 
 // Search Provider types
-export type SearchProviderType =
-  | "tavily"
-  | "exa"
-  | "brave"
-  | "serpapi"
-  | "google"
-  | "duckduckgo";
+export type SearchProviderType = "tavily" | "exa" | "brave" | "serpapi" | "google" | "duckduckgo";
 export type SearchType = "web" | "news" | "images";
 export type WebSearchMode = "disabled" | "cached" | "live";
 
@@ -10265,12 +9992,7 @@ export const DEFAULT_BLOCKED_COMMAND_PATTERNS = [
 
 export type ReputationProvider = "virustotal";
 
-export type ReputationVerdict =
-  | "clean"
-  | "unknown"
-  | "suspicious"
-  | "malicious"
-  | "error";
+export type ReputationVerdict = "clean" | "unknown" | "suspicious" | "malicious" | "error";
 
 export type ReputationAction = "allow" | "warn" | "block";
 
@@ -10367,13 +10089,7 @@ export interface UpdateInfo {
 }
 
 export interface UpdateProgress {
-  phase:
-    | "checking"
-    | "downloading"
-    | "extracting"
-    | "installing"
-    | "complete"
-    | "error";
+  phase: "checking" | "downloading" | "extracting" | "installing" | "complete" | "error";
   percent?: number;
   message: string;
   bytesDownloaded?: number;
@@ -10750,11 +10466,7 @@ export type AutomationRunSource =
   | "subconscious"
   | "memory_dreaming";
 
-export type AutomationRunUsefulness =
-  | "actionable"
-  | "informational"
-  | "low_value"
-  | "failed";
+export type AutomationRunUsefulness = "actionable" | "informational" | "low_value" | "failed";
 
 export type AutomationRunTrigger =
   | "startup"
@@ -11111,11 +10823,7 @@ export interface NodeInvokeResult {
  */
 export interface NodeEvent {
   /** Event type */
-  type:
-    | "connected"
-    | "disconnected"
-    | "capabilities_changed"
-    | "foreground_changed";
+  type: "connected" | "disconnected" | "capabilities_changed" | "foreground_changed";
   /** Node ID */
   nodeId: string;
   /** Node info (for connected/capabilities_changed events) */
@@ -11253,12 +10961,7 @@ export interface SmsSendResult {
 /**
  * SSH tunnel connection state
  */
-export type SSHTunnelState =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "error";
+export type SSHTunnelState = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
 
 /**
  * SSH tunnel configuration for remote gateway access
@@ -11363,17 +11066,8 @@ export type ManagedDevicePurpose =
   | "automation"
   | "archive"
   | "general";
-export type ManagedDeviceTransport =
-  | "local"
-  | "direct"
-  | "ssh"
-  | "tailscale"
-  | "unknown";
-export type ManagedDeviceAttentionState =
-  | "none"
-  | "info"
-  | "warning"
-  | "critical";
+export type ManagedDeviceTransport = "local" | "direct" | "ssh" | "tailscale" | "unknown";
+export type ManagedDeviceAttentionState = "none" | "info" | "warning" | "critical";
 
 export interface ManagedDeviceStorageSummary {
   totalBytes?: number;
@@ -11398,14 +11092,7 @@ export interface ManagedDeviceAlert {
   level: ManagedDeviceAttentionState;
   title: string;
   description?: string;
-  kind:
-    | "approval"
-    | "input_request"
-    | "channel"
-    | "connection"
-    | "storage"
-    | "status"
-    | "warning";
+  kind: "approval" | "input_request" | "channel" | "connection" | "storage" | "status" | "warning";
 }
 
 export interface ManagedDevice {
@@ -11939,9 +11626,7 @@ export const PERSONALITY_DEFINITIONS: PersonalityDefinition[] = [
 /**
  * Get personality definition by ID
  */
-export function getPersonalityById(
-  id: PersonalityId,
-): PersonalityDefinition | undefined {
+export function getPersonalityById(id: PersonalityId): PersonalityDefinition | undefined {
   return PERSONALITY_DEFINITIONS.find((p) => p.id === id);
 }
 
@@ -11959,8 +11644,7 @@ export const PERSONA_DEFINITIONS: PersonaDefinition[] = [
   {
     id: "companion",
     name: "Companion",
-    description:
-      "Warm, curious, and emotionally attuned presence with thoughtful conversation",
+    description: "Warm, curious, and emotionally attuned presence with thoughtful conversation",
     icon: "🌙",
     suggestedName: "Ari",
     sampleCatchphrase: "I'm here with you.",
@@ -12231,13 +11915,7 @@ export const ANALOGY_DOMAINS: Record<
 /**
  * Context modes for context-dependent personality behavior
  */
-export type ContextMode =
-  | "coding"
-  | "chat"
-  | "planning"
-  | "writing"
-  | "research"
-  | "all";
+export type ContextMode = "coding" | "chat" | "planning" | "writing" | "research" | "all";
 
 /**
  * Composable personality trait with intensity slider.
@@ -12464,8 +12142,7 @@ export const TRAIT_DEFINITIONS: TraitDefinition[] = [
   {
     id: "confidence",
     label: "Confidence",
-    description:
-      "How hedging and option-presenting vs assertive and opinionated",
+    description: "How hedging and option-presenting vs assertive and opinionated",
     lowLabel: "Presents options",
     highLabel: "Assertive & opinionated",
     defaultIntensity: 50,
@@ -12985,14 +12662,7 @@ export interface Issue {
   activeRunId?: string;
   title: string;
   description?: string;
-  status:
-    | "backlog"
-    | "todo"
-    | "in_progress"
-    | "review"
-    | "done"
-    | "blocked"
-    | "cancelled";
+  status: "backlog" | "todo" | "in_progress" | "review" | "done" | "blocked" | "cancelled";
   priority: number;
   assigneeAgentRoleId?: string;
   reporterAgentRoleId?: string;
@@ -13073,13 +12743,7 @@ export interface HeartbeatRun {
   runType?: HeartbeatRunType;
   dispatchKind?: HeartbeatDispatchKind;
   reason?: string;
-  status:
-    | "queued"
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | "interrupted";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
   summary?: string;
   error?: string;
   metadata?: Record<string, unknown>;
@@ -13146,10 +12810,7 @@ export interface CompanyImportResult {
 
 export type CompanyPackageSourceKind = "local" | "git" | "github";
 export type CompanyPackageTrustLevel = "local" | "trusted" | "untrusted";
-export type CompanyPackageSourceStatus =
-  | "ready"
-  | "needs_attention"
-  | "imported";
+export type CompanyPackageSourceStatus = "ready" | "needs_attention" | "imported";
 export type CompanyPackageManifestKind =
   | "company"
   | "team"
@@ -13167,24 +12828,9 @@ export type CompanyGraphEdgeKind =
   | "attaches_skill"
   | "assigned_to"
   | "related_to_project";
-export type CompanySyncStatus =
-  | "in_sync"
-  | "diverged"
-  | "local_override"
-  | "unlinked";
-export type CompanyImportAction =
-  | "create"
-  | "update"
-  | "link"
-  | "skip"
-  | "conflict"
-  | "warning";
-export type CompanyRuntimeEntityKind =
-  | "company"
-  | "goal"
-  | "project"
-  | "issue"
-  | "agent_role";
+export type CompanySyncStatus = "in_sync" | "diverged" | "local_override" | "unlinked";
+export type CompanyImportAction = "create" | "update" | "link" | "skip" | "conflict" | "warning";
+export type CompanyRuntimeEntityKind = "company" | "goal" | "project" | "issue" | "agent_role";
 
 export interface CompanyPackageSource {
   id: string;
@@ -13320,11 +12966,7 @@ export interface CompanyPackageImportResult {
 }
 
 export type AutonomyPolicyPreset = "manual" | "safe_autonomy" | "founder_edge";
-export type HumanInputPolicy =
-  | "none"
-  | "hard_blockers"
-  | "structured_plan"
-  | "legacy_interactive";
+export type HumanInputPolicy = "none" | "hard_blockers" | "structured_plan" | "legacy_interactive";
 
 export interface OperationalAutonomyPolicy {
   preset: AutonomyPolicyPreset;
@@ -13561,11 +13203,7 @@ export type MissionControlCategory =
   | "awareness"
   | "evidence";
 
-export type MissionControlSeverity =
-  | "action_needed"
-  | "monitor_only"
-  | "successful"
-  | "failed";
+export type MissionControlSeverity = "action_needed" | "monitor_only" | "successful" | "failed";
 
 export type MissionControlEvidenceSource =
   | "activity_feed"

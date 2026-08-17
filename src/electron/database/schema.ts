@@ -11,8 +11,7 @@ import {
 
 const schemaLogger = createLogger("DatabaseManager");
 const STARTUP_PHASE_WARN_MS = 250;
-const TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY =
-  "task_event_payload_sanitizer_v1_completed";
+const TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY = "task_event_payload_sanitizer_v1_completed";
 
 export class DatabaseManager {
   private static instance: DatabaseManager | null = null;
@@ -84,9 +83,7 @@ export class DatabaseManager {
       }
     };
 
-    runMaintenanceStep("backfillTaskLastRunDurations", () =>
-      this.backfillTaskLastRunDurations(),
-    );
+    runMaintenanceStep("backfillTaskLastRunDurations", () => this.backfillTaskLastRunDurations());
     runMaintenanceStep("sanitizeLargeTaskEventPayloads", () =>
       this.sanitizeLargeTaskEventPayloads(),
     );
@@ -106,9 +103,9 @@ export class DatabaseManager {
   }
 
   private getMaintenanceState(key: string): string | null {
-    const row = this.db
-      .prepare("SELECT value FROM maintenance_state WHERE key = ?")
-      .get(key) as { value?: string } | undefined;
+    const row = this.db.prepare("SELECT value FROM maintenance_state WHERE key = ?").get(key) as
+      | { value?: string }
+      | undefined;
     return typeof row?.value === "string" ? row.value : null;
   }
 
@@ -133,7 +130,9 @@ export class DatabaseManager {
         .get() as { sql?: string } | undefined;
       if (!issuesSchema?.sql?.includes("heartbeat_runs_legacy")) return;
 
-      schemaLogger.info("Fixing broken issues FK reference (heartbeat_runs_legacy -> active_run_id metadata)...");
+      schemaLogger.info(
+        "Fixing broken issues FK reference (heartbeat_runs_legacy -> active_run_id metadata)...",
+      );
       const foreignKeysEnabled = this.db.pragma("foreign_keys", { simple: true }) as number;
       this.db.pragma("foreign_keys = OFF");
       try {
@@ -142,7 +141,10 @@ export class DatabaseManager {
             /active_run_id\s+TEXT\s+REFERENCES\s+["'`]?heartbeat_runs_legacy["'`]?\(id\)\s+ON\s+DELETE\s+SET\s+NULL/i,
             "active_run_id TEXT",
           )
-          .replace(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?issues["'`]?/i, "CREATE TABLE issues_rebuild");
+          .replace(
+            /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?issues["'`]?/i,
+            "CREATE TABLE issues_rebuild",
+          );
         this.db.exec(fixedSql);
         const columns = (
           this.db.prepare("PRAGMA table_info(issues)").all() as Array<{ name: string }>
@@ -224,7 +226,15 @@ export class DatabaseManager {
       },
       {
         label: "issue references",
-        tables: ["issues", "goals", "projects", "workspaces", "tasks", "heartbeat_runs", "agent_roles"],
+        tables: [
+          "issues",
+          "goals",
+          "projects",
+          "workspaces",
+          "tasks",
+          "heartbeat_runs",
+          "agent_roles",
+        ],
         sql: `
           UPDATE issues
           SET goal_id = CASE
@@ -535,11 +545,14 @@ export class DatabaseManager {
   private static calculateLastRunDurationMs(params: {
     createdAt: number;
     completedAt: number;
-    events: Array<{ timestamp?: unknown; type?: unknown; legacy_type?: unknown; payload?: unknown }>;
+    events: Array<{
+      timestamp?: unknown;
+      type?: unknown;
+      legacy_type?: unknown;
+      payload?: unknown;
+    }>;
   }): number {
-    const end = Number.isFinite(params.completedAt)
-      ? Math.floor(params.completedAt)
-      : Date.now();
+    const end = Number.isFinite(params.completedAt) ? Math.floor(params.completedAt) : Date.now();
 
     let previousTerminalAt: number | undefined;
     for (const event of params.events) {
@@ -774,7 +787,9 @@ export class DatabaseManager {
           fs.copyFileSync(oldDbPath, newDbPath);
           migratedFiles.push("cowork-os.db");
         } else {
-          schemaLogger.info("Database already exists, passed integrity_check, and is not smaller. Skipping copy.");
+          schemaLogger.info(
+            "Database already exists, passed integrity_check, and is not smaller. Skipping copy.",
+          );
         }
       }
 
@@ -1093,6 +1108,64 @@ export class DatabaseManager {
         actor TEXT,
         legacy_type TEXT,
         FOREIGN KEY (task_id) REFERENCES tasks(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_security_findings (
+        finding_id TEXT PRIMARY KEY,
+        schema_version TEXT NOT NULL,
+        task_id TEXT,
+        session_id TEXT,
+        source_agent TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        rule_id TEXT NOT NULL,
+        rule_version TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        detected_at TEXT NOT NULL,
+        observed_at TEXT,
+        project_path_hash TEXT,
+        record_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_security_decisions (
+        decision_id TEXT PRIMARY KEY,
+        schema_version TEXT NOT NULL,
+        task_id TEXT,
+        session_id TEXT,
+        tool_call_id TEXT,
+        decision TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source_agent TEXT NOT NULL,
+        finding_ids_json TEXT NOT NULL,
+        rule_ids_json TEXT NOT NULL,
+        host_outcome TEXT,
+        record_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_security_diagnostics (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        level TEXT NOT NULL,
+        code TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_security_inventory (
+        agent_id TEXT PRIMARY KEY,
+        present INTEGER NOT NULL DEFAULT 0,
+        wired INTEGER NOT NULL DEFAULT 0,
+        live_mode TEXT,
+        details_json TEXT NOT NULL,
+        checked_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS managed_agents (
@@ -1559,6 +1632,14 @@ export class DatabaseManager {
         ON task_events(type, timestamp DESC, task_id);
       CREATE INDEX IF NOT EXISTS idx_task_events_task_type_timestamp
         ON task_events(task_id, type, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_security_findings_task_detected
+        ON agent_security_findings(task_id, detected_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_security_findings_status_severity
+        ON agent_security_findings(status, severity, detected_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_security_decisions_task_created
+        ON agent_security_decisions(task_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_security_diagnostics_created
+        ON agent_security_diagnostics(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id);
       CREATE INDEX IF NOT EXISTS idx_annotations_task_status_created
         ON annotations(task_id, status, created_at DESC);
@@ -2866,7 +2947,9 @@ export class DatabaseManager {
     }
 
     try {
-      this.db.exec("CREATE INDEX IF NOT EXISTS idx_task_events_task_seq ON task_events(task_id, seq)");
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_task_events_task_seq ON task_events(task_id, seq)",
+      );
     } catch {
       // Index already exists, ignore
     }
@@ -3715,14 +3798,16 @@ export class DatabaseManager {
           .map((row) => (typeof row.agent_role_id === "string" ? row.agent_role_id : ""))
           .filter(Boolean),
       );
-      const roles = this.db.prepare(
-        `SELECT id, name, role_kind, source_template_id, source_template_version, soul,
+      const roles = this.db
+        .prepare(
+          `SELECT id, name, role_kind, source_template_id, source_template_version, soul,
                 heartbeat_enabled, heartbeat_interval_minutes, heartbeat_stagger_offset,
                 heartbeat_pulse_every_minutes, heartbeat_dispatch_cooldown_minutes,
                 heartbeat_max_dispatches_per_day, heartbeat_profile, heartbeat_active_hours,
                 created_at, updated_at
          FROM agent_roles`,
-      ).all() as Array<Record<string, unknown>>;
+        )
+        .all() as Array<Record<string, unknown>>;
       const insertPolicy = this.db.prepare(
         `INSERT INTO heartbeat_policies (
           id, agent_role_id, enabled, cadence_minutes, stagger_offset_minutes,
@@ -3763,7 +3848,9 @@ export class DatabaseManager {
             sourceTemplateId =
               typeof parsed.sourceTemplateId === "string" ? parsed.sourceTemplateId : null;
             sourceTemplateVersion =
-              typeof parsed.sourceTemplateVersion === "string" ? parsed.sourceTemplateVersion : null;
+              typeof parsed.sourceTemplateVersion === "string"
+                ? parsed.sourceTemplateVersion
+                : null;
           } catch {
             // Ignore malformed soul JSON during migration.
           }
@@ -3773,12 +3860,7 @@ export class DatabaseManager {
           sourceTemplateId || (typeof role.name === "string" && role.name.startsWith("twin-"))
             ? "persona_template"
             : "custom";
-        updateRoleMetadata.run(
-          derivedRoleKind,
-          sourceTemplateId,
-          sourceTemplateVersion,
-          roleId,
-        );
+        updateRoleMetadata.run(derivedRoleKind, sourceTemplateId, sourceTemplateVersion, roleId);
 
         if (!existingPolicyRoleIds.has(roleId)) {
           insertPolicy.run(
@@ -3845,14 +3927,16 @@ export class DatabaseManager {
           .map((row) => (typeof row.agent_role_id === "string" ? row.agent_role_id : ""))
           .filter(Boolean),
       );
-      const policies = this.db.prepare(
-        `SELECT hp.*, ar.role_kind, ar.name,
+      const policies = this.db
+        .prepare(
+          `SELECT hp.*, ar.role_kind, ar.name,
                 ar.last_heartbeat_at, ar.last_pulse_at, ar.last_dispatch_at,
                 ar.heartbeat_status, ar.heartbeat_last_pulse_result, ar.heartbeat_last_dispatch_kind,
                 ar.created_at AS role_created_at, ar.updated_at AS role_updated_at
          FROM heartbeat_policies hp
          JOIN agent_roles ar ON ar.id = hp.agent_role_id`,
-      ).all() as Array<Record<string, unknown>>;
+        )
+        .all() as Array<Record<string, unknown>>;
       const insertAutomationProfile = this.db.prepare(
         `INSERT INTO automation_profiles (
           id, agent_role_id, enabled, cadence_minutes, stagger_offset_minutes,
@@ -3871,8 +3955,7 @@ export class DatabaseManager {
       deleteTwinProfiles.run();
 
       for (const policy of policies) {
-        const agentRoleId =
-          typeof policy.agent_role_id === "string" ? policy.agent_role_id : "";
+        const agentRoleId = typeof policy.agent_role_id === "string" ? policy.agent_role_id : "";
         if (!agentRoleId || existingAutomationRoleIds.has(agentRoleId)) {
           continue;
         }
@@ -3931,7 +4014,10 @@ export class DatabaseManager {
           // writable_schema is blocked in this SQLite build — use standard table reconstruction instead.
           const fixedSql = tasksSchema.sql
             .replace(/heartbeat_runs_legacy/g, "heartbeat_runs")
-            .replace(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?tasks["'`]?/i, "CREATE TABLE tasks_rebuild");
+            .replace(
+              /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?tasks["'`]?/i,
+              "CREATE TABLE tasks_rebuild",
+            );
           this.db.exec(fixedSql);
           const columns = (
             this.db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>
@@ -4106,7 +4192,9 @@ export class DatabaseManager {
 
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_issue_id ON tasks(issue_id)");
-      this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_heartbeat_run_id ON tasks(heartbeat_run_id)");
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_heartbeat_run_id ON tasks(heartbeat_run_id)",
+      );
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_company_id ON tasks(company_id)");
     } catch {
       // Index already exists, ignore
@@ -4671,7 +4759,10 @@ export class DatabaseManager {
         END;
       `);
     } catch (error) {
-      schemaLogger.warn("[DatabaseManager] Failed to install automation profile delete guard:", error);
+      schemaLogger.warn(
+        "[DatabaseManager] Failed to install automation profile delete guard:",
+        error,
+      );
     }
 
     try {
@@ -5533,15 +5624,17 @@ export class DatabaseManager {
         if (/duplicate column name|already exists/i.test(msg)) {
           continue; // Expected when column exists
         }
-        schemaLogger.error("[DatabaseManager] Migration failed (schema may be inconsistent):", statement, msg);
+        schemaLogger.error(
+          "[DatabaseManager] Migration failed (schema may be inconsistent):",
+          statement,
+          msg,
+        );
         throw err;
       }
     }
 
     // Device management: target_node_id on tasks + device_profiles table
-    for (const statement of [
-      "ALTER TABLE tasks ADD COLUMN target_node_id TEXT",
-    ]) {
+    for (const statement of ["ALTER TABLE tasks ADD COLUMN target_node_id TEXT"]) {
       try {
         this.db.exec(statement);
       } catch (err) {
@@ -5549,7 +5642,11 @@ export class DatabaseManager {
         if (/duplicate column name|already exists/i.test(msg)) {
           continue; // Expected when column exists
         }
-        schemaLogger.error("[DatabaseManager] Migration failed (schema may be inconsistent):", statement, msg);
+        schemaLogger.error(
+          "[DatabaseManager] Migration failed (schema may be inconsistent):",
+          statement,
+          msg,
+        );
         throw err;
       }
     }
@@ -5815,7 +5912,9 @@ export class DatabaseManager {
 
     // Mailbox classifier state/provenance
     try {
-      this.db.exec("ALTER TABLE mailbox_accounts ADD COLUMN classification_initial_batch_at INTEGER");
+      this.db.exec(
+        "ALTER TABLE mailbox_accounts ADD COLUMN classification_initial_batch_at INTEGER",
+      );
     } catch {
       // Column already exists, ignore
     }
@@ -6428,9 +6527,7 @@ export class DatabaseManager {
 
   private initializeKnowledgeGraphFTS() {
     const hasKnowledgeGraphEntitiesTable = this.db
-      .prepare(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'kg_entities' LIMIT 1",
-      )
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'kg_entities' LIMIT 1")
       .get();
     if (!hasKnowledgeGraphEntitiesTable) {
       return;
@@ -6561,131 +6658,789 @@ export class DatabaseManager {
   private seedLlmPricing() {
     try {
       const now = Date.now();
-      type P = { key: string; provider: string; display: string; input: number; output: number; cached: number };
+      type P = {
+        key: string;
+        provider: string;
+        display: string;
+        input: number;
+        output: number;
+        cached: number;
+      };
       const models: P[] = [
         // ── OpenAI 5.4 ──
-        { key: "gpt-5.4",              provider: "OpenAI", display: "GPT-5.4",             input: 2.50,   output: 15.00,  cached: 0.25 },
-        { key: "gpt-5.4-mini",         provider: "OpenAI", display: "GPT-5.4 Mini",        input: 0.75,   output: 4.50,   cached: 0.075 },
-        { key: "gpt-5.4-nano",         provider: "OpenAI", display: "GPT-5.4 Nano",        input: 0.20,   output: 1.25,   cached: 0.02 },
-        { key: "gpt-5.4-pro",          provider: "OpenAI", display: "GPT-5.4 Pro",         input: 30.00,  output: 180.00, cached: 0 },
+        {
+          key: "gpt-5.4",
+          provider: "OpenAI",
+          display: "GPT-5.4",
+          input: 2.5,
+          output: 15.0,
+          cached: 0.25,
+        },
+        {
+          key: "gpt-5.4-mini",
+          provider: "OpenAI",
+          display: "GPT-5.4 Mini",
+          input: 0.75,
+          output: 4.5,
+          cached: 0.075,
+        },
+        {
+          key: "gpt-5.4-nano",
+          provider: "OpenAI",
+          display: "GPT-5.4 Nano",
+          input: 0.2,
+          output: 1.25,
+          cached: 0.02,
+        },
+        {
+          key: "gpt-5.4-pro",
+          provider: "OpenAI",
+          display: "GPT-5.4 Pro",
+          input: 30.0,
+          output: 180.0,
+          cached: 0,
+        },
         // ── OpenAI 5.3 ──
-        { key: "gpt-5.3-chat",         provider: "OpenAI", display: "GPT-5.3 Chat",        input: 1.75,   output: 14.00,  cached: 0.175 },
-        { key: "gpt-5.3-codex-spark",  provider: "OpenAI", display: "GPT-5.3 Codex Spark", input: 1.75,   output: 14.00,  cached: 0.175 },
-        { key: "gpt-5.3-codex",        provider: "OpenAI", display: "GPT-5.3 Codex",       input: 1.75,   output: 14.00,  cached: 0.175 },
+        {
+          key: "gpt-5.3-chat",
+          provider: "OpenAI",
+          display: "GPT-5.3 Chat",
+          input: 1.75,
+          output: 14.0,
+          cached: 0.175,
+        },
+        {
+          key: "gpt-5.3-codex-spark",
+          provider: "OpenAI",
+          display: "GPT-5.3 Codex Spark",
+          input: 1.75,
+          output: 14.0,
+          cached: 0.175,
+        },
+        {
+          key: "gpt-5.3-codex",
+          provider: "OpenAI",
+          display: "GPT-5.3 Codex",
+          input: 1.75,
+          output: 14.0,
+          cached: 0.175,
+        },
         // ── OpenAI 5.2 ──
-        { key: "gpt-5.2",              provider: "OpenAI", display: "GPT-5.2",             input: 1.75,   output: 14.00,  cached: 0.175 },
-        { key: "gpt-5.2-pro",          provider: "OpenAI", display: "GPT-5.2 Pro",         input: 21.00,  output: 168.00, cached: 0 },
+        {
+          key: "gpt-5.2",
+          provider: "OpenAI",
+          display: "GPT-5.2",
+          input: 1.75,
+          output: 14.0,
+          cached: 0.175,
+        },
+        {
+          key: "gpt-5.2-pro",
+          provider: "OpenAI",
+          display: "GPT-5.2 Pro",
+          input: 21.0,
+          output: 168.0,
+          cached: 0,
+        },
         // ── OpenAI 5.1 / 5.0 ──
-        { key: "gpt-5.1",              provider: "OpenAI", display: "GPT-5.1",             input: 1.25,   output: 10.00,  cached: 0.125 },
-        { key: "gpt-5.1-codex-mini",   provider: "OpenAI", display: "GPT-5.1 Codex Mini",  input: 0.25,   output: 2.00,   cached: 0.025 },
-        { key: "gpt-5",                provider: "OpenAI", display: "GPT-5",               input: 1.25,   output: 10.00,  cached: 0.125 },
-        { key: "gpt-5-mini",           provider: "OpenAI", display: "GPT-5 Mini",          input: 0.25,   output: 2.00,   cached: 0.025 },
-        { key: "gpt-5-nano",           provider: "OpenAI", display: "GPT-5 Nano",          input: 0.05,   output: 0.40,   cached: 0.005 },
-        { key: "gpt-5-pro",            provider: "OpenAI", display: "GPT-5 Pro",           input: 15.00,  output: 120.00, cached: 0 },
+        {
+          key: "gpt-5.1",
+          provider: "OpenAI",
+          display: "GPT-5.1",
+          input: 1.25,
+          output: 10.0,
+          cached: 0.125,
+        },
+        {
+          key: "gpt-5.1-codex-mini",
+          provider: "OpenAI",
+          display: "GPT-5.1 Codex Mini",
+          input: 0.25,
+          output: 2.0,
+          cached: 0.025,
+        },
+        {
+          key: "gpt-5",
+          provider: "OpenAI",
+          display: "GPT-5",
+          input: 1.25,
+          output: 10.0,
+          cached: 0.125,
+        },
+        {
+          key: "gpt-5-mini",
+          provider: "OpenAI",
+          display: "GPT-5 Mini",
+          input: 0.25,
+          output: 2.0,
+          cached: 0.025,
+        },
+        {
+          key: "gpt-5-nano",
+          provider: "OpenAI",
+          display: "GPT-5 Nano",
+          input: 0.05,
+          output: 0.4,
+          cached: 0.005,
+        },
+        {
+          key: "gpt-5-pro",
+          provider: "OpenAI",
+          display: "GPT-5 Pro",
+          input: 15.0,
+          output: 120.0,
+          cached: 0,
+        },
         // ── OpenAI 4.x ──
-        { key: "gpt-4.1",              provider: "OpenAI", display: "GPT-4.1",             input: 2.00,   output: 8.00,   cached: 0.50 },
-        { key: "gpt-4.1-mini",         provider: "OpenAI", display: "GPT-4.1 Mini",        input: 0.40,   output: 1.60,   cached: 0.10 },
-        { key: "gpt-4.1-nano",         provider: "OpenAI", display: "GPT-4.1 Nano",        input: 0.10,   output: 0.40,   cached: 0.025 },
-        { key: "gpt-4o",               provider: "OpenAI", display: "GPT-4o",              input: 2.50,   output: 10.00,  cached: 1.25 },
-        { key: "gpt-4o-mini",          provider: "OpenAI", display: "GPT-4o Mini",         input: 0.15,   output: 0.60,   cached: 0.075 },
-        { key: "gpt-4-turbo",          provider: "OpenAI", display: "GPT-4 Turbo",         input: 10.00,  output: 30.00,  cached: 0 },
-        { key: "gpt-3.5-turbo",        provider: "OpenAI", display: "GPT-3.5 Turbo",       input: 0.50,   output: 1.50,   cached: 0 },
+        {
+          key: "gpt-4.1",
+          provider: "OpenAI",
+          display: "GPT-4.1",
+          input: 2.0,
+          output: 8.0,
+          cached: 0.5,
+        },
+        {
+          key: "gpt-4.1-mini",
+          provider: "OpenAI",
+          display: "GPT-4.1 Mini",
+          input: 0.4,
+          output: 1.6,
+          cached: 0.1,
+        },
+        {
+          key: "gpt-4.1-nano",
+          provider: "OpenAI",
+          display: "GPT-4.1 Nano",
+          input: 0.1,
+          output: 0.4,
+          cached: 0.025,
+        },
+        {
+          key: "gpt-4o",
+          provider: "OpenAI",
+          display: "GPT-4o",
+          input: 2.5,
+          output: 10.0,
+          cached: 1.25,
+        },
+        {
+          key: "gpt-4o-mini",
+          provider: "OpenAI",
+          display: "GPT-4o Mini",
+          input: 0.15,
+          output: 0.6,
+          cached: 0.075,
+        },
+        {
+          key: "gpt-4-turbo",
+          provider: "OpenAI",
+          display: "GPT-4 Turbo",
+          input: 10.0,
+          output: 30.0,
+          cached: 0,
+        },
+        {
+          key: "gpt-3.5-turbo",
+          provider: "OpenAI",
+          display: "GPT-3.5 Turbo",
+          input: 0.5,
+          output: 1.5,
+          cached: 0,
+        },
         // ── OpenAI reasoning ──
-        { key: "o4-mini",              provider: "OpenAI", display: "o4-mini",             input: 1.10,   output: 4.40,   cached: 0.275 },
-        { key: "o3",                   provider: "OpenAI", display: "o3",                  input: 2.00,   output: 8.00,   cached: 0.50 },
-        { key: "o3-mini",              provider: "OpenAI", display: "o3-mini",             input: 1.10,   output: 4.40,   cached: 0.55 },
-        { key: "o3-pro",               provider: "OpenAI", display: "o3-pro",              input: 20.00,  output: 80.00,  cached: 0 },
-        { key: "o1",                   provider: "OpenAI", display: "o1",                  input: 15.00,  output: 60.00,  cached: 7.50 },
-        { key: "o1-mini",              provider: "OpenAI", display: "o1-mini",             input: 1.10,   output: 4.40,   cached: 0.55 },
-        { key: "o1-pro",               provider: "OpenAI", display: "o1-pro",              input: 150.00, output: 600.00, cached: 0 },
+        {
+          key: "o4-mini",
+          provider: "OpenAI",
+          display: "o4-mini",
+          input: 1.1,
+          output: 4.4,
+          cached: 0.275,
+        },
+        { key: "o3", provider: "OpenAI", display: "o3", input: 2.0, output: 8.0, cached: 0.5 },
+        {
+          key: "o3-mini",
+          provider: "OpenAI",
+          display: "o3-mini",
+          input: 1.1,
+          output: 4.4,
+          cached: 0.55,
+        },
+        {
+          key: "o3-pro",
+          provider: "OpenAI",
+          display: "o3-pro",
+          input: 20.0,
+          output: 80.0,
+          cached: 0,
+        },
+        { key: "o1", provider: "OpenAI", display: "o1", input: 15.0, output: 60.0, cached: 7.5 },
+        {
+          key: "o1-mini",
+          provider: "OpenAI",
+          display: "o1-mini",
+          input: 1.1,
+          output: 4.4,
+          cached: 0.55,
+        },
+        {
+          key: "o1-pro",
+          provider: "OpenAI",
+          display: "o1-pro",
+          input: 150.0,
+          output: 600.0,
+          cached: 0,
+        },
 
         // ── Anthropic ──
-        { key: "claude-opus-4-6",      provider: "Anthropic", display: "Claude Opus 4.6",      input: 5.00,  output: 25.00, cached: 0.50 },
-        { key: "claude-sonnet-4-6",    provider: "Anthropic", display: "Claude Sonnet 4.6",    input: 3.00,  output: 15.00, cached: 0.30 },
-        { key: "claude-opus-4-5",      provider: "Anthropic", display: "Claude Opus 4.5",      input: 5.00,  output: 25.00, cached: 0.50 },
-        { key: "claude-sonnet-4-5",    provider: "Anthropic", display: "Claude Sonnet 4.5",    input: 3.00,  output: 15.00, cached: 0.30 },
-        { key: "claude-opus-4-1",      provider: "Anthropic", display: "Claude Opus 4.1",      input: 15.00, output: 75.00, cached: 1.50 },
-        { key: "claude-sonnet-4",      provider: "Anthropic", display: "Claude Sonnet 4",      input: 3.00,  output: 15.00, cached: 0.30 },
-        { key: "claude-opus-4",        provider: "Anthropic", display: "Claude Opus 4",        input: 15.00, output: 75.00, cached: 1.50 },
-        { key: "claude-haiku-4-5",     provider: "Anthropic", display: "Claude Haiku 4.5",     input: 1.00,  output: 5.00,  cached: 0.10 },
-        { key: "claude-haiku-3-5",     provider: "Anthropic", display: "Claude Haiku 3.5",     input: 0.80,  output: 4.00,  cached: 0.08 },
-        { key: "claude-3-haiku",       provider: "Anthropic", display: "Claude 3 Haiku",       input: 0.25,  output: 1.25,  cached: 0.03 },
-        { key: "claude-3-opus",        provider: "Anthropic", display: "Claude 3 Opus",        input: 15.00, output: 75.00, cached: 1.50 },
-        { key: "claude-3-sonnet",      provider: "Anthropic", display: "Claude 3 Sonnet",      input: 3.00,  output: 15.00, cached: 0.30 },
-        { key: "claude-sonnet-3-7",    provider: "Anthropic", display: "Claude Sonnet 3.7",    input: 3.00,  output: 15.00, cached: 0.30 },
+        {
+          key: "claude-opus-4-6",
+          provider: "Anthropic",
+          display: "Claude Opus 4.6",
+          input: 5.0,
+          output: 25.0,
+          cached: 0.5,
+        },
+        {
+          key: "claude-sonnet-4-6",
+          provider: "Anthropic",
+          display: "Claude Sonnet 4.6",
+          input: 3.0,
+          output: 15.0,
+          cached: 0.3,
+        },
+        {
+          key: "claude-opus-4-5",
+          provider: "Anthropic",
+          display: "Claude Opus 4.5",
+          input: 5.0,
+          output: 25.0,
+          cached: 0.5,
+        },
+        {
+          key: "claude-sonnet-4-5",
+          provider: "Anthropic",
+          display: "Claude Sonnet 4.5",
+          input: 3.0,
+          output: 15.0,
+          cached: 0.3,
+        },
+        {
+          key: "claude-opus-4-1",
+          provider: "Anthropic",
+          display: "Claude Opus 4.1",
+          input: 15.0,
+          output: 75.0,
+          cached: 1.5,
+        },
+        {
+          key: "claude-sonnet-4",
+          provider: "Anthropic",
+          display: "Claude Sonnet 4",
+          input: 3.0,
+          output: 15.0,
+          cached: 0.3,
+        },
+        {
+          key: "claude-opus-4",
+          provider: "Anthropic",
+          display: "Claude Opus 4",
+          input: 15.0,
+          output: 75.0,
+          cached: 1.5,
+        },
+        {
+          key: "claude-haiku-4-5",
+          provider: "Anthropic",
+          display: "Claude Haiku 4.5",
+          input: 1.0,
+          output: 5.0,
+          cached: 0.1,
+        },
+        {
+          key: "claude-haiku-3-5",
+          provider: "Anthropic",
+          display: "Claude Haiku 3.5",
+          input: 0.8,
+          output: 4.0,
+          cached: 0.08,
+        },
+        {
+          key: "claude-3-haiku",
+          provider: "Anthropic",
+          display: "Claude 3 Haiku",
+          input: 0.25,
+          output: 1.25,
+          cached: 0.03,
+        },
+        {
+          key: "claude-3-opus",
+          provider: "Anthropic",
+          display: "Claude 3 Opus",
+          input: 15.0,
+          output: 75.0,
+          cached: 1.5,
+        },
+        {
+          key: "claude-3-sonnet",
+          provider: "Anthropic",
+          display: "Claude 3 Sonnet",
+          input: 3.0,
+          output: 15.0,
+          cached: 0.3,
+        },
+        {
+          key: "claude-sonnet-3-7",
+          provider: "Anthropic",
+          display: "Claude Sonnet 3.7",
+          input: 3.0,
+          output: 15.0,
+          cached: 0.3,
+        },
 
         // ── Google Gemini ──
-        { key: "gemini-3.1-pro",       provider: "Google", display: "Gemini 3.1 Pro",         input: 2.00,  output: 12.00, cached: 0.20 },
-        { key: "gemini-3.1-flash-lite", provider: "Google", display: "Gemini 3.1 Flash Lite", input: 0.25,  output: 1.50,  cached: 0.025 },
-        { key: "gemini-3-flash",       provider: "Google", display: "Gemini 3 Flash",         input: 0.50,  output: 3.00,  cached: 0.05 },
-        { key: "gemini-2.5-pro",       provider: "Google", display: "Gemini 2.5 Pro",         input: 1.25,  output: 10.00, cached: 0.125 },
-        { key: "gemini-2.5-flash",     provider: "Google", display: "Gemini 2.5 Flash",       input: 0.30,  output: 2.50,  cached: 0.03 },
-        { key: "gemini-2.5-flash-lite", provider: "Google", display: "Gemini 2.5 Flash Lite", input: 0.10,  output: 0.40,  cached: 0.01 },
-        { key: "gemini-2.0-flash",     provider: "Google", display: "Gemini 2.0 Flash",       input: 0.10,  output: 0.40,  cached: 0.025 },
-        { key: "gemini-1.5-pro",       provider: "Google", display: "Gemini 1.5 Pro",         input: 1.25,  output: 5.00,  cached: 0.3125 },
-        { key: "gemini-1.5-flash",     provider: "Google", display: "Gemini 1.5 Flash",       input: 0.075, output: 0.30,  cached: 0.01875 },
+        {
+          key: "gemini-3.1-pro",
+          provider: "Google",
+          display: "Gemini 3.1 Pro",
+          input: 2.0,
+          output: 12.0,
+          cached: 0.2,
+        },
+        {
+          key: "gemini-3.1-flash-lite",
+          provider: "Google",
+          display: "Gemini 3.1 Flash Lite",
+          input: 0.25,
+          output: 1.5,
+          cached: 0.025,
+        },
+        {
+          key: "gemini-3-flash",
+          provider: "Google",
+          display: "Gemini 3 Flash",
+          input: 0.5,
+          output: 3.0,
+          cached: 0.05,
+        },
+        {
+          key: "gemini-2.5-pro",
+          provider: "Google",
+          display: "Gemini 2.5 Pro",
+          input: 1.25,
+          output: 10.0,
+          cached: 0.125,
+        },
+        {
+          key: "gemini-2.5-flash",
+          provider: "Google",
+          display: "Gemini 2.5 Flash",
+          input: 0.3,
+          output: 2.5,
+          cached: 0.03,
+        },
+        {
+          key: "gemini-2.5-flash-lite",
+          provider: "Google",
+          display: "Gemini 2.5 Flash Lite",
+          input: 0.1,
+          output: 0.4,
+          cached: 0.01,
+        },
+        {
+          key: "gemini-2.0-flash",
+          provider: "Google",
+          display: "Gemini 2.0 Flash",
+          input: 0.1,
+          output: 0.4,
+          cached: 0.025,
+        },
+        {
+          key: "gemini-1.5-pro",
+          provider: "Google",
+          display: "Gemini 1.5 Pro",
+          input: 1.25,
+          output: 5.0,
+          cached: 0.3125,
+        },
+        {
+          key: "gemini-1.5-flash",
+          provider: "Google",
+          display: "Gemini 1.5 Flash",
+          input: 0.075,
+          output: 0.3,
+          cached: 0.01875,
+        },
 
         // ── xAI Grok ──
-        { key: "grok-4",               provider: "xAI", display: "Grok 4",                 input: 3.00,  output: 15.00, cached: 0.75 },
-        { key: "grok-4.20",            provider: "xAI", display: "Grok 4.20",              input: 2.00,  output: 6.00,  cached: 0.20 },
-        { key: "grok-4-1-fast",        provider: "xAI", display: "Grok 4.1 Fast",          input: 0.20,  output: 0.50,  cached: 0.05 },
-        { key: "grok-4.1-fast",        provider: "xAI", display: "Grok 4.1 Fast",          input: 0.20,  output: 0.50,  cached: 0.05 },
-        { key: "grok-3",               provider: "xAI", display: "Grok 3",                 input: 3.00,  output: 15.00, cached: 0.75 },
-        { key: "grok-3-mini",          provider: "xAI", display: "Grok 3 Mini",            input: 0.30,  output: 0.50,  cached: 0.075 },
-        { key: "grok-code-fast-1",     provider: "xAI", display: "Grok Code Fast 1",       input: 0.20,  output: 1.50,  cached: 0.05 },
+        {
+          key: "grok-4",
+          provider: "xAI",
+          display: "Grok 4",
+          input: 3.0,
+          output: 15.0,
+          cached: 0.75,
+        },
+        {
+          key: "grok-4.20",
+          provider: "xAI",
+          display: "Grok 4.20",
+          input: 2.0,
+          output: 6.0,
+          cached: 0.2,
+        },
+        {
+          key: "grok-4-1-fast",
+          provider: "xAI",
+          display: "Grok 4.1 Fast",
+          input: 0.2,
+          output: 0.5,
+          cached: 0.05,
+        },
+        {
+          key: "grok-4.1-fast",
+          provider: "xAI",
+          display: "Grok 4.1 Fast",
+          input: 0.2,
+          output: 0.5,
+          cached: 0.05,
+        },
+        {
+          key: "grok-3",
+          provider: "xAI",
+          display: "Grok 3",
+          input: 3.0,
+          output: 15.0,
+          cached: 0.75,
+        },
+        {
+          key: "grok-3-mini",
+          provider: "xAI",
+          display: "Grok 3 Mini",
+          input: 0.3,
+          output: 0.5,
+          cached: 0.075,
+        },
+        {
+          key: "grok-code-fast-1",
+          provider: "xAI",
+          display: "Grok Code Fast 1",
+          input: 0.2,
+          output: 1.5,
+          cached: 0.05,
+        },
 
         // ── DeepSeek ──
-        { key: "deepseek-chat",        provider: "DeepSeek", display: "DeepSeek Chat V3.2",   input: 0.28,  output: 0.42,  cached: 0.028 },
-        { key: "deepseek-reasoner",    provider: "DeepSeek", display: "DeepSeek Reasoner",    input: 0.55,  output: 2.19,  cached: 0.14 },
-        { key: "deepseek-v3",          provider: "DeepSeek", display: "DeepSeek V3",          input: 0.28,  output: 0.42,  cached: 0.028 },
-        { key: "deepseek-v3.1",        provider: "DeepSeek", display: "DeepSeek V3.1",        input: 0.15,  output: 0.75,  cached: 0.015 },
-        { key: "deepseek-r1",          provider: "DeepSeek", display: "DeepSeek R1",          input: 0.55,  output: 2.19,  cached: 0.14 },
+        {
+          key: "deepseek-chat",
+          provider: "DeepSeek",
+          display: "DeepSeek Chat V3.2",
+          input: 0.28,
+          output: 0.42,
+          cached: 0.028,
+        },
+        {
+          key: "deepseek-reasoner",
+          provider: "DeepSeek",
+          display: "DeepSeek Reasoner",
+          input: 0.55,
+          output: 2.19,
+          cached: 0.14,
+        },
+        {
+          key: "deepseek-v3",
+          provider: "DeepSeek",
+          display: "DeepSeek V3",
+          input: 0.28,
+          output: 0.42,
+          cached: 0.028,
+        },
+        {
+          key: "deepseek-v3.1",
+          provider: "DeepSeek",
+          display: "DeepSeek V3.1",
+          input: 0.15,
+          output: 0.75,
+          cached: 0.015,
+        },
+        {
+          key: "deepseek-r1",
+          provider: "DeepSeek",
+          display: "DeepSeek R1",
+          input: 0.55,
+          output: 2.19,
+          cached: 0.14,
+        },
 
         // ── Mistral ──
-        { key: "mistral-large",        provider: "Mistral", display: "Mistral Large 3",      input: 0.50,  output: 1.50,  cached: 0.05 },
-        { key: "mistral-small",        provider: "Mistral", display: "Mistral Small 3.2",    input: 0.07,  output: 0.20,  cached: 0.007 },
-        { key: "mistral-small-4",      provider: "Mistral", display: "Mistral Small 4",      input: 0.15,  output: 0.60,  cached: 0.015 },
-        { key: "codestral",            provider: "Mistral", display: "Codestral",            input: 0.30,  output: 0.90,  cached: 0.03 },
-        { key: "mistral-medium",       provider: "Mistral", display: "Mistral Medium",       input: 2.75,  output: 8.10,  cached: 0.275 },
+        {
+          key: "mistral-large",
+          provider: "Mistral",
+          display: "Mistral Large 3",
+          input: 0.5,
+          output: 1.5,
+          cached: 0.05,
+        },
+        {
+          key: "mistral-small",
+          provider: "Mistral",
+          display: "Mistral Small 3.2",
+          input: 0.07,
+          output: 0.2,
+          cached: 0.007,
+        },
+        {
+          key: "mistral-small-4",
+          provider: "Mistral",
+          display: "Mistral Small 4",
+          input: 0.15,
+          output: 0.6,
+          cached: 0.015,
+        },
+        {
+          key: "codestral",
+          provider: "Mistral",
+          display: "Codestral",
+          input: 0.3,
+          output: 0.9,
+          cached: 0.03,
+        },
+        {
+          key: "mistral-medium",
+          provider: "Mistral",
+          display: "Mistral Medium",
+          input: 2.75,
+          output: 8.1,
+          cached: 0.275,
+        },
 
         // ── Meta Llama ──
-        { key: "llama-4-maverick",     provider: "Meta", display: "Llama 4 Maverick",       input: 0.15,  output: 0.60,  cached: 0 },
-        { key: "llama-4-scout",        provider: "Meta", display: "Llama 4 Scout",          input: 0.08,  output: 0.30,  cached: 0 },
-        { key: "llama-3.3-70b",        provider: "Meta", display: "Llama 3.3 70B",          input: 0.10,  output: 0.30,  cached: 0 },
-        { key: "llama-3.1-405b",       provider: "Meta", display: "Llama 3.1 405B",         input: 0.80,  output: 0.80,  cached: 0 },
-        { key: "llama-3.1-70b",        provider: "Meta", display: "Llama 3.1 70B",          input: 0.10,  output: 0.30,  cached: 0 },
-        { key: "llama-3.1-8b",         provider: "Meta", display: "Llama 3.1 8B",           input: 0.03,  output: 0.05,  cached: 0 },
+        {
+          key: "llama-4-maverick",
+          provider: "Meta",
+          display: "Llama 4 Maverick",
+          input: 0.15,
+          output: 0.6,
+          cached: 0,
+        },
+        {
+          key: "llama-4-scout",
+          provider: "Meta",
+          display: "Llama 4 Scout",
+          input: 0.08,
+          output: 0.3,
+          cached: 0,
+        },
+        {
+          key: "llama-3.3-70b",
+          provider: "Meta",
+          display: "Llama 3.3 70B",
+          input: 0.1,
+          output: 0.3,
+          cached: 0,
+        },
+        {
+          key: "llama-3.1-405b",
+          provider: "Meta",
+          display: "Llama 3.1 405B",
+          input: 0.8,
+          output: 0.8,
+          cached: 0,
+        },
+        {
+          key: "llama-3.1-70b",
+          provider: "Meta",
+          display: "Llama 3.1 70B",
+          input: 0.1,
+          output: 0.3,
+          cached: 0,
+        },
+        {
+          key: "llama-3.1-8b",
+          provider: "Meta",
+          display: "Llama 3.1 8B",
+          input: 0.03,
+          output: 0.05,
+          cached: 0,
+        },
 
         // ── Moonshot Kimi ──
-        { key: "kimi-k2.5",            provider: "Moonshot", display: "Kimi K2.5",           input: 0.42,  output: 2.20,  cached: 0 },
-        { key: "kimi-k2",              provider: "Moonshot", display: "Kimi K2",             input: 0.40,  output: 2.00,  cached: 0 },
-        { key: "kimi-k2.5-turbo",      provider: "Moonshot", display: "Kimi K2.5 Turbo",    input: 0.60,  output: 3.00,  cached: 0 },
-        { key: "moonshot-v1-8k",       provider: "Moonshot", display: "Moonshot v1 8K",      input: 0.42,  output: 2.20,  cached: 0 },
+        {
+          key: "kimi-k2.5",
+          provider: "Moonshot",
+          display: "Kimi K2.5",
+          input: 0.42,
+          output: 2.2,
+          cached: 0,
+        },
+        {
+          key: "kimi-k2",
+          provider: "Moonshot",
+          display: "Kimi K2",
+          input: 0.4,
+          output: 2.0,
+          cached: 0,
+        },
+        {
+          key: "kimi-k2.5-turbo",
+          provider: "Moonshot",
+          display: "Kimi K2.5 Turbo",
+          input: 0.6,
+          output: 3.0,
+          cached: 0,
+        },
+        {
+          key: "moonshot-v1-8k",
+          provider: "Moonshot",
+          display: "Moonshot v1 8K",
+          input: 0.42,
+          output: 2.2,
+          cached: 0,
+        },
 
         // ── Cohere ──
-        { key: "command-a",            provider: "Cohere", display: "Command A",             input: 2.50,  output: 10.00, cached: 0 },
-        { key: "command-r",            provider: "Cohere", display: "Command R",             input: 0.15,  output: 0.60,  cached: 0 },
-        { key: "command-r-plus",       provider: "Cohere", display: "Command R+",            input: 2.50,  output: 10.00, cached: 0 },
-        { key: "command-r7b",          provider: "Cohere", display: "Command R7B",           input: 0.037, output: 0.15,  cached: 0 },
+        {
+          key: "command-a",
+          provider: "Cohere",
+          display: "Command A",
+          input: 2.5,
+          output: 10.0,
+          cached: 0,
+        },
+        {
+          key: "command-r",
+          provider: "Cohere",
+          display: "Command R",
+          input: 0.15,
+          output: 0.6,
+          cached: 0,
+        },
+        {
+          key: "command-r-plus",
+          provider: "Cohere",
+          display: "Command R+",
+          input: 2.5,
+          output: 10.0,
+          cached: 0,
+        },
+        {
+          key: "command-r7b",
+          provider: "Cohere",
+          display: "Command R7B",
+          input: 0.037,
+          output: 0.15,
+          cached: 0,
+        },
 
         // ── MiniMax ──
-        { key: "MiniMax-M2.7",         provider: "MiniMax", display: "MiniMax M2.7",         input: 0.30,  output: 1.20,  cached: 0 },
-        { key: "MiniMax-M2.5",         provider: "MiniMax", display: "MiniMax M2.5",         input: 0.20,  output: 1.10,  cached: 0.10 },
-        { key: "MiniMax-M2.5-highspeed", provider: "MiniMax", display: "MiniMax M2.5 Highspeed", input: 0.20, output: 2.40, cached: 0.10 },
-        { key: "MiniMax-M2.1",         provider: "MiniMax", display: "MiniMax M2.1",         input: 0.20,  output: 1.10,  cached: 0.10 },
-        { key: "MiniMax-M2",           provider: "MiniMax", display: "MiniMax M2",           input: 0.20,  output: 1.10,  cached: 0.10 },
+        {
+          key: "MiniMax-M2.7",
+          provider: "MiniMax",
+          display: "MiniMax M2.7",
+          input: 0.3,
+          output: 1.2,
+          cached: 0,
+        },
+        {
+          key: "MiniMax-M2.5",
+          provider: "MiniMax",
+          display: "MiniMax M2.5",
+          input: 0.2,
+          output: 1.1,
+          cached: 0.1,
+        },
+        {
+          key: "MiniMax-M2.5-highspeed",
+          provider: "MiniMax",
+          display: "MiniMax M2.5 Highspeed",
+          input: 0.2,
+          output: 2.4,
+          cached: 0.1,
+        },
+        {
+          key: "MiniMax-M2.1",
+          provider: "MiniMax",
+          display: "MiniMax M2.1",
+          input: 0.2,
+          output: 1.1,
+          cached: 0.1,
+        },
+        {
+          key: "MiniMax-M2",
+          provider: "MiniMax",
+          display: "MiniMax M2",
+          input: 0.2,
+          output: 1.1,
+          cached: 0.1,
+        },
 
         // ── Free: ":free" suffix ──
-        { key: "nvidia/nemotron-3-nano-30b-a3b:free",   provider: "NVIDIA", display: "Nemotron 3 Nano 30B (free)", input: 0, output: 0, cached: 0 },
-        { key: "nvidia/nemotron-3-super-120b-a12b:free", provider: "NVIDIA", display: "Nemotron 3 Super 120B (free)", input: 0, output: 0, cached: 0 },
+        {
+          key: "nvidia/nemotron-3-nano-30b-a3b:free",
+          provider: "NVIDIA",
+          display: "Nemotron 3 Nano 30B (free)",
+          input: 0,
+          output: 0,
+          cached: 0,
+        },
+        {
+          key: "nvidia/nemotron-3-super-120b-a12b:free",
+          provider: "NVIDIA",
+          display: "Nemotron 3 Super 120B (free)",
+          input: 0,
+          output: 0,
+          cached: 0,
+        },
 
         // ── Local / Ollama — always free ──
-        { key: "qwen3.5:latest",       provider: "Local", display: "Qwen 3.5 (Ollama)",     input: 0, output: 0, cached: 0 },
-        { key: "llama3:latest",         provider: "Local", display: "Llama 3 (Ollama)",      input: 0, output: 0, cached: 0 },
-        { key: "mistral:latest",        provider: "Local", display: "Mistral (Ollama)",      input: 0, output: 0, cached: 0 },
-        { key: "codellama:latest",      provider: "Local", display: "Code Llama (Ollama)",   input: 0, output: 0, cached: 0 },
-        { key: "phi-3:latest",          provider: "Local", display: "Phi-3 (Ollama)",        input: 0, output: 0, cached: 0 },
-        { key: "gemma:latest",          provider: "Local", display: "Gemma (Ollama)",        input: 0, output: 0, cached: 0 },
+        {
+          key: "qwen3.5:latest",
+          provider: "Local",
+          display: "Qwen 3.5 (Ollama)",
+          input: 0,
+          output: 0,
+          cached: 0,
+        },
+        {
+          key: "llama3:latest",
+          provider: "Local",
+          display: "Llama 3 (Ollama)",
+          input: 0,
+          output: 0,
+          cached: 0,
+        },
+        {
+          key: "mistral:latest",
+          provider: "Local",
+          display: "Mistral (Ollama)",
+          input: 0,
+          output: 0,
+          cached: 0,
+        },
+        {
+          key: "codellama:latest",
+          provider: "Local",
+          display: "Code Llama (Ollama)",
+          input: 0,
+          output: 0,
+          cached: 0,
+        },
+        {
+          key: "phi-3:latest",
+          provider: "Local",
+          display: "Phi-3 (Ollama)",
+          input: 0,
+          output: 0,
+          cached: 0,
+        },
+        {
+          key: "gemma:latest",
+          provider: "Local",
+          display: "Gemma (Ollama)",
+          input: 0,
+          output: 0,
+          cached: 0,
+        },
       ];
 
       const stmt = this.db.prepare(`
@@ -6769,17 +7524,18 @@ export class DatabaseManager {
 
   private upgradeKnowledgeGraphEdgesForTemporalValidity(): void {
     try {
-      const tableInfo = this.db
-        .prepare("PRAGMA table_info(kg_edges)")
-        .all() as Array<{ name?: string }>;
+      const tableInfo = this.db.prepare("PRAGMA table_info(kg_edges)").all() as Array<{
+        name?: string;
+      }>;
       const columns = new Set(tableInfo.map((column) => String(column.name || "")));
       const tableSqlRow = this.db
         .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'kg_edges'")
         .get() as { sql?: string } | undefined;
       const tableSql = String(tableSqlRow?.sql || "");
-      const hasLegacyUniqueConstraint = /UNIQUE\s*\(\s*workspace_id\s*,\s*source_entity_id\s*,\s*target_entity_id\s*,\s*edge_type\s*\)/i.test(
-        tableSql,
-      );
+      const hasLegacyUniqueConstraint =
+        /UNIQUE\s*\(\s*workspace_id\s*,\s*source_entity_id\s*,\s*target_entity_id\s*,\s*edge_type\s*\)/i.test(
+          tableSql,
+        );
 
       if (hasLegacyUniqueConstraint) {
         const foreignKeysEnabled = this.db.pragma("foreign_keys", { simple: true }) as number;

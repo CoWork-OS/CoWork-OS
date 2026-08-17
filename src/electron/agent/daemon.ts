@@ -114,8 +114,17 @@ import type { TerminalKind } from "./runtime/TerminalState";
 import { BuiltinToolsSettingsManager } from "./tools/builtin-settings";
 import { loadPolicies } from "../admin/policies";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
-import { decideTaskOutcome, getTaskBestKnownOutcome, hasSubstantiveOutcomeEvidence } from "./outcome-policy";
-import { approvalIdempotency, taskIdempotency as _taskIdempotency, IdempotencyManager } from "../security/concurrency";
+import { getNumbatService } from "../security/numbat";
+import {
+  decideTaskOutcome,
+  getTaskBestKnownOutcome,
+  hasSubstantiveOutcomeEvidence,
+} from "./outcome-policy";
+import {
+  approvalIdempotency,
+  taskIdempotency as _taskIdempotency,
+  IdempotencyManager,
+} from "../security/concurrency";
 import { MemoryService } from "../memory/MemoryService";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
@@ -123,10 +132,7 @@ import {
   appendWorkspacePermissionManifestRule,
   loadWorkspacePermissionManifest,
 } from "../security/workspace-permission-manifest";
-import {
-  permissionScopeFingerprint,
-  summarizePermissionScope,
-} from "../security/permission-utils";
+import { permissionScopeFingerprint, summarizePermissionScope } from "../security/permission-utils";
 import { buildPermissionSecurityContext } from "./security/export-permission-context";
 import { evaluateNetworkPolicy } from "../security/network-policy";
 import { PlaybookService } from "../memory/PlaybookService";
@@ -168,7 +174,10 @@ import {
   scoreTaskRisk,
 } from "../eval/risk";
 import { buildEntropySweepPrompt, collectBlastRadiusPaths } from "./post-task-entropy-sweep";
-import { OrchestrationGraphEngine, type OrchestrationGraphNodeInput } from "./orchestration/OrchestrationGraphEngine";
+import {
+  OrchestrationGraphEngine,
+  type OrchestrationGraphNodeInput,
+} from "./orchestration/OrchestrationGraphEngine";
 import { OrchestrationGraphRepository } from "./orchestration/OrchestrationGraphRepository";
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { getMailboxServiceInstance } from "../mailbox/MailboxService";
@@ -244,7 +253,8 @@ function buildStructuredInputSelectionMessage(
   const truncate = (value: string, maxChars: number): string =>
     value.length > maxChars ? `${value.slice(0, maxChars)}…` : value;
 
-  const answerMap = answers && typeof answers === "object" && !Array.isArray(answers) ? answers : {};
+  const answerMap =
+    answers && typeof answers === "object" && !Array.isArray(answers) ? answers : {};
 
   const lines = ["User selected structured input options:"];
   for (const question of request.questions) {
@@ -339,7 +349,9 @@ function sanitizeTaskOverrides(taskOverrides?: Partial<Task>): Partial<Task> | u
   if (!taskOverrides) return undefined;
   const sanitized: Partial<Task> = {};
   const writableSanitized = sanitized as Record<keyof Task, Task[keyof Task]>;
-  for (const [key, value] of Object.entries(taskOverrides) as Array<[keyof Task, Task[keyof Task]]>) {
+  for (const [key, value] of Object.entries(taskOverrides) as Array<
+    [keyof Task, Task[keyof Task]]
+  >) {
     if (TASK_OVERRIDE_ALLOWLIST.has(key)) {
       writableSanitized[key] = value;
     }
@@ -365,7 +377,7 @@ interface PendingApprovalEntry {
 function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     const BrowserWindow = electron?.BrowserWindow;
     if (BrowserWindow?.getAllWindows) {
@@ -378,7 +390,9 @@ function getAllElectronWindows(): Any[] {
 }
 
 function parseSessionRetentionDurationMs(raw: unknown): number | undefined {
-  const text = String(raw || "").trim().toLowerCase();
+  const text = String(raw || "")
+    .trim()
+    .toLowerCase();
   const match = text.match(/^(\d+(?:\.\d+)?)(ms|s|m|h|d|w|mo|y)?$/);
   if (!match) return undefined;
   const value = Number(match[1]);
@@ -478,7 +492,10 @@ export class AgentDaemon extends EventEmitter {
   };
   private completionTelemetryBackfilledTaskIds: Set<string> = new Set();
   private readonly verificationOutcomeV2Enabled: boolean;
-  private verificationLocks: Map<string, { promise: Promise<{ success: boolean; output?: string }>; startedAt: number }> = new Map();
+  private verificationLocks: Map<
+    string,
+    { promise: Promise<{ success: boolean; output?: string }>; startedAt: number }
+  > = new Map();
   private static readonly TRANSIENT_RETRY_ERROR_REGEX =
     /^Transient provider error\.\s*Retry\s+\d+\/\d+\s+in\s+\d+s\./i;
 
@@ -584,8 +601,7 @@ export class AgentDaemon extends EventEmitter {
 
   private isTransientRetryErrorMessage(message: unknown): boolean {
     return (
-      typeof message === "string" &&
-      AgentDaemon.TRANSIENT_RETRY_ERROR_REGEX.test(message.trim())
+      typeof message === "string" && AgentDaemon.TRANSIENT_RETRY_ERROR_REGEX.test(message.trim())
     );
   }
 
@@ -633,7 +649,10 @@ export class AgentDaemon extends EventEmitter {
     workspacePath: string,
     command: string,
     _taskId: string,
-    executeTool: (name: string, args: Record<string, unknown>) => Promise<{ success: boolean; output?: string }>,
+    executeTool: (
+      name: string,
+      args: Record<string, unknown>,
+    ) => Promise<{ success: boolean; output?: string }>,
   ): Promise<{ success: boolean; output?: string }> {
     const lockKey = `${workspacePath}::${command}`;
     const existing = this.verificationLocks.get(lockKey);
@@ -641,10 +660,12 @@ export class AgentDaemon extends EventEmitter {
       return existing.promise;
     }
 
-    const promise = executeTool("run_command", { command, workingDirectory: workspacePath })
-      .finally(() => {
-        setTimeout(() => this.verificationLocks.delete(lockKey), 5_000);
-      });
+    const promise = executeTool("run_command", {
+      command,
+      workingDirectory: workspacePath,
+    }).finally(() => {
+      setTimeout(() => this.verificationLocks.delete(lockKey), 5_000);
+    });
 
     this.verificationLocks.set(lockKey, { promise, startedAt: Date.now() });
     return promise;
@@ -948,7 +969,8 @@ export class AgentDaemon extends EventEmitter {
     });
     const agentConfig = TaskStrategyService.applyToAgentConfig(input.agentConfig, strategy);
     const hasExplicitModelOverride =
-      typeof input.agentConfig?.modelKey === "string" && input.agentConfig.modelKey.trim().length > 0;
+      typeof input.agentConfig?.modelKey === "string" &&
+      input.agentConfig.modelKey.trim().length > 0;
     if (hasExplicitModelOverride) {
       delete agentConfig.llmProfileHint;
     } else {
@@ -1490,10 +1512,7 @@ export class AgentDaemon extends EventEmitter {
       console.log(`[AgentDaemon] TaskExecutor created successfully`);
     } catch (error: Any) {
       console.error(`[AgentDaemon] Task ${effectiveTask.id} failed to initialize:`, error);
-      this.failTask(
-        effectiveTask.id,
-        error.message || "Failed to initialize task executor",
-      );
+      this.failTask(effectiveTask.id, error.message || "Failed to initialize task executor");
       this.pendingTaskImages.delete(effectiveTask.id);
       this.logEvent(effectiveTask.id, "error", { error: error.message });
       return;
@@ -1557,7 +1576,9 @@ export class AgentDaemon extends EventEmitter {
 
   private shouldResumeTaskOnStartup(task: Task): boolean {
     const title = String(task.title || "").trim();
-    const source = String(task.source || "manual").trim().toLowerCase();
+    const source = String(task.source || "manual")
+      .trim()
+      .toLowerCase();
     if (source === "hook") return false;
     if (source === "subconscious") return false;
     if (task.parentTaskId) return false;
@@ -1571,7 +1592,11 @@ export class AgentDaemon extends EventEmitter {
   private skipStartupResume(task: Task): void {
     const current = this.taskRepo.findById(task.id);
     if (!current) return;
-    if (current.status !== "interrupted" && current.status !== "planning" && current.status !== "executing") {
+    if (
+      current.status !== "interrupted" &&
+      current.status !== "planning" &&
+      current.status !== "executing"
+    ) {
       return;
     }
     this.cancelTaskRecord(
@@ -1878,11 +1903,14 @@ export class AgentDaemon extends EventEmitter {
     if (!normalized) return false;
     const now = Date.now();
     const events = this.getTaskEventsForReplay(taskId);
-    const latestError = [...events].reverse().find((event) => this.isLegacyEventType(event, "error"));
+    const latestError = [...events]
+      .reverse()
+      .find((event) => this.isLegacyEventType(event, "error"));
     if (!latestError || now - (latestError.timestamp || 0) > windowMs) {
       return false;
     }
-    const payload = latestError.payload && typeof latestError.payload === "object" ? latestError.payload : {};
+    const payload =
+      latestError.payload && typeof latestError.payload === "object" ? latestError.payload : {};
     const latestMessage =
       typeof (payload as Any).message === "string"
         ? String((payload as Any).message)
@@ -2127,7 +2155,10 @@ export class AgentDaemon extends EventEmitter {
       const selectedType = this.resolveLegacyEventType(selectedEvent);
       if (selectedType === "user_message") {
         cutoff = selectedIndex;
-        if (options.useSelectedUserMessageAsPrompt && typeof selectedEvent.payload?.message === "string") {
+        if (
+          options.useSelectedUserMessageAsPrompt &&
+          typeof selectedEvent.payload?.message === "string"
+        ) {
           prefillPrompt = selectedEvent.payload.message.trim() || undefined;
         }
       } else {
@@ -2194,7 +2225,8 @@ export class AgentDaemon extends EventEmitter {
     const payload = event.payload && typeof event.payload === "object" ? event.payload : undefined;
     if (!payload || Array.isArray(payload)) return undefined;
     if (payload.forkedFromTaskId !== sourceTaskId) return undefined;
-    return typeof payload.forkedFromEventId === "string" && payload.forkedFromEventId.trim().length > 0
+    return typeof payload.forkedFromEventId === "string" &&
+      payload.forkedFromEventId.trim().length > 0
       ? payload.forkedFromEventId.trim()
       : undefined;
   }
@@ -2309,7 +2341,8 @@ export class AgentDaemon extends EventEmitter {
         ? new Date(event.timestamp).toISOString()
         : "";
     const text = this.extractSideChatEventText(event);
-    const status = typeof event.status === "string" && event.status.length > 0 ? ` [${event.status}]` : "";
+    const status =
+      typeof event.status === "string" && event.status.length > 0 ? ` [${event.status}]` : "";
     return `- ${timestamp ? `${timestamp} ` : ""}${type}${status}${text ? `: ${text}` : ""}`;
   }
 
@@ -2381,7 +2414,10 @@ export class AgentDaemon extends EventEmitter {
       .join("\n");
   }
 
-  private buildSideChatTurnAgentConfigOverride(task: Task, message: string): AgentConfig | undefined {
+  private buildSideChatTurnAgentConfigOverride(
+    task: Task,
+    message: string,
+  ): AgentConfig | undefined {
     const sideChatTurnContext = this.buildSideChatParentStatusContext(task, message);
     return sideChatTurnContext ? { sideChatTurnContext } : undefined;
   }
@@ -2453,7 +2489,8 @@ export class AgentDaemon extends EventEmitter {
     const memoryFeatures = MemoryFeaturesManager.loadSettings();
     const rootLineageUpdates: Partial<Task> = {
       sessionId:
-        typeof safeTaskOverrides?.sessionId === "string" && safeTaskOverrides.sessionId.trim().length > 0
+        typeof safeTaskOverrides?.sessionId === "string" &&
+        safeTaskOverrides.sessionId.trim().length > 0
           ? safeTaskOverrides.sessionId.trim()
           : task.id,
       resumeStrategy:
@@ -2514,7 +2551,12 @@ export class AgentDaemon extends EventEmitter {
   async appendOrchestrationGraphNodes(params: {
     runId: string;
     nodes: OrchestrationGraphNodeInput[];
-    edges?: Array<{ fromNodeId?: string; fromNodeKey?: string; toNodeId?: string; toNodeKey?: string }>;
+    edges?: Array<{
+      fromNodeId?: string;
+      fromNodeKey?: string;
+      toNodeId?: string;
+      toNodeKey?: string;
+    }>;
   }) {
     return this.orchestrationGraphEngine.appendNodes(params);
   }
@@ -2735,10 +2777,7 @@ export class AgentDaemon extends EventEmitter {
       if (mergedShellAccess !== undefined) {
         next.shellAccess = mergedShellAccess;
       }
-      if (
-        mergedPermissionMode === "bypass_permissions" &&
-        next.externalRuntime?.kind === "acpx"
-      ) {
+      if (mergedPermissionMode === "bypass_permissions" && next.externalRuntime?.kind === "acpx") {
         next.externalRuntime = {
           ...next.externalRuntime,
           permissionMode: "approve-all",
@@ -2901,8 +2940,9 @@ export class AgentDaemon extends EventEmitter {
     const activeRoles = this.agentRoleRepo.findAll(false).filter((role) => role.isActive);
     const activeRoleIds = new Set(activeRoles.map((role) => role.id));
     const assignedLeadRoleId =
-      childTasks.find((task) => task.assignedAgentRoleId && activeRoleIds.has(task.assignedAgentRoleId))
-        ?.assignedAgentRoleId || activeRoles[0]?.id;
+      childTasks.find(
+        (task) => task.assignedAgentRoleId && activeRoleIds.has(task.assignedAgentRoleId),
+      )?.assignedAgentRoleId || activeRoles[0]?.id;
     if (!assignedLeadRoleId) {
       log.warn(
         `Cannot create collaborative child-agent run for ${parentTaskId}: no active agent roles`,
@@ -3191,7 +3231,10 @@ export class AgentDaemon extends EventEmitter {
     // Compute file ownership zones to prevent overlapping output directories between agents.
     const roleZones = rolesToDispatch.map((role) => ({
       role: role.displayName,
-      zone: `output/${role.displayName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`,
+      zone: `output/${role.displayName
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9-]/g, "")}`,
     }));
 
     for (const role of rolesToDispatch) {
@@ -3356,7 +3399,10 @@ export class AgentDaemon extends EventEmitter {
     this.pendingContinuationTaskIds.delete(taskId);
 
     if (existing.status === "paused" || existing.terminalStatus === "needs_user_action") {
-      await this.acceptTaskCurrentProgress(taskId, "Task stopped by user; current progress accepted.");
+      await this.acceptTaskCurrentProgress(
+        taskId,
+        "Task stopped by user; current progress accepted.",
+      );
       return;
     }
 
@@ -3394,7 +3440,10 @@ export class AgentDaemon extends EventEmitter {
       });
     }
 
-    this.cleanupPendingApprovalsForTask(taskId, "Task ended because the user accepted the current progress.");
+    this.cleanupPendingApprovalsForTask(
+      taskId,
+      "Task ended because the user accepted the current progress.",
+    );
 
     const cached = this.activeTasks.get(taskId);
     if (cached) {
@@ -3625,7 +3674,11 @@ export class AgentDaemon extends EventEmitter {
   private isAutoReviewSafeCommand(command: string): boolean {
     const normalized = String(command || "").trim();
     if (!normalized) return false;
-    if (/&&|\|\||[;|`]|>>?|<<?|\$\(|\bsudo\b|\bchmod\b|\bchown\b|\brm\b|\bmv\b|\bcp\b/i.test(normalized)) {
+    if (
+      /&&|\|\||[;|`]|>>?|<<?|\$\(|\bsudo\b|\bchmod\b|\bchown\b|\brm\b|\bmv\b|\bcp\b/i.test(
+        normalized,
+      )
+    ) {
       return false;
     }
     const lowered = normalized.toLowerCase();
@@ -3709,7 +3762,10 @@ export class AgentDaemon extends EventEmitter {
     if (runtime?.getPermissionState().mode) {
       return enforceAllowedMode(runtime.getPermissionState().mode);
     }
-    if (task?.agentConfig?.executionMode === "plan" || task?.agentConfig?.executionMode === "analyze") {
+    if (
+      task?.agentConfig?.executionMode === "plan" ||
+      task?.agentConfig?.executionMode === "analyze"
+    ) {
       return enforceAllowedMode("plan");
     }
     if (task?.agentConfig?.permissionMode) {
@@ -3748,7 +3804,9 @@ export class AgentDaemon extends EventEmitter {
           }),
         )
       : [];
-    const builtinRules: PermissionRule[] = BuiltinToolsSettingsManager.getToolAutoApprove("run_command")
+    const builtinRules: PermissionRule[] = BuiltinToolsSettingsManager.getToolAutoApprove(
+      "run_command",
+    )
       ? [
           {
             source: "legacy_builtin_settings",
@@ -3836,9 +3894,12 @@ export class AgentDaemon extends EventEmitter {
       typeof details?.serverName === "string" && details.serverName.trim()
         ? details.serverName.trim()
         : null;
-    const permissionToolInput = Object.prototype.hasOwnProperty.call(details || {}, "permissionInput")
+    const permissionToolInput = Object.prototype.hasOwnProperty.call(
+      details || {},
+      "permissionInput",
+    )
       ? details.permissionInput
-      : details?.params ?? details;
+      : (details?.params ?? details);
     const mode = this.buildPermissionMode(taskId, task);
     const bundleGrantKey =
       type === "run_command" && details?.approvalMode === "single_bundle"
@@ -3993,20 +4054,21 @@ export class AgentDaemon extends EventEmitter {
     manifestError?: string;
   } {
     const details =
-      approval?.details && typeof approval.details === "object" ? (approval.details as Record<string, unknown>) : {};
+      approval?.details && typeof approval.details === "object"
+        ? (approval.details as Record<string, unknown>)
+        : {};
     const prompt = details.permissionPrompt as PermissionPromptDetails | undefined;
     if (!prompt?.scope) {
       return {};
     }
     const effect: PermissionEffect = action.startsWith("deny_") ? "deny" : "allow";
-    const destination =
-      action.endsWith("_session")
-        ? "session"
-        : action.endsWith("_workspace")
-          ? "workspace"
-          : action.endsWith("_profile")
-            ? "profile"
-            : undefined;
+    const destination = action.endsWith("_session")
+      ? "session"
+      : action.endsWith("_workspace")
+        ? "workspace"
+        : action.endsWith("_profile")
+          ? "profile"
+          : undefined;
     if (!destination) {
       return { effect };
     }
@@ -4063,12 +4125,15 @@ export class AgentDaemon extends EventEmitter {
     return { effect, destination };
   }
 
-  evaluateToolPermission(taskId: string, opts: {
-    approvalType?: ApprovalType;
-    toolName: string;
-    details?: Any;
-    allowPersistence?: boolean;
-  }): PermissionEvaluationResult {
+  evaluateToolPermission(
+    taskId: string,
+    opts: {
+      approvalType?: ApprovalType;
+      toolName: string;
+      details?: Any;
+      allowPersistence?: boolean;
+    },
+  ): PermissionEvaluationResult {
     const result = this.evaluatePermissionRequest(
       taskId,
       opts.approvalType,
@@ -4099,7 +4164,10 @@ export class AgentDaemon extends EventEmitter {
     });
   }
 
-  async requestUserInput(taskId: string, args: RequestUserInputArgs): Promise<InputRequestResponse> {
+  async requestUserInput(
+    taskId: string,
+    args: RequestUserInputArgs,
+  ): Promise<InputRequestResponse> {
     const existingPending = this.inputRequestRepo.findPendingByTaskId(taskId);
     if (existingPending.length > 0) {
       throw new Error(
@@ -4145,7 +4213,9 @@ export class AgentDaemon extends EventEmitter {
   ): Promise<boolean> {
     const allowAutoApprove = opts?.allowAutoApprove !== false;
     const enrichedDetails =
-      details && typeof details === "object" && !Array.isArray(details) ? { ...details } : { value: details };
+      details && typeof details === "object" && !Array.isArray(details)
+        ? { ...details }
+        : { value: details };
     const permission = this.evaluatePermissionRequest(
       taskId,
       type as ApprovalType,
@@ -4204,11 +4274,7 @@ export class AgentDaemon extends EventEmitter {
     }
 
     const autoReview = allowAutoApprove
-      ? this.canAutoReviewApprove(
-          taskId,
-          type as ApprovalType | undefined,
-          permissionDetails,
-        )
+      ? this.canAutoReviewApprove(taskId, type as ApprovalType | undefined, permissionDetails)
       : { approved: false };
     const safeSessionAutoApprove =
       allowAutoApprove &&
@@ -4361,9 +4427,11 @@ export class AgentDaemon extends EventEmitter {
       const pending = this.pendingApprovals.get(approvalId);
       if (pending && !pending.resolved) {
         const normalizedAction: ApprovalResponseAction =
-          action ||
-          (approved ? "allow_once" : "deny_once");
-        const persistenceResult = this.persistApprovalActionRule(normalizedAction, pending.approval);
+          action || (approved ? "allow_once" : "deny_once");
+        const persistenceResult = this.persistApprovalActionRule(
+          normalizedAction,
+          pending.approval,
+        );
         const didApprove =
           normalizedAction === "allow_once" ||
           normalizedAction === "allow_session" ||
@@ -4372,12 +4440,11 @@ export class AgentDaemon extends EventEmitter {
         const runtime = this.getExecutorForTask(pending.taskId)?.runtime || null;
         const prompt =
           pending.approval?.details && typeof pending.approval.details === "object"
-            ? ((pending.approval.details as Record<string, unknown>)
-                .permissionPrompt as PermissionPromptDetails | undefined)
+            ? ((pending.approval.details as Record<string, unknown>).permissionPrompt as
+                | PermissionPromptDetails
+                | undefined)
             : undefined;
-        const trackingKey = prompt?.scope
-          ? this.buildPermissionTrackingKey(prompt.scope)
-          : "";
+        const trackingKey = prompt?.scope ? this.buildPermissionTrackingKey(prompt.scope) : "";
         if (runtime && trackingKey) {
           if (didApprove) {
             runtime.recordPermissionSuccess(trackingKey);
@@ -4592,6 +4659,35 @@ export class AgentDaemon extends EventEmitter {
           ? {}
           : ({ value: payload } as Record<string, unknown>);
 
+    const securityLifecycleEvent =
+      type === "task_created"
+        ? "SessionStart"
+        : type === "task_completed" || type === "task_cancelled"
+          ? "SessionEnd"
+          : type === "user_message"
+            ? "UserPromptSubmit"
+            : type === "approval_requested"
+              ? "PermissionRequested"
+              : type === "approval_granted"
+                ? "PermissionApproved"
+                : type === "approval_denied"
+                  ? "PermissionDenied"
+                  : null;
+    if (securityLifecycleEvent) {
+      const numbatService = getNumbatService();
+      if (numbatService?.isEnabled()) {
+        const task = this.taskRepo.findById(taskId);
+        const workspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
+        numbatService.observeLifecycle({
+          taskId,
+          sessionId: taskId,
+          workspacePath: workspace?.path,
+          hookEventName: securityLifecycleEvent,
+          actor: type === "user_message" ? "user" : "system",
+        });
+      }
+    }
+
     // Drop internal metric telemetry from timeline persistence/rendering.
     // These high-frequency events are not user-facing and can overwhelm UI/event stores.
     if (
@@ -4619,10 +4715,7 @@ export class AgentDaemon extends EventEmitter {
           status: "in_progress",
           actor: "agent",
           ephemeral: true,
-          message:
-            typeof payloadObj.message === "string"
-              ? payloadObj.message
-              : "Thinking...",
+          message: typeof payloadObj.message === "string" ? payloadObj.message : "Thinking...",
         },
         timestamp,
         eventId,
@@ -4674,9 +4767,9 @@ export class AgentDaemon extends EventEmitter {
     if (requestedSeq !== undefined) {
       this.taskSeqById.set(taskId, requestedSeq);
     }
-    const seq = requestedSeq ?? this.nextEventSeq(taskId);
+    let seq = requestedSeq ?? this.nextEventSeq(taskId);
     const eventId = crypto.randomUUID();
-    const timelineEvent = normalizeTaskEventToTimelineV2({
+    let timelineEvent = normalizeTaskEventToTimelineV2({
       taskId,
       type,
       payload: payloadObj,
@@ -4723,6 +4816,22 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
+    // Stage transitions emit their own timeline events re-entrantly. When that
+    // happens, the sequence reserved above is older than the group-close/open
+    // events even though the original event is persisted afterward. Reassign
+    // locally generated events so persisted replay order matches live order.
+    if (requestedSeq === undefined && this.getCurrentEventSeq(taskId) > seq) {
+      seq = this.nextEventSeq(taskId);
+      timelineEvent = normalizeTaskEventToTimelineV2({
+        taskId,
+        type,
+        payload: payloadObj,
+        timestamp,
+        eventId,
+        seq,
+      });
+    }
+
     this.trackTimelineStepState(taskId, timelineEvent);
     this.trackEvidenceRefs(taskId, timelineEvent);
     this.timelineMetrics.totalEvents += 1;
@@ -4753,7 +4862,11 @@ export class AgentDaemon extends EventEmitter {
     type: string,
     payload: Record<string, unknown>,
   ): void {
-    if (type !== "file_created" && type !== "artifact_created" && type !== "timeline_artifact_emitted") {
+    if (
+      type !== "file_created" &&
+      type !== "artifact_created" &&
+      type !== "timeline_artifact_emitted"
+    ) {
       return;
     }
 
@@ -4770,9 +4883,12 @@ export class AgentDaemon extends EventEmitter {
         ? workspace.path.trim()
         : "";
     const normalizedPath =
-      !isUrl && !path.isAbsolute(rawPath) && workspacePath ? path.resolve(workspacePath, rawPath) : rawPath;
+      !isUrl && !path.isAbsolute(rawPath) && workspacePath
+        ? path.resolve(workspacePath, rawPath)
+        : rawPath;
 
-    const mimeType = typeof payload.mimeType === "string" ? payload.mimeType.trim().toLowerCase() : "";
+    const mimeType =
+      typeof payload.mimeType === "string" ? payload.mimeType.trim().toLowerCase() : "";
     const extension = path.extname(rawPath).toLowerCase();
     const isPreviewableVideo =
       mimeType === "video/mp4" ||
@@ -4822,7 +4938,8 @@ export class AgentDaemon extends EventEmitter {
     payload: Record<string, unknown>,
     rawPath: string,
   ): boolean {
-    const displayMode = typeof payload.display === "string" ? payload.display.trim().toLowerCase() : "";
+    const displayMode =
+      typeof payload.display === "string" ? payload.display.trim().toLowerCase() : "";
     if (
       payload.inlineFrame === true ||
       payload.richFrame === true ||
@@ -4846,7 +4963,9 @@ export class AgentDaemon extends EventEmitter {
     const payloadLabel = typeof payload.label === "string" ? payload.label : "";
     const payloadKind = typeof payload.kind === "string" ? payload.kind : "";
     const filename = path.basename(rawPath).toLowerCase();
-    const haystack = [taskTitle, taskPrompt, payloadLabel, payloadKind, rawPath].join(" ").toLowerCase();
+    const haystack = [taskTitle, taskPrompt, payloadLabel, payloadKind, rawPath]
+      .join(" ")
+      .toLowerCase();
 
     const fullPageIntent =
       /\b(landing page|homepage|website|web site|webpage|web page|site design|marketing page|portfolio site|single page app|web app|webapp|frontend app|react app|vite app|next\.?js app|static site|full page|page design|html file|standalone html)\b/.test(
@@ -4879,7 +4998,9 @@ export class AgentDaemon extends EventEmitter {
   }
 
   private getTaskAgentConfigProviderType(taskId: string): string | null {
-    return this.normalizeProviderTypeValue(this.taskRepo.findById(taskId)?.agentConfig?.providerType);
+    return this.normalizeProviderTypeValue(
+      this.taskRepo.findById(taskId)?.agentConfig?.providerType,
+    );
   }
 
   private getActiveExecutorProviderType(taskId: string): string | null {
@@ -4916,7 +5037,10 @@ export class AgentDaemon extends EventEmitter {
     const effectiveType = payloadLegacyType || type;
 
     if (effectiveType === "log") {
-      this.rememberTaskLlmProviderType(taskId, this.getProviderTypeFromLogMessage(payloadObj.message));
+      this.rememberTaskLlmProviderType(
+        taskId,
+        this.getProviderTypeFromLogMessage(payloadObj.message),
+      );
       return;
     }
 
@@ -5042,7 +5166,10 @@ export class AgentDaemon extends EventEmitter {
   }
 
   private getSnapshotSummaryBlock(payload: Record<string, unknown>): string {
-    if (typeof payload.explicitChatSummaryBlock === "string" && payload.explicitChatSummaryBlock.trim()) {
+    if (
+      typeof payload.explicitChatSummaryBlock === "string" &&
+      payload.explicitChatSummaryBlock.trim()
+    ) {
       return payload.explicitChatSummaryBlock.trim();
     }
     const transcript =
@@ -5059,7 +5186,10 @@ export class AgentDaemon extends EventEmitter {
     return "";
   }
 
-  private parseStructuredCheckpointSummary(rawText: string, source: "snapshot" | "compaction_summary" | "completion" | "fallback"): {
+  private parseStructuredCheckpointSummary(
+    rawText: string,
+    source: "snapshot" | "compaction_summary" | "completion" | "fallback",
+  ): {
     source: "snapshot" | "compaction_summary" | "completion" | "fallback";
     rawText?: string;
     decisions: string[];
@@ -5120,7 +5250,10 @@ export class AgentDaemon extends EventEmitter {
     };
   }
 
-  private buildStructuredCheckpointSummary(task: Task, snapshotPayload?: Record<string, unknown>): {
+  private buildStructuredCheckpointSummary(
+    task: Task,
+    snapshotPayload?: Record<string, unknown>,
+  ): {
     source: "snapshot" | "compaction_summary" | "completion" | "fallback";
     rawText?: string;
     decisions: string[];
@@ -5136,7 +5269,8 @@ export class AgentDaemon extends EventEmitter {
     const bestKnownOutcome = getTaskBestKnownOutcome(task);
     const completionSummary =
       (typeof task.resultSummary === "string" && task.resultSummary.trim()) ||
-      (typeof bestKnownOutcome?.resultSummary === "string" && bestKnownOutcome.resultSummary.trim()) ||
+      (typeof bestKnownOutcome?.resultSummary === "string" &&
+        bestKnownOutcome.resultSummary.trim()) ||
       "";
     if (completionSummary) {
       return this.parseStructuredCheckpointSummary(completionSummary, "completion");
@@ -5145,7 +5279,10 @@ export class AgentDaemon extends EventEmitter {
     return this.parseStructuredCheckpointSummary(task.prompt.slice(0, 400), "fallback");
   }
 
-  private buildCheckpointEvidencePacket(taskId: string, messageEvents: TaskEvent[]): {
+  private buildCheckpointEvidencePacket(
+    taskId: string,
+    messageEvents: TaskEvent[],
+  ): {
     generatedAt: number;
     spanHash: string;
     spanCount: number;
@@ -5165,7 +5302,9 @@ export class AgentDaemon extends EventEmitter {
         const excerpt = this.extractCheckpointEventText(event.payload).slice(0, 500);
         if (!excerpt) return null;
         const objectId =
-          event.eventId || event.id || `${taskId}:${typeof event.seq === "number" ? event.seq : event.timestamp}`;
+          event.eventId ||
+          event.id ||
+          `${taskId}:${typeof event.seq === "number" ? event.seq : event.timestamp}`;
         return {
           sourceType: "task_message" as const,
           objectId,
@@ -5207,7 +5346,10 @@ export class AgentDaemon extends EventEmitter {
         : params.event.type;
     const meaningfulEvents = this.collectMeaningfulExchangeEvents(params.task.id);
     const meaningfulExchangeCount = meaningfulEvents.length;
-    const latestCheckpoint = await TranscriptStore.loadCheckpoint(params.workspacePath, params.task.id);
+    const latestCheckpoint = await TranscriptStore.loadCheckpoint(
+      params.workspacePath,
+      params.task.id,
+    );
     const latestSnapshotEvent = [...this.getTaskEventsForReplay(params.task.id)]
       .reverse()
       .find((event) => {
@@ -5248,7 +5390,10 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    if (this.isMeaningfulExchangeEvent(effectiveType, params.legacyPayload) && meaningfulExchangeCount > 0) {
+    if (
+      this.isMeaningfulExchangeEvent(effectiveType, params.legacyPayload) &&
+      meaningfulExchangeCount > 0
+    ) {
       const PERIODIC_EXCHANGE_INTERVAL = 12;
       if (meaningfulExchangeCount % PERIODIC_EXCHANGE_INTERVAL === 0) {
         const messageWindow = meaningfulEvents.slice(-PERIODIC_EXCHANGE_INTERVAL);
@@ -5265,7 +5410,10 @@ export class AgentDaemon extends EventEmitter {
           sourceEventId: params.event.eventId,
           sourceTimestamp: params.event.timestamp,
           resumeStrategy: "checkpoint",
-          structuredSummary: this.buildStructuredCheckpointSummary(params.task, latestSnapshotPayload),
+          structuredSummary: this.buildStructuredCheckpointSummary(
+            params.task,
+            latestSnapshotPayload,
+          ),
           evidencePacket,
           dedupeHash: evidencePacket.spanHash,
           sourceMetadata: {
@@ -5295,7 +5443,10 @@ export class AgentDaemon extends EventEmitter {
         sourceEventId: params.event.eventId,
         sourceTimestamp: params.event.timestamp,
         resumeStrategy: "checkpoint",
-        structuredSummary: this.buildStructuredCheckpointSummary(params.task, latestSnapshotPayload),
+        structuredSummary: this.buildStructuredCheckpointSummary(
+          params.task,
+          latestSnapshotPayload,
+        ),
         evidencePacket,
         dedupeHash: evidencePacket.spanHash,
         sourceMetadata: {
@@ -5454,9 +5605,7 @@ export class AgentDaemon extends EventEmitter {
       actor: "system",
       legacyType: "step_started",
       maxParallel:
-        nextStage === "BUILD"
-          ? Math.max(1, this.queueManager.getStatus().maxConcurrent || 1)
-          : 1,
+        nextStage === "BUILD" ? Math.max(1, this.queueManager.getStatus().maxConcurrent || 1) : 1,
     });
     this.activeTimelineStageByTask.set(taskId, nextStage);
   }
@@ -5622,10 +5771,7 @@ export class AgentDaemon extends EventEmitter {
     effectiveType: string | undefined,
     task: Task | undefined,
   ): void {
-    if (
-      effectiveType !== "assistant_message" &&
-      effectiveType !== "task_completed"
-    ) {
+    if (effectiveType !== "assistant_message" && effectiveType !== "task_completed") {
       return;
     }
     const payload =
@@ -5660,7 +5806,11 @@ export class AgentDaemon extends EventEmitter {
 
     const signature = crypto
       .createHash("sha1")
-      .update([event.taskId, effectiveType, draftInput.subject || "", draftInput.bodyText || ""].join("\n"))
+      .update(
+        [event.taskId, effectiveType, draftInput.subject || "", draftInput.bodyText || ""].join(
+          "\n",
+        ),
+      )
       .digest("hex");
     if (this.materializedMailComposeFrameSignatures.has(signature)) return;
     this.materializedMailComposeFrameSignatures.add(signature);
@@ -5716,7 +5866,8 @@ export class AgentDaemon extends EventEmitter {
     } = {},
   ): void {
     const effectiveLegacyType = options.legacyType || event.legacyType;
-    const effectiveLegacyPayload = options.legacyPayload || (event.payload as Record<string, unknown>);
+    const effectiveLegacyPayload =
+      options.legacyPayload || (event.payload as Record<string, unknown>);
     const effectiveType = effectiveLegacyType || event.type;
 
     const storedEvent = this.eventRepo.create({
@@ -5735,9 +5886,10 @@ export class AgentDaemon extends EventEmitter {
       actor: event.actor,
       legacyType: effectiveLegacyType as Any,
     });
-    const storedLegacyPayload = sanitizeTimelinePayloadForStorage(
-      effectiveLegacyPayload,
-    ) as Record<string, unknown>;
+    const storedLegacyPayload = sanitizeTimelinePayloadForStorage(effectiveLegacyPayload) as Record<
+      string,
+      unknown
+    >;
 
     const task = this.taskRepo.findById(event.taskId);
     this.maybeMaterializeMailComposeInlineFrame(storedEvent, effectiveType, task);
@@ -6220,7 +6372,8 @@ export class AgentDaemon extends EventEmitter {
           }
         }
       } else if (type === "user_feedback") {
-        const feedbackDecision = typeof payload?.decision === "string" ? payload.decision : undefined;
+        const feedbackDecision =
+          typeof payload?.decision === "string" ? payload.decision : undefined;
         const feedbackReason = typeof payload?.reason === "string" ? payload.reason : undefined;
         getAwarenessService().captureFeedback(feedbackReason, task.workspaceId, taskId);
         // Adaptive style observation — learns from explicit feedback signals
@@ -6332,31 +6485,28 @@ export class AgentDaemon extends EventEmitter {
           title: "Task created",
           description: task.title,
         };
-      case "task_completed":
-        {
-          const summary = [
-            typeof payload?.resultSummary === "string" ? payload.resultSummary.trim() : "",
-            typeof payload?.semanticSummary === "string" ? payload.semanticSummary.trim() : "",
-          ]
-            .filter((value) => value.length > 0)
-            .join(" · ");
-          const verificationVerdict =
-            typeof payload?.verificationVerdict === "string"
-              ? payload.verificationVerdict.trim()
-              : "";
-          const verificationReport =
-            typeof payload?.verificationReport === "string"
-              ? payload.verificationReport.trim()
-              : "";
-          const verificationSuffix =
-            verificationVerdict || verificationReport
-              ? [
-                  verificationVerdict ? `Verification: ${verificationVerdict}` : "",
-                  verificationReport ? verificationReport : "",
-                ]
-                  .filter((value) => value.length > 0)
-                  .join(" — ")
-              : "";
+      case "task_completed": {
+        const summary = [
+          typeof payload?.resultSummary === "string" ? payload.resultSummary.trim() : "",
+          typeof payload?.semanticSummary === "string" ? payload.semanticSummary.trim() : "",
+        ]
+          .filter((value) => value.length > 0)
+          .join(" · ");
+        const verificationVerdict =
+          typeof payload?.verificationVerdict === "string"
+            ? payload.verificationVerdict.trim()
+            : "";
+        const verificationReport =
+          typeof payload?.verificationReport === "string" ? payload.verificationReport.trim() : "";
+        const verificationSuffix =
+          verificationVerdict || verificationReport
+            ? [
+                verificationVerdict ? `Verification: ${verificationVerdict}` : "",
+                verificationReport ? verificationReport : "",
+              ]
+                .filter((value) => value.length > 0)
+                .join(" — ")
+            : "";
         return {
           workspaceId: task.workspaceId,
           taskId: task.id,
@@ -6372,7 +6522,7 @@ export class AgentDaemon extends EventEmitter {
             activityKind: "task_completed",
           },
         };
-        }
+      }
       case "learning_progress":
         return {
           workspaceId: task.workspaceId,
@@ -7658,7 +7808,11 @@ export class AgentDaemon extends EventEmitter {
   ): void {
     const existing = this.taskRepo.findById(taskId);
     const currentStatus = existing ? deriveCanonicalTaskStatus(existing) : undefined;
-    if (isTerminalTaskStatus(currentStatus) && updates.status && !isTerminalTaskStatus(updates.status)) {
+    if (
+      isTerminalTaskStatus(currentStatus) &&
+      updates.status &&
+      !isTerminalTaskStatus(updates.status)
+    ) {
       return;
     }
     this.taskRepo.update(taskId, updates);
@@ -7709,7 +7863,10 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    this.cleanupPendingApprovalsForTask(taskId, "Task ended before the approval request was resolved.");
+    this.cleanupPendingApprovalsForTask(
+      taskId,
+      "Task ended before the approval request was resolved.",
+    );
 
     const completedAt = metadata?.completedAt ?? Date.now();
     const lastRunDurationMs = this.calculateLatestRunDurationMs(
@@ -7744,7 +7901,9 @@ export class AgentDaemon extends EventEmitter {
       ...(metadata?.autoContinueBlockReason !== undefined
         ? { autoContinueBlockReason: metadata.autoContinueBlockReason }
         : {}),
-      ...(metadata?.compactionCount !== undefined ? { compactionCount: metadata.compactionCount } : {}),
+      ...(metadata?.compactionCount !== undefined
+        ? { compactionCount: metadata.compactionCount }
+        : {}),
       ...(metadata?.lastCompactionAt !== undefined
         ? { lastCompactionAt: metadata.lastCompactionAt }
         : {}),
@@ -7754,12 +7913,17 @@ export class AgentDaemon extends EventEmitter {
       ...(metadata?.lastCompactionTokensAfter !== undefined
         ? { lastCompactionTokensAfter: metadata.lastCompactionTokensAfter }
         : {}),
-      ...(metadata?.noProgressStreak !== undefined ? { noProgressStreak: metadata.noProgressStreak } : {}),
+      ...(metadata?.noProgressStreak !== undefined
+        ? { noProgressStreak: metadata.noProgressStreak }
+        : {}),
       ...(metadata?.lastLoopFingerprint !== undefined
         ? { lastLoopFingerprint: metadata.lastLoopFingerprint }
         : {}),
-      ...(metadata?.bestKnownOutcome !== undefined ? { bestKnownOutcome: metadata.bestKnownOutcome } : {}),
-      ...(typeof metadata?.semanticSummary === "string" && metadata.semanticSummary.trim().length > 0
+      ...(metadata?.bestKnownOutcome !== undefined
+        ? { bestKnownOutcome: metadata.bestKnownOutcome }
+        : {}),
+      ...(typeof metadata?.semanticSummary === "string" &&
+      metadata.semanticSummary.trim().length > 0
         ? { semanticSummary: metadata.semanticSummary.trim() }
         : {}),
       ...(metadata?.verificationVerdict !== undefined
@@ -7793,7 +7957,8 @@ export class AgentDaemon extends EventEmitter {
         ? { bestKnownOutcome: metadata.bestKnownOutcome }
         : {}),
       ...(metadata?.budgetUsage !== undefined ? { budgetUsage: metadata.budgetUsage } : {}),
-      ...(typeof metadata?.semanticSummary === "string" && metadata.semanticSummary.trim().length > 0
+      ...(typeof metadata?.semanticSummary === "string" &&
+      metadata.semanticSummary.trim().length > 0
         ? { semanticSummary: metadata.semanticSummary.trim() }
         : {}),
       ...(metadata?.verificationVerdict !== undefined
@@ -7826,7 +7991,10 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    this.cleanupPendingApprovalsForTask(taskId, "Task ended before the approval request was resolved.");
+    this.cleanupPendingApprovalsForTask(
+      taskId,
+      "Task ended before the approval request was resolved.",
+    );
 
     const completedAt = metadata?.completedAt ?? Date.now();
     const lastRunDurationMs = this.calculateLatestRunDurationMs(
@@ -7904,11 +8072,16 @@ export class AgentDaemon extends EventEmitter {
     if (params.explicitEvidenceRequired && !hasArtifactEvidence) {
       issues.push("missing_artifact_or_file_evidence");
     }
-    if (params.explicitEvidenceRequired && params.riskReasons.includes("tests_expected_without_evidence")) {
+    if (
+      params.explicitEvidenceRequired &&
+      params.riskReasons.includes("tests_expected_without_evidence")
+    ) {
       issues.push("tests_expected_without_execution_evidence");
     }
     if (params.explicitEvidenceRequired && params.verificationEvidenceBundle) {
-      const hasSuccessfulVerificationEvidence = params.verificationEvidenceBundle.entries.some((entry) => entry.ok);
+      const hasSuccessfulVerificationEvidence = params.verificationEvidenceBundle.entries.some(
+        (entry) => entry.ok,
+      );
       if (!hasSuccessfulVerificationEvidence) {
         issues.push("missing_successful_verification_evidence");
       }
@@ -7962,16 +8135,18 @@ export class AgentDaemon extends EventEmitter {
 
   private compareEventOrder(a: TaskEvent, b: TaskEvent): number {
     const aSeq =
-      typeof a.seq === "number" && Number.isFinite(a.seq) && a.seq > 0 ? Math.floor(a.seq) : undefined;
+      typeof a.seq === "number" && Number.isFinite(a.seq) && a.seq > 0
+        ? Math.floor(a.seq)
+        : undefined;
     const bSeq =
-      typeof b.seq === "number" && Number.isFinite(b.seq) && b.seq > 0 ? Math.floor(b.seq) : undefined;
+      typeof b.seq === "number" && Number.isFinite(b.seq) && b.seq > 0
+        ? Math.floor(b.seq)
+        : undefined;
     if (typeof aSeq === "number" && typeof bSeq === "number" && aSeq !== bSeq) {
       return aSeq - bSeq;
     }
-    const aTs =
-      typeof a.ts === "number" && Number.isFinite(a.ts) ? a.ts : Number(a.timestamp) || 0;
-    const bTs =
-      typeof b.ts === "number" && Number.isFinite(b.ts) ? b.ts : Number(b.timestamp) || 0;
+    const aTs = typeof a.ts === "number" && Number.isFinite(a.ts) ? a.ts : Number(a.timestamp) || 0;
+    const bTs = typeof b.ts === "number" && Number.isFinite(b.ts) ? b.ts : Number(b.timestamp) || 0;
     if (aTs !== bTs) return aTs - bTs;
     return (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0);
   }
@@ -8011,7 +8186,9 @@ export class AgentDaemon extends EventEmitter {
       if (
         event.type === "timeline_error" &&
         (typeof payloadObj.rejectedSeq === "number" ||
-          String(payloadObj.message || "").toLowerCase().includes("out-of-order"))
+          String(payloadObj.message || "")
+            .toLowerCase()
+            .includes("out-of-order"))
       ) {
         orderViolations += 1;
         droppedEvents += 1;
@@ -8040,7 +8217,11 @@ export class AgentDaemon extends EventEmitter {
           effectiveLegacyType === "task_completed" ||
           effectiveLegacyType === "task_cancelled" ||
           effectiveLegacyType === "step_skipped";
-        if (!activeSteps.has(stepId) && event.status !== "failed" && !shouldIgnoreUnstartedMismatch) {
+        if (
+          !activeSteps.has(stepId) &&
+          event.status !== "failed" &&
+          !shouldIgnoreUnstartedMismatch
+        ) {
           stepStateMismatches += 1;
         }
         activeSteps.delete(stepId);
@@ -8108,7 +8289,9 @@ export class AgentDaemon extends EventEmitter {
 
       const telemetry = this.computeTimelineTelemetryFromEvents(snapshot);
       const existingTelemetry =
-        payloadObj.telemetry && typeof payloadObj.telemetry === "object" && !Array.isArray(payloadObj.telemetry)
+        payloadObj.telemetry &&
+        typeof payloadObj.telemetry === "object" &&
+        !Array.isArray(payloadObj.telemetry)
           ? (payloadObj.telemetry as Record<string, unknown>)
           : null;
 
@@ -8374,7 +8557,11 @@ export class AgentDaemon extends EventEmitter {
           summary: "",
         };
       }
-      if (child.status === "completed" || child.status === "failed" || child.status === "cancelled") {
+      if (
+        child.status === "completed" ||
+        child.status === "failed" ||
+        child.status === "cancelled"
+      ) {
         return {
           childTaskId: childTask.id,
           status: child.status,
@@ -8435,7 +8622,10 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    this.cleanupPendingApprovalsForTask(taskId, "Task ended before the approval request was resolved.");
+    this.cleanupPendingApprovalsForTask(
+      taskId,
+      "Task ended before the approval request was resolved.",
+    );
 
     const isChatSession =
       existingTask.agentConfig?.executionMode === "chat" &&
@@ -8505,7 +8695,9 @@ export class AgentDaemon extends EventEmitter {
         : undefined;
     const bestKnownOutcome = metadata?.bestKnownOutcome || getTaskBestKnownOutcome(existingTask);
     const unresolvedFailedSteps = this.getUnresolvedFailedSteps(taskId);
-    const timelineErrorStepIds = Array.from(this.timelineErrorsByTask.get(taskId) || new Set<string>())
+    const timelineErrorStepIds = Array.from(
+      this.timelineErrorsByTask.get(taskId) || new Set<string>(),
+    )
       .map((id) => String(id || "").trim())
       .filter((id) => id.length > 0)
       .sort();
@@ -8531,7 +8723,9 @@ export class AgentDaemon extends EventEmitter {
         .filter((id) => id.length > 0),
     );
     const failedMutationRequiredNormalizedStepIds = new Set(
-      Array.from(failedMutationRequiredStepIds.values()).map((id) => normalizeStepIdForComparison(id)),
+      Array.from(failedMutationRequiredStepIds.values()).map((id) =>
+        normalizeStepIdForComparison(id),
+      ),
     );
     const nonBlockingFailedStepIds = new Set(
       (this.verificationOutcomeV2Enabled ? metadata?.nonBlockingFailedStepIds || [] : [])
@@ -8600,7 +8794,11 @@ export class AgentDaemon extends EventEmitter {
           ) {
             continue;
           }
-          if (String(step?.kind || "").trim().toLowerCase() === "verification") {
+          if (
+            String(step?.kind || "")
+              .trim()
+              .toLowerCase() === "verification"
+          ) {
             return true;
           }
           if (isVerificationDescription(String(step?.description || ""))) {
@@ -8702,7 +8900,7 @@ export class AgentDaemon extends EventEmitter {
     const allowBudgetAutoWaive =
       metadata?.terminalStatus === "partial_success" &&
       metadata?.failureClass === "budget_exhausted" &&
-      ((metadata?.waiveFailedStepIds || []).length === 0);
+      (metadata?.waiveFailedStepIds || []).length === 0;
     const allowEvidenceBackedAutoWaive =
       metadata?.terminalStatus === "partial_success" &&
       hasSubstantiveOutcomeEvidence({
@@ -8775,7 +8973,9 @@ export class AgentDaemon extends EventEmitter {
         gate: "completion_failed_step_gate",
         legacyType: "progress_update",
       });
-      blockingFailedSteps = blockingFailedSteps.filter((id) => !autoWaivedVerificationStepIds.includes(id));
+      blockingFailedSteps = blockingFailedSteps.filter(
+        (id) => !autoWaivedVerificationStepIds.includes(id),
+      );
     }
     if (autoWaivedBudgetStepIds.length > 0) {
       for (const stepId of autoWaivedBudgetStepIds) {
@@ -8797,7 +8997,9 @@ export class AgentDaemon extends EventEmitter {
         gate: "completion_failed_step_gate",
         legacyType: "progress_update",
       });
-      blockingFailedSteps = blockingFailedSteps.filter((id) => !autoWaivedBudgetStepIds.includes(id));
+      blockingFailedSteps = blockingFailedSteps.filter(
+        (id) => !autoWaivedBudgetStepIds.includes(id),
+      );
     }
     if (autoWaivedEvidenceBackedStepIds.size > 0) {
       const autoWaivedStepIds = Array.from(autoWaivedEvidenceBackedStepIds.values());
@@ -8822,13 +9024,13 @@ export class AgentDaemon extends EventEmitter {
         gate: "completion_failed_step_gate",
         legacyType: "progress_update",
       });
-      blockingFailedSteps = blockingFailedSteps.filter((id) => !autoWaivedEvidenceBackedStepIds.has(id));
+      blockingFailedSteps = blockingFailedSteps.filter(
+        (id) => !autoWaivedEvidenceBackedStepIds.has(id),
+      );
     }
     blockingFailedSteps = Array.from(
       new Set(
-        blockingFailedSteps
-          .map((id) => String(id || "").trim())
-          .filter((id) => id.length > 0),
+        blockingFailedSteps.map((id) => String(id || "").trim()).filter((id) => id.length > 0),
       ),
     );
 
@@ -8871,9 +9073,7 @@ export class AgentDaemon extends EventEmitter {
           gate: "completion_failed_step_gate",
           legacyType: "progress_update",
         });
-        blockingFailedSteps = blockingFailedSteps.filter(
-          (id) => !nonMutationBlockers.includes(id),
-        );
+        blockingFailedSteps = blockingFailedSteps.filter((id) => !nonMutationBlockers.includes(id));
       }
     }
 
@@ -8957,7 +9157,10 @@ export class AgentDaemon extends EventEmitter {
       terminalStatus = "failed";
     }
     const explicitFailedTerminalStatus = terminalStatus === "failed";
-    if (this.verificationOutcomeV2Enabled && metadata?.verificationOutcome === "pending_user_action") {
+    if (
+      this.verificationOutcomeV2Enabled &&
+      metadata?.verificationOutcome === "pending_user_action"
+    ) {
       if (terminalStatus === "ok") {
         terminalStatus = "needs_user_action";
       }
@@ -9019,10 +9222,9 @@ export class AgentDaemon extends EventEmitter {
         legacyType: "progress_update",
       });
     } else if (evidenceCheck.keyClaims.length > 0) {
-      const evidenceRefs = Array.from((this.evidenceRefsByTask.get(taskId) || new Map()).values()).slice(
-        0,
-        20,
-      );
+      const evidenceRefs = Array.from(
+        (this.evidenceRefsByTask.get(taskId) || new Map()).values(),
+      ).slice(0, 20);
       if (evidenceRefs.length > 0) {
         this.logEvent(taskId, "timeline_evidence_attached", {
           stepId: "evidence_gate:key_claims",
@@ -9069,18 +9271,23 @@ export class AgentDaemon extends EventEmitter {
       error:
         resolvedOutcome.status === "completed"
           ? null
-          : existingTask.error || (resolvedOutcome.terminalStatus === "resume_available" ? "Resume available" : null),
+          : existingTask.error ||
+            (resolvedOutcome.terminalStatus === "resume_available" ? "Resume available" : null),
       terminalStatus,
       failureClass,
       ...(bestKnownOutcome ? { bestKnownOutcome } : {}),
       budgetUsage: metadata?.budgetUsage,
       riskLevel: risk.level,
       ...(trimmedSummary ? { resultSummary: trimmedSummary } : {}),
-      ...(typeof metadata?.semanticSummary === "string" && metadata.semanticSummary.trim().length > 0
+      ...(typeof metadata?.semanticSummary === "string" &&
+      metadata.semanticSummary.trim().length > 0
         ? { semanticSummary: metadata.semanticSummary.trim() }
         : {}),
-      ...(metadata?.verificationVerdict ? { verificationVerdict: metadata.verificationVerdict } : {}),
-      ...(typeof metadata?.verificationReport === "string" && metadata.verificationReport.trim().length > 0
+      ...(metadata?.verificationVerdict
+        ? { verificationVerdict: metadata.verificationVerdict }
+        : {}),
+      ...(typeof metadata?.verificationReport === "string" &&
+      metadata.verificationReport.trim().length > 0
         ? { verificationReport: metadata.verificationReport.trim() }
         : {}),
       ...(metadata?.agentConfig ? { agentConfig: metadata.agentConfig } : {}),
@@ -9132,14 +9339,20 @@ export class AgentDaemon extends EventEmitter {
       ...(bestKnownOutcome ? { bestKnownOutcome } : {}),
       ...(metadata?.budgetUsage ? { budgetUsage: metadata.budgetUsage } : {}),
       ...(metadata?.outputSummary ? { outputSummary: metadata.outputSummary } : {}),
-      ...(typeof metadata?.semanticSummary === "string" && metadata.semanticSummary.trim().length > 0
+      ...(typeof metadata?.semanticSummary === "string" &&
+      metadata.semanticSummary.trim().length > 0
         ? { semanticSummary: metadata.semanticSummary.trim() }
         : {}),
-      ...(metadata?.verificationVerdict ? { verificationVerdict: metadata.verificationVerdict } : {}),
-      ...(typeof metadata?.verificationReport === "string" && metadata.verificationReport.trim().length > 0
+      ...(metadata?.verificationVerdict
+        ? { verificationVerdict: metadata.verificationVerdict }
+        : {}),
+      ...(typeof metadata?.verificationReport === "string" &&
+      metadata.verificationReport.trim().length > 0
         ? { verificationReport: metadata.verificationReport.trim() }
         : {}),
-      ...(metadata?.verificationOutcome ? { verificationOutcome: metadata.verificationOutcome } : {}),
+      ...(metadata?.verificationOutcome
+        ? { verificationOutcome: metadata.verificationOutcome }
+        : {}),
       ...(metadata?.verificationScope ? { verificationScope: metadata.verificationScope } : {}),
       ...(metadata?.verificationEvidenceMode
         ? { verificationEvidenceMode: metadata.verificationEvidenceMode }
@@ -9147,7 +9360,9 @@ export class AgentDaemon extends EventEmitter {
       ...(Array.isArray(metadata?.pendingChecklist) && metadata?.pendingChecklist.length > 0
         ? { pendingChecklist: metadata.pendingChecklist }
         : {}),
-      ...(metadata?.verificationMessage ? { verificationMessage: metadata.verificationMessage } : {}),
+      ...(metadata?.verificationMessage
+        ? { verificationMessage: metadata.verificationMessage }
+        : {}),
       ...(Array.isArray(metadata?.failedMutationRequiredStepIds) &&
       metadata.failedMutationRequiredStepIds.length > 0
         ? { failedMutationRequiredStepIds: metadata.failedMutationRequiredStepIds }
@@ -9163,7 +9378,9 @@ export class AgentDaemon extends EventEmitter {
       ...(Array.isArray(metadata?.incompleteStepIds) && metadata.incompleteStepIds.length > 0
         ? { incompleteStepIds: metadata.incompleteStepIds }
         : {}),
-      ...(metadata?.terminalStatusReason ? { terminalStatusReason: metadata.terminalStatusReason } : {}),
+      ...(metadata?.terminalStatusReason
+        ? { terminalStatusReason: metadata.terminalStatusReason }
+        : {}),
       ...(timelineErrorStepIds.length > 0 ? { timelineErrorStepIds } : {}),
       risk: {
         score: risk.score,
@@ -9239,7 +9456,11 @@ export class AgentDaemon extends EventEmitter {
 
     // === WORKTREE AUTO-COMMIT ===
     // If the task has an active worktree, auto-commit changes on completion.
-    if (isCompletedOutcome && existingTask?.worktreeStatus === "active" && existingTask.worktreePath) {
+    if (
+      isCompletedOutcome &&
+      existingTask?.worktreeStatus === "active" &&
+      existingTask.worktreePath
+    ) {
       const worktreeSettings = this.worktreeManager.getSettings();
       if (worktreeSettings.autoCommitOnComplete) {
         void (async () => {
@@ -9317,7 +9538,10 @@ export class AgentDaemon extends EventEmitter {
     this.finishQueueSlot(taskId);
   }
 
-  private buildAnnotationFollowUpContext(taskId: string, message: string): {
+  private buildAnnotationFollowUpContext(
+    taskId: string,
+    message: string,
+  ): {
     message: string;
     annotations: Annotation[];
   } {
@@ -9540,11 +9764,7 @@ export class AgentDaemon extends EventEmitter {
               ? "Stop requested"
               : "Scope adjustment requested";
     const feedbackStatus: TaskEvent["status"] =
-      action === "skip"
-        ? "skipped"
-        : action === "stop"
-          ? "cancelled"
-          : "in_progress";
+      action === "skip" ? "skipped" : action === "stop" ? "cancelled" : "in_progress";
     this.logEvent(taskId, "timeline_step_updated", {
       stepId,
       action,

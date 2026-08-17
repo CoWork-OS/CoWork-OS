@@ -96,6 +96,7 @@ vm-bundle/
 
 # Electron
 *.asar
+/build/numbat/
 
 # Temporary files
 /.tmp/

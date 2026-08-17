@@ -35,10 +35,7 @@ import { MCPClientManager } from "../electron/mcp/client/MCPClientManager";
 import { MCPSettingsManager } from "../electron/mcp/settings";
 import { getUserDataDir } from "../electron/utils/user-data-dir";
 import { LLMSettingsSchema, MCPSettingsSchema } from "../electron/utils/validation";
-import {
-  importProcessEnvToSettings,
-  migrateEnvToSettings,
-} from "../electron/utils/env-migration";
+import { importProcessEnvToSettings, migrateEnvToSettings } from "../electron/utils/env-migration";
 import {
   getEnvSettingsImportModeFromArgsOrEnv,
   shouldImportEnvSettingsFromArgsOrEnv,
@@ -46,6 +43,9 @@ import {
 import { isTerminalTaskStatus } from "../shared/task-status";
 import type { AgentConfig, CliTaskOwnership, Task } from "../shared/types";
 import { buildTaskTitle } from "./format";
+import { NumbatService } from "../electron/security/numbat";
+import type { AgentSecurityFindingStatus } from "../shared/agent-security";
+import { requiresAgentSecurityConfirmation } from "./agent-security-confirmation";
 
 type Any = Record<string, any>;
 
@@ -98,6 +98,20 @@ interface DirectRunArgs {
     | "security-audit"
     | "security-rules-list"
     | "security-rules-remove"
+    | "agent-security-status"
+    | "agent-security-findings"
+    | "agent-security-finding-update"
+    | "agent-security-decisions"
+    | "agent-security-inventory"
+    | "agent-security-inventory-refresh"
+    | "agent-security-scan"
+    | "agent-security-check-rules"
+    | "agent-security-hook-status"
+    | "agent-security-hook-install"
+    | "agent-security-hook-uninstall"
+    | "agent-security-case-build"
+    | "agent-security-case-verify"
+    | "agent-security-prune"
     | "prompt-size"
     | "prompt-preview"
     | "dashboard-status";
@@ -147,6 +161,7 @@ interface DirectRunArgs {
   vacuum?: boolean;
   yes?: boolean;
   dryRun?: boolean;
+  refresh?: boolean;
   json?: boolean;
 }
 
@@ -246,15 +261,19 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     activeInterruptPolicy = cliOwnership.interruptPolicy;
     startCliHeartbeat();
 
-    writeEvent(args, {
-      type: "task_created",
-      task: {
-        id: task.id,
-        title: task.title,
-        status: task.status,
-        workspaceId: task.workspaceId,
+    writeEvent(
+      args,
+      {
+        type: "task_created",
+        task: {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          workspaceId: task.workspaceId,
+        },
       },
-    }, `Created task: ${task.id}  ${task.title}`);
+      `Created task: ${task.id}  ${task.title}`,
+    );
     if (args.readyFile) {
       await writeDetachedReadyFile(args.readyFile, task);
     }
@@ -262,7 +281,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     daemon.on("assistant_message", (payload: Any) => {
       if (payload?.taskId !== task.id) return;
       const message = stringifyMessage(payload.message || payload.text || payload.content);
-      if (message) writeEvent(args, { type: "assistant_message", taskId: task.id, message }, message);
+      if (message)
+        writeEvent(args, { type: "assistant_message", taskId: task.id, message }, message);
     });
     daemon.on("task_status", (payload: Any) => {
       if (payload?.taskId !== task.id) return;
@@ -271,7 +291,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     });
     daemon.on("task_completed", (payload: Any) => {
       if (payload?.taskId !== task.id) return;
-      const message = stringifyMessage(payload.message || payload.resultSummary || "Task completed.");
+      const message = stringifyMessage(
+        payload.message || payload.resultSummary || "Task completed.",
+      );
       if (message) writeEvent(args, { type: "task_completed", taskId: task.id, message }, message);
       done = true;
     });
@@ -279,7 +301,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     await daemon.startTask(task);
 
     const status = await waitForTerminalTask(daemon, task.id, args);
-    await updateActiveCliOwnership({ endedAt: Date.now(), exitCode: status === "completed" ? 0 : 1 });
+    await updateActiveCliOwnership({
+      endedAt: Date.now(),
+      exitCode: status === "completed" ? 0 : 1,
+    });
     stopCliHeartbeat();
     activeTaskId = null;
     activeCliRunId = null;
@@ -401,7 +426,11 @@ async function waitForTerminalTask(
     }
     if (isTerminalTaskStatus(task.status)) {
       if (task.resultSummary) {
-        writeEvent(args, { type: "result_summary", taskId, message: task.resultSummary }, task.resultSummary);
+        writeEvent(
+          args,
+          { type: "result_summary", taskId, message: task.resultSummary },
+          task.resultSummary,
+        );
       }
       if (task.error) writeError(args, task.error, taskId);
       return task.status;
@@ -553,6 +582,48 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
         break;
       case "--security-rules-remove":
         args.command = "security-rules-remove";
+        break;
+      case "--agent-security-status":
+        args.command = "agent-security-status";
+        break;
+      case "--agent-security-findings":
+        args.command = "agent-security-findings";
+        break;
+      case "--agent-security-finding-update":
+        args.command = "agent-security-finding-update";
+        break;
+      case "--agent-security-decisions":
+        args.command = "agent-security-decisions";
+        break;
+      case "--agent-security-inventory":
+        args.command = "agent-security-inventory";
+        break;
+      case "--agent-security-inventory-refresh":
+        args.command = "agent-security-inventory-refresh";
+        break;
+      case "--agent-security-scan":
+        args.command = "agent-security-scan";
+        break;
+      case "--agent-security-check-rules":
+        args.command = "agent-security-check-rules";
+        break;
+      case "--agent-security-hook-status":
+        args.command = "agent-security-hook-status";
+        break;
+      case "--agent-security-hook-install":
+        args.command = "agent-security-hook-install";
+        break;
+      case "--agent-security-hook-uninstall":
+        args.command = "agent-security-hook-uninstall";
+        break;
+      case "--agent-security-case-build":
+        args.command = "agent-security-case-build";
+        break;
+      case "--agent-security-case-verify":
+        args.command = "agent-security-case-verify";
+        break;
+      case "--agent-security-prune":
+        args.command = "agent-security-prune";
         break;
       case "--prompt-size":
         args.command = "prompt-size";
@@ -733,6 +804,9 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
       case "--dry-run":
         args.dryRun = true;
         break;
+      case "--refresh":
+        args.refresh = true;
+        break;
       case "--json":
         args.json = true;
         break;
@@ -821,13 +895,18 @@ async function runLocalMetadataCommand(
           `Current: ${providerStatus.currentProvider} (${providerStatus.currentModel || "default model"})`,
           ...(configured.length
             ? configured.map((provider) => `- ${provider.name} (${provider.type}) configured`)
-            : ["No local providers configured. Open Settings > LLM in the desktop app or import provider env settings."]),
+            : [
+                "No local providers configured. Open Settings > LLM in the desktop app or import provider env settings.",
+              ]),
         ].join("\n"),
       );
       return 0;
     }
     case "providers-configure": {
-      if (!args.providerType) throw new Error("Usage: cowork providers configure <provider> [--api-key <key>] [--model <model>] [--base-url <url>]");
+      if (!args.providerType)
+        throw new Error(
+          "Usage: cowork providers configure <provider> [--api-key <key>] [--model <model>] [--base-url <url>]",
+        );
       const result = configureLocalProvider(args);
       writeEvent(
         args,
@@ -838,15 +917,26 @@ async function runLocalMetadataCommand(
     }
     case "workspace-list": {
       const allWorkspaces = workspaces.findAll();
-      const visibleWorkspaces = allWorkspaces.filter((workspace) => !workspace.isTemp && !workspace.id.startsWith("__temp_workspace__"));
+      const visibleWorkspaces = allWorkspaces.filter(
+        (workspace) => !workspace.isTemp && !workspace.id.startsWith("__temp_workspace__"),
+      );
       writeEvent(
         args,
-        { type: "workspaces", workspaces: visibleWorkspaces, totalCount: allWorkspaces.length, hiddenTemporaryCount: allWorkspaces.length - visibleWorkspaces.length },
+        {
+          type: "workspaces",
+          workspaces: visibleWorkspaces,
+          totalCount: allWorkspaces.length,
+          hiddenTemporaryCount: allWorkspaces.length - visibleWorkspaces.length,
+        },
         visibleWorkspaces.length
           ? [
-              ...visibleWorkspaces.map((workspace) => `${workspace.name}  ${workspace.path}  (${workspace.id})`),
+              ...visibleWorkspaces.map(
+                (workspace) => `${workspace.name}  ${workspace.path}  (${workspace.id})`,
+              ),
               ...(allWorkspaces.length > visibleWorkspaces.length
-                ? [`Hidden temporary workspaces: ${allWorkspaces.length - visibleWorkspaces.length}`]
+                ? [
+                    `Hidden temporary workspaces: ${allWorkspaces.length - visibleWorkspaces.length}`,
+                  ]
                 : []),
             ].join("\n")
           : "No local workspaces configured.",
@@ -859,13 +949,17 @@ async function runLocalMetadataCommand(
       const existing = workspaces.findByPath(workspacePath);
       const workspace =
         existing ||
-        workspaces.create(args.workspaceName || path.basename(workspacePath) || "Workspace", workspacePath, {
-          read: true,
-          write: true,
-          delete: false,
-          network: true,
-          shell: false,
-        });
+        workspaces.create(
+          args.workspaceName || path.basename(workspacePath) || "Workspace",
+          workspacePath,
+          {
+            read: true,
+            write: true,
+            delete: false,
+            network: true,
+            shell: false,
+          },
+        );
       writeEvent(
         args,
         { type: "workspace", workspace, created: !existing },
@@ -893,7 +987,12 @@ async function runLocalMetadataCommand(
         args,
         { type: "approvals", approvals: rows },
         rows.length
-          ? rows.map((approval) => `${approval.id}  ${approval.type}  ${approval.description}  task=${approval.taskId}`).join("\n")
+          ? rows
+              .map(
+                (approval) =>
+                  `${approval.id}  ${approval.type}  ${approval.description}  task=${approval.taskId}`,
+              )
+              .join("\n")
           : "No pending approvals.",
       );
       return 0;
@@ -1000,6 +1099,21 @@ async function runLocalMetadataCommand(
       return securityRulesListCommand(db, args);
     case "security-rules-remove":
       return securityRulesRemoveCommand(db, args);
+    case "agent-security-status":
+    case "agent-security-findings":
+    case "agent-security-finding-update":
+    case "agent-security-decisions":
+    case "agent-security-inventory":
+    case "agent-security-inventory-refresh":
+    case "agent-security-scan":
+    case "agent-security-check-rules":
+    case "agent-security-hook-status":
+    case "agent-security-hook-install":
+    case "agent-security-hook-uninstall":
+    case "agent-security-case-build":
+    case "agent-security-case-verify":
+    case "agent-security-prune":
+      return await agentSecurityCommand(db, args);
     case "prompt-size":
     case "prompt-preview":
       return promptCommand(args);
@@ -1016,11 +1130,7 @@ function listSessions(sessionRetention: SessionRetentionService, args: DirectRun
   writeEvent(
     args,
     { type: "sessions", sessions: limited },
-    limited.length
-      ? limited
-          .map(formatSessionSummaryLine)
-          .join("\n")
-      : "No local sessions found.",
+    limited.length ? limited.map(formatSessionSummaryLine).join("\n") : "No local sessions found.",
   );
   return 0;
 }
@@ -1041,7 +1151,10 @@ function showSession(
       `Session: ${sessionId}`,
       ...(metadata?.name ? [`Name: ${metadata.name}`] : []),
       ...(metadata?.archivedAt ? [`Archived: ${formatDate(metadata.archivedAt)}`] : []),
-      ...rows.map((task) => `${formatDate(task.updatedAt || task.createdAt)}  ${task.status}  ${task.id}  ${task.title}`),
+      ...rows.map(
+        (task) =>
+          `${formatDate(task.updatedAt || task.createdAt)}  ${task.status}  ${task.id}  ${task.title}`,
+      ),
     ].join("\n"),
   );
   return 0;
@@ -1074,7 +1187,11 @@ function renameSession(sessionRetention: SessionRetentionService, args: DirectRu
   const name = (args.name || args.title || "").trim();
   if (!name) throw new Error("Usage: cowork sessions rename <sessionId> <name>");
   sessionRetention.renameSession(sessionId, name);
-  writeEvent(args, { type: "session_renamed", sessionId, name }, `Renamed session ${sessionId} to "${name}".`);
+  writeEvent(
+    args,
+    { type: "session_renamed", sessionId, name },
+    `Renamed session ${sessionId} to "${name}".`,
+  );
   return 0;
 }
 
@@ -1102,28 +1219,25 @@ function archiveSession(sessionRetention: SessionRetentionService, args: DirectR
 function buildSessionRetentionFilters(args: DirectRunArgs): SessionRetentionFilters {
   const hasExplicitWindowOrSelection = Boolean(
     args.all ||
-      args.olderThan ||
-      args.newerThan ||
-      args.after ||
-      args.before ||
-      args.title ||
-      args.source ||
-      args.cwdFilter ||
-      args.providerType ||
-      args.model ||
-      args.endReason ||
-      typeof args.minTokens === "number" ||
-      typeof args.maxTokens === "number" ||
-      typeof args.minCost === "number" ||
-      typeof args.maxCost === "number",
+    args.olderThan ||
+    args.newerThan ||
+    args.after ||
+    args.before ||
+    args.title ||
+    args.source ||
+    args.cwdFilter ||
+    args.providerType ||
+    args.model ||
+    args.endReason ||
+    typeof args.minTokens === "number" ||
+    typeof args.maxTokens === "number" ||
+    typeof args.minCost === "number" ||
+    typeof args.maxCost === "number",
   );
-  const olderThanMs =
-    args.all
-      ? undefined
-      : parseDurationMs(args.olderThan) ??
-        (hasExplicitWindowOrSelection
-          ? undefined
-          : (args.days || 30) * 24 * 60 * 60 * 1000);
+  const olderThanMs = args.all
+    ? undefined
+    : (parseDurationMs(args.olderThan) ??
+      (hasExplicitWindowOrSelection ? undefined : (args.days || 30) * 24 * 60 * 60 * 1000));
 
   return {
     limit: args.limit || 10000,
@@ -1160,7 +1274,9 @@ async function pruneSessions(
   args: DirectRunArgs,
 ): Promise<number> {
   const filters = buildSessionRetentionFilters(args);
-  const preview = await sessionRetention.pruneSessions(filters, { dryRun: !args.yes || args.dryRun });
+  const preview = await sessionRetention.pruneSessions(filters, {
+    dryRun: !args.yes || args.dryRun,
+  });
   if (!args.yes || args.dryRun) {
     writeEvent(
       args,
@@ -1169,7 +1285,9 @@ async function pruneSessions(
         ? [
             `Would delete ${preview.sessionCount} terminal session(s) (${preview.taskCount} task(s)).`,
             ...preview.sessions.slice(0, 20).map(formatSessionSummaryLine),
-            ...(preview.sessions.length > 20 ? [`...and ${preview.sessions.length - 20} more.`] : []),
+            ...(preview.sessions.length > 20
+              ? [`...and ${preview.sessions.length - 20} more.`]
+              : []),
             ...(args.yes ? [] : ["Re-run with --yes to delete the listed sessions."]),
           ].join("\n")
         : "No matching terminal sessions found.",
@@ -1187,16 +1305,15 @@ async function pruneSessions(
 }
 
 function listCliTasks(taskRepo: TaskRepository, args: DirectRunArgs): number {
-  const rows = taskRepo.findAll(args.limit || 1000)
+  const rows = taskRepo
+    .findAll(args.limit || 1000)
     .filter((task) => !args.activeOnly || !isTerminalTaskStatus(task.status))
     .filter((task) => !args.cliOnly || Boolean(getCliOwnership(task)))
     .slice(0, args.limit || 50);
   writeEvent(
     args,
     { type: "tasks", tasks: rows },
-    rows.length
-      ? rows.map(formatCliTaskLine).join("\n")
-      : "No matching local tasks found.",
+    rows.length ? rows.map(formatCliTaskLine).join("\n") : "No matching local tasks found.",
   );
   return 0;
 }
@@ -1211,7 +1328,11 @@ function cancelCliTask(
   const task = taskRepo.findById(taskId);
   if (!task) throw new Error(`Task not found: ${taskId}`);
   if (isTerminalTaskStatus(task.status)) {
-    writeEvent(args, { type: "task_cancel_noop", task }, `Task ${task.id} is already ${task.status}.`);
+    writeEvent(
+      args,
+      { type: "task_cancel_noop", task },
+      `Task ${task.id} is already ${task.status}.`,
+    );
     return 0;
   }
   if (!getCliOwnership(task)) {
@@ -1238,14 +1359,16 @@ async function attachCliTask(
   const printNewEvents = () => {
     const events = eventRepo.findRecentByTaskId(taskId, args.limit || 200);
     for (const event of events) {
-      const key = event.id || `${event.timestamp}:${event.type}:${JSON.stringify(event.payload || {})}`;
+      const key =
+        event.id || `${event.timestamp}:${event.type}:${JSON.stringify(event.payload || {})}`;
       if (seen.has(key)) continue;
       seen.add(key);
       writeEvent(args, { type: "task_event", taskId, event }, formatTaskEventLine(event));
     }
   };
   printNewEvents();
-  if (isTerminalTaskStatus(task.status)) return task.status === "failed" || task.status === "cancelled" ? 1 : 0;
+  if (isTerminalTaskStatus(task.status))
+    return task.status === "failed" || task.status === "cancelled" ? 1 : 0;
 
   return await new Promise((resolve) => {
     const interval = setInterval(() => {
@@ -1270,9 +1393,7 @@ function listStaleCliTasks(taskRepo: TaskRepository, args: DirectRunArgs): numbe
   writeEvent(
     args,
     { type: "stale_cli_tasks", tasks: rows },
-    rows.length
-      ? rows.map(formatCliTaskLine).join("\n")
-      : "No stale attached CLI tasks found.",
+    rows.length ? rows.map(formatCliTaskLine).join("\n") : "No stale attached CLI tasks found.",
   );
   return rows.length ? 1 : 0;
 }
@@ -1316,7 +1437,11 @@ async function logsCommand(args: DirectRunArgs): Promise<number> {
   try {
     text = await fs.readFile(latest, "utf8");
   } catch {
-    writeEvent(args, { type: "logs", path: latest, exists: false }, `No development log found at ${latest}.`);
+    writeEvent(
+      args,
+      { type: "logs", path: latest, exists: false },
+      `No development log found at ${latest}.`,
+    );
     return 1;
   }
   const limit = args.limit || 80;
@@ -1327,7 +1452,11 @@ async function logsCommand(args: DirectRunArgs): Promise<number> {
     lines = lines.filter((line) => line.toLowerCase().includes(query.toLowerCase()));
   }
   const tail = lines.slice(-limit);
-  writeEvent(args, { type: "logs", path: latest, lines: tail }, tail.length ? tail.join("\n") : "No matching log lines.");
+  writeEvent(
+    args,
+    { type: "logs", path: latest, lines: tail },
+    tail.length ? tail.join("\n") : "No matching log lines.",
+  );
   return 0;
 }
 
@@ -1344,7 +1473,10 @@ function toolsCommand(args: DirectRunArgs): number {
       args,
       { type: "tools", categories, overrides: settings.toolOverrides },
       categories
-        .map((category) => `${category.name}  ${category.enabled ? "enabled" : "disabled"}  ${category.priority}  tools=${category.tools.length}`)
+        .map(
+          (category) =>
+            `${category.name}  ${category.enabled ? "enabled" : "disabled"}  ${category.priority}  tools=${category.tools.length}`,
+        )
         .join("\n"),
     );
     return 0;
@@ -1355,7 +1487,12 @@ function toolsCommand(args: DirectRunArgs): number {
   const isCategory = Boolean(categories[target]);
   if (args.command === "tools-info") {
     const payload = isCategory
-      ? { type: "tool_category", name: target, ...categories[target], tools: BuiltinToolsSettingsManager.getToolsByCategory()[target] || [] }
+      ? {
+          type: "tool_category",
+          name: target,
+          ...categories[target],
+          tools: BuiltinToolsSettingsManager.getToolsByCategory()[target] || [],
+        }
       : {
           type: "tool",
           name: target,
@@ -1370,11 +1507,21 @@ function toolsCommand(args: DirectRunArgs): number {
   }
   const enabled = args.command === "tools-enable";
   if (isCategory) {
-    BuiltinToolsSettingsManager.setCategoryEnabled(target as keyof typeof settings.categories, enabled);
+    BuiltinToolsSettingsManager.setCategoryEnabled(
+      target as keyof typeof settings.categories,
+      enabled,
+    );
   } else {
-    BuiltinToolsSettingsManager.setToolOverride(target, { enabled, priority: BuiltinToolsSettingsManager.getToolPriority(target) });
+    BuiltinToolsSettingsManager.setToolOverride(target, {
+      enabled,
+      priority: BuiltinToolsSettingsManager.getToolPriority(target),
+    });
   }
-  writeEvent(args, { type: "tool_updated", target, enabled }, `${enabled ? "Enabled" : "Disabled"} ${isCategory ? "category" : "tool"} ${target}.`);
+  writeEvent(
+    args,
+    { type: "tool_updated", target, enabled },
+    `${enabled ? "Enabled" : "Disabled"} ${isCategory ? "category" : "tool"} ${target}.`,
+  );
   return 0;
 }
 
@@ -1387,7 +1534,10 @@ function mcpSettingsCommand(args: DirectRunArgs): number {
       { type: "mcp_servers", servers: settings.servers },
       settings.servers.length
         ? settings.servers
-            .map((server) => `${server.id}  ${server.name}  ${server.enabled ? "enabled" : "disabled"}  ${server.transport}  ${server.command || server.url || ""}`)
+            .map(
+              (server) =>
+                `${server.id}  ${server.name}  ${server.enabled ? "enabled" : "disabled"}  ${server.transport}  ${server.command || server.url || ""}`,
+            )
             .join("\n")
         : "No MCP servers configured.",
     );
@@ -1395,11 +1545,16 @@ function mcpSettingsCommand(args: DirectRunArgs): number {
   }
   if (args.command === "mcp-add") {
     const name = (args.name || "").trim();
-    if (!name) throw new Error("Usage: cowork mcp add --name <name> (--command <cmd> | --url <url>)");
-    const transport = normalizeMcpTransport(args.transport || (args.url ? "streamable-http" : "stdio"));
+    if (!name)
+      throw new Error("Usage: cowork mcp add --name <name> (--command <cmd> | --url <url>)");
+    const transport = normalizeMcpTransport(
+      args.transport || (args.url ? "streamable-http" : "stdio"),
+    );
     const commandParts = args.commandLine ? splitCommandLine(args.commandLine) : [];
-    if (transport === "stdio" && commandParts.length === 0) throw new Error("stdio MCP servers require --command.");
-    if (transport !== "stdio" && !args.url) throw new Error(`${transport} MCP servers require --url.`);
+    if (transport === "stdio" && commandParts.length === 0)
+      throw new Error("stdio MCP servers require --command.");
+    if (transport !== "stdio" && !args.url)
+      throw new Error(`${transport} MCP servers require --url.`);
     const server = MCPSettingsManager.addServer({
       name,
       enabled: true,
@@ -1408,19 +1563,33 @@ function mcpSettingsCommand(args: DirectRunArgs): number {
         ? { command: commandParts[0], args: commandParts.slice(1), cwd: path.resolve(args.cwd) }
         : { url: args.url }),
     });
-    writeEvent(args, { type: "mcp_server_added", server }, `Added MCP server ${server.name} (${server.id}).`);
+    writeEvent(
+      args,
+      { type: "mcp_server_added", server },
+      `Added MCP server ${server.name} (${server.id}).`,
+    );
     return 0;
   }
   const id = args.name || args.prompt || "";
   if (!id) throw new Error("Usage: cowork mcp remove|enable|disable <serverId>");
   if (args.command === "mcp-remove") {
     const removed = MCPSettingsManager.removeServer(id);
-    writeEvent(args, { type: "mcp_server_removed", id, removed }, removed ? `Removed MCP server ${id}.` : `MCP server not found: ${id}.`);
+    writeEvent(
+      args,
+      { type: "mcp_server_removed", id, removed },
+      removed ? `Removed MCP server ${id}.` : `MCP server not found: ${id}.`,
+    );
     return removed ? 0 : 1;
   }
   const enabled = args.command === "mcp-enable";
   const server = MCPSettingsManager.toggleServer(id, enabled);
-  writeEvent(args, { type: "mcp_server_updated", id, enabled, server }, server ? `${enabled ? "Enabled" : "Disabled"} MCP server ${id}.` : `MCP server not found: ${id}.`);
+  writeEvent(
+    args,
+    { type: "mcp_server_updated", id, enabled, server },
+    server
+      ? `${enabled ? "Enabled" : "Disabled"} MCP server ${id}.`
+      : `MCP server not found: ${id}.`,
+  );
   return server ? 0 : 1;
 }
 
@@ -1430,7 +1599,13 @@ async function mcpTestCommand(args: DirectRunArgs): Promise<number> {
   const target = args.name || args.prompt || "";
   if (target) {
     const result = await manager.testServer(target);
-    writeEvent(args, { type: "mcp_test", id: target, ...result }, result.success ? `MCP server ${target} connected. tools=${result.tools || 0}` : `MCP server ${target} failed: ${result.error}`);
+    writeEvent(
+      args,
+      { type: "mcp_test", id: target, ...result },
+      result.success
+        ? `MCP server ${target} connected. tools=${result.tools || 0}`
+        : `MCP server ${target} failed: ${result.error}`,
+    );
     return result.success ? 0 : 1;
   }
   const statuses = manager.getStatus();
@@ -1438,7 +1613,12 @@ async function mcpTestCommand(args: DirectRunArgs): Promise<number> {
     args,
     { type: "mcp_status", statuses },
     statuses.length
-      ? statuses.map((status) => `${status.id}  ${status.name}  ${status.status}  tools=${status.tools.length}${status.error ? `  error=${status.error}` : ""}`).join("\n")
+      ? statuses
+          .map(
+            (status) =>
+              `${status.id}  ${status.name}  ${status.status}  tools=${status.tools.length}${status.error ? `  error=${status.error}` : ""}`,
+          )
+          .join("\n")
       : "No MCP servers configured.",
   );
   return statuses.some((status) => status.status === "error") ? 1 : 0;
@@ -1453,19 +1633,33 @@ async function skillsCommand(skillRepo: SkillRepository, args: DirectRunArgs): P
     writeEvent(
       args,
       { type: "skills", skills: limited, summary: status.summary, databaseSkills: dbSkills },
-      limited.length ? limited.map((skill) => `${skill.id}  ${skill.name}  ${skill.source}  ${skill.category || "uncategorized"}`).join("\n") : "No local skills registered.",
+      limited.length
+        ? limited
+            .map(
+              (skill) =>
+                `${skill.id}  ${skill.name}  ${skill.source}  ${skill.category || "uncategorized"}`,
+            )
+            .join("\n")
+        : "No local skills registered.",
     );
     return 0;
   }
   if (args.command === "skills-info") {
     const query = (args.name || args.prompt || "").toLowerCase();
     if (!query) throw new Error("Usage: cowork skills info <skillId-or-name>");
-    const skill = skills.find((candidate) => candidate.id === query || candidate.name.toLowerCase() === query || candidate.name.toLowerCase().includes(query));
+    const skill = skills.find(
+      (candidate) =>
+        candidate.id === query ||
+        candidate.name.toLowerCase() === query ||
+        candidate.name.toLowerCase().includes(query),
+    );
     if (!skill) throw new Error(`Skill not found: ${query}`);
     writeEvent(args, { type: "skill", skill }, JSON.stringify(skill, null, 2));
     return 0;
   }
-  const invalid = skills.filter((skill) => !skill.id || !skill.name || (!skill.prompt && !skill.filePath));
+  const invalid = skills.filter(
+    (skill) => !skill.id || !skill.name || (!skill.prompt && !skill.filePath),
+  );
   writeEvent(
     args,
     { type: "skills_audit", summary: status.summary, invalid, databaseSkills: dbSkills },
@@ -1482,11 +1676,19 @@ function modelsCommand(modelRepo: LLMModelRepository, args: DirectRunArgs): numb
   const dbModels = modelRepo.findAll();
   writeEvent(
     args,
-    { type: "models", currentProvider: status.currentProvider, currentModel: status.currentModel, models: configuredModels, databaseModels: dbModels },
+    {
+      type: "models",
+      currentProvider: status.currentProvider,
+      currentModel: status.currentModel,
+      models: configuredModels,
+      databaseModels: dbModels,
+    },
     [
       `Current provider: ${status.currentProvider}`,
       `Current model: ${status.currentModel || "default"}`,
-      ...configuredModels.slice(0, args.limit || 100).map((model) => `${model.key}  ${model.displayName || model.key}`),
+      ...configuredModels
+        .slice(0, args.limit || 100)
+        .map((model) => `${model.key}  ${model.displayName || model.key}`),
       ...(dbModels.length ? [`Database model presets: ${dbModels.length}`] : []),
     ].join("\n"),
   );
@@ -1501,17 +1703,33 @@ function providerFallbackCommand(args: DirectRunArgs): number {
       args,
       { type: "provider_fallbacks", fallbackProviders: fallbacks },
       fallbacks.length
-        ? fallbacks.map((fallback: Any, index: number) => `${index + 1}. ${fallback.providerType}${fallback.modelKey ? ` (${fallback.modelKey})` : ""}`).join("\n")
+        ? fallbacks
+            .map(
+              (fallback: Any, index: number) =>
+                `${index + 1}. ${fallback.providerType}${fallback.modelKey ? ` (${fallback.modelKey})` : ""}`,
+            )
+            .join("\n")
         : "No global provider fallbacks configured.",
     );
     return 0;
   }
   if (args.command === "providers-fallback-add") {
-    if (!args.providerType) throw new Error("Usage: cowork providers fallback add <provider> [--model <model>]");
-    const next = [...fallbacks, { providerType: normalizeProviderType(args.providerType), ...(args.model ? { modelKey: args.model } : {}) }];
+    if (!args.providerType)
+      throw new Error("Usage: cowork providers fallback add <provider> [--model <model>]");
+    const next = [
+      ...fallbacks,
+      {
+        providerType: normalizeProviderType(args.providerType),
+        ...(args.model ? { modelKey: args.model } : {}),
+      },
+    ];
     settings.fallbackProviders = next;
     LLMProviderFactory.saveSettings(settings as ReturnType<typeof LLMProviderFactory.loadSettings>);
-    writeEvent(args, { type: "provider_fallback_added", fallbackProviders: next }, `Added fallback provider ${args.providerType}.`);
+    writeEvent(
+      args,
+      { type: "provider_fallback_added", fallbackProviders: next },
+      `Added fallback provider ${args.providerType}.`,
+    );
     return 0;
   }
   const provider = normalizeProviderType(args.providerType || args.name || args.prompt || "");
@@ -1519,13 +1737,19 @@ function providerFallbackCommand(args: DirectRunArgs): number {
   const next = fallbacks.filter((fallback: Any) => fallback.providerType !== provider);
   settings.fallbackProviders = next;
   LLMProviderFactory.saveSettings(settings as ReturnType<typeof LLMProviderFactory.loadSettings>);
-  writeEvent(args, { type: "provider_fallback_removed", provider, fallbackProviders: next }, `Removed fallback provider ${provider}.`);
+  writeEvent(
+    args,
+    { type: "provider_fallback_removed", provider, fallbackProviders: next },
+    `Removed fallback provider ${provider}.`,
+  );
   return fallbacks.length === next.length ? 1 : 0;
 }
 
 async function createBackup(dbManager: DatabaseManager, args: DirectRunArgs): Promise<number> {
   if (args.includeSecrets && !args.yes) {
-    throw new Error("Refusing to export secrets without --yes. Re-run with --include-secrets --yes if you really need them.");
+    throw new Error(
+      "Refusing to export secrets without --yes. Re-run with --include-secrets --yes if you really need them.",
+    );
   }
   const db = dbManager.getDatabase();
   const payload = {
@@ -1536,16 +1760,36 @@ async function createBackup(dbManager: DatabaseManager, args: DirectRunArgs): Pr
     contentMode: args.includeSecrets ? "full_sensitive" : "redacted_metadata",
     userData: getUserDataDir(),
     workspaces: new WorkspaceRepository(db).findAll(),
-    tasks: sanitizeTasksForBackup(new TaskRepository(db).findAll(args.limit || 500), Boolean(args.includeSecrets)),
-    approvals: sanitizeApprovalsForBackup(new ApprovalRepository(db).findPending(1000), Boolean(args.includeSecrets)),
+    tasks: sanitizeTasksForBackup(
+      new TaskRepository(db).findAll(args.limit || 500),
+      Boolean(args.includeSecrets),
+    ),
+    approvals: sanitizeApprovalsForBackup(
+      new ApprovalRepository(db).findPending(1000),
+      Boolean(args.includeSecrets),
+    ),
     providers: redactObject(LLMProviderFactory.loadSettings(), !args.includeSecrets),
     tools: BuiltinToolsSettingsManager.loadSettings(),
-    mcp: sanitizeMcpForBackup(args.includeSecrets ? MCPSettingsManager.loadSettings() : MCPSettingsManager.getSettingsForDisplay(), Boolean(args.includeSecrets)),
+    mcp: sanitizeMcpForBackup(
+      args.includeSecrets
+        ? MCPSettingsManager.loadSettings()
+        : MCPSettingsManager.getSettingsForDisplay(),
+      Boolean(args.includeSecrets),
+    ),
     skills: new SkillRepository(db).findAll(),
   };
-  const output = args.output || path.resolve(process.cwd(), `cowork-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+  const output =
+    args.output ||
+    path.resolve(
+      process.cwd(),
+      `cowork-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+    );
   await fs.writeFile(path.resolve(output), JSON.stringify(payload, null, 2));
-  writeEvent(args, { type: "backup_created", output: path.resolve(output) }, `Created backup: ${path.resolve(output)}`);
+  writeEvent(
+    args,
+    { type: "backup_created", output: path.resolve(output) },
+    `Created backup: ${path.resolve(output)}`,
+  );
   return 0;
 }
 
@@ -1563,13 +1807,32 @@ async function restoreBackup(args: DirectRunArgs): Promise<number> {
     hasMcp: Boolean(parsed.mcp),
   };
   if (args.dryRun || !args.yes) {
-    writeEvent(args, { type: "backup_restore_preview", input: path.resolve(input), summary, requiresYes: true }, `Backup is valid. Restore preview: ${JSON.stringify(summary)}. Re-run with --yes to restore settings.`);
+    writeEvent(
+      args,
+      { type: "backup_restore_preview", input: path.resolve(input), summary, requiresYes: true },
+      `Backup is valid. Restore preview: ${JSON.stringify(summary)}. Re-run with --yes to restore settings.`,
+    );
     return args.dryRun ? 0 : 1;
   }
-  if (parsed.providers) LLMProviderFactory.saveSettings(LLMSettingsSchema.parse(parsed.providers) as ReturnType<typeof LLMProviderFactory.loadSettings>);
-  if (parsed.tools) BuiltinToolsSettingsManager.saveSettings(validateBuiltinToolsSettings(parsed.tools));
-  if (parsed.mcp) MCPSettingsManager.saveSettings(disableRestoredMcpServers(MCPSettingsSchema.parse(parsed.mcp)) as ReturnType<typeof MCPSettingsManager.loadSettings>);
-  writeEvent(args, { type: "backup_restored", input: path.resolve(input), summary }, "Restored provider, tool, and MCP settings from backup.");
+  if (parsed.providers)
+    LLMProviderFactory.saveSettings(
+      LLMSettingsSchema.parse(parsed.providers) as ReturnType<
+        typeof LLMProviderFactory.loadSettings
+      >,
+    );
+  if (parsed.tools)
+    BuiltinToolsSettingsManager.saveSettings(validateBuiltinToolsSettings(parsed.tools));
+  if (parsed.mcp)
+    MCPSettingsManager.saveSettings(
+      disableRestoredMcpServers(MCPSettingsSchema.parse(parsed.mcp)) as ReturnType<
+        typeof MCPSettingsManager.loadSettings
+      >,
+    );
+  writeEvent(
+    args,
+    { type: "backup_restored", input: path.resolve(input), summary },
+    "Restored provider, tool, and MCP settings from backup.",
+  );
   return 0;
 }
 
@@ -1580,17 +1843,29 @@ function securityAuditCommand(db: Database.Database, args: DirectRunArgs): numbe
   const permissionRepo = new WorkspacePermissionRuleRepository(db);
   const rules = workspaces.flatMap((workspace) => permissionRepo.listByWorkspaceId(workspace.id));
   const warnings: string[] = [];
-  if (providerStatus.providers.filter((provider) => provider.configured).length === 0) warnings.push("No configured LLM provider.");
-  if (tools.categories.shell?.enabled && tools.runCommandApprovalMode === "single_bundle") warnings.push("Shell tools are enabled with bundled approval mode.");
+  if (providerStatus.providers.filter((provider) => provider.configured).length === 0)
+    warnings.push("No configured LLM provider.");
+  if (tools.categories.shell?.enabled && tools.runCommandApprovalMode === "single_bundle")
+    warnings.push("Shell tools are enabled with bundled approval mode.");
   if (tools.categories.computer_use?.enabled) warnings.push("Computer-use tools are enabled.");
-  if (Object.keys(tools.toolAutoApprove || {}).length > 0) warnings.push("Some tools have auto-approval overrides.");
+  if (Object.keys(tools.toolAutoApprove || {}).length > 0)
+    warnings.push("Some tools have auto-approval overrides.");
   const allowRules = rules.filter((rule) => rule.effect === "allow");
-  if (allowRules.length > 0) warnings.push(`${allowRules.length} workspace allow rule(s) configured.`);
-  const payload = { type: "security_audit", ok: warnings.length === 0, warnings, providerStatus, permissionRules: rules.length };
+  if (allowRules.length > 0)
+    warnings.push(`${allowRules.length} workspace allow rule(s) configured.`);
+  const payload = {
+    type: "security_audit",
+    ok: warnings.length === 0,
+    warnings,
+    providerStatus,
+    permissionRules: rules.length,
+  };
   writeEvent(
     args,
     payload,
-    warnings.length ? ["Security audit warnings:", ...warnings.map((warning) => `- ${warning}`)].join("\n") : "Security audit passed with no local warnings.",
+    warnings.length
+      ? ["Security audit warnings:", ...warnings.map((warning) => `- ${warning}`)].join("\n")
+      : "Security audit passed with no local warnings.",
   );
   return warnings.length ? 1 : 0;
 }
@@ -1602,13 +1877,17 @@ function securityRulesListCommand(db: Database.Database, args: DirectRunArgs): n
     ? workspaces.filter((workspace) => workspace.id === args.workspaceId)
     : workspaces;
   const rules = workspaceRows.flatMap((workspace) =>
-    repo.listByWorkspaceId(workspace.id).map((rule) => ({ ...rule, workspaceName: workspace.name, workspacePath: workspace.path })),
+    repo
+      .listByWorkspaceId(workspace.id)
+      .map((rule) => ({ ...rule, workspaceName: workspace.name, workspacePath: workspace.path })),
   );
   writeEvent(
     args,
     { type: "security_rules", rules },
     rules.length
-      ? rules.map((rule) => `${rule.id}  ${rule.effect}  ${rule.scope.kind}  ${rule.workspaceName}`).join("\n")
+      ? rules
+          .map((rule) => `${rule.id}  ${rule.effect}  ${rule.scope.kind}  ${rule.workspaceName}`)
+          .join("\n")
       : "No workspace permission rules found.",
   );
   return 0;
@@ -1618,27 +1897,225 @@ function securityRulesRemoveCommand(db: Database.Database, args: DirectRunArgs):
   const id = args.ruleId || args.name || args.prompt || "";
   if (!id) throw new Error("Usage: cowork security rules remove <ruleId> --yes");
   if (!args.yes) {
-    writeEvent(args, { type: "security_rule_remove_preview", id, requiresYes: true }, `Re-run with --yes to remove permission rule ${id}.`);
+    writeEvent(
+      args,
+      { type: "security_rule_remove_preview", id, requiresYes: true },
+      `Re-run with --yes to remove permission rule ${id}.`,
+    );
     return 1;
   }
   const repo = new WorkspacePermissionRuleRepository(db);
   const removed = repo.deleteById(id);
-  writeEvent(args, { type: "security_rule_removed", id, removed }, removed ? `Removed permission rule ${id}.` : `Permission rule not found: ${id}.`);
+  writeEvent(
+    args,
+    { type: "security_rule_removed", id, removed },
+    removed ? `Removed permission rule ${id}.` : `Permission rule not found: ${id}.`,
+  );
   return removed ? 0 : 1;
+}
+
+async function agentSecurityCommand(db: Database.Database, args: DirectRunArgs): Promise<number> {
+  if (requiresAgentSecurityConfirmation(args.command) && !args.yes) {
+    writeEvent(
+      args,
+      { type: "agent_security_confirmation_required", command: args.command, requiresYes: true },
+      `Refusing to run ${args.command} without --yes.`,
+    );
+    return 1;
+  }
+  const service = NumbatService.initialize(db);
+  if (args.command === "agent-security-status") {
+    const status = await service.getStatus(args.refresh);
+    writeEvent(
+      args,
+      { type: "agent_security_status", ...status },
+      [
+        `Agent security: ${status.enabled ? status.mode : "disabled"}`,
+        `Health: ${status.health}`,
+        `Runtime: ${status.binaryVersion || "unavailable"}`,
+        ...(status.lastError ? [`Error: ${status.lastError}`] : []),
+      ].join("\n"),
+    );
+    return status.enabled && status.health === "unavailable" ? 1 : 0;
+  }
+  if (args.command === "agent-security-findings") {
+    const findings = service.listFindings({
+      taskId: args.taskId,
+      limit: args.limit || 100,
+    });
+    writeEvent(
+      args,
+      { type: "agent_security_findings", findings },
+      findings.length
+        ? findings
+            .map(
+              (finding) =>
+                `${finding.severity.padEnd(8)} ${finding.status.padEnd(14)} ${finding.ruleId}  ${finding.title}`,
+            )
+            .join("\n")
+        : "No agent security findings.",
+    );
+    return 0;
+  }
+  if (args.command === "agent-security-finding-update") {
+    const findingId = args.ruleId || "";
+    const status = args.category as AgentSecurityFindingStatus;
+    if (!findingId || !["open", "acknowledged", "resolved", "false_positive"].includes(status)) {
+      throw new Error(
+        "Usage: cowork security finding <findingId> open|acknowledged|resolved|false_positive",
+      );
+    }
+    const finding = service.updateFindingStatus(findingId, status);
+    if (!finding) throw new Error(`Agent security finding not found: ${findingId}`);
+    writeEvent(
+      args,
+      { type: "agent_security_finding_updated", finding },
+      `Updated ${findingId} to ${status}.`,
+    );
+    return 0;
+  }
+  if (args.command === "agent-security-decisions") {
+    const decisions = service.listDecisions(args.taskId, args.limit || 100);
+    writeEvent(
+      args,
+      { type: "agent_security_decisions", decisions },
+      decisions.length
+        ? decisions
+            .map(
+              (decision) =>
+                `${decision.decision.padEnd(11)} ${decision.hostOutcome || "unknown"}  ${decision.ruleIds.join(",") || "no rule"}  ${decision.decisionId}`,
+            )
+            .join("\n")
+        : "No agent security decisions.",
+    );
+    return 0;
+  }
+  if (args.command === "agent-security-inventory") {
+    const inventory = service.listInventory();
+    writeEvent(
+      args,
+      { type: "agent_security_inventory", inventory },
+      formatAgentSecurityInventory(inventory),
+    );
+    return 0;
+  }
+  if (args.command === "agent-security-inventory-refresh") {
+    const inventory = await service.refreshInventory();
+    writeEvent(
+      args,
+      { type: "agent_security_inventory", inventory },
+      formatAgentSecurityInventory(inventory),
+    );
+    return 0;
+  }
+  if (args.command === "agent-security-scan") {
+    const result = await service.runScan();
+    writeEvent(
+      args,
+      { type: "agent_security_scan", ...result },
+      `Numbat scan completed with ${result.findings} finding(s).\nRecords: ${result.outputFile}`,
+    );
+    return 0;
+  }
+  if (args.command === "agent-security-check-rules") {
+    const result = await service.checkRules();
+    writeEvent(
+      args,
+      { type: "agent_security_rules_check", ...result },
+      result.output || "Numbat rules passed validation.",
+    );
+    return 0;
+  }
+  if (args.command === "agent-security-prune") {
+    const result = service.prune();
+    writeEvent(
+      args,
+      { type: "agent_security_prune", ...result },
+      `Pruned ${result.findings} findings, ${result.decisions} decisions, and ${result.diagnostics} diagnostics.`,
+    );
+    return 0;
+  }
+  if (args.command === "agent-security-case-build") {
+    const caseId = args.name || "";
+    const taskId = args.taskId || "";
+    if (!caseId || !taskId) {
+      throw new Error("Usage: cowork security case build <caseId> --task-id <taskId>");
+    }
+    const result = await service.buildCase(caseId, taskId);
+    writeEvent(
+      args,
+      { type: "agent_security_case_built", ...result },
+      `Built case bundle ${result.bundleName}\n${result.bundlePath}`,
+    );
+    return 0;
+  }
+  if (args.command === "agent-security-case-verify") {
+    const bundleName = args.name || "";
+    if (!bundleName) {
+      throw new Error("Usage: cowork security case verify <bundleName>");
+    }
+    const result = await service.verifyCase(bundleName);
+    writeEvent(
+      args,
+      { type: "agent_security_case_verified", ...result },
+      result.output || `Verified case bundle ${result.bundleName}.`,
+    );
+    return 0;
+  }
+  const agent = args.name || "";
+  if (!agent) {
+    throw new Error("Usage: cowork security hooks status|install|uninstall <agent> [--yes]");
+  }
+  const result =
+    args.command === "agent-security-hook-install"
+      ? await service.installHook(agent)
+      : args.command === "agent-security-hook-uninstall"
+        ? await service.uninstallHook(agent)
+        : await service.hookStatus(agent);
+  writeEvent(
+    args,
+    { type: args.command.replaceAll("-", "_"), agent, ...result },
+    result.output || `${args.command} completed for ${agent}.`,
+  );
+  return 0;
+}
+
+function formatAgentSecurityInventory(
+  inventory: ReturnType<NumbatService["listInventory"]>,
+): string {
+  return inventory.length
+    ? inventory
+        .map(
+          (agent) =>
+            `${agent.agentId.padEnd(14)} ${agent.present ? "detected" : "absent"}  ${agent.wired ? "hook installed" : "hook not installed"}${agent.liveMode ? `  ${agent.liveMode}` : ""}`,
+        )
+        .join("\n")
+    : "No external agent inventory is available.";
 }
 
 function promptCommand(args: DirectRunArgs): number {
   const text = args.prompt || "";
-  if (!text) throw new Error(`Usage: cowork ${args.command === "prompt-size" ? "prompt-size" : "prompt-preview"} <prompt text>`);
+  if (!text)
+    throw new Error(
+      `Usage: cowork ${args.command === "prompt-size" ? "prompt-size" : "prompt-preview"} <prompt text>`,
+    );
   const chars = text.length;
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   const estimatedTokens = Math.max(1, Math.ceil(chars / 4));
-  const payload = { type: args.command, chars, words, estimatedTokens, preview: truncate(text, 500) };
+  const payload = {
+    type: args.command,
+    chars,
+    words,
+    estimatedTokens,
+    preview: truncate(text, 500),
+  };
   writeEvent(
     args,
     payload,
     args.command === "prompt-preview"
-      ? [`Chars: ${chars}`, `Estimated tokens: ${estimatedTokens}`, "", truncate(text, 1200)].join("\n")
+      ? [`Chars: ${chars}`, `Estimated tokens: ${estimatedTokens}`, "", truncate(text, 1200)].join(
+          "\n",
+        )
       : `Chars: ${chars}\nWords: ${words}\nEstimated tokens: ${estimatedTokens}`,
   );
   return 0;
@@ -1733,13 +2210,15 @@ function configureLocalProvider(args: DirectRunArgs): { providerType: string; mo
       break;
     }
     default: {
-      const customProviders = settings.customProviders && typeof settings.customProviders === "object"
-        ? settings.customProviders
-        : {};
+      const customProviders =
+        settings.customProviders && typeof settings.customProviders === "object"
+          ? settings.customProviders
+          : {};
       settings.customProviders = customProviders;
-      const node = customProviders[providerType] && typeof customProviders[providerType] === "object"
-        ? customProviders[providerType]
-        : {};
+      const node =
+        customProviders[providerType] && typeof customProviders[providerType] === "object"
+          ? customProviders[providerType]
+          : {};
       customProviders[providerType] = node;
       if (apiKey) node.apiKey = apiKey;
       if (model) node.model = model;
@@ -1777,16 +2256,15 @@ function getCliOwnership(task: Task | undefined | null): CliTaskOwnership | unde
 
 function findStaleCliTasks(taskRepo: TaskRepository, limit: number): Task[] {
   const now = Date.now();
-  return taskRepo.findAll(limit)
-    .filter((task) => {
-      if (isTerminalTaskStatus(task.status)) return false;
-      const cli = getCliOwnership(task);
-      if (!cli || cli.mode !== "attached") return false;
-      if (cli.endedAt) return false;
-      if (isPidAlive(cli.pid)) return false;
-      const lastSeenAt = cli.lastSeenAt || cli.startedAt || task.updatedAt || task.createdAt;
-      return now - lastSeenAt > 30_000;
-    });
+  return taskRepo.findAll(limit).filter((task) => {
+    if (isTerminalTaskStatus(task.status)) return false;
+    const cli = getCliOwnership(task);
+    if (!cli || cli.mode !== "attached") return false;
+    if (cli.endedAt) return false;
+    if (isPidAlive(cli.pid)) return false;
+    const lastSeenAt = cli.lastSeenAt || cli.startedAt || task.updatedAt || task.createdAt;
+    return now - lastSeenAt > 30_000;
+  });
 }
 
 function markTaskCancelled(
@@ -1917,8 +2395,12 @@ function sessionMetadataPath(): string {
 
 function countTasksByStatus(db: Database.Database): Record<string, number> {
   try {
-    const rows = db.prepare("SELECT status, COUNT(1) as count FROM tasks GROUP BY status").all() as Any[];
-    return Object.fromEntries(rows.map((row) => [String(row.status || "unknown"), Number(row.count || 0)]));
+    const rows = db
+      .prepare("SELECT status, COUNT(1) as count FROM tasks GROUP BY status")
+      .all() as Any[];
+    return Object.fromEntries(
+      rows.map((row) => [String(row.status || "unknown"), Number(row.count || 0)]),
+    );
   } catch {
     return {};
   }
@@ -1958,7 +2440,10 @@ async function writeDetachedReadyFile(file: string, task: Task): Promise<void> {
 async function readPackageInfo(): Promise<{ name: string; version: string }> {
   const root = await findPackageRoot();
   try {
-    const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8")) as { name?: string; version?: string };
+    const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8")) as {
+      name?: string;
+      version?: string;
+    };
     return { name: pkg.name || "cowork-os", version: pkg.version || "dev" };
   } catch {
     return { name: "cowork-os", version: "dev" };
@@ -1985,7 +2470,12 @@ async function findPackageRoot(): Promise<string> {
 
 function normalizeMcpTransport(value: string): "stdio" | "sse" | "websocket" | "streamable-http" {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "stdio" || normalized === "sse" || normalized === "websocket" || normalized === "streamable-http") {
+  if (
+    normalized === "stdio" ||
+    normalized === "sse" ||
+    normalized === "websocket" ||
+    normalized === "streamable-http"
+  ) {
     return normalized;
   }
   if (normalized === "http") return "streamable-http";
@@ -2066,7 +2556,10 @@ function sanitizeTasksForBackup(tasks: Task[], includeSensitiveContent: boolean)
   }));
 }
 
-function sanitizeApprovalsForBackup(approvals: unknown[], includeSensitiveContent: boolean): unknown[] {
+function sanitizeApprovalsForBackup(
+  approvals: unknown[],
+  includeSensitiveContent: boolean,
+): unknown[] {
   if (includeSensitiveContent) return approvals;
   return approvals.map((approval) => {
     if (!approval || typeof approval !== "object") return approval;
@@ -2203,9 +2696,12 @@ function parseSkillMarkdownFrontmatter(text: string): Record<string, string> {
   return result;
 }
 
-function validateBuiltinToolsSettings(value: unknown): ReturnType<typeof BuiltinToolsSettingsManager.loadSettings> {
+function validateBuiltinToolsSettings(
+  value: unknown,
+): ReturnType<typeof BuiltinToolsSettingsManager.loadSettings> {
   const defaults = BuiltinToolsSettingsManager.getDefaultSettings();
-  if (!value || typeof value !== "object") throw new Error("Invalid built-in tools settings in backup.");
+  if (!value || typeof value !== "object")
+    throw new Error("Invalid built-in tools settings in backup.");
   const raw = value as Any;
   if (!raw.categories || typeof raw.categories !== "object") {
     throw new Error("Invalid built-in tools settings: missing categories.");
@@ -2217,16 +2713,23 @@ function validateBuiltinToolsSettings(value: unknown): ReturnType<typeof Builtin
       ...defaults.categories,
       ...raw.categories,
     },
-    toolOverrides: typeof raw.toolOverrides === "object" && raw.toolOverrides ? raw.toolOverrides : {},
+    toolOverrides:
+      typeof raw.toolOverrides === "object" && raw.toolOverrides ? raw.toolOverrides : {},
     toolTimeouts: typeof raw.toolTimeouts === "object" && raw.toolTimeouts ? raw.toolTimeouts : {},
-    toolAutoApprove: typeof raw.toolAutoApprove === "object" && raw.toolAutoApprove ? raw.toolAutoApprove : {},
-    runCommandApprovalMode: raw.runCommandApprovalMode === "per_command" ? "per_command" : defaults.runCommandApprovalMode,
+    toolAutoApprove:
+      typeof raw.toolAutoApprove === "object" && raw.toolAutoApprove ? raw.toolAutoApprove : {},
+    runCommandApprovalMode:
+      raw.runCommandApprovalMode === "per_command"
+        ? "per_command"
+        : defaults.runCommandApprovalMode,
     codexRuntimeMode: raw.codexRuntimeMode === "acpx" ? "acpx" : "native",
   } as ReturnType<typeof BuiltinToolsSettingsManager.loadSettings>;
 
   for (const [name, category] of Object.entries(next.categories)) {
-    if (!category || typeof category !== "object") throw new Error(`Invalid tool category in backup: ${name}`);
-    if (typeof category.enabled !== "boolean") throw new Error(`Invalid enabled flag for tool category: ${name}`);
+    if (!category || typeof category !== "object")
+      throw new Error(`Invalid tool category in backup: ${name}`);
+    if (typeof category.enabled !== "boolean")
+      throw new Error(`Invalid enabled flag for tool category: ${name}`);
     if (!["high", "normal", "low"].includes(category.priority)) {
       throw new Error(`Invalid priority for tool category: ${name}`);
     }
@@ -2299,7 +2802,7 @@ function parseTimestampMs(raw: unknown): number | undefined {
 
 function formatDoctor(payload: Record<string, unknown>): string {
   const providers = Array.isArray(payload.configuredProviders)
-    ? payload.configuredProviders as Array<{ name?: string; type?: string }>
+    ? (payload.configuredProviders as Array<{ name?: string; type?: string }>)
     : [];
   return [
     "CoWork CLI doctor",
@@ -2363,11 +2866,7 @@ function writeLine(args: DirectRunArgs, message: string): void {
   }
 }
 
-function writeEvent(
-  args: DirectRunArgs,
-  event: Record<string, unknown>,
-  text: string,
-): void {
+function writeEvent(args: DirectRunArgs, event: Record<string, unknown>, text: string): void {
   if (args.json) {
     process.stdout.write(`${JSON.stringify(event)}\n`);
   } else {
@@ -2394,9 +2893,9 @@ function stringifyMessage(value: unknown): string {
 function hasProviderEnv(): boolean {
   return Boolean(
     process.env.OPENAI_API_KEY ||
-      process.env.ANTHROPIC_API_KEY ||
-      process.env.GEMINI_API_KEY ||
-      process.env.OPENROUTER_API_KEY,
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.OPENROUTER_API_KEY,
   );
 }
 
@@ -2478,10 +2977,14 @@ function shouldRunEntrypoint(): boolean {
 }
 
 if (shouldRunEntrypoint()) {
-  main().then((code) => {
-    process.exit(code);
-  }).catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.stack || error.message : String(error)}\n`);
-    process.exit(1);
-  });
+  main()
+    .then((code) => {
+      process.exit(code);
+    })
+    .catch((error) => {
+      process.stderr.write(
+        `${error instanceof Error ? error.stack || error.message : String(error)}\n`,
+      );
+      process.exit(1);
+    });
 }

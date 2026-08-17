@@ -1,53 +1,54 @@
 {
   "name": "cowork-os",
   "version": "0.5.50",
+  "private": false,
   "description": "CoWork OS - GUI-first, CLI-capable local AI super app and everything app for coding, email, agents, documents, spreadsheets, presentations, web design, automations, and agentic work",
-  "overrides": {
-    "@whiskeysockets/baileys": {
-      "libsignal": "https://codeload.github.com/WhiskeySockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67",
-      "@whiskeysockets/eslint-config": "1.0.0"
-    }
-  },
-  "main": "dist/electron/electron/main.js",
-  "author": "CoWork OS Contributors",
-  "license": "MIT",
+  "keywords": [
+    "agentic-os",
+    "ai-assistant",
+    "ai-automation",
+    "ai-gateway",
+    "ai-workbench",
+    "artifact-workbench",
+    "byok",
+    "claude",
+    "coding-agent",
+    "developer-tools",
+    "documents",
+    "electron",
+    "everything-app",
+    "gemini",
+    "gpt",
+    "knowledge-work",
+    "llm",
+    "local-first",
+    "mcp",
+    "office-productivity",
+    "personal-ai",
+    "presentations",
+    "security",
+    "self-hosted",
+    "spreadsheets",
+    "web-design",
+    "web-pages"
+  ],
   "homepage": "https://github.com/CoWork-OS/CoWork-OS#readme",
+  "bugs": {
+    "url": "https://github.com/CoWork-OS/CoWork-OS/issues"
+  },
+  "license": "MIT",
+  "author": "CoWork OS Contributors",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/CoWork-OS/CoWork-OS.git"
   },
-  "bugs": {
-    "url": "https://github.com/CoWork-OS/CoWork-OS/issues"
+  "bin": {
+    "cowork": "bin/cowork-cli.js",
+    "cowork-os": "bin/cowork.js",
+    "coworkctl": "bin/coworkctl.js",
+    "coworkd": "bin/coworkd.js",
+    "coworkd-node": "bin/coworkd-node.js"
   },
-  "keywords": [
-    "agentic-os",
-    "everything-app",
-    "ai-workbench",
-    "personal-ai",
-    "coding-agent",
-    "knowledge-work",
-    "web-design",
-    "artifact-workbench",
-    "documents",
-    "spreadsheets",
-    "presentations",
-    "web-pages",
-    "developer-tools",
-    "office-productivity",
-    "ai-assistant",
-    "ai-automation",
-    "local-first",
-    "byok",
-    "self-hosted",
-    "ai-gateway",
-    "mcp",
-    "llm",
-    "claude",
-    "gpt",
-    "gemini",
-    "electron",
-    "security"
-  ],
   "files": [
     "dist",
     "src",
@@ -70,21 +71,7 @@
     "tsconfig.node.json",
     "vite.config.ts"
   ],
-  "bin": {
-    "cowork": "bin/cowork-cli.js",
-    "cowork-os": "bin/cowork.js",
-    "coworkctl": "bin/coworkctl.js",
-    "coworkd": "bin/coworkd.js",
-    "coworkd-node": "bin/coworkd-node.js"
-  },
-  "engines": {
-    "node": ">=24.0.0"
-  },
-  "private": false,
-  "bundleDependencies": [
-    "@mariozechner/pi-ai",
-    "@whiskeysockets/baileys"
-  ],
+  "main": "dist/electron/electron/main.js",
   "scripts": {
     "postinstall": "node scripts/codesign_electron_dev.mjs",
     "setup": "node scripts/setup.mjs",
@@ -102,6 +89,9 @@
     "tunnel-relay:dev": "npm run build:electron && node dist/electron/electron/tunnels/relay.js",
     "tunnel-relay:test": "npm run build:electron && node scripts/smoke-secure-mcp-tunnel.mjs",
     "build": "npm run build:react && npm run build:healthkit-bridge && npm run build:location-helper-macos && npm run build:location-helpers && concurrently -n electron,daemon,cli \"npm run build:electron\" \"npm run build:daemon\" \"npm run build:cli\" && npm run build:connectors",
+    "build:with-numbat": "npm run numbat:build && npm run build",
+    "numbat:build": "node scripts/build_numbat_runtime.mjs",
+    "numbat:verify": "node scripts/build_numbat_runtime.mjs --verify-only",
     "build:react": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:daemon": "tsc -p tsconfig.daemon.json",
@@ -112,14 +102,14 @@
     "adoption:collect": "node scripts/collect-public-adoption-stats.mjs",
     "adoption:render": "node scripts/render-public-adoption-summary.mjs",
     "adoption:update": "npm run adoption:collect && npm run adoption:render",
-    "package": "npm run build && node scripts/run_electron_builder.mjs --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
-    "package:win:x64": "node scripts/run_electron_builder.mjs --win --x64 --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
+    "package": "npm run build:with-numbat && node scripts/run_electron_builder.mjs --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
+    "package:win:x64": "npm run numbat:build -- --target=win32-x64 && node scripts/run_electron_builder.mjs --win --x64 --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
     "package:mac": "node scripts/package-mac-with-env.mjs",
     "package:mac:unsigned": "cross-env COWORK_MAC_UNSIGNED=1 node scripts/package-mac-with-env.mjs",
     "package:desktop:smoke": "node scripts/smoke-desktop-artifacts.mjs",
     "package:mac:smoke": "node scripts/smoke-desktop-artifacts.mjs --platform=mac",
     "package:win:smoke": "node scripts/smoke-desktop-artifacts.mjs --platform=win",
-    "package:linux:server": "npm run build:daemon && npm run build:connectors && node scripts/package-linux-server.mjs",
+    "package:linux:server": "npm run numbat:build -- --target=linux-x64 && npm run build:daemon && npm run build:connectors && node scripts/package-linux-server.mjs",
     "package:linux:server:smoke": "node scripts/smoke-linux-server-package.mjs",
     "fmt": "oxfmt --write src",
     "fmt:check": "oxfmt --check src",
@@ -208,9 +198,6 @@
     "ws": "^8.18.0",
     "zod": "^4.3.6"
   },
-  "optionalDependencies": {
-    "better-sqlite3": "12.6.2"
-  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
     "@types/jszip": "^3.4.1",
@@ -237,6 +224,22 @@
     "vite": "^7.3.1",
     "vite-plugin-electron": "^0.29.0",
     "vitest": "^4.0.18"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "12.6.2"
+  },
+  "bundleDependencies": [
+    "@mariozechner/pi-ai",
+    "@whiskeysockets/baileys"
+  ],
+  "overrides": {
+    "@whiskeysockets/baileys": {
+      "libsignal": "https://codeload.github.com/WhiskeySockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67",
+      "@whiskeysockets/eslint-config": "1.0.0"
+    }
+  },
+  "engines": {
+    "node": ">=24.0.0"
   },
   "build": {
     "appId": "com.cowork-os.app",
@@ -294,6 +297,13 @@
       {
         "from": "resources/computer-use",
         "to": "computer-use"
+      },
+      {
+        "from": "build/numbat",
+        "to": "numbat",
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "build/healthkit-bridge",

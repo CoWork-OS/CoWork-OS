@@ -104,58 +104,137 @@ const SlackSettings = lazySettingsPanel(() => import("./SlackSettings"), "SlackS
 const WhatsAppSettings = lazySettingsPanel(() => import("./WhatsAppSettings"), "WhatsAppSettings");
 const ImessageSettings = lazySettingsPanel(() => import("./ImessageSettings"), "ImessageSettings");
 const SignalSettings = lazySettingsPanel(() => import("./SignalSettings"), "SignalSettings");
-const MattermostSettings = lazySettingsPanel(() => import("./MattermostSettings"), "MattermostSettings");
+const MattermostSettings = lazySettingsPanel(
+  () => import("./MattermostSettings"),
+  "MattermostSettings",
+);
 const MatrixSettings = lazySettingsPanel(() => import("./MatrixSettings"), "MatrixSettings");
 const TwitchSettings = lazySettingsPanel(() => import("./TwitchSettings"), "TwitchSettings");
 const LineSettings = lazySettingsPanel(() => import("./LineSettings"), "LineSettings");
-const BlueBubblesSettings = lazySettingsPanel(() => import("./BlueBubblesSettings"), "BlueBubblesSettings");
+const BlueBubblesSettings = lazySettingsPanel(
+  () => import("./BlueBubblesSettings"),
+  "BlueBubblesSettings",
+);
 const EmailSettings = lazySettingsPanel(() => import("./EmailSettings"), "EmailSettings");
 const TeamsSettings = lazySettingsPanel(() => import("./TeamsSettings"), "TeamsSettings");
-const GoogleChatSettings = lazySettingsPanel(() => import("./GoogleChatSettings"), "GoogleChatSettings");
+const GoogleChatSettings = lazySettingsPanel(
+  () => import("./GoogleChatSettings"),
+  "GoogleChatSettings",
+);
 const FeishuSettings = lazySettingsPanel(() => import("./FeishuSettings"), "FeishuSettings");
 const WeComSettings = lazySettingsPanel(() => import("./WeComSettings"), "WeComSettings");
 const XSettings = lazySettingsPanel(() => import("./XSettings"), "XSettings");
 const SearchSettings = lazySettingsPanel(() => import("./SearchSettings"), "SearchSettings");
 const UpdateSettings = lazySettingsPanel(() => import("./UpdateSettings"), "UpdateSettings");
-const GuardrailSettings = lazySettingsPanel(() => import("./GuardrailSettings"), "GuardrailSettings");
-const PermissionSettingsPanel = lazySettingsPanel(() => import("./PermissionSettingsPanel"), "PermissionSettingsPanel");
-const AppearanceSettings = lazySettingsPanel(() => import("./AppearanceSettings"), "AppearanceSettings");
+const GuardrailSettings = lazySettingsPanel(
+  () => import("./GuardrailSettings"),
+  "GuardrailSettings",
+);
+const PermissionSettingsPanel = lazySettingsPanel(
+  () => import("./PermissionSettingsPanel"),
+  "PermissionSettingsPanel",
+);
+const AppearanceSettings = lazySettingsPanel(
+  () => import("./AppearanceSettings"),
+  "AppearanceSettings",
+);
 const QueueSettings = lazySettingsPanel(() => import("./QueueSettings"), "QueueSettings");
 const SkillsSettings = lazySettingsPanel(() => import("./SkillsSettings"), "SkillsSettings");
 const SkillHubBrowser = lazySettingsPanel(() => import("./SkillHubBrowser"), "SkillHubBrowser");
 const MCPSettings = lazySettingsPanel(() => import("./MCPSettings"), "MCPSettings");
-const ConnectorsSettings = lazySettingsPanel(() => import("./ConnectorsSettings"), "ConnectorsSettings");
-const BuiltinToolsSettings = lazySettingsPanel(() => import("./BuiltinToolsSettings"), "BuiltinToolsSettings");
-const ChronicleSettingsCard = lazySettingsPanel(() => import("./ChronicleSettings"), "ChronicleSettingsCard");
-const ComputerUseSettings = lazySettingsPanel(() => import("./ComputerUseSettings"), "ComputerUseSettings");
+const ConnectorsSettings = lazySettingsPanel(
+  () => import("./ConnectorsSettings"),
+  "ConnectorsSettings",
+);
+const BuiltinToolsSettings = lazySettingsPanel(
+  () => import("./BuiltinToolsSettings"),
+  "BuiltinToolsSettings",
+);
+const ChronicleSettingsCard = lazySettingsPanel(
+  () => import("./ChronicleSettings"),
+  "ChronicleSettingsCard",
+);
+const ComputerUseSettings = lazySettingsPanel(
+  () => import("./ComputerUseSettings"),
+  "ComputerUseSettings",
+);
 const TraySettings = lazySettingsPanel(() => import("./TraySettings"), "TraySettings");
-const ScheduledTasksSettings = lazySettingsPanel(() => import("./ScheduledTasksSettings"), "ScheduledTasksSettings");
+const ScheduledTasksSettings = lazySettingsPanel(
+  () => import("./ScheduledTasksSettings"),
+  "ScheduledTasksSettings",
+);
 const HooksSettings = lazySettingsPanel(() => import("./HooksSettings"), "HooksSettings");
-const ControlPlaneSettings = lazySettingsPanel(() => import("./ControlPlaneSettings"), "ControlPlaneSettings");
-const PersonalitySettings = lazySettingsPanel(() => import("./PersonalitySettings"), "PersonalitySettings");
+const ControlPlaneSettings = lazySettingsPanel(
+  () => import("./ControlPlaneSettings"),
+  "ControlPlaneSettings",
+);
+const PersonalitySettings = lazySettingsPanel(
+  () => import("./PersonalitySettings"),
+  "PersonalitySettings",
+);
 const NodesSettings = lazySettingsPanel(() => import("./NodesSettings"), "NodesSettings");
-const ExtensionsSettings = lazySettingsPanel(() => import("./ExtensionsSettings"), "ExtensionsSettings");
+const ExtensionsSettings = lazySettingsPanel(
+  () => import("./ExtensionsSettings"),
+  "ExtensionsSettings",
+);
 const VoiceSettings = lazySettingsPanel(() => import("./VoiceSettings"), "VoiceSettings");
-const MemoryHubSettings = lazySettingsPanel(() => import("./MemoryHubSettings"), "MemoryHubSettings");
+const MemoryHubSettings = lazySettingsPanel(
+  () => import("./MemoryHubSettings"),
+  "MemoryHubSettings",
+);
 const WorktreeSettings = lazySettingsPanel(() => import("./WorktreeSettings"), "WorktreeSettings");
-const UsageInsightsPanel = lazySettingsPanel(() => import("./UsageInsightsPanel"), "UsageInsightsPanel");
+const UsageInsightsPanel = lazySettingsPanel(
+  () => import("./UsageInsightsPanel"),
+  "UsageInsightsPanel",
+);
 const SuggestionsPanel = lazySettingsPanel(() => import("./SuggestionsPanel"), "SuggestionsPanel");
 const CustomizePanel = lazySettingsPanel(() => import("./CustomizePanel"), "CustomizePanel");
 const ProfileSettings = lazySettingsPanel(() => import("./ProfileSettings"), "ProfileSettings");
-const AdminPoliciesPanel = lazySettingsPanel(() => import("./AdminPoliciesPanel"), "AdminPoliciesPanel");
-const EventTriggersPanel = lazySettingsPanel(() => import("./EventTriggersPanel"), "EventTriggersPanel");
+const AdminPoliciesPanel = lazySettingsPanel(
+  () => import("./AdminPoliciesPanel"),
+  "AdminPoliciesPanel",
+);
+const AgentSecurityPanel = lazySettingsPanel(
+  () => import("./AgentSecurityPanel"),
+  "AgentSecurityPanel",
+);
+const EventTriggersPanel = lazySettingsPanel(
+  () => import("./EventTriggersPanel"),
+  "EventTriggersPanel",
+);
 const BriefingPanel = lazySettingsPanel(() => import("./BriefingPanel"), "BriefingPanel");
-const WebAccessSettingsPanel = lazySettingsPanel(() => import("./WebAccessSettingsPanel"), "WebAccessSettingsPanel");
+const WebAccessSettingsPanel = lazySettingsPanel(
+  () => import("./WebAccessSettingsPanel"),
+  "WebAccessSettingsPanel",
+);
 const InfraSettings = lazySettingsPanel(() => import("./InfraSettings"), "InfraSettings");
-const DigitalTwinsPanel = lazySettingsPanel(() => import("./DigitalTwinsPanel"), "DigitalTwinsPanel");
-const SubconsciousSettingsPanel = lazySettingsPanel(() => import("./SubconsciousSettingsPanel"), "SubconsciousSettingsPanel");
+const DigitalTwinsPanel = lazySettingsPanel(
+  () => import("./DigitalTwinsPanel"),
+  "DigitalTwinsPanel",
+);
+const SubconsciousSettingsPanel = lazySettingsPanel(
+  () => import("./SubconsciousSettingsPanel"),
+  "SubconsciousSettingsPanel",
+);
 const CompaniesPanel = lazySettingsPanel(() => import("./CompaniesPanel"), "CompaniesPanel");
 const HealthPanel = lazySettingsPanel(() => import("./HealthPanel"), "HealthPanel");
 const CouncilSettings = lazySettingsPanel(() => import("./CouncilSettings"), "CouncilSettings");
-const RoutineSettingsPanel = lazySettingsPanel(() => import("./RoutineSettingsPanel"), "RoutineSettingsPanel");
-const ContactIdentitySettings = lazySettingsPanel(() => import("./ContactIdentitySettings"), "ContactIdentitySettings");
-const TaskTraceDebuggerPanel = lazySettingsPanel(() => import("./TaskTraceDebuggerPanel"), "TaskTraceDebuggerPanel");
-const EverydayAgentSettingsPanel = lazySettingsPanel(() => import("./EverydayAgentPanel"), "EverydayAgentSettingsPanel");
+const RoutineSettingsPanel = lazySettingsPanel(
+  () => import("./RoutineSettingsPanel"),
+  "RoutineSettingsPanel",
+);
+const ContactIdentitySettings = lazySettingsPanel(
+  () => import("./ContactIdentitySettings"),
+  "ContactIdentitySettings",
+);
+const TaskTraceDebuggerPanel = lazySettingsPanel(
+  () => import("./TaskTraceDebuggerPanel"),
+  "TaskTraceDebuggerPanel",
+);
+const EverydayAgentSettingsPanel = lazySettingsPanel(
+  () => import("./EverydayAgentPanel"),
+  "EverydayAgentSettingsPanel",
+);
 
 type SettingsTab =
   | "appearance"
@@ -263,10 +342,7 @@ const OPENROUTER_PARETO_SCORE_ERROR =
   "Pareto minimum coding score must be a decimal number from 0 to 1.";
 
 function isOpenRouterParetoCodeModel(model: string): boolean {
-  return (
-    model.trim().toLowerCase().split(":")[0] ===
-    OPENROUTER_PARETO_CODE_MODEL
-  );
+  return model.trim().toLowerCase().split(":")[0] === OPENROUTER_PARETO_CODE_MODEL;
 }
 
 interface ProviderInfo {
@@ -430,19 +506,14 @@ function SearchableSelect({
     (opt) =>
       opt.label.toLowerCase().includes(search.toLowerCase()) ||
       opt.value.toLowerCase().includes(search.toLowerCase()) ||
-      (opt.description &&
-        opt.description.toLowerCase().includes(search.toLowerCase())),
+      (opt.description && opt.description.toLowerCase().includes(search.toLowerCase())),
   );
 
   const customValue = search.trim();
   const showCustomOption =
     allowCustomValue && filteredOptions.length === 0 && customValue.length > 0;
   const optionCount =
-    filteredOptions.length > 0
-      ? filteredOptions.length
-      : showCustomOption
-        ? 1
-        : 0;
+    filteredOptions.length > 0 ? filteredOptions.length : showCustomOption ? 1 : 0;
 
   // Reset highlighted index when search changes
   useEffect(() => {
@@ -452,9 +523,7 @@ function SearchableSelect({
   // Scroll highlighted option into view
   useEffect(() => {
     if (isOpen && listRef.current) {
-      const highlightedEl = listRef.current.querySelector(
-        `[data-index="${highlightedIndex}"]`,
-      );
+      const highlightedEl = listRef.current.querySelector(`[data-index="${highlightedIndex}"]`);
       if (highlightedEl) {
         highlightedEl.scrollIntoView({ block: "nearest" });
       }
@@ -464,10 +533,7 @@ function SearchableSelect({
   // Close on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
         setSearch("");
       }
@@ -540,11 +606,7 @@ function SearchableSelect({
         <span className="searchable-select-value">
           {selectedOption ? selectedOption.label : value ? value : placeholder}
         </span>
-        <ChevronDown
-          className="searchable-select-arrow"
-          size={12}
-          strokeWidth={2}
-        />
+        <ChevronDown className="searchable-select-arrow" size={12} strokeWidth={2} />
       </div>
 
       {isOpen && (
@@ -571,17 +633,11 @@ function SearchableSelect({
                   onClick={() => handleSelect(customValue)}
                   onMouseEnter={() => setHighlightedIndex(0)}
                 >
-                  <span className="searchable-select-option-label">
-                    {customValue}
-                  </span>
-                  <span className="searchable-select-option-desc">
-                    Use custom model ID
-                  </span>
+                  <span className="searchable-select-option-label">{customValue}</span>
+                  <span className="searchable-select-option-desc">Use custom model ID</span>
                 </div>
               ) : (
-                <div className="searchable-select-no-results">
-                  No models found
-                </div>
+                <div className="searchable-select-no-results">No models found</div>
               )
             ) : (
               filteredOptions.map((opt, index) => (
@@ -592,13 +648,9 @@ function SearchableSelect({
                   onClick={() => handleSelect(opt.value)}
                   onMouseEnter={() => setHighlightedIndex(index)}
                 >
-                  <span className="searchable-select-option-label">
-                    {opt.label}
-                  </span>
+                  <span className="searchable-select-option-label">{opt.label}</span>
                   {opt.description && (
-                    <span className="searchable-select-option-desc">
-                      {opt.description}
-                    </span>
+                    <span className="searchable-select-option-desc">{opt.description}</span>
                   )}
                 </div>
               ))
@@ -831,258 +883,233 @@ const secondaryChannelItems: Array<{
   { key: "bluebubbles", label: "BlueBubbles", icon: <Smile {...S} /> },
 ];
 
-const secondaryChannelSearchTerms: Partial<Record<SecondaryChannel, string[]>> =
-  {
-    teams: ["microsoft teams", "teams"],
-    x: ["twitter", "x twitter", "tweets", "social"],
-    discord: ["discord"],
-    imessage: ["imessage", "ios messages", "apple messages"],
-    signal: ["signal", "secure messaging"],
-    line: ["line", "line messenger"],
-    email: ["email", "mail"],
-    googlechat: ["google chat", "gchat"],
-    feishu: ["feishu", "lark"],
-    wecom: ["wecom", "wechat work", "enterprise wechat"],
-    mattermost: ["mattermost"],
-    matrix: ["matrix"],
-    twitch: ["twitch", "stream chat"],
-    bluebubbles: ["bluebubbles", "blue bubbles"],
-  };
+const secondaryChannelSearchTerms: Partial<Record<SecondaryChannel, string[]>> = {
+  teams: ["microsoft teams", "teams"],
+  x: ["twitter", "x twitter", "tweets", "social"],
+  discord: ["discord"],
+  imessage: ["imessage", "ios messages", "apple messages"],
+  signal: ["signal", "secure messaging"],
+  line: ["line", "line messenger"],
+  email: ["email", "mail"],
+  googlechat: ["google chat", "gchat"],
+  feishu: ["feishu", "lark"],
+  wecom: ["wecom", "wechat work", "enterprise wechat"],
+  mattermost: ["mattermost"],
+  matrix: ["matrix"],
+  twitch: ["twitch", "stream chat"],
+  bluebubbles: ["bluebubbles", "blue bubbles"],
+};
 
-const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
-  {
-    appearance: [
-      {
-        terms: [
-          "theme",
-          "light mode",
-          "dark mode",
-          "accent color",
-          "transparency effects",
-          "ui density",
-          "developer logging",
-          "onboarding",
-        ],
-      },
-    ],
-    personality: [
-      { terms: ["personality", "assistant behavior", "system prompt"] },
-    ],
-    companies: [
-      { terms: ["companies", "company", "mission control", "organization"] },
-    ],
-    system: [
-      {
-        terms: [
-          "profiles",
-          "security",
-          "permissions",
-          "guardrails",
-          "admin policies",
-          "tray",
-          "menu bar",
-          "system settings",
-        ],
-      },
-    ],
-    voice: [{ terms: ["voice", "voice mode", "speech", "microphone", "audio"] }],
-    digitaltwins: [
-      { terms: ["agent personas", "personas", "digital twins", "agents"] },
-    ],
-    aimodels: [
-      {
-        terms: [
-          "ai model",
-          "llm",
-          "language model",
-          "model provider",
-          "provider routing",
-          "fallback provider",
-          "anthropic",
-          "claude",
-          "openai",
-          "gpt",
-          "azure",
-          "gemini",
-          "openrouter",
-          "ollama",
-          "groq",
-          "xai",
-          "grok",
-          "supergrok",
-          "grok oauth",
-          "kimi",
-          "nano-gpt",
-          "nanogpt",
-          "bedrock",
-          "pi",
-        ],
-        target: { tab: "aimodels", aiModelsSubTab: "llm" },
-      },
-      {
-        terms: [
-          "image model",
-          "image generation",
-          "text to image",
-          "text-to-image",
-          "gpt-image",
-          "gpt image",
-          "nano-banana",
-          "nano banana",
-          "draw image",
-          "create image",
-        ],
-        target: { tab: "aimodels", aiModelsSubTab: "image" },
-      },
-      {
-        terms: [
-          "video",
-          "video model",
-          "sora",
-          "kling",
-          "vertex video",
-          "video generation",
-        ],
-        target: { tab: "aimodels", aiModelsSubTab: "video" },
-      },
-      {
-        terms: [
-          "web search",
-          "search provider",
-          "search engine",
-          "tavily",
-          "exa",
-          "duckduckgo",
-          "google search",
-        ],
-        target: { tab: "aimodels", aiModelsSubTab: "search" },
-      },
-    ],
-    morechannels: secondaryChannelItems.map((item) => ({
-      terms: [item.label, ...(secondaryChannelSearchTerms[item.key] ?? [])],
-      target: { tab: "morechannels", secondaryChannel: item.key },
-    })),
-    memory: [{ terms: ["memory", "memories", "memory hub", "knowledge"] }],
-    automations: [
-      {
-        terms: ["routines", "routine", "automation routines"],
-        target: { tab: "automations", automationsSubTab: "routines" },
-      },
-      {
-        terms: ["queue", "task queue", "queued tasks"],
-        target: { tab: "automations", automationsSubTab: "queue" },
-      },
-      {
-        terms: ["council", "r&d council", "research council"],
-        target: { tab: "automations", automationsSubTab: "council" },
-      },
-      {
-        terms: [
-          "workflow intelligence",
-          "continuity",
-          "reflection",
-          "workflow insights",
-          "background reflection",
-          "subconscious",
-        ],
-        target: { tab: "automations", automationsSubTab: "subconscious" },
-      },
-      {
-        terms: ["scheduled", "scheduled tasks", "cron", "recurring tasks"],
-        target: { tab: "automations", automationsSubTab: "scheduled" },
-      },
-      {
-        terms: ["hooks", "webhooks", "hook"],
-        target: { tab: "automations", automationsSubTab: "hooks" },
-      },
-      {
-        terms: ["triggers", "event triggers", "events"],
-        target: { tab: "automations", automationsSubTab: "triggers" },
-      },
-    ],
-    integrations: [
-      {
-        terms: ["git", "worktree", "repository"],
-        target: { tab: "integrations", integrationsSubTab: "git" },
-      },
-      {
-        terms: ["connectors", "integrations", "apps"],
-        target: { tab: "integrations", integrationsSubTab: "connectors" },
-      },
-      {
-        terms: ["identity", "contacts", "crm", "contact identity"],
-        target: { tab: "integrations", integrationsSubTab: "identity" },
-      },
-      {
-        terms: ["infrastructure", "infra", "servers", "deployment"],
-        target: { tab: "integrations", integrationsSubTab: "infrastructure" },
-      },
-    ],
-    health: [{ terms: ["health", "healthkit", "fitness", "wellness"] }],
-    customize: [
-      {
-        terms: [
-          "feature packs",
-          "plugin packs",
-          "plugins",
-          "packs",
-          "registry",
-          "customize",
-          "claude for legal",
-          "small business",
-          "smb",
-          "finance packs",
-        ],
-      },
-    ],
-    skills: [
-      {
-        terms: ["custom skills", "skills", "local skills"],
-        target: { tab: "skills", skillsSubTab: "custom" },
-      },
-      {
-        terms: ["skill store", "skill hub", "marketplace", "skillhub"],
-        target: { tab: "skills", skillsSubTab: "store" },
-      },
-    ],
-    mcp: [
-      {
-        terms: [
-          "mcp",
-          "mcp servers",
-          "model context protocol",
-          "server registry",
-        ],
-      },
-    ],
-    tools: [
-      { terms: ["built-in tools", "tools", "computer use", "builtin tools"] },
-    ],
-    briefing: [
-      { terms: ["daily briefing", "briefing", "morning summary", "digest"] },
-    ],
-    access: [
-      {
-        terms: ["remote access", "control plane", "controlplane"],
-        target: { tab: "access", accessSubTab: "controlplane" },
-      },
-      {
-        terms: ["web access", "browser access", "webaccess"],
-        target: { tab: "access", accessSubTab: "webaccess" },
-      },
-    ],
-    nodes: [{ terms: ["mobile companions", "nodes", "mobile"] }],
-    extensions: [{ terms: ["extensions", "browser extension", "extension"] }],
-    insights: [{ terms: ["usage insights", "analytics", "metrics"] }],
-    suggestions: [{ terms: ["suggestions", "recommendations"] }],
-    traces: [{ terms: ["trace debugger", "traces", "sessions", "debugger"] }],
-    updates: [{ terms: ["updates", "update", "release notes"] }],
-  };
+const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> = {
+  appearance: [
+    {
+      terms: [
+        "theme",
+        "light mode",
+        "dark mode",
+        "accent color",
+        "transparency effects",
+        "ui density",
+        "developer logging",
+        "onboarding",
+      ],
+    },
+  ],
+  personality: [{ terms: ["personality", "assistant behavior", "system prompt"] }],
+  companies: [{ terms: ["companies", "company", "mission control", "organization"] }],
+  system: [
+    {
+      terms: [
+        "profiles",
+        "security",
+        "permissions",
+        "guardrails",
+        "admin policies",
+        "tray",
+        "menu bar",
+        "system settings",
+      ],
+    },
+  ],
+  voice: [{ terms: ["voice", "voice mode", "speech", "microphone", "audio"] }],
+  digitaltwins: [{ terms: ["agent personas", "personas", "digital twins", "agents"] }],
+  aimodels: [
+    {
+      terms: [
+        "ai model",
+        "llm",
+        "language model",
+        "model provider",
+        "provider routing",
+        "fallback provider",
+        "anthropic",
+        "claude",
+        "openai",
+        "gpt",
+        "azure",
+        "gemini",
+        "openrouter",
+        "ollama",
+        "groq",
+        "xai",
+        "grok",
+        "supergrok",
+        "grok oauth",
+        "kimi",
+        "nano-gpt",
+        "nanogpt",
+        "bedrock",
+        "pi",
+      ],
+      target: { tab: "aimodels", aiModelsSubTab: "llm" },
+    },
+    {
+      terms: [
+        "image model",
+        "image generation",
+        "text to image",
+        "text-to-image",
+        "gpt-image",
+        "gpt image",
+        "nano-banana",
+        "nano banana",
+        "draw image",
+        "create image",
+      ],
+      target: { tab: "aimodels", aiModelsSubTab: "image" },
+    },
+    {
+      terms: ["video", "video model", "sora", "kling", "vertex video", "video generation"],
+      target: { tab: "aimodels", aiModelsSubTab: "video" },
+    },
+    {
+      terms: [
+        "web search",
+        "search provider",
+        "search engine",
+        "tavily",
+        "exa",
+        "duckduckgo",
+        "google search",
+      ],
+      target: { tab: "aimodels", aiModelsSubTab: "search" },
+    },
+  ],
+  morechannels: secondaryChannelItems.map((item) => ({
+    terms: [item.label, ...(secondaryChannelSearchTerms[item.key] ?? [])],
+    target: { tab: "morechannels", secondaryChannel: item.key },
+  })),
+  memory: [{ terms: ["memory", "memories", "memory hub", "knowledge"] }],
+  automations: [
+    {
+      terms: ["routines", "routine", "automation routines"],
+      target: { tab: "automations", automationsSubTab: "routines" },
+    },
+    {
+      terms: ["queue", "task queue", "queued tasks"],
+      target: { tab: "automations", automationsSubTab: "queue" },
+    },
+    {
+      terms: ["council", "r&d council", "research council"],
+      target: { tab: "automations", automationsSubTab: "council" },
+    },
+    {
+      terms: [
+        "workflow intelligence",
+        "continuity",
+        "reflection",
+        "workflow insights",
+        "background reflection",
+        "subconscious",
+      ],
+      target: { tab: "automations", automationsSubTab: "subconscious" },
+    },
+    {
+      terms: ["scheduled", "scheduled tasks", "cron", "recurring tasks"],
+      target: { tab: "automations", automationsSubTab: "scheduled" },
+    },
+    {
+      terms: ["hooks", "webhooks", "hook"],
+      target: { tab: "automations", automationsSubTab: "hooks" },
+    },
+    {
+      terms: ["triggers", "event triggers", "events"],
+      target: { tab: "automations", automationsSubTab: "triggers" },
+    },
+  ],
+  integrations: [
+    {
+      terms: ["git", "worktree", "repository"],
+      target: { tab: "integrations", integrationsSubTab: "git" },
+    },
+    {
+      terms: ["connectors", "integrations", "apps"],
+      target: { tab: "integrations", integrationsSubTab: "connectors" },
+    },
+    {
+      terms: ["identity", "contacts", "crm", "contact identity"],
+      target: { tab: "integrations", integrationsSubTab: "identity" },
+    },
+    {
+      terms: ["infrastructure", "infra", "servers", "deployment"],
+      target: { tab: "integrations", integrationsSubTab: "infrastructure" },
+    },
+  ],
+  health: [{ terms: ["health", "healthkit", "fitness", "wellness"] }],
+  customize: [
+    {
+      terms: [
+        "feature packs",
+        "plugin packs",
+        "plugins",
+        "packs",
+        "registry",
+        "customize",
+        "claude for legal",
+        "small business",
+        "smb",
+        "finance packs",
+      ],
+    },
+  ],
+  skills: [
+    {
+      terms: ["custom skills", "skills", "local skills"],
+      target: { tab: "skills", skillsSubTab: "custom" },
+    },
+    {
+      terms: ["skill store", "skill hub", "marketplace", "skillhub"],
+      target: { tab: "skills", skillsSubTab: "store" },
+    },
+  ],
+  mcp: [
+    {
+      terms: ["mcp", "mcp servers", "model context protocol", "server registry"],
+    },
+  ],
+  tools: [{ terms: ["built-in tools", "tools", "computer use", "builtin tools"] }],
+  briefing: [{ terms: ["daily briefing", "briefing", "morning summary", "digest"] }],
+  access: [
+    {
+      terms: ["remote access", "control plane", "controlplane"],
+      target: { tab: "access", accessSubTab: "controlplane" },
+    },
+    {
+      terms: ["web access", "browser access", "webaccess"],
+      target: { tab: "access", accessSubTab: "webaccess" },
+    },
+  ],
+  nodes: [{ terms: ["mobile companions", "nodes", "mobile"] }],
+  extensions: [{ terms: ["extensions", "browser extension", "extension"] }],
+  insights: [{ terms: ["usage insights", "analytics", "metrics"] }],
+  suggestions: [{ terms: ["suggestions", "recommendations"] }],
+  traces: [{ terms: ["trace debugger", "traces", "sessions", "debugger"] }],
+  updates: [{ terms: ["updates", "update", "release notes"] }],
+};
 
 const getSidebarItemLabel = (item: SidebarItem): string => item.label;
 
-const normalizeSettingsSidebarSearchQuery = (value: string): string =>
-  value.trim().toLowerCase();
+const normalizeSettingsSidebarSearchQuery = (value: string): string => value.trim().toLowerCase();
 
 const matchesSettingsSidebarSearchQuery = (haystack: string, query: string): boolean => {
   const normalizedQuery = normalizeSettingsSidebarSearchQuery(query);
@@ -1193,40 +1220,34 @@ const SettingsSidebar = memo(function SettingsSidebar({
       </div>
       <div className="settings-nav-items">
         {
-          filteredSidebarItems
-            .reduce<{ seenGroups: Set<string>; elements: ReactNode[] }>(
-              (acc, { item, matchedTarget }) => {
-                if (!hasSidebarSearch && !acc.seenGroups.has(item.group)) {
-                  acc.elements.push(
-                    <div
-                      key={`group-${item.group}`}
-                      className="settings-nav-group-header"
-                    >
-                      {item.group}
-                    </div>,
-                  );
-                  acc.seenGroups.add(item.group);
-                }
+          filteredSidebarItems.reduce<{ seenGroups: Set<string>; elements: ReactNode[] }>(
+            (acc, { item, matchedTarget }) => {
+              if (!hasSidebarSearch && !acc.seenGroups.has(item.group)) {
                 acc.elements.push(
-                  <button
-                    key={item.tab}
-                    className={`settings-nav-item ${activeTab === item.tab || (item.tab === "morechannels" && (activeTab === "teams" || activeTab === "x")) ? "active" : ""}`}
-                    data-tab={item.tab}
-                    onClick={() => onSelect(item, matchedTarget)}
-                  >
-                    {item.icon}
-                    {getSidebarItemLabel(item)}
-                  </button>,
+                  <div key={`group-${item.group}`} className="settings-nav-group-header">
+                    {item.group}
+                  </div>,
                 );
-                return acc;
-              },
-              { seenGroups: new Set<string>(), elements: [] },
-            ).elements
+                acc.seenGroups.add(item.group);
+              }
+              acc.elements.push(
+                <button
+                  key={item.tab}
+                  className={`settings-nav-item ${activeTab === item.tab || (item.tab === "morechannels" && (activeTab === "teams" || activeTab === "x")) ? "active" : ""}`}
+                  data-tab={item.tab}
+                  onClick={() => onSelect(item, matchedTarget)}
+                >
+                  {item.icon}
+                  {getSidebarItemLabel(item)}
+                </button>,
+              );
+              return acc;
+            },
+            { seenGroups: new Set<string>(), elements: [] },
+          ).elements
         }
         {hasSidebarSearch && filteredSidebarItems.length === 0 && (
-          <div className="settings-nav-no-results">
-            No matching settings
-          </div>
+          <div className="settings-nav-no-results">No matching settings</div>
         )}
       </div>
     </div>
@@ -1255,10 +1276,7 @@ const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
 
 const DEFAULT_DEEPSEEK_MODELS = [{ id: "deepseek-chat", name: "DeepSeek Chat" }];
 
-const getLLMProviderIcon = (
-  providerType: string,
-  customEntry?: { compatibility?: string },
-) => {
+const getLLMProviderIcon = (providerType: string, customEntry?: { compatibility?: string }) => {
   if (LLM_PROVIDER_ICONS[providerType]) {
     return LLM_PROVIDER_ICONS[providerType];
   }
@@ -1329,62 +1347,36 @@ export function Settings({
   onNavigateToAgents,
 }: SettingsProps) {
   const normalizedInitialTab: SettingsTab =
-    initialTab === "tray" ||
-    initialTab === "guardrails" ||
-    initialTab === "policies"
+    initialTab === "tray" || initialTab === "guardrails" || initialTab === "policies"
       ? "system"
       : initialTab === "skillhub"
         ? "skills"
-        : initialTab === "llm" ||
-            initialTab === "image" ||
-            initialTab === "search"
+        : initialTab === "llm" || initialTab === "image" || initialTab === "search"
           ? "aimodels"
-          : [
-                "queue",
-                "subconscious",
-                "scheduled",
-                "hooks",
-                "triggers",
-                "council",
-              ].includes(initialTab as string)
+          : ["queue", "subconscious", "scheduled", "hooks", "triggers", "council"].includes(
+                initialTab as string,
+              )
             ? "automations"
-            : ["git", "connectors", "infrastructure"].includes(
-                  initialTab as string,
-                )
+            : ["git", "connectors", "infrastructure"].includes(initialTab as string)
               ? "integrations"
               : initialTab === "controlplane" || initialTab === "webaccess"
                 ? "access"
                 : (initialTab ?? "appearance");
   const [activeTab, setActiveTab] = useState<SettingsTab>(normalizedInitialTab);
-  const [digitalTwinsCompanyId, setDigitalTwinsCompanyId] = useState<
-    string | null
-  >(null);
-  const [activeSecondaryChannel, setActiveSecondaryChannel] =
-    useState<SecondaryChannel>("teams");
-  const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<
-    "custom" | "store"
-  >(initialTab === "skillhub" ? "store" : "custom");
+  const [digitalTwinsCompanyId, setDigitalTwinsCompanyId] = useState<string | null>(null);
+  const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
+  const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
+    initialTab === "skillhub" ? "store" : "custom",
+  );
   const [activeAIModelsSubTab, setActiveAIModelsSubTab] = useState<
     "llm" | "image" | "video" | "search"
-  >(
-    initialTab === "search"
-      ? "search"
-      : initialTab === "image"
-        ? "image"
-        : "llm",
-  );
+  >(initialTab === "search" ? "search" : initialTab === "image" ? "image" : "llm");
   const [activeAutomationsSubTab, setActiveAutomationsSubTab] = useState<
     "routines" | "queue" | "subconscious" | "scheduled" | "hooks" | "triggers" | "council"
   >(
-    [
-      "routines",
-      "queue",
-      "subconscious",
-      "scheduled",
-      "hooks",
-      "triggers",
-      "council",
-    ].includes(initialTab as string)
+    ["routines", "queue", "subconscious", "scheduled", "hooks", "triggers", "council"].includes(
+      initialTab as string,
+    )
       ? (initialTab as
           | "routines"
           | "queue"
@@ -1398,22 +1390,18 @@ export function Settings({
   const [activeIntegrationsSubTab, setActiveIntegrationsSubTab] = useState<
     "git" | "connectors" | "identity" | "infrastructure"
   >(
-    ["git", "connectors", "identity", "infrastructure"].includes(
-      initialTab as string,
-    )
+    ["git", "connectors", "identity", "infrastructure"].includes(initialTab as string)
       ? (initialTab as "git" | "connectors" | "identity" | "infrastructure")
       : "connectors",
   );
-  const [activeAccessSubTab, setActiveAccessSubTab] = useState<
-    "controlplane" | "webaccess"
-  >(initialTab === "webaccess" ? "webaccess" : "controlplane");
+  const [activeAccessSubTab, setActiveAccessSubTab] = useState<"controlplane" | "webaccess">(
+    initialTab === "webaccess" ? "webaccess" : "controlplane",
+  );
   const settingsRef = useRef<LLMSettingsData>({
     providerType: "anthropic",
     modelKey: "sonnet-4-5",
   });
-  const [settings, setSettingsState] = useState<LLMSettingsData>(
-    settingsRef.current,
-  );
+  const [settings, setSettingsState] = useState<LLMSettingsData>(settingsRef.current);
   const setSettings = (value: SetStateAction<LLMSettingsData>) => {
     setSettingsState((prev) => {
       const next = typeof value === "function" ? value(prev) : value;
@@ -1422,15 +1410,12 @@ export function Settings({
     });
   };
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [providerRoutingModels, setProviderRoutingModels] = useState<
-    ModelOption[]
-  >([]);
+  const [providerRoutingModels, setProviderRoutingModels] = useState<ModelOption[]>([]);
   const [providerModelOptionsByType, setProviderModelOptionsByType] = useState<
     Record<string, ModelOption[]>
   >({});
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [routingRuntime, setRoutingRuntime] =
-    useState<LLMRoutingRuntimeState | null>(null);
+  const [routingRuntime, setRoutingRuntime] = useState<LLMRoutingRuntimeState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -1451,37 +1436,33 @@ export function Settings({
     })();
   const isMacPlatform = platform === "darwin";
 
-  const handleSidebarItemSelect = useCallback(
-    (item: SidebarItem, target?: SidebarSearchTarget) => {
-      setActiveTab(target?.tab ?? item.tab);
-      if (target?.secondaryChannel) {
-        setActiveSecondaryChannel(target.secondaryChannel);
-      }
-      if (target?.aiModelsSubTab) {
-        setActiveAIModelsSubTab(target.aiModelsSubTab);
-      }
-      if (target?.automationsSubTab) {
-        setActiveAutomationsSubTab(target.automationsSubTab);
-      }
-      if (target?.skillsSubTab) {
-        setActiveSkillsSubTab(target.skillsSubTab);
-      }
-      if (target?.integrationsSubTab) {
-        setActiveIntegrationsSubTab(target.integrationsSubTab);
-      }
-      if (target?.accessSubTab) {
-        setActiveAccessSubTab(target.accessSubTab);
-      }
-    },
-    [],
-  );
+  const handleSidebarItemSelect = useCallback((item: SidebarItem, target?: SidebarSearchTarget) => {
+    setActiveTab(target?.tab ?? item.tab);
+    if (target?.secondaryChannel) {
+      setActiveSecondaryChannel(target.secondaryChannel);
+    }
+    if (target?.aiModelsSubTab) {
+      setActiveAIModelsSubTab(target.aiModelsSubTab);
+    }
+    if (target?.automationsSubTab) {
+      setActiveAutomationsSubTab(target.automationsSubTab);
+    }
+    if (target?.skillsSubTab) {
+      setActiveSkillsSubTab(target.skillsSubTab);
+    }
+    if (target?.integrationsSubTab) {
+      setActiveIntegrationsSubTab(target.integrationsSubTab);
+    }
+    if (target?.accessSubTab) {
+      setActiveAccessSubTab(target.accessSubTab);
+    }
+  }, []);
   // Form state for credentials (not persisted directly)
   const [anthropicApiKey, setAnthropicApiKey] = useState("");
-  const [anthropicSubscriptionToken, setAnthropicSubscriptionToken] =
-    useState("");
-  const [anthropicAuthMethod, setAnthropicAuthMethod] = useState<
-    "api_key" | "subscription"
-  >("api_key");
+  const [anthropicSubscriptionToken, setAnthropicSubscriptionToken] = useState("");
+  const [anthropicAuthMethod, setAnthropicAuthMethod] = useState<"api_key" | "subscription">(
+    "api_key",
+  );
   const [loadingClaudeModels, setLoadingClaudeModels] = useState(false);
   const [awsRegion, setAwsRegion] = useState("us-east-1");
   const [awsAccessKeyId, setAwsAccessKeyId] = useState("");
@@ -1493,9 +1474,7 @@ export function Settings({
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState("http://localhost:11434");
   const [ollamaModel, setOllamaModel] = useState("llama3.2");
   const [ollamaApiKey, setOllamaApiKey] = useState("");
-  const [ollamaModels, setOllamaModels] = useState<
-    Array<{ name: string; size: number }>
-  >([]);
+  const [ollamaModels, setOllamaModels] = useState<Array<{ name: string; size: number }>>([]);
   const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
 
   // Gemini state
@@ -1509,11 +1488,8 @@ export function Settings({
   // OpenRouter state
   const [openrouterApiKey, setOpenrouterApiKey] = useState("");
   const [openrouterBaseUrl, setOpenrouterBaseUrl] = useState("");
-  const [openrouterModel, setOpenrouterModel] = useState(
-    "anthropic/claude-3.5-sonnet",
-  );
-  const [openrouterParetoMinCodingScore, setOpenrouterParetoMinCodingScore] =
-    useState("");
+  const [openrouterModel, setOpenrouterModel] = useState("anthropic/claude-3.5-sonnet");
+  const [openrouterParetoMinCodingScore, setOpenrouterParetoMinCodingScore] = useState("");
   const [openrouterModels, setOpenrouterModels] = useState<
     Array<{ id: string; name: string; context_length: number }>
   >([]);
@@ -1526,9 +1502,7 @@ export function Settings({
     Array<{ id: string; name: string; description: string }>
   >([]);
   const [loadingOpenAIModels, setLoadingOpenAIModels] = useState(false);
-  const [openaiAuthMethod, setOpenaiAuthMethod] = useState<"api_key" | "oauth">(
-    "api_key",
-  );
+  const [openaiAuthMethod, setOpenaiAuthMethod] = useState<"api_key" | "oauth">("api_key");
   const [openaiReasoningEffort, setOpenaiReasoningEffort] =
     useState<OpenAIReasoningEffort>("medium");
   const openaiReasoningEffortOptions = useMemo(
@@ -1536,16 +1510,11 @@ export function Settings({
     [openaiModel],
   );
   useEffect(() => {
-    if (
-      !openaiReasoningEffortOptions.some(
-        (option) => option.value === openaiReasoningEffort,
-      )
-    ) {
+    if (!openaiReasoningEffortOptions.some((option) => option.value === openaiReasoningEffort)) {
       setOpenaiReasoningEffort("medium");
     }
   }, [openaiReasoningEffort, openaiReasoningEffortOptions]);
-  const [openaiTextVerbosity, setOpenaiTextVerbosity] =
-    useState<LLMTextVerbosity>("medium");
+  const [openaiTextVerbosity, setOpenaiTextVerbosity] = useState<LLMTextVerbosity>("medium");
   const [openaiOAuthConnected, setOpenaiOAuthConnected] = useState(false);
   const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
 
@@ -1554,9 +1523,7 @@ export function Settings({
   type ImageGenModel = "gpt-image-2" | "gpt-image-1.5" | "nano-banana-2";
 
   // Image generation (text-to-image) state
-  const [imageGenDefaultProvider, setImageGenDefaultProvider] = useState<ImageGenProvider | "">(
-    "",
-  );
+  const [imageGenDefaultProvider, setImageGenDefaultProvider] = useState<ImageGenProvider | "">("");
   const [imageGenDefaultModel, setImageGenDefaultModel] = useState<ImageGenModel | "">("");
   const [imageGenBackupProvider, setImageGenBackupProvider] = useState<ImageGenProvider | "">("");
   const [imageGenBackupModel, setImageGenBackupModel] = useState<ImageGenModel | "">("");
@@ -1565,21 +1532,15 @@ export function Settings({
   const [imageAzureApiKey, setImageAzureApiKey] = useState("");
   const [imageAzureEndpoint, setImageAzureEndpoint] = useState("");
   const [imageAzureDeployment, setImageAzureDeployment] = useState("");
-  const [imageAzureApiVersion, setImageAzureApiVersion] = useState(
-    "2024-02-15-preview",
-  );
+  const [imageAzureApiVersion, setImageAzureApiVersion] = useState("2024-02-15-preview");
   const [imageGeminiApiKey, setImageGeminiApiKey] = useState("");
-  const [imageGeminiModel, setImageGeminiModel] =
-    useState<"nano-banana-2">("nano-banana-2");
+  const [imageGeminiModel, setImageGeminiModel] = useState<"nano-banana-2">("nano-banana-2");
   const [imageOpenRouterApiKey, setImageOpenRouterApiKey] = useState("");
   const [imageOpenRouterBaseUrl, setImageOpenRouterBaseUrl] = useState(
     "https://openrouter.ai/api/v1",
   );
-  const [imageOpenRouterModel, setImageOpenRouterModel] = useState(
-    "openai/gpt-image-2",
-  );
-  const [imageOpenAICodexModel, setImageOpenAICodexModel] =
-    useState("gpt-image-2");
+  const [imageOpenRouterModel, setImageOpenRouterModel] = useState("openai/gpt-image-2");
+  const [imageOpenAICodexModel, setImageOpenAICodexModel] = useState("gpt-image-2");
   const [imageOpenAITimeoutSeconds, setImageOpenAITimeoutSeconds] = useState("300");
   const [imageOpenAICodexTimeoutSeconds, setImageOpenAICodexTimeoutSeconds] = useState("300");
   const [imageAzureTimeoutSeconds, setImageAzureTimeoutSeconds] = useState("300");
@@ -1612,9 +1573,7 @@ export function Settings({
   const [videoGeminiDuration, setVideoGeminiDuration] = useState("5");
   const [videoGeminiAspectRatio, setVideoGeminiAspectRatio] = useState("16:9");
   // Vertex AI Veo config
-  const [videoVertexModel, setVideoVertexModel] = useState<"veo-3" | "veo-3.1">(
-    "veo-3",
-  );
+  const [videoVertexModel, setVideoVertexModel] = useState<"veo-3" | "veo-3.1">("veo-3");
   const [videoVertexProjectId, setVideoVertexProjectId] = useState("");
   const [videoVertexLocation, setVideoVertexLocation] = useState("us-central1");
   const [videoVertexOutputGcsUri, setVideoVertexOutputGcsUri] = useState("");
@@ -1623,9 +1582,7 @@ export function Settings({
   const [videoVertexAspectRatio, setVideoVertexAspectRatio] = useState("16:9");
   // Kling config
   const [videoKlingApiKey, setVideoKlingApiKey] = useState("");
-  const [videoKlingBaseUrl, setVideoKlingBaseUrl] = useState(
-    "https://api.klingai.com",
-  );
+  const [videoKlingBaseUrl, setVideoKlingBaseUrl] = useState("https://api.klingai.com");
   const [videoKlingModel, setVideoKlingModel] = useState("kling-v2");
   const [videoKlingDuration, setVideoKlingDuration] = useState("5");
   const [videoKlingAspectRatio, setVideoKlingAspectRatio] = useState("16:9");
@@ -1636,34 +1593,27 @@ export function Settings({
   const [azureDeployment, setAzureDeployment] = useState("");
   const [azureDeploymentsText, setAzureDeploymentsText] = useState("");
   const [azureApiVersion, setAzureApiVersion] = useState("2024-02-15-preview");
-  const [azureReasoningEffort, setAzureReasoningEffort] =
-    useState<AzureReasoningEffort>("medium");
+  const [azureReasoningEffort, setAzureReasoningEffort] = useState<AzureReasoningEffort>("medium");
 
   // Azure Anthropic state
   const [azureAnthropicApiKey, setAzureAnthropicApiKey] = useState("");
   const [azureAnthropicEndpoint, setAzureAnthropicEndpoint] = useState("");
   const [azureAnthropicDeployment, setAzureAnthropicDeployment] = useState("");
-  const [azureAnthropicDeploymentsText, setAzureAnthropicDeploymentsText] =
-    useState("");
-  const [azureAnthropicApiVersion, setAzureAnthropicApiVersion] =
-    useState("2023-06-01");
+  const [azureAnthropicDeploymentsText, setAzureAnthropicDeploymentsText] = useState("");
+  const [azureAnthropicApiVersion, setAzureAnthropicApiVersion] = useState("2023-06-01");
 
   // Groq state
   const [groqApiKey, setGroqApiKey] = useState("");
   const [groqBaseUrl, setGroqBaseUrl] = useState("");
   const [groqModel, setGroqModel] = useState("llama-3.1-8b-instant");
-  const [groqModels, setGroqModels] = useState<
-    Array<{ id: string; name: string }>
-  >([]);
+  const [groqModels, setGroqModels] = useState<Array<{ id: string; name: string }>>([]);
   const [loadingGroqModels, setLoadingGroqModels] = useState(false);
 
   // xAI state
   const [xaiApiKey, setXaiApiKey] = useState("");
   const [xaiBaseUrl, setXaiBaseUrl] = useState("");
   const [xaiModel, setXaiModel] = useState("grok-4.3");
-  const [xaiModels, setXaiModels] = useState<
-    Array<{ id: string; name: string }>
-  >([]);
+  const [xaiModels, setXaiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [loadingXaiModels, setLoadingXaiModels] = useState(false);
   const [xaiOAuthConnected, setXaiOAuthConnected] = useState(false);
   const [xaiOAuthLoading, setXaiOAuthLoading] = useState(false);
@@ -1672,18 +1622,15 @@ export function Settings({
   const [deepseekApiKey, setDeepseekApiKey] = useState("");
   const [deepseekBaseUrl, setDeepseekBaseUrl] = useState("");
   const [deepseekModel, setDeepseekModel] = useState("deepseek-chat");
-  const [deepseekModels, setDeepseekModels] = useState<
-    Array<{ id: string; name: string }>
-  >(DEFAULT_DEEPSEEK_MODELS);
+  const [deepseekModels, setDeepseekModels] =
+    useState<Array<{ id: string; name: string }>>(DEFAULT_DEEPSEEK_MODELS);
   const [loadingDeepseekModels, setLoadingDeepseekModels] = useState(false);
 
   // Kimi state
   const [kimiApiKey, setKimiApiKey] = useState("");
   const [kimiBaseUrl, setKimiBaseUrl] = useState("");
   const [kimiModel, setKimiModel] = useState("kimi-k2.5");
-  const [kimiModels, setKimiModels] = useState<
-    Array<{ id: string; name: string }>
-  >([]);
+  const [kimiModels, setKimiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [loadingKimiModels, setLoadingKimiModels] = useState(false);
 
   // Pi state
@@ -1693,9 +1640,7 @@ export function Settings({
   const [piModels, setPiModels] = useState<
     Array<{ id: string; name: string; description: string }>
   >([]);
-  const [piProviders, setPiProviders] = useState<
-    Array<{ id: string; name: string }>
-  >([]);
+  const [piProviders, setPiProviders] = useState<Array<{ id: string; name: string }>>([]);
   const [loadingPiModels, setLoadingPiModels] = useState(false);
 
   // OpenAI-compatible state
@@ -1705,8 +1650,7 @@ export function Settings({
   const [openaiCompatModels, setOpenaiCompatModels] = useState<
     Array<{ key: string; displayName: string; description: string }>
   >([]);
-  const [loadingOpenAICompatModels, setLoadingOpenAICompatModels] =
-    useState(false);
+  const [loadingOpenAICompatModels, setLoadingOpenAICompatModels] = useState(false);
 
   // HuggingFace Local AI (hf-agents) state
   const [hfStatus, setHfStatus] = useState<{
@@ -1749,11 +1693,8 @@ export function Settings({
   } | null>(null);
 
   // Custom provider state
-  const [customProviders, setCustomProviders] = useState<
-    Record<string, CustomProviderConfig>
-  >({});
-  const [loadingCustomProviderModels, setLoadingCustomProviderModels] =
-    useState(false);
+  const [customProviders, setCustomProviders] = useState<Record<string, CustomProviderConfig>>({});
+  const [loadingCustomProviderModels, setLoadingCustomProviderModels] = useState(false);
 
   // Bedrock state
   const [bedrockModel, setBedrockModel] = useState("");
@@ -1824,9 +1765,7 @@ export function Settings({
     return normalized.slice(0, 5);
   };
 
-  const sanitizeCustomProviders = (
-    providers: Record<string, CustomProviderConfig>,
-  ) => {
+  const sanitizeCustomProviders = (providers: Record<string, CustomProviderConfig>) => {
     const sanitized: Record<string, CustomProviderConfig> = {};
     Object.entries(providers).forEach(([key, value]) => {
       const apiKey = value.apiKey?.trim();
@@ -1852,23 +1791,12 @@ export function Settings({
       const strongModelKey = value.strongModelKey?.trim();
       const cheapModelKey = value.cheapModelKey?.trim();
       const automatedTaskModelKey = value.automatedTaskModelKey?.trim();
-      const hasFallbackProviders = Object.prototype.hasOwnProperty.call(
-        value,
-        "fallbackProviders",
-      );
-      const fallbackProviders = sanitizeFailoverProviders(
-        value.fallbackProviders,
-      );
+      const hasFallbackProviders = Object.prototype.hasOwnProperty.call(value, "fallbackProviders");
+      const fallbackProviders = sanitizeFailoverProviders(value.fallbackProviders);
       const failoverPrimaryRetryCooldownSeconds =
         typeof value.failoverPrimaryRetryCooldownSeconds === "number" &&
         Number.isFinite(value.failoverPrimaryRetryCooldownSeconds)
-          ? Math.max(
-              0,
-              Math.min(
-                3600,
-                Math.floor(value.failoverPrimaryRetryCooldownSeconds),
-              ),
-            )
+          ? Math.max(0, Math.min(3600, Math.floor(value.failoverPrimaryRetryCooldownSeconds)))
           : undefined;
       const profileRoutingEnabled = value.profileRoutingEnabled === true;
       const preferStrongForVerification =
@@ -1959,9 +1887,7 @@ export function Settings({
     };
   };
 
-  const getProviderRoutingConfig = (
-    providerType: LLMProviderType,
-  ): ProviderRoutingConfig => {
+  const getProviderRoutingConfig = (providerType: LLMProviderType): ProviderRoutingConfig => {
     const resolvedType = resolveCustomProviderId(providerType);
     const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedType);
     if (customEntry) {
@@ -2007,26 +1933,21 @@ export function Settings({
 
   const getProviderFailoverConfig = (
     providerType: LLMProviderType,
-  ): Pick<
-    ProviderRoutingConfig,
-    "fallbackProviders" | "failoverPrimaryRetryCooldownSeconds"
-  > => {
+  ): Pick<ProviderRoutingConfig, "fallbackProviders" | "failoverPrimaryRetryCooldownSeconds"> => {
     const resolvedType = resolveCustomProviderId(providerType);
     const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedType);
     if (customEntry) {
       const config = customProviders[resolvedType] || {};
       return {
-        fallbackProviders:
-          Object.prototype.hasOwnProperty.call(config, "fallbackProviders")
-            ? config.fallbackProviders
-            : settings.fallbackProviders,
-        failoverPrimaryRetryCooldownSeconds:
-          Object.prototype.hasOwnProperty.call(
-            config,
-            "failoverPrimaryRetryCooldownSeconds",
-          )
-            ? config.failoverPrimaryRetryCooldownSeconds
-            : settings.failoverPrimaryRetryCooldownSeconds,
+        fallbackProviders: Object.prototype.hasOwnProperty.call(config, "fallbackProviders")
+          ? config.fallbackProviders
+          : settings.fallbackProviders,
+        failoverPrimaryRetryCooldownSeconds: Object.prototype.hasOwnProperty.call(
+          config,
+          "failoverPrimaryRetryCooldownSeconds",
+        )
+          ? config.failoverPrimaryRetryCooldownSeconds
+          : settings.failoverPrimaryRetryCooldownSeconds,
       };
     }
 
@@ -2071,19 +1992,17 @@ export function Settings({
 
     const shouldInheritGlobalFallbacks = providerType !== "moa";
     return {
-      fallbackProviders:
-        Object.prototype.hasOwnProperty.call(routing, "fallbackProviders")
-          ? routing.fallbackProviders
-          : shouldInheritGlobalFallbacks
-            ? settings.fallbackProviders
-            : undefined,
-      failoverPrimaryRetryCooldownSeconds:
-        Object.prototype.hasOwnProperty.call(
-          routing,
-          "failoverPrimaryRetryCooldownSeconds",
-        )
-          ? routing.failoverPrimaryRetryCooldownSeconds
-          : settings.failoverPrimaryRetryCooldownSeconds,
+      fallbackProviders: Object.prototype.hasOwnProperty.call(routing, "fallbackProviders")
+        ? routing.fallbackProviders
+        : shouldInheritGlobalFallbacks
+          ? settings.fallbackProviders
+          : undefined,
+      failoverPrimaryRetryCooldownSeconds: Object.prototype.hasOwnProperty.call(
+        routing,
+        "failoverPrimaryRetryCooldownSeconds",
+      )
+        ? routing.failoverPrimaryRetryCooldownSeconds
+        : settings.failoverPrimaryRetryCooldownSeconds,
     };
   };
 
@@ -2169,18 +2088,14 @@ export function Settings({
     const resolvedType = resolveCustomProviderId(providerType);
     const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedType);
     if (customEntry) {
-      return (
-        customProviders[resolvedType]?.model || customEntry.defaultModel || ""
-      );
+      return customProviders[resolvedType]?.model || customEntry.defaultModel || "";
     }
 
     switch (providerType) {
       case "anthropic":
         return settings.modelKey || "sonnet-4-5";
       case "bedrock":
-        return (
-          bedrockModel || settings.bedrock?.model || settings.modelKey || ""
-        );
+        return bedrockModel || settings.bedrock?.model || settings.modelKey || "";
       case "ollama":
         return ollamaModel || settings.ollama?.model || "";
       case "gemini":
@@ -2195,11 +2110,7 @@ export function Settings({
       }
       case "azure-anthropic": {
         const azureAnthropicBuilt = buildAzureAnthropicSettings();
-        return (
-          azureAnthropicBuilt.deployment ||
-          settings.azureAnthropic?.deployment ||
-          ""
-        );
+        return azureAnthropicBuilt.deployment || settings.azureAnthropic?.deployment || "";
       }
       case "groq":
         return groqModel || settings.groq?.model || "";
@@ -2217,9 +2128,8 @@ export function Settings({
       case "moa":
         return (
           settings.moa?.defaultPreset ||
-          Object.values(settings.moa?.presets || {}).find(
-            (preset) => preset.enabled !== false,
-          )?.id ||
+          Object.values(settings.moa?.presets || {}).find((preset) => preset.enabled !== false)
+            ?.id ||
           ""
         );
       default:
@@ -2227,9 +2137,7 @@ export function Settings({
     }
   };
 
-  const getRoutingModelOptions = (
-    providerType: LLMProviderType,
-  ): ModelOption[] => {
+  const getRoutingModelOptions = (providerType: LLMProviderType): ModelOption[] => {
     const routing = getProviderRoutingConfig(providerType);
     const deduped = new Map<string, ModelOption>();
     const addOption = (value?: string, label?: string) => {
@@ -2241,9 +2149,7 @@ export function Settings({
       });
     };
 
-    providerRoutingModels.forEach((model) =>
-      addOption(model.key, model.displayName),
-    );
+    providerRoutingModels.forEach((model) => addOption(model.key, model.displayName));
     models.forEach((model) => addOption(model.key, model.displayName));
     addOption(getProviderPrimaryModel(providerType));
     addOption(routing.strongModelKey);
@@ -2253,52 +2159,52 @@ export function Settings({
     return Array.from(deduped.values());
   };
 
-  const loadProviderModelsForType = useCallback(async (
-    providerType: LLMProviderType,
-    claudeCredentials?: ReturnType<typeof buildClaudeCredentialInput>,
-  ): Promise<ModelOption[]> => {
-    try {
-      const providerModels =
-        providerType === "anthropic"
-          ? (
-              await window.electronAPI.getAnthropicModels(
-                claudeCredentials ||
-                  buildClaudeCredentialInput({
-                    apiKey: anthropicApiKey,
-                    subscriptionToken: anthropicSubscriptionToken,
-                    authMethod: anthropicAuthMethod,
-                  }),
-              )
-            ).map((model) => ({
-              key: model.id,
-              displayName: model.displayName,
-              description: model.description,
-            }))
-          : await window.electronAPI.getProviderModels(providerType);
-      const normalized = providerModels || [];
-      setProviderModelOptionsByType((prev) => ({
-        ...prev,
-        [providerType]: normalized,
-      }));
-      return normalized;
-    } catch (error) {
-      console.error("Failed to load provider models:", error);
-      setProviderModelOptionsByType((prev) => ({
-        ...prev,
-        [providerType]: [],
-      }));
-      return [];
-    }
-  }, [anthropicApiKey, anthropicAuthMethod, anthropicSubscriptionToken]);
+  const loadProviderModelsForType = useCallback(
+    async (
+      providerType: LLMProviderType,
+      claudeCredentials?: ReturnType<typeof buildClaudeCredentialInput>,
+    ): Promise<ModelOption[]> => {
+      try {
+        const providerModels =
+          providerType === "anthropic"
+            ? (
+                await window.electronAPI.getAnthropicModels(
+                  claudeCredentials ||
+                    buildClaudeCredentialInput({
+                      apiKey: anthropicApiKey,
+                      subscriptionToken: anthropicSubscriptionToken,
+                      authMethod: anthropicAuthMethod,
+                    }),
+                )
+              ).map((model) => ({
+                key: model.id,
+                displayName: model.displayName,
+                description: model.description,
+              }))
+            : await window.electronAPI.getProviderModels(providerType);
+        const normalized = providerModels || [];
+        setProviderModelOptionsByType((prev) => ({
+          ...prev,
+          [providerType]: normalized,
+        }));
+        return normalized;
+      } catch (error) {
+        console.error("Failed to load provider models:", error);
+        setProviderModelOptionsByType((prev) => ({
+          ...prev,
+          [providerType]: [],
+        }));
+        return [];
+      }
+    },
+    [anthropicApiKey, anthropicAuthMethod, anthropicSubscriptionToken],
+  );
 
   const loadProviderRoutingModels = async (
     providerType: LLMProviderType,
     claudeCredentials?: ReturnType<typeof buildClaudeCredentialInput>,
   ) => {
-    const providerModels = await loadProviderModelsForType(
-      providerType,
-      claudeCredentials,
-    );
+    const providerModels = await loadProviderModelsForType(providerType, claudeCredentials);
     setProviderRoutingModels(providerModels);
   };
 
@@ -2346,10 +2252,7 @@ export function Settings({
     };
   };
 
-  const updateMoaPreset = (
-    presetId: string,
-    updater: (preset: MoaPreset) => MoaPreset,
-  ) => {
+  const updateMoaPreset = (presetId: string, updater: (preset: MoaPreset) => MoaPreset) => {
     setSettings((prev) => {
       const presets = { ...(prev.moa?.presets || {}) };
       const existing = presets[presetId];
@@ -2446,11 +2349,7 @@ export function Settings({
     });
   };
 
-  const updateMoaReference = (
-    presetId: string,
-    index: number,
-    patch: Partial<MoaModelSlot>,
-  ) => {
+  const updateMoaReference = (presetId: string, index: number, patch: Partial<MoaModelSlot>) => {
     updateMoaPreset(presetId, (preset) => {
       const references = [...preset.referenceModels];
       references[index] = { ...references[index], ...patch };
@@ -2471,15 +2370,11 @@ export function Settings({
       ...(typeof slot.temperature === "number" && Number.isFinite(slot.temperature)
         ? { temperature: Math.max(0, Math.min(2, slot.temperature)) }
         : {}),
-      ...(slot.roleInstruction?.trim()
-        ? { roleInstruction: slot.roleInstruction.trim() }
-        : {}),
+      ...(slot.roleInstruction?.trim() ? { roleInstruction: slot.roleInstruction.trim() } : {}),
     };
   };
 
-  const sanitizeMoaPresets = (
-    presets?: Record<string, MoaPreset>,
-  ): Record<string, MoaPreset> => {
+  const sanitizeMoaPresets = (presets?: Record<string, MoaPreset>): Record<string, MoaPreset> => {
     const sanitized: Record<string, MoaPreset> = {};
     for (const [presetId, preset] of Object.entries(presets || {})) {
       const id = preset.id?.trim() || presetId.trim();
@@ -2491,9 +2386,7 @@ export function Settings({
       sanitized[id] = {
         id,
         name: preset.name?.trim() || id,
-        ...(preset.description?.trim()
-          ? { description: preset.description.trim() }
-          : {}),
+        ...(preset.description?.trim() ? { description: preset.description.trim() } : {}),
         enabled: preset.enabled !== false,
         referenceModels: referenceModels.slice(0, 8),
         aggregator,
@@ -2515,13 +2408,9 @@ export function Settings({
               ),
             }
           : {}),
-        ...(typeof preset.concurrency === "number" &&
-        Number.isFinite(preset.concurrency)
+        ...(typeof preset.concurrency === "number" && Number.isFinite(preset.concurrency)
           ? {
-              concurrency: Math.max(
-                1,
-                Math.min(8, Math.floor(preset.concurrency)),
-              ),
+              concurrency: Math.max(1, Math.min(8, Math.floor(preset.concurrency))),
             }
           : {}),
       };
@@ -2553,10 +2442,7 @@ export function Settings({
         anthropic: providerModels,
       }));
       setModels(providerModels);
-      const nextModelKey = selectClaudeModelKey(
-        providerModels,
-        currentModelKeyOverride,
-      );
+      const nextModelKey = selectClaudeModelKey(providerModels, currentModelKeyOverride);
       setSettings((prev) => {
         if (prev.providerType !== "anthropic") return prev;
         if (prev.modelKey === nextModelKey) {
@@ -2601,9 +2487,7 @@ export function Settings({
     return Array.from(deduped.values());
   };
 
-  const configuredFallbackProviderOptions = providers.filter(
-    (provider) => provider.configured,
-  );
+  const configuredFallbackProviderOptions = providers.filter((provider) => provider.configured);
 
   useEffect(() => {
     if (!azureDeployment) {
@@ -2660,9 +2544,7 @@ export function Settings({
       } else {
         setCustomProviders({});
       }
-      const loadedClaudeAuthMethod = resolveClaudeAuthMethod(
-        loadedSettings.anthropic,
-      );
+      const loadedClaudeAuthMethod = resolveClaudeAuthMethod(loadedSettings.anthropic);
       const loadedClaudeCredentials = buildClaudeCredentialInput({
         ...loadedSettings.anthropic,
         authMethod: loadedClaudeAuthMethod,
@@ -2672,9 +2554,7 @@ export function Settings({
         setAnthropicApiKey(loadedSettings.anthropic.apiKey);
       }
       if (loadedSettings.anthropic?.subscriptionToken) {
-        setAnthropicSubscriptionToken(
-          loadedSettings.anthropic.subscriptionToken,
-        );
+        setAnthropicSubscriptionToken(loadedSettings.anthropic.subscriptionToken);
       }
       setAnthropicAuthMethod(loadedClaudeAuthMethod);
 
@@ -2687,10 +2567,7 @@ export function Settings({
           loadedSettings.modelKey,
           loadedClaudeCredentials,
         );
-        const nextModelKey = selectClaudeModelKey(
-          providerModels,
-          loadedSettings.modelKey,
-        );
+        const nextModelKey = selectClaudeModelKey(providerModels, loadedSettings.modelKey);
         if (nextModelKey && nextModelKey !== loadedSettings.modelKey) {
           setSettings((prev) => ({ ...prev, modelKey: nextModelKey }));
         }
@@ -2703,9 +2580,7 @@ export function Settings({
       if (loadedSettings.bedrock?.profile) {
         setAwsProfile(loadedSettings.bedrock.profile);
       }
-      setUseDefaultCredentials(
-        loadedSettings.bedrock?.useDefaultCredentials ?? true,
-      );
+      setUseDefaultCredentials(loadedSettings.bedrock?.useDefaultCredentials ?? true);
 
       // Set Ollama form state
       if (loadedSettings.ollama?.baseUrl) {
@@ -2749,12 +2624,8 @@ export function Settings({
       if (loadedSettings.openai?.model) {
         setOpenaiModel(loadedSettings.openai.model);
       }
-      setOpenaiReasoningEffort(
-        resolveOpenAIReasoningEffort(loadedSettings.openai),
-      );
-      setOpenaiTextVerbosity(
-        resolveOpenAITextVerbosity(loadedSettings.openai),
-      );
+      setOpenaiReasoningEffort(resolveOpenAIReasoningEffort(loadedSettings.openai));
+      setOpenaiTextVerbosity(resolveOpenAITextVerbosity(loadedSettings.openai));
       // Set OpenAI auth method and OAuth status
       if (loadedSettings.openai?.authMethod) {
         setOpenaiAuthMethod(loadedSettings.openai.authMethod);
@@ -2763,10 +2634,7 @@ export function Settings({
           if (!loadedSettings.openai.model) {
             setOpenaiModel("gpt-5.5");
           }
-          if (
-            loadedSettings.openai.accessToken ||
-            loadedSettings.openai.refreshToken
-          ) {
+          if (loadedSettings.openai.accessToken || loadedSettings.openai.refreshToken) {
             // Tokens available - fully connected
             setOpenaiOAuthConnected(true);
           } else {
@@ -2793,8 +2661,7 @@ export function Settings({
       }
       {
         const loadedDeployments =
-          loadedSettings.azure?.deployments &&
-          loadedSettings.azure.deployments.length > 0
+          loadedSettings.azure?.deployments && loadedSettings.azure.deployments.length > 0
             ? loadedSettings.azure.deployments
             : loadedSettings.azure?.deployment
               ? [loadedSettings.azure.deployment]
@@ -2802,8 +2669,7 @@ export function Settings({
         if (loadedDeployments.length > 0) {
           setAzureDeploymentsText(loadedDeployments.join("\n"));
         }
-        const selectedDeployment =
-          loadedSettings.azure?.deployment || loadedDeployments[0];
+        const selectedDeployment = loadedSettings.azure?.deployment || loadedDeployments[0];
         if (selectedDeployment) {
           setAzureDeployment(selectedDeployment);
         }
@@ -2811,9 +2677,7 @@ export function Settings({
       if (loadedSettings.azure?.apiVersion) {
         setAzureApiVersion(loadedSettings.azure.apiVersion);
       }
-      setAzureReasoningEffort(
-        loadedSettings.azure?.reasoningEffort || "medium",
-      );
+      setAzureReasoningEffort(loadedSettings.azure?.reasoningEffort || "medium");
 
       // Set Azure Anthropic form state
       if (loadedSettings.azureAnthropic?.apiKey) {
@@ -2864,9 +2728,7 @@ export function Settings({
       if (loadedSettings.xai?.model) {
         setXaiModel(loadedSettings.xai.model);
       }
-      setXaiOAuthConnected(
-        !!(loadedSettings.xai?.accessToken && loadedSettings.xai?.refreshToken),
-      );
+      setXaiOAuthConnected(!!(loadedSettings.xai?.accessToken && loadedSettings.xai?.refreshToken));
 
       // Set DeepSeek form state
       if (loadedSettings.deepseek?.apiKey) {
@@ -2942,18 +2804,12 @@ export function Settings({
       setImageAzureApiKey(ig?.azure?.imageApiKey ?? "");
       setImageAzureEndpoint(ig?.azure?.imageEndpoint ?? "");
       setImageAzureDeployment(ig?.azure?.imageDeployment ?? "");
-      setImageAzureApiVersion(
-        ig?.azure?.imageApiVersion ?? "2024-02-15-preview",
-      );
+      setImageAzureApiVersion(ig?.azure?.imageApiVersion ?? "2024-02-15-preview");
       setImageGeminiApiKey(ig?.gemini?.apiKey ?? "");
       setImageGeminiModel(ig?.gemini?.model ?? "nano-banana-2");
       setImageOpenRouterApiKey(ig?.openrouter?.apiKey ?? "");
-      setImageOpenRouterBaseUrl(
-        ig?.openrouter?.baseUrl ?? "https://openrouter.ai/api/v1",
-      );
-      setImageOpenRouterModel(
-        ig?.openrouter?.model ?? "openai/gpt-image-2",
-      );
+      setImageOpenRouterBaseUrl(ig?.openrouter?.baseUrl ?? "https://openrouter.ai/api/v1");
+      setImageOpenRouterModel(ig?.openrouter?.model ?? "openai/gpt-image-2");
       setImageOpenAICodexModel("gpt-image-2");
       setImageOpenAITimeoutSeconds(String(ig?.timeouts?.openai ?? 300));
       setImageOpenAICodexTimeoutSeconds(String(ig?.timeouts?.openaiCodex ?? 300));
@@ -2966,46 +2822,30 @@ export function Settings({
       if (vg?.defaultProvider) setVideoDefaultProvider(vg.defaultProvider);
       if (vg?.fallbackProvider) setVideoFallbackProvider(vg.fallbackProvider);
       if (vg?.openai?.defaultModel) setVideoOpenAIModel(vg.openai.defaultModel);
-      if (vg?.openai?.defaultDuration)
-        setVideoOpenAIDuration(String(vg.openai.defaultDuration));
-      if (vg?.openai?.defaultAspectRatio)
-        setVideoOpenAIAspectRatio(vg.openai.defaultAspectRatio);
-      if (vg?.openai?.defaultResolution)
-        setVideoOpenAIResolution(vg.openai.defaultResolution);
+      if (vg?.openai?.defaultDuration) setVideoOpenAIDuration(String(vg.openai.defaultDuration));
+      if (vg?.openai?.defaultAspectRatio) setVideoOpenAIAspectRatio(vg.openai.defaultAspectRatio);
+      if (vg?.openai?.defaultResolution) setVideoOpenAIResolution(vg.openai.defaultResolution);
       if (vg?.azure?.videoApiKey) setVideoAzureApiKey(vg.azure.videoApiKey);
-      if (vg?.azure?.videoEndpoint)
-        setVideoAzureEndpoint(vg.azure.videoEndpoint);
-      if (vg?.azure?.videoDeployment)
-        setVideoAzureDeployment(vg.azure.videoDeployment);
-      if (vg?.azure?.videoApiVersion)
-        setVideoAzureApiVersion(vg.azure.videoApiVersion);
-      if (vg?.azure?.defaultDuration)
-        setVideoAzureDuration(String(vg.azure.defaultDuration));
-      if (vg?.azure?.defaultAspectRatio)
-        setVideoAzureAspectRatio(vg.azure.defaultAspectRatio);
+      if (vg?.azure?.videoEndpoint) setVideoAzureEndpoint(vg.azure.videoEndpoint);
+      if (vg?.azure?.videoDeployment) setVideoAzureDeployment(vg.azure.videoDeployment);
+      if (vg?.azure?.videoApiVersion) setVideoAzureApiVersion(vg.azure.videoApiVersion);
+      if (vg?.azure?.defaultDuration) setVideoAzureDuration(String(vg.azure.defaultDuration));
+      if (vg?.azure?.defaultAspectRatio) setVideoAzureAspectRatio(vg.azure.defaultAspectRatio);
       if (vg?.gemini?.defaultModel) setVideoGeminiModel(vg.gemini.defaultModel);
-      if (vg?.gemini?.defaultDuration)
-        setVideoGeminiDuration(String(vg.gemini.defaultDuration));
-      if (vg?.gemini?.defaultAspectRatio)
-        setVideoGeminiAspectRatio(vg.gemini.defaultAspectRatio);
+      if (vg?.gemini?.defaultDuration) setVideoGeminiDuration(String(vg.gemini.defaultDuration));
+      if (vg?.gemini?.defaultAspectRatio) setVideoGeminiAspectRatio(vg.gemini.defaultAspectRatio);
       if (vg?.vertex?.model) setVideoVertexModel(vg.vertex.model);
       if (vg?.vertex?.projectId) setVideoVertexProjectId(vg.vertex.projectId);
       if (vg?.vertex?.location) setVideoVertexLocation(vg.vertex.location);
-      if (vg?.vertex?.outputGcsUri)
-        setVideoVertexOutputGcsUri(vg.vertex.outputGcsUri);
-      if (vg?.vertex?.accessToken)
-        setVideoVertexAccessToken(vg.vertex.accessToken);
-      if (vg?.vertex?.defaultDuration)
-        setVideoVertexDuration(String(vg.vertex.defaultDuration));
-      if (vg?.vertex?.defaultAspectRatio)
-        setVideoVertexAspectRatio(vg.vertex.defaultAspectRatio);
+      if (vg?.vertex?.outputGcsUri) setVideoVertexOutputGcsUri(vg.vertex.outputGcsUri);
+      if (vg?.vertex?.accessToken) setVideoVertexAccessToken(vg.vertex.accessToken);
+      if (vg?.vertex?.defaultDuration) setVideoVertexDuration(String(vg.vertex.defaultDuration));
+      if (vg?.vertex?.defaultAspectRatio) setVideoVertexAspectRatio(vg.vertex.defaultAspectRatio);
       if (vg?.kling?.apiKey) setVideoKlingApiKey(vg.kling.apiKey);
       if (vg?.kling?.baseUrl) setVideoKlingBaseUrl(vg.kling.baseUrl);
       if (vg?.kling?.model) setVideoKlingModel(vg.kling.model);
-      if (vg?.kling?.defaultDuration)
-        setVideoKlingDuration(String(vg.kling.defaultDuration));
-      if (vg?.kling?.defaultAspectRatio)
-        setVideoKlingAspectRatio(vg.kling.defaultAspectRatio);
+      if (vg?.kling?.defaultDuration) setVideoKlingDuration(String(vg.kling.defaultDuration));
+      if (vg?.kling?.defaultAspectRatio) setVideoKlingAspectRatio(vg.kling.defaultAspectRatio);
 
       // Set Bedrock form state (access key and secret key are set earlier)
       if (loadedSettings.bedrock?.accessKeyId) {
@@ -3019,10 +2859,7 @@ export function Settings({
       }
 
       // Populate dropdown arrays from cached models
-      if (
-        loadedSettings.cachedGeminiModels &&
-        loadedSettings.cachedGeminiModels.length > 0
-      ) {
+      if (loadedSettings.cachedGeminiModels && loadedSettings.cachedGeminiModels.length > 0) {
         setGeminiModels(
           loadedSettings.cachedGeminiModels.map((m: Any) => ({
             name: m.key,
@@ -3043,10 +2880,7 @@ export function Settings({
           })),
         );
       }
-      if (
-        loadedSettings.cachedOpenAIModels &&
-        loadedSettings.cachedOpenAIModels.length > 0
-      ) {
+      if (loadedSettings.cachedOpenAIModels && loadedSettings.cachedOpenAIModels.length > 0) {
         setOpenaiModels(
           loadedSettings.cachedOpenAIModels.map((m: Any) => ({
             id: m.key,
@@ -3055,10 +2889,7 @@ export function Settings({
           })),
         );
       }
-      if (
-        loadedSettings.cachedOllamaModels &&
-        loadedSettings.cachedOllamaModels.length > 0
-      ) {
+      if (loadedSettings.cachedOllamaModels && loadedSettings.cachedOllamaModels.length > 0) {
         setOllamaModels(
           loadedSettings.cachedOllamaModels.map((m: Any) => ({
             name: m.key,
@@ -3066,10 +2897,7 @@ export function Settings({
           })),
         );
       }
-      if (
-        loadedSettings.cachedBedrockModels &&
-        loadedSettings.cachedBedrockModels.length > 0
-      ) {
+      if (loadedSettings.cachedBedrockModels && loadedSettings.cachedBedrockModels.length > 0) {
         setBedrockModels(
           loadedSettings.cachedBedrockModels.map((m: Any) => ({
             id: m.key,
@@ -3078,10 +2906,7 @@ export function Settings({
           })),
         );
       }
-      if (
-        loadedSettings.cachedPiModels &&
-        loadedSettings.cachedPiModels.length > 0
-      ) {
+      if (loadedSettings.cachedPiModels && loadedSettings.cachedPiModels.length > 0) {
         setPiModels(
           loadedSettings.cachedPiModels.map((m: Any) => ({
             id: m.key,
@@ -3100,20 +2925,11 @@ export function Settings({
   const loadOllamaModels = async (baseUrl?: string) => {
     try {
       setLoadingOllamaModels(true);
-      const models = await window.electronAPI.getOllamaModels(
-        baseUrl || ollamaBaseUrl,
-      );
-      console.log(
-        `[Settings] Loaded ${models?.length || 0} Ollama models`,
-        models,
-      );
+      const models = await window.electronAPI.getOllamaModels(baseUrl || ollamaBaseUrl);
+      console.log(`[Settings] Loaded ${models?.length || 0} Ollama models`, models);
       setOllamaModels(models || []);
       // If we got models and current model isn't in the list, select the first one
-      if (
-        models &&
-        models.length > 0 &&
-        !models.some((m) => m.name === ollamaModel)
-      ) {
+      if (models && models.length > 0 && !models.some((m) => m.name === ollamaModel)) {
         setOllamaModel(models[0].name);
       }
       // Notify main page that models were refreshed (they're now cached)
@@ -3129,16 +2945,10 @@ export function Settings({
   const loadGeminiModels = async (apiKey?: string) => {
     try {
       setLoadingGeminiModels(true);
-      const models = await window.electronAPI.getGeminiModels(
-        apiKey || geminiApiKey,
-      );
+      const models = await window.electronAPI.getGeminiModels(apiKey || geminiApiKey);
       setGeminiModels(models || []);
       // If we got models and current model isn't in the list, select the first one
-      if (
-        models &&
-        models.length > 0 &&
-        !models.some((m) => m.name === geminiModel)
-      ) {
+      if (models && models.length > 0 && !models.some((m) => m.name === geminiModel)) {
         setGeminiModel(models[0].name);
       }
       // Notify main page that models were refreshed (they're now cached)
@@ -3160,11 +2970,7 @@ export function Settings({
       );
       setOpenrouterModels(models || []);
       // If we got models and current model isn't in the list, select the first one
-      if (
-        models &&
-        models.length > 0 &&
-        !models.some((m) => m.id === openrouterModel)
-      ) {
+      if (models && models.length > 0 && !models.some((m) => m.id === openrouterModel)) {
         setOpenrouterModel(models[0].id);
       }
       // Notify main page that models were refreshed (they're now cached)
@@ -3180,9 +2986,7 @@ export function Settings({
   const loadOpenAIModels = async (apiKey?: string) => {
     try {
       setLoadingOpenAIModels(true);
-      const models = await window.electronAPI.getOpenAIModels(
-        apiKey || openaiApiKey,
-      );
+      const models = await window.electronAPI.getOpenAIModels(apiKey || openaiApiKey);
       setOpenaiModels(models || []);
       // If we got models and no model is selected yet, select the first one
       // (Don't override custom model IDs that may not be in the list.)
@@ -3207,11 +3011,7 @@ export function Settings({
         groqBaseUrl || undefined,
       );
       setGroqModels(models || []);
-      if (
-        models &&
-        models.length > 0 &&
-        !models.some((m) => m.id === groqModel)
-      ) {
+      if (models && models.length > 0 && !models.some((m) => m.id === groqModel)) {
         setGroqModel(models[0].id);
       }
       onSettingsChanged?.();
@@ -3231,11 +3031,7 @@ export function Settings({
         xaiBaseUrl || undefined,
       );
       setXaiModels(models || []);
-      if (
-        models &&
-        models.length > 0 &&
-        !models.some((m) => m.id === xaiModel)
-      ) {
+      if (models && models.length > 0 && !models.some((m) => m.id === xaiModel)) {
         setXaiModel(models[0].id);
       }
       onSettingsChanged?.();
@@ -3256,10 +3052,7 @@ export function Settings({
       );
       const availableModels = models && models.length > 0 ? models : DEFAULT_DEEPSEEK_MODELS;
       setDeepseekModels(availableModels);
-      if (
-        availableModels.length > 0 &&
-        !availableModels.some((m) => m.id === deepseekModel)
-      ) {
+      if (availableModels.length > 0 && !availableModels.some((m) => m.id === deepseekModel)) {
         setDeepseekModel(availableModels[0].id);
       }
       onSettingsChanged?.();
@@ -3279,11 +3072,7 @@ export function Settings({
         kimiBaseUrl || undefined,
       );
       setKimiModels(models || []);
-      if (
-        models &&
-        models.length > 0 &&
-        !models.some((m) => m.id === kimiModel)
-      ) {
+      if (models && models.length > 0 && !models.some((m) => m.id === kimiModel)) {
         setKimiModel(models[0].id);
       }
       onSettingsChanged?.();
@@ -3301,11 +3090,7 @@ export function Settings({
       const resolvedProvider = provider || piProvider;
       const models = await window.electronAPI.getPiModels(resolvedProvider);
       setPiModels(models || []);
-      if (
-        models &&
-        models.length > 0 &&
-        !models.some((m) => m.id === piModel)
-      ) {
+      if (models && models.length > 0 && !models.some((m) => m.id === piModel)) {
         setPiModel(models[0].id);
       }
       onSettingsChanged?.();
@@ -3326,10 +3111,7 @@ export function Settings({
     }
   };
 
-  const loadOpenAICompatibleModels = async (
-    baseUrl?: string,
-    apiKey?: string,
-  ) => {
+  const loadOpenAICompatibleModels = async (baseUrl?: string, apiKey?: string) => {
     try {
       setLoadingOpenAICompatModels(true);
       const resolvedBaseUrl = baseUrl || openaiCompatBaseUrl;
@@ -3339,11 +3121,7 @@ export function Settings({
         apiKey || openaiCompatApiKey || undefined,
       );
       setOpenaiCompatModels(models || []);
-      if (
-        models &&
-        models.length > 0 &&
-        !models.some((m) => m.key === openaiCompatModel)
-      ) {
+      if (models && models.length > 0 && !models.some((m) => m.key === openaiCompatModel)) {
         setOpenaiCompatModel(models[0].key);
       }
       onSettingsChanged?.();
@@ -3364,13 +3142,10 @@ export function Settings({
       setLoadingCustomProviderModels(true);
       setTestResult(null);
       const currentConfig = customProviders[resolvedType] || {};
-      const models = await window.electronAPI.refreshCustomProviderModels(
-        resolvedType,
-        {
-          apiKey: currentConfig.apiKey,
-          baseUrl: currentConfig.baseUrl || customEntry.baseUrl,
-        },
-      );
+      const models = await window.electronAPI.refreshCustomProviderModels(resolvedType, {
+        apiKey: currentConfig.apiKey,
+        baseUrl: currentConfig.baseUrl || customEntry.baseUrl,
+      });
 
       setCustomProviders((prev) => {
         const existing = prev[resolvedType] || {};
@@ -3401,9 +3176,7 @@ export function Settings({
       setTestResult({
         success: false,
         error:
-          error instanceof Error
-            ? error.message
-            : `Failed to load models for ${customEntry.name}`,
+          error instanceof Error ? error.message : `Failed to load models for ${customEntry.name}`,
       });
     } finally {
       setLoadingCustomProviderModels(false);
@@ -3415,9 +3188,7 @@ export function Settings({
       if (providerType !== "moa") return { ...prev, providerType };
       const defaultPreset =
         prev.moa?.defaultPreset ||
-        Object.values(prev.moa?.presets || {}).find(
-          (preset) => preset.enabled !== false,
-        )?.id ||
+        Object.values(prev.moa?.presets || {}).find((preset) => preset.enabled !== false)?.id ||
         "";
       return {
         ...prev,
@@ -3448,10 +3219,7 @@ export function Settings({
 
     const currentRouting = getProviderRoutingConfig(providerType);
     const providerPrimaryModel = getProviderPrimaryModel(providerType);
-    if (
-      providerPrimaryModel &&
-      (!currentRouting.strongModelKey || !currentRouting.cheapModelKey)
-    ) {
+    if (providerPrimaryModel && (!currentRouting.strongModelKey || !currentRouting.cheapModelKey)) {
       setProviderRoutingConfig(providerType, {
         strongModelKey: currentRouting.strongModelKey || providerPrimaryModel,
         cheapModelKey: currentRouting.cheapModelKey || providerPrimaryModel,
@@ -3496,9 +3264,10 @@ export function Settings({
         if (result) setHfServerStatus(result);
       });
     } else if (providerType === "moa") {
-      const slots = Object.values(settingsRef.current.moa?.presets || {}).flatMap(
-        (preset) => [preset.aggregator, ...(preset.referenceModels || [])],
-      );
+      const slots = Object.values(settingsRef.current.moa?.presets || {}).flatMap((preset) => [
+        preset.aggregator,
+        ...(preset.referenceModels || []),
+      ]);
       for (const slot of slots) {
         if (slot.providerType !== "moa") {
           void loadProviderModelsForType(slot.providerType);
@@ -3573,11 +3342,7 @@ export function Settings({
         ]);
         if (status) setHfServerStatus(status);
         if (log) setServerLog(log);
-        if (
-          status?.serverRunning ||
-          !status?.processAlive ||
-          pollCount >= maxPolls
-        ) {
+        if (status?.serverRunning || !status?.processAlive || pollCount >= maxPolls) {
           if (status?.serverRunning) setServerLog(null); // clear log panel on success
           setStartingServer(false);
           return;
@@ -3690,10 +3455,7 @@ export function Settings({
       // (for example, custom inference profile ARN/ID). Only auto-select when empty.
       const currentModel = bedrockModel?.trim();
       let nextModels = normalizedModels;
-      if (
-        currentModel &&
-        !normalizedModels.some((m: Any) => m.id === currentModel)
-      ) {
+      if (currentModel && !normalizedModels.some((m: Any) => m.id === currentModel)) {
         nextModels = [
           {
             id: currentModel,
@@ -3714,11 +3476,8 @@ export function Settings({
     } catch (error) {
       console.error("Failed to load Bedrock models:", error);
       setBedrockModels([]);
-      const rawMessage =
-        error instanceof Error ? error.message : String(error || "");
-      if (
-        rawMessage.includes("Could not load credentials from any providers")
-      ) {
+      const rawMessage = error instanceof Error ? error.message : String(error || "");
+      if (rawMessage.includes("Could not load credentials from any providers")) {
         setTestResult({
           success: false,
           error:
@@ -3849,9 +3608,7 @@ export function Settings({
       setResettingCredentials(true);
       setTestResult(null);
 
-      const providerType = resolveCustomProviderId(
-        settings.providerType as LLMProviderType,
-      );
+      const providerType = resolveCustomProviderId(settings.providerType as LLMProviderType);
       await window.electronAPI.resetLLMProviderCredentials(providerType);
 
       clearProviderFormState(providerType);
@@ -3893,32 +3650,24 @@ export function Settings({
       const currentSettings = settingsRef.current;
       const openrouterParetoScore = parseOpenRouterParetoMinCodingScore();
       const shouldValidateOpenRouterParetoScore =
-        currentSettings.providerType === "openrouter" &&
-        openrouterParetoScore.shouldSave;
+        currentSettings.providerType === "openrouter" && openrouterParetoScore.shouldSave;
       if (shouldValidateOpenRouterParetoScore && openrouterParetoScore.error) {
         setTestResult({ success: false, error: openrouterParetoScore.error });
         return;
       }
 
-      const sanitizedCustomProviders =
-        sanitizeCustomProviders(customProviders) || {};
+      const sanitizedCustomProviders = sanitizeCustomProviders(customProviders) || {};
       const sanitizedMoaPresets = sanitizeMoaPresets(currentSettings.moa?.presets);
       const moaDefaultPreset =
-        currentSettings.moa?.defaultPreset &&
-        sanitizedMoaPresets[currentSettings.moa.defaultPreset]
+        currentSettings.moa?.defaultPreset && sanitizedMoaPresets[currentSettings.moa.defaultPreset]
           ? currentSettings.moa.defaultPreset
-          : Object.values(sanitizedMoaPresets).find(
-              (preset) => preset.enabled !== false,
-            )?.id;
+          : Object.values(sanitizedMoaPresets).find((preset) => preset.enabled !== false)?.id;
       const resolvedProviderTypeForSave = resolveCustomProviderId(
         currentSettings.providerType as LLMProviderType,
       );
-      const selectedCustomEntry = CUSTOM_PROVIDER_MAP.get(
-        resolvedProviderTypeForSave,
-      );
+      const selectedCustomEntry = CUSTOM_PROVIDER_MAP.get(resolvedProviderTypeForSave);
       if (selectedCustomEntry) {
-        const existing =
-          sanitizedCustomProviders[resolvedProviderTypeForSave] || {};
+        const existing = sanitizedCustomProviders[resolvedProviderTypeForSave] || {};
         const withDefaults: CustomProviderConfig = { ...existing };
         if (!withDefaults.model && selectedCustomEntry.defaultModel) {
           withDefaults.model = selectedCustomEntry.defaultModel;
@@ -3930,9 +3679,7 @@ export function Settings({
       }
       const azureSettings = buildAzureSettings();
       const azureAnthropicSettings = buildAzureAnthropicSettings();
-      const routingFor = (
-        providerType: LLMProviderType,
-      ): ProviderRoutingConfig => {
+      const routingFor = (providerType: LLMProviderType): ProviderRoutingConfig => {
         const routing = getProviderRoutingConfig(providerType);
         const strongModelKey = routing.strongModelKey?.trim();
         const cheapModelKey = routing.cheapModelKey?.trim();
@@ -3944,8 +3691,8 @@ export function Settings({
           automatedTaskModelKey: automatedTaskModelKey || undefined,
           preferStrongForVerification:
             typeof routing.preferStrongForVerification === "boolean"
-            ? routing.preferStrongForVerification
-            : true,
+              ? routing.preferStrongForVerification
+              : true,
         };
       };
       const failoverFor = (
@@ -3962,18 +3709,10 @@ export function Settings({
         const cooldown =
           typeof failover.failoverPrimaryRetryCooldownSeconds === "number" &&
           Number.isFinite(failover.failoverPrimaryRetryCooldownSeconds)
-            ? Math.max(
-                0,
-                Math.min(
-                  3600,
-                  Math.floor(failover.failoverPrimaryRetryCooldownSeconds),
-                ),
-              )
+            ? Math.max(0, Math.min(3600, Math.floor(failover.failoverPrimaryRetryCooldownSeconds)))
             : undefined;
         return {
-          ...(fallbackProviders !== undefined
-            ? { fallbackProviders }
-            : {}),
+          ...(fallbackProviders !== undefined ? { fallbackProviders } : {}),
           ...(typeof cooldown === "number"
             ? { failoverPrimaryRetryCooldownSeconds: cooldown }
             : {}),
@@ -4054,10 +3793,7 @@ export function Settings({
         },
         // Always include openai settings
         openai: {
-          apiKey:
-            openaiAuthMethod === "api_key"
-              ? openaiApiKey || undefined
-              : undefined,
+          apiKey: openaiAuthMethod === "api_key" ? openaiApiKey || undefined : undefined,
           model: openaiModel || undefined,
           reasoningEffort: openaiReasoningEffort,
           textVerbosity: openaiTextVerbosity,
@@ -4137,10 +3873,7 @@ export function Settings({
         },
         moa: {
           defaultPreset: moaDefaultPreset,
-          presets:
-            Object.keys(sanitizedMoaPresets).length > 0
-              ? sanitizedMoaPresets
-              : undefined,
+          presets: Object.keys(sanitizedMoaPresets).length > 0 ? sanitizedMoaPresets : undefined,
           ...routingFor("moa"),
           ...failoverFor("moa"),
         },
@@ -4207,32 +3940,22 @@ export function Settings({
           fallbackProvider: videoFallbackProvider || undefined,
           openai: {
             defaultModel: videoOpenAIModel || undefined,
-            defaultDuration: videoOpenAIDuration
-              ? Number(videoOpenAIDuration)
-              : undefined,
-            defaultAspectRatio:
-              (videoOpenAIAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
-            defaultResolution:
-              (videoOpenAIResolution as "480p" | "720p" | "1080p") || undefined,
+            defaultDuration: videoOpenAIDuration ? Number(videoOpenAIDuration) : undefined,
+            defaultAspectRatio: (videoOpenAIAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
+            defaultResolution: (videoOpenAIResolution as "480p" | "720p" | "1080p") || undefined,
           },
           azure: {
             videoApiKey: videoAzureApiKey || undefined,
             videoEndpoint: videoAzureEndpoint || undefined,
             videoDeployment: videoAzureDeployment || undefined,
             videoApiVersion: videoAzureApiVersion || undefined,
-            defaultDuration: videoAzureDuration
-              ? Number(videoAzureDuration)
-              : undefined,
-            defaultAspectRatio:
-              (videoAzureAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
+            defaultDuration: videoAzureDuration ? Number(videoAzureDuration) : undefined,
+            defaultAspectRatio: (videoAzureAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
           },
           gemini: {
             defaultModel: videoGeminiModel || undefined,
-            defaultDuration: videoGeminiDuration
-              ? Number(videoGeminiDuration)
-              : undefined,
-            defaultAspectRatio:
-              (videoGeminiAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
+            defaultDuration: videoGeminiDuration ? Number(videoGeminiDuration) : undefined,
+            defaultAspectRatio: (videoGeminiAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
           },
           vertex: {
             model: videoVertexModel || undefined,
@@ -4240,27 +3963,19 @@ export function Settings({
             location: videoVertexLocation || undefined,
             outputGcsUri: videoVertexOutputGcsUri || undefined,
             accessToken: videoVertexAccessToken || undefined,
-            defaultDuration: videoVertexDuration
-              ? Number(videoVertexDuration)
-              : undefined,
-            defaultAspectRatio:
-              (videoVertexAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
+            defaultDuration: videoVertexDuration ? Number(videoVertexDuration) : undefined,
+            defaultAspectRatio: (videoVertexAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
           },
           kling: {
             apiKey: videoKlingApiKey || undefined,
             baseUrl: videoKlingBaseUrl || undefined,
             model: videoKlingModel || undefined,
-            defaultDuration: videoKlingDuration
-              ? Number(videoKlingDuration)
-              : undefined,
-            defaultAspectRatio:
-              (videoKlingAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
+            defaultDuration: videoKlingDuration ? Number(videoKlingDuration) : undefined,
+            defaultAspectRatio: (videoKlingAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
           },
         },
         customProviders:
-          Object.keys(sanitizedCustomProviders).length > 0
-            ? sanitizedCustomProviders
-            : undefined,
+          Object.keys(sanitizedCustomProviders).length > 0 ? sanitizedCustomProviders : undefined,
       };
 
       await window.electronAPI.saveLLMSettings(settingsToSave);
@@ -4280,22 +3995,18 @@ export function Settings({
 
       const openrouterParetoScore = parseOpenRouterParetoMinCodingScore();
       const shouldValidateOpenRouterParetoScore =
-        settings.providerType === "openrouter" &&
-        openrouterParetoScore.shouldSave;
+        settings.providerType === "openrouter" && openrouterParetoScore.shouldSave;
       if (shouldValidateOpenRouterParetoScore && openrouterParetoScore.error) {
         setTestResult({ success: false, error: openrouterParetoScore.error });
         return;
       }
 
-      const sanitizedCustomProviders =
-        sanitizeCustomProviders(customProviders) || {};
+      const sanitizedCustomProviders = sanitizeCustomProviders(customProviders) || {};
       const sanitizedMoaPresets = sanitizeMoaPresets(settings.moa?.presets);
       const moaDefaultPreset =
         settings.moa?.defaultPreset && sanitizedMoaPresets[settings.moa.defaultPreset]
           ? settings.moa.defaultPreset
-          : Object.values(sanitizedMoaPresets).find(
-              (preset) => preset.enabled !== false,
-            )?.id;
+          : Object.values(sanitizedMoaPresets).find((preset) => preset.enabled !== false)?.id;
       const azureSettings = buildAzureSettings();
       const azureAnthropicSettings = buildAzureAnthropicSettings();
       const anthropicCredentialSettings = {
@@ -4307,10 +4018,7 @@ export function Settings({
       const testConfig = {
         providerType: settings.providerType,
         modelKey: settings.modelKey,
-        anthropic:
-          settings.providerType === "anthropic"
-            ? anthropicCredentialSettings
-            : undefined,
+        anthropic: settings.providerType === "anthropic" ? anthropicCredentialSettings : undefined,
         bedrock:
           settings.providerType === "bedrock"
             ? {
@@ -4354,10 +4062,7 @@ export function Settings({
         openai:
           settings.providerType === "openai"
             ? {
-                apiKey:
-                  openaiAuthMethod === "api_key"
-                    ? openaiApiKey || undefined
-                    : undefined,
+                apiKey: openaiAuthMethod === "api_key" ? openaiApiKey || undefined : undefined,
                 model: openaiModel || undefined,
                 reasoningEffort: openaiReasoningEffort,
                 textVerbosity: openaiTextVerbosity,
@@ -4397,14 +4102,10 @@ export function Settings({
         xai:
           settings.providerType === "xai" || settings.providerType === "xai-oauth"
             ? {
-                apiKey:
-                  settings.providerType === "xai"
-                    ? xaiApiKey || undefined
-                    : undefined,
+                apiKey: settings.providerType === "xai" ? xaiApiKey || undefined : undefined,
                 model: xaiModel || undefined,
                 baseUrl: xaiBaseUrl || undefined,
-                authMethod:
-                  settings.providerType === "xai-oauth" ? "oauth" : "api_key",
+                authMethod: settings.providerType === "xai-oauth" ? "oauth" : "api_key",
               }
             : undefined,
         deepseek:
@@ -4444,15 +4145,11 @@ export function Settings({
             ? {
                 defaultPreset: moaDefaultPreset,
                 presets:
-                  Object.keys(sanitizedMoaPresets).length > 0
-                    ? sanitizedMoaPresets
-                    : undefined,
+                  Object.keys(sanitizedMoaPresets).length > 0 ? sanitizedMoaPresets : undefined,
               }
             : undefined,
         customProviders:
-          Object.keys(sanitizedCustomProviders).length > 0
-            ? sanitizedCustomProviders
-            : undefined,
+          Object.keys(sanitizedCustomProviders).length > 0 ? sanitizedCustomProviders : undefined,
       };
 
       const result = await window.electronAPI.testLLMProvider(testConfig);
@@ -4464,9 +4161,7 @@ export function Settings({
     }
   };
 
-  const renderModelSettingsActions = (options?: {
-    includeProviderActions?: boolean;
-  }) => (
+  const renderModelSettingsActions = (options?: { includeProviderActions?: boolean }) => (
     <div className="settings-actions">
       {options?.includeProviderActions && (
         <>
@@ -4482,9 +4177,7 @@ export function Settings({
             onClick={handleResetProviderCredentials}
             disabled={loading || saving || testing || resettingCredentials}
           >
-            {resettingCredentials
-              ? "Resetting..."
-              : "Reset Provider Credentials"}
+            {resettingCredentials ? "Resetting..." : "Reset Provider Credentials"}
           </button>
         </>
       )}
@@ -4526,14 +4219,10 @@ export function Settings({
     settings.moa?.defaultPreset ||
     moaPresetList.find((preset) => preset.enabled !== false)?.id ||
     "";
-  const selectedMoaPreset = selectedMoaPresetId
-    ? moaPresets[selectedMoaPresetId]
-    : undefined;
+  const selectedMoaPreset = selectedMoaPresetId ? moaPresets[selectedMoaPresetId] : undefined;
   const moaProviderOptions = getMoaProviderOptions();
-  const strongRoutingModel =
-    providerRouting.strongModelKey || providerPrimaryModel;
-  const cheapRoutingModel =
-    providerRouting.cheapModelKey || providerPrimaryModel;
+  const strongRoutingModel = providerRouting.strongModelKey || providerPrimaryModel;
+  const cheapRoutingModel = providerRouting.cheapModelKey || providerPrimaryModel;
   const automatedTaskRoutingModel = providerRouting.automatedTaskModelKey || "";
   const routingModelOptions = getRoutingModelOptions(currentProviderType);
   const routingModelsIdentical =
@@ -4577,12 +4266,7 @@ export function Settings({
         void loadProviderModelsForType(providerType);
       }
     }
-  }, [
-    currentProviderType,
-    moaPresetList,
-    loadProviderModelsForType,
-    providerModelOptionsByType,
-  ]);
+  }, [currentProviderType, moaPresetList, loadProviderModelsForType, providerModelOptionsByType]);
 
   const activeImageTab: ImageProviderTab = imageGenDefaultProvider || "auto";
 
@@ -4627,14 +4311,9 @@ export function Settings({
     provider === "gemini" ? "nano-banana-2" : "gpt-image-2";
 
   const getImageModelLabel = (model: ImageGenModel): string =>
-    model === "nano-banana-2"
-      ? "nano-banana-2 (Gemini 3.1 Flash Image)"
-      : model;
+    model === "nano-banana-2" ? "nano-banana-2 (Gemini 3.1 Flash Image)" : model;
 
-  const renderImageTimeoutField = (
-    value: string,
-    onChange: (value: string) => void,
-  ) => (
+  const renderImageTimeoutField = (value: string, onChange: (value: string) => void) => (
     <>
       <label className="settings-label" style={{ marginTop: "8px" }}>
         Timeout before fallback (seconds)
@@ -4657,10 +4336,7 @@ export function Settings({
   const selectImageDefaultProvider = (provider: ImageGenProvider) => {
     setImageGenDefaultProvider(provider);
     const compatibleModel = getImageProviderModel(provider);
-    if (
-      imageGenDefaultModel &&
-      imageGenDefaultModel !== compatibleModel
-    ) {
+    if (imageGenDefaultModel && imageGenDefaultModel !== compatibleModel) {
       setImageGenDefaultModel(compatibleModel);
     }
   };
@@ -4706,8 +4382,8 @@ export function Settings({
       <div className="llm-provider-header">
         <h2>Image Provider</h2>
         <p className="settings-description">
-          Choose which service to use for image generation. The selected
-          provider will be used by the image creation tool.
+          Choose which service to use for image generation. The selected provider will be used by
+          the image creation tool.
         </p>
       </div>
       <div className="llm-provider-tabs">
@@ -4729,13 +4405,11 @@ export function Settings({
             <h3>Automatic Image Routing</h3>
             <p className="settings-hint">{automaticImageRoutingDescription}</p>
             {currentProviderType === "openai" && openaiAuthMethod === "oauth" && (
-              <p className="settings-hint">
-                Current route: ChatGPT Subscription with gpt-image-2.
-              </p>
+              <p className="settings-hint">Current route: ChatGPT Subscription with gpt-image-2.</p>
             )}
             <p className="settings-hint">
-              Pick a specific provider tab only when you want image generation
-              to ignore the AI Model provider.
+              Pick a specific provider tab only when you want image generation to ignore the AI
+              Model provider.
             </p>
           </div>
         )}
@@ -4744,12 +4418,10 @@ export function Settings({
           <div className="settings-section">
             <h3>OpenAI GPT Image</h3>
             <p className="settings-hint">
-              Optionally use a dedicated API key for image generation. Leave
-              blank to reuse the OpenAI API key from AI Model.
+              Optionally use a dedicated API key for image generation. Leave blank to reuse the
+              OpenAI API key from AI Model.
             </p>
-            <label className="settings-label">
-              API Key (image-specific, optional)
-            </label>
+            <label className="settings-label">API Key (image-specific, optional)</label>
             <input
               className="settings-input"
               type="password"
@@ -4782,13 +4454,10 @@ export function Settings({
           <div className="settings-section">
             <h3>Azure OpenAI Image</h3>
             <p className="settings-hint">
-              Optionally use a dedicated Azure resource for image generation.
-              Leave credentials blank to reuse the Azure chat credentials from
-              AI Model.
+              Optionally use a dedicated Azure resource for image generation. Leave credentials
+              blank to reuse the Azure chat credentials from AI Model.
             </p>
-            <label className="settings-label">
-              API Key (image-specific, optional)
-            </label>
+            <label className="settings-label">API Key (image-specific, optional)</label>
             <input
               className="settings-input"
               type="password"
@@ -4841,12 +4510,10 @@ export function Settings({
           <div className="settings-section">
             <h3>Gemini Image</h3>
             <p className="settings-hint">
-              Optionally use a dedicated Gemini API key for image generation.
-              Leave blank to reuse the Gemini API key from AI Model.
+              Optionally use a dedicated Gemini API key for image generation. Leave blank to reuse
+              the Gemini API key from AI Model.
             </p>
-            <label className="settings-label">
-              API Key (image-specific, optional)
-            </label>
+            <label className="settings-label">API Key (image-specific, optional)</label>
             <input
               className="settings-input"
               type="password"
@@ -4863,9 +4530,7 @@ export function Settings({
                 setImageGenDefaultModel("nano-banana-2");
               }}
             >
-              <option value="nano-banana-2">
-                nano-banana-2 (Gemini 3.1 Flash Image)
-              </option>
+              <option value="nano-banana-2">nano-banana-2 (Gemini 3.1 Flash Image)</option>
             </select>
             {renderImageTimeoutField(imageGeminiTimeoutSeconds, setImageGeminiTimeoutSeconds)}
           </div>
@@ -4875,13 +4540,10 @@ export function Settings({
           <div className="settings-section">
             <h3>OpenRouter Image</h3>
             <p className="settings-hint">
-              Optionally use dedicated OpenRouter credentials for image
-              generation. Leave blank to reuse OpenRouter settings from AI
-              Model.
+              Optionally use dedicated OpenRouter credentials for image generation. Leave blank to
+              reuse OpenRouter settings from AI Model.
             </p>
-            <label className="settings-label">
-              API Key (image-specific, optional)
-            </label>
+            <label className="settings-label">API Key (image-specific, optional)</label>
             <input
               className="settings-input"
               type="password"
@@ -4914,16 +4576,17 @@ export function Settings({
                 );
               }}
             />
-            {renderImageTimeoutField(imageOpenRouterTimeoutSeconds, setImageOpenRouterTimeoutSeconds)}
+            {renderImageTimeoutField(
+              imageOpenRouterTimeoutSeconds,
+              setImageOpenRouterTimeoutSeconds,
+            )}
           </div>
         )}
 
         {activeImageTab === "openai-codex" && (
           <div className="settings-section">
             <h3>ChatGPT Subscription Image</h3>
-            <p className="settings-hint">
-              Uses the ChatGPT sign-in configured in AI Model.
-            </p>
+            <p className="settings-hint">Uses the ChatGPT sign-in configured in AI Model.</p>
             <label className="settings-label">Default model</label>
             <select
               className="settings-select"
@@ -4944,16 +4607,12 @@ export function Settings({
 
         <div className="settings-section" style={{ marginTop: "16px" }}>
           <label className="settings-label">Fallback provider</label>
-          <p className="settings-hint">
-            If the selected provider fails, fall back to this one.
-          </p>
+          <p className="settings-hint">If the selected provider fails, fall back to this one.</p>
           <select
             className="settings-select"
             value={imageGenBackupProvider}
             onChange={(e) =>
-              selectImageBackupProvider(
-                (e.target.value || "") as ImageGenProvider | "",
-              )
+              selectImageBackupProvider((e.target.value || "") as ImageGenProvider | "")
             }
           >
             <option value="">None</option>
@@ -4971,22 +4630,17 @@ export function Settings({
               <select
                 className="settings-select"
                 value={
-                  imageGenBackupModel ===
-                  getImageProviderModel(imageGenBackupProvider)
+                  imageGenBackupModel === getImageProviderModel(imageGenBackupProvider)
                     ? imageGenBackupModel
                     : ""
                 }
                 onChange={(e) =>
-                  setImageGenBackupModel(
-                    (e.target.value || "") as ImageGenModel | "",
-                  )
+                  setImageGenBackupModel((e.target.value || "") as ImageGenModel | "")
                 }
               >
                 <option value="">Auto (recommended)</option>
                 <option value={getImageProviderModel(imageGenBackupProvider)}>
-                  {getImageModelLabel(
-                    getImageProviderModel(imageGenBackupProvider),
-                  )}
+                  {getImageModelLabel(getImageProviderModel(imageGenBackupProvider))}
                 </option>
               </select>
             </>
@@ -5003,8 +4657,8 @@ export function Settings({
       <div className="llm-provider-header">
         <h2>Video Provider</h2>
         <p className="settings-description">
-          Choose which service to use for video generation. The selected
-          provider will be used by the video creation tool.
+          Choose which service to use for video generation. The selected provider will be used by
+          the video creation tool.
         </p>
       </div>
       <div className="llm-provider-tabs">
@@ -5025,8 +4679,8 @@ export function Settings({
           <div className="settings-section">
             <h3>OpenAI Sora 2</h3>
             <p className="settings-hint">
-              Uses the OpenAI API key configured in AI Model. Supports
-              text-to-video and image-to-video.
+              Uses the OpenAI API key configured in AI Model. Supports text-to-video and
+              image-to-video.
             </p>
             <label className="settings-label">Default model</label>
             <select
@@ -5079,13 +4733,10 @@ export function Settings({
           <div className="settings-section">
             <h3>Azure OpenAI Sora 2</h3>
             <p className="settings-hint">
-              Optionally use a dedicated API key and endpoint for video (e.g. a
-              different Azure resource). Leave blank to reuse the Azure chat
-              credentials from AI Model.
+              Optionally use a dedicated API key and endpoint for video (e.g. a different Azure
+              resource). Leave blank to reuse the Azure chat credentials from AI Model.
             </p>
-            <label className="settings-label">
-              API Key (video-specific, optional)
-            </label>
+            <label className="settings-label">API Key (video-specific, optional)</label>
             <input
               className="settings-input"
               type="password"
@@ -5153,8 +4804,8 @@ export function Settings({
           <div className="settings-section">
             <h3>Gemini Veo 3.1</h3>
             <p className="settings-hint">
-              Uses the Gemini API key configured in AI Model. Supports
-              text-to-video and image-to-video via long-running operations.
+              Uses the Gemini API key configured in AI Model. Supports text-to-video and
+              image-to-video via long-running operations.
             </p>
             <label className="settings-label">Default model</label>
             <select
@@ -5162,10 +4813,7 @@ export function Settings({
               value={videoGeminiModel}
               onChange={(e) =>
                 setVideoGeminiModel(
-                  e.target.value as
-                    | "veo-3.1"
-                    | "veo-3.1-fast-preview"
-                    | "veo-3.0",
+                  e.target.value as "veo-3.1" | "veo-3.1-fast-preview" | "veo-3.0",
                 )
               }
             >
@@ -5203,16 +4851,14 @@ export function Settings({
           <div className="settings-section">
             <h3>Vertex AI Veo 3 / 3.1</h3>
             <p className="settings-hint">
-              Requires a Google Cloud project, location, and an access token.
-              Output can be saved to a GCS bucket.
+              Requires a Google Cloud project, location, and an access token. Output can be saved to
+              a GCS bucket.
             </p>
             <label className="settings-label">Model</label>
             <select
               className="settings-select"
               value={videoVertexModel}
-              onChange={(e) =>
-                setVideoVertexModel(e.target.value as "veo-3" | "veo-3.1")
-              }
+              onChange={(e) => setVideoVertexModel(e.target.value as "veo-3" | "veo-3.1")}
             >
               <option value="veo-3">Veo 3</option>
               <option value="veo-3.1">Veo 3.1</option>
@@ -5257,9 +4903,8 @@ export function Settings({
                 color: "var(--color-warning, #b45309)",
               }}
             >
-              OAuth access tokens expire in ~1 hour. Re-paste a fresh token when
-              generation fails. For long-running use, consider a service account
-              key instead.
+              OAuth access tokens expire in ~1 hour. Re-paste a fresh token when generation fails.
+              For long-running use, consider a service account key instead.
             </p>
             <input
               className="settings-input"
@@ -5298,8 +4943,7 @@ export function Settings({
           <div className="settings-section">
             <h3>Kling</h3>
             <p className="settings-hint">
-              Dedicated Kling API key. Supports text-to-video and
-              image-to-video.
+              Dedicated Kling API key. Supports text-to-video and image-to-video.
             </p>
             <label className="settings-label">API Key</label>
             <input
@@ -5358,21 +5002,13 @@ export function Settings({
         {/* Fallback provider */}
         <div className="settings-section" style={{ marginTop: "16px" }}>
           <label className="settings-label">Fallback provider</label>
-          <p className="settings-hint">
-            If the selected provider fails, fall back to this one.
-          </p>
+          <p className="settings-hint">If the selected provider fails, fall back to this one.</p>
           <select
             className="settings-select"
             value={videoFallbackProvider}
             onChange={(e) =>
               setVideoFallbackProvider(
-                (e.target.value || "") as
-                  | "openai"
-                  | "azure"
-                  | "gemini"
-                  | "vertex"
-                  | "kling"
-                  | "",
+                (e.target.value || "") as "openai" | "azure" | "gemini" | "vertex" | "kling" | "",
               )
             }
           >
@@ -5409,10 +5045,7 @@ export function Settings({
     };
 
     return (
-      <div
-        className="settings-section"
-        style={{ marginTop: "10px", padding: "12px" }}
-      >
+      <div className="settings-section" style={{ marginTop: "10px", padding: "12px" }}>
         <div
           style={{
             display: "grid",
@@ -5471,13 +5104,9 @@ export function Settings({
           className="settings-input"
           rows={2}
           value={slot.roleInstruction || ""}
-          onChange={(event) =>
-            updateSlot({ roleInstruction: event.target.value })
-          }
+          onChange={(event) => updateSlot({ roleInstruction: event.target.value })}
           placeholder={
-            slotKind === "aggregator"
-              ? "Optional aggregation guidance"
-              : "Optional advisor focus"
+            slotKind === "aggregator" ? "Optional aggregation guidance" : "Optional advisor focus"
           }
         />
         {slotKind === "reference" && (
@@ -5491,9 +5120,7 @@ export function Settings({
               value={slot.maxTokens || ""}
               onChange={(event) =>
                 updateSlot({
-                  maxTokens: event.target.value
-                    ? Number(event.target.value)
-                    : undefined,
+                  maxTokens: event.target.value ? Number(event.target.value) : undefined,
                 })
               }
               placeholder="Preset default"
@@ -5508,9 +5135,7 @@ export function Settings({
     <div className="llm-provider-panel">
       <div className="llm-provider-header">
         <h2>LLM Provider</h2>
-        <p className="settings-description">
-          Choose which service to use for AI model calls
-        </p>
+        <p className="settings-description">Choose which service to use for AI model calls</p>
       </div>
       <div className="llm-provider-tabs">
         {providers.map((provider) => {
@@ -5541,13 +5166,9 @@ export function Settings({
             <div className="settings-section">
               <h3>Claude</h3>
               <p className="settings-description">
-                Choose between direct Claude API access and a Claude
-                subscription token.
+                Choose between direct Claude API access and a Claude subscription token.
               </p>
-              <div
-                className="auth-method-tabs"
-                style={{ marginBottom: "1rem" }}
-              >
+              <div className="auth-method-tabs" style={{ marginBottom: "1rem" }}>
                 <button
                   type="button"
                   className={`auth-method-tab ${anthropicAuthMethod === "api_key" ? "active" : ""}`}
@@ -5590,28 +5211,23 @@ export function Settings({
               <div className="settings-section">
                 <h3>Claude Subscription Token</h3>
                 <p className="settings-description">
-                  Paste your Claude subscription token (for example,{" "}
-                  <code>sk-ant-oat...</code>).
+                  Paste your Claude subscription token (for example, <code>sk-ant-oat...</code>).
                 </p>
                 <p className="settings-description">
-                  To get one, install Claude Code, sign in by running{" "}
-                  <code>claude</code>, then run <code>claude setup-token</code>{" "}
-                  locally and paste the generated token here.
+                  To get one, install Claude Code, sign in by running <code>claude</code>, then run{" "}
+                  <code>claude setup-token</code> locally and paste the generated token here.
                 </p>
                 <p className="settings-description">
-                  Note: as of April 4, 2026, third-party harnesses connected to
-                  your Claude account draw from extra usage instead of from your
-                  subscription. If you do not use them, nothing changes. If you
-                  do, the credit and bundles above have you covered.
+                  Note: as of April 4, 2026, third-party harnesses connected to your Claude account
+                  draw from extra usage instead of from your subscription. If you do not use them,
+                  nothing changes. If you do, the credit and bundles above have you covered.
                 </p>
                 <input
                   type="password"
                   className="settings-input"
                   placeholder="sk-ant-oat..."
                   value={anthropicSubscriptionToken}
-                  onChange={(e) =>
-                    setAnthropicSubscriptionToken(e.target.value)
-                  }
+                  onChange={(e) => setAnthropicSubscriptionToken(e.target.value)}
                 />
               </div>
             )}
@@ -5619,8 +5235,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                Refresh the Claude model list if this selector is showing a
-                stale model from another provider.
+                Refresh the Claude model list if this selector is showing a stale model from another
+                provider.
               </p>
               <div className="settings-input-group">
                 <select
@@ -5686,8 +5302,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                Select a Gemini model. Enter your API key and click "Refresh
-                Models" to load available models.
+                Select a Gemini model. Enter your API key and click "Refresh Models" to load
+                available models.
               </p>
               {geminiModels.length > 0 ? (
                 <SearchableSelect
@@ -5719,11 +5335,7 @@ export function Settings({
               <h3>OpenRouter API Key</h3>
               <p className="settings-description">
                 Enter your API key from{" "}
-                <a
-                  href="https://openrouter.ai/keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">
                   OpenRouter
                 </a>
               </p>
@@ -5762,8 +5374,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                Select a model from OpenRouter's catalog. Enter your API key and
-                click "Refresh Models" to load available models.
+                Select a model from OpenRouter's catalog. Enter your API key and click "Refresh
+                Models" to load available models.
               </p>
               {openrouterModels.length > 0 ? (
                 <SearchableSelect
@@ -5787,8 +5399,8 @@ export function Settings({
                 />
               )}
               <p className="settings-hint">
-                OpenRouter provides access to many models from different
-                providers (Claude, GPT-4, Llama, etc.) through a unified API.
+                OpenRouter provides access to many models from different providers (Claude, GPT-4,
+                Llama, etc.) through a unified API.
               </p>
             </div>
 
@@ -5796,8 +5408,8 @@ export function Settings({
               <div className="settings-section">
                 <h3>Pareto Router</h3>
                 <p className="settings-description">
-                  Optional minimum coding score for OpenRouter's Pareto Code
-                  router. Leave blank to use OpenRouter's default high tier.
+                  Optional minimum coding score for OpenRouter's Pareto Code router. Leave blank to
+                  use OpenRouter's default high tier.
                 </p>
                 <input
                   type="number"
@@ -5808,21 +5420,16 @@ export function Settings({
                   placeholder="0.8"
                   value={openrouterParetoMinCodingScore}
                   aria-invalid={!!openrouterParetoScoreError}
-                  onChange={(e) =>
-                    setOpenrouterParetoMinCodingScore(e.target.value)
-                  }
+                  onChange={(e) => setOpenrouterParetoMinCodingScore(e.target.value)}
                 />
                 {openrouterParetoScoreError && (
-                  <p
-                    className="settings-hint"
-                    style={{ color: "var(--color-error, #dc2626)" }}
-                  >
+                  <p className="settings-hint" style={{ color: "var(--color-error, #dc2626)" }}>
                     {openrouterParetoScoreError}
                   </p>
                 )}
                 <p className="settings-hint">
-                  Use 0.66 or higher for the high tier, 0.33 to 0.65 for the
-                  medium tier, and below 0.33 for cheaper low-tier routing.
+                  Use 0.66 or higher for the high tier, 0.33 to 0.65 for the medium tier, and below
+                  0.33 for cheaper low-tier routing.
                 </p>
               </div>
             )}
@@ -5833,9 +5440,7 @@ export function Settings({
           <>
             <div className="settings-section">
               <h3>Authentication Method</h3>
-              <p className="settings-description">
-                Choose how to authenticate with OpenAI
-              </p>
+              <p className="settings-description">Choose how to authenticate with OpenAI</p>
               <div className="auth-method-tabs">
                 <button
                   className={`auth-method-tab ${openaiAuthMethod === "oauth" ? "active" : ""}`}
@@ -5893,17 +5498,15 @@ export function Settings({
                       <span>Connected to ChatGPT</span>
                     </div>
                     <p className="settings-description">
-                      Your ChatGPT account is connected. You can use Codex GPT models with
-                      your subscription.
+                      Your ChatGPT account is connected. You can use Codex GPT models with your
+                      subscription.
                     </p>
                     <button
                       className="button-small button-secondary"
                       onClick={handleOpenAIOAuthLogout}
                       disabled={openaiOAuthLoading}
                     >
-                      {openaiOAuthLoading
-                        ? "Disconnecting..."
-                        : "Disconnect Account"}
+                      {openaiOAuthLoading ? "Disconnecting..." : "Disconnect Account"}
                     </button>
                   </div>
                 ) : (
@@ -6030,9 +5633,8 @@ export function Settings({
             <div className="settings-section openai-request-controls">
               <h3>OpenAI Request Controls</h3>
               <p className="settings-description">
-                Applies to OpenAI models that support reasoning effort and
-                response verbosity. Unsupported models keep their existing
-                request behavior.
+                Applies to OpenAI models that support reasoning effort and response verbosity.
+                Unsupported models keep their existing request behavior.
               </p>
               <div className="settings-form-grid two-columns">
                 <label className="settings-field">
@@ -6041,9 +5643,7 @@ export function Settings({
                     className="settings-select"
                     value={openaiReasoningEffort}
                     onChange={(e) =>
-                      setOpenaiReasoningEffort(
-                        e.target.value as OpenAIReasoningEffort,
-                      )
+                      setOpenaiReasoningEffort(e.target.value as OpenAIReasoningEffort)
                     }
                   >
                     {openaiReasoningEffortOptions.map((option) => (
@@ -6065,9 +5665,7 @@ export function Settings({
                   <select
                     className="settings-select"
                     value={openaiTextVerbosity}
-                    onChange={(e) =>
-                      setOpenaiTextVerbosity(e.target.value as LLMTextVerbosity)
-                    }
+                    onChange={(e) => setOpenaiTextVerbosity(e.target.value as LLMTextVerbosity)}
                   >
                     {OPENAI_TEXT_VERBOSITY_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -6088,19 +5686,14 @@ export function Settings({
           </>
         )}
 
-        {(settings.providerType === "azure" ||
-          settings.providerType === "azure-anthropic") && (
+        {(settings.providerType === "azure" || settings.providerType === "azure-anthropic") && (
           <>
             <div className="settings-section">
               <h3>Azure</h3>
               <p className="settings-description">
-                Configure Azure OpenAI (GPT models) or Azure Anthropic (Claude
-                models).
+                Configure Azure OpenAI (GPT models) or Azure Anthropic (Claude models).
               </p>
-              <div
-                className="auth-method-tabs"
-                style={{ marginBottom: "1rem" }}
-              >
+              <div className="auth-method-tabs" style={{ marginBottom: "1rem" }}>
                 <button
                   type="button"
                   className={`auth-method-tab ${settings.providerType === "azure" ? "active" : ""}`}
@@ -6152,8 +5745,8 @@ export function Settings({
                 <div className="settings-section">
                   <h3>Deployment Names</h3>
                   <p className="settings-description">
-                    Enter one or more deployment names (one per line). These
-                    appear in the model selector.
+                    Enter one or more deployment names (one per line). These appear in the model
+                    selector.
                   </p>
                   <textarea
                     className="settings-input"
@@ -6167,8 +5760,8 @@ export function Settings({
                 <div className="settings-section">
                   <h3>Default Deployment</h3>
                   <p className="settings-description">
-                    Optional. Used for connection tests and initial selection.
-                    You can switch models in the main view.
+                    Optional. Used for connection tests and initial selection. You can switch models
+                    in the main view.
                   </p>
                   <input
                     type="text"
@@ -6196,18 +5789,15 @@ export function Settings({
                 <div className="settings-section">
                   <h3>Reasoning Effort</h3>
                   <p className="settings-description">
-                    Controls how much reasoning Azure should spend on supported
-                    models. Azure currently accepts low, medium, and high. Extra
-                    High is stored in settings but sent as High to Azure
-                    requests.
+                    Controls how much reasoning Azure should spend on supported models. Azure
+                    currently accepts low, medium, and high. Extra High is stored in settings but
+                    sent as High to Azure requests.
                   </p>
                   <select
                     className="settings-input"
                     value={azureReasoningEffort}
                     onChange={(e) =>
-                      setAzureReasoningEffort(
-                        e.target.value as AzureReasoningEffort,
-                      )
+                      setAzureReasoningEffort(e.target.value as AzureReasoningEffort)
                     }
                   >
                     {AZURE_REASONING_EFFORT_OPTIONS.map((option) => (
@@ -6225,13 +5815,10 @@ export function Settings({
                 <div className="settings-section">
                   <h3>Azure Anthropic Endpoint</h3>
                   <p className="settings-description">
-                    Enter your Azure resource endpoint with the Anthropic path
-                    (for example,{" "}
-                    <code>
-                      https://your-resource.openai.azure.com/anthropic
-                    </code>
-                    ). The API uses the Anthropic Messages format with x-api-key
-                    and anthropic-version headers.
+                    Enter your Azure resource endpoint with the Anthropic path (for example,{" "}
+                    <code>https://your-resource.openai.azure.com/anthropic</code>
+                    ). The API uses the Anthropic Messages format with x-api-key and
+                    anthropic-version headers.
                   </p>
                   <input
                     type="text"
@@ -6245,8 +5832,7 @@ export function Settings({
                 <div className="settings-section">
                   <h3>Azure Anthropic API Key</h3>
                   <p className="settings-description">
-                    Enter the API key for your Azure OpenAI resource (same key
-                    as Azure OpenAI).
+                    Enter the API key for your Azure OpenAI resource (same key as Azure OpenAI).
                   </p>
                   <input
                     type="password"
@@ -6260,17 +5846,15 @@ export function Settings({
                 <div className="settings-section">
                   <h3>Deployment Names</h3>
                   <p className="settings-description">
-                    Enter one or more deployment names (one per line), e.g.
-                    claude-opus-4-6, claude-sonnet-4-6.
+                    Enter one or more deployment names (one per line), e.g. claude-opus-4-6,
+                    claude-sonnet-4-6.
                   </p>
                   <textarea
                     className="settings-input"
                     placeholder="claude-opus-4-6\nclaude-sonnet-4-6"
                     rows={3}
                     value={azureAnthropicDeploymentsText}
-                    onChange={(e) =>
-                      setAzureAnthropicDeploymentsText(e.target.value)
-                    }
+                    onChange={(e) => setAzureAnthropicDeploymentsText(e.target.value)}
                   />
                 </div>
 
@@ -6284,9 +5868,7 @@ export function Settings({
                     className="settings-input"
                     placeholder="claude-opus-4-6"
                     value={azureAnthropicDeployment}
-                    onChange={(e) =>
-                      setAzureAnthropicDeployment(e.target.value)
-                    }
+                    onChange={(e) => setAzureAnthropicDeployment(e.target.value)}
                   />
                 </div>
 
@@ -6300,9 +5882,7 @@ export function Settings({
                     className="settings-input"
                     placeholder="2023-06-01"
                     value={azureAnthropicApiVersion}
-                    onChange={(e) =>
-                      setAzureAnthropicApiVersion(e.target.value)
-                    }
+                    onChange={(e) => setAzureAnthropicApiVersion(e.target.value)}
                   />
                 </div>
               </>
@@ -6316,11 +5896,7 @@ export function Settings({
               <h3>Groq API Key</h3>
               <p className="settings-description">
                 Enter your API key from{" "}
-                <a
-                  href="https://console.groq.com/keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">
                   Groq Console
                 </a>
               </p>
@@ -6344,9 +5920,7 @@ export function Settings({
 
             <div className="settings-section">
               <h3>Base URL</h3>
-              <p className="settings-description">
-                Optional override for the Groq API endpoint.
-              </p>
+              <p className="settings-description">Optional override for the Groq API endpoint.</p>
               <input
                 type="text"
                 className="settings-input"
@@ -6359,8 +5933,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                Select a Groq model. Enter your API key and click "Refresh
-                Models" to load available models.
+                Select a Groq model. Enter your API key and click "Refresh Models" to load available
+                models.
               </p>
               {groqModels.length > 0 ? (
                 <SearchableSelect
@@ -6385,14 +5959,12 @@ export function Settings({
           </>
         )}
 
-        {(settings.providerType === "xai" ||
-          settings.providerType === "xai-oauth") && (
+        {(settings.providerType === "xai" || settings.providerType === "xai-oauth") && (
           <>
             <div className="settings-section">
               <h3>Grok Authentication</h3>
               <p className="settings-description">
-                Use your SuperGrok subscription with browser OAuth, or use a
-                direct xAI API key.
+                Use your SuperGrok subscription with browser OAuth, or use a direct xAI API key.
               </p>
               <div className="auth-method-tabs">
                 <button
@@ -6421,24 +5993,22 @@ export function Settings({
                       <span>Connected to Grok</span>
                     </div>
                     <p className="settings-description">
-                      Your Grok account is connected. CoWork OS will refresh
-                      the OAuth session automatically before model calls.
+                      Your Grok account is connected. CoWork OS will refresh the OAuth session
+                      automatically before model calls.
                     </p>
                     <button
                       className="button-small button-secondary"
                       onClick={handleXAIOAuthLogout}
                       disabled={xaiOAuthLoading}
                     >
-                      {xaiOAuthLoading
-                        ? "Disconnecting..."
-                        : "Disconnect Account"}
+                      {xaiOAuthLoading ? "Disconnecting..." : "Disconnect Account"}
                     </button>
                   </div>
                 ) : (
                   <div className="oauth-login">
                     <p className="settings-description">
-                      Sign in through xAI to use Grok 4.3 and related
-                      subscription models without an API key.
+                      Sign in through xAI to use Grok 4.3 and related subscription models without an
+                      API key.
                     </p>
                     <button
                       className="button-primary oauth-login-btn"
@@ -6455,38 +6025,34 @@ export function Settings({
                 <h3>xAI API Key</h3>
                 <p className="settings-description">
                   Enter your API key from{" "}
-                  <a
-                    href="https://console.x.ai/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
+                  <a href="https://console.x.ai/" target="_blank" rel="noopener noreferrer">
                     xAI Console
                   </a>
                 </p>
-              <div className="settings-input-group">
-                <input
-                  type="password"
-                  className="settings-input"
-                  placeholder="xai-..."
-                  value={xaiApiKey}
-                  onChange={(e) => setXaiApiKey(e.target.value)}
-                />
-                <button
-                  className="button-small button-secondary"
-                  onClick={() => loadXAIModels(xaiApiKey)}
-                  disabled={loadingXaiModels}
-                >
-                  {loadingXaiModels ? "Loading..." : "Refresh Models"}
-                </button>
+                <div className="settings-input-group">
+                  <input
+                    type="password"
+                    className="settings-input"
+                    placeholder="xai-..."
+                    value={xaiApiKey}
+                    onChange={(e) => setXaiApiKey(e.target.value)}
+                  />
+                  <button
+                    className="button-small button-secondary"
+                    onClick={() => loadXAIModels(xaiApiKey)}
+                    disabled={loadingXaiModels}
+                  >
+                    {loadingXaiModels ? "Loading..." : "Refresh Models"}
+                  </button>
+                </div>
               </div>
-            </div>
             )}
 
             <div className="settings-section">
               <h3>Base URL</h3>
               <p className="settings-description">
-                Optional override for the xAI API endpoint. OAuth defaults to
-                the same Responses-compatible endpoint used by Hermes.
+                Optional override for the xAI API endpoint. OAuth defaults to the same
+                Responses-compatible endpoint used by Hermes.
               </p>
               <input
                 type="text"
@@ -6574,9 +6140,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                DeepSeek Chat is enabled for agentic tool use. DeepSeek
-                Reasoner is hidden until thinking-mode tool continuation is
-                supported.
+                DeepSeek Chat is enabled for agentic tool use. DeepSeek Reasoner is hidden until
+                thinking-mode tool continuation is supported.
               </p>
               {deepseekModels.length > 0 ? (
                 <SearchableSelect
@@ -6607,11 +6172,7 @@ export function Settings({
               <h3>Kimi API Key</h3>
               <p className="settings-description">
                 Enter your API key from{" "}
-                <a
-                  href="https://platform.moonshot.ai/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href="https://platform.moonshot.ai/" target="_blank" rel="noopener noreferrer">
                   Moonshot Platform
                 </a>
               </p>
@@ -6635,9 +6196,7 @@ export function Settings({
 
             <div className="settings-section">
               <h3>Base URL</h3>
-              <p className="settings-description">
-                Optional override for the Kimi API endpoint.
-              </p>
+              <p className="settings-description">Optional override for the Kimi API endpoint.</p>
               <input
                 type="text"
                 className="settings-input"
@@ -6650,8 +6209,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                Select a Kimi model. Enter your API key and click "Refresh
-                Models" to load available models.
+                Select a Kimi model. Enter your API key and click "Refresh Models" to load available
+                models.
               </p>
               {kimiModels.length > 0 ? (
                 <SearchableSelect
@@ -6750,9 +6309,7 @@ export function Settings({
 
             <div className="settings-section">
               <h3>Model</h3>
-              <p className="settings-description">
-                Select a model from Pi's model registry.
-              </p>
+              <p className="settings-description">Select a model from Pi's model registry.</p>
               {piModels.length > 0 ? (
                 <SearchableSelect
                   options={piModels.map((model) => ({
@@ -6782,8 +6339,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Base URL</h3>
               <p className="settings-description">
-                Enter the base URL of your OpenAI-compatible API endpoint (e.g.
-                vLLM, LM Studio, LocalAI, text-generation-webui).
+                Enter the base URL of your OpenAI-compatible API endpoint (e.g. vLLM, LM Studio,
+                LocalAI, text-generation-webui).
               </p>
               <div className="settings-input-group">
                 <input
@@ -6806,8 +6363,8 @@ export function Settings({
             <div className="settings-section">
               <h3>API Key (Optional)</h3>
               <p className="settings-description">
-                API key is optional for local servers. Required for remote
-                endpoints that need authentication.
+                API key is optional for local servers. Required for remote endpoints that need
+                authentication.
               </p>
               <input
                 type="password"
@@ -6821,8 +6378,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                Select a model or enter a model ID. Click "Fetch Models" to load
-                available models from the endpoint.
+                Select a model or enter a model ID. Click "Fetch Models" to load available models
+                from the endpoint.
               </p>
               {openaiCompatModels.length > 0 ? (
                 <SearchableSelect
@@ -6862,8 +6419,8 @@ export function Settings({
                 <div>
                   <h3>Mixture of Agents Presets</h3>
                   <p className="settings-description">
-                    Presets appear as virtual models. Advisors run without
-                    tools; the aggregator acts with the normal CoWork tool loop.
+                    Presets appear as virtual models. Advisors run without tools; the aggregator
+                    acts with the normal CoWork tool loop.
                   </p>
                 </div>
                 <button
@@ -7007,9 +6564,7 @@ export function Settings({
                       type="number"
                       min={500}
                       max={50000}
-                      value={
-                        selectedMoaPreset.maxReferenceCharsPerModel || 12000
-                      }
+                      value={selectedMoaPreset.maxReferenceCharsPerModel || 12000}
                       onChange={(event) =>
                         updateMoaPreset(selectedMoaPreset.id, (preset) => ({
                           ...preset,
@@ -7075,10 +6630,7 @@ export function Settings({
                     onClick={() =>
                       updateMoaPreset(selectedMoaPreset.id, (preset) => ({
                         ...preset,
-                        referenceModels: [
-                          ...preset.referenceModels,
-                          createDefaultMoaSlot(),
-                        ],
+                        referenceModels: [...preset.referenceModels, createDefaultMoaSlot()],
                       }))
                     }
                   >
@@ -7113,12 +6665,7 @@ export function Settings({
                         Remove
                       </button>
                     </div>
-                    {renderMoaSlotEditor(
-                      selectedMoaPreset.id,
-                      slot,
-                      "reference",
-                      index,
-                    )}
+                    {renderMoaSlotEditor(selectedMoaPreset.id, slot, "reference", index)}
                   </div>
                 ))}
               </div>
@@ -7142,16 +6689,12 @@ export function Settings({
                   </a>
                 </p>
               ) : selectedCustomProvider.description ? (
-                <p className="settings-description">
-                  {selectedCustomProvider.description}
-                </p>
+                <p className="settings-description">{selectedCustomProvider.description}</p>
               ) : null}
               <input
                 type="password"
                 className="settings-input"
-                placeholder={
-                  selectedCustomProvider.apiKeyPlaceholder || "sk-..."
-                }
+                placeholder={selectedCustomProvider.apiKeyPlaceholder || "sk-..."}
                 value={selectedCustomConfig.apiKey || ""}
                 onChange={(e) =>
                   updateCustomProvider(resolvedProviderType, {
@@ -7160,14 +6703,11 @@ export function Settings({
                 }
               />
               {selectedCustomProvider.apiKeyOptional && (
-                <p className="settings-hint">
-                  API key is optional for this provider.
-                </p>
+                <p className="settings-hint">API key is optional for this provider.</p>
               )}
             </div>
 
-            {(selectedCustomProvider.requiresBaseUrl ||
-              selectedCustomProvider.baseUrl) && (
+            {(selectedCustomProvider.requiresBaseUrl || selectedCustomProvider.baseUrl) && (
               <div className="settings-section">
                 <h3>Base URL</h3>
                 <p className="settings-description">
@@ -7199,16 +6739,11 @@ export function Settings({
                   disabled={
                     loadingCustomProviderModels ||
                     (selectedCustomProvider.requiresBaseUrl &&
-                      !(
-                        selectedCustomConfig.baseUrl ||
-                        selectedCustomProvider.baseUrl
-                      ))
+                      !(selectedCustomConfig.baseUrl || selectedCustomProvider.baseUrl))
                   }
                   style={{ marginLeft: "8px" }}
                 >
-                  {loadingCustomProviderModels
-                    ? "Loading..."
-                    : "Refresh Models"}
+                  {loadingCustomProviderModels ? "Loading..." : "Refresh Models"}
                 </button>
               </p>
               {selectedCustomModels.length > 0 ? (
@@ -7219,18 +6754,14 @@ export function Settings({
                     description: model.description,
                   }))}
                   value={selectedCustomConfig.model || ""}
-                  onChange={(value) =>
-                    updateCustomProvider(resolvedProviderType, { model: value })
-                  }
+                  onChange={(value) => updateCustomProvider(resolvedProviderType, { model: value })}
                   placeholder="Select a model..."
                 />
               ) : (
                 <input
                   type="text"
                   className="settings-input"
-                  placeholder={
-                    selectedCustomProvider.defaultModel || "model-id"
-                  }
+                  placeholder={selectedCustomProvider.defaultModel || "model-id"}
                   value={selectedCustomConfig.model || ""}
                   onChange={(e) =>
                     updateCustomProvider(resolvedProviderType, {
@@ -7249,9 +6780,7 @@ export function Settings({
             <div className="settings-section">
               <h3>Local AI Status</h3>
               {hfStatus === null ? (
-                <p className="settings-description">
-                  Checking hf-agents installation...
-                </p>
+                <p className="settings-description">Checking hf-agents installation...</p>
               ) : hfStatus.installed ? (
                 <p
                   className="settings-description"
@@ -7280,15 +6809,9 @@ export function Settings({
                       gap: "4px",
                     }}
                   >
-                    {!hfStatus.hfInstalled && (
-                      <span># Step 1 — install hf CLI</span>
-                    )}
-                    {!hfStatus.hfInstalled && (
-                      <span>pip install huggingface_hub</span>
-                    )}
-                    <span
-                      style={{ marginTop: !hfStatus.hfInstalled ? "6px" : 0 }}
-                    >
+                    {!hfStatus.hfInstalled && <span># Step 1 — install hf CLI</span>}
+                    {!hfStatus.hfInstalled && <span>pip install huggingface_hub</span>}
+                    <span style={{ marginTop: !hfStatus.hfInstalled ? "6px" : 0 }}>
                       {!hfStatus.hfInstalled
                         ? "# Step 2 — install agents extension"
                         : "# Install agents extension"}
@@ -7350,8 +6873,7 @@ export function Settings({
                           : serverLog.state === "downloading"
                             ? "rgba(59,130,246,0.08)"
                             : "rgba(0,0,0,0.04)",
-                      borderBottom:
-                        "1px solid var(--color-border, rgba(0,0,0,0.08))",
+                      borderBottom: "1px solid var(--color-border, rgba(0,0,0,0.08))",
                     }}
                   >
                     {serverLog.state !== "error" && (
@@ -7361,18 +6883,13 @@ export function Settings({
                           width: "8px",
                           height: "8px",
                           borderRadius: "50%",
-                          background:
-                            serverLog.state === "downloading"
-                              ? "#3b82f6"
-                              : "#f59e0b",
+                          background: serverLog.state === "downloading" ? "#3b82f6" : "#f59e0b",
                           animation: "pulse 1.5s ease-in-out infinite",
                         }}
                       />
                     )}
                     {serverLog.state === "error" && (
-                      <span style={{ color: "var(--color-error, #dc2626)" }}>
-                        ⚠
-                      </span>
+                      <span style={{ color: "var(--color-error, #dc2626)" }}>⚠</span>
                     )}
                     <span style={{ fontSize: "12px", fontWeight: 500 }}>
                       {serverLog.state === "downloading"
@@ -7410,9 +6927,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Detect Hardware</h3>
               <p className="settings-description">
-                Run <code>hf agents fit</code> to detect your hardware and get
-                model recommendations. The best model will be selected
-                automatically.
+                Run <code>hf agents fit</code> to detect your hardware and get model
+                recommendations. The best model will be selected automatically.
               </p>
               <button
                 className="button-small button-secondary"
@@ -7422,30 +6938,20 @@ export function Settings({
                 {detectingHardware ? "Detecting..." : "Detect Hardware"}
               </button>
               {hfHardwareOutput &&
-                (hfHardwareOutput.modelDetails?.length ??
-                  hfHardwareOutput.models?.length ??
-                  0) > 0 && (
+                (hfHardwareOutput.modelDetails?.length ?? hfHardwareOutput.models?.length ?? 0) >
+                  0 && (
                   <div style={{ marginTop: "12px" }}>
                     {/* Model list — show all, mark MLX-only as not usable with llama-server */}
                     {(hfHardwareOutput.modelDetails ?? []).length > 0 ? (
                       <>
-                        <p
-                          className="settings-description"
-                          style={{ marginBottom: "8px" }}
-                        >
-                          Recommended models for your hardware. Click a model to
-                          select it.{" "}
-                          <span
-                            style={{ color: "var(--color-success, #16a34a)" }}
-                          >
-                            GGUF
-                          </span>{" "}
-                          runs via llama-server.{" "}
+                        <p className="settings-description" style={{ marginBottom: "8px" }}>
+                          Recommended models for your hardware. Click a model to select it.{" "}
+                          <span style={{ color: "var(--color-success, #16a34a)" }}>GGUF</span> runs
+                          via llama-server.{" "}
                           {hfStatus?.mlxInstalled === "ok" ? (
                             <>
-                              <span style={{ color: "#8b5cf6" }}>MLX</span> runs
-                              natively on Apple Silicon via mlx_lm — fastest on
-                              your M-series Mac.
+                              <span style={{ color: "#8b5cf6" }}>MLX</span> runs natively on Apple
+                              Silicon via mlx_lm — fastest on your M-series Mac.
                             </>
                           ) : hfStatus?.isMac ? (
                             <>
@@ -7484,19 +6990,15 @@ export function Settings({
                             <span style={{ fontSize: "12px" }}>
                               {hfStatus.mlxInstalled === "broken" ? (
                                 <>
-                                  {hfStatus.mlxMessage ||
-                                    "MLX installed but broken."}{" "}
+                                  {hfStatus.mlxMessage || "MLX installed but broken."}{" "}
                                   <code style={{ fontSize: "11px" }}>
-                                    pip install mlx mlx-metal --force-reinstall
-                                    --no-cache-dir
+                                    pip install mlx mlx-metal --force-reinstall --no-cache-dir
                                   </code>
                                 </>
                               ) : (
                                 <>
                                   MLX not installed. To use MLX models:{" "}
-                                  <code style={{ fontSize: "11px" }}>
-                                    pip install mlx-lm
-                                  </code>
+                                  <code style={{ fontSize: "11px" }}>pip install mlx-lm</code>
                                 </>
                               )}
                             </span>
@@ -7522,18 +7024,15 @@ export function Settings({
                                 gap: "8px",
                                 padding: "6px 10px",
                                 borderRadius: "6px",
-                                background:
-                                  "var(--color-bg-secondary, rgba(0,0,0,0.06))",
+                                background: "var(--color-bg-secondary, rgba(0,0,0,0.06))",
                                 opacity:
                                   m.hasGguf ||
-                                  (m.runtime === "MLX" &&
-                                    hfStatus?.mlxInstalled === "ok")
+                                  (m.runtime === "MLX" && hfStatus?.mlxInstalled === "ok")
                                     ? 1
                                     : 0.4,
                                 cursor:
                                   m.hasGguf ||
-                                  (m.runtime === "MLX" &&
-                                    hfStatus?.mlxInstalled === "ok")
+                                  (m.runtime === "MLX" && hfStatus?.mlxInstalled === "ok")
                                     ? "pointer"
                                     : "not-allowed",
                               }}
@@ -7544,10 +7043,7 @@ export function Settings({
                                 if (!input) return;
                                 if (m.hasGguf) {
                                   input.value = m.spec;
-                                } else if (
-                                  m.runtime === "MLX" &&
-                                  hfStatus?.mlxInstalled === "ok"
-                                ) {
+                                } else if (m.runtime === "MLX" && hfStatus?.mlxInstalled === "ok") {
                                   input.value = `mlx://${m.name}`;
                                 }
                               }}
@@ -7560,8 +7056,7 @@ export function Settings({
                                   borderRadius: "3px",
                                   background: m.hasGguf
                                     ? "var(--color-success, #16a34a)"
-                                    : m.runtime === "MLX" &&
-                                        hfStatus?.mlxInstalled === "ok"
+                                    : m.runtime === "MLX" && hfStatus?.mlxInstalled === "ok"
                                       ? "#8b5cf6"
                                       : "var(--color-text-muted, #888)",
                                   color: "#fff",
@@ -7613,18 +7108,15 @@ export function Settings({
                             marginBottom: "8px",
                             padding: "8px 10px",
                             borderRadius: "6px",
-                            background:
-                              "var(--color-bg-secondary, rgba(0,0,0,0.04))",
-                            border:
-                              "1px solid var(--color-border, rgba(0,0,0,0.08))",
+                            background: "var(--color-bg-secondary, rgba(0,0,0,0.04))",
+                            border: "1px solid var(--color-border, rgba(0,0,0,0.08))",
                           }}
                         >
                           <p
                             className="settings-description"
                             style={{ margin: "0 0 8px 0", fontSize: "11px" }}
                           >
-                            Smaller models (faster download, great for most
-                            tasks):
+                            Smaller models (faster download, great for most tasks):
                           </p>
                           {hfStatus?.mlxInstalled === "ok" && (
                             <div style={{ marginBottom: "6px" }}>
@@ -7779,19 +7271,14 @@ export function Settings({
             <div className="settings-section">
               <h3>Server Control</h3>
               <p className="settings-description">
-                Start the llama.cpp server with your selected model. The server
-                exposes an OpenAI-compatible API at{" "}
-                <code>http://localhost:8080</code>.
+                Start the llama.cpp server with your selected model. The server exposes an
+                OpenAI-compatible API at <code>http://localhost:8080</code>.
               </p>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button
                   className="button-small button-primary"
                   onClick={handleHfStartServer}
-                  disabled={
-                    startingServer ||
-                    !hfStatus?.installed ||
-                    hfServerStatus?.serverRunning
-                  }
+                  disabled={startingServer || !hfStatus?.installed || hfServerStatus?.serverRunning}
                 >
                   {startingServer ? "Starting..." : "Start Server"}
                 </button>
@@ -7841,8 +7328,8 @@ export function Settings({
               {useDefaultCredentials ? (
                 <div className="settings-subsection">
                   <p className="settings-description">
-                    Uses AWS credentials from environment variables, shared
-                    credentials file (~/.aws/credentials), or IAM role.
+                    Uses AWS credentials from environment variables, shared credentials file
+                    (~/.aws/credentials), or IAM role.
                   </p>
                   <input
                     type="text"
@@ -7900,9 +7387,7 @@ export function Settings({
                 <select
                   className="settings-select"
                   value={settings.modelKey}
-                  onChange={(e) =>
-                    setSettings({ ...settings, modelKey: e.target.value })
-                  }
+                  onChange={(e) => setSettings({ ...settings, modelKey: e.target.value })}
                 >
                   {models.map((model) => (
                     <option key={model.key} value={model.key}>
@@ -7920,8 +7405,8 @@ export function Settings({
             <div className="settings-section">
               <h3>Ollama Server URL</h3>
               <p className="settings-description">
-                URL of your Ollama server. Default is http://localhost:11434 for
-                local installations.
+                URL of your Ollama server. Default is http://localhost:11434 for local
+                installations.
               </p>
               <div className="settings-input-group">
                 <input
@@ -7944,8 +7429,7 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                Select from models available on your Ollama server, or enter a
-                custom model name.
+                Select from models available on your Ollama server, or enter a custom model name.
               </p>
               {ollamaModels.length > 0 ? (
                 <SearchableSelect
@@ -7968,16 +7452,14 @@ export function Settings({
                 />
               )}
               <p className="settings-hint">
-                Don't have models? Run <code>ollama pull llama3.2</code> to
-                download a model.
+                Don't have models? Run <code>ollama pull llama3.2</code> to download a model.
               </p>
             </div>
 
             <div className="settings-section">
               <h3>API Key (Optional)</h3>
               <p className="settings-description">
-                Only needed if connecting to a remote Ollama server that
-                requires authentication.
+                Only needed if connecting to a remote Ollama server that requires authentication.
               </p>
               <input
                 type="password"
@@ -7993,8 +7475,8 @@ export function Settings({
         <div className="settings-section profile-routing-section">
           <h3>Profile-Based Routing</h3>
           <p className="settings-description">
-            Route strong tasks (planning/verification) and cheap execution tasks
-            to different models for this provider.
+            Route strong tasks (planning/verification) and cheap execution tasks to different models
+            for this provider.
           </p>
           <label className="settings-checkbox profile-routing-enable">
             <input
@@ -8002,21 +7484,17 @@ export function Settings({
               checked={routingEnabled}
               onChange={(e) => {
                 const enabled = e.target.checked;
-                const fallbackModel =
-                  providerPrimaryModel || strongRoutingModel || "";
+                const fallbackModel = providerPrimaryModel || strongRoutingModel || "";
                 setProviderRoutingConfig(currentProviderType, {
                   profileRoutingEnabled: enabled,
                   ...(enabled
                     ? {
-                        strongModelKey:
-                          strongRoutingModel || fallbackModel || undefined,
-                        cheapModelKey:
-                          cheapRoutingModel || fallbackModel || undefined,
+                        strongModelKey: strongRoutingModel || fallbackModel || undefined,
+                        cheapModelKey: cheapRoutingModel || fallbackModel || undefined,
                       }
                     : {}),
                   preferStrongForVerification:
-                    typeof providerRouting.preferStrongForVerification ===
-                    "boolean"
+                    typeof providerRouting.preferStrongForVerification === "boolean"
                       ? providerRouting.preferStrongForVerification
                       : true,
                 });
@@ -8069,10 +7547,9 @@ export function Settings({
                 <div className="settings-subsection">
                   <h4>Automated Tasks Model</h4>
                   <p className="settings-hint">
-                    Optional. Dedicated model for cron, scheduled, and
-                    improvement tasks. When set, uses faster/cheaper models
-                    (e.g. gpt-4o-mini, nano). Leave empty to use the execution
-                    model above.
+                    Optional. Dedicated model for cron, scheduled, and improvement tasks. When set,
+                    uses faster/cheaper models (e.g. gpt-4o-mini, nano). Leave empty to use the
+                    execution model above.
                   </p>
                   <select
                     className="settings-select"
@@ -8099,10 +7576,8 @@ export function Settings({
                   type="button"
                   onClick={() =>
                     setProviderRoutingConfig(currentProviderType, {
-                      strongModelKey:
-                        strongRoutingModel || providerPrimaryModel || undefined,
-                      cheapModelKey:
-                        strongRoutingModel || providerPrimaryModel || undefined,
+                      strongModelKey: strongRoutingModel || providerPrimaryModel || undefined,
+                      cheapModelKey: strongRoutingModel || providerPrimaryModel || undefined,
                     })
                   }
                 >
@@ -8113,9 +7588,7 @@ export function Settings({
               <label className="settings-checkbox profile-routing-prefer">
                 <input
                   type="checkbox"
-                  checked={
-                    providerRouting.preferStrongForVerification !== false
-                  }
+                  checked={providerRouting.preferStrongForVerification !== false}
                   onChange={(e) =>
                     setProviderRoutingConfig(currentProviderType, {
                       preferStrongForVerification: e.target.checked,
@@ -8127,8 +7600,8 @@ export function Settings({
 
               {routingModelsIdentical && (
                 <p className="settings-hint">
-                  Strong and cheap models are identical, so routing will not
-                  change model cost/quality.
+                  Strong and cheap models are identical, so routing will not change model
+                  cost/quality.
                 </p>
               )}
 
@@ -8143,10 +7616,7 @@ export function Settings({
                         ?.getLLMRoutingStatus?.()
                         .then((state) => setRoutingRuntime(state))
                         .catch((error) => {
-                          console.error(
-                            "Failed to refresh routing status:",
-                            error,
-                          );
+                          console.error("Failed to refresh routing status:", error);
                         })
                     }
                   >
@@ -8166,17 +7636,11 @@ export function Settings({
                       </div>
                       <div className="routing-runtime-item">
                         <span>Route reason</span>
-                        <strong>
-                          {routingRuntime.routeReason.replace("_", " ")}
-                        </strong>
+                        <strong>{routingRuntime.routeReason.replace("_", " ")}</strong>
                       </div>
                       <div className="routing-runtime-item">
                         <span>Fallback</span>
-                        <strong>
-                          {routingRuntime.fallbackOccurred
-                            ? "Used"
-                            : "Not used"}
-                        </strong>
+                        <strong>{routingRuntime.fallbackOccurred ? "Used" : "Not used"}</strong>
                       </div>
                     </div>
                     <p className="settings-hint">
@@ -8189,11 +7653,8 @@ export function Settings({
                     {routingRuntime.fallbackChain.length > 0 && (
                       <ul className="routing-runtime-fallbacks">
                         {routingRuntime.fallbackChain.map((step, index) => (
-                          <li
-                            key={`${step.providerType}:${step.modelKey}:${index}`}
-                          >
-                            <strong>{step.providerType}</strong> /{" "}
-                            {step.modelKey} - {step.reason}
+                          <li key={`${step.providerType}:${step.modelKey}:${index}`}>
+                            <strong>{step.providerType}</strong> / {step.modelKey} - {step.reason}
                             {step.success ? " (success)" : " (failed)"}
                           </li>
                         ))}
@@ -8202,8 +7663,7 @@ export function Settings({
                   </>
                 ) : (
                   <p className="settings-hint">
-                    No live routing snapshot yet. Open a task or refresh after a
-                    route change.
+                    No live routing snapshot yet. Open a task or refresh after a route change.
                   </p>
                 )}
               </div>
@@ -8214,15 +7674,13 @@ export function Settings({
         <div className="settings-section">
           <h3>Provider Failover</h3>
           <p className="settings-description">
-            Configure ordered fallback providers/models for {currentProviderLabel}.
-            Each LLM provider keeps its own failover chain and retry cooldown.
-            Task-level provider or model overrides skip automatic failover.
+            Configure ordered fallback providers/models for {currentProviderLabel}. Each LLM
+            provider keeps its own failover chain and retry cooldown. Task-level provider or model
+            overrides skip automatic failover.
           </p>
 
           <div className="settings-subsection" style={{ marginBottom: "12px" }}>
-            <label className="settings-label">
-              Retry primary after (seconds)
-            </label>
+            <label className="settings-label">Retry primary after (seconds)</label>
             <input
               className="settings-input"
               type="number"
@@ -8236,20 +7694,14 @@ export function Settings({
                   failoverPrimaryRetryCooldownSeconds:
                     e.target.value.trim().length === 0
                       ? undefined
-                      : Math.max(
-                          0,
-                          Math.min(
-                            3600,
-                            Math.floor(Number(e.target.value) || 0),
-                          ),
-                        ),
+                      : Math.max(0, Math.min(3600, Math.floor(Number(e.target.value) || 0))),
                 })
               }
             />
             <p className="settings-hint">
-              How long to stay on a fallback route before trying this provider&apos;s
-              primary route again. Leave blank for the default of 60 seconds.
-              Set to 0 to retry the primary on the next route refresh.
+              How long to stay on a fallback route before trying this provider&apos;s primary route
+              again. Leave blank for the default of 60 seconds. Set to 0 to retry the primary on the
+              next route refresh.
             </p>
           </div>
 
@@ -8260,17 +7712,14 @@ export function Settings({
                   key={`${entry.providerType}:${index}`}
                   style={{
                     display: "grid",
-                    gridTemplateColumns:
-                      "minmax(180px, 220px) minmax(240px, 1fr) auto",
+                    gridTemplateColumns: "minmax(180px, 220px) minmax(240px, 1fr) auto",
                     gap: "12px",
                     alignItems: "end",
                     marginBottom: "12px",
                   }}
                 >
                   <div>
-                    <label className="settings-label">
-                      Backup provider #{index + 1}
-                    </label>
+                    <label className="settings-label">Backup provider #{index + 1}</label>
                     <select
                       className="settings-select"
                       value={entry.providerType}
@@ -8282,9 +7731,7 @@ export function Settings({
                             candidateIndex === index
                               ? {
                                   providerType: nextProvider,
-                                  modelKey:
-                                    getProviderPrimaryModel(nextProvider) ||
-                                    undefined,
+                                  modelKey: getProviderPrimaryModel(nextProvider) || undefined,
                                 }
                               : candidate,
                           ),
@@ -8304,10 +7751,7 @@ export function Settings({
                     <SearchableSelect
                       options={[
                         { value: "", label: "Use provider default" },
-                        ...getFailoverModelOptions(
-                          entry.providerType,
-                          entry.modelKey,
-                        ),
+                        ...getFailoverModelOptions(entry.providerType, entry.modelKey),
                       ]}
                       value={entry.modelKey || ""}
                       onChange={(value) =>
@@ -8342,10 +7786,7 @@ export function Settings({
                         updateCurrentFailoverProviders((prev) => {
                           if (index === 0) return prev;
                           const next = [...prev];
-                          [next[index - 1], next[index]] = [
-                            next[index],
-                            next[index - 1],
-                          ];
+                          [next[index - 1], next[index]] = [next[index], next[index - 1]];
                           return next;
                         })
                       }
@@ -8360,10 +7801,7 @@ export function Settings({
                         updateCurrentFailoverProviders((prev) => {
                           if (index >= prev.length - 1) return prev;
                           const next = [...prev];
-                          [next[index], next[index + 1]] = [
-                            next[index + 1],
-                            next[index],
-                          ];
+                          [next[index], next[index + 1]] = [next[index + 1], next[index]];
                           return next;
                         })
                       }
@@ -8376,9 +7814,7 @@ export function Settings({
                       type="button"
                       onClick={() =>
                         updateCurrentFailoverProviders((prev) =>
-                          prev.filter(
-                            (_, candidateIndex) => candidateIndex !== index,
-                          ),
+                          prev.filter((_, candidateIndex) => candidateIndex !== index),
                         )
                       }
                     >
@@ -8390,8 +7826,8 @@ export function Settings({
             </div>
           ) : (
             <p className="settings-hint">
-              No backup providers configured yet for {currentProviderLabel}. Add
-              at least one to enable ordered failover for this provider.
+              No backup providers configured yet for {currentProviderLabel}. Add at least one to
+              enable ordered failover for this provider.
             </p>
           )}
 
@@ -8406,8 +7842,7 @@ export function Settings({
                 const nextProvider =
                   configuredFallbackProviderOptions.find(
                     (provider) =>
-                      provider.type !== currentProviderType &&
-                      !usedProviders.has(provider.type),
+                      provider.type !== currentProviderType && !usedProviders.has(provider.type),
                   ) ||
                   configuredFallbackProviderOptions.find(
                     (provider) => provider.type !== currentProviderType,
@@ -8420,8 +7855,7 @@ export function Settings({
                   ...prev,
                   {
                     providerType: nextProvider.type,
-                    modelKey:
-                      getProviderPrimaryModel(nextProvider.type) || undefined,
+                    modelKey: getProviderPrimaryModel(nextProvider.type) || undefined,
                   },
                 ]);
               }}
@@ -8434,16 +7868,14 @@ export function Settings({
               Add backup provider
             </button>
             <p className="settings-hint">
-              Backups run in order from top to bottom. Leave the model blank to
-              use that provider&apos;s default model.
+              Backups run in order from top to bottom. Leave the model blank to use that
+              provider&apos;s default model.
             </p>
           </div>
         </div>
 
         {testResult && (
-          <div
-            className={`test-result ${testResult.success ? "success" : "error"}`}
-          >
+          <div className={`test-result ${testResult.success ? "success" : "error"}`}>
             {testResult.success ? (
               <>
                 <svg
@@ -8478,11 +7910,8 @@ export function Settings({
                     const error = testResult.error || "Connection failed";
                     // Extract meaningful part before JSON details
                     const jsonStart = error.indexOf(" [{");
-                    const truncated =
-                      jsonStart > 0 ? error.slice(0, jsonStart) : error;
-                    return truncated.length > 200
-                      ? truncated.slice(0, 200) + "..."
-                      : truncated;
+                    const truncated = jsonStart > 0 ? error.slice(0, jsonStart) : error;
+                    return truncated.length > 200 ? truncated.slice(0, 200) + "..." : truncated;
                   })()}
                 </span>
               </>
@@ -8507,454 +7936,421 @@ export function Settings({
         <div className="settings-content-card">
           <div className="settings-content">
             <Suspense fallback={<div className="settings-loading">Loading settings...</div>}>
-            {activeTab === "appearance" ? (
-              <AppearanceSettings
-                themeMode={themeMode}
-                visualTheme={visualTheme}
-                accentColor={accentColor}
-                transparencyEffectsEnabled={transparencyEffectsEnabled}
-                onThemeChange={onThemeChange}
-                onVisualThemeChange={onVisualThemeChange}
-                onAccentChange={onAccentChange}
-                onTransparencyEffectsEnabledChange={
-                  onTransparencyEffectsEnabledChange
-                }
-                uiDensity={uiDensity}
-                onUiDensityChange={onUiDensityChange}
-                devRunLoggingEnabled={devRunLoggingEnabled}
-                onDevRunLoggingEnabledChange={onDevRunLoggingEnabledChange}
-                homeResearchVaultEnabled={homeResearchVaultEnabled}
-                homeNextActionsEnabled={homeNextActionsEnabled}
-                onHomeResearchVaultEnabledChange={onHomeResearchVaultEnabledChange}
-                onHomeNextActionsEnabledChange={onHomeNextActionsEnabledChange}
-                onShowOnboarding={onShowOnboarding}
-                onboardingCompletedAt={onboardingCompletedAt}
-              />
-            ) : activeTab === "personality" ? (
-              <PersonalitySettings onSettingsChanged={onSettingsChanged} />
-            ) : activeTab === "companies" ? (
-              <CompaniesPanel
-                onOpenMissionControl={(companyId: string) =>
-                  onNavigateToMissionControl?.(companyId)
-                }
-                onOpenDigitalTwins={(companyId: string) => {
-                  setDigitalTwinsCompanyId(companyId);
-                  setActiveTab("digitaltwins");
-                }}
-              />
-            ) : activeTab === "digitaltwins" ? (
-              <DigitalTwinsPanel
-                initialCompanyId={digitalTwinsCompanyId}
-                onOpenAgents={onNavigateToAgents}
-              />
-            ) : activeTab === "everydayAgent" ? (
-              <EverydayAgentSettingsPanel
-                workspaceId={workspaceId}
-                onCreateTask={onCreateTask}
-              />
-            ) : activeTab === "health" ? (
-              <HealthPanel compact onCreateTask={onCreateTask} />
-            ) : activeTab === "system" ? (
-              <div className="settings-combined-panel system-security-panel">
-                <div className="system-security-panel-header">
-                  <h2>System &amp; Security</h2>
-                  <p className="settings-description">
-                    Manage local profiles, app presence, safety limits, permissions, and
-                    organization controls from one place.
-                  </p>
-                </div>
-                <SystemSettingsSection
-                  className="system-security-section--profiles"
-                  icon={<User {...S} />}
-                  title="Profiles"
-                  description="Keep user data isolated, switch profiles, and move profile bundles between machines."
-                >
-                  <ProfileSettings />
-                </SystemSettingsSection>
-                <SystemSettingsSection
-                  className="system-security-section--tray"
-                  icon={<Monitor {...S} />}
-                  title={
-                    platform === "win32"
-                      ? "System Tray"
-                      : platform === "darwin"
-                        ? "Menu Bar"
-                        : "Tray"
+              {activeTab === "appearance" ? (
+                <AppearanceSettings
+                  themeMode={themeMode}
+                  visualTheme={visualTheme}
+                  accentColor={accentColor}
+                  transparencyEffectsEnabled={transparencyEffectsEnabled}
+                  onThemeChange={onThemeChange}
+                  onVisualThemeChange={onVisualThemeChange}
+                  onAccentChange={onAccentChange}
+                  onTransparencyEffectsEnabledChange={onTransparencyEffectsEnabledChange}
+                  uiDensity={uiDensity}
+                  onUiDensityChange={onUiDensityChange}
+                  devRunLoggingEnabled={devRunLoggingEnabled}
+                  onDevRunLoggingEnabledChange={onDevRunLoggingEnabledChange}
+                  homeResearchVaultEnabled={homeResearchVaultEnabled}
+                  homeNextActionsEnabled={homeNextActionsEnabled}
+                  onHomeResearchVaultEnabledChange={onHomeResearchVaultEnabledChange}
+                  onHomeNextActionsEnabledChange={onHomeNextActionsEnabledChange}
+                  onShowOnboarding={onShowOnboarding}
+                  onboardingCompletedAt={onboardingCompletedAt}
+                />
+              ) : activeTab === "personality" ? (
+                <PersonalitySettings onSettingsChanged={onSettingsChanged} />
+              ) : activeTab === "companies" ? (
+                <CompaniesPanel
+                  onOpenMissionControl={(companyId: string) =>
+                    onNavigateToMissionControl?.(companyId)
                   }
-                  description="Control how CoWork appears in the operating system and when it sends desktop alerts."
-                >
-                  <TraySettings />
-                </SystemSettingsSection>
-                <SystemSettingsSection
-                  className="system-security-section--safety"
-                  icon={<Shield {...S} />}
-                  title="Safety Limits"
-                  description="Set budget, iteration, command, browser, and model guardrails for automated work."
-                >
-                  <GuardrailSettings />
-                </SystemSettingsSection>
-                <SystemSettingsSection
-                  className="system-security-section--permissions"
-                  icon={<ShieldCheckIcon {...S} />}
-                  title="Permissions"
-                  description="Tune the default approval experience and manage profile or workspace-specific rules."
-                >
-                  <PermissionSettingsPanel workspaceId={workspaceId} />
-                </SystemSettingsSection>
-                <SystemSettingsSection
-                  className="system-security-section--admin"
-                  icon={<Building2 {...S} />}
-                  title="Admin Policies"
-                  description="Apply organization-level limits for plugin packs, connectors, installation, and agents."
-                >
-                  <AdminPoliciesPanel />
-                </SystemSettingsSection>
-              </div>
-            ) : activeTab === "voice" ? (
-              <VoiceSettings />
-            ) : activeTab === "telegram" ? (
-              <TelegramSettings />
-            ) : activeTab === "slack" ? (
-              <SlackSettings />
-            ) : activeTab === "whatsapp" ? (
-              <WhatsAppSettings />
-            ) : activeTab === "morechannels" ||
-              activeTab === "teams" ||
-              activeTab === "x" ? (
-              (() => {
-                const effectiveSecondary =
-                  activeTab === "teams" || activeTab === "x"
-                    ? activeTab
-                    : activeSecondaryChannel;
-                return (
-                  <div className="more-channels-panel">
-                    <div className="more-channels-header">
-                      <h2>More Channels</h2>
-                      <p className="settings-description">
-                        Configure additional messaging platforms
-                      </p>
-                    </div>
-                    <div className="more-channels-tabs">
-                      {secondaryChannelItems.map((item) => (
-                        <button
-                          key={item.key}
-                          className={`more-channels-tab ${effectiveSecondary === item.key ? "active" : ""}`}
-                          onClick={() => {
-                            setActiveTab("morechannels");
-                            setActiveSecondaryChannel(item.key);
-                          }}
-                        >
-                          {item.icon}
-                          <span>{item.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="more-channels-content">
-                      {effectiveSecondary === "teams" && <TeamsSettings />}
-                      {effectiveSecondary === "x" && <XSettings />}
-                      {effectiveSecondary === "discord" && <DiscordSettings />}
-                      {effectiveSecondary === "imessage" && (
-                        <ImessageSettings />
-                      )}
-                      {effectiveSecondary === "signal" && <SignalSettings />}
-                      {effectiveSecondary === "mattermost" && (
-                        <MattermostSettings />
-                      )}
-                      {effectiveSecondary === "matrix" && <MatrixSettings />}
-                      {effectiveSecondary === "twitch" && <TwitchSettings />}
-                      {effectiveSecondary === "line" && <LineSettings />}
-                      {effectiveSecondary === "bluebubbles" && (
-                        <BlueBubblesSettings />
-                      )}
-                      {effectiveSecondary === "email" && <EmailSettings />}
-                      {effectiveSecondary === "googlechat" && (
-                        <GoogleChatSettings />
-                      )}
-                      {effectiveSecondary === "feishu" && <FeishuSettings />}
-                      {effectiveSecondary === "wecom" && <WeComSettings />}
-                    </div>
+                  onOpenDigitalTwins={(companyId: string) => {
+                    setDigitalTwinsCompanyId(companyId);
+                    setActiveTab("digitaltwins");
+                  }}
+                />
+              ) : activeTab === "digitaltwins" ? (
+                <DigitalTwinsPanel
+                  initialCompanyId={digitalTwinsCompanyId}
+                  onOpenAgents={onNavigateToAgents}
+                />
+              ) : activeTab === "everydayAgent" ? (
+                <EverydayAgentSettingsPanel workspaceId={workspaceId} onCreateTask={onCreateTask} />
+              ) : activeTab === "health" ? (
+                <HealthPanel compact onCreateTask={onCreateTask} />
+              ) : activeTab === "system" ? (
+                <div className="settings-combined-panel system-security-panel">
+                  <div className="system-security-panel-header">
+                    <h2>System &amp; Security</h2>
+                    <p className="settings-description">
+                      Manage local profiles, app presence, safety limits, permissions, and
+                      organization controls from one place.
+                    </p>
                   </div>
-                );
-              })()
-            ) : activeTab === "aimodels" ? (
-              <div className="more-channels-panel">
-                <div className="more-channels-header">
-                  <h2>AI & Models</h2>
-                  <p className="settings-description">
-                    Configure AI model, image model, video model, and web
-                    search
-                  </p>
-                </div>
-                <div className="more-channels-tabs">
-                  <button
-                    className={`more-channels-tab ${activeAIModelsSubTab === "llm" ? "active" : ""}`}
-                    onClick={() => setActiveAIModelsSubTab("llm")}
+                  <SystemSettingsSection
+                    className="system-security-section--profiles"
+                    icon={<User {...S} />}
+                    title="Profiles"
+                    description="Keep user data isolated, switch profiles, and move profile bundles between machines."
                   >
-                    <Layers {...S} />
-                    <span>AI Model</span>
-                  </button>
-                  <button
-                    className={`more-channels-tab ${activeAIModelsSubTab === "image" ? "active" : ""}`}
-                    onClick={() => setActiveAIModelsSubTab("image")}
-                  >
-                    <ImageIcon {...S} />
-                    <span>Image Model</span>
-                  </button>
-                  <button
-                    className={`more-channels-tab ${activeAIModelsSubTab === "video" ? "active" : ""}`}
-                    onClick={() => setActiveAIModelsSubTab("video")}
-                  >
-                    <Film {...S} />
-                    <span>Video Model</span>
-                  </button>
-                  <button
-                    className={`more-channels-tab ${activeAIModelsSubTab === "search" ? "active" : ""}`}
-                    onClick={() => setActiveAIModelsSubTab("search")}
-                  >
-                    <Search {...S} />
-                    <span>Web Search</span>
-                  </button>
-                </div>
-                <div className="more-channels-content">
-                  {activeAIModelsSubTab === "llm" && renderLLMPanel()}
-                  {activeAIModelsSubTab === "image" && renderImagePanel()}
-                  {activeAIModelsSubTab === "video" && renderVideoPanel()}
-                  {activeAIModelsSubTab === "search" && <SearchSettings />}
-                </div>
-              </div>
-            ) : activeTab === "updates" ? (
-              <UpdateSettings />
-            ) : activeTab === "automations" ? (
-              <div className="more-channels-panel">
-                <div className="more-channels-header">
-                  <h2>Automations</h2>
-                  <p className="settings-description">
-                    Routines first, then queueing, workflow intelligence, and the lower-level automation engines
-                    that routines compile into
-                  </p>
-                </div>
-                <div className="more-channels-tabs">
-                  {(
-                    [
-                      "routines",
-                      "queue",
-                      "council",
-                      "subconscious",
-                      "scheduled",
-                      "hooks",
-                      "triggers",
-                    ] as const
-                  ).map((key) => (
-                    <button
-                      key={key}
-                      className={`more-channels-tab ${activeAutomationsSubTab === key ? "active" : ""}`}
-                      onClick={() => setActiveAutomationsSubTab(key)}
-                    >
-                      {key === "routines" && <Box {...S} />}
-                      {key === "queue" && <ListOrdered {...S} />}
-                      {key === "council" && <Users {...S} />}
-                      {key === "subconscious" && <Sparkles {...S} />}
-                      {key === "scheduled" && <Clock {...S} />}
-                      {key === "hooks" && <Link {...S} />}
-                      {key === "triggers" && <Zap {...S} />}
-                      <span>
-                        {key === "routines" && "Routines"}
-                        {key === "queue" && "Task Queue"}
-                        {key === "council" && "R&D Council"}
-                        {key === "subconscious" && "Workflow Intelligence"}
-                        {key === "scheduled" && "Scheduled Tasks"}
-                        {key === "hooks" && "Webhooks"}
-                        {key === "triggers" && "Event Triggers"}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                <div className="more-channels-content">
-                  {activeAutomationsSubTab === "routines" && (
-                    <RoutineSettingsPanel onOpenTask={onOpenTask} />
-                  )}
-                  {activeAutomationsSubTab === "queue" && <QueueSettings />}
-                  {activeAutomationsSubTab === "council" && (
-                    <CouncilSettings
-                      workspaceId={workspaceId}
-                      onOpenTask={onOpenTask}
-                    />
-                  )}
-                  {activeAutomationsSubTab === "subconscious" && (
-                    <SubconsciousSettingsPanel
-                      initialWorkspaceId={workspaceId}
-                      onOpenTask={onOpenTask}
-                    />
-                  )}
-                  {activeAutomationsSubTab === "scheduled" && (
-                    <ScheduledTasksSettings onOpenTask={onOpenTask} />
-                  )}
-                  {activeAutomationsSubTab === "hooks" && <HooksSettings />}
-                  {activeAutomationsSubTab === "triggers" && (
-                    <EventTriggersPanel workspaceId={workspaceId} />
-                  )}
-                </div>
-              </div>
-            ) : activeTab === "skills" ? (
-              <div className="more-channels-panel">
-                <div className="more-channels-header">
-                  <h2>Skills</h2>
-                  <p className="settings-description">
-                    Manage custom skills and browse the Skill Store
-                  </p>
-                </div>
-                <div className="more-channels-tabs">
-                  <button
-                    className={`more-channels-tab ${activeSkillsSubTab === "custom" ? "active" : ""}`}
-                    onClick={() => setActiveSkillsSubTab("custom")}
-                  >
-                    <Wrench {...S} />
-                    <span>Custom Skills</span>
-                  </button>
-                  <button
-                    className={`more-channels-tab ${activeSkillsSubTab === "store" ? "active" : ""}`}
-                    onClick={() => setActiveSkillsSubTab("store")}
-                  >
-                    <Store {...S} />
-                    <span>Skill Store</span>
-                  </button>
-                </div>
-                <div className="more-channels-content">
-                  {activeSkillsSubTab === "custom" && <SkillsSettings />}
-                  {activeSkillsSubTab === "store" && <SkillHubBrowser />}
-                </div>
-              </div>
-            ) : activeTab === "integrations" ? (
-              <div className="more-channels-panel">
-                <div className="more-channels-header">
-                  <h2>Integrations</h2>
-                  <p className="settings-description">
-                    Git, connectors, and infrastructure
-                  </p>
-                </div>
-                <div className="more-channels-tabs">
-                  <button
-                    className={`more-channels-tab ${activeIntegrationsSubTab === "git" ? "active" : ""}`}
-                    onClick={() => setActiveIntegrationsSubTab("git")}
-                  >
-                    <GitBranch {...S} />
-                    <span>Git</span>
-                  </button>
-                  <button
-                    className={`more-channels-tab ${activeIntegrationsSubTab === "connectors" ? "active" : ""}`}
-                    onClick={() => setActiveIntegrationsSubTab("connectors")}
-                  >
-                    <LayoutGrid {...S} />
-                    <span>Connectors</span>
-                  </button>
-                  <button
-                    className={`more-channels-tab ${activeIntegrationsSubTab === "identity" ? "active" : ""}`}
-                    onClick={() => setActiveIntegrationsSubTab("identity")}
-                  >
-                    <UsersRound {...S} />
-                    <span>Identity</span>
-                  </button>
-                  <button
-                    className={`more-channels-tab ${activeIntegrationsSubTab === "infrastructure" ? "active" : ""}`}
-                    onClick={() =>
-                      setActiveIntegrationsSubTab("infrastructure")
+                    <ProfileSettings />
+                  </SystemSettingsSection>
+                  <SystemSettingsSection
+                    className="system-security-section--tray"
+                    icon={<Monitor {...S} />}
+                    title={
+                      platform === "win32"
+                        ? "System Tray"
+                        : platform === "darwin"
+                          ? "Menu Bar"
+                          : "Tray"
                     }
+                    description="Control how CoWork appears in the operating system and when it sends desktop alerts."
                   >
-                    <Zap {...S} />
-                    <span>Infrastructure</span>
-                  </button>
-                </div>
-                <div className="more-channels-content">
-                  {activeIntegrationsSubTab === "git" && <WorktreeSettings />}
-                  {activeIntegrationsSubTab === "connectors" && (
-                    <ConnectorsSettings />
-                  )}
-                  {activeIntegrationsSubTab === "identity" && (
-                    <ContactIdentitySettings workspaceId={workspaceId} />
-                  )}
-                  {activeIntegrationsSubTab === "infrastructure" && (
-                    <InfraSettings />
-                  )}
-                </div>
-              </div>
-            ) : activeTab === "mcp" ? (
-              <MCPSettings />
-            ) : activeTab === "tools" ? (
-              <div className="settings-tools-stack">
-                <BuiltinToolsSettings />
-                <ChronicleSettingsCard />
-                <ComputerUseSettings />
-              </div>
-            ) : activeTab === "access" ? (
-              <div className="more-channels-panel">
-                <div className="more-channels-header">
-                  <h2>Access</h2>
-                  <p className="settings-description">
-                    Remote access and web access
-                  </p>
-                </div>
-                <div className="more-channels-tabs">
-                  <button
-                    className={`more-channels-tab ${activeAccessSubTab === "controlplane" ? "active" : ""}`}
-                    onClick={() => setActiveAccessSubTab("controlplane")}
+                    <TraySettings />
+                  </SystemSettingsSection>
+                  <SystemSettingsSection
+                    className="system-security-section--safety"
+                    icon={<Shield {...S} />}
+                    title="Safety Limits"
+                    description="Set budget, iteration, command, browser, and model guardrails for automated work."
                   >
-                    <Monitor {...S} />
-                    <span>Remote Access</span>
-                  </button>
-                  <button
-                    className={`more-channels-tab ${activeAccessSubTab === "webaccess" ? "active" : ""}`}
-                    onClick={() => setActiveAccessSubTab("webaccess")}
+                    <GuardrailSettings />
+                  </SystemSettingsSection>
+                  <SystemSettingsSection
+                    className="system-security-section--permissions"
+                    icon={<ShieldCheckIcon {...S} />}
+                    title="Permissions"
+                    description="Tune the default approval experience and manage profile or workspace-specific rules."
                   >
-                    <Monitor {...S} />
-                    <span>Web Access</span>
-                  </button>
+                    <PermissionSettingsPanel workspaceId={workspaceId} />
+                  </SystemSettingsSection>
+                  <SystemSettingsSection
+                    className="system-security-section--admin"
+                    icon={<Building2 {...S} />}
+                    title="Admin Policies"
+                    description="Apply organization-level limits for plugin packs, connectors, installation, agents, and security enforcement."
+                  >
+                    <AdminPoliciesPanel />
+                  </SystemSettingsSection>
+                  <SystemSettingsSection
+                    className="system-security-section--agent-security"
+                    icon={<ShieldCheckIcon {...S} />}
+                    title="Agent Security"
+                    description="Monitor Numbat runtime health, findings, rules, scans, and external-agent hooks."
+                  >
+                    <AgentSecurityPanel />
+                  </SystemSettingsSection>
                 </div>
-                <div className="more-channels-content">
-                  {activeAccessSubTab === "controlplane" && (
-                    <ControlPlaneSettings />
-                  )}
-                  {activeAccessSubTab === "webaccess" && (
-                    <WebAccessSettingsPanel />
-                  )}
+              ) : activeTab === "voice" ? (
+                <VoiceSettings />
+              ) : activeTab === "telegram" ? (
+                <TelegramSettings />
+              ) : activeTab === "slack" ? (
+                <SlackSettings />
+              ) : activeTab === "whatsapp" ? (
+                <WhatsAppSettings />
+              ) : activeTab === "morechannels" || activeTab === "teams" || activeTab === "x" ? (
+                (() => {
+                  const effectiveSecondary =
+                    activeTab === "teams" || activeTab === "x" ? activeTab : activeSecondaryChannel;
+                  return (
+                    <div className="more-channels-panel">
+                      <div className="more-channels-header">
+                        <h2>More Channels</h2>
+                        <p className="settings-description">
+                          Configure additional messaging platforms
+                        </p>
+                      </div>
+                      <div className="more-channels-tabs">
+                        {secondaryChannelItems.map((item) => (
+                          <button
+                            key={item.key}
+                            className={`more-channels-tab ${effectiveSecondary === item.key ? "active" : ""}`}
+                            onClick={() => {
+                              setActiveTab("morechannels");
+                              setActiveSecondaryChannel(item.key);
+                            }}
+                          >
+                            {item.icon}
+                            <span>{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="more-channels-content">
+                        {effectiveSecondary === "teams" && <TeamsSettings />}
+                        {effectiveSecondary === "x" && <XSettings />}
+                        {effectiveSecondary === "discord" && <DiscordSettings />}
+                        {effectiveSecondary === "imessage" && <ImessageSettings />}
+                        {effectiveSecondary === "signal" && <SignalSettings />}
+                        {effectiveSecondary === "mattermost" && <MattermostSettings />}
+                        {effectiveSecondary === "matrix" && <MatrixSettings />}
+                        {effectiveSecondary === "twitch" && <TwitchSettings />}
+                        {effectiveSecondary === "line" && <LineSettings />}
+                        {effectiveSecondary === "bluebubbles" && <BlueBubblesSettings />}
+                        {effectiveSecondary === "email" && <EmailSettings />}
+                        {effectiveSecondary === "googlechat" && <GoogleChatSettings />}
+                        {effectiveSecondary === "feishu" && <FeishuSettings />}
+                        {effectiveSecondary === "wecom" && <WeComSettings />}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : activeTab === "aimodels" ? (
+                <div className="more-channels-panel">
+                  <div className="more-channels-header">
+                    <h2>AI & Models</h2>
+                    <p className="settings-description">
+                      Configure AI model, image model, video model, and web search
+                    </p>
+                  </div>
+                  <div className="more-channels-tabs">
+                    <button
+                      className={`more-channels-tab ${activeAIModelsSubTab === "llm" ? "active" : ""}`}
+                      onClick={() => setActiveAIModelsSubTab("llm")}
+                    >
+                      <Layers {...S} />
+                      <span>AI Model</span>
+                    </button>
+                    <button
+                      className={`more-channels-tab ${activeAIModelsSubTab === "image" ? "active" : ""}`}
+                      onClick={() => setActiveAIModelsSubTab("image")}
+                    >
+                      <ImageIcon {...S} />
+                      <span>Image Model</span>
+                    </button>
+                    <button
+                      className={`more-channels-tab ${activeAIModelsSubTab === "video" ? "active" : ""}`}
+                      onClick={() => setActiveAIModelsSubTab("video")}
+                    >
+                      <Film {...S} />
+                      <span>Video Model</span>
+                    </button>
+                    <button
+                      className={`more-channels-tab ${activeAIModelsSubTab === "search" ? "active" : ""}`}
+                      onClick={() => setActiveAIModelsSubTab("search")}
+                    >
+                      <Search {...S} />
+                      <span>Web Search</span>
+                    </button>
+                  </div>
+                  <div className="more-channels-content">
+                    {activeAIModelsSubTab === "llm" && renderLLMPanel()}
+                    {activeAIModelsSubTab === "image" && renderImagePanel()}
+                    {activeAIModelsSubTab === "video" && renderVideoPanel()}
+                    {activeAIModelsSubTab === "search" && <SearchSettings />}
+                  </div>
                 </div>
-              </div>
-            ) : activeTab === "nodes" ? (
-              <NodesSettings />
-            ) : activeTab === "extensions" ? (
-              <ExtensionsSettings />
-            ) : activeTab === "memory" ? (
-              <MemoryHubSettings
-                initialWorkspaceId={workspaceId}
-                onSettingsChanged={onSettingsChanged}
-              />
-            ) : activeTab === "insights" ? (
-              <UsageInsightsPanel workspaceId={workspaceId} />
-            ) : activeTab === "suggestions" ? (
-              <SuggestionsPanel
-                workspaceId={workspaceId}
-                onCreateTask={onCreateTask}
-              />
-            ) : activeTab === "traces" ? (
-              <TaskTraceDebuggerPanel
-                workspaceId={workspaceId}
-                onOpenTask={onOpenTask}
-              />
-            ) : activeTab === "customize" ? (
-              <CustomizePanel
-                onNavigateToConnectors={() => {
-                  setActiveTab("integrations");
-                  setActiveIntegrationsSubTab("connectors");
-                }}
-                onNavigateToSkills={() => setActiveTab("skills")}
-                onCreateTask={onCreateTask}
-              />
-            ) : activeTab === "briefing" ? (
-              <BriefingPanel workspaceId={workspaceId} />
-            ) : loading ? (
-              <div className="settings-loading">Loading settings...</div>
-            ) : (
-              renderLLMPanel()
-            )}
+              ) : activeTab === "updates" ? (
+                <UpdateSettings />
+              ) : activeTab === "automations" ? (
+                <div className="more-channels-panel">
+                  <div className="more-channels-header">
+                    <h2>Automations</h2>
+                    <p className="settings-description">
+                      Routines first, then queueing, workflow intelligence, and the lower-level
+                      automation engines that routines compile into
+                    </p>
+                  </div>
+                  <div className="more-channels-tabs">
+                    {(
+                      [
+                        "routines",
+                        "queue",
+                        "council",
+                        "subconscious",
+                        "scheduled",
+                        "hooks",
+                        "triggers",
+                      ] as const
+                    ).map((key) => (
+                      <button
+                        key={key}
+                        className={`more-channels-tab ${activeAutomationsSubTab === key ? "active" : ""}`}
+                        onClick={() => setActiveAutomationsSubTab(key)}
+                      >
+                        {key === "routines" && <Box {...S} />}
+                        {key === "queue" && <ListOrdered {...S} />}
+                        {key === "council" && <Users {...S} />}
+                        {key === "subconscious" && <Sparkles {...S} />}
+                        {key === "scheduled" && <Clock {...S} />}
+                        {key === "hooks" && <Link {...S} />}
+                        {key === "triggers" && <Zap {...S} />}
+                        <span>
+                          {key === "routines" && "Routines"}
+                          {key === "queue" && "Task Queue"}
+                          {key === "council" && "R&D Council"}
+                          {key === "subconscious" && "Workflow Intelligence"}
+                          {key === "scheduled" && "Scheduled Tasks"}
+                          {key === "hooks" && "Webhooks"}
+                          {key === "triggers" && "Event Triggers"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="more-channels-content">
+                    {activeAutomationsSubTab === "routines" && (
+                      <RoutineSettingsPanel onOpenTask={onOpenTask} />
+                    )}
+                    {activeAutomationsSubTab === "queue" && <QueueSettings />}
+                    {activeAutomationsSubTab === "council" && (
+                      <CouncilSettings workspaceId={workspaceId} onOpenTask={onOpenTask} />
+                    )}
+                    {activeAutomationsSubTab === "subconscious" && (
+                      <SubconsciousSettingsPanel
+                        initialWorkspaceId={workspaceId}
+                        onOpenTask={onOpenTask}
+                      />
+                    )}
+                    {activeAutomationsSubTab === "scheduled" && (
+                      <ScheduledTasksSettings onOpenTask={onOpenTask} />
+                    )}
+                    {activeAutomationsSubTab === "hooks" && <HooksSettings />}
+                    {activeAutomationsSubTab === "triggers" && (
+                      <EventTriggersPanel workspaceId={workspaceId} />
+                    )}
+                  </div>
+                </div>
+              ) : activeTab === "skills" ? (
+                <div className="more-channels-panel">
+                  <div className="more-channels-header">
+                    <h2>Skills</h2>
+                    <p className="settings-description">
+                      Manage custom skills and browse the Skill Store
+                    </p>
+                  </div>
+                  <div className="more-channels-tabs">
+                    <button
+                      className={`more-channels-tab ${activeSkillsSubTab === "custom" ? "active" : ""}`}
+                      onClick={() => setActiveSkillsSubTab("custom")}
+                    >
+                      <Wrench {...S} />
+                      <span>Custom Skills</span>
+                    </button>
+                    <button
+                      className={`more-channels-tab ${activeSkillsSubTab === "store" ? "active" : ""}`}
+                      onClick={() => setActiveSkillsSubTab("store")}
+                    >
+                      <Store {...S} />
+                      <span>Skill Store</span>
+                    </button>
+                  </div>
+                  <div className="more-channels-content">
+                    {activeSkillsSubTab === "custom" && <SkillsSettings />}
+                    {activeSkillsSubTab === "store" && <SkillHubBrowser />}
+                  </div>
+                </div>
+              ) : activeTab === "integrations" ? (
+                <div className="more-channels-panel">
+                  <div className="more-channels-header">
+                    <h2>Integrations</h2>
+                    <p className="settings-description">Git, connectors, and infrastructure</p>
+                  </div>
+                  <div className="more-channels-tabs">
+                    <button
+                      className={`more-channels-tab ${activeIntegrationsSubTab === "git" ? "active" : ""}`}
+                      onClick={() => setActiveIntegrationsSubTab("git")}
+                    >
+                      <GitBranch {...S} />
+                      <span>Git</span>
+                    </button>
+                    <button
+                      className={`more-channels-tab ${activeIntegrationsSubTab === "connectors" ? "active" : ""}`}
+                      onClick={() => setActiveIntegrationsSubTab("connectors")}
+                    >
+                      <LayoutGrid {...S} />
+                      <span>Connectors</span>
+                    </button>
+                    <button
+                      className={`more-channels-tab ${activeIntegrationsSubTab === "identity" ? "active" : ""}`}
+                      onClick={() => setActiveIntegrationsSubTab("identity")}
+                    >
+                      <UsersRound {...S} />
+                      <span>Identity</span>
+                    </button>
+                    <button
+                      className={`more-channels-tab ${activeIntegrationsSubTab === "infrastructure" ? "active" : ""}`}
+                      onClick={() => setActiveIntegrationsSubTab("infrastructure")}
+                    >
+                      <Zap {...S} />
+                      <span>Infrastructure</span>
+                    </button>
+                  </div>
+                  <div className="more-channels-content">
+                    {activeIntegrationsSubTab === "git" && <WorktreeSettings />}
+                    {activeIntegrationsSubTab === "connectors" && <ConnectorsSettings />}
+                    {activeIntegrationsSubTab === "identity" && (
+                      <ContactIdentitySettings workspaceId={workspaceId} />
+                    )}
+                    {activeIntegrationsSubTab === "infrastructure" && <InfraSettings />}
+                  </div>
+                </div>
+              ) : activeTab === "mcp" ? (
+                <MCPSettings />
+              ) : activeTab === "tools" ? (
+                <div className="settings-tools-stack">
+                  <BuiltinToolsSettings />
+                  <ChronicleSettingsCard />
+                  <ComputerUseSettings />
+                </div>
+              ) : activeTab === "access" ? (
+                <div className="more-channels-panel">
+                  <div className="more-channels-header">
+                    <h2>Access</h2>
+                    <p className="settings-description">Remote access and web access</p>
+                  </div>
+                  <div className="more-channels-tabs">
+                    <button
+                      className={`more-channels-tab ${activeAccessSubTab === "controlplane" ? "active" : ""}`}
+                      onClick={() => setActiveAccessSubTab("controlplane")}
+                    >
+                      <Monitor {...S} />
+                      <span>Remote Access</span>
+                    </button>
+                    <button
+                      className={`more-channels-tab ${activeAccessSubTab === "webaccess" ? "active" : ""}`}
+                      onClick={() => setActiveAccessSubTab("webaccess")}
+                    >
+                      <Monitor {...S} />
+                      <span>Web Access</span>
+                    </button>
+                  </div>
+                  <div className="more-channels-content">
+                    {activeAccessSubTab === "controlplane" && <ControlPlaneSettings />}
+                    {activeAccessSubTab === "webaccess" && <WebAccessSettingsPanel />}
+                  </div>
+                </div>
+              ) : activeTab === "nodes" ? (
+                <NodesSettings />
+              ) : activeTab === "extensions" ? (
+                <ExtensionsSettings />
+              ) : activeTab === "memory" ? (
+                <MemoryHubSettings
+                  initialWorkspaceId={workspaceId}
+                  onSettingsChanged={onSettingsChanged}
+                />
+              ) : activeTab === "insights" ? (
+                <UsageInsightsPanel workspaceId={workspaceId} />
+              ) : activeTab === "suggestions" ? (
+                <SuggestionsPanel workspaceId={workspaceId} onCreateTask={onCreateTask} />
+              ) : activeTab === "traces" ? (
+                <TaskTraceDebuggerPanel workspaceId={workspaceId} onOpenTask={onOpenTask} />
+              ) : activeTab === "customize" ? (
+                <CustomizePanel
+                  onNavigateToConnectors={() => {
+                    setActiveTab("integrations");
+                    setActiveIntegrationsSubTab("connectors");
+                  }}
+                  onNavigateToSkills={() => setActiveTab("skills")}
+                  onCreateTask={onCreateTask}
+                />
+              ) : activeTab === "briefing" ? (
+                <BriefingPanel workspaceId={workspaceId} />
+              ) : loading ? (
+                <div className="settings-loading">Loading settings...</div>
+              ) : (
+                renderLLMPanel()
+              )}
             </Suspense>
           </div>
         </div>

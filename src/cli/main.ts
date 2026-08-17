@@ -110,6 +110,20 @@ const METHODS = {
   TASK_GET: "task.get",
   APPROVAL_LIST: "approval.list",
   APPROVAL_RESPOND: "approval.respond",
+  AGENT_SECURITY_STATUS: "security.status",
+  AGENT_SECURITY_FINDINGS_LIST: "security.findings.list",
+  AGENT_SECURITY_FINDING_UPDATE: "security.finding.update",
+  AGENT_SECURITY_DECISIONS_LIST: "security.decisions.list",
+  AGENT_SECURITY_INVENTORY_LIST: "security.inventory.list",
+  AGENT_SECURITY_INVENTORY_REFRESH: "security.inventory.refresh",
+  AGENT_SECURITY_SCAN: "security.scan",
+  AGENT_SECURITY_RULES_CHECK: "security.rules.check",
+  AGENT_SECURITY_HOOK_STATUS: "security.hook.status",
+  AGENT_SECURITY_HOOK_INSTALL: "security.hook.install",
+  AGENT_SECURITY_HOOK_UNINSTALL: "security.hook.uninstall",
+  AGENT_SECURITY_CASE_BUILD: "security.case.build",
+  AGENT_SECURITY_CASE_VERIFY: "security.case.verify",
+  AGENT_SECURITY_PRUNE: "security.prune",
 } as const;
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -378,7 +392,9 @@ function resolveConnectionWithLocalDiscovery(
   autoDiscovered?: boolean;
 } {
   if (connection.token || hasFlag(parsed, "--no-discover")) return { connection };
-  const discovered = discoverLocalControlPlane(getFlag(parsed, "--profile") || connection.profileName);
+  const discovered = discoverLocalControlPlane(
+    getFlag(parsed, "--profile") || connection.profileName,
+  );
   if (discovered.token) {
     return {
       connection: {
@@ -465,21 +481,31 @@ function logout(ctx: CommandContext): number {
 
 function whoami(ctx: CommandContext): number {
   if (!hasFlag(ctx.parsed, "--remote")) {
-    printLinesOrJson(ctx, { profile: ctx.connection.profileName, runtime: "local", controlPlaneRequired: false }, [
-      `Profile: ${ctx.connection.profileName}`,
-      "Runtime: local",
-      "Control Plane: not required for local CLI commands",
-    ]);
+    printLinesOrJson(
+      ctx,
+      { profile: ctx.connection.profileName, runtime: "local", controlPlaneRequired: false },
+      [
+        `Profile: ${ctx.connection.profileName}`,
+        "Runtime: local",
+        "Control Plane: not required for local CLI commands",
+      ],
+    );
     return 0;
   }
 
-  printLinesOrJson(ctx, { ...ctx.connection, autoDiscovered: ctx.autoDiscovered, discoverySource: ctx.discoverySource }, [
-    `Profile: ${ctx.connection.profileName}`,
-    `URL: ${ctx.connection.url}`,
-    `Token: ${ctx.connection.token ? (ctx.autoDiscovered ? "auto-discovered" : "configured") : "missing"}`,
-    ...(ctx.discoverySource ? [`Source: ${ctx.discoverySource}`] : []),
-    ...(!ctx.connection.token && ctx.discoveryError ? [`Auto-discovery: ${ctx.discoveryError}`] : []),
-  ]);
+  printLinesOrJson(
+    ctx,
+    { ...ctx.connection, autoDiscovered: ctx.autoDiscovered, discoverySource: ctx.discoverySource },
+    [
+      `Profile: ${ctx.connection.profileName}`,
+      `URL: ${ctx.connection.url}`,
+      `Token: ${ctx.connection.token ? (ctx.autoDiscovered ? "auto-discovered" : "configured") : "missing"}`,
+      ...(ctx.discoverySource ? [`Source: ${ctx.discoverySource}`] : []),
+      ...(!ctx.connection.token && ctx.discoveryError
+        ? [`Auto-discovery: ${ctx.discoveryError}`]
+        : []),
+    ],
+  );
   return ctx.connection.token ? 0 : 1;
 }
 
@@ -515,7 +541,9 @@ async function daemon(ctx: CommandContext): Promise<number> {
     });
     child.unref();
     process.stdout.write("Started CoWork daemon in the background.\n");
-    process.stdout.write("Check logs from your process manager, or run foreground mode to read the token.\n");
+    process.stdout.write(
+      "Check logs from your process manager, or run foreground mode to read the token.\n",
+    );
     return 0;
   }
   const child = spawn(process.execPath, [daemonBin, ...args], {
@@ -536,9 +564,17 @@ async function workspace(ctx: CommandContext): Promise<number> {
       const target = ctx.parsed.rest[1] || getFlag(ctx.parsed, "--cwd") || process.cwd();
       const resolved = path.resolve(target);
       const name = getFlag(ctx.parsed, "--name") || path.basename(resolved) || "Workspace";
-      return runDirectCommandProcess(ctx, ["--workspace-create", "--cwd", resolved, "--name", name]);
+      return runDirectCommandProcess(ctx, [
+        "--workspace-create",
+        "--cwd",
+        resolved,
+        "--name",
+        name,
+      ]);
     }
-    process.stderr.write("Usage: cowork workspace list | cowork workspace create [path] [--name <name>]\n");
+    process.stderr.write(
+      "Usage: cowork workspace list | cowork workspace create [path] [--name <name>]\n",
+    );
     return 1;
   }
 
@@ -547,7 +583,11 @@ async function workspace(ctx: CommandContext): Promise<number> {
     if (sub === "list") {
       const payload = await client.request(METHODS.WORKSPACE_LIST);
       const workspaces = extractArrayPayload<WorkspaceLike>(payload, "workspaces");
-      printLinesOrJson(ctx, payload, workspaces.length ? workspaces.map(formatWorkspace) : ["No workspaces configured."]);
+      printLinesOrJson(
+        ctx,
+        payload,
+        workspaces.length ? workspaces.map(formatWorkspace) : ["No workspaces configured."],
+      );
       return 0;
     }
     if (sub === "create") {
@@ -555,10 +595,14 @@ async function workspace(ctx: CommandContext): Promise<number> {
       const resolved = path.resolve(target);
       const name = getFlag(ctx.parsed, "--name") || path.basename(resolved) || "Workspace";
       const payload = await client.request(METHODS.WORKSPACE_CREATE, { name, path: resolved });
-      printLinesOrJson(ctx, payload, [`Created workspace: ${formatWorkspace((payload as Any).workspace || {})}`]);
+      printLinesOrJson(ctx, payload, [
+        `Created workspace: ${formatWorkspace((payload as Any).workspace || {})}`,
+      ]);
       return 0;
     }
-    process.stderr.write("Usage: cowork workspace list | cowork workspace create [path] [--name <name>]\n");
+    process.stderr.write(
+      "Usage: cowork workspace list | cowork workspace create [path] [--name <name>]\n",
+    );
     return 1;
   } finally {
     client.close();
@@ -568,7 +612,9 @@ async function workspace(ctx: CommandContext): Promise<number> {
 async function runTask(ctx: CommandContext): Promise<number> {
   const prompt = ctx.parsed.rest.join(" ").trim();
   if (!prompt) {
-    process.stderr.write('Usage: cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--shell] [--detach]\n');
+    process.stderr.write(
+      'Usage: cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--shell] [--detach]\n',
+    );
     return 1;
   }
   if (isLikelyCommandPrompt(prompt) && !hasFlag(ctx.parsed, "--force")) {
@@ -592,7 +638,9 @@ async function runTask(ctx: CommandContext): Promise<number> {
       title: getFlag(ctx.parsed, "--title") || buildTaskTitle(prompt),
       prompt,
       ...(hasFlag(ctx.parsed, "--shell") ? { shellAccess: true } : {}),
-      ...(getFlag(ctx.parsed, "--permission-mode") ? { permissionMode: getFlag(ctx.parsed, "--permission-mode") } : {}),
+      ...(getFlag(ctx.parsed, "--permission-mode")
+        ? { permissionMode: getFlag(ctx.parsed, "--permission-mode") }
+        : {}),
     };
     const created = await client.request(METHODS.TASK_CREATE, params, 30000);
     const task = ((created as Any).task || {}) as TaskLike;
@@ -602,7 +650,9 @@ async function runTask(ctx: CommandContext): Promise<number> {
       return 0;
     }
     if (hasFlag(ctx.parsed, "--detach")) {
-      process.stdout.write(`Created detached task: ${taskId}  ${task.title || buildTaskTitle(prompt)}\n`);
+      process.stdout.write(
+        `Created detached task: ${taskId}  ${task.title || buildTaskTitle(prompt)}\n`,
+      );
       process.stdout.write(`Tail: cowork tasks attach ${taskId} --remote\n`);
       process.stdout.write(`Cancel: cowork tasks cancel ${taskId} --remote\n`);
       return 0;
@@ -648,7 +698,9 @@ async function runDirectDetachedTaskProcess(ctx: CommandContext, prompt: string)
     process.stdout.write(`Tail: cowork tasks attach ${ready.taskId}\n`);
     process.stdout.write(`Cancel: cowork tasks cancel ${ready.taskId}\n`);
   } else {
-    process.stdout.write("Started detached task runner. Task id was not available before timeout.\n");
+    process.stdout.write(
+      "Started detached task runner. Task id was not available before timeout.\n",
+    );
   }
   return 0;
 }
@@ -676,7 +728,12 @@ async function waitForDetachedReadyFile(
     try {
       const text = await fs.readFile(readyFile, "utf8");
       await fs.unlink(readyFile).catch(() => {});
-      const parsed = JSON.parse(text) as { taskId?: string; title?: string; status?: string; workspaceId?: string };
+      const parsed = JSON.parse(text) as {
+        taskId?: string;
+        title?: string;
+        status?: string;
+        workspaceId?: string;
+      };
       return parsed && typeof parsed === "object" ? parsed : null;
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -744,7 +801,12 @@ async function tail(ctx: CommandContext): Promise<number> {
 
   const client = await connectedClient(ctx);
   try {
-    return await streamTask(client, taskId, Number(getFlag(ctx.parsed, "--limit") || 200), ctx.json);
+    return await streamTask(
+      client,
+      taskId,
+      Number(getFlag(ctx.parsed, "--limit") || 200),
+      ctx.json,
+    );
   } finally {
     client.close();
   }
@@ -752,14 +814,25 @@ async function tail(ctx: CommandContext): Promise<number> {
 
 async function approvals(ctx: CommandContext): Promise<number> {
   if (!hasFlag(ctx.parsed, "--remote")) {
-    return runDirectCommandProcess(ctx, ["--approvals-list", "--limit", String(parseLimit(ctx, 100))]);
+    return runDirectCommandProcess(ctx, [
+      "--approvals-list",
+      "--limit",
+      String(parseLimit(ctx, 100)),
+    ]);
   }
 
   const client = await connectedClient(ctx);
   try {
-    const payload = await client.request(METHODS.APPROVAL_LIST, { limit: parseLimit(ctx, 100), offset: 0 });
+    const payload = await client.request(METHODS.APPROVAL_LIST, {
+      limit: parseLimit(ctx, 100),
+      offset: 0,
+    });
     const rows = extractArrayPayload<ApprovalLike>(payload, "approvals");
-    printLinesOrJson(ctx, payload, rows.length ? rows.map(formatApproval) : ["No pending approvals."]);
+    printLinesOrJson(
+      ctx,
+      payload,
+      rows.length ? rows.map(formatApproval) : ["No pending approvals."],
+    );
     return 0;
   } finally {
     client.close();
@@ -779,7 +852,9 @@ async function respondApproval(ctx: CommandContext, approved: boolean): Promise<
   const client = await connectedClient(ctx);
   try {
     const payload = await client.request(METHODS.APPROVAL_RESPOND, { approvalId, approved });
-    printLinesOrJson(ctx, payload, [`${approved ? "Approved" : "Rejected"} approval ${approvalId}.`]);
+    printLinesOrJson(ctx, payload, [
+      `${approved ? "Approved" : "Rejected"} approval ${approvalId}.`,
+    ]);
     return 0;
   } finally {
     client.close();
@@ -865,7 +940,11 @@ async function providers(ctx: CommandContext): Promise<number> {
         process.stderr.write("Usage: cowork providers fallback remove <provider>\n");
         return 1;
       }
-      return runDirectCommandProcess(ctx, ["--providers-fallback-remove", "--provider", providerType]);
+      return runDirectCommandProcess(ctx, [
+        "--providers-fallback-remove",
+        "--provider",
+        providerType,
+      ]);
     }
     process.stderr.write("Usage: cowork providers fallback list|add|remove\n");
     return 1;
@@ -876,7 +955,9 @@ async function providers(ctx: CommandContext): Promise<number> {
   if (!hasFlag(ctx.parsed, "--remote") && sub === "configure") {
     const providerType = ctx.parsed.rest[1] || getFlag(ctx.parsed, "--provider");
     if (!providerType) {
-      process.stderr.write("Usage: cowork providers configure <provider> [--api-key <key>] [--model <model>] [--base-url <url>]\n");
+      process.stderr.write(
+        "Usage: cowork providers configure <provider> [--api-key <key>] [--model <model>] [--base-url <url>]\n",
+      );
       return 1;
     }
     return runDirectCommandProcess(ctx, [
@@ -887,7 +968,9 @@ async function providers(ctx: CommandContext): Promise<number> {
         ? ["--api-key", getFlag(ctx.parsed, "--api-key") || providerEnvKey(providerType)]
         : []),
       ...(getFlag(ctx.parsed, "--model") ? ["--model", getFlag(ctx.parsed, "--model")!] : []),
-      ...(getFlag(ctx.parsed, "--base-url") ? ["--base-url", getFlag(ctx.parsed, "--base-url")!] : []),
+      ...(getFlag(ctx.parsed, "--base-url")
+        ? ["--base-url", getFlag(ctx.parsed, "--base-url")!]
+        : []),
     ]);
   }
 
@@ -902,7 +985,9 @@ async function providers(ctx: CommandContext): Promise<number> {
     if (sub === "configure") {
       const providerType = ctx.parsed.rest[1] || getFlag(ctx.parsed, "--provider");
       if (!providerType) {
-        process.stderr.write("Usage: cowork providers configure <provider> [--api-key <key>] [--model <model>] [--base-url <url>]\n");
+        process.stderr.write(
+          "Usage: cowork providers configure <provider> [--api-key <key>] [--model <model>] [--base-url <url>]\n",
+        );
         return 1;
       }
       const apiKey = getFlag(ctx.parsed, "--api-key") || providerEnvKey(providerType);
@@ -937,7 +1022,13 @@ async function sessions(ctx: CommandContext): Promise<number> {
   if (sub === "show") {
     const id = ctx.parsed.rest[1];
     if (!id) return usageError("Usage: cowork sessions show <sessionId>");
-    return runDirectCommandProcess(ctx, ["--sessions-show", "--session-id", id, "--limit", String(parseLimit(ctx, 200))]);
+    return runDirectCommandProcess(ctx, [
+      "--sessions-show",
+      "--session-id",
+      id,
+      "--limit",
+      String(parseLimit(ctx, 200)),
+    ]);
   }
   if (sub === "export") {
     const id = ctx.parsed.rest[1];
@@ -965,7 +1056,12 @@ async function sessions(ctx: CommandContext): Promise<number> {
   if (sub === "delete") {
     const id = ctx.parsed.rest[1];
     if (!id) return usageError("Usage: cowork sessions delete <sessionId> --yes");
-    return runDirectCommandProcess(ctx, ["--sessions-delete", "--session-id", id, ...(hasFlag(ctx.parsed, "--yes") ? ["--yes"] : [])]);
+    return runDirectCommandProcess(ctx, [
+      "--sessions-delete",
+      "--session-id",
+      id,
+      ...(hasFlag(ctx.parsed, "--yes") ? ["--yes"] : []),
+    ]);
   }
   if (sub === "prune") {
     return runDirectCommandProcess(ctx, [
@@ -1011,7 +1107,11 @@ async function tasks(ctx: CommandContext): Promise<number> {
       ]);
     }
     if (sub === "stale") {
-      return runDirectCommandProcess(ctx, ["--tasks-stale", "--limit", String(parseLimit(ctx, 100))]);
+      return runDirectCommandProcess(ctx, [
+        "--tasks-stale",
+        "--limit",
+        String(parseLimit(ctx, 100)),
+      ]);
     }
     if (sub === "cleanup") {
       return runDirectCommandProcess(ctx, [
@@ -1028,12 +1128,21 @@ async function tasks(ctx: CommandContext): Promise<number> {
   const client = await connectedClient(ctx);
   try {
     if (sub === "list") {
-      const payload = await client.request(METHODS.TASK_LIST, { limit: parseLimit(ctx, 50), offset: 0 });
+      const payload = await client.request(METHODS.TASK_LIST, {
+        limit: parseLimit(ctx, 50),
+        offset: 0,
+      });
       const rows = extractArrayPayload<TaskLike>(payload, "tasks");
       const filtered = hasFlag(ctx.parsed, "--active")
-        ? rows.filter((task) => !["completed", "failed", "cancelled"].includes(String(task.status || "")))
+        ? rows.filter(
+            (task) => !["completed", "failed", "cancelled"].includes(String(task.status || "")),
+          )
         : rows;
-      printLinesOrJson(ctx, payload, filtered.length ? filtered.map(formatTask) : ["No matching remote tasks found."]);
+      printLinesOrJson(
+        ctx,
+        payload,
+        filtered.length ? filtered.map(formatTask) : ["No matching remote tasks found."],
+      );
       return 0;
     }
     if (sub === "cancel") {
@@ -1056,12 +1165,20 @@ async function tasks(ctx: CommandContext): Promise<number> {
 
 async function logs(ctx: CommandContext): Promise<number> {
   const sub = ctx.parsed.rest[0] || "latest";
-  if (sub === "latest") return runDirectCommandProcess(ctx, ["--logs-latest", "--limit", String(parseLimit(ctx, 80))]);
-  if (sub === "tail") return runDirectCommandProcess(ctx, ["--logs-tail", "--limit", String(parseLimit(ctx, 80))]);
+  if (sub === "latest")
+    return runDirectCommandProcess(ctx, ["--logs-latest", "--limit", String(parseLimit(ctx, 80))]);
+  if (sub === "tail")
+    return runDirectCommandProcess(ctx, ["--logs-tail", "--limit", String(parseLimit(ctx, 80))]);
   if (sub === "grep") {
     const query = ctx.parsed.rest.slice(1).join(" ").trim() || getFlag(ctx.parsed, "--query");
     if (!query) return usageError("Usage: cowork logs grep <query>");
-    return runDirectCommandProcess(ctx, ["--logs-grep", "--query", query, "--limit", String(parseLimit(ctx, 80))]);
+    return runDirectCommandProcess(ctx, [
+      "--logs-grep",
+      "--query",
+      query,
+      "--limit",
+      String(parseLimit(ctx, 80)),
+    ]);
   }
   process.stderr.write("Usage: cowork logs latest|tail|grep\n");
   return 1;
@@ -1071,7 +1188,8 @@ async function tools(ctx: CommandContext): Promise<number> {
   const sub = ctx.parsed.rest[0] || "list";
   if (sub === "list") return runDirectCommandProcess(ctx, ["--tools-list"]);
   if (sub === "info" || sub === "enable" || sub === "disable") {
-    const target = ctx.parsed.rest[1] || getFlag(ctx.parsed, "--category") || getFlag(ctx.parsed, "--tool");
+    const target =
+      ctx.parsed.rest[1] || getFlag(ctx.parsed, "--category") || getFlag(ctx.parsed, "--tool");
     if (!target) return usageError(`Usage: cowork tools ${sub} <category-or-tool>`);
     return runDirectCommandProcess(ctx, [`--tools-${sub}`, "--name", target]);
   }
@@ -1084,12 +1202,15 @@ async function mcp(ctx: CommandContext): Promise<number> {
   if (sub === "list") return runDirectCommandProcess(ctx, ["--mcp-list"]);
   if (sub === "add") {
     const name = getFlag(ctx.parsed, "--name") || ctx.parsed.rest[1];
-    if (!name) return usageError("Usage: cowork mcp add --name <name> (--command <cmd> | --url <url>)");
+    if (!name)
+      return usageError("Usage: cowork mcp add --name <name> (--command <cmd> | --url <url>)");
     return runDirectCommandProcess(ctx, [
       "--mcp-add",
       "--name",
       name,
-      ...(getFlag(ctx.parsed, "--transport") ? ["--transport", getFlag(ctx.parsed, "--transport")!] : []),
+      ...(getFlag(ctx.parsed, "--transport")
+        ? ["--transport", getFlag(ctx.parsed, "--transport")!]
+        : []),
       ...(getFlag(ctx.parsed, "--command") ? ["--command", getFlag(ctx.parsed, "--command")!] : []),
       ...(getFlag(ctx.parsed, "--url") ? ["--url", getFlag(ctx.parsed, "--url")!] : []),
       "--cwd",
@@ -1107,7 +1228,8 @@ async function mcp(ctx: CommandContext): Promise<number> {
 
 async function skills(ctx: CommandContext): Promise<number> {
   const sub = ctx.parsed.rest[0] || "list";
-  if (sub === "list") return runDirectCommandProcess(ctx, ["--skills-list", "--limit", String(parseLimit(ctx, 200))]);
+  if (sub === "list")
+    return runDirectCommandProcess(ctx, ["--skills-list", "--limit", String(parseLimit(ctx, 200))]);
   if (sub === "info") {
     const id = ctx.parsed.rest.slice(1).join(" ").trim();
     if (!id) return usageError("Usage: cowork skills info <skillId-or-name>");
@@ -1120,7 +1242,8 @@ async function skills(ctx: CommandContext): Promise<number> {
 
 async function models(ctx: CommandContext): Promise<number> {
   const sub = ctx.parsed.rest[0] || "list";
-  if (sub === "list") return runDirectCommandProcess(ctx, ["--models-list", "--limit", String(parseLimit(ctx, 100))]);
+  if (sub === "list")
+    return runDirectCommandProcess(ctx, ["--models-list", "--limit", String(parseLimit(ctx, 100))]);
   process.stderr.write("Usage: cowork models list\n");
   return 1;
 }
@@ -1160,17 +1283,237 @@ async function security(ctx: CommandContext): Promise<number> {
     if (action === "list") {
       return runDirectCommandProcess(ctx, [
         "--security-rules-list",
-        ...(getFlag(ctx.parsed, "--workspace-id") ? ["--workspace-id", getFlag(ctx.parsed, "--workspace-id")!] : []),
+        ...(getFlag(ctx.parsed, "--workspace-id")
+          ? ["--workspace-id", getFlag(ctx.parsed, "--workspace-id")!]
+          : []),
       ]);
     }
     if (action === "remove") {
       const ruleId = ctx.parsed.rest[2] || getFlag(ctx.parsed, "--rule-id");
       if (!ruleId) return usageError("Usage: cowork security rules remove <ruleId> --yes");
-      return runDirectCommandProcess(ctx, ["--security-rules-remove", "--rule-id", ruleId, ...(hasFlag(ctx.parsed, "--yes") ? ["--yes"] : [])]);
+      return runDirectCommandProcess(ctx, [
+        "--security-rules-remove",
+        "--rule-id",
+        ruleId,
+        ...(hasFlag(ctx.parsed, "--yes") ? ["--yes"] : []),
+      ]);
     }
   }
-  process.stderr.write("Usage: cowork security audit | cowork security rules list|remove\n");
+  const agentSecurityCommands = new Set([
+    "status",
+    "findings",
+    "finding",
+    "decisions",
+    "inventory",
+    "scan",
+    "check-rules",
+    "hooks",
+    "case",
+    "prune",
+  ]);
+  if (agentSecurityCommands.has(sub)) {
+    if (hasFlag(ctx.parsed, "--remote")) return remoteAgentSecurity(ctx, sub);
+    if (sub === "status") {
+      return runDirectCommandProcess(ctx, [
+        "--agent-security-status",
+        ...(hasFlag(ctx.parsed, "--refresh") ? ["--refresh"] : []),
+      ]);
+    }
+    if (sub === "findings") {
+      return runDirectCommandProcess(ctx, [
+        "--agent-security-findings",
+        "--limit",
+        String(parseLimit(ctx, 100)),
+        ...(getFlag(ctx.parsed, "--task-id")
+          ? ["--task-id", getFlag(ctx.parsed, "--task-id")!]
+          : []),
+      ]);
+    }
+    if (sub === "finding") {
+      const findingId = ctx.parsed.rest[1];
+      const findingStatus = ctx.parsed.rest[2];
+      if (!findingId || !findingStatus) {
+        return usageError(
+          "Usage: cowork security finding <findingId> open|acknowledged|resolved|false_positive",
+        );
+      }
+      return runDirectCommandProcess(ctx, [
+        "--agent-security-finding-update",
+        "--rule-id",
+        findingId,
+        "--category",
+        findingStatus,
+      ]);
+    }
+    if (sub === "decisions") {
+      return runDirectCommandProcess(ctx, [
+        "--agent-security-decisions",
+        "--limit",
+        String(parseLimit(ctx, 100)),
+        ...(getFlag(ctx.parsed, "--task-id")
+          ? ["--task-id", getFlag(ctx.parsed, "--task-id")!]
+          : []),
+      ]);
+    }
+    if (sub === "inventory") {
+      return runDirectCommandProcess(ctx, [
+        hasFlag(ctx.parsed, "--refresh")
+          ? "--agent-security-inventory-refresh"
+          : "--agent-security-inventory",
+      ]);
+    }
+    if (sub === "scan") return runDirectCommandProcess(ctx, ["--agent-security-scan"]);
+    if (sub === "check-rules") {
+      return runDirectCommandProcess(ctx, ["--agent-security-check-rules"]);
+    }
+    if (sub === "hooks") {
+      const action = ctx.parsed.rest[1] || "status";
+      const agent = ctx.parsed.rest[2];
+      if (!agent || !["status", "install", "uninstall"].includes(action)) {
+        return usageError("Usage: cowork security hooks status|install|uninstall <agent> [--yes]");
+      }
+      if (action !== "status" && !hasFlag(ctx.parsed, "--yes")) {
+        return usageError(
+          `Refusing to ${action} a hook without --yes. This changes ${agent}'s local configuration.`,
+        );
+      }
+      return runDirectCommandProcess(ctx, [
+        `--agent-security-hook-${action}`,
+        "--name",
+        agent,
+        ...(hasFlag(ctx.parsed, "--yes") ? ["--yes"] : []),
+      ]);
+    }
+    if (sub === "case") {
+      const action = ctx.parsed.rest[1];
+      const identifier = ctx.parsed.rest[2];
+      if (action === "build") {
+        const taskId = getFlag(ctx.parsed, "--task-id");
+        if (!identifier || !taskId) {
+          return usageError("Usage: cowork security case build <caseId> --task-id <taskId>");
+        }
+        return runDirectCommandProcess(ctx, [
+          "--agent-security-case-build",
+          "--name",
+          identifier,
+          "--task-id",
+          taskId,
+        ]);
+      }
+      if (action === "verify" && identifier) {
+        return runDirectCommandProcess(ctx, ["--agent-security-case-verify", "--name", identifier]);
+      }
+      return usageError(
+        "Usage: cowork security case build <caseId> --task-id <taskId> | case verify <bundleName>",
+      );
+    }
+    if (!hasFlag(ctx.parsed, "--yes")) {
+      return usageError("Refusing to prune agent security history without --yes.");
+    }
+    return runDirectCommandProcess(ctx, ["--agent-security-prune", "--yes"]);
+  }
+  process.stderr.write(
+    "Usage: cowork security audit | rules list|remove | status|findings|decisions|inventory|scan|check-rules|hooks|prune\n",
+  );
   return 1;
+}
+
+async function remoteAgentSecurity(ctx: CommandContext, sub: string): Promise<number> {
+  const client = await connectedClient(ctx);
+  try {
+    let method: string;
+    let params: Record<string, unknown> | undefined;
+    if (sub === "status") {
+      method = METHODS.AGENT_SECURITY_STATUS;
+      params = { refresh: hasFlag(ctx.parsed, "--refresh") };
+    } else if (sub === "findings") {
+      method = METHODS.AGENT_SECURITY_FINDINGS_LIST;
+      params = {
+        limit: parseLimit(ctx, 100),
+        ...(getFlag(ctx.parsed, "--task-id") ? { taskId: getFlag(ctx.parsed, "--task-id") } : {}),
+      };
+    } else if (sub === "finding") {
+      const findingId = ctx.parsed.rest[1];
+      const status = ctx.parsed.rest[2];
+      if (!findingId || !status) {
+        return usageError(
+          "Usage: cowork security finding <findingId> open|acknowledged|resolved|false_positive --remote",
+        );
+      }
+      method = METHODS.AGENT_SECURITY_FINDING_UPDATE;
+      params = { findingId, status };
+    } else if (sub === "decisions") {
+      method = METHODS.AGENT_SECURITY_DECISIONS_LIST;
+      params = {
+        limit: parseLimit(ctx, 100),
+        ...(getFlag(ctx.parsed, "--task-id") ? { taskId: getFlag(ctx.parsed, "--task-id") } : {}),
+      };
+    } else if (sub === "inventory") {
+      method = hasFlag(ctx.parsed, "--refresh")
+        ? METHODS.AGENT_SECURITY_INVENTORY_REFRESH
+        : METHODS.AGENT_SECURITY_INVENTORY_LIST;
+    } else if (sub === "scan") {
+      method = METHODS.AGENT_SECURITY_SCAN;
+    } else if (sub === "check-rules") {
+      method = METHODS.AGENT_SECURITY_RULES_CHECK;
+    } else if (sub === "hooks") {
+      const action = ctx.parsed.rest[1] || "status";
+      const agent = ctx.parsed.rest[2];
+      if (!agent || !["status", "install", "uninstall"].includes(action)) {
+        return usageError(
+          "Usage: cowork security hooks status|install|uninstall <agent> [--yes] --remote",
+        );
+      }
+      if (action !== "status" && !hasFlag(ctx.parsed, "--yes")) {
+        return usageError(
+          `Refusing to ${action} a hook without --yes. This changes ${agent}'s local configuration.`,
+        );
+      }
+      method =
+        action === "install"
+          ? METHODS.AGENT_SECURITY_HOOK_INSTALL
+          : action === "uninstall"
+            ? METHODS.AGENT_SECURITY_HOOK_UNINSTALL
+            : METHODS.AGENT_SECURITY_HOOK_STATUS;
+      params = {
+        agent,
+        ...(action === "install" || action === "uninstall"
+          ? { confirmation: `${action}:${agent}` }
+          : {}),
+      };
+    } else if (sub === "case") {
+      const action = ctx.parsed.rest[1];
+      const identifier = ctx.parsed.rest[2];
+      if (action === "build") {
+        const taskId = getFlag(ctx.parsed, "--task-id");
+        if (!identifier || !taskId) {
+          return usageError(
+            "Usage: cowork security case build <caseId> --task-id <taskId> --remote",
+          );
+        }
+        method = METHODS.AGENT_SECURITY_CASE_BUILD;
+        params = { caseId: identifier, taskId };
+      } else if (action === "verify" && identifier) {
+        method = METHODS.AGENT_SECURITY_CASE_VERIFY;
+        params = { bundleName: identifier };
+      } else {
+        return usageError(
+          "Usage: cowork security case build <caseId> --task-id <taskId> | case verify <bundleName> --remote",
+        );
+      }
+    } else {
+      if (!hasFlag(ctx.parsed, "--yes")) {
+        return usageError("Refusing to prune agent security history without --yes.");
+      }
+      method = METHODS.AGENT_SECURITY_PRUNE;
+      params = { confirmation: "prune" };
+    }
+    const payload = await client.request(method, params);
+    printLinesOrJson(ctx, payload, [JSON.stringify(payload, null, 2)]);
+    return 0;
+  } finally {
+    client.close();
+  }
 }
 
 async function promptSize(ctx: CommandContext): Promise<number> {
@@ -1258,7 +1601,11 @@ function createClient(ctx: CommandContext): ControlPlaneClient {
   });
 }
 
-async function resolveWorkspaceId(client: ControlPlaneClient, ctx: CommandContext, cwd: string): Promise<string> {
+async function resolveWorkspaceId(
+  client: ControlPlaneClient,
+  ctx: CommandContext,
+  cwd: string,
+): Promise<string> {
   const explicit = getFlag(ctx.parsed, "--workspace-id");
   if (explicit) return explicit;
   const named = getFlag(ctx.parsed, "--workspace");
@@ -1277,7 +1624,8 @@ async function resolveWorkspaceId(client: ControlPlaneClient, ctx: CommandContex
     path: cwd,
   });
   const workspace = (created as Any).workspace as WorkspaceLike | undefined;
-  if (!workspace?.id) throw new Error("Workspace creation succeeded but no workspace id was returned.");
+  if (!workspace?.id)
+    throw new Error("Workspace creation succeeded but no workspace id was returned.");
   process.stdout.write(`Created workspace: ${formatWorkspace(workspace)}\n`);
   return workspace.id;
 }
@@ -1288,7 +1636,10 @@ async function streamTask(
   limit: number,
   json = false,
 ): Promise<number> {
-  const history = await client.request(METHODS.TASK_EVENTS, { taskId, limit: sanitizeLimit(limit, 200) });
+  const history = await client.request(METHODS.TASK_EVENTS, {
+    taskId,
+    limit: sanitizeLimit(limit, 200),
+  });
   const events = extractArrayPayload<ControlPlaneFrame>(history, "events");
   for (const event of events) {
     if (json) {
@@ -1442,7 +1793,9 @@ function usageError(message: string): number {
 function launchDesktopApp(extraArgs: string[]): Promise<number> {
   const runtime = resolveDirectRuntime();
   if (!runtime.usesElectron) {
-    process.stderr.write("Launching the desktop app requires the Electron runtime from this installation.\n");
+    process.stderr.write(
+      "Launching the desktop app requires the Electron runtime from this installation.\n",
+    );
     return Promise.resolve(1);
   }
   return new Promise((resolve, reject) => {
@@ -1567,6 +1920,9 @@ function usage(): void {
       "  cowork backup create|restore",
       "  cowork security audit",
       "  cowork security rules list|remove",
+      "  cowork security status|findings|decisions|inventory|scan|check-rules",
+      "  cowork security hooks status|install|uninstall <agent> [--yes]",
+      "  cowork security case build <caseId> --task-id <taskId> | case verify <bundleName>",
       "  cowork prompt-size <prompt text>",
       "  cowork prompt-preview <prompt text>",
       "  cowork completions zsh|bash|fish",

@@ -140,7 +140,10 @@ import { isComputerUseToolName } from "../../../shared/computer-use-contract";
 import { writeKitFileWithSnapshot } from "../../context/kit-revisions";
 import { getACPRegistry } from "../../acp";
 import { RemoteAgentInvoker } from "../../acp/remote-invoker";
-import { withRuntimeToolMetadataList, getDefaultRuntimeToolMetadata } from "./runtime-tool-definition";
+import {
+  withRuntimeToolMetadataList,
+  getDefaultRuntimeToolMetadata,
+} from "./runtime-tool-definition";
 import { ToolHandlerRegistry } from "../runtime/tool-handler-registry";
 import {
   createStaticRuntimeToolSchedulerSpecResolver,
@@ -155,10 +158,7 @@ import {
 } from "../runtime/tool-middleware";
 import { evaluateToolPolicyPipeline } from "../runtime/ToolPolicyPipeline";
 import { ToolSearchService } from "../runtime/ToolSearchService";
-import {
-  getWorkerRoleSpec,
-  resolveDelegationWorkerRole,
-} from "../runtime/worker-role-registry";
+import { getWorkerRoleSpec, resolveDelegationWorkerRole } from "../runtime/worker-role-registry";
 import {
   TOOL_PROMPT_METADATA_VERSION,
   renderCompactToolDescription,
@@ -166,6 +166,7 @@ import {
   withToolPromptMetadataList,
 } from "./tool-prompting";
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
+import { getNumbatService } from "../../security/numbat";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -784,7 +785,14 @@ export class ToolRegistry {
     const hash = createHash("sha1");
     hash.update(this.buildToolDefinitionsCacheKey());
     if (Array.isArray(visibleTools) && visibleTools.length > 0) {
-      hash.update(JSON.stringify([...visibleTools].map((tool) => tool.trim()).filter(Boolean).sort()));
+      hash.update(
+        JSON.stringify(
+          [...visibleTools]
+            .map((tool) => tool.trim())
+            .filter(Boolean)
+            .sort(),
+        ),
+      );
     } else {
       hash.update("__all_tools__");
     }
@@ -802,10 +810,7 @@ export class ToolRegistry {
     return hash.digest("hex");
   }
 
-  renderToolsForContext(
-    tools: LLMTool[],
-    context: LLMToolPromptRenderContext,
-  ): LLMTool[] {
+  renderToolsForContext(tools: LLMTool[], context: LLMToolPromptRenderContext): LLMTool[] {
     return tools.map((tool) => renderToolForContext(tool, context));
   }
 
@@ -861,7 +866,8 @@ export class ToolRegistry {
       const skillLoader = getCustomSkillLoader();
       const availableToolNames = new Set(orderedVisibleTools.map((tool) => tool.name));
       const resolvedSkillShortlistSize =
-        typeof options?.skillShortlistSize === "number" && Number.isFinite(options.skillShortlistSize)
+        typeof options?.skillShortlistSize === "number" &&
+        Number.isFinite(options.skillShortlistSize)
           ? Math.min(Math.max(Math.round(options.skillShortlistSize), 1), 200)
           : parseBoundedIntEnv("COWORK_SKILL_SHORTLIST_SIZE", 20, 1, 200);
       const resolvedSkillLowConfidenceThreshold =
@@ -913,7 +919,10 @@ export class ToolRegistry {
         const requiredInputSchemaKey = semantics.requiredInputSchemaKey;
         if (!requiredInputSchemaKey) return null;
         const properties = (tool as Any)?.input_schema?.properties;
-        if (properties && Object.prototype.hasOwnProperty.call(properties, requiredInputSchemaKey)) {
+        if (
+          properties &&
+          Object.prototype.hasOwnProperty.call(properties, requiredInputSchemaKey)
+        ) {
           return null;
         }
         return `${toolName} missing required input schema key "${requiredInputSchemaKey}"`;
@@ -972,7 +981,9 @@ export class ToolRegistry {
   /**
    * Set resolved web_search domain policy for this task execution context.
    */
-  setWebSearchDomainPolicy(policy: { allowedDomains?: string[]; blockedDomains?: string[] } | null): void {
+  setWebSearchDomainPolicy(
+    policy: { allowedDomains?: string[]; blockedDomains?: string[] } | null,
+  ): void {
     this.searchTools.setDomainPolicy(policy);
   }
 
@@ -1093,7 +1104,8 @@ export class ToolRegistry {
     windowTitle?: string;
     localTextSnippet?: string;
   }): string[] {
-    const haystack = `${input.appName || ""} ${input.windowTitle || ""} ${input.localTextSnippet || ""}`.toLowerCase();
+    const haystack =
+      `${input.appName || ""} ${input.windowTitle || ""} ${input.localTextSnippet || ""}`.toLowerCase();
     const hints = new Set<string>();
     if (/\bgoogle docs?|docs\.google|drive\b/.test(haystack)) hints.add("google_doc");
     if (/\bslack\b/.test(haystack)) hints.add("slack_dm");
@@ -1566,7 +1578,10 @@ export class ToolRegistry {
     return this.getTools().filter((tool) => tool.runtime?.deferLoad && !tool.runtime?.alwaysExpose);
   }
 
-  searchDeferredTools(query: string, limit = 8): {
+  searchDeferredTools(
+    query: string,
+    limit = 8,
+  ): {
     query: string;
     matches: Array<{ name: string; description: string; score: number }>;
   } {
@@ -1578,7 +1593,9 @@ export class ToolRegistry {
   }
 
   private buildBrowserUseApprovalDetails(toolName: string, input: Any) {
-    const normalizedToolName = String(toolName || "").trim().toLowerCase();
+    const normalizedToolName = String(toolName || "")
+      .trim()
+      .toLowerCase();
     const toolInput = input && typeof input === "object" && !Array.isArray(input) ? input : {};
     const sessionId =
       typeof (toolInput as Record<string, unknown>).session_id === "string"
@@ -1597,7 +1614,13 @@ export class ToolRegistry {
 
   private buildExecutionMiddlewares(): ToolExecutionMiddleware[] {
     const policyMiddleware: ToolExecutionMiddleware = async (context, next) => {
+      const executionStartedAt = Date.now();
       const runtime = this.getRuntimeMetadata(context.request.name);
+      const toolCallId =
+        typeof context.request.runtime?.toolUseId === "string" &&
+        context.request.runtime.toolUseId.trim()
+          ? context.request.runtime.toolUseId.trim()
+          : `${this.taskId}:${context.request.name}:${executionStartedAt}`;
       const approvalType = this.getApprovalTypeForTool(context.request.name, context.request.input);
       const browserUseApproval = this.buildBrowserUseApprovalDetails(
         context.request.name,
@@ -1608,7 +1631,7 @@ export class ToolRegistry {
       // than broad runtime metadata kinds for the same tool call.
       const effectiveApprovalType = browserUseApproval
         ? "network_access"
-        : approvalType ?? runtimeApprovalType;
+        : (approvalType ?? runtimeApprovalType);
       const permissionEvaluation = (this.daemon as Any)?.evaluateToolPermission;
       const serverName = this.getMcpServerName(context.request.name);
       const approvalDetails = {
@@ -1640,59 +1663,121 @@ export class ToolRegistry {
                 });
               }
             : undefined,
+        agentSecurityEvaluation: getNumbatService()
+          ? () =>
+              getNumbatService()!.evaluatePreTool({
+                taskId: this.taskId,
+                sessionId: this.taskId,
+                workspacePath: this.workspace.path,
+                toolCallId,
+                toolName: context.request.name,
+                toolInput: context.request.input,
+                highRisk:
+                  runtime.sideEffectLevel === "high" ||
+                  runtime.approvalKind === "destructive" ||
+                  runtime.approvalKind === "shell_sensitive",
+              })
+          : undefined,
       });
 
       if (pipeline.decision === "deny") {
+        if (pipeline.agentSecurity?.decision === "deny") {
+          getNumbatService()?.recordBlockedDecision(pipeline.agentSecurity.decisionId);
+        }
         const reason = pipeline.reason ? `: ${pipeline.reason}` : "";
-        throw Object.assign(new Error(`Tool "${context.request.name}" blocked by policy${reason}`), {
-          policyTrace: pipeline.trace,
-        });
+        throw Object.assign(
+          new Error(`Tool "${context.request.name}" blocked by policy${reason}`),
+          {
+            policyTrace: pipeline.trace,
+          },
+        );
       }
 
       if (pipeline.decision === "require_approval") {
-        if (this.toolHandlesApprovalInternally(context.request.name)) {
-          const result = await next(context);
-          return {
-            result,
-            policyTrace: pipeline.trace,
-          };
-        }
-        const requester = (this.daemon as Any)?.requestApproval;
-        if (typeof requester !== "function") {
-          throw Object.assign(
-            new Error(
-              `Tool "${context.request.name}" requires approval, but approval system is unavailable in this context`,
-            ),
-            { policyTrace: pipeline.trace },
+        if (!this.toolHandlesApprovalInternally(context.request.name)) {
+          const requester = (this.daemon as Any)?.requestApproval;
+          if (typeof requester !== "function") {
+            throw Object.assign(
+              new Error(
+                `Tool "${context.request.name}" requires approval, but approval system is unavailable in this context`,
+              ),
+              { policyTrace: pipeline.trace },
+            );
+          }
+          const approved = await requester.call(
+            this.daemon,
+            this.taskId,
+            effectiveApprovalType || "external_service",
+            browserUseApproval
+              ? `Allow Browser Use to access ${browserUseApproval.origin}?`
+              : effectiveApprovalType === "location_access"
+                ? "Allow CoWork OS to access your current location once?"
+                : `Approve tool call: ${context.request.name}`,
+            {
+              ...approvalDetails,
+              reason: pipeline.reason || null,
+            },
+            { allowAutoApprove: effectiveApprovalType !== "location_access" },
           );
-        }
-        const approved = await requester.call(
-          this.daemon,
-          this.taskId,
-          effectiveApprovalType || "external_service",
-          browserUseApproval
-            ? `Allow Browser Use to access ${browserUseApproval.origin}?`
-            : effectiveApprovalType === "location_access"
-              ? "Allow CoWork OS to access your current location once?"
-            : `Approve tool call: ${context.request.name}`,
-          {
-            ...approvalDetails,
-            reason: pipeline.reason || null,
-          },
-          { allowAutoApprove: effectiveApprovalType !== "location_access" },
-        );
-        if (approved !== true) {
-          throw Object.assign(new Error(`Tool "${context.request.name}" approval denied`), {
-            policyTrace: pipeline.trace,
-          });
+          if (approved !== true) {
+            throw Object.assign(new Error(`Tool "${context.request.name}" approval denied`), {
+              policyTrace: pipeline.trace,
+            });
+          }
         }
       }
 
-      const result = await next(context);
-      return {
-        result,
-        policyTrace: pipeline.trace,
-      };
+      try {
+        const result = await next(context);
+        let outputBytes: number | undefined;
+        try {
+          outputBytes = Buffer.byteLength(JSON.stringify(result), "utf8");
+        } catch {
+          outputBytes = undefined;
+        }
+        getNumbatService()?.observePostTool({
+          taskId: this.taskId,
+          sessionId: this.taskId,
+          workspacePath: this.workspace.path,
+          toolCallId,
+          toolName: context.request.name,
+          toolInput: context.request.input,
+          highRisk:
+            runtime.sideEffectLevel === "high" ||
+            runtime.approvalKind === "destructive" ||
+            runtime.approvalKind === "shell_sensitive",
+          success: !(result && typeof result === "object" && result.success === false),
+          durationMs: Date.now() - executionStartedAt,
+          exitCode:
+            result && typeof result === "object" && typeof result.exitCode === "number"
+              ? result.exitCode
+              : undefined,
+          outputBytes,
+          decisionId: pipeline.agentSecurity?.decisionId,
+        });
+        return {
+          result,
+          policyTrace: pipeline.trace,
+        };
+      } catch (error) {
+        getNumbatService()?.observePostTool({
+          taskId: this.taskId,
+          sessionId: this.taskId,
+          workspacePath: this.workspace.path,
+          toolCallId,
+          toolName: context.request.name,
+          toolInput: context.request.input,
+          highRisk:
+            runtime.sideEffectLevel === "high" ||
+            runtime.approvalKind === "destructive" ||
+            runtime.approvalKind === "shell_sensitive",
+          success: false,
+          durationMs: Date.now() - executionStartedAt,
+          errorType: error instanceof Error ? error.name : "Error",
+          decisionId: pipeline.agentSecurity?.decisionId,
+        });
+        throw error;
+      }
     };
 
     return [policyMiddleware];
@@ -1769,7 +1854,8 @@ export class ToolRegistry {
       "write_file",
       async ({ request }) =>
         this.fileTools.writeFile(request.input.path, request.input.content, {
-          signal: request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+          signal:
+            request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
           timeoutMs:
             typeof request.runtime?.timeoutMs === "number" ? request.runtime.timeoutMs : undefined,
         }),
@@ -1781,98 +1867,156 @@ export class ToolRegistry {
         this.fileTools.copyFile(request.input.sourcePath, request.input.destPath),
       exclusiveSchedulerSpec,
     );
-    register("list_directory", async ({ request }) => this.fileTools.listDirectory(request.input.path), readParallelSchedulerSpec);
     register(
-      "list_directory_with_sizes",
-      async ({ request }) =>
-        this.fileTools.listDirectoryWithSizes(request.input.path),
+      "list_directory",
+      async ({ request }) => this.fileTools.listDirectory(request.input.path),
       readParallelSchedulerSpec,
     );
-    register("get_file_info", async ({ request }) => this.fileTools.getFileInfo(request.input.path), readParallelSchedulerSpec);
+    register(
+      "list_directory_with_sizes",
+      async ({ request }) => this.fileTools.listDirectoryWithSizes(request.input.path),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "get_file_info",
+      async ({ request }) => this.fileTools.getFileInfo(request.input.path),
+      readParallelSchedulerSpec,
+    );
     register(
       "rename_file",
       async ({ request }) =>
         this.fileTools.renameFile(request.input.oldPath, request.input.newPath),
       exclusiveSchedulerSpec,
     );
-    register("delete_file", async ({ request }) => this.fileTools.deleteFile(request.input.path), exclusiveSchedulerSpec);
-    register("create_directory", async ({ request }) => this.fileTools.createDirectory(request.input.path), exclusiveSchedulerSpec);
+    register(
+      "delete_file",
+      async ({ request }) => this.fileTools.deleteFile(request.input.path),
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "create_directory",
+      async ({ request }) => this.fileTools.createDirectory(request.input.path),
+      exclusiveSchedulerSpec,
+    );
     register(
       "search_files",
-      async ({ request }) =>
-        this.fileTools.searchFiles(request.input.query, request.input.path),
+      async ({ request }) => this.fileTools.searchFiles(request.input.query, request.input.path),
       readParallelSchedulerSpec,
     );
-    register("create_spreadsheet", async ({ request }) => this.skillTools.createSpreadsheet(request.input));
-    register("create_document", async ({ request }) => this.skillTools.createDocument(request.input));
+    register("create_spreadsheet", async ({ request }) =>
+      this.skillTools.createSpreadsheet(request.input),
+    );
+    register("create_document", async ({ request }) =>
+      this.skillTools.createDocument(request.input),
+    );
     register("edit_document", async ({ request }) => this.skillTools.editDocument(request.input));
-    register("edit_pdf_region", async ({ request }) => this.skillTools.editPdfRegion(request.input));
-    register("create_presentation", async ({ request }) => this.skillTools.createPresentation(request.input));
-    register("organize_folder", async ({ request }) => this.skillTools.organizeFolder(request.input));
+    register("edit_pdf_region", async ({ request }) =>
+      this.skillTools.editPdfRegion(request.input),
+    );
+    register("create_presentation", async ({ request }) =>
+      this.skillTools.createPresentation(request.input),
+    );
+    register("organize_folder", async ({ request }) =>
+      this.skillTools.organizeFolder(request.input),
+    );
     register("skill_create", async ({ request }) => this.executeSkillCreate(request.input));
     register("skill_duplicate", async ({ request }) => this.executeSkillDuplicate(request.input));
     register("skill_update", async ({ request }) => this.executeSkillUpdate(request.input));
     register("skill_delete", async ({ request }) => this.executeSkillDelete(request.input));
     register("skill_proposal", async ({ request }) => this.executeSkillProposal(request.input));
-    register("glob", async ({ request }) => this.globTools.glob(request.input), readParallelSchedulerSpec);
-    register("grep", async ({ request }) => this.grepTools.grep(request.input), readParallelSchedulerSpec);
-    register("edit_file", async ({ request }) => this.editTools.editFile(request.input), exclusiveSchedulerSpec);
+    register(
+      "glob",
+      async ({ request }) => this.globTools.glob(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "grep",
+      async ({ request }) => this.grepTools.grep(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "edit_file",
+      async ({ request }) => this.editTools.editFile(request.input),
+      exclusiveSchedulerSpec,
+    );
     register("count_text", async ({ request }) => this.textTools.countText(request.input));
     register("text_metrics", async ({ request }) => this.textTools.textMetrics(request.input));
     register("monty_run", async ({ request }) => this.montyTools.montyRun(request.input));
-    register("monty_list_transforms", async ({ request }) => this.montyTools.listTransforms(request.input));
-    register("monty_run_transform", async ({ request }) => this.montyTools.runTransform(request.input));
-    register("monty_transform_file", async ({ request }) => this.montyTools.transformFile(request.input));
+    register("monty_list_transforms", async ({ request }) =>
+      this.montyTools.listTransforms(request.input),
+    );
+    register("monty_run_transform", async ({ request }) =>
+      this.montyTools.runTransform(request.input),
+    );
+    register("monty_transform_file", async ({ request }) =>
+      this.montyTools.transformFile(request.input),
+    );
     register("extract_json", async ({ request }) => this.montyTools.extractJson(request.input));
-    register("web_fetch", async ({ request }) => {
-      const result = await this.webFetchTools.webFetch(request.input);
-      if (this.citationTracker) {
-        this.citationTracker.addFromFetch(request.input.url, request.input.url);
-      }
-      return result;
-    }, readParallelSchedulerSpec);
-    register("http_request", async ({ request }) => this.webFetchTools.httpRequest(request.input), readParallelSchedulerSpec);
-    register("web_search", async ({ request }) => {
-      const result = await this.searchTools.webSearch(request.input);
-      if (this.citationTracker && result && typeof result === "object") {
-        this.citationTracker.addFromSearch((result as Any).results || []);
-      }
-      return result;
-    }, readParallelSchedulerSpec);
-    register("x_search", async ({ request }) => {
-      const result = await this.xSearchTools.search(request.input);
-      if (this.citationTracker && result && typeof result === "object") {
-        const inline = Array.isArray((result as Any).inline_citations)
-          ? (result as Any).inline_citations
-          : [];
-        const topLevel = Array.isArray((result as Any).citations)
-          ? (result as Any).citations
-          : [];
-        this.citationTracker.addFromSearch(
-          [...topLevel, ...inline].map((citation: Any) => ({
-            title: citation?.title,
-            url: citation?.url,
-            snippet: (result as Any).answer,
-          })),
-        );
-      }
-      return result;
-    }, readParallelSchedulerSpec);
+    register(
+      "web_fetch",
+      async ({ request }) => {
+        const result = await this.webFetchTools.webFetch(request.input);
+        if (this.citationTracker) {
+          this.citationTracker.addFromFetch(request.input.url, request.input.url);
+        }
+        return result;
+      },
+      readParallelSchedulerSpec,
+    );
+    register(
+      "http_request",
+      async ({ request }) => this.webFetchTools.httpRequest(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "web_search",
+      async ({ request }) => {
+        const result = await this.searchTools.webSearch(request.input);
+        if (this.citationTracker && result && typeof result === "object") {
+          this.citationTracker.addFromSearch((result as Any).results || []);
+        }
+        return result;
+      },
+      readParallelSchedulerSpec,
+    );
+    register(
+      "x_search",
+      async ({ request }) => {
+        const result = await this.xSearchTools.search(request.input);
+        if (this.citationTracker && result && typeof result === "object") {
+          const inline = Array.isArray((result as Any).inline_citations)
+            ? (result as Any).inline_citations
+            : [];
+          const topLevel = Array.isArray((result as Any).citations)
+            ? (result as Any).citations
+            : [];
+          this.citationTracker.addFromSearch(
+            [...topLevel, ...inline].map((citation: Any) => ({
+              title: citation?.title,
+              url: citation?.url,
+              snippet: (result as Any).answer,
+            })),
+          );
+        }
+        return result;
+      },
+      readParallelSchedulerSpec,
+    );
     register("youtube_ingest_video", async ({ request }) =>
       this.youtubeTools.ingestVideo(request.input),
     );
-    register("youtube_ask_video", async ({ request }) =>
-      this.youtubeTools.askVideo(request.input),
-    );
+    register("youtube_ask_video", async ({ request }) => this.youtubeTools.askVideo(request.input));
     register("youtube_ask_or_ingest_video", async ({ request }) =>
       this.youtubeTools.askOrIngestVideo(request.input),
     );
-    register("youtube_search_ingested_segments", async ({ request }) =>
-      this.youtubeTools.searchSegments(request.input),
+    register(
+      "youtube_search_ingested_segments",
+      async ({ request }) => this.youtubeTools.searchSegments(request.input),
       readParallelSchedulerSpec,
     );
-    register("youtube_list_ingested_videos", async ({ request }) =>
-      this.youtubeTools.listVideos(request.input),
+    register(
+      "youtube_list_ingested_videos",
+      async ({ request }) => this.youtubeTools.listVideos(request.input),
       readParallelSchedulerSpec,
     );
     register("tool_search", async ({ request }) =>
@@ -1891,7 +2035,9 @@ export class ToolRegistry {
     register("x_action", async ({ request }) => this.xTools.executeAction(request.input));
     register("notion_action", async ({ request }) => this.notionTools.executeAction(request.input));
     register("box_action", async ({ request }) => this.boxTools.executeAction(request.input));
-    register("onedrive_action", async ({ request }) => this.oneDriveTools.executeAction(request.input));
+    register("onedrive_action", async ({ request }) =>
+      this.oneDriveTools.executeAction(request.input),
+    );
     register("google_drive_action", async ({ request }) =>
       this.googleDriveTools.executeAction(request.input),
     );
@@ -1911,15 +2057,16 @@ export class ToolRegistry {
     register("apple_reminders_action", async ({ request }) =>
       this.appleRemindersTools.executeAction(request.input),
     );
-    register("dropbox_action", async ({ request }) => this.dropboxTools.executeAction(request.input));
+    register("dropbox_action", async ({ request }) =>
+      this.dropboxTools.executeAction(request.input),
+    );
     register("sharepoint_action", async ({ request }) =>
       this.sharePointTools.executeAction(request.input),
     );
     register("voice_call", async ({ request }) => this.voiceCallTools.executeAction(request.input));
     register(
       "run_command",
-      async ({ request }) =>
-        this.shellTools.runCommand(request.input.command, request.input),
+      async ({ request }) => this.shellTools.runCommand(request.input.command, request.input),
       exclusiveSchedulerSpec,
     );
     register("git_status", async () => this.gitTools.gitStatus());
@@ -1930,29 +2077,91 @@ export class ToolRegistry {
     register("get_current_location", async ({ request }) =>
       this.systemTools.getCurrentLocation(request.input),
     );
-    register("search_memories", async ({ request }) => this.systemTools.searchMemories(request.input));
-    register("memory_search_index", async ({ request }) => this.systemTools.searchMemoryIndex(request.input), readParallelSchedulerSpec);
-    register("memory_timeline", async ({ request }) => this.systemTools.memoryTimeline(request.input), readParallelSchedulerSpec);
-    register("memory_details", async ({ request }) => this.systemTools.memoryDetails(request.input), readParallelSchedulerSpec);
-    register("search_quotes", async ({ request }) => this.systemTools.searchQuotes(request.input), readParallelSchedulerSpec);
-    register("search_sessions", async ({ request }) => this.systemTools.searchSessions(request.input), readParallelSchedulerSpec);
-    register("memory_topics_load", async ({ request }) => this.systemTools.loadMemoryTopics(request.input), readParallelSchedulerSpec);
-    register("context_grep", async ({ request }) => this.systemTools.contextGrep(request.input), readParallelSchedulerSpec);
-    register("context_describe", async ({ request }) => this.systemTools.contextDescribe(request.input), readParallelSchedulerSpec);
+    register("search_memories", async ({ request }) =>
+      this.systemTools.searchMemories(request.input),
+    );
+    register(
+      "memory_search_index",
+      async ({ request }) => this.systemTools.searchMemoryIndex(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "memory_timeline",
+      async ({ request }) => this.systemTools.memoryTimeline(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "memory_details",
+      async ({ request }) => this.systemTools.memoryDetails(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "search_quotes",
+      async ({ request }) => this.systemTools.searchQuotes(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "search_sessions",
+      async ({ request }) => this.systemTools.searchSessions(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "memory_topics_load",
+      async ({ request }) => this.systemTools.loadMemoryTopics(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "context_grep",
+      async ({ request }) => this.systemTools.contextGrep(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "context_describe",
+      async ({ request }) => this.systemTools.contextDescribe(request.input),
+      readParallelSchedulerSpec,
+    );
     register("memory_save", async ({ request }) => this.memoryTools.save(request.input));
-    register("memory_curate", async ({ request }) => this.memoryTools.curate(request.input), exclusiveSchedulerSpec);
-    register("memory_curated_read", async ({ request }) => this.memoryTools.readCurated(request.input), readParallelSchedulerSpec);
+    register(
+      "memory_curate",
+      async ({ request }) => this.memoryTools.curate(request.input),
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "memory_curated_read",
+      async ({ request }) => this.memoryTools.readCurated(request.input),
+      readParallelSchedulerSpec,
+    );
     if (SupermemoryTools.isEnabled()) {
-      register("supermemory_profile", async ({ request }) => this.supermemoryTools.profile(request.input), readParallelSchedulerSpec);
-      register("supermemory_search", async ({ request }) => this.supermemoryTools.search(request.input), readParallelSchedulerSpec);
-      register("supermemory_remember", async ({ request }) => this.supermemoryTools.remember(request.input), exclusiveSchedulerSpec);
-      register("supermemory_forget", async ({ request }) => this.supermemoryTools.forget(request.input), exclusiveSchedulerSpec);
+      register(
+        "supermemory_profile",
+        async ({ request }) => this.supermemoryTools.profile(request.input),
+        readParallelSchedulerSpec,
+      );
+      register(
+        "supermemory_search",
+        async ({ request }) => this.supermemoryTools.search(request.input),
+        readParallelSchedulerSpec,
+      );
+      register(
+        "supermemory_remember",
+        async ({ request }) => this.supermemoryTools.remember(request.input),
+        exclusiveSchedulerSpec,
+      );
+      register(
+        "supermemory_forget",
+        async ({ request }) => this.supermemoryTools.forget(request.input),
+        exclusiveSchedulerSpec,
+      );
     }
     register("scratchpad_write", async ({ request }) => this.scratchpadTools.write(request.input));
     register("scratchpad_read", async ({ request }) => this.scratchpadTools.read(request.input));
     register("read_clipboard", async () => this.systemTools.readClipboard());
-    register("write_clipboard", async ({ request }) => this.systemTools.writeClipboard(request.input.text));
-    register("take_screenshot", async ({ request }) => this.systemTools.takeScreenshot(request.input));
+    register("write_clipboard", async ({ request }) =>
+      this.systemTools.writeClipboard(request.input.text),
+    );
+    register("take_screenshot", async ({ request }) =>
+      this.systemTools.takeScreenshot(request.input),
+    );
     register(
       "screen_context_resolve",
       async ({ request }) => {
@@ -1981,10 +2190,11 @@ export class ToolRegistry {
               if (!record) {
                 return match;
               }
-              const generatedMemory = await ChronicleMemoryService.getInstance().notePromotedObservation(
-                this.workspace.path,
-                record,
-              );
+              const generatedMemory =
+                await ChronicleMemoryService.getInstance().notePromotedObservation(
+                  this.workspace.path,
+                  record,
+                );
               evidenceRefs.push({
                 evidenceId: record.id,
                 sourceType: "screen_context",
@@ -2027,34 +2237,43 @@ export class ToolRegistry {
       },
       readParallelSchedulerSpec,
     );
-    register("open_application", async ({ request }) => this.systemTools.openApplication(request.input.appName));
+    register("open_application", async ({ request }) =>
+      this.systemTools.openApplication(request.input.appName),
+    );
     register("open_url", async ({ request }) => this.systemTools.openUrl(request.input.url));
     register("open_path", async ({ request }) => this.systemTools.openPath(request.input.path));
-    register("show_in_folder", async ({ request }) => this.systemTools.showInFolder(request.input.path));
+    register("show_in_folder", async ({ request }) =>
+      this.systemTools.showInFolder(request.input.path),
+    );
     register("get_env", async ({ request }) => this.systemTools.getEnvVariable(request.input.name));
     register("get_app_paths", async () => this.systemTools.getAppPaths());
     register("resolve_app_bundle_id", async ({ request }) =>
       this.systemTools.resolveAppBundleId(request.input.appName),
     );
-    register("find_macos_app_processes", async ({ request }) =>
-      this.systemTools.findMacOSAppProcesses(request.input),
+    register(
+      "find_macos_app_processes",
+      async ({ request }) => this.systemTools.findMacOSAppProcesses(request.input),
       readParallelSchedulerSpec,
     );
     register("terminate_macos_app_processes", async ({ request }) =>
       this.systemTools.terminateMacOSAppProcesses(request.input),
     );
-    register("list_macos_launch_agents", async ({ request }) =>
-      this.systemTools.listMacOSLaunchAgents(request.input),
+    register(
+      "list_macos_launch_agents",
+      async ({ request }) => this.systemTools.listMacOSLaunchAgents(request.input),
       readParallelSchedulerSpec,
     );
     register("disable_macos_launch_agents", async ({ request }) =>
       this.systemTools.disableMacOSLaunchAgents(request.input),
     );
-    register("run_applescript", async ({ request }) => this.systemTools.runAppleScript(request.input.script), exclusiveSchedulerSpec);
+    register(
+      "run_applescript",
+      async ({ request }) => this.systemTools.runAppleScript(request.input.script),
+      exclusiveSchedulerSpec,
+    );
     register("generate_image", async ({ request }) =>
       this.imageTools.generateImage(request.input, {
-        signal:
-          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        signal: request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
       }),
     );
     register("generate_video", async ({ request }) => this.videoTools.generateVideo(request.input));
@@ -2065,7 +2284,9 @@ export class ToolRegistry {
       this.videoTools.cancelVideoGenerationJob(request.input),
     );
     register("analyze_image", async ({ request }) => this.visionTools.analyzeImage(request.input));
-    register("read_pdf_visual", async ({ request }) => this.visionTools.readPdfVisual(request.input));
+    register("read_pdf_visual", async ({ request }) =>
+      this.visionTools.readPdfVisual(request.input),
+    );
     register(
       "screenshot",
       async ({ request }) =>
@@ -2099,11 +2320,7 @@ export class ToolRegistry {
     register(
       "move_mouse",
       async ({ request }) =>
-        this.computerUseTools.moveMouse(
-          request.input.x,
-          request.input.y,
-          request.input.captureId,
-        ),
+        this.computerUseTools.moveMouse(request.input.x, request.input.y, request.input.captureId),
       serialSchedulerSpec,
     );
     register(
@@ -2126,14 +2343,12 @@ export class ToolRegistry {
     );
     register(
       "type_text",
-      async ({ request }) =>
-        this.computerUseTools.typeText(request.input.text),
+      async ({ request }) => this.computerUseTools.typeText(request.input.text),
       serialSchedulerSpec,
     );
     register(
       "keypress",
-      async ({ request }) =>
-        this.computerUseTools.pressKeys(request.input.keys),
+      async ({ request }) => this.computerUseTools.pressKeys(request.input.keys),
       serialSchedulerSpec,
     );
     register(
@@ -2141,7 +2356,9 @@ export class ToolRegistry {
       async ({ request }) => this.computerUseTools.wait(request.input.ms),
       serialSchedulerSpec,
     );
-    register("batch_image_process", async ({ request }) => this.batchImageTools.batchProcess(request.input));
+    register("batch_image_process", async ({ request }) =>
+      this.batchImageTools.batchProcess(request.input),
+    );
     register("schedule_task", async ({ request }) => this.cronTools.executeAction(request.input));
     registerPredicate(
       (name) =>
@@ -2153,48 +2370,64 @@ export class ToolRegistry {
       async ({ request }) => this.infraTools.executeTool(request.name, request.input),
       serialSchedulerSpec,
     );
-    register("canvas_create", async ({ request }) => this.canvasTools.createCanvas(request.input.title), serialSchedulerSpec);
-    register("canvas_push", async ({ request }) => {
-      const canvasInput = request.input || {};
-      const rawSessionId = canvasInput.session_id;
-      const inferredSessionId = rawSessionId || this.getLatestCanvasSessionId();
-      if (!canvasInput.session_id && inferredSessionId) {
-        canvasInput.session_id = inferredSessionId;
-      }
-      try {
-        return await this.canvasTools.pushContent(
-          canvasInput.session_id,
-          canvasInput.content,
-          canvasInput.filename,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown canvas push error";
-        this.daemon.logEvent(this.taskId, "tool_error", {
-          tool: "canvas_push",
-          error: message,
-          softFailure: true,
-        });
-        return {
-          success: true,
-          warning:
-            "Canvas preview could not be refreshed right now, but execution can continue without it.",
-          fallback: true,
-        };
-      }
-    }, serialSchedulerSpec);
+    register(
+      "canvas_create",
+      async ({ request }) => this.canvasTools.createCanvas(request.input.title),
+      serialSchedulerSpec,
+    );
+    register(
+      "canvas_push",
+      async ({ request }) => {
+        const canvasInput = request.input || {};
+        const rawSessionId = canvasInput.session_id;
+        const inferredSessionId = rawSessionId || this.getLatestCanvasSessionId();
+        if (!canvasInput.session_id && inferredSessionId) {
+          canvasInput.session_id = inferredSessionId;
+        }
+        try {
+          return await this.canvasTools.pushContent(
+            canvasInput.session_id,
+            canvasInput.content,
+            canvasInput.filename,
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown canvas push error";
+          this.daemon.logEvent(this.taskId, "tool_error", {
+            tool: "canvas_push",
+            error: message,
+            softFailure: true,
+          });
+          return {
+            success: true,
+            warning:
+              "Canvas preview could not be refreshed right now, but execution can continue without it.",
+            fallback: true,
+          };
+        }
+      },
+      serialSchedulerSpec,
+    );
     register(
       "canvas_open_url",
       async ({ request }) =>
-        this.canvasTools.openUrl(
-          request.input.session_id,
-          request.input.url,
-          request.input.show,
-        ),
+        this.canvasTools.openUrl(request.input.session_id, request.input.url, request.input.show),
       serialSchedulerSpec,
     );
-    register("canvas_show", async ({ request }) => this.canvasTools.showCanvas(request.input.session_id), serialSchedulerSpec);
-    register("canvas_hide", async ({ request }) => this.canvasTools.hideCanvas(request.input.session_id), serialSchedulerSpec);
-    register("canvas_close", async ({ request }) => this.canvasTools.closeCanvas(request.input.session_id), serialSchedulerSpec);
+    register(
+      "canvas_show",
+      async ({ request }) => this.canvasTools.showCanvas(request.input.session_id),
+      serialSchedulerSpec,
+    );
+    register(
+      "canvas_hide",
+      async ({ request }) => this.canvasTools.hideCanvas(request.input.session_id),
+      serialSchedulerSpec,
+    );
+    register(
+      "canvas_close",
+      async ({ request }) => this.canvasTools.closeCanvas(request.input.session_id),
+      serialSchedulerSpec,
+    );
     register(
       "canvas_eval",
       async ({ request }) =>
@@ -2203,8 +2436,7 @@ export class ToolRegistry {
     );
     register(
       "canvas_snapshot",
-      async ({ request }) =>
-        this.canvasTools.takeSnapshot(request.input.session_id),
+      async ({ request }) => this.canvasTools.takeSnapshot(request.input.session_id),
       serialSchedulerSpec,
     );
     register("canvas_list", async () => this.canvasTools.listSessions(), serialSchedulerSpec);
@@ -2217,16 +2449,12 @@ export class ToolRegistry {
     register(
       "canvas_restore",
       async ({ request }) =>
-        this.canvasTools.restoreCheckpoint(
-          request.input.session_id,
-          request.input.checkpoint_id,
-        ),
+        this.canvasTools.restoreCheckpoint(request.input.session_id, request.input.checkpoint_id),
       serialSchedulerSpec,
     );
     register(
       "canvas_checkpoints",
-      async ({ request }) =>
-        this.canvasTools.listCheckpoints(request.input.session_id),
+      async ({ request }) => this.canvasTools.listCheckpoints(request.input.session_id),
       serialSchedulerSpec,
     );
     register("visual_open_annotator", async ({ request }) =>
@@ -2274,15 +2502,21 @@ export class ToolRegistry {
     register("complete_mention", async ({ request }) =>
       this.mentionTools.completeMention(request.input.mentionId),
     );
-    register("generate_document", async ({ request }) => this.documentTools.generateDocument(request.input));
-    register("compile_latex", async ({ request }) => this.documentTools.compileLatex(request.input));
+    register("generate_document", async ({ request }) =>
+      this.documentTools.generateDocument(request.input),
+    );
+    register("compile_latex", async ({ request }) =>
+      this.documentTools.compileLatex(request.input),
+    );
     register("generate_presentation", async ({ request }) =>
       this.documentTools.generatePresentation(request.input),
     );
     register("generate_spreadsheet", async ({ request }) =>
       this.documentTools.generateSpreadsheet(request.input),
     );
-    register("generate_epub", async ({ request }) => this.documentTools.generateEPUB(request.input));
+    register("generate_epub", async ({ request }) =>
+      this.documentTools.generateEPUB(request.input),
+    );
     register("generate_landing_page", async ({ request }) =>
       this.documentTools.generateLandingPage(request.input),
     );
@@ -2293,7 +2527,10 @@ export class ToolRegistry {
       const title = typeof request.input?.title === "string" ? request.input.title : "Diagram";
       const diagram = typeof request.input?.diagram === "string" ? request.input.diagram : "";
       if (!diagram.trim()) {
-        return { success: false, error: "diagram is required and must be non-empty Mermaid syntax" };
+        return {
+          success: false,
+          error: "diagram is required and must be non-empty Mermaid syntax",
+        };
       }
       const validation = await ToolRegistry.validateMermaidDiagram(diagram);
       if (!validation.success) {
@@ -2322,11 +2559,7 @@ export class ToolRegistry {
       async ({ request }) => this.taskListUpdate(request.input),
       serialSchedulerSpec,
     );
-    register(
-      "task_list_list",
-      async () => this.taskListList(),
-      readParallelSchedulerSpec,
-    );
+    register("task_list_list", async () => this.taskListList(), readParallelSchedulerSpec);
     register("revise_plan", async ({ request }) => {
       if (!this.planRevisionHandler) {
         throw new Error("Plan revision not available at this time");
@@ -2475,18 +2708,43 @@ export class ToolRegistry {
     register("parse_document", async ({ request }) => this.parseDocument(request.input));
     register("acp_discover", async ({ request }) => this.acpDiscover(request.input));
     register("Skill", async ({ request }) => this.executeSkillCommand(request.input));
-    register("spawn_agent", async ({ request }) => this.spawnAgent(request.input), exclusiveSchedulerSpec);
+    register(
+      "spawn_agent",
+      async ({ request }) => this.spawnAgent(request.input),
+      exclusiveSchedulerSpec,
+    );
     register("wait_for_agent", async ({ request }) => this.waitForAgent(request.input));
-    register("orchestrate_agents", async ({ request }) => this.orchestrateAgents(request.input), exclusiveSchedulerSpec);
+    register(
+      "orchestrate_agents",
+      async ({ request }) => this.orchestrateAgents(request.input),
+      exclusiveSchedulerSpec,
+    );
     register("get_agent_status", async ({ request }) => this.getAgentStatus(request.input));
     register("list_agents", async ({ request }) => this.listAgents(request.input));
-    register("send_agent_message", async ({ request }) => this.sendAgentMessage(request.input), exclusiveSchedulerSpec);
+    register(
+      "send_agent_message",
+      async ({ request }) => this.sendAgentMessage(request.input),
+      exclusiveSchedulerSpec,
+    );
     register("capture_agent_events", async ({ request }) => this.captureAgentEvents(request.input));
-    register("cancel_agent", async ({ request }) => this.cancelAgent(request.input), exclusiveSchedulerSpec);
-    register("pause_agent", async ({ request }) => this.pauseAgent(request.input), exclusiveSchedulerSpec);
-    register("resume_agent", async ({ request }) => this.resumeAgent(request.input), exclusiveSchedulerSpec);
-    registerPredicate((name) => KnowledgeGraphTools.isKnowledgeGraphTool(name), async ({ request }) =>
-      this.knowledgeGraphTools.executeTool(request.name, request.input),
+    register(
+      "cancel_agent",
+      async ({ request }) => this.cancelAgent(request.input),
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "pause_agent",
+      async ({ request }) => this.pauseAgent(request.input),
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "resume_agent",
+      async ({ request }) => this.resumeAgent(request.input),
+      exclusiveSchedulerSpec,
+    );
+    registerPredicate(
+      (name) => KnowledgeGraphTools.isKnowledgeGraphTool(name),
+      async ({ request }) => this.knowledgeGraphTools.executeTool(request.name, request.input),
     );
     registerPredicate(
       (name) => {
@@ -2527,7 +2785,7 @@ export class ToolRegistry {
           input_schema: tool.inputSchema,
         };
       });
-    } catch  {
+    } catch {
       // MCP not initialized yet, return empty array
       return [];
     }
@@ -3202,29 +3460,32 @@ System Tools:
 - memory_save: Save an observation, decision, insight, or error to workspace memory for future recall
 - memory_curate: Add, replace, or remove curated hot-memory facts that should stay prompt-visible
 - memory_curated_read: Inspect the current curated hot-memory entries
-${hasAnyVisibleTools(
-  "supermemory_profile",
-  "supermemory_search",
-  "supermemory_remember",
-  "supermemory_forget",
-)
-  ? `- supermemory_profile: Load the workspace-scoped external Supermemory profile and relevant facts
+${
+  hasAnyVisibleTools(
+    "supermemory_profile",
+    "supermemory_search",
+    "supermemory_remember",
+    "supermemory_forget",
+  )
+    ? `- supermemory_profile: Load the workspace-scoped external Supermemory profile and relevant facts
 - supermemory_search: Search external Supermemory memories for this workspace or approved container
 - supermemory_remember: Persist a high-signal fact into external Supermemory
 - supermemory_forget: Remove an outdated external Supermemory entry by ID or exact content`
-  : ""}
-${hasAnyVisibleTools(
-  "screenshot",
-  "click",
-  "double_click",
-  "move_mouse",
-  "drag",
-  "scroll",
-  "type_text",
-  "keypress",
-  "wait",
-)
-  ? `
+    : ""
+}
+${
+  hasAnyVisibleTools(
+    "screenshot",
+    "click",
+    "double_click",
+    "move_mouse",
+    "drag",
+    "scroll",
+    "type_text",
+    "keypress",
+    "wait",
+  )
+    ? `
 
 Chronicle Screen Context:
 - screen_context_resolve: Resolve vague references like "this", "that", "same doc", or "why is this failing?" from the local recent-screen buffer without sending screenshots to external providers
@@ -3239,7 +3500,8 @@ Computer Use Tools (macOS native GUI, preferred over run_applescript for normal 
 - type_text: Type into the currently focused native app control
 - keypress: Press key chords like Return, Escape, or Cmd shortcuts in the current controlled window
 - wait: Pause briefly, then refresh the controlled-window screenshot`
-  : ""}
+    : ""
+}
 
 Scheduling:
 - schedule_task: Schedule tasks to run at specific times or intervals
@@ -3385,6 +3647,74 @@ ${skillDescriptions}`;
     if (this.handlerRegistry.has(name)) {
       const execution = await this.executeWithRegisteredHandler(name, input, _runtime);
       return execution?.result ?? execution;
+    }
+    if (_runtime?.__agentSecurityWrapped !== true && getNumbatService()) {
+      const startedAt = Date.now();
+      const metadata = getDefaultRuntimeToolMetadata(name);
+      const toolCallId =
+        typeof _runtime?.toolUseId === "string" && _runtime.toolUseId.trim()
+          ? _runtime.toolUseId.trim()
+          : `${this.taskId}:${name}:${startedAt}`;
+      const evaluation = await getNumbatService()!.evaluatePreTool({
+        taskId: this.taskId,
+        sessionId: this.taskId,
+        workspacePath: this.workspace.path,
+        toolCallId,
+        toolName: name,
+        toolInput: input,
+        highRisk:
+          metadata.sideEffectLevel === "high" ||
+          metadata.approvalKind === "destructive" ||
+          metadata.approvalKind === "shell_sensitive",
+      });
+      if (evaluation.decision === "deny") {
+        getNumbatService()?.recordBlockedDecision(evaluation.decisionId);
+        throw new Error(
+          `Tool "${name}" blocked by agent security: ${
+            evaluation.reason || "Action denied. Do not retry or attempt an equivalent action."
+          }`,
+        );
+      }
+      try {
+        const result = await this.executeTool(name, input, {
+          ..._runtime,
+          __agentSecurityWrapped: true,
+        });
+        getNumbatService()?.observePostTool({
+          taskId: this.taskId,
+          sessionId: this.taskId,
+          workspacePath: this.workspace.path,
+          toolCallId,
+          toolName: name,
+          toolInput: input,
+          highRisk:
+            metadata.sideEffectLevel === "high" ||
+            metadata.approvalKind === "destructive" ||
+            metadata.approvalKind === "shell_sensitive",
+          success: !(result && typeof result === "object" && result.success === false),
+          durationMs: Date.now() - startedAt,
+          decisionId: evaluation.decisionId,
+        });
+        return result;
+      } catch (error) {
+        getNumbatService()?.observePostTool({
+          taskId: this.taskId,
+          sessionId: this.taskId,
+          workspacePath: this.workspace.path,
+          toolCallId,
+          toolName: name,
+          toolInput: input,
+          highRisk:
+            metadata.sideEffectLevel === "high" ||
+            metadata.approvalKind === "destructive" ||
+            metadata.approvalKind === "shell_sensitive",
+          success: false,
+          durationMs: Date.now() - startedAt,
+          errorType: error instanceof Error ? error.name : "Error",
+          decisionId: evaluation.decisionId,
+        });
+        throw error;
+      }
     }
     // Optional workspace-local policy hook (.cowork/policy/tools.monty).
     // Fail-open on policy script errors to avoid bricking tool execution.
@@ -3566,9 +3896,7 @@ ${skillDescriptions}`;
         const inline = Array.isArray((result as Any).inline_citations)
           ? (result as Any).inline_citations
           : [];
-        const topLevel = Array.isArray((result as Any).citations)
-          ? (result as Any).citations
-          : [];
+        const topLevel = Array.isArray((result as Any).citations) ? (result as Any).citations : [];
         this.citationTracker.addFromSearch(
           [...topLevel, ...inline].map((citation: Any) => ({
             title: citation?.title,
@@ -3640,11 +3968,14 @@ ${skillDescriptions}`;
 
     // Video tools
     if (name === "generate_video") return await this.videoTools.generateVideo(input);
-    if (name === "get_video_generation_job") return await this.videoTools.getVideoGenerationJob(input);
-    if (name === "cancel_video_generation_job") return await this.videoTools.cancelVideoGenerationJob(input);
+    if (name === "get_video_generation_job")
+      return await this.videoTools.getVideoGenerationJob(input);
+    if (name === "cancel_video_generation_job")
+      return await this.videoTools.cancelVideoGenerationJob(input);
     if (name === "youtube_ingest_video") return await this.youtubeTools.ingestVideo(input);
     if (name === "youtube_ask_video") return await this.youtubeTools.askVideo(input);
-    if (name === "youtube_ask_or_ingest_video") return await this.youtubeTools.askOrIngestVideo(input);
+    if (name === "youtube_ask_or_ingest_video")
+      return await this.youtubeTools.askOrIngestVideo(input);
     if (name === "youtube_search_ingested_segments") return this.youtubeTools.searchSegments(input);
     if (name === "youtube_list_ingested_videos") return this.youtubeTools.listVideos(input);
 
@@ -3666,10 +3997,14 @@ ${skillDescriptions}`;
     if (name === "memory_save") return await this.memoryTools.save(input);
     if (name === "memory_curate") return await this.memoryTools.curate(input);
     if (name === "memory_curated_read") return await this.memoryTools.readCurated(input);
-    if (name === "supermemory_profile" && SupermemoryTools.isEnabled()) return await this.supermemoryTools.profile(input);
-    if (name === "supermemory_search" && SupermemoryTools.isEnabled()) return await this.supermemoryTools.search(input);
-    if (name === "supermemory_remember" && SupermemoryTools.isEnabled()) return await this.supermemoryTools.remember(input);
-    if (name === "supermemory_forget" && SupermemoryTools.isEnabled()) return await this.supermemoryTools.forget(input);
+    if (name === "supermemory_profile" && SupermemoryTools.isEnabled())
+      return await this.supermemoryTools.profile(input);
+    if (name === "supermemory_search" && SupermemoryTools.isEnabled())
+      return await this.supermemoryTools.search(input);
+    if (name === "supermemory_remember" && SupermemoryTools.isEnabled())
+      return await this.supermemoryTools.remember(input);
+    if (name === "supermemory_forget" && SupermemoryTools.isEnabled())
+      return await this.supermemoryTools.forget(input);
     if (name === "scratchpad_write") return this.scratchpadTools.write(input);
     if (name === "scratchpad_read") return this.scratchpadTools.read(input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
@@ -3681,11 +4016,16 @@ ${skillDescriptions}`;
     if (name === "show_in_folder") return await this.systemTools.showInFolder(input.path);
     if (name === "get_env") return await this.systemTools.getEnvVariable(input.name);
     if (name === "get_app_paths") return this.systemTools.getAppPaths();
-    if (name === "resolve_app_bundle_id") return await this.systemTools.resolveAppBundleId(input.appName);
-    if (name === "find_macos_app_processes") return await this.systemTools.findMacOSAppProcesses(input);
-    if (name === "terminate_macos_app_processes") return await this.systemTools.terminateMacOSAppProcesses(input);
-    if (name === "list_macos_launch_agents") return await this.systemTools.listMacOSLaunchAgents(input);
-    if (name === "disable_macos_launch_agents") return await this.systemTools.disableMacOSLaunchAgents(input);
+    if (name === "resolve_app_bundle_id")
+      return await this.systemTools.resolveAppBundleId(input.appName);
+    if (name === "find_macos_app_processes")
+      return await this.systemTools.findMacOSAppProcesses(input);
+    if (name === "terminate_macos_app_processes")
+      return await this.systemTools.terminateMacOSAppProcesses(input);
+    if (name === "list_macos_launch_agents")
+      return await this.systemTools.listMacOSLaunchAgents(input);
+    if (name === "disable_macos_launch_agents")
+      return await this.systemTools.disableMacOSLaunchAgents(input);
     if (name === "run_applescript") return await this.systemTools.runAppleScript(input.script);
 
     // Computer use tools (CUA)
@@ -3700,8 +4040,7 @@ ${skillDescriptions}`;
       return await this.computerUseTools.doubleClick(input.x, input.y, input.captureId);
     if (name === "move_mouse")
       return await this.computerUseTools.moveMouse(input.x, input.y, input.captureId);
-    if (name === "drag")
-      return await this.computerUseTools.drag(input.path, input.captureId);
+    if (name === "drag") return await this.computerUseTools.drag(input.path, input.captureId);
     if (name === "scroll")
       return await this.computerUseTools.scroll(
         input.x,
@@ -3710,10 +4049,8 @@ ${skillDescriptions}`;
         input.scrollY,
         input.captureId,
       );
-    if (name === "type_text")
-      return await this.computerUseTools.typeText(input.text);
-    if (name === "keypress")
-      return await this.computerUseTools.pressKeys(input.keys);
+    if (name === "type_text") return await this.computerUseTools.typeText(input.text);
+    if (name === "keypress") return await this.computerUseTools.pressKeys(input.keys);
     if (name === "wait") return await this.computerUseTools.wait(input.ms);
 
     // Batch image processing
@@ -3838,7 +4175,8 @@ ${skillDescriptions}`;
       return await this.documentTools.generatePresentation(input);
     if (name === "generate_spreadsheet") return await this.documentTools.generateSpreadsheet(input);
     if (name === "generate_epub") return await this.documentTools.generateEPUB(input);
-    if (name === "generate_landing_page") return await this.documentTools.generateLandingPage(input);
+    if (name === "generate_landing_page")
+      return await this.documentTools.generateLandingPage(input);
     if (name === "generate_narration_audio")
       return await this.documentTools.generateNarrationAudio(input);
 
@@ -3847,7 +4185,10 @@ ${skillDescriptions}`;
       const title = typeof input?.title === "string" ? input.title : "Diagram";
       const diagram = typeof input?.diagram === "string" ? input.diagram : "";
       if (!diagram.trim()) {
-        return { success: false, error: "diagram is required and must be non-empty Mermaid syntax" };
+        return {
+          success: false,
+          error: "diagram is required and must be non-empty Mermaid syntax",
+        };
       }
       const validation = await ToolRegistry.validateMermaidDiagram(diagram);
       if (!validation.success) {
@@ -3914,7 +4255,9 @@ ${skillDescriptions}`;
     }
 
     if (name === "list_projects") {
-      const projects = this.daemon.listProjects({ includeArchived: input?.include_archived === true });
+      const projects = this.daemon.listProjects({
+        includeArchived: input?.include_archived === true,
+      });
       return {
         projects: projects.map((p: Any) => ({
           id: p.id,
@@ -4151,7 +4494,7 @@ ${skillDescriptions}`;
     let mcpManager: MCPClientManager;
     try {
       mcpManager = MCPClientManager.getInstance();
-    } catch  {
+    } catch {
       // MCP not initialized
       return null;
     }
@@ -4384,7 +4727,7 @@ ${skillDescriptions}`;
 
             break;
           }
-        } catch  {
+        } catch {
           // Continue checking other paths
         }
       }
@@ -4431,7 +4774,10 @@ ${skillDescriptions}`;
     return getCustomSkillLoader().getRuntimeSkillDescriptor(skill);
   }
 
-  private resolveSkillArgsToParameters(skill: CustomSkill, args: string): {
+  private resolveSkillArgsToParameters(
+    skill: CustomSkill,
+    args: string,
+  ): {
     success: boolean;
     parameters?: Record<string, Any>;
     error?: string;
@@ -4442,7 +4788,9 @@ ${skillDescriptions}`;
     }
 
     if (skill.id === "simplify" || skill.id === "batch" || skill.id === "llm-wiki") {
-      const parsed = parseLeadingSkillSlashCommand(`/${skill.id}${trimmedArgs ? ` ${trimmedArgs}` : ""}`);
+      const parsed = parseLeadingSkillSlashCommand(
+        `/${skill.id}${trimmedArgs ? ` ${trimmedArgs}` : ""}`,
+      );
       if (!parsed.matched || parsed.error || !parsed.parsed) {
         const usageExample =
           skill.id === "batch"
@@ -4848,17 +5196,14 @@ ${skillDescriptions}`;
       skill: skill_id,
       skill_name: skill.name,
       message: `Loaded skill '${skill.name}' for this task.`,
-      application_summary:
-        `Loaded skill "${skill.name}" as hidden context for the current task.`,
+      application_summary: `Loaded skill "${skill.name}" as hidden context for the current task.`,
       skill_invocation_id: invocationId,
     };
   }
 
   private async buildCodexCliRuntimePrompt(): Promise<string> {
     const runtimeMode = BuiltinToolsSettingsManager.getCodexRuntimeMode();
-    const task = await this.daemon
-      .getTaskById?.(this.taskId)
-      .catch(() => null);
+    const task = await this.daemon.getTaskById?.(this.taskId).catch(() => null);
 
     const sourceTitle = this.extractCurrentTaskText(task?.title);
     const sourcePrompt =
@@ -4919,7 +5264,8 @@ ${skillDescriptions}`;
   }
 
   private deriveCodexChildTaskPrompt(taskPrompt: string, fallbackTitle: string): string {
-    const source = this.extractCurrentTaskText(taskPrompt) || this.extractCurrentTaskText(fallbackTitle);
+    const source =
+      this.extractCurrentTaskText(taskPrompt) || this.extractCurrentTaskText(fallbackTitle);
     if (!source) {
       return "Handle the assigned coding task. Focus on the user's requested outcome and report concrete results.";
     }
@@ -5443,7 +5789,8 @@ ${skillDescriptions}`;
           action,
           duplicate_of: createResult.duplicateOf,
           cooldown_until: createResult.cooldownUntil,
-          message: "A similar proposal was recently rejected. Wait for cooldown before re-submitting.",
+          message:
+            "A similar proposal was recently rejected. Wait for cooldown before re-submitting.",
         };
       }
 
@@ -5652,10 +5999,14 @@ ${skillDescriptions}`;
               id: String(testCase?.id || "").trim(),
               prompt: String(testCase?.prompt || "").trim(),
               expectedSignals: Array.isArray(testCase?.expectedSignals)
-                ? testCase.expectedSignals.map((signal) => String(signal || "").trim()).filter(Boolean)
+                ? testCase.expectedSignals
+                    .map((signal) => String(signal || "").trim())
+                    .filter(Boolean)
                 : undefined,
               forbiddenSignals: Array.isArray(testCase?.forbiddenSignals)
-                ? testCase.forbiddenSignals.map((signal) => String(signal || "").trim()).filter(Boolean)
+                ? testCase.forbiddenSignals
+                    .map((signal) => String(signal || "").trim())
+                    .filter(Boolean)
                 : undefined,
               requiredTools: Array.isArray(testCase?.requiredTools)
                 ? testCase.requiredTools.map((tool) => String(tool || "").trim()).filter(Boolean)
@@ -6008,7 +6359,13 @@ ${skillDescriptions}`;
             },
             action: {
               type: "string",
-              enum: ["append", "move_section", "insert_after_section", "replace_blocks", "list_sections"],
+              enum: [
+                "append",
+                "move_section",
+                "insert_after_section",
+                "replace_blocks",
+                "list_sections",
+              ],
               description:
                 "Action to perform: append adds content at end, move_section reorders a section, insert_after_section inserts content after a specific section, replace_blocks replaces contiguous parsed block IDs, list_sections lists sections",
             },
@@ -6877,8 +7234,7 @@ ${skillDescriptions}`;
             },
             maxResults: {
               type: "number",
-              description:
-                "Alias for limit (kept for compatibility with older prompts/plans).",
+              description: "Alias for limit (kept for compatibility with older prompts/plans).",
             },
             offset: {
               type: "number",
@@ -7940,7 +8296,9 @@ ${skillDescriptions}`;
     }
 
     const authMethod: "auto" | IntegrationAuthMethod =
-      input?.auth_method === "oauth" || input?.auth_method === "api_key" ? input.auth_method : "auto";
+      input?.auth_method === "oauth" || input?.auth_method === "api_key"
+        ? input.auth_method
+        : "auto";
     if (authMethod === "oauth" && !capability.authMethods.includes("oauth")) {
       return {
         success: false,
@@ -7971,7 +8329,10 @@ ${skillDescriptions}`;
       env: envForInspect,
       authMethod,
     });
-    const missingInputs = this.buildIntegrationMissingInputs(capability, inspectReadiness.missingInputs);
+    const missingInputs = this.buildIntegrationMissingInputs(
+      capability,
+      inspectReadiness.missingInputs,
+    );
     const connected = server ? this.isConnectorConnected(mcpClient, server.id) : false;
     const ready = Boolean(server) && inspectReadiness.configured && connected;
     const planHash = this.buildIntegrationPlanHash({
@@ -8026,7 +8387,8 @@ ${skillDescriptions}`;
       return response;
     }
 
-    const expectedPlanHash = typeof input?.expected_plan_hash === "string" ? input.expected_plan_hash.trim() : "";
+    const expectedPlanHash =
+      typeof input?.expected_plan_hash === "string" ? input.expected_plan_hash.trim() : "";
     if (expectedPlanHash && expectedPlanHash !== planHash) {
       return {
         success: false,
@@ -8034,7 +8396,7 @@ ${skillDescriptions}`;
         provider,
         stale_plan: true,
         message:
-          "Integration state changed since inspect. Re-run integration_setup with action=\"inspect\" and retry configure using the latest plan_hash.",
+          'Integration state changed since inspect. Re-run integration_setup with action="inspect" and retry configure using the latest plan_hash.',
         expected_plan_hash: expectedPlanHash,
         current_plan_hash: planHash,
       };
@@ -8125,7 +8487,10 @@ ${skillDescriptions}`;
       env: envToApply,
       authMethod,
     });
-    const missingAfter = this.buildIntegrationMissingInputs(capability, readinessAfter.missingInputs);
+    const missingAfter = this.buildIntegrationMissingInputs(
+      capability,
+      readinessAfter.missingInputs,
+    );
 
     let updatedServer: MCPServerConfig | null = null;
     if (!dryRun && server) {
@@ -8236,7 +8601,9 @@ ${skillDescriptions}`;
   }
 
   private resolveTier1Provider(rawProvider: string): Tier1IntegrationProvider | null {
-    const normalized = String(rawProvider || "").trim().toLowerCase();
+    const normalized = String(rawProvider || "")
+      .trim()
+      .toLowerCase();
     return TIER1_CONNECTOR_IDS.includes(normalized as Tier1IntegrationProvider)
       ? (normalized as Tier1IntegrationProvider)
       : null;
@@ -8266,7 +8633,9 @@ ${skillDescriptions}`;
     }
   }
 
-  private normalizeIntegrationEnvInput(inputEnv: Record<string, unknown> | undefined): Record<string, string> {
+  private normalizeIntegrationEnvInput(
+    inputEnv: Record<string, unknown> | undefined,
+  ): Record<string, string> {
     const normalized: Record<string, string> = {};
     if (!inputEnv || typeof inputEnv !== "object") return normalized;
     for (const [key, value] of Object.entries(inputEnv)) {
@@ -8321,7 +8690,10 @@ ${skillDescriptions}`;
     });
   }
 
-  private buildDefaultInputHint(capability: ConnectorCapability, key: string): IntegrationInputHint {
+  private buildDefaultInputHint(
+    capability: ConnectorCapability,
+    key: string,
+  ): IntegrationInputHint {
     const label = key.replace(/_/g, " ").toLowerCase();
     const title = label.charAt(0).toUpperCase() + label.slice(1);
     return {
@@ -8457,7 +8829,8 @@ ${skillDescriptions}`;
       const nextEnv: Record<string, string> = { ...params.env };
 
       if (clientEnvKeys.clientIdKey) nextEnv[clientEnvKeys.clientIdKey] = clientId;
-      if (clientEnvKeys.clientSecretKey && clientSecret) nextEnv[clientEnvKeys.clientSecretKey] = clientSecret;
+      if (clientEnvKeys.clientSecretKey && clientSecret)
+        nextEnv[clientEnvKeys.clientSecretKey] = clientSecret;
 
       switch (params.provider) {
         case "jira": {
@@ -8788,7 +9161,9 @@ ${skillDescriptions}`;
 
     const userName = sanitizeStoredPreferredName(rawUserName);
     if (!userName) {
-      throw new Error('Name looks invalid. Please provide just your preferred name (for example: "Alice").');
+      throw new Error(
+        'Name looks invalid. Please provide just your preferred name (for example: "Alice").',
+      );
     }
 
     // Save the user's name
@@ -9561,7 +9936,9 @@ ${skillDescriptions}`;
 
   private async getDelegationCurrentStepContext(): Promise<string | undefined> {
     if (typeof this.daemon.getTaskEvents !== "function") return undefined;
-    const events = (await Promise.resolve(this.daemon.getTaskEvents(this.taskId))) as TaskEvent[] | undefined;
+    const events = (await Promise.resolve(this.daemon.getTaskEvents(this.taskId))) as
+      | TaskEvent[]
+      | undefined;
     if (!Array.isArray(events) || events.length === 0) return undefined;
 
     for (const event of [...events].reverse()) {
@@ -9580,7 +9957,9 @@ ${skillDescriptions}`;
 
   private async getDelegationKnownFindings(): Promise<string | undefined> {
     if (typeof this.daemon.getTaskEvents !== "function") return undefined;
-    const events = (await Promise.resolve(this.daemon.getTaskEvents(this.taskId))) as TaskEvent[] | undefined;
+    const events = (await Promise.resolve(this.daemon.getTaskEvents(this.taskId))) as
+      | TaskEvent[]
+      | undefined;
     if (!Array.isArray(events) || events.length === 0) return undefined;
 
     const findings: string[] = [];
@@ -9630,20 +10009,30 @@ ${skillDescriptions}`;
     const scopeOutByRole: Record<WorkerRoleKind, string> = {
       researcher: "Do not modify project files or expand into implementation work.",
       implementer: "Do not modify unrelated files or broaden the task beyond the assigned scope.",
-      verifier: "Do not change project files; verify independently and report only evidence-backed findings.",
-      synthesizer: "Do not reopen broad new research or unrelated implementation unless the supplied evidence is insufficient.",
+      verifier:
+        "Do not change project files; verify independently and report only evidence-backed findings.",
+      synthesizer:
+        "Do not reopen broad new research or unrelated implementation unless the supplied evidence is insufficient.",
     };
     const expectedDeliverableByRole: Record<WorkerRoleKind, string> = {
-      researcher: "A concise findings report with concrete file paths, commands, risks, and unresolved questions.",
-      implementer: "A completed implementation summary with exact changed files plus the verification commands or checks run.",
-      verifier: "A verification report that starts with VERDICT: PASS, FAIL, or PARTIAL and then cites the supporting evidence.",
-      synthesizer: "A consolidated artifact or summary that resolves predecessor outputs into one clear recommendation or deliverable.",
+      researcher:
+        "A concise findings report with concrete file paths, commands, risks, and unresolved questions.",
+      implementer:
+        "A completed implementation summary with exact changed files plus the verification commands or checks run.",
+      verifier:
+        "A verification report that starts with VERDICT: PASS, FAIL, or PARTIAL and then cites the supporting evidence.",
+      synthesizer:
+        "A consolidated artifact or summary that resolves predecessor outputs into one clear recommendation or deliverable.",
     };
     const evidenceRequirementsByRole: Record<WorkerRoleKind, string> = {
-      researcher: "Cite the files, commands, search results, or observations that support each material finding.",
-      implementer: "Report the concrete edits made and the tests, commands, or runtime checks that validate the change.",
-      verifier: "Include the command/output/file evidence behind the verdict and at least one adversarial probe.",
-      synthesizer: "Attribute the final synthesis to the upstream evidence or predecessor outputs that justify it.",
+      researcher:
+        "Cite the files, commands, search results, or observations that support each material finding.",
+      implementer:
+        "Report the concrete edits made and the tests, commands, or runtime checks that validate the change.",
+      verifier:
+        "Include the command/output/file evidence behind the verdict and at least one adversarial probe.",
+      synthesizer:
+        "Attribute the final synthesis to the upstream evidence or predecessor outputs that justify it.",
     };
 
     const lines = [
@@ -9669,7 +10058,9 @@ ${skillDescriptions}`;
       "Scope out:",
       `- ${scopeOutByRole[params.workerRole]}`,
       ...(params.extractionMode
-        ? ["- Preserve the extraction-only contract; do not drift into unrelated edits or open-ended exploration."]
+        ? [
+            "- Preserve the extraction-only contract; do not drift into unrelated edits or open-ended exploration.",
+          ]
         : []),
       "",
       "Known findings or evidence:",
@@ -10075,16 +10466,12 @@ ${skillDescriptions}`;
     if (delegatedNode) {
       const result = await this.daemon.waitForDelegatedNode(this.taskId, taskId, timeoutSeconds);
       if (result.node) {
-        this.daemon.logEvent(
-          this.taskId,
-          result.success ? "agent_completed" : "agent_failed",
-          {
-            childTaskId: result.node.taskId || result.node.remoteTaskId || taskId,
-            childStatus: result.status,
-            resultSummary: result.resultSummary,
-            error: result.error,
-          },
-        );
+        this.daemon.logEvent(this.taskId, result.success ? "agent_completed" : "agent_failed", {
+          childTaskId: result.node.taskId || result.node.remoteTaskId || taskId,
+          childStatus: result.status,
+          resultSummary: result.resultSummary,
+          error: result.error,
+        });
       }
       return result;
     }
@@ -10250,34 +10637,36 @@ ${skillDescriptions}`;
       };
     }
 
-    const preparedNodes = await Promise.all(tasks.map(async (task, index) => {
-      const prepared = await this.prepareSpawnAgentNode({
-        prompt: task.prompt,
-        title: task.title,
-        model_preference: task.model_preference,
-        capability_hint: task.capability_hint,
-        acp_agent_id: task.acp_agent_id,
-        worker_role: task.worker_role,
-        max_turns: 20,
-      });
-      return {
-        key: `batch-${index + 1}`,
-        title: prepared.taskTitle,
-        node: {
+    const preparedNodes = await Promise.all(
+      tasks.map(async (task, index) => {
+        const prepared = await this.prepareSpawnAgentNode({
+          prompt: task.prompt,
+          title: task.title,
+          model_preference: task.model_preference,
+          capability_hint: task.capability_hint,
+          acp_agent_id: task.acp_agent_id,
+          worker_role: task.worker_role,
+          max_turns: 20,
+        });
+        return {
           key: `batch-${index + 1}`,
           title: prepared.taskTitle,
-          prompt: prepared.contractedPrompt,
-          kind: "child_task" as const,
-          dispatchTarget: prepared.dispatchTarget,
-          parentTaskId: this.taskId,
-          assignedAgentRoleId: prepared.assignedAgentRoleId,
-          acpAgentId: prepared.acpAgentId,
-          workerRole: prepared.workerRole,
-          agentConfig: prepared.agentConfig,
-          metadata: { depth: currentDepth + 1 },
-        },
-      };
-    }));
+          node: {
+            key: `batch-${index + 1}`,
+            title: prepared.taskTitle,
+            prompt: prepared.contractedPrompt,
+            kind: "child_task" as const,
+            dispatchTarget: prepared.dispatchTarget,
+            parentTaskId: this.taskId,
+            assignedAgentRoleId: prepared.assignedAgentRoleId,
+            acpAgentId: prepared.acpAgentId,
+            workerRole: prepared.workerRole,
+            agentConfig: prepared.agentConfig,
+            metadata: { depth: currentDepth + 1 },
+          },
+        };
+      }),
+    );
 
     const snapshot = await this.daemon.createOrchestrationGraphRun({
       rootTaskId: this.taskId,
@@ -10513,15 +10902,19 @@ ${skillDescriptions}`;
     );
     const summary = {
       total: allTasks.length + allDelegatedNodes.length,
-      running: allTasks.filter((t) =>
-        ["pending", "queued", "planning", "executing", "paused"].includes(t.status),
-      ).length + allDelegatedNodes.filter((node) => ["pending", "ready", "running"].includes(node.status)).length,
+      running:
+        allTasks.filter((t) =>
+          ["pending", "queued", "planning", "executing", "paused"].includes(t.status),
+        ).length +
+        allDelegatedNodes.filter((node) => ["pending", "ready", "running"].includes(node.status))
+          .length,
       completed:
         allTasks.filter((t) => t.status === "completed").length +
         allDelegatedNodes.filter((node) => node.status === "completed").length,
       failed:
         allTasks.filter((t) => ["failed", "cancelled"].includes(t.status)).length +
-        allDelegatedNodes.filter((node) => ["failed", "cancelled", "blocked"].includes(node.status)).length,
+        allDelegatedNodes.filter((node) => ["failed", "cancelled", "blocked"].includes(node.status))
+          .length,
     };
 
     const agents = [
@@ -11145,7 +11538,7 @@ ${skillDescriptions}`;
             status: {
               type: "array",
               description:
-                "Filter by status values, e.g. [\"backlog\", \"todo\", \"in_progress\", \"blocked\"].",
+                'Filter by status values, e.g. ["backlog", "todo", "in_progress", "blocked"].',
               items: { type: "string" },
             },
             limit: {
@@ -11408,12 +11801,13 @@ ${skillDescriptions}`;
             },
             dry_run: {
               type: "boolean",
-              description: "When true, computes the outcome without writing settings or launching OAuth.",
+              description:
+                "When true, computes the outcome without writing settings or launching OAuth.",
             },
             env: {
               type: "object",
               description:
-                "Environment variable overrides to apply to the connector (e.g., {\"LINEAR_API_KEY\":\"...\"}).",
+                'Environment variable overrides to apply to the connector (e.g., {"LINEAR_API_KEY":"..."}).',
               additionalProperties: true,
             },
             oauth: {
@@ -11957,7 +12351,8 @@ ${skillDescriptions}`;
                   capability_hint: {
                     type: "string",
                     enum: ["code", "math", "research", "vision", "fast", "long_context"],
-                    description: "Route to a capability-suited model when model_preference is absent.",
+                    description:
+                      "Route to a capability-suited model when model_preference is absent.",
                   },
                   acp_agent_id: {
                     type: "string",
@@ -12186,7 +12581,7 @@ ${skillDescriptions}`;
 
     // Look up the agent role by display name
     const db = this.daemon.getDatabase();
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const { AgentRoleRepository } = require("../../agents/AgentRoleRepository");
     const agentRoleRepo = new AgentRoleRepository(db);
     const allRoles = agentRoleRepo.findAll(true); // include inactive
@@ -12209,7 +12604,7 @@ ${skillDescriptions}`;
     agentRoleRepo.updateHeartbeatConfig(role.id, config);
 
     // Notify the HeartbeatService singleton to cancel or reschedule
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const { getHeartbeatService } = require("../../agents/HeartbeatService");
     const heartbeatService = getHeartbeatService();
     if (heartbeatService) {

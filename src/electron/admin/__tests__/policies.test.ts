@@ -103,6 +103,40 @@ describe("validatePolicies", () => {
     ).toBe("runtime.network.allowShellNetwork must be a boolean");
   });
 
+  it("accepts a complete agent security policy", () => {
+    expect(
+      validatePolicies({
+        runtime: {
+          agentSecurity: {
+            enabled: true,
+            mode: "enforce",
+            ruleProfile: "custom",
+            customRuleDirs: ["/opt/cowork/numbat-rules"],
+            failurePolicy: "deny_high_risk",
+            timeoutMs: 2_000,
+            retentionDays: 45,
+            scheduledScan: {
+              enabled: true,
+              intervalHours: 12,
+            },
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects agent security timeouts outside the bounded range", () => {
+    expect(
+      validatePolicies({
+        runtime: {
+          agentSecurity: {
+            timeoutMs: 20_000,
+          },
+        },
+      }),
+    ).toBe("runtime.agentSecurity.timeoutMs must be between 250 and 5000");
+  });
+
   it("accepts Everyday Agent admin policy controls", () => {
     expect(
       validatePolicies({
@@ -164,5 +198,51 @@ describe("loadPoliciesStrict", () => {
     const { loadPolicies: freshLoadPolicies } = await import("../policies");
 
     expect(freshLoadPolicies().packs.blocked).toEqual([]);
+  });
+
+  it("migrates legacy policies to disabled monitor-mode agent security", async () => {
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({
+        version: 1,
+        runtime: {
+          network: {
+            defaultAction: "deny",
+          },
+        },
+      }),
+    );
+    const { loadPoliciesStrict: freshLoadPoliciesStrict } = await import("../policies");
+
+    expect(freshLoadPoliciesStrict()?.version).toBe(2);
+    expect(freshLoadPoliciesStrict()?.runtime.agentSecurity).toEqual(
+      expect.objectContaining({
+        enabled: false,
+        mode: "monitor",
+        ruleProfile: "recommended",
+        failurePolicy: "open",
+      }),
+    );
+  });
+});
+
+describe("policy change notifications", () => {
+  it("notifies watchers synchronously when policies are saved in-process", async () => {
+    mockFs.existsSync.mockReturnValue(false);
+    const close = vi.fn();
+    mockFs.watch.mockReturnValue({ on: vi.fn(), close });
+    const {
+      loadPolicies: freshLoadPolicies,
+      savePolicies: freshSavePolicies,
+      watchPolicies: freshWatchPolicies,
+    } = await import("../policies");
+    const onChange = vi.fn();
+    const cleanup = freshWatchPolicies(onChange);
+
+    freshSavePolicies(freshLoadPolicies());
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    cleanup();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

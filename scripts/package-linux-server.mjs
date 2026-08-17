@@ -59,7 +59,9 @@ async function copyIfPresent(fromRelative, toRoot) {
 function getConnectorPackageNames(pkg) {
   const buildConnectorsScript = pkg.scripts?.["build:connectors"];
   if (typeof buildConnectorsScript !== "string" || buildConnectorsScript.length === 0) {
-    throw new Error("Missing package.json scripts.build:connectors; cannot derive server connector package list.");
+    throw new Error(
+      "Missing package.json scripts.build:connectors; cannot derive server connector package list.",
+    );
   }
 
   const names = new Set();
@@ -69,7 +71,9 @@ function getConnectorPackageNames(pkg) {
   }
 
   if (names.size === 0) {
-    throw new Error("Could not derive connector package list from package.json scripts.build:connectors.");
+    throw new Error(
+      "Could not derive connector package list from package.json scripts.build:connectors.",
+    );
   }
 
   return [...names].sort();
@@ -99,7 +103,7 @@ async function copyConnectorRuntimeFiles(toRoot, connectorPackageNames) {
     throw new Error(
       `Missing required connector runtime files:\n${missing
         .map((item) => `  - connectors/${item}`)
-        .join("\n")}\nRun npm run build:connectors first.`
+        .join("\n")}\nRun npm run build:connectors first.`,
     );
   }
 
@@ -188,7 +192,7 @@ async function assertRequiredBuildOutputs() {
     throw new Error(
       `Missing required files for Linux server package:\n${missing
         .map((item) => `  - ${item}`)
-        .join("\n")}\nRun npm run build:daemon && npm run build:connectors first.`
+        .join("\n")}\nRun npm run build:daemon && npm run build:connectors first.`,
     );
   }
 }
@@ -204,7 +208,9 @@ async function sha256File(filePath) {
 
 async function main() {
   if (process.platform !== "linux" || process.arch !== "x64") {
-    throw new Error("Linux server packages must be built on linux x64 so native modules match the target.");
+    throw new Error(
+      "Linux server packages must be built on linux x64 so native modules match the target.",
+    );
   }
 
   await assertRequiredBuildOutputs();
@@ -221,7 +227,7 @@ async function main() {
 
     await fsp.writeFile(
       path.join(packageRoot, "package.json"),
-      `${JSON.stringify(prunePackageJsonForServer(pkg), null, 2)}\n`
+      `${JSON.stringify(prunePackageJsonForServer(pkg), null, 2)}\n`,
     );
     await copyIfPresent("package-lock.json", packageRoot);
 
@@ -242,6 +248,15 @@ async function main() {
     ]) {
       await copyIfPresent(relativePath, packageRoot);
     }
+    await fsp.cp(
+      path.join(ROOT, "build", "numbat"),
+      path.join(packageRoot, "resources", "numbat"),
+      {
+        recursive: true,
+        force: true,
+        dereference: false,
+      },
+    );
 
     await copyConnectorRuntimeFiles(packageRoot, connectorPackageNames);
     await writeInstallNotes(packageRoot, version);
@@ -249,9 +264,20 @@ async function main() {
     await fsp.chmod(path.join(packageRoot, "bin", "coworkd-node.js"), 0o755);
     await fsp.chmod(path.join(packageRoot, "bin", "coworkctl.js"), 0o755);
 
-    run("npm", ["install", "--omit=dev", "--include=optional", "--ignore-scripts", "--no-audit", "--no-fund"], {
-      cwd: packageRoot,
-    });
+    run(
+      "npm",
+      [
+        "install",
+        "--omit=dev",
+        "--include=optional",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+      ],
+      {
+        cwd: packageRoot,
+      },
+    );
     run("npm", ["rebuild", "--ignore-scripts=false", "better-sqlite3"], { cwd: packageRoot });
 
     await fsp.mkdir(RELEASE_DIR, { recursive: true });

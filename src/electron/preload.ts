@@ -3,14 +3,25 @@ import { contextBridge, ipcRenderer } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import { randomBytes } from "crypto";
-import {
-  IPC_CHANNELS as SHARED_IPC_CHANNELS,
-  isTempWorkspaceId,
-} from "../shared/types";
+import { IPC_CHANNELS as SHARED_IPC_CHANNELS, isTempWorkspaceId } from "../shared/types";
 import type {
   ApplyOnboardingProfileRequest,
   ApplyOnboardingProfileResult,
 } from "../shared/onboarding";
+import type {
+  AgentSecurityCaseBuildResult,
+  AgentSecurityCaseVerifyResult,
+  AgentSecurityDiagnostic,
+  AgentSecurityEnforcement,
+  AgentSecurityFinding,
+  AgentSecurityFindingQuery,
+  AgentSecurityFindingStatus,
+  AgentSecurityHookManagementResult,
+  AgentSecurityInventoryItem,
+  AgentSecurityRulesCheckResult,
+  AgentSecurityRuntimeStatus,
+  AgentSecurityScanResult,
+} from "../shared/agent-security";
 import type { SpreadsheetPreview } from "../shared/spreadsheet-preview";
 import type {
   SpreadsheetApplyPatchesResult,
@@ -20,10 +31,7 @@ import type {
   SpreadsheetViewportRequest,
   SpreadsheetViewportResult,
 } from "../shared/spreadsheet-workbook";
-import type {
-  DocumentPreview,
-  EditableDocumentBlock,
-} from "../shared/document-preview";
+import type { DocumentPreview, EditableDocumentBlock } from "../shared/document-preview";
 import { shouldUseNativeWindowFrame } from "../shared/native-window-frame";
 import type {
   AgentTeam,
@@ -317,8 +325,7 @@ const normalizeAttachmentName = (value: unknown): string => {
   return sanitized || "image";
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isUuidLike = (value: unknown): value is string =>
   typeof value === "string" && UUID_PATTERN.test(value);
@@ -427,9 +434,7 @@ function validateSendMessageAttachments(images?: ImageAttachment[]): ImageAttach
           );
         }
         if (!stat.isFile()) {
-          throw new Error(
-            `Attachment at index ${index} filePath must point to a regular file.`,
-          );
+          throw new Error(`Attachment at index ${index} filePath must point to a regular file.`);
         }
         const maxAttachmentBytes = isVideo
           ? MAX_VIDEO_ATTACHMENT_BYTES
@@ -459,13 +464,9 @@ function validateSendMessageAttachments(images?: ImageAttachment[]): ImageAttach
       if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || !Number.isInteger(sizeBytes)) {
         throw new Error(`Attachment at index ${index} has invalid sizeBytes.`);
       }
-      const maxAttachmentBytes = isVideo
-        ? MAX_VIDEO_ATTACHMENT_BYTES
-        : MAX_IMAGE_ATTACHMENT_BYTES;
+      const maxAttachmentBytes = isVideo ? MAX_VIDEO_ATTACHMENT_BYTES : MAX_IMAGE_ATTACHMENT_BYTES;
       if (sizeBytes > maxAttachmentBytes) {
-        throw new Error(
-          `Attachment at index ${index} exceeds ${maxAttachmentBytes} bytes.`,
-        );
+        throw new Error(`Attachment at index ${index} exceeds ${maxAttachmentBytes} bytes.`);
       }
 
       if (!isVideo) {
@@ -1348,13 +1349,7 @@ void LOCAL_MANAGED_DEVICE_ID;
 void LOCAL_MANAGED_DEVICE_NODE_ID;
 
 type ManagedDeviceRole = "local" | "remote";
-type ManagedDevicePurpose =
-  | "primary"
-  | "work"
-  | "personal"
-  | "automation"
-  | "archive"
-  | "general";
+type ManagedDevicePurpose = "primary" | "work" | "personal" | "automation" | "archive" | "general";
 type ManagedDeviceTransport = "local" | "direct" | "ssh" | "tailscale" | "unknown";
 type ManagedDeviceAttentionState = "none" | "info" | "warning" | "critical";
 
@@ -1381,14 +1376,7 @@ interface ManagedDeviceAlert {
   level: ManagedDeviceAttentionState;
   title: string;
   description?: string;
-  kind:
-    | "approval"
-    | "input_request"
-    | "channel"
-    | "connection"
-    | "storage"
-    | "status"
-    | "warning";
+  kind: "approval" | "input_request" | "channel" | "connection" | "storage" | "status" | "warning";
 }
 
 interface ManagedDevice {
@@ -2030,10 +2018,7 @@ export interface LlmWikiVaultSummary {
   recentRawSources: LlmWikiVaultEntry[];
 }
 
-async function invokeTaskIpcWithRendererTiming<T>(
-  channel: string,
-  ...args: unknown[]
-): Promise<T> {
+async function invokeTaskIpcWithRendererTiming<T>(channel: string, ...args: unknown[]): Promise<T> {
   const startedAt =
     typeof performance !== "undefined" && typeof performance.now === "function"
       ? performance.now()
@@ -2046,7 +2031,7 @@ async function invokeTaskIpcWithRendererTiming<T>(
   const rowCount = Array.isArray(result)
     ? result.length
     : result && typeof result === "object" && Array.isArray((result as { events?: unknown }).events)
-      ? ((result as { events: unknown[] }).events.length)
+      ? (result as { events: unknown[] }).events.length
       : result
         ? 1
         : 0;
@@ -2080,29 +2065,50 @@ contextBridge.exposeInMainWorld("electronAPI", {
     filePath: string,
     workspacePath?: string,
     options?: ReadFileForViewerOptions,
-  ) => ipcRenderer.invoke(IPC_CHANNELS.FILE_READ_FOR_VIEWER, { filePath, workspacePath, ...options }),
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_READ_FOR_VIEWER, { filePath, workspacePath, ...options }),
   updateSpreadsheetFile: (data: {
     filePath: string;
     workspacePath: string;
     preview: SpreadsheetPreview;
   }) => ipcRenderer.invoke(IPC_CHANNELS.FILE_UPDATE_SPREADSHEET, data) as Promise<FileViewerResult>,
-  openSpreadsheetWorkbook: (data: { filePath: string; workspacePath: string; workspaceId?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SPREADSHEET_OPEN_WORKBOOK, data) as Promise<SpreadsheetOpenWorkbookResult>,
+  openSpreadsheetWorkbook: (data: {
+    filePath: string;
+    workspacePath: string;
+    workspaceId?: string;
+  }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SPREADSHEET_OPEN_WORKBOOK,
+      data,
+    ) as Promise<SpreadsheetOpenWorkbookResult>,
   getSpreadsheetViewport: (data: SpreadsheetViewportRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SPREADSHEET_GET_VIEWPORT, data) as Promise<SpreadsheetViewportResult>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SPREADSHEET_GET_VIEWPORT,
+      data,
+    ) as Promise<SpreadsheetViewportResult>,
   applySpreadsheetPatches: (data: { sessionId: string; patches: SpreadsheetPatch[] }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SPREADSHEET_APPLY_PATCHES, data) as Promise<SpreadsheetApplyPatchesResult>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SPREADSHEET_APPLY_PATCHES,
+      data,
+    ) as Promise<SpreadsheetApplyPatchesResult>,
   saveSpreadsheetWorkbook: (data: { sessionId: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SPREADSHEET_SAVE_WORKBOOK, data) as Promise<SpreadsheetSaveWorkbookResult>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SPREADSHEET_SAVE_WORKBOOK,
+      data,
+    ) as Promise<SpreadsheetSaveWorkbookResult>,
   closeSpreadsheetWorkbook: (data: { sessionId: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SPREADSHEET_CLOSE_WORKBOOK, data) as Promise<{ success: boolean }>,
+    ipcRenderer.invoke(IPC_CHANNELS.SPREADSHEET_CLOSE_WORKBOOK, data) as Promise<{
+      success: boolean;
+    }>,
   updateDocumentFile: (data: {
     filePath: string;
     workspacePath: string;
     blocks: EditableDocumentBlock[];
   }) => ipcRenderer.invoke(IPC_CHANNELS.FILE_UPDATE_DOCUMENT, data) as Promise<FileViewerResult>,
   listTerminalTabs: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_LIST, { workspaceId }) as Promise<ShellSessionInfo[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_LIST, { workspaceId }) as Promise<
+      ShellSessionInfo[]
+    >,
   createTerminalTab: (data: { workspaceId: string; cwd?: string; title?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_CREATE, data) as Promise<ShellSessionInfo>,
   runTerminalTabCommand: (data: {
@@ -2132,14 +2138,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
     taskId: string;
     sessionId?: string;
     webContentsId?: number;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_UNREGISTER, data) as Promise<{ success: true }>,
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_UNREGISTER, data) as Promise<{
+      success: true;
+    }>,
   updateBrowserWorkbenchStatus: (data: {
     taskId: string;
     sessionId?: string;
     webContentsId?: number;
     url?: string;
     title?: string;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_STATUS, data) as Promise<{ success: true }>,
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_STATUS, data) as Promise<{ success: true }>,
   captureBrowserWorkbenchScreenshot: (data: {
     taskId: string;
     sessionId?: string;
@@ -2162,20 +2172,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     sessionId?: string;
     x: number;
     y: number;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_INSPECT_POINT, data) as Promise<{
-    success: boolean;
-    target?: BrowserWorkbenchInspectTarget;
-    error?: string;
-  }>,
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_INSPECT_POINT, data) as Promise<{
+      success: boolean;
+      target?: BrowserWorkbenchInspectTarget;
+      error?: string;
+    }>,
   resolveBrowserWorkbenchAnnotationTargets: (data: {
     taskId: string;
     sessionId?: string;
     targets: BrowserAnnotationTargetRef[];
-  }) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_RESOLVE_ANNOTATION_TARGETS, data) as Promise<{
-    success: boolean;
-    targets?: BrowserAnnotationTargetResolveResult[];
-    error?: string;
-  }>,
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_RESOLVE_ANNOTATION_TARGETS, data) as Promise<{
+      success: boolean;
+      targets?: BrowserAnnotationTargetResolveResult[];
+      error?: string;
+    }>,
   createAnnotation: (data: AnnotationCreateInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.ANNOTATION_CREATE, data) as Promise<Annotation>,
   listAnnotations: (query: AnnotationListQuery) =>
@@ -2183,7 +2195,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   updateAnnotation: (id: string, patch: AnnotationUpdateInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.ANNOTATION_UPDATE, { id, patch }) as Promise<Annotation | null>,
   resolveAnnotation: (id: string, resolvedByEventId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.ANNOTATION_RESOLVE, { id, resolvedByEventId }) as Promise<Annotation | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.ANNOTATION_RESOLVE, {
+      id,
+      resolvedByEventId,
+    }) as Promise<Annotation | null>,
   dismissAnnotation: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ANNOTATION_DISMISS, { id }) as Promise<Annotation | null>,
   onBrowserWorkbenchOpenRequest: (callback: (request: BrowserWorkbenchOpenRequest) => void) => {
@@ -2201,8 +2216,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_VIEWPORT, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_VIEWPORT, handler);
   },
-  ingestYouTubeVideo: (data: { workspaceId: string; url: string; language?: string; force?: boolean }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_INGEST_VIDEO, data),
+  ingestYouTubeVideo: (data: {
+    workspaceId: string;
+    url: string;
+    language?: string;
+    force?: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_INGEST_VIDEO, data),
   askYouTubeVideo: (data: {
     workspaceId: string;
     question: string;
@@ -2212,12 +2231,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     limit?: number;
     force?: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_ASK_VIDEO, data),
-  searchYouTubeSegments: (data: { workspaceId: string; query: string; videoIds?: string[]; limit?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_SEARCH_SEGMENTS, data),
+  searchYouTubeSegments: (data: {
+    workspaceId: string;
+    query: string;
+    videoIds?: string[];
+    limit?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_SEARCH_SEGMENTS, data),
   listYouTubeVideos: (data: { workspaceId: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.YOUTUBE_LIST_VIDEOS, data),
   getLlmWikiVaultSummary: (data: { workspacePath: string; vaultPath?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LLM_WIKI_GET_VAULT_SUMMARY, data) as Promise<LlmWikiVaultSummary>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.LLM_WIKI_GET_VAULT_SUMMARY,
+      data,
+    ) as Promise<LlmWikiVaultSummary>,
   importFilesToWorkspace: (data: { workspaceId: string; files: string[] }) =>
     ipcRenderer.invoke(IPC_CHANNELS.FILE_IMPORT_TO_WORKSPACE, data),
   importDataToWorkspace: (data: {
@@ -2225,9 +2251,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     files: Array<{ name: string; data: string; mimeType?: string }>;
   }) => ipcRenderer.invoke(IPC_CHANNELS.FILE_IMPORT_DATA_TO_WORKSPACE, data),
   openDocumentEditorSession: (data: { filePath: string; workspacePath?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_OPEN_EDITOR_SESSION, data) as Promise<DocumentEditorSession>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.DOCUMENT_OPEN_EDITOR_SESSION,
+      data,
+    ) as Promise<DocumentEditorSession>,
   listDocumentVersions: (data: { filePath: string; workspacePath?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_LIST_VERSIONS, data) as Promise<DocumentVersionEntry[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_LIST_VERSIONS, data) as Promise<
+      DocumentVersionEntry[]
+    >,
   startDocumentEditTask: (data: DocumentEditRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_START_EDIT_TASK, data),
   getMailboxSyncStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_SYNC_STATUS),
@@ -2237,51 +2268,78 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SYNC, { limit, source }),
   listMailboxThreads: (query?: MailboxListThreadsInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_LIST_THREADS, query),
-  getMailboxThread: (threadId: string) => ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_THREAD, threadId),
+  getMailboxThread: (threadId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_THREAD, threadId),
   listMailboxEvents: (limit?: number, threadId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_LIST_EVENTS, { limit, threadId }) as Promise<MailboxEvent[]>,
-  listMailboxAutomations: (query?: {
-    workspaceId?: string;
-    threadId?: string;
-  }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_LIST, query) as Promise<MailboxAutomationRecord[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_LIST_EVENTS, { limit, threadId }) as Promise<
+      MailboxEvent[]
+    >,
+  listMailboxAutomations: (query?: { workspaceId?: string; threadId?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_LIST, query) as Promise<
+      MailboxAutomationRecord[]
+    >,
   listThreadMailboxAutomations: (threadId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_LIST_THREAD, threadId) as Promise<MailboxAutomationRecord[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_LIST_THREAD, threadId) as Promise<
+      MailboxAutomationRecord[]
+    >,
   createMailboxRule: (recipe: MailboxRuleRecipe) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_CREATE_RULE, { recipe }) as Promise<MailboxAutomationRecord>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_CREATE_RULE, {
+      recipe,
+    }) as Promise<MailboxAutomationRecord>,
   updateMailboxRule: (
     id: string,
     patch: Partial<MailboxRuleRecipe> & { status?: MailboxAutomationStatus },
   ) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_UPDATE_RULE, { id, patch }) as Promise<MailboxAutomationRecord | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_UPDATE_RULE, {
+      id,
+      patch,
+    }) as Promise<MailboxAutomationRecord | null>,
   deleteMailboxRule: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_DELETE_RULE, id) as Promise<boolean>,
   createMailboxSchedule: (recipe: MailboxScheduleRecipe) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_CREATE_SCHEDULE, { recipe }) as Promise<MailboxAutomationRecord>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_CREATE_SCHEDULE, {
+      recipe,
+    }) as Promise<MailboxAutomationRecord>,
   updateMailboxSchedule: (
     id: string,
     patch: Partial<MailboxScheduleRecipe> & { status?: MailboxAutomationStatus },
   ) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_UPDATE_SCHEDULE, { id, patch }) as Promise<MailboxAutomationRecord | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_UPDATE_SCHEDULE, {
+      id,
+      patch,
+    }) as Promise<MailboxAutomationRecord | null>,
   deleteMailboxSchedule: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_DELETE_SCHEDULE, id) as Promise<boolean>,
   createMailboxForward: (recipe: MailboxForwardRecipe) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_CREATE_FORWARD, { recipe }) as Promise<MailboxAutomationRecord>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_CREATE_FORWARD, {
+      recipe,
+    }) as Promise<MailboxAutomationRecord>,
   updateMailboxForward: (
     id: string,
     patch: Partial<MailboxForwardRecipe> & { status?: MailboxAutomationStatus },
   ) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_UPDATE_FORWARD, { id, patch }) as Promise<MailboxAutomationRecord | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_UPDATE_FORWARD, {
+      id,
+      patch,
+    }) as Promise<MailboxAutomationRecord | null>,
   deleteMailboxForward: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_DELETE_FORWARD, id) as Promise<boolean>,
   runMailboxForward: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_AUTOMATION_RUN_FORWARD, id) as Promise<string>,
   getMailboxDigest: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_DIGEST, { workspaceId }) as Promise<MailboxDigestSnapshot>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_DIGEST, {
+      workspaceId,
+    }) as Promise<MailboxDigestSnapshot>,
   getMailboxTodayDigest: (input?: { limitPerBucket?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_TODAY_DIGEST, input || {}) as Promise<MailboxTodayDigest>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MAILBOX_TODAY_DIGEST,
+      input || {},
+    ) as Promise<MailboxTodayDigest>,
   getMailboxSenderCleanupDigest: (input?: { limit?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SENDER_CLEANUP_DIGEST, input || {}) as Promise<MailboxSenderCleanupDigest>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MAILBOX_SENDER_CLEANUP_DIGEST,
+      input || {},
+    ) as Promise<MailboxSenderCleanupDigest>,
   askMailbox: (input: MailboxAskInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ASK, input) as Promise<MailboxAskResult>,
   onMailboxAskEvent: (callback: (event: MailboxAskRunEvent) => void) => {
@@ -2290,29 +2348,53 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MAILBOX_ASK_EVENT, subscription);
   },
   extractMailboxAttachmentText: (attachmentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ATTACHMENT_EXTRACT_TEXT, { attachmentId }) as Promise<MailboxAttachmentRecord>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ATTACHMENT_EXTRACT_TEXT, {
+      attachmentId,
+    }) as Promise<MailboxAttachmentRecord>,
   getMailboxDraft: (draftId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_DRAFT, { draftId }) as Promise<MailboxComposeDraft | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_GET_DRAFT, {
+      draftId,
+    }) as Promise<MailboxComposeDraft | null>,
   createMailboxDraft: (input: MailboxComposeDraftInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_CREATE_DRAFT, input) as Promise<MailboxComposeDraft>,
   updateMailboxDraft: (draftId: string, patch: MailboxComposeDraftPatch) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UPDATE_DRAFT, { draftId, patch }) as Promise<MailboxComposeDraft>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UPDATE_DRAFT, {
+      draftId,
+      patch,
+    }) as Promise<MailboxComposeDraft>,
   addMailboxDraftAttachment: (draftId: string, input: MailboxDraftAttachmentInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ADD_DRAFT_ATTACHMENT, { draftId, input }) as Promise<MailboxComposeDraft>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_ADD_DRAFT_ATTACHMENT, {
+      draftId,
+      input,
+    }) as Promise<MailboxComposeDraft>,
   removeMailboxDraftAttachment: (draftId: string, attachmentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_REMOVE_DRAFT_ATTACHMENT, { draftId, attachmentId }) as Promise<MailboxComposeDraft>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_REMOVE_DRAFT_ATTACHMENT, {
+      draftId,
+      attachmentId,
+    }) as Promise<MailboxComposeDraft>,
   sendMailboxDraft: (draftId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SEND_DRAFT, { draftId }) as Promise<MailboxOutgoingMessage>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SEND_DRAFT, {
+      draftId,
+    }) as Promise<MailboxOutgoingMessage>,
   scheduleMailboxSend: (draftId: string, scheduledAt: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SCHEDULE_SEND, { draftId, scheduledAt }) as Promise<MailboxComposeDraft>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SCHEDULE_SEND, {
+      draftId,
+      scheduledAt,
+    }) as Promise<MailboxComposeDraft>,
   updateMailboxClientSettings: (patch: MailboxClientSettingsPatch) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UPDATE_CLIENT_SETTINGS, patch) as Promise<MailboxClientState["settings"]>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UPDATE_CLIENT_SETTINGS, patch) as Promise<
+      MailboxClientState["settings"]
+    >,
   retryMailboxAction: (actionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RETRY_ACTION, { actionId }) as Promise<MailboxQueuedAction>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RETRY_ACTION, {
+      actionId,
+    }) as Promise<MailboxQueuedAction>,
   discardMailboxDraft: (draftId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_DISCARD_COMPOSE_DRAFT, { draftId }) as Promise<boolean>,
   undoMailboxAction: (actionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UNDO_ACTION, { actionId }) as Promise<MailboxQueuedAction>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UNDO_ACTION, {
+      actionId,
+    }) as Promise<MailboxQueuedAction>,
   summarizeMailboxThread: (threadId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SUMMARIZE_THREAD, { threadId }),
   generateMailboxDraft: (threadId: string, options?: MailboxDraftOptions) =>
@@ -2326,13 +2408,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
   researchMailboxContact: (threadId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RESEARCH_CONTACT, { threadId }),
   resolveMailboxContactIdentity: (threadId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_RESOLVE, { threadId }) as Promise<ContactIdentityResolution | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_RESOLVE, {
+      threadId,
+    }) as Promise<ContactIdentityResolution | null>,
   getContactIdentity: (contactIdentityId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_GET, { contactIdentityId }) as Promise<ContactIdentity | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_GET, {
+      contactIdentityId,
+    }) as Promise<ContactIdentity | null>,
   listContactIdentities: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_LIST, { workspaceId }) as Promise<ContactIdentity[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_LIST, { workspaceId }) as Promise<
+      ContactIdentity[]
+    >,
   searchIdentityLinkTargets: (workspaceId: string, query: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_SEARCH, { workspaceId, query, limit }) as Promise<ContactIdentitySearchResult[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_SEARCH, {
+      workspaceId,
+      query,
+      limit,
+    }) as Promise<ContactIdentitySearchResult[]>,
   linkIdentityHandle: (input: {
     workspaceId: string;
     contactIdentityId: string;
@@ -2344,21 +2436,37 @@ contextBridge.exposeInMainWorld("electronAPI", {
     channelType?: string;
     channelUserId?: string;
   }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_LINK, input) as Promise<ContactIdentity | null>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MAILBOX_IDENTITY_LINK,
+      input,
+    ) as Promise<ContactIdentity | null>,
   getMailboxRelationshipTimeline: (query: RelationshipTimelineQuery) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_TIMELINE, query) as Promise<RelationshipTimelineEvent[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_TIMELINE, query) as Promise<
+      RelationshipTimelineEvent[]
+    >,
   listIdentityCandidates: (workspaceId?: string, status?: ContactIdentityCandidate["status"]) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_CANDIDATES, { workspaceId, status }) as Promise<ContactIdentityCandidate[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_CANDIDATES, {
+      workspaceId,
+      status,
+    }) as Promise<ContactIdentityCandidate[]>,
   confirmIdentityLink: (candidateId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_CONFIRM, { candidateId }) as Promise<ContactIdentityCandidate | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_CONFIRM, {
+      candidateId,
+    }) as Promise<ContactIdentityCandidate | null>,
   rejectIdentityLink: (candidateId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_REJECT, { candidateId }) as Promise<ContactIdentityCandidate | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_REJECT, {
+      candidateId,
+    }) as Promise<ContactIdentityCandidate | null>,
   unlinkIdentityHandle: (handleId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_UNLINK, { handleId }) as Promise<boolean>,
   getChannelPreferenceSummary: (contactIdentityId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_PREFERENCE, { contactIdentityId }) as Promise<ChannelPreferenceSummary>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_PREFERENCE, {
+      contactIdentityId,
+    }) as Promise<ChannelPreferenceSummary>,
   getContactIdentityCoverageStats: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_COVERAGE, { workspaceId }) as Promise<ContactIdentityCoverageStats>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_IDENTITY_COVERAGE, {
+      workspaceId,
+    }) as Promise<ContactIdentityCoverageStats>,
   replyViaChannel: (input: {
     threadId: string;
     handleId: string;
@@ -2371,14 +2479,26 @@ contextBridge.exposeInMainWorld("electronAPI", {
       target: ContactIdentityReplyTarget;
     }>,
   previewMailboxMissionControlHandoff: (threadId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_MC_HANDOFF_PREVIEW, { threadId }) as Promise<MailboxMissionControlHandoffPreview | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_MC_HANDOFF_PREVIEW, {
+      threadId,
+    }) as Promise<MailboxMissionControlHandoffPreview | null>,
   createMailboxMissionControlHandoff: (request: MailboxMissionControlHandoffRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_MC_HANDOFF_CREATE, request) as Promise<MailboxMissionControlHandoffRecord>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MAILBOX_MC_HANDOFF_CREATE,
+      request,
+    ) as Promise<MailboxMissionControlHandoffRecord>,
   listMailboxMissionControlHandoffs: (threadId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_MC_HANDOFF_LIST, { threadId }) as Promise<MailboxMissionControlHandoffRecord[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_MC_HANDOFF_LIST, { threadId }) as Promise<
+      MailboxMissionControlHandoffRecord[]
+    >,
   listMailboxSnippets: () =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SNIPPETS_LIST) as Promise<MailboxSnippetRecord[]>,
-  upsertMailboxSnippet: (input: { id?: string; shortcut: string; body: string; subjectHint?: string }) =>
+  upsertMailboxSnippet: (input: {
+    id?: string;
+    shortcut: string;
+    body: string;
+    subjectHint?: string;
+  }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SNIPPET_UPSERT, input) as Promise<MailboxSnippetRecord>,
   deleteMailboxSnippet: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SNIPPET_DELETE, { id }) as Promise<boolean>,
@@ -2390,21 +2510,34 @@ contextBridge.exposeInMainWorld("electronAPI", {
     seedThreadId?: string;
     threadIds: string[];
     showInInbox?: boolean;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SAVED_VIEW_CREATE, input) as Promise<MailboxSavedViewRecord>,
+  }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MAILBOX_SAVED_VIEW_CREATE,
+      input,
+    ) as Promise<MailboxSavedViewRecord>,
   deleteMailboxSavedView: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SAVED_VIEW_DELETE, { id }) as Promise<boolean>,
-  previewMailboxSavedViewSimilar: (input: { seedThreadId: string; name: string; instructions: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SAVED_VIEW_PREVIEW_SIMILAR, input) as Promise<MailboxSavedViewPreviewResult>,
+  previewMailboxSavedViewSimilar: (input: {
+    seedThreadId: string;
+    name: string;
+    instructions: string;
+  }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MAILBOX_SAVED_VIEW_PREVIEW_SIMILAR,
+      input,
+    ) as Promise<MailboxSavedViewPreviewResult>,
   getMailboxQuickReplySuggestions: (threadId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_QUICK_REPLY_SUGGESTIONS, { threadId }) as Promise<MailboxQuickReplySuggestionsResult>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_QUICK_REPLY_SUGGESTIONS, {
+      threadId,
+    }) as Promise<MailboxQuickReplySuggestionsResult>,
   createMailboxSavedViewReviewSchedule: (viewId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SAVED_VIEW_REVIEW_SCHEDULE, { viewId }) as Promise<MailboxAutomationRecord>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_SAVED_VIEW_REVIEW_SCHEDULE, {
+      viewId,
+    }) as Promise<MailboxAutomationRecord>,
   applyMailboxAction: (input: MailboxApplyActionInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_APPLY_ACTION, input),
-  updateMailboxCommitmentState: (
-    commitmentId: string,
-    state: MailboxCommitmentState,
-  ) => ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UPDATE_COMMITMENT_STATE, { commitmentId, state }),
+  updateMailboxCommitmentState: (commitmentId: string, state: MailboxCommitmentState) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UPDATE_COMMITMENT_STATE, { commitmentId, state }),
   updateMailboxCommitmentDetails: (
     commitmentId: string,
     patch: {
@@ -2416,9 +2549,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
   ) => ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UPDATE_COMMITMENT_DETAILS, { commitmentId, patch }),
   reclassifyMailboxThread: (threadId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RECLASSIFY_THREAD, { threadId }) as Promise<MailboxReclassifyResult>,
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RECLASSIFY_THREAD, {
+      threadId,
+    }) as Promise<MailboxReclassifyResult>,
   reclassifyMailboxAccount: (input: MailboxReclassifyInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RECLASSIFY_ACCOUNT, input) as Promise<MailboxReclassifyResult>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MAILBOX_RECLASSIFY_ACCOUNT,
+      input,
+    ) as Promise<MailboxReclassifyResult>,
   onMailboxEvent: (callback: (event: MailboxEvent) => void) => {
     const subscription = (_: Any, data: MailboxEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.MAILBOX_EVENT, subscription);
@@ -2432,8 +2570,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Task APIs
   createTask: (data: Any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CREATE, data),
-  getTask: (id: string) =>
-    invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_GET, id),
+  getTask: (id: string) => invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_GET, id),
   listTasks: (opts?: {
     limit?: number;
     offset?: number;
@@ -2447,8 +2584,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       updatedAt?: number;
       createdAt?: number;
     };
-  }) =>
-    invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_LIST, opts),
+  }) => invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_LIST, opts),
   listSidebarTasks: (opts?: {
     limit?: number;
     offset?: number;
@@ -2462,8 +2598,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       updatedAt?: number;
       createdAt?: number;
     };
-  }) =>
-    invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_LIST_SIDEBAR, opts),
+  }) => invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_LIST_SIDEBAR, opts),
   exportTasksJson: (query?: Any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_EXPORT_JSON, query),
   toggleTaskPin: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PIN, taskId),
   cancelTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CANCEL, id),
@@ -2511,10 +2646,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       request,
     ),
   getTaskEventDetail: (request: TaskEventDetailRequest) =>
-    invokeTaskIpcWithRendererTiming<TaskEventDetailResult>(
-      IPC_CHANNELS.TASK_EVENT_DETAIL,
-      request,
-    ),
+    invokeTaskIpcWithRendererTiming<TaskEventDetailResult>(IPC_CHANNELS.TASK_EVENT_DETAIL, request),
   getTaskLearningProgress: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_LEARNING_PROGRESS, taskId) as Promise<
       TaskLearningProgress[]
@@ -2526,7 +2658,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   listTaskTraceRuns: (request?: import("../shared/types").ListTaskTraceRunsRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_TRACE_LIST, request) as Promise<TaskTraceRunSummary[]>,
   getTaskTraceRun: (taskId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_TRACE_GET, taskId) as Promise<TaskTraceRunDetail | undefined>,
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_TRACE_GET, taskId) as Promise<
+      TaskTraceRunDetail | undefined
+    >,
 
   // Send follow-up message to a task (optionally with image attachments)
   sendMessage: (
@@ -2581,7 +2715,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
 
   // Approval APIs
-  respondToApproval: (data: ApprovalResponse) => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_RESPOND, data),
+  respondToApproval: (data: ApprovalResponse) =>
+    ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_RESPOND, data),
   setSessionAutoApprove: (enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_SET, enabled),
   getSessionAutoApprove: () => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_GET),
@@ -2605,21 +2740,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
     status?: ManagedAgent["status"];
   }) => ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_LIST_IPC, params) as Promise<ManagedAgent[]>,
   getManagedAgent: (agentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_GET_IPC, agentId) as Promise<
-      { agent: ManagedAgent; currentVersion?: ManagedAgentVersion } | null
-    >,
+    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_GET_IPC, agentId) as Promise<{
+      agent: ManagedAgent;
+      currentVersion?: ManagedAgentVersion;
+    } | null>,
   getManagedAgentRuntimeToolCatalog: (agentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_RUNTIME_TOOL_CATALOG_IPC, agentId) as Promise<
-      ManagedAgentRuntimeToolCatalog
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_RUNTIME_TOOL_CATALOG_IPC,
+      agentId,
+    ) as Promise<ManagedAgentRuntimeToolCatalog>,
   generateManagedAgentPlan: (request: AgentBuilderPlanRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_GENERATE_PLAN_IPC, request) as Promise<
-      AgentBuilderPlan
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_GENERATE_PLAN_IPC,
+      request,
+    ) as Promise<AgentBuilderPlan>,
   createManagedAgentFromPlan: (request: AgentBuilderCreateRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_CREATE_FROM_PLAN_IPC, request) as Promise<
-      AgentBuilderCreateResult
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_CREATE_FROM_PLAN_IPC,
+      request,
+    ) as Promise<AgentBuilderCreateResult>,
   createManagedAgent: (request: {
     name: string;
     description?: string;
@@ -2654,57 +2793,66 @@ contextBridge.exposeInMainWorld("electronAPI", {
       version: ManagedAgentVersion;
     }>,
   archiveManagedAgent: (agentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_ARCHIVE_IPC, agentId) as Promise<
-      ManagedAgent | null
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_ARCHIVE_IPC,
+      agentId,
+    ) as Promise<ManagedAgent | null>,
   publishManagedAgent: (agentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_PUBLISH_IPC, agentId) as Promise<
-      ManagedAgent | null
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_PUBLISH_IPC,
+      agentId,
+    ) as Promise<ManagedAgent | null>,
   suspendManagedAgent: (agentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_SUSPEND_IPC, agentId) as Promise<
-      ManagedAgent | null
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_SUSPEND_IPC,
+      agentId,
+    ) as Promise<ManagedAgent | null>,
   listManagedAgentRoutines: (agentId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_ROUTINE_LIST_IPC, agentId) as Promise<
       ManagedAgentRoutineRecord[]
     >,
   createManagedAgentRoutine: (request: CreateManagedAgentRoutineRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_ROUTINE_CREATE_IPC, request) as Promise<
-      ManagedAgentRoutineRecord
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_ROUTINE_CREATE_IPC,
+      request,
+    ) as Promise<ManagedAgentRoutineRecord>,
   updateManagedAgentRoutine: (request: UpdateManagedAgentRoutineRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_ROUTINE_UPDATE_IPC, request) as Promise<
-      ManagedAgentRoutineRecord
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_ROUTINE_UPDATE_IPC,
+      request,
+    ) as Promise<ManagedAgentRoutineRecord>,
   deleteManagedAgentRoutine: (agentId: string, routineId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_ROUTINE_DELETE_IPC, {
       agentId,
       routineId,
     }) as Promise<boolean>,
   getManagedAgentInsights: (agentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_INSIGHTS_GET_IPC, agentId) as Promise<
-      ManagedAgentInsights
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_INSIGHTS_GET_IPC,
+      agentId,
+    ) as Promise<ManagedAgentInsights>,
   listManagedAgentAuditEntries: (agentId: string, limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_AUDIT_LIST_IPC, {
       agentId,
       limit,
     }) as Promise<ManagedAgentAuditEntry[]>,
   getManagedAgentSlackDeploymentHealth: (agentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_SLACK_HEALTH_GET_IPC, agentId) as Promise<
-      ManagedAgentSlackDeploymentHealth
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_SLACK_HEALTH_GET_IPC,
+      agentId,
+    ) as Promise<ManagedAgentSlackDeploymentHealth>,
   convertAgentRoleToManagedAgent: (request: ConvertAgentRoleToManagedAgentRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_CONVERT_ROLE_IPC, request) as Promise<
-      ManagedAgentConversionResult
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_CONVERT_ROLE_IPC,
+      request,
+    ) as Promise<ManagedAgentConversionResult>,
   convertAutomationProfileToManagedAgent: (
     request: ConvertAutomationProfileToManagedAgentRequest,
   ) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_AGENT_CONVERT_AUTOMATION_IPC, request) as Promise<
-      ManagedAgentConversionResult
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_AGENT_CONVERT_AUTOMATION_IPC,
+      request,
+    ) as Promise<ManagedAgentConversionResult>,
   listManagedEnvironments: (params?: {
     limit?: number;
     offset?: number;
@@ -2714,29 +2862,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ManagedEnvironment[]
     >,
   getManagedEnvironment: (environmentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_ENVIRONMENT_GET_IPC, environmentId) as Promise<
-      ManagedEnvironment | null
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_ENVIRONMENT_GET_IPC,
+      environmentId,
+    ) as Promise<ManagedEnvironment | null>,
   createManagedEnvironment: (request: {
     name: string;
     kind?: ManagedEnvironment["kind"];
     config: ManagedEnvironment["config"];
   }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_ENVIRONMENT_CREATE_IPC, request) as Promise<
-      ManagedEnvironment
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_ENVIRONMENT_CREATE_IPC,
+      request,
+    ) as Promise<ManagedEnvironment>,
   updateManagedEnvironment: (request: {
     environmentId: string;
     name?: string;
     config?: Partial<ManagedEnvironment["config"]>;
   }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_ENVIRONMENT_UPDATE_IPC, request) as Promise<
-      ManagedEnvironment | null
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_ENVIRONMENT_UPDATE_IPC,
+      request,
+    ) as Promise<ManagedEnvironment | null>,
   archiveManagedEnvironment: (environmentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_ENVIRONMENT_ARCHIVE_IPC, environmentId) as Promise<
-      ManagedEnvironment | null
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_ENVIRONMENT_ARCHIVE_IPC,
+      environmentId,
+    ) as Promise<ManagedEnvironment | null>,
   listManagedSessions: (params?: {
     limit?: number;
     offset?: number;
@@ -2747,9 +2899,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_LIST_IPC, params) as Promise<ManagedSession[]>,
   getManagedSession: (sessionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_GET_IPC, sessionId) as Promise<
-      ManagedSession | null
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_SESSION_GET_IPC,
+      sessionId,
+    ) as Promise<ManagedSession | null>,
   createManagedSession: (request: ManagedSessionCreateInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_CREATE_IPC, request) as Promise<ManagedSession>,
   sendManagedSessionUserMessage: (request: ManagedSessionUserMessageRequest) =>
@@ -2771,9 +2924,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       limit,
     }) as Promise<ManagedSessionEvent[]>,
   getManagedSessionWorkpaper: (sessionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_WORKPAPER_GET_IPC, sessionId) as Promise<
-      ManagedSessionWorkpaper
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MANAGED_SESSION_WORKPAPER_GET_IPC,
+      sessionId,
+    ) as Promise<ManagedSessionWorkpaper>,
   listAgentTemplates: () =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_TEMPLATE_LIST) as Promise<AgentTemplate[]>,
   listAgentWorkspaceMemberships: (workspaceId?: string) =>
@@ -2785,9 +2939,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     principalId: string;
     role: AgentWorkspaceMembership["role"];
   }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AGENT_WORKSPACE_MEMBERSHIP_UPDATE_IPC, request) as Promise<
-      AgentWorkspaceMembership
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_WORKSPACE_MEMBERSHIP_UPDATE_IPC,
+      request,
+    ) as Promise<AgentWorkspaceMembership>,
   getMyAgentWorkspacePermissions: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_WORKSPACE_PERMISSION_SNAPSHOT_IPC, {
       workspaceId,
@@ -2809,15 +2964,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     addReferencePhotoPaths?: string[];
     removeReferencePhotoIds?: string[];
   }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMAGE_GEN_PROFILE_UPDATE, request) as Promise<
-      ImageGenProfile | null
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.IMAGE_GEN_PROFILE_UPDATE,
+      request,
+    ) as Promise<ImageGenProfile | null>,
   deleteImageGenProfile: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.IMAGE_GEN_PROFILE_DELETE, id) as Promise<boolean>,
-  generateManagedSessionAudioSummary: (
-    sessionId: string,
-    config?: Partial<AudioSummaryConfig>,
-  ) =>
+  generateManagedSessionAudioSummary: (sessionId: string, config?: Partial<AudioSummaryConfig>) =>
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_GENERATE_AUDIO_SUMMARY, {
       sessionId,
       config,
@@ -3051,11 +3204,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     displayName?: string;
     clientId?: string;
   }) => ipcRenderer.invoke(IPC_CHANNELS.AGENTMAIL_CREATE_INBOX, payload),
-  updateAgentMailInbox: (payload: {
-    workspaceId: string;
-    inboxId: string;
-    displayName: string;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.AGENTMAIL_UPDATE_INBOX, payload),
+  updateAgentMailInbox: (payload: { workspaceId: string; inboxId: string; displayName: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENTMAIL_UPDATE_INBOX, payload),
   deleteAgentMailInbox: (payload: { workspaceId: string; inboxId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENTMAIL_DELETE_INBOX, payload),
   listAgentMailDomains: (workspaceId: string) =>
@@ -3217,8 +3367,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_IMPORT, data),
   getPersonalityPreview: (draft: Any, contextMode?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_PREVIEW, draft, contextMode),
-  getPersonalityTraitPresets: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_TRAIT_PRESETS),
+  getPersonalityTraitPresets: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_TRAIT_PRESETS),
   onPersonalitySettingsChanged: (callback: (settings: Any) => void) => {
     const subscription = (_: Any, data: Any) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.PERSONALITY_SETTINGS_CHANGED, subscription);
@@ -3361,10 +3510,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SECURE_MCP_TUNNELS_DELETE, id),
   startSecureMcpTunnel: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SECURE_MCP_TUNNELS_START, id),
-  stopSecureMcpTunnel: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SECURE_MCP_TUNNELS_STOP, id),
-  getSecureMcpTunnelStatus: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.SECURE_MCP_TUNNELS_GET_STATUS),
+  stopSecureMcpTunnel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.SECURE_MCP_TUNNELS_STOP, id),
+  getSecureMcpTunnelStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SECURE_MCP_TUNNELS_GET_STATUS),
   getSecureMcpTunnelAudit: (id?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SECURE_MCP_TUNNELS_GET_AUDIT, id),
   onSecureMcpTunnelStatusChange: (callback: (status: Any[]) => void) => {
@@ -3406,11 +3553,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveChronicleSettings: (settings: Partial<ChronicleSettings>) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_SAVE_SETTINGS, settings),
   getChronicleStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_GET_STATUS),
-  queryChronicleRecentContext: (input: {
-    query: string;
-    limit?: number;
-    useFallback?: boolean;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_QUERY_RECENT_CONTEXT, input),
+  queryChronicleRecentContext: (input: { query: string; limit?: number; useFallback?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_QUERY_RECENT_CONTEXT, input),
   listChronicleObservations: (input: { workspaceId: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_LIST_OBSERVATIONS, input),
   deleteChronicleObservation: (input: { workspaceId: string; observationId: string }) =>
@@ -3490,19 +3634,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getCronWebhookStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CRON_GET_WEBHOOK_STATUS),
   listCouncils: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_LIST, { workspaceId }) as Promise<CouncilConfig[]>,
-  getCouncil: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_GET, id) as Promise<CouncilConfig | null>,
+  getCouncil: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_GET, id) as Promise<CouncilConfig | null>,
   createCouncil: (data: CreateCouncilConfigRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_CREATE, data) as Promise<CouncilConfig>,
   updateCouncil: (data: UpdateCouncilConfigRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_UPDATE, data) as Promise<CouncilConfig | null>,
-  deleteCouncil: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_DELETE, id) as Promise<boolean>,
-  runCouncilNow: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_RUN_NOW, id) as Promise<CouncilRun | null>,
+  deleteCouncil: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_DELETE, id) as Promise<boolean>,
+  runCouncilNow: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_RUN_NOW, id) as Promise<CouncilRun | null>,
   listCouncilRuns: (payload: { councilConfigId: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_LIST_RUNS, payload) as Promise<CouncilRun[]>,
   getCouncilMemo: (query: string | { id?: string; councilConfigId?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_GET_MEMO, query) as Promise<CouncilMemo | null>,
   setCouncilEnabled: (id: string, enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_SET_ENABLED, { id, enabled }) as Promise<CouncilConfig | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_SET_ENABLED, {
+      id,
+      enabled,
+    }) as Promise<CouncilConfig | null>,
 
   // Notification APIs
   listNotifications: () => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_LIST),
@@ -3611,9 +3761,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Device Fleet
   listManagedDevices: () => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_LIST_MANAGED),
-  getDeviceSummary: (deviceId: string) => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_GET_SUMMARY, deviceId),
+  getDeviceSummary: (deviceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DEVICE_GET_SUMMARY, deviceId),
   connectDevice: (deviceId: string) => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_CONNECT, deviceId),
-  disconnectDevice: (deviceId: string) => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_DISCONNECT, deviceId),
+  disconnectDevice: (deviceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DEVICE_DISCONNECT, deviceId),
   deviceProxyRequest: (request: DeviceProxyRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.DEVICE_PROXY_REQUEST, request),
 
@@ -3677,8 +3829,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
 
   // Device Management APIs
-  deviceListTasks: (nodeId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.DEVICE_LIST_TASKS, nodeId),
+  deviceListTasks: (nodeId: string) => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_LIST_TASKS, nodeId),
   deviceListFiles: (params: { nodeId: string; workspaceId: string; path?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.DEVICE_LIST_FILES, params),
   deviceListRemoteWorkspaces: (nodeId: string) =>
@@ -3691,8 +3842,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     shellAccess?: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_ASSIGN_TASK, params),
   deviceGetProfiles: () => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_GET_PROFILES),
-  deviceUpdateProfile: (deviceId: string, data: { customName?: string; platform?: string; modelIdentifier?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.DEVICE_UPDATE_PROFILE, deviceId, data),
+  deviceUpdateProfile: (
+    deviceId: string,
+    data: { customName?: string; platform?: string; modelIdentifier?: string },
+  ) => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_UPDATE_PROFILE, deviceId, data),
 
   // Memory System APIs
   getMemorySettings: (workspaceId: string) =>
@@ -3721,8 +3874,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_UPDATE, data),
   deleteMemoryObservation: (data: { workspaceId: string; memoryId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_DELETE, data),
-  redactMemoryObservation: (data: { workspaceId: string; memoryId: string; replacement?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_REDACT, data),
+  redactMemoryObservation: (data: {
+    workspaceId: string;
+    memoryId: string;
+    replacement?: string;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_REDACT, data),
   promoteMemoryObservation: (data: {
     workspaceId: string;
     memoryId: string;
@@ -3811,7 +3967,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   listAwarenessEvents: (params?: { workspaceId?: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_LIST_EVENTS, params),
   getAutonomyConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_GET_CONFIG),
-  saveAutonomyConfig: (config: Any) => ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_SAVE_CONFIG, config),
+  saveAutonomyConfig: (config: Any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_SAVE_CONFIG, config),
   getAutonomyState: (workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_GET_STATE, workspaceId),
   listAutonomyDecisions: (workspaceId?: string) =>
@@ -3851,25 +4008,40 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getImprovementEligibility: () =>
     ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_GET_ELIGIBILITY) as Promise<ImprovementEligibility>,
   saveImprovementOwnerEnrollment: (token: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_SAVE_OWNER_ENROLLMENT, token) as Promise<ImprovementEligibility>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.IMPROVEMENT_SAVE_OWNER_ENROLLMENT,
+      token,
+    ) as Promise<ImprovementEligibility>,
   clearImprovementOwnerEnrollment: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_CLEAR_OWNER_ENROLLMENT) as Promise<ImprovementEligibility>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.IMPROVEMENT_CLEAR_OWNER_ENROLLMENT,
+    ) as Promise<ImprovementEligibility>,
   saveImprovementSettings: (settings: ImprovementLoopSettings) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_SAVE_SETTINGS, settings) as Promise<ImprovementLoopSettings>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.IMPROVEMENT_SAVE_SETTINGS,
+      settings,
+    ) as Promise<ImprovementLoopSettings>,
   listImprovementCandidates: (workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_CANDIDATES, workspaceId) as Promise<
       ImprovementCandidate[]
     >,
   listImprovementCampaigns: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_RUNS, workspaceId) as Promise<ImprovementCampaign[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_LIST_RUNS, workspaceId) as Promise<
+      ImprovementCampaign[]
+    >,
   refreshImprovementCandidates: () =>
     ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_REFRESH) as Promise<{ candidateCount: number }>,
   runNextImprovementExperiment: () =>
     ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_RUN_NEXT) as Promise<ImprovementCampaign | null>,
   resetImprovementHistory: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_RESET_HISTORY) as Promise<ImprovementHistoryResetResult>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.IMPROVEMENT_RESET_HISTORY,
+    ) as Promise<ImprovementHistoryResetResult>,
   retryImprovementCampaign: (campaignId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_RETRY_RUN, campaignId) as Promise<ImprovementCampaign | null>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.IMPROVEMENT_RETRY_RUN,
+      campaignId,
+    ) as Promise<ImprovementCampaign | null>,
   dismissImprovementCandidate: (candidateId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.IMPROVEMENT_DISMISS_CANDIDATE, candidateId) as Promise<
       ImprovementCandidate | undefined
@@ -3883,7 +4055,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getSubconsciousSettings: () =>
     ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_GET_SETTINGS) as Promise<SubconsciousSettings>,
   saveSubconsciousSettings: (settings: SubconsciousSettings) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_SAVE_SETTINGS, settings) as Promise<SubconsciousSettings>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SUBCONSCIOUS_SAVE_SETTINGS,
+      settings,
+    ) as Promise<SubconsciousSettings>,
   getSubconsciousBrain: () =>
     ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_GET_BRAIN) as Promise<SubconsciousBrainSummary>,
   listSubconsciousTargets: (workspaceId?: string) =>
@@ -3891,17 +4066,26 @@ contextBridge.exposeInMainWorld("electronAPI", {
       SubconsciousTargetSummary[]
     >,
   listSubconsciousRuns: (targetKey?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_LIST_RUNS, targetKey) as Promise<SubconsciousRun[]>,
-  getSubconsciousTargetDetail: (targetKey: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_GET_TARGET_DETAIL, targetKey) as Promise<
-      SubconsciousTargetDetail | null
+    ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_LIST_RUNS, targetKey) as Promise<
+      SubconsciousRun[]
     >,
+  getSubconsciousTargetDetail: (targetKey: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SUBCONSCIOUS_GET_TARGET_DETAIL,
+      targetKey,
+    ) as Promise<SubconsciousTargetDetail | null>,
   refreshSubconsciousTargets: () =>
     ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_REFRESH) as Promise<SubconsciousRefreshResult>,
   runSubconsciousNow: (targetKey?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_RUN_NOW, targetKey) as Promise<SubconsciousRun | null>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SUBCONSCIOUS_RUN_NOW,
+      targetKey,
+    ) as Promise<SubconsciousRun | null>,
   retrySubconsciousRun: (runId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_RETRY_RUN, runId) as Promise<SubconsciousRun | null>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SUBCONSCIOUS_RETRY_RUN,
+      runId,
+    ) as Promise<SubconsciousRun | null>,
   reviewSubconsciousRun: (runId: string, reviewStatus: "accepted" | "dismissed") =>
     ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_REVIEW_RUN, runId, reviewStatus) as Promise<
       SubconsciousRun | undefined
@@ -3911,7 +4095,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
       SubconsciousTargetSummary | undefined
     >,
   resetSubconsciousHistory: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUBCONSCIOUS_RESET_HISTORY) as Promise<SubconsciousHistoryResetResult>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SUBCONSCIOUS_RESET_HISTORY,
+    ) as Promise<SubconsciousHistoryResetResult>,
 
   // Workspace Kit (.cowork) APIs
   getWorkspaceKitStatus: (workspaceId: string) =>
@@ -3919,7 +4105,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   initWorkspaceKit: (request: WorkspaceKitInitRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.KIT_INIT, request) as Promise<WorkspaceKitStatus>,
   applyOnboardingProfile: (request: ApplyOnboardingProfileRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.KIT_APPLY_ONBOARDING_PROFILE, request) as Promise<ApplyOnboardingProfileResult>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.KIT_APPLY_ONBOARDING_PROFILE,
+      request,
+    ) as Promise<ApplyOnboardingProfileResult>,
   createWorkspaceKitProject: (request: WorkspaceKitProjectCreateRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.KIT_PROJECT_CREATE, request) as Promise<{
       success: boolean;
@@ -4072,9 +4261,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     companyId: string;
     orgNodeId: string;
     agentRoleId: string | null;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_ORG_LINK_ROLE, request) as Promise<
-    import("../shared/types").CompanySyncState | null
-  >,
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_ORG_LINK_ROLE, request) as Promise<
+      import("../shared/types").CompanySyncState | null
+    >,
   getCommandCenterSummary: (companyId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, companyId) as Promise<
       import("../shared/types").CompanyCommandCenterSummary
@@ -4115,7 +4305,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_CREATE, input),
   updateIssue: (request: { issueId: string } & import("../shared/types").IssueUpdate) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_UPDATE, request),
-  listIssueComments: (issueId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_COMMENT_LIST, issueId),
+  listIssueComments: (issueId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MC_ISSUE_COMMENT_LIST, issueId),
   listCompanyRuns: (companyId: string, issueId?: string, limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_RUN_LIST, { companyId, issueId, limit }),
   listRunEvents: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_RUN_EVENT_LIST, runId),
@@ -4141,8 +4332,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_UPDATE_CONFIG, updates) as Promise<SymphonyConfig>,
   getSymphonyStatus: () =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_STATUS) as Promise<SymphonyStatus>,
-  runSymphony: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_RUN) as Promise<SymphonyStatus>,
+  runSymphony: () => ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_RUN) as Promise<SymphonyStatus>,
   pauseSymphony: () =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_PAUSE) as Promise<SymphonyConfig>,
 
@@ -4194,47 +4384,125 @@ contextBridge.exposeInMainWorld("electronAPI", {
   checkPackPolicy: (packId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ADMIN_POLICIES_CHECK_PACK, packId),
 
+  // Agent Security APIs
+  agentSecurityGetStatus: (refresh?: boolean) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_SECURITY_STATUS,
+      refresh,
+    ) as Promise<AgentSecurityRuntimeStatus>,
+  agentSecurityListFindings: (query?: AgentSecurityFindingQuery) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_FINDINGS_LIST, query) as Promise<
+      AgentSecurityFinding[]
+    >,
+  agentSecurityUpdateFinding: (findingId: string, status: AgentSecurityFindingStatus) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_SECURITY_FINDING_UPDATE,
+      findingId,
+      status,
+    ) as Promise<AgentSecurityFinding | null>,
+  agentSecurityListDecisions: (taskId?: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_DECISIONS_LIST, taskId, limit) as Promise<
+      AgentSecurityEnforcement[]
+    >,
+  agentSecurityListDiagnostics: (limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_DIAGNOSTICS_LIST, limit) as Promise<
+      AgentSecurityDiagnostic[]
+    >,
+  agentSecurityListInventory: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_INVENTORY_LIST) as Promise<
+      AgentSecurityInventoryItem[]
+    >,
+  agentSecurityRefreshInventory: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_INVENTORY_REFRESH) as Promise<
+      AgentSecurityInventoryItem[]
+    >,
+  agentSecurityScan: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_SCAN) as Promise<AgentSecurityScanResult>,
+  agentSecurityCheckRules: () =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_SECURITY_RULES_CHECK,
+    ) as Promise<AgentSecurityRulesCheckResult>,
+  agentSecurityHookStatus: (agent: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_SECURITY_HOOK_STATUS,
+      agent,
+    ) as Promise<AgentSecurityHookManagementResult>,
+  agentSecurityInstallHook: (agent: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_SECURITY_HOOK_INSTALL,
+      agent,
+    ) as Promise<AgentSecurityHookManagementResult>,
+  agentSecurityUninstallHook: (agent: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_SECURITY_HOOK_UNINSTALL,
+      agent,
+    ) as Promise<AgentSecurityHookManagementResult>,
+  agentSecurityBuildCase: (caseId: string, taskId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_SECURITY_CASE_BUILD,
+      caseId,
+      taskId,
+    ) as Promise<AgentSecurityCaseBuildResult>,
+  agentSecurityVerifyCase: (bundleName: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_SECURITY_CASE_VERIFY,
+      bundleName,
+    ) as Promise<AgentSecurityCaseVerifyResult>,
+  agentSecurityPrune: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_SECURITY_PRUNE) as Promise<{
+      findings: number;
+      decisions: number;
+      diagnostics: number;
+    }>,
+
   // Everyday Agent APIs
   everydayAgentGetProfile: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_GET_PROFILE) as Promise<
-      EverydayAgentProfileResult
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.EVERYDAY_AGENT_GET_PROFILE,
+    ) as Promise<EverydayAgentProfileResult>,
   everydayAgentUpdateProfile: (updates: EverydayAgentUpdateProfileRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_UPDATE_PROFILE, updates) as Promise<
-      EverydayAgentProfileResult
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.EVERYDAY_AGENT_UPDATE_PROFILE,
+      updates,
+    ) as Promise<EverydayAgentProfileResult>,
   everydayAgentAcceptConsent: (request?: {
     enabled?: boolean;
     workspaceId?: string;
     accepted?: boolean;
   }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_ACCEPT_CONSENT, request) as Promise<
-      EverydayAgentProfileResult
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.EVERYDAY_AGENT_ACCEPT_CONSENT,
+      request,
+    ) as Promise<EverydayAgentProfileResult>,
   everydayAgentPause: (scope: Partial<EverydayPauseScope>) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_PAUSE, scope) as Promise<
-      EverydayAgentProfileResult
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.EVERYDAY_AGENT_PAUSE,
+      scope,
+    ) as Promise<EverydayAgentProfileResult>,
   everydayAgentRevokeCapability: (capability: EverydayCapabilityBundle) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_REVOKE_CAPABILITY, capability) as Promise<
-      EverydayAgentProfileResult
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.EVERYDAY_AGENT_REVOKE_CAPABILITY,
+      capability,
+    ) as Promise<EverydayAgentProfileResult>,
   everydayAgentListReceipts: (request?: EverydayAgentListReceiptsRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_LIST_RECEIPTS, request) as Promise<
       EverydayActionReceipt[]
     >,
   everydayAgentClearData: (request?: EverydayAgentClearDataRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_CLEAR_DATA, request) as Promise<
-      EverydayAgentProfileResult
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.EVERYDAY_AGENT_CLEAR_DATA,
+      request,
+    ) as Promise<EverydayAgentProfileResult>,
   everydayAgentPreviewAction: (input: EverydayActionPreviewInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_PREVIEW_ACTION, input) as Promise<
-      EverydayActionPreview
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.EVERYDAY_AGENT_PREVIEW_ACTION,
+      input,
+    ) as Promise<EverydayActionPreview>,
   everydayAgentApproveAction: (request: EverydayAgentApproveActionRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_APPROVE_ACTION, request) as Promise<
-      EverydayActionReceipt
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.EVERYDAY_AGENT_APPROVE_ACTION,
+      request,
+    ) as Promise<EverydayActionReceipt>,
 
   // Agent Teams APIs
   listTeams: (workspaceId: string, includeInactive?: boolean) =>
@@ -4354,8 +4622,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.HEARTBEAT_EVENT, subscription);
   },
   listAutomationProfiles: () => ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_LIST),
-  getAutomationProfile: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_GET, id),
+  getAutomationProfile: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_GET, id),
   createAutomationProfile: (request: import("../shared/types").CreateAutomationProfileRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_CREATE, request),
   updateAutomationProfile: (request: import("../shared/types").UpdateAutomationProfileRequest) =>
@@ -4365,27 +4632,31 @@ contextBridge.exposeInMainWorld("electronAPI", {
   attachAutomationProfileToAgentRole: (
     agentRoleId: string,
     request?: Partial<import("../shared/types").CreateAutomationProfileRequest>,
-  ) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_ATTACH, agentRoleId, request),
+  ) => ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_ATTACH, agentRoleId, request),
   detachAutomationProfileFromAgentRole: (agentRoleId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_DETACH, agentRoleId),
   listHeartbeatRunsForAutomationProfile: (profileId: string, limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_LIST_HEARTBEAT_RUNS, { profileId, limit }),
   listSubconsciousRunsForAutomationProfile: (profileId: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_LIST_SUBCONSCIOUS_RUNS, { profileId, limit }),
+    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATION_PROFILE_LIST_SUBCONSCIOUS_RUNS, {
+      profileId,
+      limit,
+    }),
   listCoreTraces: (request?: import("../shared/types").ListCoreTracesRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_TRACE_LIST, request) as Promise<CoreTrace[]>,
   getCoreTrace: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_TRACE_GET, id) as Promise<GetCoreTraceResult | undefined>,
   listCoreTracesForAutomationProfile: (profileId: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_TRACE_LIST_BY_PROFILE, { profileId, limit }) as Promise<CoreTrace[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.CORE_TRACE_LIST_BY_PROFILE, { profileId, limit }) as Promise<
+      CoreTrace[]
+    >,
   listCoreFailureRecords: (request?: import("../shared/types").ListCoreFailureRecordsRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_FAILURE_LIST, request) as Promise<CoreFailureRecord[]>,
   listCoreFailureClusters: (request?: import("../shared/types").ListCoreFailureClustersRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_FAILURE_CLUSTER_LIST, request) as Promise<CoreFailureCluster[]>,
-  reviewCoreFailureCluster: (
-    request: import("../shared/types").ReviewCoreFailureClusterRequest,
-  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CORE_FAILURE_CLUSTER_LIST, request) as Promise<
+      CoreFailureCluster[]
+    >,
+  reviewCoreFailureCluster: (request: import("../shared/types").ReviewCoreFailureClusterRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_FAILURE_CLUSTER_REVIEW, request) as Promise<
       CoreFailureCluster | undefined
     >,
@@ -4411,16 +4682,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     >,
   listCoreLearnings: (request?: import("../shared/types").ListCoreLearningsRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_LEARNINGS_LIST, request) as Promise<CoreLearningsEntry[]>,
-  listCoreMemoryCandidates: (request?: import("../shared/types").ListCoreMemoryCandidatesRequest) => {
+  listCoreMemoryCandidates: (
+    request?: import("../shared/types").ListCoreMemoryCandidatesRequest,
+  ) => {
     if (hasInvalidCoreMemoryCandidateScope(request)) {
       return Promise.resolve([]);
     }
-    return ipcRenderer.invoke(
-      IPC_CHANNELS.CORE_MEMORY_LIST_CANDIDATES,
-      request,
-    ) as Promise<CoreMemoryCandidate[]>;
+    return ipcRenderer.invoke(IPC_CHANNELS.CORE_MEMORY_LIST_CANDIDATES, request) as Promise<
+      CoreMemoryCandidate[]
+    >;
   },
-  reviewCoreMemoryCandidate: (request: import("../shared/types").ReviewCoreMemoryCandidateRequest) =>
+  reviewCoreMemoryCandidate: (
+    request: import("../shared/types").ReviewCoreMemoryCandidateRequest,
+  ) =>
     ipcRenderer.invoke(IPC_CHANNELS.CORE_MEMORY_REVIEW_CANDIDATE, request) as Promise<
       CoreMemoryCandidate | undefined
     >,
@@ -4431,7 +4705,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       limit,
     }) as Promise<CoreMemoryDistillRun[]>,
   runCoreMemoryDistillNow: (request: import("../shared/types").RunCoreMemoryDistillNowRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CORE_MEMORY_RUN_DISTILL_NOW, request) as Promise<CoreMemoryDistillRun>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.CORE_MEMORY_RUN_DISTILL_NOW,
+      request,
+    ) as Promise<CoreMemoryDistillRun>,
 
   // Task Subscriptions
   listSubscriptions: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.SUBSCRIPTION_LIST, taskId),
@@ -4509,34 +4786,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.SHELL_SESSION_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.SHELL_SESSION_EVENT, subscription);
   },
-  getShellSessionInfo: (
-    taskId: string,
-    workspaceId: string,
-    scope?: "task" | "workspace",
-  ) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_GET, { taskId, workspaceId, scope }) as Promise<
-      ShellSessionInfo | null
-    >,
+  getShellSessionInfo: (taskId: string, workspaceId: string, scope?: "task" | "workspace") =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_GET, {
+      taskId,
+      workspaceId,
+      scope,
+    }) as Promise<ShellSessionInfo | null>,
   listShellSessions: (taskId?: string, workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_LIST, { taskId, workspaceId }) as Promise<
       ShellSessionInfo[]
     >,
-  resetShellSession: (
-    taskId: string,
-    workspaceId: string,
-    scope?: "task" | "workspace",
-  ) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_RESET, { taskId, workspaceId, scope }) as Promise<
-      ShellSessionInfo | null
-    >,
-  closeShellSession: (
-    taskId: string,
-    workspaceId: string,
-    scope?: "task" | "workspace",
-  ) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_CLOSE, { taskId, workspaceId, scope }) as Promise<
-      ShellSessionInfo | null
-    >,
+  resetShellSession: (taskId: string, workspaceId: string, scope?: "task" | "workspace") =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_RESET, {
+      taskId,
+      workspaceId,
+      scope,
+    }) as Promise<ShellSessionInfo | null>,
+  closeShellSession: (taskId: string, workspaceId: string, scope?: "task" | "workspace") =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHELL_SESSION_CLOSE, {
+      taskId,
+      workspaceId,
+      scope,
+    }) as Promise<ShellSessionInfo | null>,
 
   // LLM routing observability
   getLLMRoutingStatus: () =>
@@ -4607,25 +4878,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ChannelSpecializationData[]
     >,
   createChannelSpecialization: (data: CreateChannelSpecializationData) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_SPECIALIZATION_CREATE, data) as Promise<
-      ChannelSpecializationData
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.CHANNEL_SPECIALIZATION_CREATE,
+      data,
+    ) as Promise<ChannelSpecializationData>,
   updateChannelSpecialization: (data: UpdateChannelSpecializationData) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_SPECIALIZATION_UPDATE, data) as Promise<
-      ChannelSpecializationData
-    >,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.CHANNEL_SPECIALIZATION_UPDATE,
+      data,
+    ) as Promise<ChannelSpecializationData>,
   deleteChannelSpecialization: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_SPECIALIZATION_DELETE, id) as Promise<{
       success: boolean;
     }>,
-  resolveChannelSpecialization: (data: {
-    channelId: string;
-    chatId?: string;
-    threadId?: string;
-  }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_SPECIALIZATION_RESOLVE, data) as Promise<
-      ChannelSpecializationData | null
-    >,
+  resolveChannelSpecialization: (data: { channelId: string; chatId?: string; threadId?: string }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.CHANNEL_SPECIALIZATION_RESOLVE,
+      data,
+    ) as Promise<ChannelSpecializationData | null>,
 
   // Voice Mode
   getVoiceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_GET_SETTINGS),
@@ -4753,8 +5023,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_CANCEL, runId),
   enqueueRoutineWorkflowEvent: (envelope: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_ENQUEUE_EVENT, envelope),
-  listRoutineWorkflowSecrets: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_SECRETS),
+  listRoutineWorkflowSecrets: () => ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_SECRETS),
   upsertRoutineWorkflowSecret: (input: { id?: string; name: string; value: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTINE_WORKFLOW_UPSERT_SECRET, input),
   removeRoutineWorkflowSecret: (id: string) =>
@@ -5009,9 +5278,9 @@ export type {
 
 export interface ElectronAPI {
   selectFolder: (defaultPath?: string) => Promise<string | null>;
-  selectFiles: (defaultPath?: string) => Promise<
-    Array<{ path: string; name: string; size: number; mimeType?: string }>
-  >;
+  selectFiles: (
+    defaultPath?: string,
+  ) => Promise<Array<{ path: string; name: string; size: number; mimeType?: string }>>;
   openFile: (filePath: string, workspacePath?: string) => Promise<string>;
   openFileWithApp: (
     filePath: string,
@@ -5034,19 +5303,13 @@ export interface ElectronAPI {
     workspacePath: string;
     workspaceId?: string;
   }) => Promise<SpreadsheetOpenWorkbookResult>;
-  getSpreadsheetViewport: (
-    data: SpreadsheetViewportRequest,
-  ) => Promise<SpreadsheetViewportResult>;
+  getSpreadsheetViewport: (data: SpreadsheetViewportRequest) => Promise<SpreadsheetViewportResult>;
   applySpreadsheetPatches: (data: {
     sessionId: string;
     patches: SpreadsheetPatch[];
   }) => Promise<SpreadsheetApplyPatchesResult>;
-  saveSpreadsheetWorkbook: (data: {
-    sessionId: string;
-  }) => Promise<SpreadsheetSaveWorkbookResult>;
-  closeSpreadsheetWorkbook: (data: {
-    sessionId: string;
-  }) => Promise<{ success: boolean }>;
+  saveSpreadsheetWorkbook: (data: { sessionId: string }) => Promise<SpreadsheetSaveWorkbookResult>;
+  closeSpreadsheetWorkbook: (data: { sessionId: string }) => Promise<{ success: boolean }>;
   updateDocumentFile: (data: {
     filePath: string;
     workspacePath: string;
@@ -5110,9 +5373,7 @@ export interface ElectronAPI {
   onBrowserWorkbenchOpenRequest: (
     callback: (request: BrowserWorkbenchOpenRequest) => void,
   ) => () => void;
-  onBrowserWorkbenchCursor: (
-    callback: (event: BrowserWorkbenchCursorEvent) => void,
-  ) => () => void;
+  onBrowserWorkbenchCursor: (callback: (event: BrowserWorkbenchCursorEvent) => void) => () => void;
   onBrowserWorkbenchViewport: (
     callback: (event: BrowserWorkbenchViewportEvent) => void,
   ) => () => void;
@@ -5191,18 +5452,31 @@ export interface ElectronAPI {
   runMailboxForward: (id: string) => Promise<string>;
   getMailboxDigest: (workspaceId?: string) => Promise<MailboxDigestSnapshot>;
   getMailboxTodayDigest: (input?: { limitPerBucket?: number }) => Promise<MailboxTodayDigest>;
-  getMailboxSenderCleanupDigest: (input?: { limit?: number }) => Promise<MailboxSenderCleanupDigest>;
+  getMailboxSenderCleanupDigest: (input?: {
+    limit?: number;
+  }) => Promise<MailboxSenderCleanupDigest>;
   askMailbox: (input: MailboxAskInput) => Promise<MailboxAskResult>;
   onMailboxAskEvent: (callback: (event: MailboxAskRunEvent) => void) => () => void;
   extractMailboxAttachmentText: (attachmentId: string) => Promise<MailboxAttachmentRecord>;
   getMailboxDraft: (draftId: string) => Promise<MailboxComposeDraft | null>;
   createMailboxDraft: (input: MailboxComposeDraftInput) => Promise<MailboxComposeDraft>;
-  updateMailboxDraft: (draftId: string, patch: MailboxComposeDraftPatch) => Promise<MailboxComposeDraft>;
-  addMailboxDraftAttachment: (draftId: string, input: MailboxDraftAttachmentInput) => Promise<MailboxComposeDraft>;
-  removeMailboxDraftAttachment: (draftId: string, attachmentId: string) => Promise<MailboxComposeDraft>;
+  updateMailboxDraft: (
+    draftId: string,
+    patch: MailboxComposeDraftPatch,
+  ) => Promise<MailboxComposeDraft>;
+  addMailboxDraftAttachment: (
+    draftId: string,
+    input: MailboxDraftAttachmentInput,
+  ) => Promise<MailboxComposeDraft>;
+  removeMailboxDraftAttachment: (
+    draftId: string,
+    attachmentId: string,
+  ) => Promise<MailboxComposeDraft>;
   sendMailboxDraft: (draftId: string) => Promise<MailboxOutgoingMessage>;
   scheduleMailboxSend: (draftId: string, scheduledAt: number) => Promise<MailboxComposeDraft>;
-  updateMailboxClientSettings: (patch: MailboxClientSettingsPatch) => Promise<MailboxClientState["settings"]>;
+  updateMailboxClientSettings: (
+    patch: MailboxClientSettingsPatch,
+  ) => Promise<MailboxClientState["settings"]>;
   retryMailboxAction: (actionId: string) => Promise<MailboxQueuedAction>;
   discardMailboxDraft: (draftId: string) => Promise<boolean>;
   undoMailboxAction: (actionId: string) => Promise<MailboxQueuedAction>;
@@ -5225,7 +5499,11 @@ export interface ElectronAPI {
   resolveMailboxContactIdentity: (threadId: string) => Promise<ContactIdentityResolution | null>;
   getContactIdentity: (contactIdentityId: string) => Promise<ContactIdentity | null>;
   listContactIdentities: (workspaceId?: string) => Promise<ContactIdentity[]>;
-  searchIdentityLinkTargets: (workspaceId: string, query: string, limit?: number) => Promise<ContactIdentitySearchResult[]>;
+  searchIdentityLinkTargets: (
+    workspaceId: string,
+    query: string,
+    limit?: number,
+  ) => Promise<ContactIdentitySearchResult[]>;
   linkIdentityHandle: (input: {
     workspaceId: string;
     contactIdentityId: string;
@@ -5237,7 +5515,9 @@ export interface ElectronAPI {
     channelType?: string;
     channelUserId?: string;
   }) => Promise<ContactIdentity | null>;
-  getMailboxRelationshipTimeline: (query: RelationshipTimelineQuery) => Promise<RelationshipTimelineEvent[]>;
+  getMailboxRelationshipTimeline: (
+    query: RelationshipTimelineQuery,
+  ) => Promise<RelationshipTimelineEvent[]>;
   listIdentityCandidates: (
     workspaceId?: string,
     status?: ContactIdentityCandidate["status"],
@@ -5257,11 +5537,15 @@ export interface ElectronAPI {
     ok: boolean;
     target: ContactIdentityReplyTarget;
   }>;
-  previewMailboxMissionControlHandoff: (threadId: string) => Promise<MailboxMissionControlHandoffPreview | null>;
+  previewMailboxMissionControlHandoff: (
+    threadId: string,
+  ) => Promise<MailboxMissionControlHandoffPreview | null>;
   createMailboxMissionControlHandoff: (
     request: MailboxMissionControlHandoffRequest,
   ) => Promise<MailboxMissionControlHandoffRecord>;
-  listMailboxMissionControlHandoffs: (threadId: string) => Promise<MailboxMissionControlHandoffRecord[]>;
+  listMailboxMissionControlHandoffs: (
+    threadId: string,
+  ) => Promise<MailboxMissionControlHandoffRecord[]>;
   listMailboxSnippets: () => Promise<MailboxSnippetRecord[]>;
   upsertMailboxSnippet: (input: {
     id?: string;
@@ -5284,7 +5568,9 @@ export interface ElectronAPI {
     name: string;
     instructions: string;
   }) => Promise<MailboxSavedViewPreviewResult>;
-  getMailboxQuickReplySuggestions: (threadId: string) => Promise<MailboxQuickReplySuggestionsResult>;
+  getMailboxQuickReplySuggestions: (
+    threadId: string,
+  ) => Promise<MailboxQuickReplySuggestionsResult>;
   createMailboxSavedViewReviewSchedule: (viewId: string) => Promise<MailboxAutomationRecord>;
   applyMailboxAction: (input: MailboxApplyActionInput) => Promise<{
     success: boolean;
@@ -5399,10 +5685,7 @@ export interface ElectronAPI {
     workspaceId: string,
     scope?: "task" | "workspace",
   ) => Promise<ShellSessionInfo | null>;
-  listShellSessions: (
-    taskId?: string,
-    workspaceId?: string,
-  ) => Promise<ShellSessionInfo[]>;
+  listShellSessions: (taskId?: string, workspaceId?: string) => Promise<ShellSessionInfo[]>;
   resetShellSession: (
     taskId: string,
     workspaceId: string,
@@ -5442,10 +5725,7 @@ export interface ElectronAPI {
     tabId: string;
     workspaceId: string;
   }) => Promise<ShellSessionInfo | null>;
-  closeTerminalTab: (data: {
-    tabId: string;
-    workspaceId: string;
-  }) => Promise<{ success: boolean }>;
+  closeTerminalTab: (data: { tabId: string; workspaceId: string }) => Promise<{ success: boolean }>;
   onTerminalTabOutput: (callback: (event: TerminalTabOutputEvent) => void) => () => void;
   createWorkspace: (data: Any) => Promise<Workspace>;
   listWorkspaces: () => Promise<Workspace[]>;
@@ -5530,8 +5810,13 @@ export interface ElectronAPI {
   ) => Promise<ManagedAgentRoutineRecord>;
   deleteManagedAgentRoutine: (agentId: string, routineId: string) => Promise<boolean>;
   getManagedAgentInsights: (agentId: string) => Promise<ManagedAgentInsights>;
-  listManagedAgentAuditEntries: (agentId: string, limit?: number) => Promise<ManagedAgentAuditEntry[]>;
-  getManagedAgentSlackDeploymentHealth: (agentId: string) => Promise<ManagedAgentSlackDeploymentHealth>;
+  listManagedAgentAuditEntries: (
+    agentId: string,
+    limit?: number,
+  ) => Promise<ManagedAgentAuditEntry[]>;
+  getManagedAgentSlackDeploymentHealth: (
+    agentId: string,
+  ) => Promise<ManagedAgentSlackDeploymentHealth>;
   convertAgentRoleToManagedAgent: (
     request: ConvertAgentRoleToManagedAgentRequest,
   ) => Promise<ManagedAgentConversionResult>;
@@ -5568,7 +5853,9 @@ export interface ElectronAPI {
   sendManagedSessionUserMessage: (
     request: ManagedSessionUserMessageRequest,
   ) => Promise<ManagedSession | undefined>;
-  resumeManagedSession: (sessionId: string) => Promise<{ resumed: boolean; session?: ManagedSession }>;
+  resumeManagedSession: (
+    sessionId: string,
+  ) => Promise<{ resumed: boolean; session?: ManagedSession }>;
   cancelManagedSession: (sessionId: string) => Promise<ManagedSession | undefined>;
   listManagedSessionEvents: (sessionId: string, limit?: number) => Promise<ManagedSessionEvent[]>;
   getManagedSessionWorkpaper: (sessionId: string) => Promise<ManagedSessionWorkpaper>;
@@ -5579,7 +5866,9 @@ export interface ElectronAPI {
     principalId: string;
     role: AgentWorkspaceMembership["role"];
   }) => Promise<AgentWorkspaceMembership>;
-  getMyAgentWorkspacePermissions: (workspaceId: string) => Promise<AgentWorkspacePermissionSnapshot>;
+  getMyAgentWorkspacePermissions: (
+    workspaceId: string,
+  ) => Promise<AgentWorkspacePermissionSnapshot>;
   listImageGenProfiles: () => Promise<ImageGenProfile[]>;
   createImageGenProfile: (request: {
     name: string;
@@ -5636,14 +5925,14 @@ export interface ElectronAPI {
           reasoningEffort?: LLMReasoningEffort;
         },
   ) => Promise<{ success: boolean }>;
-  getProviderModels: (
-    providerType: string,
-  ) => Promise<Array<{
-    key: string;
-    displayName: string;
-    description: string;
-    reasoningEfforts?: LLMReasoningEffort[];
-  }>>;
+  getProviderModels: (providerType: string) => Promise<
+    Array<{
+      key: string;
+      displayName: string;
+      description: string;
+      reasoningEfforts?: LLMReasoningEffort[];
+    }>
+  >;
   getAnthropicModels: (credentials?: {
     apiKey?: string;
     subscriptionToken?: string;
@@ -5700,7 +5989,9 @@ export interface ElectronAPI {
     isMac?: boolean;
   }>;
   detectHardware?: () => Promise<{ ok: boolean; models: string[]; output: string; error?: string }>;
-  startLocalAIServer?: (model?: string) => Promise<{ ok: boolean; pid?: number; alreadyRunning?: boolean; error?: string }>;
+  startLocalAIServer?: (
+    model?: string,
+  ) => Promise<{ ok: boolean; pid?: number; alreadyRunning?: boolean; error?: string }>;
   stopLocalAIServer?: () => Promise<{ ok: boolean; wasRunning?: boolean; error?: string }>;
   getLocalAIServerStatus?: () => Promise<{
     serverRunning: boolean;
@@ -6109,10 +6400,7 @@ export interface ElectronAPI {
   upsertHealthSource: (source: HealthSourceInput) => Promise<HealthSource>;
   removeHealthSource: (sourceId: string) => Promise<{ success: boolean }>;
   syncHealthSource: (sourceId: string) => Promise<HealthSyncResult>;
-  importHealthFiles: (
-    sourceId: string,
-    filePaths: string[],
-  ) => Promise<HealthSyncResult>;
+  importHealthFiles: (sourceId: string, filePaths: string[]) => Promise<HealthSyncResult>;
   generateHealthWorkflow: (
     request: HealthWorkflowRequest,
   ) => Promise<{ success: boolean; workflow?: HealthWorkflow; error?: string }>;
@@ -6131,12 +6419,12 @@ export interface ElectronAPI {
   }) => Promise<{ success: boolean; source?: HealthSource; error?: string }>;
   disconnectAppleHealth: (sourceId: string) => Promise<{ success: boolean }>;
   resetAppleHealth: (sourceId?: string) => Promise<{ success: boolean; removedCount: number }>;
-  previewAppleHealthWriteback: (request: HealthWritebackRequest) => Promise<
-    { success: boolean; preview?: HealthWritebackPreview; error?: string }
-  >;
-  applyAppleHealthWriteback: (request: HealthWritebackRequest) => Promise<
-    { success: boolean; writtenCount?: number; warnings?: string[]; error?: string }
-  >;
+  previewAppleHealthWriteback: (
+    request: HealthWritebackRequest,
+  ) => Promise<{ success: boolean; preview?: HealthWritebackPreview; error?: string }>;
+  applyAppleHealthWriteback: (
+    request: HealthWritebackRequest,
+  ) => Promise<{ success: boolean; writtenCount?: number; warnings?: string[]; error?: string }>;
   // App Updates
   getAppVersion: () => Promise<{
     version: string;
@@ -6181,7 +6469,14 @@ export interface ElectronAPI {
   deleteWorkspacePermissionRule: (payload: {
     workspaceId: string;
     ruleId: string;
-  }) => Promise<{ success: boolean; removed: boolean; dbRemoved?: boolean; manifestRemoved?: boolean; manifestPath?: string; manifestError?: string }>;
+  }) => Promise<{
+    success: boolean;
+    removed: boolean;
+    dbRemoved?: boolean;
+    manifestRemoved?: boolean;
+    manifestPath?: string;
+    manifestError?: string;
+  }>;
   // Appearance Settings
   getAppearanceSettings: () => Promise<{
     themeMode: "light" | "dark" | "system";
@@ -6452,9 +6747,7 @@ export interface ElectronAPI {
     error?: string;
     security?: import("../shared/types").InstallSecurityOutcome;
   }>;
-  installSkillFromClawHub: (
-    identifierOrUrl: string,
-  ) => Promise<{
+  installSkillFromClawHub: (identifierOrUrl: string) => Promise<{
     success: boolean;
     skill?: CustomSkill;
     error?: string;
@@ -6466,9 +6759,7 @@ export interface ElectronAPI {
     error?: string;
     security?: import("../shared/types").InstallSecurityOutcome;
   }>;
-  installSkillFromGit: (
-    gitUrl: string,
-  ) => Promise<{
+  installSkillFromGit: (gitUrl: string) => Promise<{
     success: boolean;
     skill?: CustomSkill;
     error?: string;
@@ -6498,9 +6789,7 @@ export interface ElectronAPI {
   retryQuarantinedImport: (
     recordId: string,
   ) => Promise<import("../shared/types").RetryQuarantinedImportResult>;
-  removeQuarantinedImport: (
-    recordId: string,
-  ) => Promise<{ success: boolean; error?: string }>;
+  removeQuarantinedImport: (recordId: string) => Promise<{ success: boolean; error?: string }>;
   // MCP (Model Context Protocol)
   getMCPSettings: () => Promise<MCPSettings>;
   saveMCPSettings: (settings: MCPSettings) => Promise<{ success: boolean }>;
@@ -6516,11 +6805,7 @@ export interface ElectronAPI {
   testMCPServer: (
     serverId: string,
   ) => Promise<{ success: boolean; error?: string; tools?: number }>;
-  deviceListFiles: (params: {
-    nodeId: string;
-    workspaceId: string;
-    path?: string;
-  }) => Promise<{
+  deviceListFiles: (params: { nodeId: string; workspaceId: string; path?: string }) => Promise<{
     ok: boolean;
     files?: Array<{ name: string; type: "file" | "directory"; size: number }>;
     error?: string;
@@ -6588,7 +6873,9 @@ export interface ElectronAPI {
   stopMCPHost: () => Promise<void>;
   getMCPHostStatus: () => Promise<{ running: boolean; port?: number }>;
   // Secure MCP Tunnels
-  getSecureMcpTunnelSettings: () => Promise<import("../shared/types").SecureMcpTunnelDisplaySettings>;
+  getSecureMcpTunnelSettings: () => Promise<
+    import("../shared/types").SecureMcpTunnelDisplaySettings
+  >;
   createSecureMcpTunnel: (input: {
     name: string;
     relayUrl: string;
@@ -6616,7 +6903,9 @@ export interface ElectronAPI {
   ) => Promise<import("../shared/types").SecureMcpTunnelDisplayConfig>;
   deleteSecureMcpTunnel: (id: string) => Promise<{ success: boolean }>;
   startSecureMcpTunnel: (id: string) => Promise<import("../shared/types").SecureMcpTunnelStatus>;
-  stopSecureMcpTunnel: (id: string) => Promise<import("../shared/types").SecureMcpTunnelStatus | null>;
+  stopSecureMcpTunnel: (
+    id: string,
+  ) => Promise<import("../shared/types").SecureMcpTunnelStatus | null>;
   getSecureMcpTunnelStatus: () => Promise<import("../shared/types").SecureMcpTunnelStatus[]>;
   getSecureMcpTunnelAudit: (
     id?: string,
@@ -6658,10 +6947,7 @@ export interface ElectronAPI {
     limit?: number;
     useFallback?: boolean;
   }) => Promise<ChronicleResolvedContext[]>;
-  listChronicleObservations: (input: {
-    workspaceId: string;
-    limit?: number;
-  }) => Promise<Any[]>;
+  listChronicleObservations: (input: { workspaceId: string; limit?: number }) => Promise<Any[]>;
   deleteChronicleObservation: (input: {
     workspaceId: string;
     observationId: string;
@@ -6726,7 +7012,9 @@ export interface ElectronAPI {
   deleteCouncil: (id: string) => Promise<boolean>;
   runCouncilNow: (id: string) => Promise<CouncilRun | null>;
   listCouncilRuns: (payload: { councilConfigId: string; limit?: number }) => Promise<CouncilRun[]>;
-  getCouncilMemo: (query: string | { id?: string; councilConfigId?: string }) => Promise<CouncilMemo | null>;
+  getCouncilMemo: (
+    query: string | { id?: string; councilConfigId?: string },
+  ) => Promise<CouncilMemo | null>;
   setCouncilEnabled: (id: string, enabled: boolean) => Promise<CouncilConfig | null>;
   // Notifications
   listNotifications: () => Promise<AppNotification[]>;
@@ -6788,7 +7076,11 @@ export interface ElectronAPI {
   cancelRoutineWorkflowRun: (runId: string) => Promise<Any | null>;
   enqueueRoutineWorkflowEvent: (envelope: Any) => Promise<Any>;
   listRoutineWorkflowSecrets: () => Promise<Any[]>;
-  upsertRoutineWorkflowSecret: (input: { id?: string; name: string; value: string }) => Promise<Any>;
+  upsertRoutineWorkflowSecret: (input: {
+    id?: string;
+    name: string;
+    value: string;
+  }) => Promise<Any>;
   removeRoutineWorkflowSecret: (id: string) => Promise<boolean>;
 
   // Control Plane (WebSocket Gateway)
@@ -6796,7 +7088,12 @@ export interface ElectronAPI {
   saveControlPlaneSettings: (
     settings: Partial<ControlPlaneSettingsData>,
   ) => Promise<{ ok: boolean; error?: string }>;
-  enableControlPlane: () => Promise<{ ok: boolean; token?: string; nodeToken?: string; error?: string }>;
+  enableControlPlane: () => Promise<{
+    ok: boolean;
+    token?: string;
+    nodeToken?: string;
+    error?: string;
+  }>;
   disableControlPlane: () => Promise<{ ok: boolean; error?: string }>;
   startControlPlane: () => Promise<{
     ok: boolean;
@@ -6813,7 +7110,12 @@ export interface ElectronAPI {
     remoteToken?: string;
     error?: string;
   }>;
-  regenerateControlPlaneToken: () => Promise<{ ok: boolean; token?: string; nodeToken?: string; error?: string }>;
+  regenerateControlPlaneToken: () => Promise<{
+    ok: boolean;
+    token?: string;
+    nodeToken?: string;
+    error?: string;
+  }>;
   onControlPlaneEvent: (callback: (event: ControlPlaneEvent) => void) => () => void;
 
   // Tailscale
@@ -6929,7 +7231,10 @@ export interface ElectronAPI {
     shellAccess?: boolean;
   }) => Promise<{ ok: boolean; taskId?: string; error?: string }>;
   deviceGetProfiles: () => Promise<{ ok: boolean; profiles?: Any[]; error?: string }>;
-  deviceUpdateProfile: (deviceId: string, data: { customName?: string; platform?: string; modelIdentifier?: string }) => Promise<{ ok: boolean; error?: string }>;
+  deviceUpdateProfile: (
+    deviceId: string,
+    data: { customName?: string; platform?: string; modelIdentifier?: string },
+  ) => Promise<{ ok: boolean; error?: string }>;
 
   // Memory System
   getMemorySettings: (workspaceId: string) => Promise<MemorySettings>;
@@ -6947,20 +7252,28 @@ export interface ElectronAPI {
     windowSize?: number;
   }) => Promise<MemoryTimelineEntry[]>;
   getMemoryDetails: (ids: string[]) => Promise<Memory[]>;
-  searchMemoryObservations: (data: MemoryObservationSearchQuery) => Promise<MemoryObservationSearchResult[]>;
+  searchMemoryObservations: (
+    data: MemoryObservationSearchQuery,
+  ) => Promise<MemoryObservationSearchResult[]>;
   getMemoryObservationTimeline: (data: {
     workspaceId: string;
     memoryId?: string;
     query?: string;
     windowSize?: number;
   }) => Promise<MemoryObservationTimelineEntry[]>;
-  getMemoryObservationDetails: (data: { workspaceId: string; ids: string[] }) => Promise<MemoryObservationMetadata[]>;
+  getMemoryObservationDetails: (data: {
+    workspaceId: string;
+    ids: string[];
+  }) => Promise<MemoryObservationMetadata[]>;
   updateMemoryObservation: (data: {
     workspaceId: string;
     memoryId: string;
     patch: Partial<MemoryObservationMetadata>;
   }) => Promise<MemoryObservationMetadata | null>;
-  deleteMemoryObservation: (data: { workspaceId: string; memoryId: string }) => Promise<{ success: boolean }>;
+  deleteMemoryObservation: (data: {
+    workspaceId: string;
+    memoryId: string;
+  }) => Promise<{ success: boolean }>;
   redactMemoryObservation: (data: {
     workspaceId: string;
     memoryId: string;
@@ -6972,7 +7285,9 @@ export interface ElectronAPI {
     target?: "user" | "workspace";
     kind?: string;
   }) => Promise<{ success: boolean; error?: string }>;
-  rebuildMemoryObservationMetadata: (data?: { force?: boolean }) => Promise<MemoryObservationBackfillStatus>;
+  rebuildMemoryObservationMetadata: (data?: {
+    force?: boolean;
+  }) => Promise<MemoryObservationBackfillStatus>;
   getMemoryObservationBackfillStatus: () => Promise<MemoryObservationBackfillStatus>;
   getRecentMemories: (data: { workspaceId: string; limit?: number }) => Promise<Memory[]>;
   getMemoryStats: (workspaceId: string) => Promise<MemoryStats>;
@@ -7053,10 +7368,20 @@ export interface ElectronAPI {
   getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) => Promise<{ success: boolean }>;
   getMemoryLayerPreview: (workspaceId: string) => Promise<MemoryLayerPreviewPayload | null>;
-  listMemoryWriteApprovals: (data?: { workspaceId?: string; limit?: number }) => Promise<MemoryWriteApprovalItem[]>;
+  listMemoryWriteApprovals: (data?: {
+    workspaceId?: string;
+    limit?: number;
+  }) => Promise<MemoryWriteApprovalItem[]>;
   getMemoryWriteApproval: (id: string) => Promise<MemoryWriteApprovalItem | null>;
-  approveMemoryWriteApproval: (data: { id: string; workspaceId?: string }) => Promise<MemoryWriteApprovalItem>;
-  rejectMemoryWriteApproval: (data: { id: string; workspaceId?: string; reason?: string }) => Promise<MemoryWriteApprovalItem>;
+  approveMemoryWriteApproval: (data: {
+    id: string;
+    workspaceId?: string;
+  }) => Promise<MemoryWriteApprovalItem>;
+  rejectMemoryWriteApproval: (data: {
+    id: string;
+    workspaceId?: string;
+    reason?: string;
+  }) => Promise<MemoryWriteApprovalItem>;
   countMemoryWriteApprovals: (workspaceId?: string) => Promise<{ pending: number }>;
   getSupermemorySettings: () => Promise<SupermemoryConfigStatus>;
   saveSupermemorySettings: (settings: SupermemorySettings) => Promise<{ success: boolean }>;
@@ -7101,7 +7426,9 @@ export interface ElectronAPI {
   // Workspace Kit (.cowork)
   getWorkspaceKitStatus: (workspaceId: string) => Promise<WorkspaceKitStatus>;
   initWorkspaceKit: (request: WorkspaceKitInitRequest) => Promise<WorkspaceKitStatus>;
-  applyOnboardingProfile: (request: ApplyOnboardingProfileRequest) => Promise<ApplyOnboardingProfileResult>;
+  applyOnboardingProfile: (
+    request: ApplyOnboardingProfileRequest,
+  ) => Promise<ApplyOnboardingProfileResult>;
   createWorkspaceKitProject: (
     request: WorkspaceKitProjectCreateRequest,
   ) => Promise<{ success: boolean; projectId: string }>;
@@ -7219,9 +7546,7 @@ export interface ElectronAPI {
   importCompanyPackage: (
     request: import("../shared/types").CompanyPackageImportRequest,
   ) => Promise<import("../shared/types").CompanyPackageImportResult>;
-  getCompanyGraph: (
-    companyId: string,
-  ) => Promise<import("../shared/types").ResolvedCompanyGraph>;
+  getCompanyGraph: (companyId: string) => Promise<import("../shared/types").ResolvedCompanyGraph>;
   listCompanySyncStates: (
     companyId: string,
   ) => Promise<import("../shared/types").CompanySyncState[]>;
@@ -7247,7 +7572,9 @@ export interface ElectronAPI {
   ) => Promise<import("../shared/types").MissionControlBrief>;
   listCompanyGoals: (companyId: string) => Promise<import("../shared/types").Goal[]>;
   getGoal: (goalId: string) => Promise<import("../shared/types").Goal | undefined>;
-  createGoal: (input: import("../shared/types").GoalCreateInput) => Promise<import("../shared/types").Goal>;
+  createGoal: (
+    input: import("../shared/types").GoalCreateInput,
+  ) => Promise<import("../shared/types").Goal>;
   updateGoal: (
     request: { goalId: string } & import("../shared/types").GoalUpdate,
   ) => Promise<import("../shared/types").Goal | undefined>;
@@ -7473,6 +7800,9 @@ export interface ElectronAPI {
         windows: Array<{ days: number[]; start: string; end: string }>;
       };
     };
+    runtime: {
+      agentSecurity: import("../shared/agent-security").AgentSecurityPolicy;
+    };
     general: {
       allowCustomPacks: boolean;
       allowGitInstall: boolean;
@@ -7499,6 +7829,9 @@ export interface ElectronAPI {
         windows: Array<{ days: number[]; start: string; end: string }>;
       };
     };
+    runtime: {
+      agentSecurity: import("../shared/agent-security").AgentSecurityPolicy;
+    };
     general: {
       allowCustomPacks: boolean;
       allowGitInstall: boolean;
@@ -7511,6 +7844,33 @@ export interface ElectronAPI {
     packId: string,
   ) => Promise<{ packId: string; allowed: boolean; required: boolean }>;
 
+  // Agent Security
+  agentSecurityGetStatus: (refresh?: boolean) => Promise<AgentSecurityRuntimeStatus>;
+  agentSecurityListFindings: (query?: AgentSecurityFindingQuery) => Promise<AgentSecurityFinding[]>;
+  agentSecurityUpdateFinding: (
+    findingId: string,
+    status: AgentSecurityFindingStatus,
+  ) => Promise<AgentSecurityFinding | null>;
+  agentSecurityListDecisions: (
+    taskId?: string,
+    limit?: number,
+  ) => Promise<AgentSecurityEnforcement[]>;
+  agentSecurityListDiagnostics: (limit?: number) => Promise<AgentSecurityDiagnostic[]>;
+  agentSecurityListInventory: () => Promise<AgentSecurityInventoryItem[]>;
+  agentSecurityRefreshInventory: () => Promise<AgentSecurityInventoryItem[]>;
+  agentSecurityScan: () => Promise<AgentSecurityScanResult>;
+  agentSecurityCheckRules: () => Promise<AgentSecurityRulesCheckResult>;
+  agentSecurityHookStatus: (agent: string) => Promise<AgentSecurityHookManagementResult>;
+  agentSecurityInstallHook: (agent: string) => Promise<AgentSecurityHookManagementResult>;
+  agentSecurityUninstallHook: (agent: string) => Promise<AgentSecurityHookManagementResult>;
+  agentSecurityBuildCase: (caseId: string, taskId: string) => Promise<AgentSecurityCaseBuildResult>;
+  agentSecurityVerifyCase: (bundleName: string) => Promise<AgentSecurityCaseVerifyResult>;
+  agentSecurityPrune: () => Promise<{
+    findings: number;
+    decisions: number;
+    diagnostics: number;
+  }>;
+
   // Everyday Agent
   everydayAgentGetProfile: () => Promise<EverydayAgentProfileResult>;
   everydayAgentUpdateProfile: (
@@ -7521,9 +7881,7 @@ export interface ElectronAPI {
     workspaceId?: string;
     accepted?: boolean;
   }) => Promise<EverydayAgentProfileResult>;
-  everydayAgentPause: (
-    scope: Partial<EverydayPauseScope>,
-  ) => Promise<EverydayAgentProfileResult>;
+  everydayAgentPause: (scope: Partial<EverydayPauseScope>) => Promise<EverydayAgentProfileResult>;
   everydayAgentRevokeCapability: (
     capability: EverydayCapabilityBundle,
   ) => Promise<EverydayAgentProfileResult>;
@@ -7533,9 +7891,7 @@ export interface ElectronAPI {
   everydayAgentClearData: (
     request?: EverydayAgentClearDataRequest,
   ) => Promise<EverydayAgentProfileResult>;
-  everydayAgentPreviewAction: (
-    input: EverydayActionPreviewInput,
-  ) => Promise<EverydayActionPreview>;
+  everydayAgentPreviewAction: (input: EverydayActionPreviewInput) => Promise<EverydayActionPreview>;
   everydayAgentApproveAction: (
     request: EverydayAgentApproveActionRequest,
   ) => Promise<EverydayActionReceipt>;
@@ -7671,9 +8027,7 @@ export interface ElectronAPI {
   listCoreExperiments: (
     request?: import("../shared/types").ListCoreExperimentsRequest,
   ) => Promise<CoreHarnessExperiment[]>;
-  runCoreExperiment: (
-    request: import("../shared/types").RunCoreExperimentRequest,
-  ) => Promise<{
+  runCoreExperiment: (request: import("../shared/types").RunCoreExperimentRequest) => Promise<{
     experiment: CoreHarnessExperiment;
     run: import("../shared/types").CoreHarnessExperimentRun;
     gate: import("../shared/types").CoreRegressionGateResult;

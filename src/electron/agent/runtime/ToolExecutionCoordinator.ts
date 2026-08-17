@@ -34,6 +34,7 @@ export class ToolExecutionCoordinator {
     try {
       const executionWithRuntime = await this.toolRegistry.executeToolWithRuntime(toolName, input, {
         toolPolicyContext: context.toolPolicyContext,
+        toolUseId,
         signal: context.signal,
         timeoutMs: toolTimeoutMs,
         targetPaths: context.targetPaths,

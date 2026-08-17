@@ -37,6 +37,7 @@ import {
   ManagedEnvironmentRepository,
 } from "../managed/repositories";
 import { ensureEverydayAgentSchema } from "./schema";
+import { DEFAULT_AGENT_SECURITY_POLICY } from "../../shared/agent-security";
 
 const VALID_CAPABILITIES = new Set<EverydayCapabilityBundle>(
   EVERYDAY_AGENT_CAPABILITY_BUNDLES.map((bundle) => bundle.id),
@@ -58,7 +59,7 @@ const DEFAULT_PROFILE = cloneJson(DEFAULT_EVERYDAY_AGENT_PROFILE);
 
 function failClosedPolicies(): AdminPolicies {
   return {
-    version: 1,
+    version: 2,
     updatedAt: new Date(0).toISOString(),
     packs: { allowed: [], blocked: [], required: [] },
     connectors: { blocked: [] },
@@ -84,6 +85,7 @@ function failClosedPolicies(): AdminPolicies {
       },
       autoReview: { enabled: true },
       telemetry: { enabled: false },
+      agentSecurity: { ...DEFAULT_AGENT_SECURITY_POLICY },
     },
     general: {
       allowCustomPacks: false,
@@ -109,9 +111,7 @@ function safeJsonParse<T>(value: unknown, fallback: T): T {
 }
 
 function asStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
+  return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
 }
 
 function asCapability(value: unknown): EverydayCapabilityBundle | undefined {
@@ -121,7 +121,9 @@ function asCapability(value: unknown): EverydayCapabilityBundle | undefined {
 
 function uniqueCapabilities(values: unknown): EverydayCapabilityBundle[] {
   const capabilities = Array.isArray(values) ? values : [];
-  return Array.from(new Set(capabilities.map(asCapability).filter(Boolean))) as EverydayCapabilityBundle[];
+  return Array.from(
+    new Set(capabilities.map(asCapability).filter(Boolean)),
+  ) as EverydayCapabilityBundle[];
 }
 
 function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
@@ -135,10 +137,7 @@ function isRecord(value: unknown): value is JsonRecord {
 }
 
 function buildIdempotencyKey(payload: unknown): string {
-  return createHash("sha256")
-    .update(JSON.stringify(payload))
-    .digest("hex")
-    .slice(0, 32);
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 32);
 }
 
 function nowMs(): number {
@@ -285,7 +284,9 @@ export class EverydayAgentService {
       this.normalizeProfile({
         ...current,
         enabled: enable,
-        acceptedConsentVersion: enable ? EVERYDAY_AGENT_CONSENT_VERSION : current.acceptedConsentVersion,
+        acceptedConsentVersion: enable
+          ? EVERYDAY_AGENT_CONSENT_VERSION
+          : current.acceptedConsentVersion,
         consentAcceptedAt: enable ? now : current.consentAcceptedAt,
         declinedConsentVersion: enable ? 0 : EVERYDAY_AGENT_CONSENT_VERSION,
         consentDeclinedAt: enable ? undefined : now,
@@ -443,7 +444,9 @@ export class EverydayAgentService {
     return rows.map((row) => this.mapReceipt(row));
   }
 
-  clearData(request?: EverydayAgentClearDataRequest & { profile?: boolean }): EverydayAgentProfileResult {
+  clearData(
+    request?: EverydayAgentClearDataRequest & { profile?: boolean },
+  ): EverydayAgentProfileResult {
     const shouldClearAll = !request || Object.keys(request).length === 0;
     const profile = this.ensureProfile();
     const deleted: Record<string, number> = {};
@@ -454,7 +457,11 @@ export class EverydayAgentService {
 
     const tx = this.db.transaction(() => {
       if (shouldClearAll || request?.receipts) {
-        deleteRequired("receipts", "DELETE FROM everyday_agent_receipts WHERE profile_id = ?", profile.id);
+        deleteRequired(
+          "receipts",
+          "DELETE FROM everyday_agent_receipts WHERE profile_id = ?",
+          profile.id,
+        );
       }
       if (shouldClearAll || request?.previews) {
         deleteRequired(
@@ -495,7 +502,11 @@ export class EverydayAgentService {
       if (shouldClearAll || request?.cachedConnectorSummaries) {
         deleted.cachedConnectorSummaries =
           (deleted.cachedConnectorSummaries || 0) +
-          this.deleteRowsIfTableExists("everyday_agent_connector_summaries", "profile_id = ?", profile.id);
+          this.deleteRowsIfTableExists(
+            "everyday_agent_connector_summaries",
+            "profile_id = ?",
+            profile.id,
+          );
       }
       if (shouldClearAll || request?.browserProfileMetadata) {
         deleted.browserProfileMetadata =
@@ -552,9 +563,10 @@ export class EverydayAgentService {
     }
     const profile = this.ensureProfile(input.profileId);
     const compiledPolicy = this.compilePolicy(profile);
-    const capability = input.capability && asCapability(input.capability)
-      ? input.capability
-      : this.inferCapability(input);
+    const capability =
+      input.capability && asCapability(input.capability)
+        ? input.capability
+        : this.inferCapability(input);
     const riskClass = this.classifyActionRisk(input);
     const blockedReason = this.getCapabilityBlockedReason(compiledPolicy, capability);
     const idempotencyKey = buildIdempotencyKey({
@@ -585,7 +597,10 @@ export class EverydayAgentService {
       )
       .get(profile.id, idempotencyKey) as { preview_json?: string } | undefined;
     if (existing?.preview_json) {
-      return safeJsonParse<EverydayActionPreview>(existing.preview_json, this.emptyPreview(profile.id));
+      return safeJsonParse<EverydayActionPreview>(
+        existing.preview_json,
+        this.emptyPreview(profile.id),
+      );
     }
 
     const createdAt = nowMs();
@@ -663,8 +678,12 @@ export class EverydayAgentService {
       sourceSignals: preview.sourceEvidence,
       previewId: preview.id,
       toolCalls: input.toolName ? [{ toolName: input.toolName }] : [],
-      externalIds: [input.connectorId, input.connectorAccountId, input.channelId, input.deviceId]
-        .filter(Boolean) as string[],
+      externalIds: [
+        input.connectorId,
+        input.connectorAccountId,
+        input.channelId,
+        input.deviceId,
+      ].filter(Boolean) as string[],
       idempotencyKey: buildIdempotencyKey(["preview-receipt", preview.id]),
       result: { approvalRequired, status },
     });
@@ -818,8 +837,7 @@ export class EverydayAgentService {
       }
     }
 
-    const reviewOnly =
-      adminPolicy.forceReviewOnly || profile.approvalPosture === "review_only";
+    const reviewOnly = adminPolicy.forceReviewOnly || profile.approvalPosture === "review_only";
     const enabled =
       profile.enabled &&
       profile.acceptedConsentVersion >= EVERYDAY_AGENT_CONSENT_VERSION &&
@@ -834,13 +852,10 @@ export class EverydayAgentService {
       allowedCapabilities: enabled ? allowedCapabilities : [],
       blockedCapabilities: Array.from(blockedCapabilities),
       pausedScopes: activePauses,
-      approvalPosture: adminPolicy.forceReviewOnly
-        ? "review_only"
-        : profile.approvalPosture,
+      approvalPosture: adminPolicy.forceReviewOnly ? "review_only" : profile.approvalPosture,
       reviewOnly,
       visibleBrowserRequired: profile.browserProfilePolicy.preferVisibleBrowser,
-      allowRealBrowserAttach:
-        profile.browserProfilePolicy.allowRealBrowserAttach && !reviewOnly,
+      allowRealBrowserAttach: profile.browserProfilePolicy.allowRealBrowserAttach && !reviewOnly,
       alwaysRequireApproval: EVERYDAY_AGENT_ALWAYS_APPROVAL_RISKS,
       permissionRules: this.buildPermissionRules(profile, allowedCapabilities, adminPolicy),
       workflowTargets: [
@@ -866,9 +881,9 @@ export class EverydayAgentService {
 
   private ensureProfile(profileId = EVERYDAY_AGENT_DEFAULT_PROFILE_ID): EverydayAgentProfile {
     const id = profileId || EVERYDAY_AGENT_DEFAULT_PROFILE_ID;
-    const row = this.db
-      .prepare("SELECT * FROM everyday_agent_profiles WHERE id = ?")
-      .get(id) as JsonRecord | undefined;
+    const row = this.db.prepare("SELECT * FROM everyday_agent_profiles WHERE id = ?").get(id) as
+      | JsonRecord
+      | undefined;
     if (row) {
       const parsed = safeJsonParse<Partial<EverydayAgentProfile>>(row.profile_json, {});
       const normalized = this.normalizeProfile({
@@ -1029,7 +1044,9 @@ export class EverydayAgentService {
   }
 
   private normalizeCapabilitySettings(
-    value: Partial<Record<EverydayCapabilityBundle, Partial<EverydayCapabilitySetting>>> | undefined,
+    value:
+      | Partial<Record<EverydayCapabilityBundle, Partial<EverydayCapabilitySetting>>>
+      | undefined,
   ): Record<EverydayCapabilityBundle, EverydayCapabilitySetting> {
     const settings = cloneJson(DEFAULT_PROFILE.capabilitySettings);
     if (!isRecord(value)) return settings;
@@ -1159,11 +1176,8 @@ export class EverydayAgentService {
           ? input.targetId.trim()
           : undefined,
       reason:
-        typeof input.reason === "string" && input.reason.trim()
-          ? input.reason.trim()
-          : undefined,
-      pausedAt:
-        typeof input.pausedAt === "number" && input.pausedAt > 0 ? input.pausedAt : nowMs(),
+        typeof input.reason === "string" && input.reason.trim() ? input.reason.trim() : undefined,
+      pausedAt: typeof input.pausedAt === "number" && input.pausedAt > 0 ? input.pausedAt : nowMs(),
       expiresAt:
         typeof input.expiresAt === "number" && input.expiresAt > nowMs()
           ? input.expiresAt
@@ -1171,7 +1185,10 @@ export class EverydayAgentService {
     };
   }
 
-  private applyAdminPolicy(profile: EverydayAgentProfile, policies: AdminPolicies): EverydayAgentProfile {
+  private applyAdminPolicy(
+    profile: EverydayAgentProfile,
+    policies: AdminPolicies,
+  ): EverydayAgentProfile {
     const next = cloneJson(profile);
     if (policies.everydayAgent.blocked) {
       next.enabled = false;
@@ -1233,7 +1250,9 @@ export class EverydayAgentService {
       )
       .all(profileId, nowMs()) as JsonRecord[];
     return rows
-      .map((row) => safeJsonParse<EverydayPauseScope>(row.scope_json, null as unknown as EverydayPauseScope))
+      .map((row) =>
+        safeJsonParse<EverydayPauseScope>(row.scope_json, null as unknown as EverydayPauseScope),
+      )
       .filter((scope) => scope && isPauseActive(scope));
   }
 
@@ -1261,7 +1280,10 @@ export class EverydayAgentService {
         scope: "connector",
         target: connectorId,
         decision: entry.enabled && !entry.paused ? "allow" : "deny",
-        reason: entry.enabled && !entry.paused ? "Allowed by profile connector scope." : "Connector paused or disabled.",
+        reason:
+          entry.enabled && !entry.paused
+            ? "Allowed by profile connector scope."
+            : "Connector paused or disabled.",
       });
     }
     rules.push({
@@ -1347,7 +1369,9 @@ export class EverydayAgentService {
     return Boolean(row);
   }
 
-  private promoteTrustPatternFromPreview(preview: EverydayActionPreview): EverydayTrustPattern | null {
+  private promoteTrustPatternFromPreview(
+    preview: EverydayActionPreview,
+  ): EverydayTrustPattern | null {
     if (riskRequiresExplicitApproval(preview.riskClass)) return null;
     const destination = preview.target.destination || preview.target.targetIdentity || "";
     const existing = this.db
@@ -1451,8 +1475,7 @@ export class EverydayAgentService {
       agent = this.managedAgentRepo.create({
         id: EVERYDAY_AGENT_DEFAULT_MANAGED_AGENT_ID,
         name: "Everyday Agent",
-        description:
-          "Opt-in personal operator preset for visible, review-first everyday work.",
+        description: "Opt-in personal operator preset for visible, review-first everyday work.",
         status: "active",
         currentVersion: 1,
       });
@@ -1555,9 +1578,9 @@ export class EverydayAgentService {
   private deleteRowsIfTableExists(tableName: string, whereSql: string, ...args: unknown[]): number {
     if (!this.tableExists(tableName)) return 0;
     try {
-      const result = this.db
-        .prepare(`DELETE FROM ${tableName} WHERE ${whereSql}`)
-        .run(...args) as { changes?: number };
+      const result = this.db.prepare(`DELETE FROM ${tableName} WHERE ${whereSql}`).run(...args) as {
+        changes?: number;
+      };
       return Number(result.changes || 0);
     } catch {
       return 0;
@@ -1567,7 +1590,11 @@ export class EverydayAgentService {
   private clearMemoryCandidateData(profileId: string): number {
     let deleted = 0;
     deleted += this.deleteRowsIfTableExists("core_memory_candidates", "profile_id = ?", profileId);
-    deleted += this.deleteRowsIfTableExists("core_memory_distill_runs", "profile_id = ?", profileId);
+    deleted += this.deleteRowsIfTableExists(
+      "core_memory_distill_runs",
+      "profile_id = ?",
+      profileId,
+    );
     return deleted;
   }
 
@@ -1788,7 +1815,9 @@ export class EverydayAgentService {
   }
 
   private inferCapability(input: EverydayActionPreviewInput): EverydayCapabilityBundle {
-    const text = [input.title, input.action, input.toolName, input.connectorId].join(" ").toLowerCase();
+    const text = [input.title, input.action, input.toolName, input.connectorId]
+      .join(" ")
+      .toLowerCase();
     if (/\b(mail|email|inbox|gmail|outlook)\b/.test(text)) return "inbox";
     if (/\b(calendar|event|meeting|schedule)\b/.test(text)) return "calendar";
     if (/\b(browser|web|page|site|url)\b/.test(text)) return "browser";
@@ -1803,10 +1832,7 @@ export class EverydayAgentService {
     return "automations";
   }
 
-  private approvalReason(
-    profile: EverydayAgentProfile,
-    risk: EverydayActionRisk,
-  ): string {
+  private approvalReason(profile: EverydayAgentProfile, risk: EverydayActionRisk): string {
     if (riskRequiresExplicitApproval(risk)) {
       return `${risk} actions always require explicit approval.`;
     }

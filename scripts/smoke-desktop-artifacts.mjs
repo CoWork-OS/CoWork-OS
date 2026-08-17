@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -83,7 +84,9 @@ Options:
 }
 
 function normalizePlatform(value) {
-  const raw = String(value || "auto").trim().toLowerCase();
+  const raw = String(value || "auto")
+    .trim()
+    .toLowerCase();
   if (raw === "auto") {
     if (process.platform === "darwin") return "mac";
     if (process.platform === "win32") return "win";
@@ -158,7 +161,9 @@ function escapeRegex(value) {
 }
 
 async function findSingleVersionedFile(releaseDir, predicate, label, expectedVersion) {
-  const versionPattern = new RegExp(`(^|[^0-9A-Za-z])${escapeRegex(expectedVersion)}([^0-9A-Za-z]|$)`);
+  const versionPattern = new RegExp(
+    `(^|[^0-9A-Za-z])${escapeRegex(expectedVersion)}([^0-9A-Za-z]|$)`,
+  );
   return findSingleFile(
     releaseDir,
     (file) => predicate(file) && versionPattern.test(file.name),
@@ -186,6 +191,49 @@ function assertHostPlatform(platform) {
 
 function validateUpdaterMetadata(releaseDir) {
   run(process.execPath, ["scripts/release-artifact-names.mjs", "--check", "--dir", releaseDir]);
+}
+
+async function sha256File(filePath) {
+  const hash = createHash("sha256");
+  hash.update(await fs.readFile(filePath));
+  return hash.digest("hex");
+}
+
+async function validateNumbatRuntime(resourcesRoot, targetKey) {
+  const numbatRoot = path.join(resourcesRoot, "numbat");
+  const manifestPath = path.join(numbatRoot, "manifest.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const target = manifest.targets?.[targetKey];
+  if (!target?.path || !target.sha256) {
+    throw new Error(`Packaged Numbat manifest has no target ${targetKey}`);
+  }
+
+  const resolvedRoot = path.resolve(numbatRoot);
+  const binaryPath = path.resolve(numbatRoot, target.path);
+  if (binaryPath !== resolvedRoot && !binaryPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+    throw new Error("Packaged Numbat target escapes its resource directory");
+  }
+  await fs.access(binaryPath, process.platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK);
+  const actualSha256 = await sha256File(binaryPath);
+  if (actualSha256.toLowerCase() !== String(target.sha256).toLowerCase()) {
+    throw new Error(
+      `Packaged Numbat checksum mismatch: expected ${target.sha256}, got ${actualSha256}`,
+    );
+  }
+
+  for (const relativePath of ["NOTICE.md", "LICENSE.Numbat.txt", "rules/cowork-recommended"]) {
+    await fs.access(path.join(numbatRoot, relativePath));
+  }
+  const version = run(binaryPath, ["version"], { shell: false, quiet: true });
+  const expectedVersion = `numbat ${manifest.version} (schema ${manifest.schemaVersion})`;
+  if (String(version.stdout || "").trim() !== expectedVersion) {
+    throw new Error(`Unexpected packaged Numbat version output: ${version.stdout || ""}`);
+  }
+  run(
+    binaryPath,
+    ["rules", "check", "--rules-dir", path.join(numbatRoot, "rules", "cowork-recommended")],
+    { shell: false, quiet: true },
+  );
 }
 
 async function walkDirs(dir, predicate, maxDepth = 3) {
@@ -350,6 +398,10 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
 
     const executablePath = path.join(appPath, "Contents", "MacOS", executableName);
     await fs.access(executablePath, fsConstants.X_OK);
+    await validateNumbatRuntime(
+      path.join(appPath, "Contents", "Resources"),
+      `darwin-${process.arch}`,
+    );
     assertMacCodeSignature(appPath, allowUnsigned);
     await smokeLaunchMac(executablePath);
     console.log(`[desktop-smoke] macOS DMG passed: ${dmg.name} (${path.basename(appPath)})`);
@@ -390,7 +442,9 @@ Write-Output $app.FullName
 function resolveWindowsProgramsDir() {
   const candidates = [
     process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Programs") : null,
-    process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "AppData", "Local", "Programs") : null,
+    process.env.USERPROFILE
+      ? path.join(process.env.USERPROFILE, "AppData", "Local", "Programs")
+      : null,
     path.join(os.homedir(), "AppData", "Local", "Programs"),
   ].filter(Boolean);
 
@@ -437,7 +491,9 @@ async function smokeWindows({ releaseDir, expectedVersion, skipLaunch }) {
 
   const programsDir = resolveWindowsProgramsDir();
   if (!programsDir) {
-    throw new Error("Could not resolve the per-user Windows Programs directory for installer smoke test.");
+    throw new Error(
+      "Could not resolve the per-user Windows Programs directory for installer smoke test.",
+    );
   }
 
   for (const dirName of ["CoWork OS", "cowork-os"]) {
@@ -460,8 +516,14 @@ Write-Output $item.VersionInfo.ProductVersion
     const versionResult = powershell(versionScript);
     const installedVersion = String(versionResult.stdout || "").trim();
     if (installedVersion && !installedVersion.startsWith(expectedVersion)) {
-      throw new Error(`Expected installed app version ${expectedVersion}, found ${installedVersion}`);
+      throw new Error(
+        `Expected installed app version ${expectedVersion}, found ${installedVersion}`,
+      );
     }
+    await validateNumbatRuntime(
+      path.join(path.dirname(appExe), "resources"),
+      `win32-${process.arch}`,
+    );
 
     if (!skipLaunch) {
       let spawnError = null;

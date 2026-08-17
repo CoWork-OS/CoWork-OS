@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -22,6 +23,10 @@ const REQUIRED_FILES = [
   "resources/branding/cowork-os-app-logo-dark.png",
   "resources/branding/cowork-os-app-logo-light.png",
   "resources/persona-templates/software-engineer.json",
+  "resources/numbat/manifest.json",
+  "resources/numbat/NOTICE.md",
+  "resources/numbat/LICENSE.Numbat.txt",
+  "resources/numbat/rules/cowork-recommended",
   "node_modules/better-sqlite3/package.json",
 ];
 
@@ -82,7 +87,7 @@ async function waitForHealth(port, child, timeoutMs = 60000) {
           (response) => {
             response.resume();
             resolve(response.statusCode ?? 0);
-          }
+          },
         );
         request.on("timeout", () => {
           request.destroy(new Error("health request timed out"));
@@ -100,6 +105,34 @@ async function waitForHealth(port, child, timeoutMs = 60000) {
   }
 
   throw new Error(`Timed out waiting for /health: ${lastError?.message ?? "unknown error"}`);
+}
+
+async function validateNumbatRuntime(packageRoot) {
+  const numbatRoot = path.join(packageRoot, "resources", "numbat");
+  const manifest = JSON.parse(await fs.readFile(path.join(numbatRoot, "manifest.json"), "utf8"));
+  const target = manifest.targets?.["linux-x64"];
+  if (!target?.path || !target.sha256) {
+    throw new Error("Packaged Numbat manifest has no linux-x64 target");
+  }
+  const resolvedRoot = path.resolve(numbatRoot);
+  const binaryPath = path.resolve(numbatRoot, target.path);
+  if (binaryPath !== resolvedRoot && !binaryPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+    throw new Error("Packaged Numbat target escapes its resource directory");
+  }
+  const hash = createHash("sha256");
+  hash.update(await fs.readFile(binaryPath));
+  const actualSha256 = hash.digest("hex");
+  if (actualSha256.toLowerCase() !== String(target.sha256).toLowerCase()) {
+    throw new Error(
+      `Packaged Numbat checksum mismatch: expected ${target.sha256}, got ${actualSha256}`,
+    );
+  }
+  run(binaryPath, ["version"], { cwd: packageRoot });
+  run(
+    binaryPath,
+    ["rules", "check", "--rules-dir", path.join(numbatRoot, "rules", "cowork-recommended")],
+    { cwd: packageRoot },
+  );
 }
 
 async function main() {
@@ -120,6 +153,7 @@ async function main() {
     for (const relativePath of REQUIRED_FILES) {
       await fs.access(path.join(packageRoot, relativePath));
     }
+    await validateNumbatRuntime(packageRoot);
 
     run(process.execPath, ["bin/coworkd-node.js", "--help"], { cwd: packageRoot });
     run(
@@ -128,7 +162,7 @@ async function main() {
         "-e",
         "const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.close(); console.log('better-sqlite3 ok')",
       ],
-      { cwd: packageRoot }
+      { cwd: packageRoot },
     );
 
     const port = 20000 + Math.floor(Math.random() * 20000);

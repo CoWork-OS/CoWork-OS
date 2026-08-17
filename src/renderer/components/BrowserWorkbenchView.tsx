@@ -112,10 +112,19 @@ type BrowserWorkbenchViewProps = {
   turnContext?: SpreadsheetTurnContext | null;
 };
 
+const BROWSER_NAVIGATION_PROTOCOLS = new Set(["http:", "https:"]);
+
 function normalizeUrl(rawUrl: string): string {
   const value = rawUrl.trim();
   if (!value) return "";
-  if (/^[a-z][a-z0-9+\-.]*:\/\//i.test(value)) return value;
+  if (/^[a-z][a-z0-9+\-.]*:\/\//i.test(value)) {
+    try {
+      const parsed = new URL(value);
+      return BROWSER_NAVIGATION_PROTOCOLS.has(parsed.protocol) ? value : "";
+    } catch {
+      return "";
+    }
+  }
   if (/^(localhost|127\.0\.0\.1|::1)(?::\d+)?(?:\/|$)/i.test(value)) {
     return `http://${value}`;
   }
@@ -326,6 +335,7 @@ export function BrowserWorkbenchView({
   onOpenSettings,
   turnContext,
 }: BrowserWorkbenchViewProps) {
+  const initialNavigationUrl = normalizeUrl(initialUrl || "");
   const webviewRef = useRef<Any>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const annotationImageRef = useRef<HTMLImageElement | null>(null);
@@ -335,16 +345,16 @@ export function BrowserWorkbenchView({
   const liveAnnotationInspectRequestIdRef = useRef(0);
   const webviewDomReadyRef = useRef(false);
   const registeredWebContentsIdRef = useRef<number | null>(null);
-  const activeUrlRef = useRef(initialUrl || "");
+  const activeUrlRef = useRef(initialNavigationUrl);
   const titleRef = useRef("");
   const onStatusChangeRef = useRef(onStatusChange);
-  const [urlText, setUrlText] = useState(initialUrl || "");
-  const [activeUrl, setActiveUrl] = useState(initialUrl || "");
+  const [urlText, setUrlText] = useState(initialNavigationUrl);
+  const [activeUrl, setActiveUrl] = useState(initialNavigationUrl);
   const [title, setTitle] = useState("");
   const [tabs, setTabs] = useState<BrowserWorkbenchTab[]>(() => [
     {
       id: "active",
-      url: initialUrl || "",
+      url: initialNavigationUrl,
       title: "",
     },
   ]);
@@ -448,15 +458,17 @@ export function BrowserWorkbenchView({
 
   useEffect(() => {
     if (!initialUrl) return;
-    setUrlText(initialUrl);
-    setActiveUrl(initialUrl);
-    activeUrlRef.current = initialUrl;
+    const normalized = normalizeUrl(initialUrl);
+    if (!normalized) {
+      setToolbarNotice("Only http:// and https:// URLs are supported");
+      return;
+    }
+    setToolbarNotice("");
+    setUrlText(normalized);
+    setActiveUrl(normalized);
+    activeUrlRef.current = normalized;
     setTabs((current) =>
-      current.map((tab, index) =>
-        index === 0
-          ? { ...tab, url: initialUrl }
-          : tab,
-      ),
+      current.map((tab, index) => (index === 0 ? { ...tab, url: normalized } : tab)),
     );
   }, [initialUrl]);
 
@@ -614,6 +626,31 @@ export function BrowserWorkbenchView({
       event?.preventDefault?.();
       if (nextUrl) openTab(nextUrl);
     };
+    const handleRenderProcessGone = (event: Any) => {
+      const reason = String(event?.reason || event?.details?.reason || "unknown");
+      const webContentsId = registeredWebContentsIdRef.current;
+      if (typeof webContentsId === "number") {
+        void window.electronAPI.unregisterBrowserWorkbenchSession?.({
+          taskId,
+          sessionId,
+          webContentsId,
+        });
+      }
+      registeredWebContentsIdRef.current = null;
+      webviewDomReadyRef.current = false;
+      activeUrlRef.current = "";
+      titleRef.current = "";
+      setIsLoading(false);
+      setActiveUrl("");
+      setTitle("");
+      updateActiveTab({ url: "", title: "" });
+      setToolbarNotice(
+        reason === "clean-exit"
+          ? "Page closed"
+          : "Page crashed — retry or enter another URL",
+      );
+      onStatusChangeRef.current?.({ url: "", title: "" });
+    };
     webview.addEventListener("dom-ready", handleDomReady);
     webview.addEventListener("did-navigate", handleNavigate);
     webview.addEventListener("did-navigate-in-page", handleNavigate);
@@ -621,6 +658,7 @@ export function BrowserWorkbenchView({
     webview.addEventListener("did-start-loading", handleLoadingStart);
     webview.addEventListener("did-stop-loading", handleLoadingStop);
     webview.addEventListener("new-window", handleNewWindow);
+    webview.addEventListener("render-process-gone", handleRenderProcessGone);
     const readyFrame = window.requestAnimationFrame(() => {
       if (webviewDomReadyRef.current) return;
       try {
@@ -653,6 +691,7 @@ export function BrowserWorkbenchView({
       webview.removeEventListener("did-start-loading", handleLoadingStart);
       webview.removeEventListener("did-stop-loading", handleLoadingStop);
       webview.removeEventListener("new-window", handleNewWindow);
+      webview.removeEventListener("render-process-gone", handleRenderProcessGone);
     };
   }, [
     applyWebviewBounds,
@@ -668,7 +707,12 @@ export function BrowserWorkbenchView({
 
   const navigate = useCallback((nextUrl = urlText) => {
     const normalized = normalizeUrl(nextUrl);
-    if (!normalized) return;
+    if (!normalized) {
+      setIsLoading(false);
+      setToolbarNotice("Only http:// and https:// URLs are supported");
+      return;
+    }
+    setToolbarNotice("");
     activeUrlRef.current = normalized;
     setUrlText(normalized);
     setActiveUrl(normalized);

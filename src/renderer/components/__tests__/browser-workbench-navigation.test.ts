@@ -20,6 +20,17 @@ describe("Browser workbench navigation controls", () => {
     expect(commandMatch?.[0]).not.toContain("!webviewDomReadyRef.current");
   });
 
+  it("blocks crash-only schemes and recovers a lost guest renderer", () => {
+    const source = readFileSync(componentPath, "utf8");
+
+    expect(source).toContain('new Set(["http:", "https:"])');
+    expect(source).toContain('const initialNavigationUrl = normalizeUrl(initialUrl || "")');
+    expect(source).toContain('webview.addEventListener("render-process-gone"');
+    expect(source).toContain('webview.removeEventListener("render-process-gone"');
+    expect(source).toContain('setToolbarNotice("Only http:// and https:// URLs are supported")');
+    expect(source).toContain('"Page crashed — retry or enter another URL"');
+  });
+
   it("hides the browser profile pill when there is no active URL", () => {
     const source = readFileSync(componentPath, "utf8");
 

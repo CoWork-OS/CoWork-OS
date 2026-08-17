@@ -1096,11 +1096,15 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                     />
                     <Tooltip
                       {...chartTooltipProps}
-                      formatter={(value: number, name: string) => {
-                        if (name === "AWUs") return [String(value), name];
-                        if (name === "Tokens / AWU") return [formatTokens(value), name];
-                        if (name === "Cost / AWU") return [formatChartCurrency(value), name];
-                        return [String(value), name];
+                      formatter={(value, name) => {
+                        const numericValue = Number(value ?? 0);
+                        const label = String(name ?? "");
+                        if (label === "AWUs") return [String(numericValue), label];
+                        if (label === "Tokens / AWU") return [formatTokens(numericValue), label];
+                        if (label === "Cost / AWU") {
+                          return [formatChartCurrency(numericValue), label];
+                        }
+                        return [String(value ?? ""), label];
                       }}
                     />
                     <Legend wrapperStyle={{ fontSize: 11 }} />

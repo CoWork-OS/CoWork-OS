@@ -1,4 +1,4 @@
-import type { OAuthAuthInfo, OAuthCredentials, OAuthPrompt } from "@mariozechner/pi-ai";
+import type { OAuthAuthInfo, OAuthCredentials, OAuthPrompt } from "@earendil-works/pi-ai";
 import { loadPiAiOAuthModule } from "./pi-ai-loader";
 import { createLogger } from "../../utils/logger";
 

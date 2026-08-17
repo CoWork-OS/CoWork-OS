@@ -207,7 +207,9 @@ export function UsageInsightsLlmSection({
                     position="top"
                     fontSize={10}
                     fill="var(--color-text-muted, #888)"
-                    formatter={(v: number | string) => (Number(v) > 0 ? String(v) : "")}
+                    formatter={(value) =>
+                      Number(value ?? 0) > 0 ? String(value ?? "") : ""
+                    }
                   />
                 </Bar>
               </BarChart>
@@ -240,10 +242,12 @@ export function UsageInsightsLlmSection({
                 />
                 <Tooltip
                   {...tooltipProps}
-                  formatter={(value: number, name: string) => {
-                    if (name === "Daily cost") return [`$${value.toFixed(4)}`, name];
-                    if (name === "Avg $/call") return [`$${value.toFixed(4)}`, name];
-                    return [value, name];
+                  formatter={(value, name) => {
+                    const numericValue = Number(value ?? 0);
+                    const label = String(name ?? "");
+                    if (label === "Daily cost") return [`$${numericValue.toFixed(4)}`, label];
+                    if (label === "Avg $/call") return [`$${numericValue.toFixed(4)}`, label];
+                    return [value ?? "", label];
                   }}
                 />
                 <Legend wrapperStyle={{ fontSize: 11 }} />

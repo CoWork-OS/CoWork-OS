@@ -5,7 +5,7 @@ import type {
   Context as PiAiContext,
   Tool as PiAiTool,
   KnownProvider,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import {
   LLMProvider,
   LLMProviderConfig,

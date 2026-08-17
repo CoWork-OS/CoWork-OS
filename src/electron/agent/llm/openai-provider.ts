@@ -4,7 +4,7 @@ import type {
   Message as PiAiMessage,
   Context as PiAiContext,
   Tool as PiAiTool,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import {
   LLMProvider,
   LLMProviderConfig,

@@ -155,10 +155,10 @@
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",
-    "@mariozechner/pi-ai": "^0.56.1",
+    "@earendil-works/pi-ai": "^0.74.2",
     "@pydantic/monty": "^0.0.4",
     "@slack/bolt": "^4.6.0",
-    "@whiskeysockets/baileys": "6.7.16",
+    "baileys": "6.7.24",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
@@ -166,12 +166,12 @@
     "chokidar": "^5.0.0",
     "discord.js": "^14.25.1",
     "docx": "^9.5.2",
-    "e2b": "^2.12.1",
-    "electron": "^40.4.1",
-    "electron-updater": "^6.3.9",
+    "e2b": "^2.39.0",
+    "electron": "^40.10.6",
+    "electron-updater": "^6.8.9",
     "ethers": "^6.16.0",
     "eventsource": "^4.1.0",
-    "exceljs": "^4.4.0",
+    "exceljs": "npm:devextreme-exceljs-fork@4.4.13",
     "grammy": "^1.39.3",
     "highlight.js": "^11.11.1",
     "jszip": "^3.10.1",
@@ -179,6 +179,7 @@
     "mammoth": "^1.11.0",
     "mermaid": "^11.13.0",
     "mime-types": "^3.0.2",
+    "node-fetch": "npm:node-fetch-native@1.6.7",
     "node-pty": "^1.1.0",
     "openai": "^6.22.0",
     "pdf-lib": "^1.17.1",
@@ -192,7 +193,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
-    "recharts": "^2.15.4",
+    "recharts": "^3.10.1",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "uuid": "^13.0.0",
@@ -201,7 +202,6 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
-    "@types/jszip": "^3.4.1",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^25.2.0",
     "@types/pdf-parse": "^1.1.5",
@@ -216,7 +216,7 @@
     "@vitest/coverage-v8": "^4.0.18",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron-builder": "^26.7.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.39.2",
     "globals": "^17.3.0",
     "oxfmt": "^0.40.0",
@@ -227,16 +227,38 @@
     "vitest": "^4.0.18"
   },
   "optionalDependencies": {
-    "better-sqlite3": "12.6.2"
+    "better-sqlite3": "13.0.3"
   },
   "bundleDependencies": [
-    "@mariozechner/pi-ai",
-    "@whiskeysockets/baileys"
+    "baileys"
   ],
   "overrides": {
-    "@whiskeysockets/baileys": {
+    "node-fetch@2": {
+      "whatwg-url": "^14.2.0"
+    },
+    "node-fetch@3": "$node-fetch",
+    "baileys": {
       "libsignal": "https://codeload.github.com/WhiskeySockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67",
       "@whiskeysockets/eslint-config": "1.0.0"
+    },
+    "electron-updater": {
+      "lodash.isequal": "npm:@lodash-modularized/isequal@1.0.1"
+    },
+    "gaxios": "7.3.1",
+    "@azure/msal-node": {
+      "uuid": "11.1.0"
+    },
+    "botbuilder": {
+      "uuid": "11.1.0"
+    },
+    "botbuilder-core": {
+      "uuid": "11.1.0"
+    },
+    "botframework-schema": {
+      "uuid": "11.1.0"
+    },
+    "botframework-streaming": {
+      "uuid": "11.1.0"
     }
   },
   "engines": {

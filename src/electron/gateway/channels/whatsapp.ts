@@ -29,7 +29,7 @@ import {
   type ConnectionState,
   type proto,
   type DownloadableMessage,
-} from "@whiskeysockets/baileys";
+} from "baileys";
 import * as fs from "fs";
 import * as path from "path";
 import { getUserDataDir } from "../../utils/user-data-dir";

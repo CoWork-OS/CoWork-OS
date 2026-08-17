@@ -2304,16 +2304,23 @@ export function App() {
     [mergeSelectedTaskTimelineEvents],
   );
 
-  // Platform detection for Windows-specific UI (custom window controls, opaque backgrounds)
-  const isWindows = hasElectronAPI && window.electronAPI.getPlatform() === "win32";
-  useEffect(() => {
-    document.documentElement.classList.toggle("platform-darwin", hasElectronAPI && window.electronAPI.getPlatform() === "darwin");
+  // Platform detection for window chrome and platform-specific surfaces.
+  const platform = hasElectronAPI ? window.electronAPI.getPlatform() : "";
+  const usesNativeWindowFrame =
+    hasElectronAPI && window.electronAPI.getNativeFrameMode?.() === true;
+  const isWindows = platform === "win32";
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle("platform-darwin", platform === "darwin");
+    document.documentElement.classList.toggle(
+      "platform-native-frame",
+      usesNativeWindowFrame,
+    );
     if (isWindows) {
       document.documentElement.classList.add("platform-win32");
       return;
     }
     document.documentElement.classList.remove("platform-win32");
-  }, [isWindows]);
+  }, [isWindows, platform, usesNativeWindowFrame]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -5432,7 +5439,7 @@ export function App() {
   if (disclaimerAccepted === null || onboardingCompleted === null) {
     return (
       <div className="app">
-        <div className="title-bar" />
+        {!usesNativeWindowFrame && <div className="title-bar" />}
         <TaskViewSkeleton />
       </div>
     );
@@ -5454,7 +5461,7 @@ export function App() {
   if (!disclaimerAccepted) {
     return (
       <div className="app">
-        <div className="title-bar" />
+        {!usesNativeWindowFrame && <div className="title-bar" />}
         <DisclaimerModal onAccept={handleDisclaimerAccept} />
       </div>
     );

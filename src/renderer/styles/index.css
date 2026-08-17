@@ -26431,6 +26431,35 @@ html.platform-win32 .title-bar {
   padding-left: 12px;
 }
 
+/* Native OS frames already provide draggable title chrome. */
+html.platform-native-frame {
+  --title-bar-height: 0px;
+}
+
+html.platform-native-frame .title-bar {
+  position: static;
+  z-index: auto;
+  height: 38px;
+  min-height: 38px;
+  flex-shrink: 0;
+  padding-left: 12px;
+  background: var(--color-bg-primary);
+  border-bottom: 1px solid var(--color-border-subtle);
+  -webkit-app-region: no-drag;
+}
+
+html.platform-native-frame .title-bar-drag-handle {
+  display: none;
+}
+
+html.platform-native-frame .title-bar-actions {
+  padding-top: 0;
+}
+
+html.platform-native-frame .browser-toolbar {
+  padding-left: 16px;
+}
+
 /* ============================================
    macOS Reduced Transparency Fallback
    Keep the visual structure, but use opaque surfaces when vibrancy is unavailable.

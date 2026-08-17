@@ -24,6 +24,7 @@ import type {
   DocumentPreview,
   EditableDocumentBlock,
 } from "../shared/document-preview";
+import { shouldUseNativeWindowFrame } from "../shared/native-window-frame";
 import type {
   AgentTeam,
   AgentTeamItem,
@@ -4798,6 +4799,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   windowClose: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CLOSE),
   windowIsMaximized: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_MAXIMIZED) as Promise<boolean>,
   getPlatform: () => process.platform,
+  getNativeFrameMode: () =>
+    shouldUseNativeWindowFrame({
+      platform: process.platform,
+      wslDistroName: process.env.WSL_DISTRO_NAME,
+      osRelease: os.release(),
+    }),
 });
 
 // Type declarations for TypeScript
@@ -7904,6 +7911,7 @@ export interface ElectronAPI {
   windowClose: () => Promise<void>;
   windowIsMaximized: () => Promise<boolean>;
   getPlatform: () => string;
+  getNativeFrameMode: () => boolean;
 }
 
 // Migration status type (for showing one-time notifications after app rename)

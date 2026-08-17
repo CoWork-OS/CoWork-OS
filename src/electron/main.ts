@@ -107,6 +107,7 @@ import {
 } from "../shared/types";
 import type { Task } from "../shared/types";
 import { isAutomatedTaskLike } from "../shared/automated-task-detection";
+import { shouldUseNativeWindowFrame } from "../shared/native-window-frame";
 import { GuardrailManager } from "./guardrails/guardrail-manager";
 import { AppearanceManager } from "./settings/appearance-manager";
 import { MemoryFeaturesManager } from "./settings/memory-features-manager";
@@ -1231,10 +1232,11 @@ if (!gotTheLock) {
 
   function createWindow() {
     const isMac = process.platform === "darwin";
-    const isWsl =
-      process.platform === "linux" &&
-      (Boolean(process.env.WSL_DISTRO_NAME) ||
-        os.release().toLowerCase().includes("microsoft"));
+    const usesNativeWindowFrame = shouldUseNativeWindowFrame({
+      platform: process.platform,
+      wslDistroName: process.env.WSL_DISTRO_NAME,
+      osRelease: os.release(),
+    });
     let useMacVibrancy = isMac && !nativeTheme.prefersReducedTransparency;
     const {
       isMaximized: shouldStartMaximized,
@@ -1267,8 +1269,10 @@ if (!gotTheLock) {
         initialWindowBounds.x === undefined ||
         initialWindowBounds.y === undefined,
       icon: getDesktopIconPath(),
-      ...(isWsl ? {} : { titleBarStyle: isMac ? "hiddenInset" : "hidden" }),
-      ...(isWsl ? { frame: true } : {}),
+      ...(usesNativeWindowFrame
+        ? {}
+        : { titleBarStyle: isMac ? "hiddenInset" : "hidden" }),
+      ...(usesNativeWindowFrame ? { frame: true } : {}),
       ...(isMac ? { trafficLightPosition: { x: 18, y: 18 } } : {}),
       ...(useMacVibrancy
         ? {

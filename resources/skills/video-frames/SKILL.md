@@ -1,6 +1,9 @@
 ---
 name: video-frames
 description: "Extract frames or short clips from videos using ffmpeg."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Video-frames

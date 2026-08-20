@@ -1,6 +1,9 @@
 ---
 name: playwright-qa
 description: "Automated visual QA testing using Playwright — navigate web apps like a real user, capture screenshots, find bugs, and fix them."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Playwright QA

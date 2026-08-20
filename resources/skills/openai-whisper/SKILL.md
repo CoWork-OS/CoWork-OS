@@ -1,6 +1,9 @@
 ---
 name: openai-whisper
 description: "Local speech-to-text with the Whisper CLI (no API key)."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Openai-whisper

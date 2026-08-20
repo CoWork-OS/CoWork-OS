@@ -1,6 +1,9 @@
 ---
 name: blogwatcher
 description: "Monitor blogs and RSS/Atom feeds for updates using the blogwatcher CLI."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Blogwatcher

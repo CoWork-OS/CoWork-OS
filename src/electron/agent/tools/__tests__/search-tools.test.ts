@@ -112,7 +112,9 @@ describe("SearchTools", () => {
       vi.mocked(SearchProviderFactory.searchWithFallback).mockResolvedValue({
         query: "test query",
         searchType: "web",
-        results: [{ title: "DDG Result", url: "https://duckduckgo.com", snippet: "Fallback result" }],
+        results: [
+          { title: "DDG Result", url: "https://duckduckgo.com", snippet: "Fallback result" },
+        ],
         provider: "duckduckgo",
       } as Any);
 
@@ -188,6 +190,32 @@ describe("SearchTools", () => {
       );
     });
 
+    it("passes locale, safe-search, and the effective workspace policy to the provider", async () => {
+      searchTools.setDomainPolicy({
+        allowedDomains: ["search.example.com"],
+        blockedDomains: ["blocked.example.com"],
+      });
+
+      await searchTools.webSearch({
+        query: "test query",
+        region: "tr",
+        language: "tr-TR",
+        safeSearch: true,
+      });
+
+      expect(SearchProviderFactory.searchWithFallback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          region: "tr",
+          language: "tr-TR",
+          safeSearch: true,
+          endpointDomainPolicy: {
+            allowedDomains: ["search.example.com"],
+            blockedDomains: ["blocked.example.com"],
+          },
+        }),
+      );
+    });
+
     it("should log search request", async () => {
       vi.mocked(SearchProviderFactory.searchWithFallback).mockResolvedValue({
         query: "test query",
@@ -241,7 +269,9 @@ describe("SearchTools", () => {
     });
 
     it("should still execute search when primaryProvider is null", async () => {
-      vi.mocked(SearchProviderFactory.loadSettings).mockReturnValue({ primaryProvider: null } as Any);
+      vi.mocked(SearchProviderFactory.loadSettings).mockReturnValue({
+        primaryProvider: null,
+      } as Any);
       vi.mocked(SearchProviderFactory.searchWithFallback).mockResolvedValue({
         query: "test query",
         searchType: "web",

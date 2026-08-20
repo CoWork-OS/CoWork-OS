@@ -1,6 +1,9 @@
 ---
 name: twitter
 description: "Write viral, persuasive tweets and threads optimized for X's algorithm. Research viral examples in your niche, then craft content using proven hook formulas and copywriting frameworks."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Twitter / X Writer

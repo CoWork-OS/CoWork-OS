@@ -1,6 +1,9 @@
 ---
 name: usecase-newsletter-digest
 description: "Summarize newsletter/email feed messages from the last N hours and propose follow-ups."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Newsletter Digest

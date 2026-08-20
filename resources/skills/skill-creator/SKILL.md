@@ -1,6 +1,9 @@
 ---
 name: skill-creator
 description: "Create or update AgentSkills for CoWork-OSS. Use when designing, structuring, or packaging skills. Supports JSON format with requirements, installation specs, and metadata."
+version: "2.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Skill-creator

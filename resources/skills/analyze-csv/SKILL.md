@@ -1,6 +1,9 @@
 ---
 name: analyze-csv
 description: "Load a CSV and provide insights"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Analyze CSV

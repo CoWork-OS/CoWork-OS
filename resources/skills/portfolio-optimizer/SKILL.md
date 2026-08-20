@@ -1,6 +1,9 @@
 ---
 name: portfolio-optimizer
 description: "Modern portfolio theory optimization including Markowitz mean-variance, Black-Litterman, risk parity, and efficient frontier construction with constraints."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Portfolio Optimizer

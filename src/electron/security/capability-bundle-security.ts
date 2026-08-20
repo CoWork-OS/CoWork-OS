@@ -32,7 +32,7 @@ const NVIDIA_SKILL_EVALUATOR_TIMEOUT_MS = 45_000;
 // NVIDIA's keyless Tier 1 checks. Quality is intentionally evaluated by the
 // bundled-skill QA workflow rather than blocking third-party installation.
 // https://docs.nvidia.com/skills/skillevaluator/quickstart
-const NVIDIA_INSTALL_CHECKS = ["schema", "pii", "license", "unicode", "lint"];
+const NVIDIA_INSTALL_CHECKS = ["schema", "security", "pii", "license", "unicode", "lint"];
 const NVIDIA_BLOCKING_CATEGORIES = new Set([
   "LICENSE",
   "PII",
@@ -751,6 +751,7 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
   detail?: string;
   findings: CapabilitySecurityFinding[];
   reportAvailable: boolean;
+  incomplete: boolean;
 }> {
   if (!fs.existsSync(path.join(bundleDir, "SKILL.md"))) {
     return {
@@ -758,6 +759,7 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
       detail: "Bundle does not contain a SKILL.md target.",
       findings: [],
       reportAvailable: false,
+      incomplete: false,
     };
   }
 
@@ -780,10 +782,15 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
       ],
       { timeout: NVIDIA_SKILL_EVALUATOR_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 },
     );
+    const findings = readNvidiaFindings(outputDir, bundleDir);
+    const reportAvailable = findJsonFiles(outputDir).length > 0;
+    const incomplete = hasIncompleteNvidiaScans(outputDir);
     return {
-      status: "passed",
-      findings: readNvidiaFindings(outputDir, bundleDir),
-      reportAvailable: findJsonFiles(outputDir).length > 0,
+      status: incomplete ? "failed" : "passed",
+      detail: incomplete ? "NVIDIA SkillEvaluator reported an incomplete security scan." : undefined,
+      findings,
+      reportAvailable,
+      incomplete,
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException & { code?: string | number }).code;
@@ -795,10 +802,12 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
           "Install NVIDIA SkillEvaluator or set COWORK_SKILL_EVALUATOR_BIN to enable the external gate.",
         findings: [],
         reportAvailable: false,
+        incomplete: false,
       };
     }
     const findings = readNvidiaFindings(outputDir, bundleDir);
     const reportAvailable = findJsonFiles(outputDir).length > 0;
+    const incomplete = hasIncompleteNvidiaScans(outputDir);
     return {
       status: "failed",
       detail:
@@ -807,6 +816,7 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
           : `NVIDIA SkillEvaluator rejected the skill${code !== undefined ? ` (exit ${String(code)})` : ""}.`,
       findings,
       reportAvailable,
+      incomplete,
     };
   } finally {
     fs.rmSync(outputDir, { recursive: true, force: true });
@@ -824,6 +834,7 @@ interface NvidiaFinding {
 }
 
 interface NvidiaReport {
+  incomplete_scans?: unknown[];
   results?: Array<{ findings?: NvidiaFinding[] }>;
 }
 
@@ -873,6 +884,13 @@ function readNvidiaFindings(
     }
   }
   return uniqueFindings(findings);
+}
+
+function hasIncompleteNvidiaScans(outputDir: string): boolean {
+  return findJsonFiles(outputDir).some((reportPath) => {
+    const report = readJsonFile<NvidiaReport>(reportPath);
+    return (report?.incomplete_scans?.length || 0) > 0;
+  });
 }
 
 function assessUrl(
@@ -985,7 +1003,7 @@ export class CapabilityBundleSecurityService {
     const nvidiaEvaluation = await runNvidiaSkillEvaluator(bundleDir);
     findings.push(...nvidiaEvaluation.findings);
     if (nvidiaEvaluation.status === "failed") {
-      if (!nvidiaEvaluation.reportAvailable) {
+      if (!nvidiaEvaluation.reportAvailable || nvidiaEvaluation.incomplete) {
         addFinding(findings, {
           code: "nvidia-skillevaluator-failed",
           severity: "critical",

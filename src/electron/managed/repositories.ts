@@ -349,10 +349,10 @@ export class ManagedSessionRepository {
       .prepare(
         `
         INSERT INTO managed_sessions (
-          id, agent_id, agent_version, environment_id, title, status, surface, workspace_id,
+          id, agent_id, agent_version, environment_id, title, status, surface, interaction_mode, workspace_id,
           backing_task_id, backing_team_run_id, resumed_from_session_id, latest_summary,
           created_at, updated_at, started_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -363,6 +363,7 @@ export class ManagedSessionRepository {
         session.title,
         session.status,
         session.surface || "runtime",
+        session.interactionMode || null,
         session.workspaceId,
         session.backingTaskId || null,
         session.backingTeamRunId || null,
@@ -390,6 +391,7 @@ export class ManagedSessionRepository {
         | "completedAt"
         | "title"
         | "surface"
+        | "interactionMode"
       >
     >,
   ): ManagedSession | undefined {
@@ -471,6 +473,9 @@ export class ManagedSessionRepository {
       title: String(row.title ?? ""),
       status: String(row.status ?? "pending") as ManagedSession["status"],
       surface: String(row.surface ?? "runtime") as ManagedSession["surface"],
+      interactionMode: row.interaction_mode
+        ? (String(row.interaction_mode) as ManagedSession["interactionMode"])
+        : undefined,
       workspaceId: String(row.workspace_id ?? ""),
       backingTaskId: row.backing_task_id ? String(row.backing_task_id) : undefined,
       backingTeamRunId: row.backing_team_run_id ? String(row.backing_team_run_id) : undefined,

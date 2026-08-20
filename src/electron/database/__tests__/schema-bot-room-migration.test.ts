@@ -79,6 +79,16 @@ describeWithSqlite("DatabaseManager bot room migration", () => {
 
     expect(roomColumns.map((column) => column.name)).toContain("current_round");
     expect(messageColumns.map((column) => column.name)).toContain("round");
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bot_room_runs'").get(),
+    ).toBeTruthy();
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bot_room_run_turns'").get(),
+    ).toBeTruthy();
+    const sessionColumns = db.prepare("PRAGMA table_info(managed_sessions)").all() as Array<{
+      name: string;
+    }>;
+    expect(sessionColumns.map((column) => column.name)).toContain("interaction_mode");
 
     manager.close();
   });

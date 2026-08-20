@@ -5,6 +5,7 @@ import type {
   BotBindingUserUpdates,
   BotEnvelope,
   BotRuntimeBinding,
+  BotRuntimeSnapshot,
   BotSendMessageRequest,
   BotSummary,
   ManagedSession,
@@ -13,6 +14,7 @@ import type {
 } from "../../shared/types";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
 import { BotMessageRepository, BotRuntimeBindingRepository } from "./repositories";
+import { routeBotTurn } from "./BotTurnRouter";
 
 const TERMINAL_SESSION_STATUSES = new Set<ManagedSession["status"]>([
   "completed",
@@ -60,6 +62,7 @@ export class BotCoordinatorService {
           unreadCount: this.messages.countForRecipient(agent.id, "queued"),
           queuedCount: this.messages.countForRecipient(agent.id, "queued"),
           latestMessage: inbox[0],
+          runtime: this.runtimeSnapshot(canonicalSession, this.messages.countForRecipient(agent.id, "queued")),
         };
       })
       .sort((left, right) => {
@@ -113,18 +116,20 @@ export class BotCoordinatorService {
   }
 
   async sendMessage(request: BotSendMessageRequest): Promise<BotEnvelope> {
-    this.assertAgent(request.toAgentId);
+    const details = this.assertAgent(request.toAgentId);
     if (!request.body.trim()) throw new Error("Bot message body is required");
     if (request.ttlMs !== undefined && (!Number.isFinite(request.ttlMs) || request.ttlMs < 0)) {
       throw new Error("Bot message TTL must be a finite non-negative number");
     }
+    const route = routeBotTurn(request, details.currentVersion);
+    const requestData = record(request.data) || {};
     const envelope = this.messages.create({
       fromAgentId: request.fromAgentId,
       toAgentId: request.toAgentId,
       kind: request.kind || "request",
       contentType: request.contentType || "text/plain",
       body: request.body.trim(),
-      data: request.data,
+      data: { ...requestData, botTurnRoute: route },
       artifactRefs: request.artifactRefs,
       conversationId: request.conversationId,
       correlationId: request.correlationId,
@@ -298,6 +303,13 @@ export class BotCoordinatorService {
     binding: BotRuntimeBinding,
   ): Promise<void> {
     const content = this.toManagedContent(envelope);
+    const routeData = record(record(envelope.data)?.botTurnRoute);
+    const route = routeData?.mode
+      ? { mode: String(routeData.mode) as "conversation" | "task" | "team_task" }
+      : routeBotTurn(
+          { body: envelope.body },
+          this.assertAgent(envelope.toAgentId).currentVersion,
+        );
     const current = binding.canonicalSessionId
       ? this.managedSessions.getSession(binding.canonicalSessionId)
       : undefined;
@@ -313,6 +325,7 @@ export class BotCoordinatorService {
       !canonical ||
       TERMINAL_SESSION_STATUSES.has(canonical.status) ||
       canonical.environmentId !== environmentId
+      || canonical.interactionMode !== route.mode
     ) {
       const environment = this.managedSessions.getEnvironment(environmentId);
       if (!environment || environment.status !== "active") {
@@ -325,11 +338,48 @@ export class BotCoordinatorService {
         surface: "bot_chat",
         resumedFromSessionId: canonical?.id,
         initialEvent: { type: "user.message", content },
+        launchMode: route.mode,
       });
       this.bindings.update(envelope.toAgentId, { canonicalSessionId: successor.id });
       return;
     }
-    await this.managedSessions.sendUserMessage(canonical.id, content);
+    await this.managedSessions.sendUserMessage(
+      canonical.id,
+      content,
+      route.mode === "conversation"
+        ? {
+            conversationMode: "chat",
+            executionMode: "chat",
+            executionModeSource: "user",
+            collaborativeMode: false,
+            multiLlmMode: false,
+            allowedTools: [],
+          }
+        : undefined,
+    );
+  }
+
+  private runtimeSnapshot(
+    session: ManagedSession | undefined,
+    queuedCount: number,
+  ): BotRuntimeSnapshot {
+    if (queuedCount > 0) {
+      return { state: "queued", sessionId: session?.id, queuedCount, updatedAt: Date.now() };
+    }
+    if (!session) return { state: "not_started", queuedCount, updatedAt: Date.now() };
+    const state =
+      session.status === "completed"
+        ? "idle"
+        : session.status === "pending" || session.status === "interrupted"
+          ? session.status === "interrupted" ? "failed" : "queued"
+          : session.status;
+    return {
+      state,
+      sessionId: session.id,
+      queuedCount,
+      lastOutcome: session.latestSummary,
+      updatedAt: session.updatedAt,
+    };
   }
 
   private async withAgentDeliveryLock<T>(agentId: string, work: () => Promise<T>): Promise<T> {

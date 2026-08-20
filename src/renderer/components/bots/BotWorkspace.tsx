@@ -23,43 +23,18 @@ import type {
   ManagedEnvironment,
   ManagedSessionEvent,
 } from "../../../shared/types";
+import { MarkdownRenderer } from "../MarkdownRenderer";
+import {
+  latestBotConversationFailure,
+  projectBotConversation,
+} from "./bot-conversation-projection";
+import { useScopedComposerState } from "./useScopedComposerState";
 import "./bots.css";
 import { BotRoomsPanel } from "./BotRoomsPanel";
 
 interface BotWorkspaceProps {
   onOpenAgents: () => void;
   onExit: () => void;
-}
-
-function eventText(event: ManagedSessionEvent): string {
-  const payload = event.payload as Record<string, unknown>;
-  const content = Array.isArray(payload.content) ? payload.content : [];
-  const contentText = content
-    .map((item) => {
-      if (!item || typeof item !== "object") return "";
-      const record = item as Record<string, unknown>;
-      return record.type === "text" && typeof record.text === "string" ? record.text : "";
-    })
-    .filter(Boolean)
-    .join("\n");
-  if (contentText) return contentText;
-  for (const key of ["message", "text", "summary", "result", "error"]) {
-    if (typeof payload[key] === "string" && payload[key]) return String(payload[key]);
-  }
-  const nested = payload.payload;
-  if (nested && typeof nested === "object") {
-    const record = nested as Record<string, unknown>;
-    for (const key of ["message", "text", "summary", "result", "error"]) {
-      if (typeof record[key] === "string" && record[key]) return String(record[key]);
-    }
-  }
-  return "";
-}
-
-function eventRole(event: ManagedSessionEvent): "user" | "assistant" | "system" {
-  if (event.type === "user.message" || event.type === "input.received") return "user";
-  if (event.type === "assistant.message") return "assistant";
-  return "system";
 }
 
 function initials(name: string): string {
@@ -85,15 +60,14 @@ export function BotWorkspace({ onOpenAgents, onExit }: BotWorkspaceProps) {
   const [environmentId, setEnvironmentId] = useState("");
   const [events, setEvents] = useState<ManagedSessionEvent[]>([]);
   const [routines, setRoutines] = useState<ManagedAgentRoutineRecord[]>([]);
-  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string>();
   const [showRooms, setShowRooms] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [search, setSearch] = useState("");
   const conversationRequestRef = useRef(0);
   const messageEndRef = useRef<HTMLDivElement>(null);
+  const composer = useScopedComposerState(`bot:${selectedAgentId || "none"}`);
+  const { draft: message, setDraft: setMessage, sending, setSending, error, setError } = composer;
 
   const selected = useMemo(
     () => bots.find((bot) => bot.agent.id === selectedAgentId),
@@ -106,6 +80,8 @@ export function BotWorkspace({ onOpenAgents, onExit }: BotWorkspaceProps) {
       `${bot.agent.name} ${bot.agent.description || ""}`.toLowerCase().includes(query),
     );
   }, [bots, search]);
+  const conversationMessages = useMemo(() => projectBotConversation(events), [events]);
+  const conversationFailure = useMemo(() => latestBotConversationFailure(events), [events]);
 
   const loadBots = useCallback(async () => {
     const [nextBots, nextEnvironments] = await Promise.all([
@@ -196,7 +172,7 @@ export function BotWorkspace({ onOpenAgents, onExit }: BotWorkspaceProps) {
         conversationId: `bot:${selected.agent.id}`,
         idempotencyKey: `ui:${selected.agent.id}:${crypto.randomUUID()}`,
       });
-      setMessage("");
+      composer.clearIfUnchanged(body);
       await Promise.all([loadConversation(selected.agent.id), loadBots()]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -330,7 +306,7 @@ export function BotWorkspace({ onOpenAgents, onExit }: BotWorkspaceProps) {
                 <h1>{selected.agent.name}</h1>
                 <span>
                   @{selected.agent.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")} · v
-                  {selected.agent.currentVersion}
+                  {selected.agent.currentVersion} · Memory on
                 </span>
               </div>
               <div className="bot-chat-actions">
@@ -351,80 +327,86 @@ export function BotWorkspace({ onOpenAgents, onExit }: BotWorkspaceProps) {
             </header>
 
             <div className="bot-message-list">
-              <div className="bot-version-note">
-                Conversation memory is persistent · capability changes start a new session
-              </div>
-              {events.length === 0 ? (
-                <div className="bot-chat-empty">
-                  <span className="bot-empty-mark" style={avatarStyle(selected.agent.name)}>
-                    {initials(selected.agent.name)}
-                  </span>
-                  <h3>What should {selected.agent.name} work on?</h3>
-                  <p>Send a task now, or ask it to set up recurring work for later.</p>
-                  <div className="bot-prompt-chips">
-                    <button onClick={() => setMessage("Give me a concise morning brief every weekday.")}>Plan a recurring brief</button>
-                    <button onClick={() => setMessage("Review my latest work and tell me what needs attention.")}>Review recent work</button>
+              <div className="bot-message-list-inner" aria-live="polite">
+                {conversationMessages.length === 0 ? (
+                  <div className="bot-chat-empty">
+                    <span className="bot-empty-mark" style={avatarStyle(selected.agent.name)}>
+                      {initials(selected.agent.name)}
+                    </span>
+                    <h3>What should {selected.agent.name} work on?</h3>
+                    <p>Send a message, hand off a task, or schedule recurring work.</p>
+                    <div className="bot-prompt-chips">
+                      <button onClick={() => setMessage("Give me a concise morning brief every weekday.")}>Plan a recurring brief</button>
+                      <button onClick={() => setMessage("Review my latest work and tell me what needs attention.")}>Review recent work</button>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                events.map((event) => {
-                  const text = eventText(event);
-                  if (!text) return null;
-                  const role = eventRole(event);
-                  return (
-                    <article key={event.id} className={`bot-message ${role}`}>
-                      <span className="bot-message-role">
-                        {role === "user"
-                          ? "You"
-                          : role === "assistant"
-                            ? selected.agent.name
-                            : "Activity"}
-                      </span>
-                      <p>{text}</p>
+                ) : (
+                  conversationMessages.map((entry) => (
+                    <article key={entry.id} className={`bot-message ${entry.role}`}>
+                      <div className="bot-message-bubble markdown-content">
+                        <MarkdownRenderer withBreaks>{entry.text}</MarkdownRenderer>
+                      </div>
                     </article>
-                  );
-                })
-              )}
-              <div ref={messageEndRef} />
+                  ))
+                )}
+                {selected.runtime?.state === "running" || selected.runtime?.state === "queued" ? (
+                  <div className="bot-turn-status" role="status">
+                    <LoaderCircle className="spin" size={13} />
+                    {selected.runtime.state === "queued" ? "Queued" : `${selected.agent.name} is working`}
+                  </div>
+                ) : null}
+                <div ref={messageEndRef} />
+              </div>
             </div>
 
-            {error ? (
-              <div className="bot-error-banner">
-                <CircleAlert size={15} /> {error}
-              </div>
-            ) : null}
-            <div className="bot-composer">
-              {!selected.binding.defaultEnvironmentId ? (
-                <select
-                  value={environmentId}
-                  onChange={(event) => setEnvironmentId(event.target.value)}
-                  aria-label="Bot environment"
-                >
-                  <option value="">Choose environment…</option>
-                  {environments.map((environment) => (
-                    <option key={environment.id} value={environment.id}>
-                      {environment.name}
-                    </option>
-                  ))}
-                </select>
+            <footer className="bot-chat-footer">
+              {error || conversationFailure ? (
+                <div className="bot-error-banner">
+                  <CircleAlert size={15} /> {error || conversationFailure}
+                </div>
               ) : null}
-              <textarea
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    void sendMessage();
-                  }
-                }}
-                placeholder={`Message ${selected.agent.name}`}
-                rows={2}
-              />
-              <span className="bot-composer-hint">Enter to send · Shift Enter for a new line</span>
-              <button onClick={() => void sendMessage()} disabled={!message.trim() || sending}>
-                {sending ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
-              </button>
-            </div>
+              <div className="bot-composer">
+                <textarea
+                  key={`bot:${selected.agent.id}`}
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void sendMessage();
+                    }
+                  }}
+                  placeholder={`Message ${selected.agent.name}`}
+                  rows={1}
+                />
+                <button
+                  aria-label={`Send message to ${selected.agent.name}`}
+                  onClick={() => void sendMessage()}
+                  disabled={!message.trim() || sending}
+                >
+                  {sending ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
+                </button>
+              </div>
+              <div className="bot-composer-meta">
+                {!selected.binding.defaultEnvironmentId ? (
+                  <select
+                    value={environmentId}
+                    onChange={(event) => setEnvironmentId(event.target.value)}
+                    aria-label="Bot environment"
+                  >
+                    <option value="">Choose environment…</option>
+                    {environments.map((environment) => (
+                      <option key={environment.id} value={environment.id}>
+                        {environment.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span>{environments.find((environment) => environment.id === environmentId)?.name || "Local environment"}</span>
+                )}
+                <span>Enter to send · Shift Enter for a new line</span>
+              </div>
+            </footer>
           </>
         ) : null}
       </section>
@@ -470,7 +452,12 @@ export function BotWorkspace({ onOpenAgents, onExit }: BotWorkspaceProps) {
                 </div>
                 <div>
                   <dt>Status</dt>
-                  <dd>{selected.canonicalSession?.status || "not started"}</dd>
+                  <dd>
+                    {(selected.runtime?.state || selected.canonicalSession?.status || "not_started").replace(
+                      "_",
+                      " ",
+                    )}
+                  </dd>
                 </div>
                 <div>
                   <dt>Queued</dt>

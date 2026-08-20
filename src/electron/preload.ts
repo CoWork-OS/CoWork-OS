@@ -2994,6 +2994,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       roomId,
       afterSeq,
     }) as Promise<BotRoomMessage[]>,
+  cancelBotRoomRun: (roomId: string, runId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_ROOM_RUN_CANCEL_IPC, { roomId, runId }) as Promise<boolean>,
+  retryBotRoomRun: (roomId: string, runId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_ROOM_RUN_RETRY_IPC, { roomId, runId }) as Promise<BotRoomRunReceipt>,
   saveRemoteAgentCredential: (credentialRef: string, token: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.REMOTE_AGENT_CREDENTIAL_SET_IPC, {
       credentialRef,
@@ -5972,6 +5976,8 @@ export interface ElectronAPI {
   }>;
   appendBotRoomUserMessage: (roomId: string, body: string) => Promise<BotRoomRunReceipt>;
   listBotRoomMessages: (roomId: string, afterSeq?: number) => Promise<BotRoomMessage[]>;
+  cancelBotRoomRun: (roomId: string, runId: string) => Promise<boolean>;
+  retryBotRoomRun: (roomId: string, runId: string) => Promise<BotRoomRunReceipt>;
   saveRemoteAgentCredential: (
     credentialRef: string,
     token: string,

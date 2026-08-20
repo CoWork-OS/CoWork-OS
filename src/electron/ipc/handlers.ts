@@ -6254,6 +6254,12 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.BOT_ROOM_MESSAGES_LIST_IPC, async (_, request: Any) =>
     botRoomService.listMessages(request.roomId, request.afterSeq),
   );
+  ipcMain.handle(IPC_CHANNELS.BOT_ROOM_RUN_CANCEL_IPC, async (_, request: Any) =>
+    botRoomCoordinatorService.cancelRun(request.roomId, request.runId),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_ROOM_RUN_RETRY_IPC, async (_, request: Any) =>
+    botRoomCoordinatorService.retryRun(request.roomId, request.runId),
+  );
   ipcMain.handle(IPC_CHANNELS.REMOTE_AGENT_CREDENTIAL_SET_IPC, async (_, request: Any) => {
     saveRemoteAgentCredential(String(request?.credentialRef || ""), String(request?.token || ""));
     return { saved: true };

@@ -1213,6 +1213,7 @@ export class DatabaseManager {
         title TEXT NOT NULL,
         status TEXT NOT NULL,
         surface TEXT DEFAULT 'runtime',
+        interaction_mode TEXT,
         workspace_id TEXT NOT NULL,
         backing_task_id TEXT,
         backing_team_run_id TEXT,
@@ -6622,6 +6623,48 @@ export class DatabaseManager {
           FOREIGN KEY (room_id) REFERENCES bot_rooms(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS bot_room_runs (
+          id TEXT PRIMARY KEY,
+          room_id TEXT NOT NULL,
+          source_message_id TEXT NOT NULL,
+          retry_of_run_id TEXT,
+          epoch INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          current_round INTEGER NOT NULL DEFAULT 1,
+          stop_requested_at INTEGER,
+          error_summary TEXT,
+          lease_owner TEXT,
+          lease_expires_at INTEGER,
+          started_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          FOREIGN KEY (room_id) REFERENCES bot_rooms(id) ON DELETE CASCADE,
+          FOREIGN KEY (source_message_id) REFERENCES bot_room_messages(id) ON DELETE CASCADE,
+          FOREIGN KEY (retry_of_run_id) REFERENCES bot_room_runs(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_bot_room_runs_room
+          ON bot_room_runs(room_id, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_bot_room_runs_status
+          ON bot_room_runs(status, lease_expires_at);
+
+        CREATE TABLE IF NOT EXISTS bot_room_run_turns (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          room_id TEXT NOT NULL,
+          round INTEGER NOT NULL,
+          agent_id TEXT NOT NULL,
+          session_id TEXT,
+          status TEXT NOT NULL,
+          error_summary TEXT,
+          started_at INTEGER,
+          completed_at INTEGER,
+          FOREIGN KEY (run_id) REFERENCES bot_room_runs(id) ON DELETE CASCADE,
+          FOREIGN KEY (room_id) REFERENCES bot_rooms(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_room_run_turns_run
+          ON bot_room_run_turns(run_id, round, agent_id);
+
         CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_room_messages_seq
           ON bot_room_messages(room_id, seq);
         CREATE INDEX IF NOT EXISTS idx_bot_messages_claim_recovery
@@ -6631,6 +6674,11 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_bot_room_messages_retention
           ON bot_room_messages(room_id, created_at DESC);
       `);
+      try {
+        this.db.exec("ALTER TABLE managed_sessions ADD COLUMN interaction_mode TEXT");
+      } catch {
+        // Column already exists.
+      }
       try {
         this.db.exec("ALTER TABLE bot_rooms ADD COLUMN current_round INTEGER NOT NULL DEFAULT 0");
       } catch {

@@ -3,6 +3,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import type {
   AgentConfig,
+  AgentTeamRun,
   AgentBuilderCreateRequest,
   AgentBuilderCreateResult,
   AgentBuilderConnectionRequirement,
@@ -52,7 +53,7 @@ import type {
   Task,
   TaskEvent,
 } from "../../shared/types";
-import { deriveCanonicalTaskStatus, isTerminalTaskStatus } from "../../shared/task-status";
+import { deriveCanonicalTaskStatus } from "../../shared/task-status";
 import { isComputerUseToolName } from "../../shared/computer-use-contract";
 import type { AgentDaemon } from "../agent/daemon";
 import type { LLMTool } from "../agent/llm/types";
@@ -271,10 +272,21 @@ export function sanitizeManagedEventPayload(value: unknown, depth = 0, key?: str
   }
 }
 
-function toManagedSessionStatus(task?: Task, hasPendingInput = false): ManagedSessionStatus {
+export function deriveManagedSessionRuntimeStatus(
+  task?: Task,
+  teamRun?: AgentTeamRun,
+  hasPendingInput = false,
+): ManagedSessionStatus {
   if (!task) return "failed";
   if (hasPendingInput) return "awaiting_input";
-  switch (deriveCanonicalTaskStatus(task)) {
+  const taskStatus = deriveCanonicalTaskStatus(task);
+  if (taskStatus === "cancelled" || teamRun?.status === "cancelled") return "cancelled";
+  if (taskStatus === "failed" || teamRun?.status === "failed") return "failed";
+  if (teamRun?.status === "paused") return "awaiting_input";
+  if (teamRun?.status === "completed") return "completed";
+  if (teamRun?.status === "running") return "running";
+  if (teamRun?.status === "pending") return "pending";
+  switch (taskStatus) {
     case "pending":
     case "queued":
     case "planning":
@@ -288,10 +300,6 @@ function toManagedSessionStatus(task?: Task, hasPendingInput = false): ManagedSe
       return "interrupted";
     case "completed":
       return "completed";
-    case "failed":
-      return "failed";
-    case "cancelled":
-      return "cancelled";
     default:
       return "pending";
   }
@@ -1790,7 +1798,19 @@ export class ManagedSessionService {
         ? "managed_agent_panel"
         : "manual";
     const userPrompt = this.materializeContent(input.initialEvent?.content || []);
-    const baseAgentConfig = this.buildAgentConfig(environment, version);
+    const configuredAgentConfig = this.buildAgentConfig(environment, version);
+    const baseAgentConfig: AgentConfig =
+      input.launchMode === "conversation"
+        ? {
+            ...configuredAgentConfig,
+            conversationMode: "chat",
+            executionMode: "chat",
+            executionModeSource: "user",
+            collaborativeMode: false,
+            multiLlmMode: false,
+            allowedTools: [],
+          }
+        : configuredAgentConfig;
     const missingConnections = this.resolveMcpToolAccess(environment).missingConnections;
     const effectivePrompt = this.composeRootPrompt(version, userPrompt, missingConnections);
     const studio = getStudioConfig(version);
@@ -1809,7 +1829,7 @@ export class ManagedSessionService {
       ],
     };
 
-    if (version.executionMode === "team") {
+    if (version.executionMode === "team" && input.launchMode !== "conversation") {
       const task = this.taskRepo.create({
         title: input.title,
         prompt: effectivePrompt,
@@ -1830,6 +1850,7 @@ export class ManagedSessionService {
         title: input.title,
         status: "running",
         surface,
+        interactionMode: input.launchMode || "team_task",
         workspaceId: environment.config.workspaceId,
         backingTaskId: task.id,
         backingTeamRunId: teamRunId,
@@ -1902,6 +1923,7 @@ export class ManagedSessionService {
       title: input.title,
       status: "pending",
       surface,
+      interactionMode: input.launchMode || "task",
       workspaceId: environment.config.workspaceId,
       backingTaskId: task.id,
       resumedFromSessionId: input.resumedFromSessionId,
@@ -2006,8 +2028,9 @@ export class ManagedSessionService {
   async sendUserMessage(
     sessionId: string,
     content: ManagedSessionInputContent[],
+    agentConfigOverride?: AgentConfig,
   ): Promise<ManagedSession | undefined> {
-    return this.sendEvent(sessionId, { type: "user.message", content });
+    return this.sendEvent(sessionId, { type: "user.message", content }, agentConfigOverride);
   }
 
   async sendEvent(
@@ -2015,6 +2038,7 @@ export class ManagedSessionService {
     event:
       | { type: "user.message"; content: ManagedSessionInputContent[] }
       | { type: "input.received"; requestId: string; answers?: InputRequestResponse["answers"]; status?: InputRequestResponse["status"] },
+    agentConfigOverride?: AgentConfig,
   ): Promise<ManagedSession | undefined> {
     const session = this.managedSessionRepo.findById(sessionId);
     if (!session?.backingTaskId) return undefined;
@@ -2025,7 +2049,17 @@ export class ManagedSessionService {
 
     if (event.type === "user.message") {
       const message = this.materializeContent(event.content);
-      await this.agentDaemon.sendMessage(session.backingTaskId, message);
+      if (agentConfigOverride) {
+        await this.agentDaemon.sendMessage(
+          session.backingTaskId,
+          message,
+          undefined,
+          undefined,
+          { agentConfigOverride },
+        );
+      } else {
+        await this.agentDaemon.sendMessage(session.backingTaskId, message);
+      }
       this.managedSessionEventRepo.create({
         sessionId,
         timestamp: Date.now(),
@@ -2568,14 +2602,17 @@ export class ManagedSessionService {
     const task = nextSession.backingTaskId ? this.taskRepo.findById(nextSession.backingTaskId) : undefined;
     const pendingInputs =
       nextSession.backingTaskId ? this.inputRequestRepo.findPendingByTaskId(nextSession.backingTaskId) : [];
-    const nextStatus = toManagedSessionStatus(task, pendingInputs.length > 0);
+    const teamRun = nextSession.backingTeamRunId
+      ? this.teamRunRepo.findById(nextSession.backingTeamRunId)
+      : undefined;
+    const nextStatus = deriveManagedSessionRuntimeStatus(task, teamRun, pendingInputs.length > 0);
     const latestSummary =
       task?.resultSummary ||
-      (nextSession.backingTeamRunId ? this.teamRunRepo.findById(nextSession.backingTeamRunId)?.summary : undefined) ||
+      teamRun?.summary ||
       nextSession.latestSummary;
     const completedAt =
       task?.completedAt ||
-      (nextSession.backingTeamRunId ? this.teamRunRepo.findById(nextSession.backingTeamRunId)?.completedAt : undefined) ||
+      teamRun?.completedAt ||
       nextSession.completedAt;
 
     const updates: Partial<ManagedSession> = {};

@@ -5485,6 +5485,7 @@ export interface ManagedSession {
   title: string;
   status: ManagedSessionStatus;
   surface?: ManagedSessionSurface;
+  interactionMode?: BotTurnMode;
   workspaceId: string;
   backingTaskId?: string;
   backingTeamRunId?: string;
@@ -5575,6 +5576,18 @@ export interface BotSummary {
   unreadCount: number;
   queuedCount: number;
   latestMessage?: BotEnvelope;
+  /** May be absent briefly during a renderer/main-process rolling development reload. */
+  runtime?: BotRuntimeSnapshot;
+}
+
+export type BotTurnMode = "conversation" | "task" | "team_task";
+
+export interface BotRuntimeSnapshot {
+  state: "not_started" | "idle" | "queued" | "running" | "awaiting_input" | "failed" | "cancelled";
+  sessionId?: string;
+  queuedCount: number;
+  lastOutcome?: string;
+  updatedAt: number;
 }
 
 export interface BotCanonicalSessionRequest {
@@ -5596,6 +5609,7 @@ export interface BotSendMessageRequest {
   replyTo?: string;
   idempotencyKey?: string;
   ttlMs?: number;
+  turnMode?: "auto" | BotTurnMode;
 }
 
 export type BotRoomExecutionMode = "sequential" | "parallel" | "leader";
@@ -5611,8 +5625,35 @@ export interface BotRoom {
   currentRound: number;
   activeRunId?: string;
   leaseExpiresAt?: number;
+  lastRun?: BotRoomRun;
   createdAt: number;
   updatedAt: number;
+}
+
+export type BotRoomRunStatus =
+  | "queued"
+  | "running"
+  | "awaiting_input"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "cancelled"
+  | "timed_out"
+  | "interrupted";
+
+export interface BotRoomRun {
+  id: string;
+  roomId: string;
+  sourceMessageId: string;
+  retryOfRunId?: string;
+  epoch: number;
+  status: BotRoomRunStatus;
+  currentRound: number;
+  stopRequestedAt?: number;
+  errorSummary?: string;
+  startedAt: number;
+  updatedAt: number;
+  completedAt?: number;
 }
 
 export interface BotRoomMember {
@@ -5657,6 +5698,8 @@ export interface ManagedSessionCreateInput {
   surface?: ManagedSessionSurface;
   /** Previous physical session in the same logical conversation. */
   resumedFromSessionId?: string;
+  /** Internal routing decision made before physical session creation. */
+  launchMode?: BotTurnMode;
   initialEvent?: {
     type: "user.message";
     content: ManagedSessionInputContent[];
@@ -8575,6 +8618,8 @@ export const IPC_CHANNELS = {
   BOT_ROOM_GET_IPC: "botRoom:getIpc",
   BOT_ROOM_APPEND_USER_MESSAGE_IPC: "botRoom:appendUserMessageIpc",
   BOT_ROOM_MESSAGES_LIST_IPC: "botRoom:messagesListIpc",
+  BOT_ROOM_RUN_CANCEL_IPC: "botRoom:runCancelIpc",
+  BOT_ROOM_RUN_RETRY_IPC: "botRoom:runRetryIpc",
   REMOTE_AGENT_CREDENTIAL_SET_IPC: "remoteAgent:credentialSetIpc",
   REMOTE_AGENT_CREDENTIAL_DELETE_IPC: "remoteAgent:credentialDeleteIpc",
   AGENT_WORKSPACE_MEMBERSHIP_LIST_IPC: "agentWorkspaceMembership:listIpc",

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { ArrowLeft, Bot, LoaderCircle, MessageSquareText, Plus, Send, UsersRound } from "lucide-react";
+import { ArrowLeft, Bot, LoaderCircle, MessageSquareText, Plus, RotateCcw, Send, Square, UsersRound } from "lucide-react";
 
 import type {
   BotRoom,
@@ -8,6 +8,7 @@ import type {
   BotRoomMessage,
   BotSummary,
 } from "../../../shared/types";
+import { useScopedComposerState } from "./useScopedComposerState";
 
 interface BotRoomsPanelProps {
   bots: BotSummary[];
@@ -24,10 +25,9 @@ export function BotRoomsPanel({ bots, onOpenBots, onExit }: BotRoomsPanelProps) 
   const [name, setName] = useState("");
   const [executionMode, setExecutionMode] = useState<BotRoomExecutionMode>("sequential");
   const [memberIds, setMemberIds] = useState<string[]>([]);
-  const [message, setMessage] = useState("");
-  const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
+  const composer = useScopedComposerState(`room:${selectedRoomId || "none"}`);
+  const { draft: message, setDraft: setMessage, sending, setSending, error, setError } = composer;
 
   const selected = useMemo(
     () => rooms.find((room) => room.id === selectedRoomId),
@@ -115,12 +115,34 @@ export function BotRoomsPanel({ bots, onOpenBots, onExit }: BotRoomsPanelProps) 
     setError(undefined);
     try {
       await window.electronAPI.appendBotRoomUserMessage(selected.id, body);
-      setMessage("");
+      composer.clearIfUnchanged(body);
       await loadSelected(selected.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSending(false);
+    }
+  };
+
+  const stopRun = async () => {
+    if (!selected?.activeRunId) return;
+    setError(undefined);
+    try {
+      await window.electronAPI.cancelBotRoomRun(selected.id, selected.activeRunId);
+      await Promise.all([loadRooms(), loadSelected(selected.id)]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const retryRun = async () => {
+    if (!selected?.lastRun) return;
+    setError(undefined);
+    try {
+      await window.electronAPI.retryBotRoomRun(selected.id, selected.lastRun.id);
+      await Promise.all([loadRooms(), loadSelected(selected.id)]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
 
@@ -176,7 +198,9 @@ export function BotRoomsPanel({ bots, onOpenBots, onExit }: BotRoomsPanelProps) 
               <span className="bot-roster-copy">
                 <span className="bot-roster-name">{room.name}</span>
                 <span className="bot-roster-preview">
-                  {room.activeRunId ? `Working · round ${room.currentRound}` : room.executionMode}
+                  {room.lastRun && ["queued", "running", "awaiting_input"].includes(room.lastRun.status)
+                    ? `${room.lastRun.status.replace("_", " ")} · round ${room.lastRun.currentRound}`
+                    : room.lastRun?.status || room.executionMode}
                 </span>
               </span>
             </button>
@@ -245,7 +269,19 @@ export function BotRoomsPanel({ bots, onOpenBots, onExit }: BotRoomsPanelProps) 
                 ))}
                 {members.length > 4 ? <small>+{members.length - 4}</small> : null}
               </div>
+              {selected.activeRunId ? (
+                <button className="bot-icon-button" aria-label="Stop room run" onClick={() => void stopRun()}>
+                  <Square size={15} /> Stop
+                </button>
+              ) : selected.lastRun && ["failed", "partial", "timed_out", "interrupted"].includes(selected.lastRun.status) ? (
+                <button className="bot-icon-button" aria-label="Retry room run" onClick={() => void retryRun()}>
+                  <RotateCcw size={15} /> Retry
+                </button>
+              ) : null}
             </header>
+            {selected.lastRun?.errorSummary ? (
+              <div className="bot-error-banner">{selected.lastRun.errorSummary}</div>
+            ) : null}
             <div className="bot-message-list">
               {messages.length ? messages.map((entry) => (
                 <article key={entry.id} className={`bot-message ${entry.fromAgentId ? "assistant" : "user"}`}>
@@ -266,6 +302,7 @@ export function BotRoomsPanel({ bots, onOpenBots, onExit }: BotRoomsPanelProps) 
             {error ? <div className="bot-error-banner">{error}</div> : null}
             <div className="bot-composer">
               <textarea
+                key={`room:${selected.id}`}
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 onKeyDown={(event) => {
@@ -277,7 +314,11 @@ export function BotRoomsPanel({ bots, onOpenBots, onExit }: BotRoomsPanelProps) 
                 placeholder={`Message ${selected.name}`}
                 rows={2}
               />
-              <button onClick={() => void sendMessage()} disabled={!message.trim() || sending}>
+              <button
+                aria-label={`Send message to ${selected.name}`}
+                onClick={() => void sendMessage()}
+                disabled={!message.trim() || sending}
+              >
                 {sending ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
               </button>
             </div>

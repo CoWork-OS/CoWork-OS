@@ -6,6 +6,8 @@ import type {
   BotRoomExecutionMode,
   BotRoomMember,
   BotRoomMessage,
+  BotRoomRun,
+  BotRoomRunStatus,
 } from "../../shared/types";
 
 type Row = Record<string, unknown>;
@@ -157,6 +159,15 @@ export class BotRoomService {
     const epoch = room.epoch + 1;
     const now = Date.now();
     const append = this.db.transaction(() => {
+      if (room.activeRunId) {
+        this.db
+          .prepare(
+            `UPDATE bot_room_runs SET status = 'cancelled', stop_requested_at = ?,
+             error_summary = 'Superseded by a newer room message.', completed_at = ?, updated_at = ?
+             WHERE id = ? AND completed_at IS NULL`,
+          )
+          .run(now, now, now, room.activeRunId);
+      }
       this.db
         .prepare(
           `UPDATE bot_rooms SET epoch = ?, current_round = 0, active_run_id = NULL,
@@ -170,17 +181,43 @@ export class BotRoomService {
     return message;
   }
 
-  startRun(roomId: string, leaseOwner: string, leaseMs = 60_000): { runId: string; epoch: number } {
+  startRun(
+    roomId: string,
+    sourceMessageId: string,
+    leaseOwner: string,
+    leaseMs = 60_000,
+    retryOfRunId?: string,
+  ): { runId: string; epoch: number } {
     const room = this.requireRoom(roomId);
     const now = Date.now();
     const runId = randomUUID();
-    const result = this.db
-      .prepare(
-        `UPDATE bot_rooms SET active_run_id = ?, current_round = 1, lease_owner = ?, lease_expires_at = ?, updated_at = ?
-         WHERE id = ? AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?)`,
-      )
-      .run(runId, leaseOwner, now + Math.max(5_000, leaseMs), now, roomId, now);
-    if (result.changes === 0) throw new Error("Bot room is already being coordinated");
+    const leaseExpiresAt = now + Math.max(5_000, leaseMs);
+    const start = this.db.transaction(() => {
+      const result = this.db
+        .prepare(
+          `UPDATE bot_rooms SET active_run_id = ?, current_round = 1, lease_owner = ?, lease_expires_at = ?, updated_at = ?
+           WHERE id = ? AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?)`,
+        )
+        .run(runId, leaseOwner, leaseExpiresAt, now, roomId, now);
+      if (result.changes === 0) throw new Error("Bot room is already being coordinated");
+      this.db.prepare(
+        `INSERT INTO bot_room_runs (
+          id, room_id, source_message_id, retry_of_run_id, epoch, status, current_round,
+          lease_owner, lease_expires_at, started_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'running', 1, ?, ?, ?, ?)`,
+      ).run(
+        runId,
+        roomId,
+        sourceMessageId,
+        retryOfRunId || null,
+        room.epoch,
+        leaseOwner,
+        leaseExpiresAt,
+        now,
+        now,
+      );
+    });
+    start();
     return { runId, epoch: room.epoch };
   }
 
@@ -195,6 +232,10 @@ export class BotRoomService {
          WHERE id = ? AND active_run_id = ? AND current_round = ?`,
       )
       .run(nextRound, Date.now(), roomId, runId, room.currentRound);
+    if (result.changes > 0) {
+      this.db.prepare("UPDATE bot_room_runs SET current_round = ?, updated_at = ? WHERE id = ?")
+        .run(nextRound, Date.now(), runId);
+    }
     return result.changes > 0 ? nextRound : undefined;
   }
 
@@ -288,14 +329,104 @@ export class BotRoomService {
     return rows.map((row) => this.mapMessage(row));
   }
 
-  finishRun(roomId: string, runId: string): void {
-    this.db
-      .prepare(
+  finishRun(
+    roomId: string,
+    runId: string,
+    status: Exclude<BotRoomRunStatus, "queued" | "running" | "awaiting_input"> = "completed",
+    errorSummary?: string,
+  ): void {
+    const now = Date.now();
+    this.db.transaction(() => {
+      this.db.prepare(
+        `UPDATE bot_room_runs SET status = ?, error_summary = ?, completed_at = ?,
+         lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`,
+      ).run(status, errorSummary?.slice(0, 2_000) || null, now, now, runId);
+      this.db.prepare(
         `UPDATE bot_rooms SET active_run_id = NULL, lease_owner = NULL,
          lease_expires_at = NULL, current_round = 0, updated_at = ?
          WHERE id = ? AND active_run_id = ?`,
+      ).run(now, roomId, runId);
+    })();
+  }
+
+  getRun(runId: string): BotRoomRun | undefined {
+    const row = this.db.prepare("SELECT * FROM bot_room_runs WHERE id = ?").get(runId) as Row | undefined;
+    return row ? this.mapRun(row) : undefined;
+  }
+
+  getLatestRun(roomId: string): BotRoomRun | undefined {
+    const row = this.db.prepare(
+      "SELECT * FROM bot_room_runs WHERE room_id = ? ORDER BY started_at DESC LIMIT 1",
+    ).get(roomId) as Row | undefined;
+    return row ? this.mapRun(row) : undefined;
+  }
+
+  getMessage(messageId: string): BotRoomMessage | undefined {
+    const row = this.db.prepare("SELECT * FROM bot_room_messages WHERE id = ?").get(messageId) as Row | undefined;
+    return row ? this.mapMessage(row) : undefined;
+  }
+
+  updateRunStatus(runId: string, status: "running" | "awaiting_input"): void {
+    this.db.prepare("UPDATE bot_room_runs SET status = ?, updated_at = ? WHERE id = ? AND completed_at IS NULL")
+      .run(status, Date.now(), runId);
+  }
+
+  startTurn(runId: string, roomId: string, round: number, agentId: string): string {
+    const id = randomUUID();
+    this.db.prepare(
+      `INSERT INTO bot_room_run_turns
+       (id, run_id, room_id, round, agent_id, status, started_at)
+       VALUES (?, ?, ?, ?, ?, 'running', ?)`,
+    ).run(id, runId, roomId, round, agentId, Date.now());
+    return id;
+  }
+
+  finishTurn(
+    turnId: string,
+    status: "completed" | "passed" | "failed" | "cancelled" | "timed_out",
+    sessionId?: string,
+    errorSummary?: string,
+  ): void {
+    this.db.prepare(
+      `UPDATE bot_room_run_turns SET status = ?, session_id = ?, error_summary = ?, completed_at = ?
+       WHERE id = ?`,
+    ).run(status, sessionId || null, errorSummary?.slice(0, 2_000) || null, Date.now(), turnId);
+  }
+
+  requestStop(roomId: string, runId: string): boolean {
+    const now = Date.now();
+    const room = this.requireRoom(roomId);
+    if (room.activeRunId !== runId) return false;
+    this.db.transaction(() => {
+      this.db.prepare(
+        "UPDATE bot_room_runs SET stop_requested_at = ?, status = 'cancelled', completed_at = ?, updated_at = ? WHERE id = ?",
+      ).run(now, now, now, runId);
+      this.db.prepare(
+        `UPDATE bot_rooms SET epoch = epoch + 1, active_run_id = NULL, current_round = 0,
+         lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND active_run_id = ?`,
+      ).run(now, roomId, runId);
+    })();
+    return true;
+  }
+
+  recoverStaleRuns(now = Date.now()): number {
+    const stale = this.db.prepare(
+      `SELECT id, room_id FROM bot_room_runs
+       WHERE status IN ('queued','running','awaiting_input')
+       AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`,
+    ).all(now) as Row[];
+    for (const row of stale) {
+      this.finishRun(String(row.room_id), String(row.id), "interrupted", "The room run was interrupted before completion.");
+    }
+    const orphaned = this.db
+      .prepare(
+        `UPDATE bot_rooms SET active_run_id = NULL, current_round = 0,
+         lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+         WHERE active_run_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM bot_room_runs WHERE id = bot_rooms.active_run_id)`,
       )
-      .run(Date.now(), roomId, runId);
+      .run(now);
+    return stale.length + orphaned.changes;
   }
 
   private insertMessage(input: {
@@ -374,7 +505,7 @@ export class BotRoomService {
   }
 
   private mapRoom(row: Row): BotRoom {
-    return {
+    const room: BotRoom = {
       id: String(row.id),
       name: String(row.name),
       ownerAgentId: row.owner_agent_id ? String(row.owner_agent_id) : undefined,
@@ -387,6 +518,25 @@ export class BotRoomService {
       leaseExpiresAt: row.lease_expires_at ? Number(row.lease_expires_at) : undefined,
       createdAt: Number(row.created_at || 0),
       updatedAt: Number(row.updated_at || 0),
+    };
+    room.lastRun = this.getLatestRun(room.id);
+    return room;
+  }
+
+  private mapRun(row: Row): BotRoomRun {
+    return {
+      id: String(row.id),
+      roomId: String(row.room_id),
+      sourceMessageId: String(row.source_message_id),
+      retryOfRunId: row.retry_of_run_id ? String(row.retry_of_run_id) : undefined,
+      epoch: Number(row.epoch || 0),
+      status: String(row.status) as BotRoomRunStatus,
+      currentRound: Number(row.current_round || 0),
+      stopRequestedAt: row.stop_requested_at ? Number(row.stop_requested_at) : undefined,
+      errorSummary: row.error_summary ? String(row.error_summary) : undefined,
+      startedAt: Number(row.started_at || 0),
+      updatedAt: Number(row.updated_at || 0),
+      completedAt: row.completed_at ? Number(row.completed_at) : undefined,
     };
   }
 

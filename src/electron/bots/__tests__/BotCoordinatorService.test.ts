@@ -126,6 +126,33 @@ describeWithSqlite("BotCoordinatorService", () => {
     expect(tasks.findById(session!.backingTaskId!)?.prompt).toContain("Prepare the morning brief");
   });
 
+  it("bypasses team orchestration for a conversational turn on a team-configured bot", async () => {
+    const fixture = createFixture();
+    const created = managed.createAgent({
+      name: "Team Chat Bot",
+      systemPrompt: "Be helpful and concise.",
+      executionMode: "team",
+      metadata: { studio: { defaultEnvironmentId: fixture.environment.id } },
+    });
+
+    await bots.sendMessage({
+      fromAgentId: "user",
+      toAgentId: created.agent.id,
+      body: "Reply exactly BOT-SMOKE and do not use tools.",
+    });
+
+    const session = managed.getSession(bots.getBinding(created.agent.id).canonicalSessionId!)!;
+    const task = tasks.findById(session.backingTaskId!)!;
+    expect(session.interactionMode).toBe("conversation");
+    expect(session.backingTeamRunId).toBeUndefined();
+    expect(task.agentConfig).toMatchObject({
+      conversationMode: "chat",
+      executionMode: "chat",
+      executionModeSource: "user",
+      allowedTools: [],
+    });
+  });
+
   it("recovers stale claimed messages for at-least-once redelivery", () => {
     const fixture = createFixture();
     const messages = new BotMessageRepository(db);
@@ -252,7 +279,8 @@ describeWithSqlite("BotCoordinatorService", () => {
       maxMessages: 2,
     });
     const userMessage = rooms.appendUserMessage(room.id, "Prepare the release");
-    const run = rooms.startRun(room.id, "test-coordinator");
+    const source = rooms.appendUserMessage(room.id, "Start bounded run");
+    const run = rooms.startRun(room.id, source.id, "test-coordinator");
     expect(rooms.get(room.id)?.currentRound).toBe(1);
     const first = rooms.appendBotMessage({
       roomId: room.id,
@@ -307,7 +335,8 @@ describeWithSqlite("BotCoordinatorService", () => {
       maxRounds: 2,
     });
     validatingRooms.appendUserMessage(room.id, "Begin");
-    const run = validatingRooms.startRun(room.id, "coordinator");
+    const source = validatingRooms.appendUserMessage(room.id, "Start validated run");
+    const run = validatingRooms.startRun(room.id, source.id, "coordinator");
     expect(validatingRooms.advanceRound(room.id, run.runId)).toBe(2);
     expect(validatingRooms.advanceRound(room.id, run.runId)).toBeUndefined();
   });
@@ -364,11 +393,62 @@ describeWithSqlite("BotCoordinatorService", () => {
       fakeManaged as Any,
     );
 
-    const receipt = coordinator.sendUserMessage(room.id, "Prepare the release");
+    const receipt = await coordinator.sendUserMessage(room.id, "Prepare the release");
     await coordinator.waitForRun(receipt.runId);
 
     const messages = rooms.listMessages(room.id);
     expect(messages.filter((entry) => entry.fromAgentId)).toHaveLength(2);
+    expect(rooms.get(room.id)?.activeRunId).toBeUndefined();
+    expect(fakeManaged.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: "bot_group", launchMode: "conversation" }),
+    );
+    expect(rooms.get(room.id)?.lastRun?.status).toBe("completed");
+  });
+
+  it("durably terminalizes a stopped room run and preserves late replies", () => {
+    const fixture = createFixture();
+    const second = managed.createAgent({
+      name: "Second Bot",
+      systemPrompt: "Help in rooms.",
+      executionMode: "solo",
+    }).agent;
+    const rooms = new BotRoomService(db, (agentId) => Boolean(managed.getAgent(agentId)));
+    const room = rooms.create({
+      name: "Stoppable",
+      memberAgentIds: [fixture.agent.id, second.id],
+    });
+    const source = rooms.appendUserMessage(room.id, "Start");
+    const run = rooms.startRun(room.id, source.id, "test");
+
+    expect(rooms.requestStop(room.id, run.runId)).toBe(true);
+    expect(rooms.getRun(run.runId)?.status).toBe("cancelled");
+    expect(rooms.get(room.id)?.activeRunId).toBeUndefined();
+    expect(
+      rooms.appendBotMessage({
+        roomId: room.id,
+        runId: run.runId,
+        epoch: run.epoch,
+        round: 1,
+        fromAgentId: fixture.agent.id,
+        body: "Late response",
+      }).status,
+    ).toBe("late");
+  });
+
+  it("clears a legacy orphaned active room run during recovery", () => {
+    const fixture = createFixture();
+    const second = managed.createAgent({
+      name: "Recovery Bot",
+      systemPrompt: "Help in rooms.",
+      executionMode: "solo",
+    }).agent;
+    const rooms = new BotRoomService(db, (agentId) => Boolean(managed.getAgent(agentId)));
+    const room = rooms.create({ name: "Legacy room", memberAgentIds: [fixture.agent.id, second.id] });
+    db.prepare(
+      "UPDATE bot_rooms SET active_run_id = 'legacy-run', current_round = 2, lease_expires_at = ? WHERE id = ?",
+    ).run(Date.now() - 1, room.id);
+
+    expect(rooms.recoverStaleRuns()).toBe(1);
     expect(rooms.get(room.id)?.activeRunId).toBeUndefined();
   });
 });

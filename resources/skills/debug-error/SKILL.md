@@ -1,6 +1,9 @@
 ---
 name: debug-error
 description: "Analyze an error message and suggest fixes"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Debug Error

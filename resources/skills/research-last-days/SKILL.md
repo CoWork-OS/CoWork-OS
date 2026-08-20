@@ -1,6 +1,9 @@
 ---
 name: research-last-days
 description: "Research a topic from the past X days using web search. Specify the number of days or let it be inferred from your prompt."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Last X Days Research

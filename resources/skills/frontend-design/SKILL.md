@@ -1,6 +1,10 @@
 ---
 name: frontend-design
 description: "Design and build production-grade frontends with bold, distinctive aesthetics."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "Anthropic"
 ---
 
 # frontend-design

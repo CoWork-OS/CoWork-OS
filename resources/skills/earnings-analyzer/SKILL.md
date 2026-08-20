@@ -1,6 +1,9 @@
 ---
 name: earnings-analyzer
 description: "Analyze quarterly and annual earnings reports including EPS beat/miss analysis, revenue trends, margin expansion, forward guidance parsing, and management commentary extraction."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Earnings Analyzer

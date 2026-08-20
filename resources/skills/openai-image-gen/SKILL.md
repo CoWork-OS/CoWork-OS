@@ -1,6 +1,9 @@
 ---
 name: openai-image-gen
 description: "Batch-generate images via OpenAI Images API. Random prompt sampler + `index.html` gallery."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Openai-image-gen

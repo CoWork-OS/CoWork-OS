@@ -1,6 +1,9 @@
 ---
 name: idea-validation
 description: "Validate a business or product idea with market research, competitor analysis, and a go/no-go recommendation"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Idea Validation

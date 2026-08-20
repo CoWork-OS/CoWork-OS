@@ -1,6 +1,9 @@
 ---
 name: explain-code
 description: "Get a detailed explanation of how code works"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Explain Code

@@ -1,6 +1,10 @@
 ---
 name: supabase-sdk-patterns
 description: "Apply production-ready Supabase SDK patterns for TypeScript and Python projects."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "Jeremy Longshore"
 ---
 
 # supabase-sdk-patterns

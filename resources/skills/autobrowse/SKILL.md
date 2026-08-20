@@ -1,6 +1,9 @@
 ---
 name: autobrowse
 description: "Learn a reliable browser workflow by iterating on a real web task, recording strategy, and proposing a reusable skill."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Autobrowse

@@ -1,6 +1,10 @@
 ---
 name: prd
 description: "Generate a structured Product Requirements Document from a feature request."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "snarktank/ralph"
 ---
 
 # prd

@@ -1,6 +1,9 @@
 ---
 name: pi-librarian
 description: "GitHub research subagent for Pi that uses gh workflows to find and cite relevant repo files before implementation."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Pi-librarian

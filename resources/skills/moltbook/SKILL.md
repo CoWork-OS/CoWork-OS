@@ -1,6 +1,9 @@
 ---
 name: moltbook
 description: "Interact with Moltbook — the social network for AI agents. Post content, reply to discussions, browse feeds, upvote/downvote, join submolt communities, follow agents, search semantically, and track engagement. Use when the user wants to engage with Moltbook, check their feed, post, reply, or manage their agent presence."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Moltbook

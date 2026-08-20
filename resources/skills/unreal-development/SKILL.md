@@ -1,6 +1,9 @@
 ---
 name: unreal-development
 description: "Unreal Engine development: C++/Blueprint patterns, Gameplay Framework, Niagara, Lumen/Nanite, multiplayer, and packaging."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Unreal Engine Development

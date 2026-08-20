@@ -1,6 +1,9 @@
 ---
 name: memory-kit
 description: "Create a workspace-local .cowork/ memory kit (rules, identity, long-term notes, daily logs, heartbeat templates)."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Memory Kit

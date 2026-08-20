@@ -411,6 +411,51 @@ describe("CapabilityBundleSecurityService", () => {
     },
   );
 
+  it.runIf(process.platform !== "win32")(
+    "quarantines a skill when NVIDIA reports an incomplete security scan",
+    async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ vulns: [] }),
+      }) as typeof fetch;
+
+      const evaluatorPath = path.join(rootDir, "skillevaluator-incomplete-test");
+      const report = { incomplete_scans: ["SkillSpector unavailable"], results: [] };
+      fs.writeFileSync(
+        evaluatorPath,
+        `#!/bin/sh\nfor output; do :; done\nmkdir -p "$output/result"\nprintf '%s\\n' '${JSON.stringify(report)}' > "$output/result/report.json"\nexit 0\n`,
+        "utf-8",
+      );
+      fs.chmodSync(evaluatorPath, 0o700);
+      process.env.COWORK_SKILL_EVALUATOR_BIN = evaluatorPath;
+
+      const stageDir = path.join(rootDir, "stage-nvidia-incomplete");
+      fs.mkdirSync(path.join(stageDir, "bundle"), { recursive: true });
+      fs.writeFileSync(
+        path.join(stageDir, "manifest.json"),
+        JSON.stringify(createSkill("nvidia-incomplete")),
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(stageDir, "bundle", "SKILL.md"),
+        "---\nname: nvidia-incomplete\ndescription: Incomplete scan test\nlicense: MIT\n---\n",
+        "utf-8",
+      );
+
+      const result = await service.scanSkillStage({
+        bundleId: "nvidia-incomplete",
+        displayName: "NVIDIA Incomplete",
+        source: "url",
+        managed: true,
+        stageDir,
+      });
+
+      expect(result.verdict).toBe("quarantined");
+      expect(result.findings.some((finding) => finding.code === "nvidia-skillevaluator-failed"))
+        .toBe(true);
+    },
+  );
+
   it("warns on shell connectors without blocking safe plugin packs", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,

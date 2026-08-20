@@ -1,6 +1,9 @@
 ---
 name: simplify
 description: "Improve existing work with focused simplification passes across code, writing, research, operations, or general tasks."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Simplify

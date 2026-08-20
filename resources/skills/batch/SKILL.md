@@ -1,6 +1,9 @@
 ---
 name: batch
 description: "Plan and execute parallel, repeatable migrations across code, docs, research artifacts, ops configs, or mixed task sets."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Batch

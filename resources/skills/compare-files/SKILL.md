@@ -1,6 +1,9 @@
 ---
 name: compare-files
 description: "Compare two files and show differences"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Compare Files

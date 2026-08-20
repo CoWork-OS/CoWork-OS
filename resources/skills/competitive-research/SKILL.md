@@ -1,6 +1,9 @@
 ---
 name: competitive-research
 description: "Research competitors for a product, market, or idea and identify opportunities to differentiate"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Competitive Research

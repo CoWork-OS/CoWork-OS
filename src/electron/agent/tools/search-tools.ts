@@ -14,12 +14,10 @@ import {
  * SearchTools implements web search operations for the agent
  */
 export class SearchTools {
-  private domainPolicyOverride:
-    | {
-        allowedDomains: string[];
-        blockedDomains: string[];
-      }
-    | null = null;
+  private domainPolicyOverride: {
+    allowedDomains: string[];
+    blockedDomains: string[];
+  } | null = null;
 
   constructor(
     private workspace: Workspace,
@@ -77,25 +75,22 @@ export class SearchTools {
     }
   }
 
+  private getEffectiveDomainPolicy(): { allowedDomains: string[]; blockedDomains: string[] } {
+    if (this.domainPolicyOverride) return this.domainPolicyOverride;
+    const settings = GuardrailManager.loadSettings();
+    return {
+      blockedDomains: this.normalizeDomainPatterns((settings as Any).webSearchBlockedDomains || []),
+      allowedDomains: this.normalizeDomainPatterns((settings as Any).webSearchAllowedDomains || []),
+    };
+  }
+
   private applyDomainPolicy(response: SearchResponse): {
     response: SearchResponse;
     originalCount: number;
     filteredCount: number;
     filteredOutCount: number;
   } {
-    const effectivePolicy = this.domainPolicyOverride
-      ? this.domainPolicyOverride
-      : (() => {
-          const settings = GuardrailManager.loadSettings();
-          return {
-            blockedDomains: this.normalizeDomainPatterns(
-              (settings as Any).webSearchBlockedDomains || [],
-            ),
-            allowedDomains: this.normalizeDomainPatterns(
-              (settings as Any).webSearchAllowedDomains || [],
-            ),
-          };
-        })();
+    const effectivePolicy = this.getEffectiveDomainPolicy();
     const blockedDomains = effectivePolicy.blockedDomains;
     const allowedDomains = effectivePolicy.allowedDomains;
 
@@ -116,12 +111,16 @@ export class SearchTools {
       if (!hostname) {
         continue;
       }
-      const blocked = blockedDomains.some((pattern) => this.matchesDomainPattern(hostname, pattern));
+      const blocked = blockedDomains.some((pattern) =>
+        this.matchesDomainPattern(hostname, pattern),
+      );
       if (blocked) {
         continue;
       }
       if (allowedDomains.length > 0) {
-        const allowed = allowedDomains.some((pattern) => this.matchesDomainPattern(hostname, pattern));
+        const allowed = allowedDomains.some((pattern) =>
+          this.matchesDomainPattern(hostname, pattern),
+        );
         if (!allowed) {
           continue;
         }
@@ -178,18 +177,21 @@ export class SearchTools {
     provider?: SearchProviderType;
     dateRange?: "day" | "week" | "month" | "year";
     region?: string;
+    language?: string;
+    safeSearch?: boolean;
     maxUses?: number;
   }): Promise<SearchResponse> {
-    // DuckDuckGo is always available as a free fallback, so web_search never
-    // needs to return "not configured". searchWithFallback handles the full
-    // provider chain including DDG as last resort.
+    const endpointDomainPolicy = this.getEffectiveDomainPolicy();
     const searchQuery: SearchQuery = {
       query: input.query,
       searchType: input.searchType || "web",
       maxResults: Math.min(input.maxResults || 10, 20), // Cap at 20 results
       dateRange: input.dateRange,
       region: input.region,
+      language: input.language,
+      safeSearch: input.safeSearch,
       provider: input.provider,
+      endpointDomainPolicy,
     };
 
     const settings = SearchProviderFactory.loadSettings();
@@ -214,9 +216,7 @@ export class SearchTools {
       if (filteredResponse.success === false) {
         this.daemon.logEvent(this.taskId, "tool_result", {
           tool: "web_search",
-          error:
-            filteredResponse.error ||
-            "All web_search results were filtered by domain policy.",
+          error: filteredResponse.error || "All web_search results were filtered by domain policy.",
           resultCount: domainPolicy.filteredCount,
           filteredOutCount: domainPolicy.filteredOutCount,
         });
@@ -240,7 +240,9 @@ export class SearchTools {
     } catch (error: Any) {
       const message = error?.message || "Web search failed";
       const failedProvider =
-        typeof error?.failedProvider === "string" ? (error.failedProvider as SearchProviderType) : undefined;
+        typeof error?.failedProvider === "string"
+          ? (error.failedProvider as SearchProviderType)
+          : undefined;
       const providerErrorScope =
         error?.providerErrorScope === "provider" || error?.providerErrorScope === "global"
           ? error.providerErrorScope

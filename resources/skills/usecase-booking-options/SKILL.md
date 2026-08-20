@@ -1,6 +1,9 @@
 ---
 name: usecase-booking-options
 description: "Find booking openings in a time window, cross-check calendar, propose 3 options. Stops before booking."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Booking Options

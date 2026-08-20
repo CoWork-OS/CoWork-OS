@@ -1,6 +1,9 @@
 ---
 name: pi-finder-subagent
 description: "Read-only local workspace scout subagent for Pi. Use it to narrow context to relevant files/snippets before implementation."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Pi-finder-subagent

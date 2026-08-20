@@ -1,6 +1,9 @@
 ---
 name: trello
 description: "Manage Trello boards, lists, and cards via the Trello REST API."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Trello

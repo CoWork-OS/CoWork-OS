@@ -1,6 +1,9 @@
 ---
 name: refactor-code
 description: "Improve code structure and readability"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Refactor Code

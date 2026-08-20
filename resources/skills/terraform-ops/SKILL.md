@@ -1,6 +1,9 @@
 ---
 name: terraform-ops
 description: "Infrastructure-as-Code operations: plan, apply, import, state management, module development, and drift detection using Terraform CLI."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Terraform Operations

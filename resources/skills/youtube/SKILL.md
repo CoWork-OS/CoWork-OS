@@ -1,6 +1,9 @@
 ---
 name: youtube
 description: "Fetch transcripts, metadata, and captions from YouTube videos. Use when you need to summarize a video, answer questions about its content, extract key points, compare videos, or pull quotes with timestamps. Supports auto-generated and manual captions, multiple languages, and translation."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # YouTube

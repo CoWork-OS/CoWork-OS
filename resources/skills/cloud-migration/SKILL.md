@@ -1,6 +1,9 @@
 ---
 name: cloud-migration
 description: "Cloud migration strategy and execution: assessment frameworks, migration patterns, database migration, network cutover, and multi-cloud planning."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Cloud Migration

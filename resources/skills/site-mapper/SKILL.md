@@ -1,6 +1,9 @@
 ---
 name: site-mapper
 description: "Crawl a website and build a structured content map with page summaries."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Site Mapper

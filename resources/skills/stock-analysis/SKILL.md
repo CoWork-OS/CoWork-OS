@@ -1,6 +1,9 @@
 ---
 name: stock-analysis
 description: "Analyze stocks, ETFs, and crypto using Yahoo Finance and Alpha Vantage. Get real-time quotes, fundamentals (P/E, EPS, margins, balance sheet), technical indicators (RSI, MACD, Bollinger), dividends, earnings, options chains, analyst ratings, institutional holders, sector comparisons, and screening. Use when the user asks about stock prices, company financials, market trends, portfolio analysis, or any investment research."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Stock Analysis

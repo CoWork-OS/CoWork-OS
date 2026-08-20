@@ -1,3 +1,13 @@
+---
+name: kami
+description: Typeset professional documents with the Kami editorial design system when the user explicitly asks for Kami by name.
+version: "1.0.0"
+license: MIT
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: Tw93
+---
+
 # Kami
 
 ## Purpose

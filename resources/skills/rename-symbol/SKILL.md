@@ -1,6 +1,9 @@
 ---
 name: rename-symbol
 description: "Rename a variable/function across files"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Rename Symbol

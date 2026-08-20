@@ -1,6 +1,9 @@
 ---
 name: local-places
 description: "Search for places (restaurants, cafes, etc.) via Google Places API proxy on localhost."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Local-places

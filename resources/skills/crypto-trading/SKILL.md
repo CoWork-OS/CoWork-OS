@@ -1,6 +1,9 @@
 ---
 name: crypto-trading
 description: "Use ccxt (Python) for crypto prices, balances, and order actions across 100+ exchanges."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Crypto Trading

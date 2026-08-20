@@ -1,6 +1,9 @@
 ---
 name: docker-compose-ops
 description: "Docker Compose operations: service orchestration, compose file authoring, multi-stage builds, networking, volumes, and production configurations."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Docker Compose Operations

@@ -1,6 +1,9 @@
 ---
 name: content-monitor
 description: "Monitor web pages for changes and extract updated content with scheduling support."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Content Monitor

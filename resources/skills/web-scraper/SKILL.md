@@ -1,6 +1,9 @@
 ---
 name: web-scraper
 description: "Scrape web pages with anti-bot bypass and structured data extraction using Scrapling."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Web Scraper

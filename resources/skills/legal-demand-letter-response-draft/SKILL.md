@@ -1,6 +1,9 @@
 ---
 name: legal-demand-letter-response-draft
 description: "Map allegations to contract language and draft a response letter with no unintended admissions."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Legal Demand Letter Response Draft

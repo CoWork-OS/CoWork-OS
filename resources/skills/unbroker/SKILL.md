@@ -1,6 +1,10 @@
 ---
 name: unbroker
 description: Find and remove authorized personal information exposures from data brokers and people-search sites with a consent-gated local workflow.
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "SHL0MS / Nous Research, ported by CoWork OS"
 ---
 
 # unbroker

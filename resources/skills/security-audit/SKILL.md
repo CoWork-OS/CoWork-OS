@@ -1,6 +1,9 @@
 ---
 name: security-audit
 description: "Check code for common security vulnerabilities"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Security Audit

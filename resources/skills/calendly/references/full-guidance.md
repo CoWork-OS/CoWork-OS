@@ -492,7 +492,7 @@ When presenting calendar data:
 
   Wednesday, Feb 26
     10:00 AM – 10:30 AM  Product Demo
-      ↳ Alex Chen <alex@company.com>  |  Zoom
+      ↳ Alex Chen <alex@example.com>  |  Zoom
       ↳ Q: "What features interest you?" A: "API integrations"
 
   3 meetings this week  |  1.5 hours total

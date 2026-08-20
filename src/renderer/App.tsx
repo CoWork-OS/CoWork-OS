@@ -6006,9 +6006,9 @@ export function App() {
         currentView === "missionControl") && (
         <>
           <div
-            className={`app-layout ${leftSidebarCollapsed ? "left-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
+            className={`app-layout ${leftSidebarCollapsed || currentView === "bots" ? "left-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""} ${currentView === "bots" ? "bots-focused-layout" : ""}`}
           >
-            {!leftSidebarCollapsed && (
+            {!leftSidebarCollapsed && currentView !== "bots" && (
               <Sidebar
                 workspace={currentWorkspace}
                 tasks={tasks}
@@ -6017,7 +6017,6 @@ export function App() {
                 isIdeasActive={currentView === "ideas"}
                 isInboxAgentActive={currentView === "inboxAgent"}
                 isAgentsActive={currentView === "agents"}
-                isBotsActive={currentView === "bots"}
                 isEverydayAgentActive={currentView === "everydayAgent"}
                 isMissionControlActive={currentView === "missionControl"}
                 isHealthActive={currentView === "health"}
@@ -6203,7 +6202,10 @@ export function App() {
                   }}
                 />
               ) : currentView === "bots" ? (
-                <BotWorkspace onOpenAgents={() => setCurrentView("agents")} />
+                <BotWorkspace
+                  onOpenAgents={() => setCurrentView("agents")}
+                  onExit={() => setCurrentView("home")}
+                />
               ) : currentView === "agents" ? (
                 <main className="main-content">
                   <AgentsHubPanel

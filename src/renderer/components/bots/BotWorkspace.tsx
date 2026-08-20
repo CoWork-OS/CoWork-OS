@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
+  ArrowLeft,
   Bot,
   CalendarClock,
+  ChevronRight,
   CircleAlert,
   LoaderCircle,
-  MessageSquareText,
+  PanelRight,
   Pin,
   Plus,
   RefreshCw,
+  Search,
   Send,
   Settings2,
   UsersRound,
+  X,
 } from "lucide-react";
 
 import type {
@@ -24,6 +28,7 @@ import { BotRoomsPanel } from "./BotRoomsPanel";
 
 interface BotWorkspaceProps {
   onOpenAgents: () => void;
+  onExit: () => void;
 }
 
 function eventText(event: ManagedSessionEvent): string {
@@ -68,7 +73,12 @@ function initials(name: string): string {
   );
 }
 
-export function BotWorkspace({ onOpenAgents }: BotWorkspaceProps) {
+function avatarStyle(name: string): CSSProperties {
+  const hue = [...name].reduce((total, character) => total + character.charCodeAt(0), 0) % 360;
+  return { "--bot-avatar-hue": String(hue) } as CSSProperties;
+}
+
+export function BotWorkspace({ onOpenAgents, onExit }: BotWorkspaceProps) {
   const [bots, setBots] = useState<BotSummary[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
   const [environments, setEnvironments] = useState<ManagedEnvironment[]>([]);
@@ -80,12 +90,22 @@ export function BotWorkspace({ onOpenAgents }: BotWorkspaceProps) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string>();
   const [showRooms, setShowRooms] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const conversationRequestRef = useRef(0);
+  const messageEndRef = useRef<HTMLDivElement>(null);
 
   const selected = useMemo(
     () => bots.find((bot) => bot.agent.id === selectedAgentId),
     [bots, selectedAgentId],
   );
+  const filteredBots = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return bots;
+    return bots.filter((bot) =>
+      `${bot.agent.name} ${bot.agent.description || ""}`.toLowerCase().includes(query),
+    );
+  }, [bots, search]);
 
   const loadBots = useCallback(async () => {
     const [nextBots, nextEnvironments] = await Promise.all([
@@ -149,6 +169,10 @@ export function BotWorkspace({ onOpenAgents }: BotWorkspaceProps) {
     };
   }, [environments, loadConversation, selected?.binding.defaultEnvironmentId, selectedAgentId]);
 
+  useEffect(() => {
+    messageEndRef.current?.scrollIntoView({ block: "end" });
+  }, [events, selectedAgentId]);
+
   const sendMessage = async () => {
     const body = message.trim();
     if (!selected || !body || sending) return;
@@ -200,29 +224,66 @@ export function BotWorkspace({ onOpenAgents }: BotWorkspaceProps) {
   }
 
   if (showRooms) {
-    return <BotRoomsPanel bots={bots} onOpenBots={() => setShowRooms(false)} />;
+    return (
+      <BotRoomsPanel bots={bots} onOpenBots={() => setShowRooms(false)} onExit={onExit} />
+    );
   }
 
   return (
     <main className="bot-workspace">
       <aside className="bot-roster">
-        <div className="bot-roster-header">
-          <div>
-            <span className="bot-eyebrow">Persistent agents</span>
-            <h2>Bots</h2>
+        <div className="bot-brand-row">
+          <button className="bot-quiet-button" onClick={onExit} title="Back to CoWork">
+            <ArrowLeft size={17} />
+          </button>
+          <div className="bot-brand-copy">
+            <strong>CoWork Bots</strong>
+            <span>Always-on agents</span>
           </div>
           <button className="bot-icon-button" onClick={onOpenAgents} title="Create a bot">
             <Plus size={17} />
           </button>
         </div>
+
+        <div className="bot-view-tabs" role="tablist" aria-label="Bot workspace views">
+          <button className="active" role="tab" aria-selected="true">
+            <Bot size={14} /> Bots
+          </button>
+          <button role="tab" aria-selected="false" onClick={() => setShowRooms(true)}>
+            <UsersRound size={14} /> Rooms
+          </button>
+        </div>
+
+        <label className="bot-search">
+          <Search size={14} />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search bots"
+            aria-label="Search bots"
+          />
+          {search ? (
+            <button onClick={() => setSearch("")} title="Clear search" type="button">
+              <X size={13} />
+            </button>
+          ) : null}
+        </label>
+
+        <div className="bot-roster-section-label">
+          <span>Your bots</span>
+          <span>{filteredBots.length}</span>
+        </div>
         <div className="bot-roster-list">
-          {bots.map((bot) => (
+          {filteredBots.map((bot, index) => (
             <button
               key={bot.agent.id}
               className={`bot-roster-item ${selectedAgentId === bot.agent.id ? "active" : ""}`}
               onClick={() => setSelectedAgentId(bot.agent.id)}
+              style={{ "--bot-list-index": index } as CSSProperties}
             >
-              <span className="bot-avatar">{initials(bot.agent.name)}</span>
+              <span className="bot-avatar" style={avatarStyle(bot.agent.name)}>
+                {initials(bot.agent.name)}
+              </span>
               <span className="bot-roster-copy">
                 <span className="bot-roster-name">
                   {bot.agent.name}
@@ -241,22 +302,31 @@ export function BotWorkspace({ onOpenAgents }: BotWorkspaceProps) {
               <p>No bots yet.</p>
               <button onClick={onOpenAgents}>Create your first bot</button>
             </div>
+          ) : filteredBots.length === 0 ? (
+            <div className="bot-empty-roster compact">
+              <Search size={20} />
+              <p>No matching bots.</p>
+            </div>
           ) : null}
         </div>
-        <button className="bot-secondary-button bot-view-switch" onClick={() => setShowRooms(true)}>
-          <UsersRound size={15} /> Bot rooms
-        </button>
-        <button className="bot-new-button" onClick={onOpenAgents}>
-          <Plus size={16} /> New bot
-        </button>
+        <div className="bot-roster-footer">
+          <button className="bot-new-button" onClick={onOpenAgents}>
+            <Plus size={16} /> New bot
+          </button>
+          <button className="bot-manage-button" onClick={onOpenAgents}>
+            Manage agents <ChevronRight size={14} />
+          </button>
+        </div>
       </aside>
 
       <section className="bot-chat">
         {selected ? (
           <>
             <header className="bot-chat-header">
-              <span className="bot-avatar large">{initials(selected.agent.name)}</span>
-              <div>
+              <span className="bot-avatar large" style={avatarStyle(selected.agent.name)}>
+                {initials(selected.agent.name)}
+              </span>
+              <div className="bot-chat-identity">
                 <h1>{selected.agent.name}</h1>
                 <span>
                   @{selected.agent.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")} · v
@@ -267,23 +337,34 @@ export function BotWorkspace({ onOpenAgents }: BotWorkspaceProps) {
                 <button className="bot-icon-button" onClick={togglePin} title="Pin bot">
                   <Pin size={16} fill={selected.binding.pinned ? "currentColor" : "none"} />
                 </button>
-                <button className="bot-secondary-button" onClick={onOpenAgents}>
+                <button className="bot-secondary-button bot-capabilities-button" onClick={onOpenAgents}>
                   <Settings2 size={15} /> Capabilities
+                </button>
+                <button
+                  className={`bot-icon-button ${inspectorOpen ? "active" : ""}`}
+                  onClick={() => setInspectorOpen((current) => !current)}
+                  title="Bot details"
+                >
+                  <PanelRight size={16} />
                 </button>
               </div>
             </header>
 
-            <div className="bot-version-banner">
-              This chat is pinned to its starting agent version. Capability changes apply to new
-              sessions.
-            </div>
-
             <div className="bot-message-list">
+              <div className="bot-version-note">
+                Conversation memory is persistent · capability changes start a new session
+              </div>
               {events.length === 0 ? (
                 <div className="bot-chat-empty">
-                  <MessageSquareText size={34} />
-                  <h3>Start working with {selected.agent.name}</h3>
-                  <p>The conversation stays attached to this bot across sessions and restarts.</p>
+                  <span className="bot-empty-mark" style={avatarStyle(selected.agent.name)}>
+                    {initials(selected.agent.name)}
+                  </span>
+                  <h3>What should {selected.agent.name} work on?</h3>
+                  <p>Send a task now, or ask it to set up recurring work for later.</p>
+                  <div className="bot-prompt-chips">
+                    <button onClick={() => setMessage("Give me a concise morning brief every weekday.")}>Plan a recurring brief</button>
+                    <button onClick={() => setMessage("Review my latest work and tell me what needs attention.")}>Review recent work</button>
+                  </div>
                 </div>
               ) : (
                 events.map((event) => {
@@ -304,6 +385,7 @@ export function BotWorkspace({ onOpenAgents }: BotWorkspaceProps) {
                   );
                 })
               )}
+              <div ref={messageEndRef} />
             </div>
 
             {error ? (
@@ -338,6 +420,7 @@ export function BotWorkspace({ onOpenAgents }: BotWorkspaceProps) {
                 placeholder={`Message ${selected.agent.name}`}
                 rows={2}
               />
+              <span className="bot-composer-hint">Enter to send · Shift Enter for a new line</span>
               <button onClick={() => void sendMessage()} disabled={!message.trim() || sending}>
                 {sending ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
               </button>
@@ -346,18 +429,37 @@ export function BotWorkspace({ onOpenAgents }: BotWorkspaceProps) {
         ) : null}
       </section>
 
-      <aside className="bot-inspector">
+      {inspectorOpen ? (
+        <button
+          className="bot-inspector-scrim"
+          onClick={() => setInspectorOpen(false)}
+          aria-label="Close bot details"
+        />
+      ) : null}
+      <aside className={`bot-inspector ${inspectorOpen ? "open" : ""}`} aria-hidden={!inspectorOpen}>
         {selected ? (
           <>
             <div className="bot-inspector-title">
               <span>Bot inspector</span>
-              <button
-                className="bot-icon-button"
-                onClick={() => void Promise.all([loadBots(), loadConversation(selected.agent.id)])}
-                title="Refresh"
-              >
-                <RefreshCw size={15} />
-              </button>
+              <div className="bot-inspector-actions">
+                <button
+                  className="bot-icon-button"
+                  onClick={() => void Promise.all([loadBots(), loadConversation(selected.agent.id)])}
+                  title="Refresh"
+                >
+                  <RefreshCw size={15} />
+                </button>
+                <button className="bot-icon-button" onClick={() => setInspectorOpen(false)} title="Close">
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+            <div className="bot-inspector-profile">
+              <span className="bot-avatar large" style={avatarStyle(selected.agent.name)}>
+                {initials(selected.agent.name)}
+              </span>
+              <strong>{selected.agent.name}</strong>
+              <span>{selected.agent.description || "Persistent CoWork bot"}</span>
             </div>
             <section>
               <h3>Runtime</h3>

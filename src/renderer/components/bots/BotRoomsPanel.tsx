@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, LoaderCircle, MessageSquareText, Plus, Send, UsersRound } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { ArrowLeft, Bot, LoaderCircle, MessageSquareText, Plus, Send, UsersRound } from "lucide-react";
 
 import type {
   BotRoom,
@@ -12,9 +12,10 @@ import type {
 interface BotRoomsPanelProps {
   bots: BotSummary[];
   onOpenBots: () => void;
+  onExit: () => void;
 }
 
-export function BotRoomsPanel({ bots, onOpenBots }: BotRoomsPanelProps) {
+export function BotRoomsPanel({ bots, onOpenBots, onExit }: BotRoomsPanelProps) {
   const [rooms, setRooms] = useState<BotRoom[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string>();
   const [members, setMembers] = useState<BotRoomMember[]>([]);
@@ -136,29 +137,42 @@ export function BotRoomsPanel({ bots, onOpenBots }: BotRoomsPanelProps) {
   return (
     <main className="bot-workspace">
       <aside className="bot-roster">
-        <div className="bot-roster-header">
-          <div>
-            <span className="bot-eyebrow">Multi-bot collaboration</span>
-            <h2>Rooms</h2>
+        <div className="bot-brand-row">
+          <button className="bot-quiet-button" onClick={onExit} title="Back to CoWork">
+            <ArrowLeft size={17} />
+          </button>
+          <div className="bot-brand-copy">
+            <strong>CoWork Bots</strong>
+            <span>Multi-bot rooms</span>
           </div>
           <button className="bot-icon-button" onClick={() => setShowCreate(true)} title="New room">
             <Plus size={17} />
           </button>
         </div>
-        <button className="bot-secondary-button bot-view-switch" onClick={onOpenBots}>
-          <Bot size={15} /> Individual bots
-        </button>
+        <div className="bot-view-tabs" role="tablist" aria-label="Bot workspace views">
+          <button role="tab" aria-selected="false" onClick={onOpenBots}>
+            <Bot size={14} /> Bots
+          </button>
+          <button className="active" role="tab" aria-selected="true">
+            <UsersRound size={14} /> Rooms
+          </button>
+        </div>
+        <div className="bot-roster-section-label">
+          <span>Your rooms</span>
+          <span>{rooms.length}</span>
+        </div>
         <div className="bot-roster-list">
-          {rooms.map((room) => (
+          {rooms.map((room, index) => (
             <button
               key={room.id}
               className={`bot-roster-item ${selectedRoomId === room.id ? "active" : ""}`}
+              style={{ "--bot-list-index": index } as CSSProperties}
               onClick={() => {
                 setShowCreate(false);
                 setSelectedRoomId(room.id);
               }}
             >
-              <span className="bot-avatar"><UsersRound size={17} /></span>
+              <span className="bot-avatar room"><UsersRound size={17} /></span>
               <span className="bot-roster-copy">
                 <span className="bot-roster-name">{room.name}</span>
                 <span className="bot-roster-preview">
@@ -168,9 +182,11 @@ export function BotRoomsPanel({ bots, onOpenBots }: BotRoomsPanelProps) {
             </button>
           ))}
         </div>
-        <button className="bot-new-button" onClick={() => setShowCreate(true)}>
-          <Plus size={16} /> New room
-        </button>
+        <div className="bot-roster-footer">
+          <button className="bot-new-button" onClick={() => setShowCreate(true)}>
+            <Plus size={16} /> New room
+          </button>
+        </div>
       </aside>
 
       <section className="bot-chat">
@@ -218,10 +234,16 @@ export function BotRoomsPanel({ bots, onOpenBots }: BotRoomsPanelProps) {
         ) : selected ? (
           <>
             <header className="bot-chat-header">
-              <span className="bot-avatar large"><UsersRound size={20} /></span>
-              <div>
+              <span className="bot-avatar large room"><UsersRound size={20} /></span>
+              <div className="bot-chat-identity">
                 <h1>{selected.name}</h1>
                 <span>{members.length} bots · {selected.executionMode}</span>
+              </div>
+              <div className="bot-room-member-stack" title={`${members.length} room members`}>
+                {members.slice(0, 4).map((member) => (
+                  <span key={member.agentId}>{(botNames.get(member.agentId) || "B").slice(0, 1)}</span>
+                ))}
+                {members.length > 4 ? <small>+{members.length - 4}</small> : null}
               </div>
             </header>
             <div className="bot-message-list">
@@ -263,15 +285,6 @@ export function BotRoomsPanel({ bots, onOpenBots }: BotRoomsPanelProps) {
         ) : null}
       </section>
 
-      <aside className="bot-inspector">
-        <div className="bot-inspector-title">Room members</div>
-        {members.map((member) => (
-          <div className="bot-routine-row" key={member.agentId}>
-            <span>{botNames.get(member.agentId) || member.agentId}</span>
-            <small>{member.status}</small>
-          </div>
-        ))}
-      </aside>
     </main>
   );
 }

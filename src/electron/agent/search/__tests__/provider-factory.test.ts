@@ -34,6 +34,7 @@ vi.mock("../../../database/SecureSettingsRepository", () => ({
 
 // Import after mocking
 import { SearchProviderFactory } from "../provider-factory";
+import { SecureSettingsRepository } from "../../../database/SecureSettingsRepository";
 
 describe("SearchProviderFactory", () => {
   beforeEach(() => {
@@ -270,8 +271,63 @@ describe("SearchProviderFactory", () => {
     });
   });
 
+  describe("SearXNG settings lifecycle", () => {
+    it("clears the saved endpoint and invalid routing when an empty SearXNG object is saved", () => {
+      const repository = SecureSettingsRepository.getInstance() as Any;
+      repository.load.mockReturnValue({
+        primaryProvider: "searxng",
+        fallbackProvider: "brave",
+        brave: { apiKey: "brave" },
+        searxng: { baseUrl: "https://search.example.com", allowPrivate: false },
+      });
+
+      SearchProviderFactory.saveSettings({
+        primaryProvider: "searxng",
+        fallbackProvider: "brave",
+        searxng: {},
+      });
+
+      expect(repository.save).toHaveBeenCalledWith(
+        "search",
+        expect.objectContaining({
+          primaryProvider: "brave",
+          fallbackProvider: null,
+          searxng: undefined,
+        }),
+      );
+    });
+
+    it("never synthesizes a fallback when the saved fallback is None", () => {
+      const repository = SecureSettingsRepository.getInstance() as Any;
+      repository.load.mockReturnValue({
+        primaryProvider: null,
+        fallbackProvider: null,
+        tavily: { apiKey: "tavily" },
+        brave: { apiKey: "brave" },
+      });
+
+      const settings = SearchProviderFactory.loadSettings();
+
+      expect(settings.primaryProvider).toBe("tavily");
+      expect(settings.fallbackProvider).toBeNull();
+    });
+
+    it("returns the saved endpoint state so the UI can inspect and edit it", () => {
+      vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
+        primaryProvider: "searxng",
+        fallbackProvider: null,
+        searxng: { baseUrl: "https://search.example.com", allowPrivate: true },
+      });
+
+      expect(SearchProviderFactory.getConfigStatus().searxng).toEqual({
+        baseUrl: "https://search.example.com",
+        allowPrivate: true,
+      });
+    });
+  });
+
   describe("provider execution order", () => {
-    it("should prefer Brave when multiple providers are configured", () => {
+    it("uses only the explicit primary and fallback", () => {
       const settings = {
         primaryProvider: "tavily",
         fallbackProvider: "google",
@@ -283,38 +339,65 @@ describe("SearchProviderFactory", () => {
 
       const order = (SearchProviderFactory as Any).getProviderExecutionOrder(settings);
 
-      expect(order).toEqual(["brave", "tavily", "google", "serpapi", "duckduckgo"]);
+      expect(order).toEqual(["tavily", "google"]);
     });
 
-    it("should not change order when Brave is not configured", () => {
+    it("uses no alternate provider when fallback is None", () => {
       const settings = {
         primaryProvider: "tavily",
-        fallbackProvider: "google",
+        fallbackProvider: null,
         tavily: { apiKey: "tavily" },
         google: { apiKey: "google", searchEngineId: "id" },
       } as Any;
 
       const order = (SearchProviderFactory as Any).getProviderExecutionOrder(settings);
 
-      expect(order).toEqual(["tavily", "google", "duckduckgo"]);
+      expect(order).toEqual(["tavily"]);
     });
 
-    it("includes Exa among configured providers while preserving Brave preference", () => {
+    it("enforces SearXNG isolation even if a fallback is stored", () => {
       const settings = {
-        primaryProvider: "exa",
-        fallbackProvider: "tavily",
+        primaryProvider: "searxng",
+        fallbackProvider: "brave",
         tavily: { apiKey: "tavily" },
-        exa: { apiKey: "exa" },
         brave: { apiKey: "brave" },
+        searxng: { baseUrl: "https://search.example.com" },
       } as Any;
 
       const order = (SearchProviderFactory as Any).getProviderExecutionOrder(settings);
 
-      expect(order).toEqual(["brave", "exa", "tavily", "duckduckgo"]);
+      expect(order).toEqual(["searxng"]);
+    });
+
+    it("uses DuckDuckGo only when no configured provider exists", () => {
+      const order = (SearchProviderFactory as Any).getProviderExecutionOrder({
+        primaryProvider: null,
+        fallbackProvider: null,
+      });
+
+      expect(order).toEqual(["duckduckgo"]);
     });
   });
 
   describe("searchWithFallback", () => {
+    it("rejects provider overrides while SearXNG isolation is active", async () => {
+      vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
+        primaryProvider: "searxng",
+        fallbackProvider: null,
+        searxng: { baseUrl: "https://search.example.com" },
+        brave: { apiKey: "brave" },
+      });
+      const createProviderSpy = vi.spyOn(SearchProviderFactory as Any, "createProviderFromConfig");
+
+      await expect(
+        SearchProviderFactory.searchWithFallback({
+          query: "private query",
+          provider: "brave",
+        }),
+      ).rejects.toThrow("provider overrides cannot route queries elsewhere");
+      expect(createProviderSpy).not.toHaveBeenCalled();
+    });
+
     it("should try providers in order and stop on first successful result", async () => {
       const braveProvider = { search: vi.fn().mockResolvedValue({ provider: "brave" }) };
       const tavilyProvider = { search: vi.fn().mockResolvedValue({ provider: "tavily" }) };
@@ -439,8 +522,10 @@ describe("SearchProviderFactory", () => {
       expect(braveProvider.search).not.toHaveBeenCalled();
     });
 
-    it("falls back to the next provider when requested provider fails with quota/rate errors", async () => {
-      const tavilyProvider = { search: vi.fn().mockRejectedValue(new Error("Tavily API error: 432")) };
+    it("does not fall back when an explicit provider hits quota or rate limits", async () => {
+      const tavilyProvider = {
+        search: vi.fn().mockRejectedValue(new Error("Tavily API error: 432")),
+      };
       const braveProvider = { search: vi.fn().mockResolvedValue({ provider: "brave" }) };
 
       vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
@@ -472,15 +557,15 @@ describe("SearchProviderFactory", () => {
         async (provider: Any) => provider.search(),
       );
 
-      const response = await SearchProviderFactory.searchWithFallback({
-        query: "f1 latest",
-        searchType: "web",
-        provider: "tavily",
-      });
-
-      expect(response.provider).toBe("brave");
+      await expect(
+        SearchProviderFactory.searchWithFallback({
+          query: "f1 latest",
+          searchType: "web",
+          provider: "tavily",
+        }),
+      ).rejects.toThrow("Search provider (tavily) failed");
       expect(tavilyProvider.search).toHaveBeenCalledTimes(1);
-      expect(braveProvider.search).toHaveBeenCalledTimes(1);
+      expect(braveProvider.search).not.toHaveBeenCalled();
     });
 
     it("does not fallback when requested provider fails for non-quota reasons", async () => {
@@ -528,8 +613,10 @@ describe("SearchProviderFactory", () => {
       expect(braveProvider.search).not.toHaveBeenCalled();
     });
 
-    it("labels providerErrorScope as global when explicit-provider fallback chain also fails", async () => {
-      const tavilyProvider = { search: vi.fn().mockRejectedValue(new Error("Tavily API error: 432")) };
+    it("labels an explicit-provider failure as provider-scoped", async () => {
+      const tavilyProvider = {
+        search: vi.fn().mockRejectedValue(new Error("Tavily API error: 432")),
+      };
       const braveProvider = { search: vi.fn().mockRejectedValue(new Error("Brave unavailable")) };
 
       vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
@@ -567,14 +654,17 @@ describe("SearchProviderFactory", () => {
         });
         throw new Error("Expected searchWithFallback to throw");
       } catch (error: Any) {
-        expect(error.providerErrorScope).toBe("global");
+        expect(error.providerErrorScope).toBe("provider");
         expect(Array.isArray(error.failedProviders)).toBe(true);
-        expect(error.failedProviders.length).toBeGreaterThan(1);
+        expect(error.failedProviders).toHaveLength(1);
+        expect(braveProvider.search).not.toHaveBeenCalled();
       }
     });
 
     it("skips a cooled-down quota-limited provider on subsequent searches", async () => {
-      const tavilyProvider = { search: vi.fn().mockRejectedValue(new Error("Tavily API error: 432")) };
+      const tavilyProvider = {
+        search: vi.fn().mockRejectedValue(new Error("Tavily API error: 432")),
+      };
       const braveProvider = { search: vi.fn().mockResolvedValue({ provider: "brave" }) };
 
       vi.spyOn(SearchProviderFactory, "loadSettings").mockReturnValue({
@@ -585,8 +675,8 @@ describe("SearchProviderFactory", () => {
       } as Any);
 
       vi.spyOn(SearchProviderFactory as Any, "getProviderExecutionOrder").mockReturnValue([
-        "brave",
         "tavily",
+        "brave",
       ]);
 
       vi.spyOn(SearchProviderFactory as Any, "getProviderConfig").mockImplementation(
@@ -607,12 +697,10 @@ describe("SearchProviderFactory", () => {
       const first = await SearchProviderFactory.searchWithFallback({
         query: "f1 latest",
         searchType: "web",
-        provider: "tavily",
       });
       const second = await SearchProviderFactory.searchWithFallback({
         query: "f1 latest",
         searchType: "web",
-        provider: "tavily",
       });
 
       expect(first.provider).toBe("brave");

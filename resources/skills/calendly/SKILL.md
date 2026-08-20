@@ -1,6 +1,9 @@
 ---
 name: calendly
 description: "Manage Calendly scheduling via the v2 API. List event types, view scheduled events, check invitee details, manage availability schedules, cancel/reschedule events, create one-off links, and configure webhooks. Use when the user asks about their calendar, upcoming meetings, scheduling links, or availability."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Calendly

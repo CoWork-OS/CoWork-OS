@@ -1,6 +1,9 @@
 ---
 name: bird
 description: "X/Twitter CLI for reading, searching, posting, and engagement via cookies."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Bird

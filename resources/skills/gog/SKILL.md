@@ -1,6 +1,9 @@
 ---
 name: gog
 description: "Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Tasks, Sheets, Docs, and Slides."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Gog

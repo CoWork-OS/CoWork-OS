@@ -1,6 +1,9 @@
 ---
 name: market-screener
 description: "Screen equities, ETFs, and bonds using fundamental, technical, and quantitative criteria with multi-factor ranking and sector filtering."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Market Screener

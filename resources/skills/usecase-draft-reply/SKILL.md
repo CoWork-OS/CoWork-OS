@@ -1,6 +1,9 @@
 ---
 name: usecase-draft-reply
 description: "Summarize a chat and draft 2 reply options. Stops before sending."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Draft Reply

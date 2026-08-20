@@ -1,6 +1,9 @@
 ---
 name: coding-agent
 description: "Run Codex CLI, Claude Code, OpenCode, or Pi Coding Agent via background process for programmatic control."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Coding-agent

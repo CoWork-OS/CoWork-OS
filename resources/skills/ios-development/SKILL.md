@@ -1,6 +1,9 @@
 ---
 name: ios-development
 description: "iOS/Swift development: SwiftUI, UIKit, Core Data, Xcode builds, simulator management, code signing, and App Store submission."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # iOS Development

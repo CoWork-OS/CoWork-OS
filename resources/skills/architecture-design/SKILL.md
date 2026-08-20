@@ -1,6 +1,9 @@
 ---
 name: architecture-design
 description: "Orchestrate an architectural concept workflow across Rhino, Blender, and ComfyUI connectors."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Architecture Design

@@ -1,6 +1,9 @@
 ---
 name: imsg
 description: "iMessage/SMS CLI for listing chats, history, watch, and sending."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Imsg

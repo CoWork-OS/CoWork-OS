@@ -1,6 +1,10 @@
 ---
 name: react-native-skills
 description: "React Native and Expo best practices for performance, UI patterns, and native integrations."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "Vercel"
 ---
 
 # react-native-skills

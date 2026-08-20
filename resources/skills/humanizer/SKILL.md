@@ -1,6 +1,9 @@
 ---
 name: humanizer
 description: "Rewrite AI-generated text to sound natural and human-written. Removes LLM tells — cliché phrases, predictable structure, inflated language, and robotic patterns. Use when editing drafts, emails, articles, or any text that reads like it was written by AI."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Humanizer

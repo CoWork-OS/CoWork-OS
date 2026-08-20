@@ -1,6 +1,9 @@
 ---
 name: twin-decision-prep
 description: "Assemble data, options, and analysis for a pending decision. Presents trade-offs and recommendations without making the decision. Used by digital twin personas to reduce decision fatigue."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Decision Preparation Package

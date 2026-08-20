@@ -1,6 +1,9 @@
 ---
 name: nano-pdf
 description: "Edit PDFs with natural-language instructions using the nano-pdf CLI."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Nano-pdf

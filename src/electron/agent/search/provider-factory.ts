@@ -14,6 +14,7 @@ import { ExaProvider } from "./exa-provider";
 import { BraveProvider } from "./brave-provider";
 import { SerpApiProvider } from "./serpapi-provider";
 import { GoogleProvider } from "./google-provider";
+import { SearXngProvider } from "./searxng-provider";
 import { DuckDuckGoProvider } from "./duckduckgo-provider";
 import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
 import { getUserDataDir } from "../../utils/user-data-dir";
@@ -41,6 +42,10 @@ export interface SearchSettings {
   google?: {
     apiKey?: string;
     searchEngineId?: string;
+  };
+  searxng?: {
+    baseUrl?: string;
+    allowPrivate?: boolean;
   };
 }
 
@@ -102,12 +107,6 @@ export class SearchProviderFactory {
       return "provider_quota";
     }
     return "external_unknown";
-  }
-
-  private static isQuotaOrRateLimitedError(error: Any): boolean {
-    const message = String(error?.message || "");
-    const failureClass = this.classifyProviderFailure(message);
-    return failureClass === "provider_quota" || failureClass === "provider_rate_limit";
   }
 
   private static buildSearchProviderError(
@@ -327,8 +326,8 @@ export class SearchProviderFactory {
       console.error("[SearchProviderFactory] Failed to load settings from database:", error);
     }
 
-    // Auto-detect and select providers if primaryProvider is not set.
-    // Only auto-select paid providers — DuckDuckGo is an implicit last-resort fallback.
+    // Auto-detect a primary provider when none is set. Never synthesize a fallback:
+    // fallbackProvider=null is a strict operator choice.
     if (!settings.primaryProvider) {
       const orderedProviders = this.getProviderExecutionOrder(settings).filter(
         (p) => p !== "duckduckgo",
@@ -338,12 +337,6 @@ export class SearchProviderFactory {
         console.log(
           `[SearchProviderFactory] Auto-selected primary provider: ${orderedProviders[0]}`,
         );
-        if (orderedProviders.length > 1 && !settings.fallbackProvider) {
-          settings.fallbackProvider = orderedProviders[1];
-          console.log(
-            `[SearchProviderFactory] Auto-selected fallback provider: ${orderedProviders[1]}`,
-          );
-        }
       }
     }
 
@@ -380,6 +373,9 @@ export class SearchProviderFactory {
     if (settings.google?.apiKey && settings.google?.searchEngineId) {
       configured.push("google");
     }
+    if (settings.searxng?.baseUrl) {
+      configured.push("searxng");
+    }
 
     return configured;
   }
@@ -414,7 +410,30 @@ export class SearchProviderFactory {
           settings.google?.apiKey || settings.google?.searchEngineId
             ? { ...existingSettings.google, ...settings.google }
             : existingSettings.google,
+        searxng: Object.prototype.hasOwnProperty.call(settings, "searxng")
+          ? settings.searxng?.baseUrl
+            ? { ...settings.searxng, baseUrl: settings.searxng.baseUrl.trim() }
+            : undefined
+          : existingSettings.searxng,
       };
+
+      const configuredProviders = this.getConfiguredProvidersFromSettings(settingsToSave);
+      if (settingsToSave.primaryProvider === "searxng") {
+        settingsToSave.fallbackProvider = null;
+      }
+      if (
+        settingsToSave.primaryProvider &&
+        settingsToSave.primaryProvider !== "duckduckgo" &&
+        !configuredProviders.includes(settingsToSave.primaryProvider)
+      ) {
+        settingsToSave.primaryProvider = configuredProviders[0] || null;
+      }
+      if (
+        settingsToSave.fallbackProvider &&
+        !configuredProviders.includes(settingsToSave.fallbackProvider)
+      ) {
+        settingsToSave.fallbackProvider = null;
+      }
 
       // Save to encrypted database
       repository.save("search", settingsToSave);
@@ -449,6 +468,8 @@ export class SearchProviderFactory {
       serpApiKey: settings.serpapi?.apiKey,
       googleApiKey: settings.google?.apiKey,
       googleSearchEngineId: settings.google?.searchEngineId,
+      searxngBaseUrl: settings.searxng?.baseUrl,
+      searxngAllowPrivate: settings.searxng?.allowPrivate,
     };
   }
 
@@ -482,6 +503,8 @@ export class SearchProviderFactory {
         return new SerpApiProvider(config);
       case "google":
         return new GoogleProvider(config);
+      case "searxng":
+        return new SearXngProvider(config);
       case "duckduckgo":
         return new DuckDuckGoProvider(config);
       default:
@@ -495,12 +518,20 @@ export class SearchProviderFactory {
   static async searchWithFallback(query: SearchQuery): Promise<SearchResponse> {
     const settings = this.loadSettings();
 
-    // getProviderExecutionOrder always includes DuckDuckGo as a last-resort fallback.
-    // When a provider is explicitly requested we still allow fallback on quota/rate errors.
+    if (
+      settings.primaryProvider === "searxng" &&
+      settings.searxng?.baseUrl &&
+      query.provider &&
+      query.provider !== "searxng"
+    ) {
+      throw new Error(
+        "SearXNG isolation is enabled; provider overrides cannot route queries elsewhere.",
+      );
+    }
     const providerExecutionOrder = this.getProviderExecutionOrder(settings);
-    const providersToTry = query.provider
-      ? [query.provider, ...providerExecutionOrder.filter((provider) => provider !== query.provider)]
-      : providerExecutionOrder;
+    // An explicit provider is a strict routing request. Automatic routing uses only
+    // the selected primary and the explicitly selected fallback.
+    const providersToTry = query.provider ? [query.provider] : providerExecutionOrder;
     if (!providersToTry.length) {
       throw new Error("No search provider available");
     }
@@ -511,8 +542,12 @@ export class SearchProviderFactory {
       failureClass: "provider_quota" | "provider_rate_limit" | "external_unknown";
     }> = [];
 
-    const activeProviders = providersToTry.filter((provider) => !this.getProviderCooldown(provider));
-    const cooledProviders = providersToTry.filter((provider) => !!this.getProviderCooldown(provider));
+    const activeProviders = providersToTry.filter(
+      (provider) => !this.getProviderCooldown(provider),
+    );
+    const cooledProviders = providersToTry.filter(
+      (provider) => !!this.getProviderCooldown(provider),
+    );
     const skipCooledProviders = activeProviders.length > 0;
     const orderedProviders = [...activeProviders, ...cooledProviders];
 
@@ -552,7 +587,7 @@ export class SearchProviderFactory {
         this.setProviderCooldown(providerType, failureClass, message);
 
         const requestedProviderFailed = !!query.provider && providerType === query.provider;
-        if (requestedProviderFailed && !this.isQuotaOrRateLimitedError(error)) {
+        if (requestedProviderFailed) {
           throw this.buildSearchProviderError(scopedMessage, {
             provider: providerType,
             failureClass,
@@ -583,7 +618,7 @@ export class SearchProviderFactory {
       .join("; ")}`;
     const firstFailure = providerErrors[0];
     throw this.buildSearchProviderError(aggregateMessage, {
-      provider: firstFailure?.provider || (query.provider || "duckduckgo"),
+      provider: firstFailure?.provider || query.provider || "duckduckgo",
       failureClass: firstFailure?.failureClass || "external_unknown",
       failedProviders: providerErrors,
       providerErrorScope: this.resolveProviderErrorScope(query, providerErrors),
@@ -639,6 +674,13 @@ export class SearchProviderFactory {
         supportedTypes: [...SEARCH_PROVIDER_INFO.google.supportedTypes],
       },
       {
+        type: "searxng",
+        name: SEARCH_PROVIDER_INFO.searxng.displayName,
+        description: SEARCH_PROVIDER_INFO.searxng.description,
+        configured: !!settings.searxng?.baseUrl,
+        supportedTypes: [...SEARCH_PROVIDER_INFO.searxng.supportedTypes],
+      },
+      {
         type: "duckduckgo",
         name: SEARCH_PROVIDER_INFO.duckduckgo.displayName,
         description: SEARCH_PROVIDER_INFO.duckduckgo.description,
@@ -657,53 +699,36 @@ export class SearchProviderFactory {
 
   /**
    * Build the provider execution order for automatic search fallback.
-   * - If Brave is configured and multiple providers are available, prefer Brave first.
-   * - Then preserve explicit primary/fallback ordering when available.
-   * - Fill remaining providers from the detected configured list.
-   * - DuckDuckGo is always appended as the last-resort fallback.
+   * Only an explicitly selected fallback may receive a query after the primary fails.
+   * SearXNG is isolation-enforced and can never fall through to another provider.
+   * DuckDuckGo is used only when it is selected or no provider is configured.
    */
   private static getProviderExecutionOrder(settings: SearchSettings): SearchProviderType[] {
     const configuredProviders = this.getConfiguredProvidersFromSettings(settings);
 
-    // No paid providers configured — DuckDuckGo is the only option
+    if (settings.primaryProvider === "duckduckgo") {
+      return ["duckduckgo"];
+    }
+
     if (configuredProviders.length === 0) {
       return ["duckduckgo"];
     }
 
-    if (configuredProviders.length === 1) {
-      return [...configuredProviders, "duckduckgo"];
+    const primary =
+      settings.primaryProvider && configuredProviders.includes(settings.primaryProvider)
+        ? settings.primaryProvider
+        : configuredProviders[0];
+    if (primary === "searxng") return ["searxng"];
+
+    const order: SearchProviderType[] = [primary];
+    if (
+      settings.fallbackProvider &&
+      settings.fallbackProvider !== primary &&
+      configuredProviders.includes(settings.fallbackProvider)
+    ) {
+      order.push(settings.fallbackProvider);
     }
-
-    const orderedProviders: SearchProviderType[] = [];
-    const addProviderIfConfigured = (provider?: SearchProviderType | null) => {
-      if (
-        provider &&
-        configuredProviders.includes(provider) &&
-        !orderedProviders.includes(provider)
-      ) {
-        orderedProviders.push(provider);
-      }
-    };
-
-    // Respect explicit primary/fallback preference where available.
-    addProviderIfConfigured(settings.primaryProvider);
-    addProviderIfConfigured(settings.fallbackProvider);
-
-    // Fill in any remaining configured providers.
-    for (const provider of configuredProviders) {
-      addProviderIfConfigured(provider);
-    }
-
-    // Prefer Brave when available and multiple providers are configured.
-    if (orderedProviders.length > 1 && orderedProviders.includes("brave")) {
-      return [
-        "brave",
-        ...orderedProviders.filter((provider) => provider !== "brave"),
-        "duckduckgo",
-      ];
-    }
-
-    return [...orderedProviders, "duckduckgo"];
+    return order;
   }
 
   /**
@@ -720,6 +745,7 @@ export class SearchProviderFactory {
       supportedTypes: SearchType[];
     }>;
     isConfigured: boolean;
+    searxng: { baseUrl?: string; allowPrivate: boolean };
   } {
     const settings = this.loadSettings();
     return {
@@ -727,6 +753,10 @@ export class SearchProviderFactory {
       fallbackProvider: settings.fallbackProvider,
       providers: this.getAvailableProviders(),
       isConfigured: this.isAnyProviderConfigured(),
+      searxng: {
+        baseUrl: settings.searxng?.baseUrl,
+        allowPrivate: settings.searxng?.allowPrivate === true,
+      },
     };
   }
 

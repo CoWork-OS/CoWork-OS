@@ -1,6 +1,9 @@
 ---
 name: notion
 description: "Notion API for creating and managing pages, databases, and blocks."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Notion

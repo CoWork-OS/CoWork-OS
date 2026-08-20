@@ -1,6 +1,10 @@
 ---
 name: code-reviewer
 description: "Perform professional code review for local changes or GitHub pull requests."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "google-gemini"
 ---
 
 # code-reviewer

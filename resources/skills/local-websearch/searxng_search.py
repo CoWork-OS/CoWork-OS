@@ -28,11 +28,21 @@ def get_base_url() -> str:
     url = os.environ.get("SEARXNG_URL", "").strip()
     if not url:
         return ""
-    # Normalize: remove trailing slash, ensure no /search suffix for base
-    url = url.rstrip("/")
-    if url.endswith("/search"):
-        url = url[:-7]
-    return url
+
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("SEARXNG_URL must use http or https")
+    if not parsed.hostname:
+        raise ValueError("SEARXNG_URL must include a hostname")
+    if parsed.username or parsed.password:
+        raise ValueError("SEARXNG_URL must not contain embedded credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("SEARXNG_URL must not contain a query string or fragment")
+
+    base_path = parsed.path.rstrip("/")
+    if base_path.endswith("/search"):
+        base_path = base_path[:-7]
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, base_path, "", ""))
 
 
 def search(query: str, count: int = 5, lang: str = None) -> dict:
@@ -47,7 +57,10 @@ def search(query: str, count: int = 5, lang: str = None) -> dict:
     Returns:
         Dict with query, count, and results array
     """
-    base_url = get_base_url()
+    try:
+        base_url = get_base_url()
+    except ValueError as error:
+        return {"error": str(error)}
     if not base_url:
         return {
             "error": "SEARXNG_URL not set",

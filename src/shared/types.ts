@@ -9545,7 +9545,14 @@ export interface SecureMcpTunnelAuditEvent {
 }
 
 // Search Provider types
-export type SearchProviderType = "tavily" | "exa" | "brave" | "serpapi" | "google" | "duckduckgo";
+export type SearchProviderType =
+  | "tavily"
+  | "exa"
+  | "brave"
+  | "serpapi"
+  | "google"
+  | "searxng"
+  | "duckduckgo";
 export type SearchType = "web" | "news" | "images";
 export type WebSearchMode = "disabled" | "cached" | "live";
 
@@ -9567,6 +9574,10 @@ export interface SearchSettingsData {
   google?: {
     apiKey?: string;
     searchEngineId?: string;
+  };
+  searxng?: {
+    baseUrl?: string;
+    allowPrivate?: boolean;
   };
 }
 
@@ -9856,6 +9867,10 @@ export interface SearchConfigStatus {
   fallbackProvider: SearchProviderType | null;
   providers: SearchProviderInfo[];
   isConfigured: boolean;
+  searxng: {
+    baseUrl?: string;
+    allowPrivate: boolean;
+  };
 }
 
 // Guardrail Settings types
@@ -10385,6 +10400,13 @@ export interface CapabilitySecurityReport {
     advisoryIds?: string[];
   }>;
   intelligenceUnavailable: boolean;
+  evaluators?: Array<{
+    name: "cowork-tier1" | "nvidia-skillevaluator";
+    status: "passed" | "failed" | "unavailable" | "skipped";
+    checks: string[];
+    version?: string;
+    detail?: string;
+  }>;
 }
 
 export interface InstallSecurityOutcome {

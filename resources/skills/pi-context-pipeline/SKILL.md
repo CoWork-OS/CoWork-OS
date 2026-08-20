@@ -1,6 +1,9 @@
 ---
 name: pi-context-pipeline
 description: "Orchestrate pi-finder and optional pi-librarian to produce a compact context pack and Codex kickoff prompt before coding."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Pi-context-pipeline

@@ -1,6 +1,10 @@
 ---
 name: multi-pr-review
 description: "Run a consensus-style multi-agent review of a PR with severity-based findings."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "dyad-sh"
 ---
 
 # multi-pr-review

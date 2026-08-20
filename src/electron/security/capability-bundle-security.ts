@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "crypto";
+import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { promisify } from "util";
 import type {
   CapabilityBundleKind,
   CapabilitySecurityFinding,
@@ -9,7 +11,6 @@ import type {
   CapabilitySecuritySeverity,
   CustomSkill,
   ImportSecurityReportRequest,
-  InstallSecurityOutcome,
   QuarantinedImportRecord,
   RetryQuarantinedImportResult,
 } from "../../shared/types";
@@ -18,6 +19,7 @@ import { createLogger } from "../utils/logger";
 import { getUserDataDir } from "../utils/user-data-dir";
 
 const logger = createLogger("CapabilityBundleSecurity");
+const execFileAsync = promisify(execFile);
 
 const PACK_REPORT_FILENAME = ".cowork-security.json";
 const SKILL_REPORT_SUFFIX = ".security.json";
@@ -26,6 +28,19 @@ const QUARANTINE_METADATA_FILENAME = "metadata.json";
 const QUARANTINE_REPORT_FILENAME = "report.json";
 const MAX_SCANNED_FILE_BYTES = 256 * 1024;
 const MAX_PACKAGE_LOOKUPS = 8;
+const NVIDIA_SKILL_EVALUATOR_TIMEOUT_MS = 45_000;
+// NVIDIA's keyless Tier 1 checks. Quality is intentionally evaluated by the
+// bundled-skill QA workflow rather than blocking third-party installation.
+// https://docs.nvidia.com/skills/skillevaluator/quickstart
+const NVIDIA_INSTALL_CHECKS = ["schema", "pii", "license", "unicode", "lint"];
+const NVIDIA_BLOCKING_CATEGORIES = new Set([
+  "LICENSE",
+  "PII",
+  "SECRET",
+  "SECRETS",
+  "SECURITY",
+  "UNICODE",
+]);
 const IGNORED_SCAN_ENTRIES = new Set([
   ".git",
   PACK_REPORT_FILENAME,
@@ -142,19 +157,6 @@ function uniqueFindings(findings: CapabilitySecurityFinding[]): CapabilitySecuri
   });
 }
 
-function highestSeverity(findings: CapabilitySecurityFinding[]): CapabilitySecuritySeverity | null {
-  if (findings.some((finding) => finding.severity === "critical")) {
-    return "critical";
-  }
-  if (findings.some((finding) => finding.severity === "warning")) {
-    return "warning";
-  }
-  if (findings.some((finding) => finding.severity === "info")) {
-    return "info";
-  }
-  return null;
-}
-
 function buildSummary(
   verdict: CapabilitySecurityReport["verdict"],
   findings: CapabilitySecurityFinding[],
@@ -254,7 +256,9 @@ function hashEntries(entries: Array<{ relativePath: string; content: Buffer | st
   for (const entry of normalized) {
     hash.update(normalizeForHash(entry.relativePath));
     hash.update("\0");
-    hash.update(Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content, "utf-8"));
+    hash.update(
+      Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content, "utf-8"),
+    );
     hash.update("\0");
   }
   return hash.digest("hex");
@@ -381,7 +385,10 @@ function collectPackagesFromText(text: string): PackageCandidate[] {
   const seen = new Set<string>();
 
   const addPackage = (ecosystem: PackageEcosystem, rawName: string) => {
-    const name = rawName.trim().replace(/["']/g, "").replace(/@[\w.-]+$/, "");
+    const name = rawName
+      .trim()
+      .replace(/["']/g, "")
+      .replace(/@[\w.-]+$/, "");
     if (!name) {
       return;
     }
@@ -393,7 +400,9 @@ function collectPackagesFromText(text: string): PackageCandidate[] {
     packages.push({ ecosystem, name });
   };
 
-  for (const match of text.matchAll(/\bnpx\s+(?:--yes\s+|--package\s+\S+\s+|--quiet\s+)*(@?[a-z0-9][\w./-]*)/gi)) {
+  for (const match of text.matchAll(
+    /\bnpx\s+(?:--yes\s+|--package\s+\S+\s+|--quiet\s+)*(@?[a-z0-9][\w./-]*)/gi,
+  )) {
     addPackage("npm", match[1] || "");
   }
 
@@ -439,8 +448,12 @@ function scanTextContent(
       severity: "critical",
       message: "Bundle appears to collect secrets and transmit them remotely.",
       test: (value, lower) =>
-        (/(process\.env|os\.environ|getenv\(|id_rsa|openai_api_key|aws_secret_access_key)/i.test(value) &&
-          /(fetch\(|axios\.|requests\.(?:get|post)|curl\s+https?:\/\/|wget\s+https?:\/\/)/i.test(value)) ||
+        (/(process\.env|os\.environ|getenv\(|id_rsa|openai_api_key|aws_secret_access_key)/i.test(
+          value,
+        ) &&
+          /(fetch\(|axios\.|requests\.(?:get|post)|curl\s+https?:\/\/|wget\s+https?:\/\/)/i.test(
+            value,
+          )) ||
         (/(authorization: bearer|api[-_ ]?key)/i.test(value) &&
           /(discord|telegram|slack|webhook|ngrok|pastebin|transfer\.sh)/i.test(lower)),
     },
@@ -491,6 +504,366 @@ function scanTextContent(
       });
     }
   }
+
+  scanSensitiveContent(filePath, text, findings);
+  scanUnicodeSafety(filePath, text, findings);
+}
+
+function isPlaceholderSecret(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const withoutProviderPrefix = normalized.replace(/^(?:sk|gh[opusr]|glpat|xox[baprs]|akia)/, "");
+  const placeholderPattern =
+    /^(?:x+|0+|changeme|placeholder|example|sample|test|your.*|replace.*|redacted|secret)$/;
+  return (
+    normalized.length < 8 ||
+    placeholderPattern.test(normalized) ||
+    placeholderPattern.test(withoutProviderPrefix)
+  );
+}
+
+function luhnValid(value: string): boolean {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 13 || digits.length > 19 || /^(\d)\1+$/.test(digits)) return false;
+  let sum = 0;
+  let doubleDigit = false;
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    let digit = Number(digits[index]);
+    if (doubleDigit) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    doubleDigit = !doubleDigit;
+  }
+  return sum % 10 === 0;
+}
+
+function scanSensitiveContent(
+  filePath: string,
+  text: string,
+  findings: CapabilitySecurityFinding[],
+): void {
+  const criticalPatterns: Array<{
+    code: string;
+    message: string;
+    pattern: RegExp;
+    ignorePlaceholder?: boolean;
+  }> = [
+    {
+      code: "leaked-private-key",
+      message: "Bundle contains private key material.",
+      pattern: /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/,
+    },
+    {
+      code: "leaked-provider-token",
+      message: "Bundle contains a value shaped like a live provider or source-control token.",
+      pattern:
+        /\b(sk-[A-Za-z0-9_-]{20,}|gh[opusr]_[A-Za-z0-9]{30,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16})\b/,
+      ignorePlaceholder: true,
+    },
+    {
+      code: "high-risk-pii",
+      message: "Bundle contains a US Social Security number pattern.",
+      pattern: /\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b/,
+    },
+  ];
+
+  for (const rule of criticalPatterns) {
+    const matched = rule.ignorePlaceholder
+      ? Array.from(
+          text.matchAll(new RegExp(rule.pattern.source, `${rule.pattern.flags.replace("g", "")}g`)),
+        ).some((match) => !isPlaceholderSecret(match[1] || match[0]))
+      : rule.pattern.test(text);
+    if (matched) {
+      addFinding(findings, {
+        code: rule.code,
+        severity: "critical",
+        path: filePath,
+        message: rule.message,
+      });
+    }
+  }
+
+  const genericSecretPattern =
+    /\b(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|passwd)\b\s*[:=]\s*["']?([^\s"'`;,}]{8,})/gi;
+  for (const match of text.matchAll(genericSecretPattern)) {
+    const candidate = match[1] || "";
+    if (
+      !candidate.startsWith("${") &&
+      !candidate.startsWith("{{") &&
+      !isPlaceholderSecret(candidate)
+    ) {
+      addFinding(findings, {
+        code: "embedded-secret",
+        severity: "warning",
+        path: filePath,
+        message: "Bundle contains a credential assignment that may embed a secret.",
+      });
+      break;
+    }
+  }
+
+  for (const match of text.matchAll(/(?:\b\d[ -]*?){13,19}\b/g)) {
+    if (luhnValid(match[0])) {
+      addFinding(findings, {
+        code: "payment-card-pii",
+        severity: "critical",
+        path: filePath,
+        message: "Bundle contains a valid payment card number pattern.",
+      });
+      break;
+    }
+  }
+
+  const piiRules: Array<{ code: string; message: string; pattern: RegExp }> = [
+    {
+      code: "email-pii",
+      message: "Bundle contains an email address that may identify a person.",
+      pattern:
+        /\b[A-Z0-9._%+-]+@(?!example\.(?:com|org|net)\b|test\b|localhost\b)[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
+    },
+    {
+      code: "phone-pii",
+      message: "Bundle contains an international phone number pattern.",
+      pattern: /(?:^|[^\w])\+\d[\d ()-]{8,}\d(?:$|[^\w])/m,
+    },
+    {
+      code: "local-user-identifier",
+      message: "Bundle contains a local user home path.",
+      pattern: /(?:\/Users\/|\/home\/|[A-Z]:\\Users\\)[^\s/\\"']+/i,
+    },
+  ];
+
+  for (const rule of piiRules) {
+    if (rule.pattern.test(text)) {
+      addFinding(findings, {
+        code: rule.code,
+        severity: "warning",
+        path: filePath,
+        message: rule.message,
+      });
+    }
+  }
+}
+
+function scanUnicodeSafety(
+  filePath: string,
+  text: string,
+  findings: CapabilitySecurityFinding[],
+): void {
+  if (/[\u202A-\u202E\u2066-\u2069]/u.test(text)) {
+    addFinding(findings, {
+      code: "unicode-bidi-smuggling",
+      severity: "critical",
+      path: filePath,
+      message:
+        "Bundle contains bidirectional Unicode controls that can disguise instruction order.",
+    });
+  }
+
+  if (/[\u{E0000}-\u{E007F}]/u.test(text)) {
+    addFinding(findings, {
+      code: "unicode-tag-smuggling",
+      severity: "critical",
+      path: filePath,
+      message: "Bundle contains invisible Unicode tag characters.",
+    });
+  }
+
+  if (/[\u200B\u2060]/u.test(text) || text.slice(1).includes("\uFEFF")) {
+    addFinding(findings, {
+      code: "invisible-unicode",
+      severity: "warning",
+      path: filePath,
+      message: "Bundle contains zero-width or invisible Unicode characters that require review.",
+    });
+  }
+}
+
+function scanSkillLicensing(
+  bundleDir: string,
+  texts: Array<{ path: string; content: string }>,
+  findings: CapabilitySecurityFinding[],
+): void {
+  const licenseFiles = fs.existsSync(bundleDir)
+    ? fs
+        .readdirSync(bundleDir)
+        .filter((name) => /^(?:licen[cs]e|copying|notice)(?:\.|$)/i.test(name))
+    : [];
+  const combined = texts.map((entry) => entry.content).join("\n");
+  const spdxIds = Array.from(
+    new Set(
+      Array.from(combined.matchAll(/SPDX-License-Identifier:\s*([^\s*]+)/gi), (match) => match[1]),
+    ),
+  );
+  const declaresLicense =
+    licenseFiles.length > 0 ||
+    spdxIds.length > 0 ||
+    /["']?license["']?\s*[:=]\s*["'][^"']+["']/i.test(combined) ||
+    /^\s*license\s*:\s*[A-Za-z0-9][A-Za-z0-9 .()+-]*\s*$/im.test(combined) ||
+    /\b(?:MIT License|Apache License|Mozilla Public License|GNU (?:Affero )?General Public License|BSD [23]-Clause)\b/i.test(
+      combined,
+    );
+
+  if (!declaresLicense) {
+    addFinding(findings, {
+      code: "missing-license",
+      severity: "warning",
+      path: "bundle",
+      message:
+        "Imported skill does not declare a license; redistribution and use rights are unclear.",
+    });
+  }
+
+  if (spdxIds.length > 1) {
+    addFinding(findings, {
+      code: "conflicting-license-identifiers",
+      severity: "warning",
+      path: "bundle",
+      message:
+        "Bundle declares multiple SPDX license identifiers that require compatibility review.",
+      detail: spdxIds.join(", "),
+    });
+  }
+
+  if (/\b(?:AGPL|GPL)-?[123](?:\.0)?(?:-only|-or-later)?\b/i.test(combined)) {
+    addFinding(findings, {
+      code: "copyleft-license-review",
+      severity: "info",
+      path: "bundle",
+      message:
+        "Bundle declares a strong copyleft license; review distribution obligations before use.",
+    });
+  }
+
+  if (/\b(?:UNLICENSED|NOASSERTION)\b|all rights reserved/i.test(combined)) {
+    addFinding(findings, {
+      code: "restricted-license",
+      severity: "warning",
+      path: "bundle",
+      message: "Bundle license terms appear restricted or unresolved.",
+    });
+  }
+}
+
+async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
+  status: "passed" | "failed" | "unavailable" | "skipped";
+  detail?: string;
+  findings: CapabilitySecurityFinding[];
+}> {
+  if (!fs.existsSync(path.join(bundleDir, "SKILL.md"))) {
+    return {
+      status: "skipped",
+      detail: "Bundle does not contain a SKILL.md target.",
+      findings: [],
+    };
+  }
+
+  const binary = process.env.COWORK_SKILL_EVALUATOR_BIN?.trim() || "skillevaluator";
+  const outputDir = path.join(path.dirname(bundleDir), `.nvidia-eval-${randomUUID()}`);
+  ensureDir(outputDir);
+  try {
+    await execFileAsync(
+      binary,
+      [
+        "validate",
+        bundleDir,
+        "--checks",
+        NVIDIA_INSTALL_CHECKS.join(","),
+        "--no-dedup",
+        "--report",
+        "json",
+        "--output-dir",
+        outputDir,
+      ],
+      { timeout: NVIDIA_SKILL_EVALUATOR_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 },
+    );
+    return { status: "passed", findings: readNvidiaFindings(outputDir, bundleDir) };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException & { code?: string | number }).code;
+    const message = error instanceof Error ? error.message : String(error);
+    if (code === "ENOENT" || /(?:not found|unsupported command|spawn .*enoent)/i.test(message)) {
+      return {
+        status: "unavailable",
+        detail:
+          "Install NVIDIA SkillEvaluator or set COWORK_SKILL_EVALUATOR_BIN to enable the external gate.",
+        findings: [],
+      };
+    }
+    const findings = readNvidiaFindings(outputDir, bundleDir);
+    return {
+      status: "failed",
+      detail:
+        code === "ETIMEDOUT"
+          ? "NVIDIA SkillEvaluator timed out before producing a verdict."
+          : `NVIDIA SkillEvaluator rejected the skill${code !== undefined ? ` (exit ${String(code)})` : ""}.`,
+      findings,
+    };
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
+}
+
+interface NvidiaFinding {
+  category?: string;
+  severity?: string;
+  check_name?: string;
+  message?: string;
+  file_path?: string;
+  line_number?: number | null;
+  suggestion?: string;
+}
+
+interface NvidiaReport {
+  results?: Array<{ findings?: NvidiaFinding[] }>;
+}
+
+function findJsonFiles(rootDir: string): string[] {
+  if (!fs.existsSync(rootDir)) return [];
+  const files: string[] = [];
+  for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+    const entryPath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) files.push(...findJsonFiles(entryPath));
+    else if (entry.isFile() && entry.name.endsWith(".json")) files.push(entryPath);
+  }
+  return files;
+}
+
+function readNvidiaFindings(
+  outputDir: string,
+  bundleDir: string,
+): CapabilitySecurityFinding[] {
+  const findings: CapabilitySecurityFinding[] = [];
+  for (const reportPath of findJsonFiles(outputDir)) {
+    const report = readJsonFile<NvidiaReport>(reportPath);
+    for (const result of report?.results || []) {
+      for (const finding of result.findings || []) {
+        const category = finding.category?.toUpperCase() || "UNKNOWN";
+        if (!NVIDIA_BLOCKING_CATEGORIES.has(category)) continue;
+        const severity = finding.severity?.toLowerCase();
+        const blocking = severity === "critical" || severity === "high";
+        const relativePath = finding.file_path
+          ? path.relative(bundleDir, finding.file_path)
+          : undefined;
+        findings.push({
+          code: `nvidia-${category.toLowerCase()}-${finding.check_name || "finding"}`,
+          severity: blocking ? "critical" : "warning",
+          path:
+            relativePath && relativePath !== "" && !relativePath.startsWith("..")
+              ? path.join("bundle", relativePath)
+              : "bundle",
+          message: finding.message || `NVIDIA SkillEvaluator reported a ${category} finding.`,
+          detail: [
+            finding.line_number ? `line ${finding.line_number}` : undefined,
+            finding.suggestion,
+          ]
+            .filter(Boolean)
+            .join(": ") || undefined,
+        });
+      }
+    }
+  }
+  return uniqueFindings(findings);
 }
 
 function assessUrl(
@@ -598,6 +971,40 @@ export class CapabilityBundleSecurityService {
     for (const textEntry of texts) {
       scanTextContent(textEntry.path, textEntry.content, findings, packages);
     }
+    scanSkillLicensing(bundleDir, texts, findings);
+
+    const nvidiaEvaluation = await runNvidiaSkillEvaluator(bundleDir);
+    findings.push(...nvidiaEvaluation.findings);
+    if (nvidiaEvaluation.status === "failed") {
+      if (nvidiaEvaluation.findings.length === 0) {
+        addFinding(findings, {
+          code: "nvidia-skillevaluator-failed",
+          severity: "critical",
+          path: "bundle",
+          message: "NVIDIA SkillEvaluator failed without a readable risk report.",
+          detail: nvidiaEvaluation.detail,
+        });
+      } else if (!nvidiaEvaluation.findings.some((finding) => finding.severity === "critical")) {
+        addFinding(findings, {
+          code: "nvidia-skillevaluator-advisory-failed",
+          severity: "warning",
+          path: "bundle",
+          message: "NVIDIA SkillEvaluator reported non-blocking review findings.",
+          detail: nvidiaEvaluation.detail,
+        });
+      }
+    } else if (nvidiaEvaluation.status === "unavailable" || nvidiaEvaluation.status === "skipped") {
+      addFinding(findings, {
+        code: `nvidia-skillevaluator-${nvidiaEvaluation.status}`,
+        severity: "info",
+        path: "bundle",
+        message:
+          nvidiaEvaluation.status === "unavailable"
+            ? "NVIDIA SkillEvaluator was unavailable; CoWork completed its built-in Tier 1 checks only."
+            : "NVIDIA SkillEvaluator could not inspect this manifest-only skill; CoWork completed its built-in Tier 1 checks.",
+        detail: nvidiaEvaluation.detail,
+      });
+    }
 
     const packageResults = await this.checkPackages(Array.from(packages.values()));
     const finalFindings = uniqueFindings(findings);
@@ -610,14 +1017,13 @@ export class CapabilityBundleSecurityService {
       });
     }
 
-    const verdict =
-      finalFindings.some((finding) => finding.severity === "critical")
-        ? context.managed
-          ? "quarantined"
-          : "warning"
-        : finalFindings.length > 0 || packageResults.intelligenceUnavailable
-          ? "warning"
-          : "clean";
+    const verdict = finalFindings.some((finding) => finding.severity === "critical")
+      ? context.managed
+        ? "quarantined"
+        : "warning"
+      : finalFindings.length > 0 || packageResults.intelligenceUnavailable
+        ? "warning"
+        : "clean";
 
     return {
       bundleKind: "skill",
@@ -632,6 +1038,24 @@ export class CapabilityBundleSecurityService {
       findings: finalFindings,
       packagesChecked: packageResults.results,
       intelligenceUnavailable: packageResults.intelligenceUnavailable,
+      evaluators: [
+        {
+          name: "cowork-tier1",
+          status: finalFindings.some(
+            (finding) =>
+              finding.severity === "critical" && finding.code !== "nvidia-skillevaluator-failed",
+          )
+            ? "failed"
+            : "passed",
+          checks: ["pii", "secrets", "license", "unicode", "security", "packages"],
+        },
+        {
+          name: "nvidia-skillevaluator",
+          status: nvidiaEvaluation.status,
+          checks: NVIDIA_INSTALL_CHECKS,
+          detail: nvidiaEvaluation.detail,
+        },
+      ],
     };
   }
 
@@ -682,14 +1106,13 @@ export class CapabilityBundleSecurityService {
       });
     }
 
-    const verdict =
-      finalFindings.some((finding) => finding.severity === "critical")
-        ? context.managed
-          ? "quarantined"
-          : "warning"
-        : finalFindings.length > 0 || packageResults.intelligenceUnavailable
-          ? "warning"
-          : "clean";
+    const verdict = finalFindings.some((finding) => finding.severity === "critical")
+      ? context.managed
+        ? "quarantined"
+        : "warning"
+      : finalFindings.length > 0 || packageResults.intelligenceUnavailable
+        ? "warning"
+        : "clean";
 
     return {
       bundleKind: "plugin-pack",
@@ -754,9 +1177,7 @@ export class CapabilityBundleSecurityService {
     }
   }
 
-  private async checkPackages(
-    candidates: PackageCandidate[],
-  ): Promise<{
+  private async checkPackages(candidates: PackageCandidate[]): Promise<{
     results: CapabilitySecurityReport["packagesChecked"];
     intelligenceUnavailable: boolean;
   }> {
@@ -788,7 +1209,9 @@ export class CapabilityBundleSecurityService {
           continue;
         }
 
-        const payload = (await response.json()) as { vulns?: Array<{ id?: string; aliases?: string[] }> };
+        const payload = (await response.json()) as {
+          vulns?: Array<{ id?: string; aliases?: string[] }>;
+        };
         const advisories = (payload.vulns || [])
           .flatMap((entry) => [entry.id, ...(entry.aliases || [])])
           .filter((value): value is string => typeof value === "string" && value.length > 0);
@@ -825,7 +1248,9 @@ export class CapabilityBundleSecurityService {
     managedSkillsDir: string,
     skillId: string,
   ): CapabilitySecurityReport | null {
-    return readJsonFile<CapabilitySecurityReport>(this.getSkillReportPath(managedSkillsDir, skillId));
+    return readJsonFile<CapabilitySecurityReport>(
+      this.getSkillReportPath(managedSkillsDir, skillId),
+    );
   }
 
   persistActivePackReport(packDir: string, report: CapabilitySecurityReport): void {
@@ -854,11 +1279,7 @@ export class CapabilityBundleSecurityService {
     this.persistActiveSkillReport(managedSkillsDir, skillId, report);
   }
 
-  activatePluginPack(
-    stageDir: string,
-    targetDir: string,
-    report: CapabilitySecurityReport,
-  ): void {
+  activatePluginPack(stageDir: string, targetDir: string, report: CapabilitySecurityReport): void {
     removeIfExists(targetDir);
     movePath(stageDir, targetDir);
     this.persistActivePackReport(targetDir, report);
@@ -874,18 +1295,22 @@ export class CapabilityBundleSecurityService {
   ): QuarantinedImportRecord {
     const targetDir = this.createQuarantineDir("skill", skillId);
     movePath(stageDir, path.join(targetDir, QUARANTINE_PAYLOAD_DIR));
-    const record = this.writeQuarantineRecord(targetDir, {
-      version: 1,
-      id: path.basename(targetDir),
-      bundleKind: "skill",
-      bundleId: skillId,
-      displayName,
-      source,
-      managed: true,
-      quarantinedAt: new Date().toISOString(),
-      activeManifestPath: path.join(managedSkillsDir, `${skillId}.json`),
-      activeBundleDir: path.join(managedSkillsDir, skillId),
-    }, report);
+    const record = this.writeQuarantineRecord(
+      targetDir,
+      {
+        version: 1,
+        id: path.basename(targetDir),
+        bundleKind: "skill",
+        bundleId: skillId,
+        displayName,
+        source,
+        managed: true,
+        quarantinedAt: new Date().toISOString(),
+        activeManifestPath: path.join(managedSkillsDir, `${skillId}.json`),
+        activeBundleDir: path.join(managedSkillsDir, skillId),
+      },
+      report,
+    );
     return record;
   }
 
@@ -908,18 +1333,22 @@ export class CapabilityBundleSecurityService {
       movePath(bundleDir, path.join(payloadDir, "bundle"));
     }
     removeIfExists(this.getSkillReportPath(managedSkillsDir, skillId));
-    return this.writeQuarantineRecord(targetDir, {
-      version: 1,
-      id: path.basename(targetDir),
-      bundleKind: "skill",
-      bundleId: skillId,
-      displayName,
-      source,
-      managed: true,
-      quarantinedAt: new Date().toISOString(),
-      activeManifestPath: manifestPath,
-      activeBundleDir: bundleDir,
-    }, report);
+    return this.writeQuarantineRecord(
+      targetDir,
+      {
+        version: 1,
+        id: path.basename(targetDir),
+        bundleKind: "skill",
+        bundleId: skillId,
+        displayName,
+        source,
+        managed: true,
+        quarantinedAt: new Date().toISOString(),
+        activeManifestPath: manifestPath,
+        activeBundleDir: bundleDir,
+      },
+      report,
+    );
   }
 
   quarantinePluginPackStage(
@@ -932,17 +1361,21 @@ export class CapabilityBundleSecurityService {
   ): QuarantinedImportRecord {
     const targetDir = this.createQuarantineDir("plugin-pack", packId);
     movePath(stageDir, path.join(targetDir, QUARANTINE_PAYLOAD_DIR));
-    return this.writeQuarantineRecord(targetDir, {
-      version: 1,
-      id: path.basename(targetDir),
-      bundleKind: "plugin-pack",
-      bundleId: packId,
-      displayName,
-      source,
-      managed: true,
-      quarantinedAt: new Date().toISOString(),
-      activePackDir,
-    }, report);
+    return this.writeQuarantineRecord(
+      targetDir,
+      {
+        version: 1,
+        id: path.basename(targetDir),
+        bundleKind: "plugin-pack",
+        bundleId: packId,
+        displayName,
+        source,
+        managed: true,
+        quarantinedAt: new Date().toISOString(),
+        activePackDir,
+      },
+      report,
+    );
   }
 
   quarantineManagedPluginPack(
@@ -953,17 +1386,21 @@ export class CapabilityBundleSecurityService {
   ): QuarantinedImportRecord {
     const targetDir = this.createQuarantineDir("plugin-pack", packId);
     movePath(packDir, path.join(targetDir, QUARANTINE_PAYLOAD_DIR));
-    return this.writeQuarantineRecord(targetDir, {
-      version: 1,
-      id: path.basename(targetDir),
-      bundleKind: "plugin-pack",
-      bundleId: packId,
-      displayName,
-      source: "managed",
-      managed: true,
-      quarantinedAt: new Date().toISOString(),
-      activePackDir: packDir,
-    }, report);
+    return this.writeQuarantineRecord(
+      targetDir,
+      {
+        version: 1,
+        id: path.basename(targetDir),
+        bundleKind: "plugin-pack",
+        bundleId: packId,
+        displayName,
+        source: "managed",
+        managed: true,
+        quarantinedAt: new Date().toISOString(),
+        activePackDir: packDir,
+      },
+      report,
+    );
   }
 
   async verifyManagedSkillIntegrity(
@@ -1012,7 +1449,11 @@ export class CapabilityBundleSecurityService {
           },
         ]);
         report.verdict = "quarantined";
-        report.summary = buildSummary(report.verdict, report.findings, report.intelligenceUnavailable);
+        report.summary = buildSummary(
+          report.verdict,
+          report.findings,
+          report.intelligenceUnavailable,
+        );
         this.quarantineManagedSkill(managedSkillsDir, skillId, displayName, "managed", report);
         return { allowed: false, report };
       }
@@ -1029,9 +1470,7 @@ export class CapabilityBundleSecurityService {
     }
   }
 
-  async inspectUnmanagedSkill(
-    skill: CustomSkill,
-  ): Promise<CapabilitySecurityReport | null> {
+  async inspectUnmanagedSkill(skill: CustomSkill): Promise<CapabilitySecurityReport | null> {
     const filePath = skill.filePath;
     if (!filePath || !fs.existsSync(filePath)) {
       return null;
@@ -1091,7 +1530,11 @@ export class CapabilityBundleSecurityService {
         },
       ]);
       report.verdict = "quarantined";
-      report.summary = buildSummary(report.verdict, report.findings, report.intelligenceUnavailable);
+      report.summary = buildSummary(
+        report.verdict,
+        report.findings,
+        report.intelligenceUnavailable,
+      );
       this.quarantineManagedPluginPack(pluginDir, manifest.name, manifest.displayName, report);
       return { allowed: false, report };
     }
@@ -1262,7 +1705,10 @@ export class CapabilityBundleSecurityService {
       };
     }
 
-    const restoreClone = path.join(path.dirname(metadata.activePackDir), `.security-restore-${Date.now()}`);
+    const restoreClone = path.join(
+      path.dirname(metadata.activePackDir),
+      `.security-restore-${Date.now()}`,
+    );
     copyPath(payloadDir, restoreClone);
     this.activatePluginPack(restoreClone, metadata.activePackDir, retryReport);
     removeIfExists(recordDir);
@@ -1319,8 +1765,12 @@ export class CapabilityBundleSecurityService {
     if (!targetDir) {
       return null;
     }
-    const metadata = readJsonFile<QuarantineMetadata>(path.join(targetDir, QUARANTINE_METADATA_FILENAME));
-    const report = readJsonFile<CapabilitySecurityReport>(path.join(targetDir, QUARANTINE_REPORT_FILENAME));
+    const metadata = readJsonFile<QuarantineMetadata>(
+      path.join(targetDir, QUARANTINE_METADATA_FILENAME),
+    );
+    const report = readJsonFile<CapabilitySecurityReport>(
+      path.join(targetDir, QUARANTINE_REPORT_FILENAME),
+    );
     if (!metadata || !report) {
       return null;
     }

@@ -1,6 +1,9 @@
 ---
 name: dcf-valuation
 description: "Discounted cash flow valuation with WACC calculation, free cash flow projection, terminal value estimation, sensitivity analysis, and enterprise-to-equity value bridge."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # DCF Valuation

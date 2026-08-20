@@ -1,6 +1,9 @@
 ---
 name: openai-whisper-api
 description: "Transcribe audio via OpenAI Audio Transcriptions API (Whisper)."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Openai-whisper-api

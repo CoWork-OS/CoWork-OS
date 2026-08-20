@@ -1,6 +1,9 @@
 ---
 name: weather
 description: "Get current weather and forecasts (no API key required)."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Weather

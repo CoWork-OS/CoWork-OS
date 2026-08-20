@@ -1,6 +1,10 @@
 ---
 name: developer-growth-analysis
 description: "Analyze recent coding patterns and generate a personalized developer growth report."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "ComposioHQ"
 ---
 
 # developer-growth-analysis

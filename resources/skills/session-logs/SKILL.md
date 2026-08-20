@@ -1,6 +1,9 @@
 ---
 name: session-logs
 description: "Query prior conversations/tasks via the task_history tool (replaces filesystem JSONL session logs)."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Session Logs (Deprecated)

@@ -1,6 +1,9 @@
 ---
 name: usecase-chief-of-staff-briefing
 description: "Build a morning/evening executive brief from calendar, inbox, tasks, and optional ops signals."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Chief of Staff Briefing

@@ -6078,21 +6078,57 @@ export interface ElectronAPI {
   ) => void;
   // Search Settings
   getSearchSettings: () => Promise<{
-    primaryProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
-    fallbackProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
+    primaryProvider:
+      | "tavily"
+      | "exa"
+      | "brave"
+      | "serpapi"
+      | "google"
+      | "searxng"
+      | "duckduckgo"
+      | null;
+    fallbackProvider:
+      | "tavily"
+      | "exa"
+      | "brave"
+      | "serpapi"
+      | "google"
+      | "searxng"
+      | "duckduckgo"
+      | null;
   }>;
   saveSearchSettings: (settings: Any) => Promise<{ success: boolean }>;
   getSearchConfigStatus: () => Promise<{
-    primaryProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
-    fallbackProvider: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo" | null;
+    primaryProvider:
+      | "tavily"
+      | "exa"
+      | "brave"
+      | "serpapi"
+      | "google"
+      | "searxng"
+      | "duckduckgo"
+      | null;
+    fallbackProvider:
+      | "tavily"
+      | "exa"
+      | "brave"
+      | "serpapi"
+      | "google"
+      | "searxng"
+      | "duckduckgo"
+      | null;
     providers: Array<{
-      type: "tavily" | "brave" | "serpapi" | "google" | "duckduckgo";
+      type: "tavily" | "exa" | "brave" | "serpapi" | "google" | "searxng" | "duckduckgo";
       name: string;
       description: string;
       configured: boolean;
       supportedTypes: Array<"web" | "news" | "images">;
     }>;
     isConfigured: boolean;
+    searxng: {
+      baseUrl?: string;
+      allowPrivate: boolean;
+    };
   }>;
   testSearchProvider: (providerType: string) => Promise<{ success: boolean; error?: string }>;
   listProfiles: () => Promise<AppProfileSummary[]>;
@@ -6467,10 +6503,7 @@ export interface ElectronAPI {
   getPermissionSettings: () => Promise<PermissionSettingsData>;
   savePermissionSettings: (settings: PermissionSettingsData) => Promise<{ success: boolean }>;
   getWorkspacePermissionRules: (workspaceId: string) => Promise<PersistedPermissionRule[]>;
-  deleteWorkspacePermissionRule: (payload: {
-    workspaceId: string;
-    ruleId: string;
-  }) => Promise<{
+  deleteWorkspacePermissionRule: (payload: { workspaceId: string; ruleId: string }) => Promise<{
     success: boolean;
     removed: boolean;
     dbRemoved?: boolean;

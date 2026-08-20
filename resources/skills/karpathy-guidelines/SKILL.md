@@ -1,6 +1,9 @@
 ---
 name: karpathy-guidelines
 description: "Surgical execution guardrails for coding, debugging, review, and refactor tasks"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Surgical Task Guidelines

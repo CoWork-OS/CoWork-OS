@@ -1786,7 +1786,9 @@ export class ManagedSessionService {
     const now = Date.now();
     const surface = input.surface || "runtime";
     const backingTaskSource: Task["source"] =
-      surface === "agent_panel" ? "managed_agent_panel" : "manual";
+      surface === "agent_panel" || surface === "bot_chat" || surface === "bot_group"
+        ? "managed_agent_panel"
+        : "manual";
     const userPrompt = this.materializeContent(input.initialEvent?.content || []);
     const baseAgentConfig = this.buildAgentConfig(environment, version);
     const missingConnections = this.resolveMcpToolAccess(environment).missingConnections;
@@ -1831,6 +1833,7 @@ export class ManagedSessionService {
         workspaceId: environment.config.workspaceId,
         backingTaskId: task.id,
         backingTeamRunId: teamRunId,
+        resumedFromSessionId: input.resumedFromSessionId,
         latestSummary: undefined,
         startedAt: now,
       });
@@ -1901,6 +1904,7 @@ export class ManagedSessionService {
       surface,
       workspaceId: environment.config.workspaceId,
       backingTaskId: task.id,
+      resumedFromSessionId: input.resumedFromSessionId,
       latestSummary: undefined,
     });
     this.managedSessionEventRepo.create({
@@ -1959,6 +1963,13 @@ export class ManagedSessionService {
     return this.managedSessionEventRepo.listBySessionId(sessionId, limit);
   }
 
+  listLatestSessionEvents(sessionId: string, limit = 500): ManagedSessionEvent[] {
+    const session = this.refreshSession(sessionId);
+    if (!session) return [];
+    if (!Number.isFinite(limit)) throw new Error("limit must be a finite number");
+    return this.managedSessionEventRepo.listLatestBySessionId(sessionId, limit);
+  }
+
   async cancelSession(sessionId: string): Promise<ManagedSession | undefined> {
     const session = this.managedSessionRepo.findById(sessionId);
     if (!session) return undefined;
@@ -2013,17 +2024,14 @@ export class ManagedSessionService {
     );
 
     if (event.type === "user.message") {
-      if (session.backingTeamRunId) {
-        throw new Error("user.message is not supported for team-mode managed sessions yet");
-      }
       const message = this.materializeContent(event.content);
+      await this.agentDaemon.sendMessage(session.backingTaskId, message);
       this.managedSessionEventRepo.create({
         sessionId,
         timestamp: Date.now(),
         type: "user.message",
         payload: { content: event.content },
       });
-      await this.agentDaemon.sendMessage(session.backingTaskId, message);
       return this.refreshSession(sessionId);
     }
 

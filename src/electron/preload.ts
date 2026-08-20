@@ -57,6 +57,17 @@ import type {
   AnnotationUpdateInput,
   BrowserAnnotationTargetRef,
   BrowserAnnotationTargetResolveResult,
+  BotCanonicalSessionRequest,
+  BotBindingUserUpdates,
+  BotEnvelope,
+  BotRuntimeBinding,
+  BotRoom,
+  BotRoomExecutionMode,
+  BotRoomMember,
+  BotRoomMessage,
+  BotRoomRunReceipt,
+  BotSendMessageRequest,
+  BotSummary,
   ProfileExportResult,
   EvalBaselineMetrics,
   EvalCase,
@@ -2928,6 +2939,71 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.MANAGED_SESSION_WORKPAPER_GET_IPC,
       sessionId,
     ) as Promise<ManagedSessionWorkpaper>,
+  listBots: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_LIST_IPC) as Promise<BotSummary[]>,
+  getBotBinding: (agentId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_BINDING_GET_IPC, agentId) as Promise<BotRuntimeBinding>,
+  updateBotBinding: (agentId: string, updates: BotBindingUserUpdates) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_BINDING_UPDATE_IPC, {
+      agentId,
+      updates,
+    }) as Promise<BotRuntimeBinding>,
+  ensureBotCanonicalSession: (request: BotCanonicalSessionRequest) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_CANONICAL_SESSION_ENSURE_IPC,
+      request,
+    ) as Promise<ManagedSession>,
+  getBotConversation: (agentId: string, limitPerSession?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_CONVERSATION_GET_IPC, {
+      agentId,
+      limitPerSession,
+    }) as Promise<Array<{ session: ManagedSession; events: ManagedSessionEvent[] }>>,
+  sendBotMessage: (request: BotSendMessageRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_MESSAGE_SEND_IPC, request) as Promise<BotEnvelope>,
+  listBotMessages: (request: {
+    toAgentId?: string;
+    fromAgentId?: string;
+    conversationId?: string;
+    status?: BotEnvelope["status"];
+    sourceProtocol?: BotEnvelope["sourceProtocol"];
+    order?: "asc" | "desc";
+    limit?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.BOT_MESSAGE_LIST_IPC, request) as Promise<BotEnvelope[]>,
+  listBotRooms: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_ROOM_LIST_IPC) as Promise<BotRoom[]>,
+  createBotRoom: (request: {
+    name: string;
+    ownerAgentId?: string;
+    memberAgentIds: string[];
+    executionMode?: BotRoomExecutionMode;
+    maxRounds?: number;
+    maxMessages?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.BOT_ROOM_CREATE_IPC, request) as Promise<BotRoom>,
+  getBotRoom: (roomId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_ROOM_GET_IPC, roomId) as Promise<{
+      room: BotRoom | null;
+      members: BotRoomMember[];
+    }>,
+  appendBotRoomUserMessage: (roomId: string, body: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_ROOM_APPEND_USER_MESSAGE_IPC, {
+      roomId,
+      body,
+    }) as Promise<BotRoomRunReceipt>,
+  listBotRoomMessages: (roomId: string, afterSeq?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_ROOM_MESSAGES_LIST_IPC, {
+      roomId,
+      afterSeq,
+    }) as Promise<BotRoomMessage[]>,
+  saveRemoteAgentCredential: (credentialRef: string, token: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.REMOTE_AGENT_CREDENTIAL_SET_IPC, {
+      credentialRef,
+      token,
+    }) as Promise<{ saved: true }>,
+  deleteRemoteAgentCredential: (credentialRef: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.REMOTE_AGENT_CREDENTIAL_DELETE_IPC,
+      credentialRef,
+    ) as Promise<{ deleted: boolean }>,
   listAgentTemplates: () =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_TEMPLATE_LIST) as Promise<AgentTemplate[]>,
   listAgentWorkspaceMemberships: (workspaceId?: string) =>
@@ -5860,6 +5936,47 @@ export interface ElectronAPI {
   cancelManagedSession: (sessionId: string) => Promise<ManagedSession | undefined>;
   listManagedSessionEvents: (sessionId: string, limit?: number) => Promise<ManagedSessionEvent[]>;
   getManagedSessionWorkpaper: (sessionId: string) => Promise<ManagedSessionWorkpaper>;
+  listBots: () => Promise<BotSummary[]>;
+  getBotBinding: (agentId: string) => Promise<BotRuntimeBinding>;
+  updateBotBinding: (
+    agentId: string,
+    updates: BotBindingUserUpdates,
+  ) => Promise<BotRuntimeBinding>;
+  ensureBotCanonicalSession: (request: BotCanonicalSessionRequest) => Promise<ManagedSession>;
+  getBotConversation: (
+    agentId: string,
+    limitPerSession?: number,
+  ) => Promise<Array<{ session: ManagedSession; events: ManagedSessionEvent[] }>>;
+  sendBotMessage: (request: BotSendMessageRequest) => Promise<BotEnvelope>;
+  listBotMessages: (request: {
+    toAgentId?: string;
+    fromAgentId?: string;
+    conversationId?: string;
+    status?: BotEnvelope["status"];
+    sourceProtocol?: BotEnvelope["sourceProtocol"];
+    order?: "asc" | "desc";
+    limit?: number;
+  }) => Promise<BotEnvelope[]>;
+  listBotRooms: () => Promise<BotRoom[]>;
+  createBotRoom: (request: {
+    name: string;
+    ownerAgentId?: string;
+    memberAgentIds: string[];
+    executionMode?: BotRoomExecutionMode;
+    maxRounds?: number;
+    maxMessages?: number;
+  }) => Promise<BotRoom>;
+  getBotRoom: (roomId: string) => Promise<{
+    room: BotRoom | null;
+    members: BotRoomMember[];
+  }>;
+  appendBotRoomUserMessage: (roomId: string, body: string) => Promise<BotRoomRunReceipt>;
+  listBotRoomMessages: (roomId: string, afterSeq?: number) => Promise<BotRoomMessage[]>;
+  saveRemoteAgentCredential: (
+    credentialRef: string,
+    token: string,
+  ) => Promise<{ saved: true }>;
+  deleteRemoteAgentCredential: (credentialRef: string) => Promise<{ deleted: boolean }>;
   listAgentTemplates: () => Promise<AgentTemplate[]>;
   listAgentWorkspaceMemberships: (workspaceId?: string) => Promise<AgentWorkspaceMembership[]>;
   updateAgentWorkspaceMembership: (request: {

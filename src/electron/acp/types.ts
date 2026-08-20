@@ -36,6 +36,8 @@ export interface ACPAgentCard {
   outputContentTypes?: string[];
   /** Whether this agent supports streaming responses */
   supportsStreaming?: boolean;
+  /** Wire protocol used by the remote endpoint. Defaults to cowork-legacy. */
+  protocol?: "cowork-legacy" | "a2a-v1";
   /** Agent endpoint URL (for remote agents) */
   endpoint?: string;
   /** Agent origin: 'local' (CoWork role) or 'remote' (external agent) */
@@ -155,6 +157,7 @@ export interface ACPAgentRegisterParams {
   inputContentTypes?: string[];
   outputContentTypes?: string[];
   supportsStreaming?: boolean;
+  protocol?: "cowork-legacy" | "a2a-v1";
   endpoint?: string;
   metadata?: Record<string, unknown>;
 }
@@ -198,8 +201,47 @@ export interface ACPTaskCreateParams {
 export interface A2AJsonRpcRequest {
   jsonrpc: "2.0";
   id: string;
-  method: "tasks/send" | "tasks/create" | "tasks/get" | "tasks/cancel";
+  method:
+    | "message/send"
+    | "message/stream"
+    | "tasks/send"
+    | "tasks/create"
+    | "tasks/get"
+    | "tasks/cancel";
   params: Record<string, unknown>;
+}
+
+export interface A2AV1Message {
+  messageId: string;
+  role: "ROLE_USER" | "ROLE_AGENT";
+  contextId?: string;
+  taskId?: string;
+  parts: Array<
+    | { text: string; mediaType?: string }
+    | { data: unknown; mediaType?: string }
+    | { url?: string; raw?: string; filename?: string; mediaType?: string }
+  >;
+}
+
+export interface A2AV1TaskResult {
+  kind?: "task";
+  id?: string;
+  taskId?: string;
+  contextId?: string;
+  status?: {
+    state?: string;
+    message?: A2AV1Message;
+  };
+  artifacts?: Array<{
+    artifactId?: string;
+    name?: string;
+    parts?: A2AV1Message["parts"];
+  }>;
+  message?: A2AV1Message;
+  /** Direct message responses are accepted in addition to task responses. */
+  messageId?: string;
+  role?: A2AV1Message["role"];
+  parts?: A2AV1Message["parts"];
 }
 
 export interface A2AJsonRpcSuccessResponse<T = unknown> {

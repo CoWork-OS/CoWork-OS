@@ -217,6 +217,9 @@ const InboxAgentPanel = lazy(() =>
 const AgentsHubPanel = lazy(() =>
   import("./components/AgentsHubPanel").then((module) => ({ default: module.AgentsHubPanel })),
 );
+const BotWorkspace = lazy(() =>
+  import("./components/bots/BotWorkspace").then((module) => ({ default: module.BotWorkspace })),
+);
 const EverydayAgentPanel = lazy(() =>
   import("./components/EverydayAgentPanel").then((module) => ({
     default: module.EverydayAgentPanel,
@@ -636,6 +639,7 @@ type AppView =
   | "ideas"
   | "inboxAgent"
   | "agents"
+  | "bots"
   | "everydayAgent"
   | "missionControl";
 type RemoteTaskView = {
@@ -5997,6 +6001,7 @@ export function App() {
         currentView === "ideas" ||
         currentView === "inboxAgent" ||
         currentView === "agents" ||
+        currentView === "bots" ||
         currentView === "everydayAgent" ||
         currentView === "missionControl") && (
         <>
@@ -6012,6 +6017,7 @@ export function App() {
                 isIdeasActive={currentView === "ideas"}
                 isInboxAgentActive={currentView === "inboxAgent"}
                 isAgentsActive={currentView === "agents"}
+                isBotsActive={currentView === "bots"}
                 isEverydayAgentActive={currentView === "everydayAgent"}
                 isMissionControlActive={currentView === "missionControl"}
                 isHealthActive={currentView === "health"}
@@ -6024,6 +6030,7 @@ export function App() {
                 onOpenIdeas={() => setCurrentView("ideas")}
                 onOpenInboxAgent={() => setCurrentView("inboxAgent")}
                 onOpenAgents={() => setCurrentView("agents")}
+                onOpenBots={() => setCurrentView("bots")}
                 onOpenEverydayAgent={() => setCurrentView("everydayAgent")}
                 onOpenHealth={() => setCurrentView("health")}
                 onOpenDevices={() => setCurrentView("devices")}
@@ -6195,6 +6202,8 @@ export function App() {
                     setCurrentView("missionControl");
                   }}
                 />
+              ) : currentView === "bots" ? (
+                <BotWorkspace onOpenAgents={() => setCurrentView("agents")} />
               ) : currentView === "agents" ? (
                 <main className="main-content">
                   <AgentsHubPanel

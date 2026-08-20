@@ -55,6 +55,13 @@ import { MailboxService } from "../mailbox/MailboxService";
 import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { AgentMailRealtimeService } from "../agentmail/AgentMailRealtimeService";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
+import {
+  deleteRemoteAgentCredential,
+  saveRemoteAgentCredential,
+} from "../acp/remote-invoker";
+import { BotCoordinatorService } from "../bots/BotCoordinatorService";
+import { BotRoomService } from "../bots/BotRoomService";
+import { BotRoomCoordinatorService } from "../bots/BotRoomCoordinatorService";
 import { AgentTemplateService } from "../managed/AgentTemplateService";
 import { AgentBuilderService, type AgentBuilderInventory } from "../managed/AgentBuilderService";
 import { ImageGenProfileService } from "../managed/ImageGenProfileService";
@@ -1574,6 +1581,16 @@ export async function setupIpcHandlers(
   const managedSessionService = new ManagedSessionService(db, agentDaemon, {
     getRoutineService,
   });
+  const botCoordinatorService = new BotCoordinatorService(db, managedSessionService);
+  botCoordinatorService.startRecoveryLoop();
+  const botRoomService = new BotRoomService(db, (agentId) =>
+    Boolean(managedSessionService.getAgent(agentId)),
+  );
+  const botRoomCoordinatorService = new BotRoomCoordinatorService(
+    botRoomService,
+    botCoordinatorService,
+    managedSessionService,
+  );
   setupEverydayAgentHandlers(new EverydayAgentService(db));
   const agentTemplateService = new AgentTemplateService();
   const agentBuilderService = new AgentBuilderService();
@@ -6203,6 +6220,47 @@ export async function setupIpcHandlers(
       return managedSessionService.generateAudioSummary(payload.sessionId, payload.config);
     },
   );
+  ipcMain.handle(IPC_CHANNELS.BOT_LIST_IPC, async () => botCoordinatorService.listBots());
+  ipcMain.handle(IPC_CHANNELS.BOT_BINDING_GET_IPC, async (_, agentId: string) =>
+    botCoordinatorService.getBinding(agentId),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_BINDING_UPDATE_IPC, async (_, payload: Any) => {
+    if (!payload?.agentId) throw new Error("agentId is required");
+    return botCoordinatorService.updateBinding(payload.agentId, payload.updates || {});
+  });
+  ipcMain.handle(IPC_CHANNELS.BOT_CANONICAL_SESSION_ENSURE_IPC, async (_, request: Any) =>
+    botCoordinatorService.ensureCanonicalSession(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_CONVERSATION_GET_IPC, async (_, payload: Any) =>
+    botCoordinatorService.getConversation(payload.agentId, payload.limitPerSession),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_MESSAGE_SEND_IPC, async (_, request: Any) =>
+    botCoordinatorService.sendMessage(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_MESSAGE_LIST_IPC, async (_, request: Any) =>
+    botCoordinatorService.listMessages(request || {}),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_ROOM_LIST_IPC, async () => botRoomService.list());
+  ipcMain.handle(IPC_CHANNELS.BOT_ROOM_CREATE_IPC, async (_, request: Any) =>
+    botRoomService.create(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_ROOM_GET_IPC, async (_, roomId: string) => ({
+    room: botRoomService.get(roomId) || null,
+    members: botRoomService.listMembers(roomId),
+  }));
+  ipcMain.handle(IPC_CHANNELS.BOT_ROOM_APPEND_USER_MESSAGE_IPC, async (_, request: Any) =>
+    botRoomCoordinatorService.sendUserMessage(request.roomId, request.body),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_ROOM_MESSAGES_LIST_IPC, async (_, request: Any) =>
+    botRoomService.listMessages(request.roomId, request.afterSeq),
+  );
+  ipcMain.handle(IPC_CHANNELS.REMOTE_AGENT_CREDENTIAL_SET_IPC, async (_, request: Any) => {
+    saveRemoteAgentCredential(String(request?.credentialRef || ""), String(request?.token || ""));
+    return { saved: true };
+  });
+  ipcMain.handle(IPC_CHANNELS.REMOTE_AGENT_CREDENTIAL_DELETE_IPC, async (_, credentialRef: string) => ({
+    deleted: deleteRemoteAgentCredential(String(credentialRef || "")),
+  }));
   ipcMain.handle(IPC_CHANNELS.AGENT_WORKSPACE_MEMBERSHIP_LIST_IPC, async (_, workspaceId?: string) => {
     return managedSessionService.listWorkspaceMemberships(workspaceId);
   });

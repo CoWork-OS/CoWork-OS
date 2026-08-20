@@ -551,6 +551,21 @@ export class ManagedSessionEventRepository {
     return rows.map((row) => this.mapRow(row));
   }
 
+  listLatestBySessionId(sessionId: string, limit = 500): ManagedSessionEvent[] {
+    const bounded = Math.max(1, Math.min(5_000, Math.floor(limit)));
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM (
+           SELECT * FROM managed_session_events
+           WHERE session_id = ?
+           ORDER BY seq DESC
+           LIMIT ?
+         ) ORDER BY seq ASC`,
+      )
+      .all(sessionId, bounded) as Any[];
+    return rows.map((row) => this.mapRow(row));
+  }
+
   hasSourceTaskEvent(sessionId: string, sourceTaskEventId: string): boolean {
     const row = this.db
       .prepare(

@@ -5496,7 +5496,155 @@ export interface ManagedSession {
   completedAt?: number;
 }
 
-export type ManagedSessionSurface = "runtime" | "agent_panel" | "studio_preview";
+export type ManagedSessionSurface =
+  | "runtime"
+  | "agent_panel"
+  | "studio_preview"
+  | "bot_chat"
+  | "bot_group"
+  | "bot_scratch";
+
+export type BotRuntimeKind = "local" | "device" | "cloud";
+
+/** Durable product identity/runtime link for a ManagedAgent shown as a bot. */
+export interface BotRuntimeBinding {
+  agentId: string;
+  agentRoleId?: string;
+  defaultEnvironmentId?: string;
+  canonicalSessionId?: string;
+  runtimeKind: BotRuntimeKind;
+  deviceId?: string;
+  browserProfileId?: string;
+  memoryScopeId?: string;
+  avatar?: Record<string, unknown>;
+  pinned: boolean;
+  sidebarGroup?: string;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Fields the trusted desktop renderer may edit without changing runtime ownership. */
+export type BotBindingUserUpdates = Partial<
+  Pick<
+    BotRuntimeBinding,
+    "defaultEnvironmentId" | "avatar" | "pinned" | "sidebarGroup" | "sortOrder"
+  >
+>;
+
+export type BotMessageKind = "request" | "delegation" | "review" | "result" | "fyi";
+export type BotMessageStatus =
+  | "queued"
+  | "claimed"
+  | "completed"
+  | "failed"
+  | "dead_letter"
+  | "expired";
+
+/** Transport-neutral message used for local, device, cloud, and external agents. */
+export interface BotEnvelope {
+  id: string;
+  fromAgentId: string;
+  toAgentId: string;
+  kind: BotMessageKind;
+  contentType: "text/plain" | "text/markdown" | "application/json";
+  body: string;
+  data?: unknown;
+  artifactRefs?: string[];
+  conversationId?: string;
+  correlationId?: string;
+  replyTo?: string;
+  sourceProtocol?: "cowork" | "cowork-legacy" | "a2a-v1";
+  sourceTaskId?: string;
+  status: BotMessageStatus;
+  attempts: number;
+  maxAttempts: number;
+  idempotencyKey?: string;
+  createdAt: number;
+  updatedAt: number;
+  claimedAt?: number;
+  completedAt?: number;
+  expiresAt?: number;
+  lastError?: string;
+}
+
+export interface BotSummary {
+  agent: ManagedAgent;
+  binding: BotRuntimeBinding;
+  canonicalSession?: ManagedSession;
+  unreadCount: number;
+  queuedCount: number;
+  latestMessage?: BotEnvelope;
+}
+
+export interface BotCanonicalSessionRequest {
+  agentId: string;
+  environmentId?: string;
+  initialContent?: ManagedSessionInputContent[];
+}
+
+export interface BotSendMessageRequest {
+  fromAgentId: string;
+  toAgentId: string;
+  body: string;
+  kind?: BotMessageKind;
+  contentType?: BotEnvelope["contentType"];
+  data?: unknown;
+  artifactRefs?: string[];
+  conversationId?: string;
+  correlationId?: string;
+  replyTo?: string;
+  idempotencyKey?: string;
+  ttlMs?: number;
+}
+
+export type BotRoomExecutionMode = "sequential" | "parallel" | "leader";
+
+export interface BotRoom {
+  id: string;
+  name: string;
+  ownerAgentId?: string;
+  executionMode: BotRoomExecutionMode;
+  maxRounds: number;
+  maxMessages: number;
+  epoch: number;
+  currentRound: number;
+  activeRunId?: string;
+  leaseExpiresAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface BotRoomMember {
+  roomId: string;
+  agentId: string;
+  source: "local" | "device" | "external";
+  memberSessionId?: string;
+  lastSeenSeq: number;
+  status: "active" | "paused" | "removed";
+  joinedAt: number;
+  updatedAt: number;
+}
+
+export interface BotRoomMessage {
+  id: string;
+  roomId: string;
+  runId?: string;
+  epoch: number;
+  round: number;
+  seq: number;
+  fromAgentId?: string;
+  body: string;
+  status: "delivered" | "pass" | "late" | "failed";
+  replyTo?: string;
+  createdAt: number;
+}
+
+export interface BotRoomRunReceipt {
+  userMessage: BotRoomMessage;
+  runId: string;
+  epoch: number;
+}
 
 export type ManagedSessionInputContent =
   | { type: "text"; text: string }
@@ -5507,6 +5655,8 @@ export interface ManagedSessionCreateInput {
   environmentId: string;
   title: string;
   surface?: ManagedSessionSurface;
+  /** Previous physical session in the same logical conversation. */
+  resumedFromSessionId?: string;
   initialEvent?: {
     type: "user.message";
     content: ManagedSessionInputContent[];
@@ -8413,6 +8563,20 @@ export const IPC_CHANNELS = {
   MANAGED_SESSION_EVENTS_LIST_IPC: "managedSession:eventsListIpc",
   MANAGED_SESSION_WORKPAPER_GET_IPC: "managedSession:workpaperGetIpc",
   MANAGED_SESSION_GENERATE_AUDIO_SUMMARY: "managedSession:generateAudioSummary",
+  BOT_LIST_IPC: "bot:listIpc",
+  BOT_BINDING_GET_IPC: "bot:bindingGetIpc",
+  BOT_BINDING_UPDATE_IPC: "bot:bindingUpdateIpc",
+  BOT_CANONICAL_SESSION_ENSURE_IPC: "bot:canonicalSessionEnsureIpc",
+  BOT_CONVERSATION_GET_IPC: "bot:conversationGetIpc",
+  BOT_MESSAGE_SEND_IPC: "bot:messageSendIpc",
+  BOT_MESSAGE_LIST_IPC: "bot:messageListIpc",
+  BOT_ROOM_LIST_IPC: "botRoom:listIpc",
+  BOT_ROOM_CREATE_IPC: "botRoom:createIpc",
+  BOT_ROOM_GET_IPC: "botRoom:getIpc",
+  BOT_ROOM_APPEND_USER_MESSAGE_IPC: "botRoom:appendUserMessageIpc",
+  BOT_ROOM_MESSAGES_LIST_IPC: "botRoom:messagesListIpc",
+  REMOTE_AGENT_CREDENTIAL_SET_IPC: "remoteAgent:credentialSetIpc",
+  REMOTE_AGENT_CREDENTIAL_DELETE_IPC: "remoteAgent:credentialDeleteIpc",
   AGENT_WORKSPACE_MEMBERSHIP_LIST_IPC: "agentWorkspaceMembership:listIpc",
   AGENT_WORKSPACE_MEMBERSHIP_UPDATE_IPC: "agentWorkspaceMembership:updateIpc",
   AGENT_WORKSPACE_PERMISSION_SNAPSHOT_IPC: "agentWorkspacePermission:snapshotIpc",

@@ -1,6 +1,9 @@
 ---
 name: learn
 description: "Manually record an insight, correction, preference, or rule that the agent should remember for future tasks."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Learn

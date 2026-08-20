@@ -1,6 +1,9 @@
 ---
 name: add-documentation
 description: "Generate JSDoc/docstrings for functions"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Add Documentation

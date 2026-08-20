@@ -1,6 +1,9 @@
 ---
 name: marketing-strategist
 description: "Comprehensive marketing strategy across 25 disciplines — positioning, copywriting frameworks, buyer psychology, SEO, CRO, paid ads, funnel architecture, content strategy, growth loops, analytics, pricing, product launches, and competitive intelligence. Use when the user needs marketing strategy, campaign planning, copy review, landing page audits, ad creation, GTM plans, or growth advice."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Marketing Strategist

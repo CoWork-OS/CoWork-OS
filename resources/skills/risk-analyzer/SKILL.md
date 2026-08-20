@@ -1,6 +1,9 @@
 ---
 name: risk-analyzer
 description: "Portfolio risk analysis including Value at Risk (parametric, historical, Monte Carlo), Conditional VaR, stress testing, drawdown analysis, and factor exposure assessment."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Risk Analyzer

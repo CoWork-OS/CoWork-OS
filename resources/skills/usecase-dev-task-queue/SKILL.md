@@ -1,6 +1,9 @@
 ---
 name: usecase-dev-task-queue
 description: "Create and run an agent-ready development queue from issues/PRs with progress checkpoints."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Dev Task Queue

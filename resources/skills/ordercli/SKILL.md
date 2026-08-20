@@ -1,6 +1,9 @@
 ---
 name: ordercli
 description: "Foodora-only CLI for checking past orders and active order status (Deliveroo WIP)."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Ordercli

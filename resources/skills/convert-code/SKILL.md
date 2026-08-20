@@ -1,6 +1,9 @@
 ---
 name: convert-code
 description: "Convert code from one language to another"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Convert Code

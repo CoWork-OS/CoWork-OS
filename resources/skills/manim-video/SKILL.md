@@ -1,6 +1,9 @@
 ---
 name: manim-video
 description: "Plan, scaffold, and render Manim Community Edition explainer videos for math, algorithms, technical concepts, and data stories."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Manim Video

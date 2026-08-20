@@ -1,6 +1,9 @@
 ---
 name: lead-scraper
 description: "Extract business and contact information from directory pages and company websites."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Lead Scraper

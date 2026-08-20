@@ -1,6 +1,9 @@
 ---
 name: agentic-image-loop
 description: "Generate -> annotate -> refine -> repeat using generate_image + Visual Annotator (Live Canvas)."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Agentic Image Loop

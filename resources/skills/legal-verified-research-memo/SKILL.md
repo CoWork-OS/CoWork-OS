@@ -1,6 +1,9 @@
 ---
 name: legal-verified-research-memo
 description: "Generate a legal research memo with claim-level source verification, confidence flags, and primary-authority priority."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Legal Verified Research Memo

@@ -1,3 +1,11 @@
+---
+name: novelist
+description: Create chaptered long-form fiction with worldbuilding, outlining, drafting, revision, and optional packaging when the user asks for a novel or novella.
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+---
+
 # Novelist
 
 ## Goal

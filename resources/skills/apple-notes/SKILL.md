@@ -1,6 +1,9 @@
 ---
 name: apple-notes
 description: "Manage Apple Notes via the `memo` CLI on macOS (create, view, edit, delete, search, move, and export notes). Use when a user asks CoWork-OSS to add a note, list notes, search notes, or manage note folders."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Apple-notes

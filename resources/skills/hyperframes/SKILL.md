@@ -331,12 +331,12 @@ Skip on small edits (fixing a color, adjusting one duration). Run on new composi
 
 ## References (loaded on demand)
 
-- **[references/captions.md](references/captions.md)** — Captions, subtitles, lyrics, karaoke synced to audio. Tone-adaptive style detection, per-word styling, text overflow prevention, caption exit guarantees, word grouping. Read when adding any text synced to audio timing.
-- **[references/tts.md](references/tts.md)** — Text-to-speech with Kokoro-82M. Voice selection, speed tuning, TTS+captions workflow. Read when generating narration or voiceover.
-- **[references/audio-reactive.md](references/audio-reactive.md)** — Audio-reactive animation: map frequency bands and amplitude to GSAP properties. Read when visuals should respond to music, voice, or sound.
+- **[references/captions.md](references/captions.md)** — Synced captions, lyrics, overflow, exits, and word grouping. Read for text timed to audio.
+- **[references/tts.md](references/tts.md)** — Kokoro-82M voice selection and TTS+captions workflow. Read for narration.
+- **[references/audio-reactive.md](references/audio-reactive.md)** — Frequency/amplitude-driven GSAP animation. Read for audio-reactive visuals.
 - **[references/css-patterns.md](references/css-patterns.md)** — CSS+GSAP marker highlighting: highlight, circle, burst, scribble, sketchout. Deterministic, fully seekable. Read when adding visual emphasis to text.
 - **[references/typography.md](references/typography.md)** — Typography: font pairing, OpenType features, dark-background adjustments, font discovery script. **Always read** — every composition has text.
-- **[references/motion-principles.md](references/motion-principles.md)** — Motion design principles: easing as emotion, timing as weight, choreography as hierarchy, scene pacing, ambient motion, anti-patterns. Read when choreographing GSAP animations.
+- **[references/motion-principles.md](references/motion-principles.md)** — Easing, timing, choreography, pacing, ambient motion, and anti-patterns.
 - **[visual-styles.md](visual-styles.md)** — 8 named visual styles (Swiss Pulse, Velvet Standard, Deconstructed, Maximalist Type, Data Drift, Soft Signal, Folk Frequency, Shadow Cut) with hex palettes, GSAP easing signatures, and shader pairings. Read when user names a style or when generating DESIGN.md.
 - **[house-style.md](house-style.md)** — Default motion, sizing, and color palettes when no style is specified.
 - **[patterns.md](patterns.md)** — PiP, title cards, slide show patterns.

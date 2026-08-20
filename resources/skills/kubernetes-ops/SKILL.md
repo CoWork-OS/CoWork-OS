@@ -1,6 +1,9 @@
 ---
 name: kubernetes-ops
 description: "Kubernetes cluster operations: kubectl commands, manifest generation, Helm charts, RBAC, debugging, and deployment strategies."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Kubernetes Operations

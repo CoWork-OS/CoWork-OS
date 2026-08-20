@@ -1,6 +1,9 @@
 ---
 name: startup-cfo
 description: "AI CFO for bootstrapped startups. Provides financial frameworks for cash management, runway calculations, unit economics (LTV:CAC), capital allocation, hiring ROI, burn rate analysis, working capital optimization, and forecasting."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Startup CFO

@@ -1,6 +1,9 @@
 ---
 name: twin-status-report
 description: "Generate a concise status report from recent activity, tasks, commits, and conversations. Used by digital twin personas to prepare standup updates and progress summaries."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Status Report Generator

@@ -1,6 +1,9 @@
 ---
 name: write-tests
 description: "Generate unit tests for existing code"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Write Tests

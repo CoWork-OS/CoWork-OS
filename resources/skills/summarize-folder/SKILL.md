@@ -1,6 +1,9 @@
 ---
 name: summarize-folder
 description: "Create a summary of all files in a folder"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Summarize Folder

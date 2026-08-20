@@ -1,6 +1,9 @@
 ---
 name: esg-scorer
 description: "Environmental, Social, and Governance scoring with SASB materiality mapping, TCFD climate risk alignment, carbon footprint analysis, and sustainability benchmarking."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # ESG Scorer

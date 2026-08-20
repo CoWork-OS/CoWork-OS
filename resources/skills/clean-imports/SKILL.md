@@ -1,6 +1,9 @@
 ---
 name: clean-imports
 description: "Remove unused imports from files"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Clean Imports

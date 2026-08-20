@@ -1,6 +1,9 @@
 ---
 name: usecase-family-digest
 description: "Draft a daily digest based on calendar + tasks. Stops before sending."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Family Digest

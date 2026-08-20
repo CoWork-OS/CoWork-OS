@@ -27,6 +27,8 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
   const [serpapiApiKey, setSerpapiApiKey] = useState("");
   const [googleApiKey, setGoogleApiKey] = useState("");
   const [googleSearchEngineId, setGoogleSearchEngineId] = useState("");
+  const [searxngBaseUrl, setSearxngBaseUrl] = useState("");
+  const [searxngAllowPrivate, setSearxngAllowPrivate] = useState(false);
 
   // Track which provider is active in the tab view
   const [activeProvider, setActiveProvider] = useState<SearchProviderType | null>(null);
@@ -42,6 +44,8 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       setConfigStatus(status);
       setPrimaryProvider(status.primaryProvider);
       setFallbackProvider(status.fallbackProvider);
+      setSearxngBaseUrl(status.searxng.baseUrl || "");
+      setSearxngAllowPrivate(status.searxng.allowPrivate);
       setActiveProvider((prev) => {
         if (prev && status.providers.some((provider) => provider.type === prev)) {
           return prev;
@@ -74,6 +78,10 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                 searchEngineId: googleSearchEngineId || undefined,
               }
             : undefined,
+        searxng: {
+          baseUrl: searxngBaseUrl.trim() || undefined,
+          allowPrivate: searxngAllowPrivate,
+        },
       });
       // Clear the input fields after saving
       setTavilyApiKey("");
@@ -103,7 +111,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
     }
   };
 
-  // Exclude DuckDuckGo from primary/fallback selection — it's an automatic last-resort fallback
+  // DuckDuckGo is used only when no configured provider exists or it is explicitly selected.
   const configuredProviders =
     configStatus?.providers.filter((p) => p.configured && p.type !== "duckduckgo") || [];
   const hasMultipleProviders = configuredProviders.length > 1;
@@ -119,8 +127,8 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
       <div className="settings-section">
         <h3>Configure Search Providers</h3>
         <p className="settings-description">
-          Add API keys to enable web search. You can configure multiple providers and set a primary
-          and fallback.
+          Configure API-backed or self-hosted web search. You can add multiple providers and set a
+          primary and fallback.
         </p>
 
         <div className="llm-provider-tabs">
@@ -172,9 +180,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                   <input
                     type="password"
                     className="settings-input"
-                    placeholder={
-                      activeProviderConfig.configured ? "••••••••••••••••" : "exa_..."
-                    }
+                    placeholder={activeProviderConfig.configured ? "••••••••••••••••" : "exa_..."}
                     value={exaApiKey}
                     onChange={(e) => setExaApiKey(e.target.value)}
                   />
@@ -266,6 +272,47 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                 </>
               )}
 
+              {activeProviderConfig.type === "searxng" && (
+                <>
+                  <div className="settings-field">
+                    <label>SearXNG Instance URL</label>
+                    <input
+                      type="url"
+                      className="settings-input"
+                      placeholder={
+                        activeProviderConfig.configured
+                          ? "Configured SearXNG URL"
+                          : "https://search.example.com"
+                      }
+                      value={searxngBaseUrl}
+                      onChange={(e) => setSearxngBaseUrl(e.target.value)}
+                    />
+                    <p className="settings-hint">
+                      JSON output must be enabled in the instance&apos;s <code>search.formats</code>
+                      . No commercial API key is required. Clearing this URL and saving removes the
+                      provider. SearXNG queries never fall through to another provider.{" "}
+                      <a
+                        href="https://docs.searxng.org/dev/search_api.html"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        SearXNG API guide
+                      </a>
+                    </p>
+                  </div>
+                  <label className="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={searxngAllowPrivate}
+                      onChange={(e) => setSearxngAllowPrivate(e.target.checked)}
+                    />
+                    <span>
+                      Allow a private or local instance (for example localhost or a home/server LAN)
+                    </span>
+                  </label>
+                </>
+              )}
+
               {activeProviderConfig.type === "duckduckgo" && (
                 <div className="ddg-free-badge" style={{ margin: "8px 0" }}>
                   <span
@@ -283,7 +330,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                   </span>
                   <p className="settings-hint" style={{ marginTop: "6px" }}>
                     DuckDuckGo search works out of the box with no configuration needed. It is used
-                    as an automatic fallback when no other provider is available.
+                    only when no configured provider is available or it is explicitly selected.
                   </p>
                 </div>
               )}
@@ -328,8 +375,8 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                     checked={primaryProvider === provider.type}
                     onChange={() => {
                       setPrimaryProvider(provider.type);
-                      // Clear fallback if same as new primary
-                      if (fallbackProvider === provider.type) {
+                      // Self-hosted SearXNG is an isolation boundary and never has a fallback.
+                      if (provider.type === "searxng" || fallbackProvider === provider.type) {
                         setFallbackProvider(null);
                       }
                     }}
@@ -345,7 +392,7 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
             </div>
           </div>
 
-          {hasMultipleProviders && (
+          {hasMultipleProviders && primaryProvider !== "searxng" && (
             <div className="settings-section">
               <h3>Fallback Provider</h3>
               <p className="settings-description">
@@ -362,7 +409,9 @@ export function SearchSettings({ onStatusChange }: SearchSettingsProps) {
                   />
                   <div className="provider-option-content">
                     <span className="provider-name">None</span>
-                    <span className="provider-description">No fallback</span>
+                    <span className="provider-description">
+                      Strict: do not send the query to any other provider
+                    </span>
                   </div>
                 </label>
 

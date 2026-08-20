@@ -750,12 +750,14 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
   status: "passed" | "failed" | "unavailable" | "skipped";
   detail?: string;
   findings: CapabilitySecurityFinding[];
+  reportAvailable: boolean;
 }> {
   if (!fs.existsSync(path.join(bundleDir, "SKILL.md"))) {
     return {
       status: "skipped",
       detail: "Bundle does not contain a SKILL.md target.",
       findings: [],
+      reportAvailable: false,
     };
   }
 
@@ -778,7 +780,11 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
       ],
       { timeout: NVIDIA_SKILL_EVALUATOR_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 },
     );
-    return { status: "passed", findings: readNvidiaFindings(outputDir, bundleDir) };
+    return {
+      status: "passed",
+      findings: readNvidiaFindings(outputDir, bundleDir),
+      reportAvailable: findJsonFiles(outputDir).length > 0,
+    };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException & { code?: string | number }).code;
     const message = error instanceof Error ? error.message : String(error);
@@ -788,9 +794,11 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
         detail:
           "Install NVIDIA SkillEvaluator or set COWORK_SKILL_EVALUATOR_BIN to enable the external gate.",
         findings: [],
+        reportAvailable: false,
       };
     }
     const findings = readNvidiaFindings(outputDir, bundleDir);
+    const reportAvailable = findJsonFiles(outputDir).length > 0;
     return {
       status: "failed",
       detail:
@@ -798,6 +806,7 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
           ? "NVIDIA SkillEvaluator timed out before producing a verdict."
           : `NVIDIA SkillEvaluator rejected the skill${code !== undefined ? ` (exit ${String(code)})` : ""}.`,
       findings,
+      reportAvailable,
     };
   } finally {
     fs.rmSync(outputDir, { recursive: true, force: true });
@@ -976,7 +985,7 @@ export class CapabilityBundleSecurityService {
     const nvidiaEvaluation = await runNvidiaSkillEvaluator(bundleDir);
     findings.push(...nvidiaEvaluation.findings);
     if (nvidiaEvaluation.status === "failed") {
-      if (nvidiaEvaluation.findings.length === 0) {
+      if (!nvidiaEvaluation.reportAvailable) {
         addFinding(findings, {
           code: "nvidia-skillevaluator-failed",
           severity: "critical",

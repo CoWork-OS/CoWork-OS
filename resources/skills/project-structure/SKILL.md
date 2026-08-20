@@ -1,6 +1,9 @@
 ---
 name: project-structure
 description: "Analyze and explain project architecture"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Project Structure

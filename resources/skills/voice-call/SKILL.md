@@ -1,6 +1,9 @@
 ---
 name: voice-call
 description: "Initiate outbound phone calls via ElevenLabs Agents."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Voice Call

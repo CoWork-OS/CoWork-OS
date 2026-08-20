@@ -1,6 +1,9 @@
 ---
 name: extract-todos
 description: "Find all TODO/FIXME comments in codebase"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Extract TODOs

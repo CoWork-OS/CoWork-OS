@@ -1,6 +1,11 @@
 ---
 name: architecture-diagram
 description: "Generate polished dark-themed architecture diagrams as standalone HTML files with inline SVG, semantic system grouping, and readable connection flows."
+version: "1.0.0"
+license: MIT
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "Cocoon AI, ported by CoWork OS"
 ---
 
 # Architecture Diagram

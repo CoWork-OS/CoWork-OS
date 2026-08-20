@@ -1,6 +1,9 @@
 ---
 name: legal-contract-negotiation-review
 description: "Analyze counterparty contract changes against agreement/schedules, flag conflicts, and produce severity-rated counterpositions."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Legal Contract Negotiation Review

@@ -1,6 +1,9 @@
 ---
 name: twin-meeting-prep
 description: "Prepare a structured brief for an upcoming meeting with relevant context, open items, data points, and talking points. Used by digital twin personas to reduce meeting preparation overhead."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Meeting Preparation Brief

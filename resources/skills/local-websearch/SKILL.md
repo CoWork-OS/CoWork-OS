@@ -1,6 +1,10 @@
 ---
 name: local-websearch
 description: "Search the web privately via a self-hosted SearXNG metasearch engine."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "stperic"
 ---
 
 # local-websearch

@@ -1,6 +1,9 @@
 ---
 name: usecase-smart-home-brain
 description: "Coordinate smart-home actions across existing integrations with clear dry-run and safety confirmation."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Smart Home Brain

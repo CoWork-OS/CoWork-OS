@@ -1,6 +1,10 @@
 ---
 name: hyperframes-registry
 description: Install and wire registry blocks and components into HyperFrames compositions. Use when running hyperframes add, installing a block or component, wiring an installed item into index.html, or working with hyperframes.json. Covers the add command, install locations, block sub-composition wiring, component snippet merging, and registry discovery.
+version: "0.4.3"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "HeyGen"
 ---
 
 # HyperFrames Registry

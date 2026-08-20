@@ -1,6 +1,9 @@
 ---
 name: game-performance
 description: "Cross-engine game performance: draw call optimization, LOD, object pooling, GPU profiling, memory management, and platform-specific tuning."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Game Performance Optimization

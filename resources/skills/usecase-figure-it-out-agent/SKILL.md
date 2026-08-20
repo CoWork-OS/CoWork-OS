@@ -1,6 +1,9 @@
 ---
 name: usecase-figure-it-out-agent
 description: "Run resilient multi-tool problem solving with explicit fallback strategy and auditable execution notes."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Figure It Out Agent

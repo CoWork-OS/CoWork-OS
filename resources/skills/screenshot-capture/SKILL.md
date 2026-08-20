@@ -1,6 +1,9 @@
 ---
 name: screenshot-capture
 description: "Capture desktop screenshots with OS-aware save-location rules, app/window/region support, and bundled helpers."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Screenshot Capture

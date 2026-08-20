@@ -1,6 +1,9 @@
 ---
 name: android-development
 description: "Android/Kotlin development: Jetpack Compose, Room database, Gradle builds, emulator management, and Play Store submission."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Android Development

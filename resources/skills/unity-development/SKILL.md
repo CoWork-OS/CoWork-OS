@@ -1,6 +1,9 @@
 ---
 name: unity-development
 description: "Unity/C# development: MonoBehaviour lifecycle, ScriptableObjects, Addressables, URP/HDRP, physics, UI, editor scripting, and CLI builds."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Unity Development

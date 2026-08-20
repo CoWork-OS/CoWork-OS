@@ -1,6 +1,9 @@
 ---
 name: price-tracker
 description: "Track and compare prices across e-commerce websites using stealth scraping."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Price Tracker

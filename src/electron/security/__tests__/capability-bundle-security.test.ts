@@ -288,6 +288,129 @@ describe("CapabilityBundleSecurityService", () => {
     },
   );
 
+  it.runIf(process.platform !== "win32")(
+    "does not quarantine a skill for NVIDIA schema-only findings",
+    async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ vulns: [] }),
+      }) as typeof fetch;
+
+      const evaluatorPath = path.join(rootDir, "skillevaluator-schema-test");
+      const report = {
+        results: [
+          {
+            findings: [
+              {
+                category: "SCHEMA",
+                severity: "high",
+                check_name: "author_missing",
+                message: "Author not specified in metadata",
+              },
+            ],
+          },
+        ],
+      };
+      fs.writeFileSync(
+        evaluatorPath,
+        `#!/bin/sh\nfor output; do :; done\nmkdir -p "$output/result"\nprintf '%s\\n' '${JSON.stringify(report)}' > "$output/result/report.json"\nexit 1\n`,
+        "utf-8",
+      );
+      fs.chmodSync(evaluatorPath, 0o700);
+      process.env.COWORK_SKILL_EVALUATOR_BIN = evaluatorPath;
+
+      const stageDir = path.join(rootDir, "stage-nvidia-schema");
+      fs.mkdirSync(path.join(stageDir, "bundle"), { recursive: true });
+      fs.writeFileSync(
+        path.join(stageDir, "manifest.json"),
+        JSON.stringify(createSkill("nvidia-schema")),
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(stageDir, "bundle", "SKILL.md"),
+        "---\nname: nvidia-schema\ndescription: Safe test skill\nlicense: MIT\n---\n",
+        "utf-8",
+      );
+
+      const result = await service.scanSkillStage({
+        bundleId: "nvidia-schema",
+        displayName: "NVIDIA Schema",
+        source: "url",
+        managed: true,
+        stageDir,
+      });
+
+      expect(result.verdict).toBe("warning");
+      expect(result.findings.some((finding) => finding.code === "nvidia-skillevaluator-failed"))
+        .toBe(false);
+      expect(
+        result.findings.some(
+          (finding) => finding.code === "nvidia-skillevaluator-advisory-failed",
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "quarantines a skill for a high-severity NVIDIA PII finding",
+    async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ vulns: [] }),
+      }) as typeof fetch;
+
+      const evaluatorPath = path.join(rootDir, "skillevaluator-pii-test");
+      const report = {
+        results: [
+          {
+            findings: [
+              {
+                category: "PII",
+                severity: "high",
+                check_name: "email_detected",
+                message: "Potential personal email detected",
+                file_path: path.join(rootDir, "stage-nvidia-pii", "bundle", "SKILL.md"),
+                line_number: 4,
+              },
+            ],
+          },
+        ],
+      };
+      fs.writeFileSync(
+        evaluatorPath,
+        `#!/bin/sh\nfor output; do :; done\nmkdir -p "$output/result"\nprintf '%s\\n' '${JSON.stringify(report)}' > "$output/result/report.json"\nexit 1\n`,
+        "utf-8",
+      );
+      fs.chmodSync(evaluatorPath, 0o700);
+      process.env.COWORK_SKILL_EVALUATOR_BIN = evaluatorPath;
+
+      const stageDir = path.join(rootDir, "stage-nvidia-pii");
+      fs.mkdirSync(path.join(stageDir, "bundle"), { recursive: true });
+      fs.writeFileSync(
+        path.join(stageDir, "manifest.json"),
+        JSON.stringify(createSkill("nvidia-pii")),
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(stageDir, "bundle", "SKILL.md"),
+        "---\nname: nvidia-pii\ndescription: PII test skill\nlicense: MIT\n---\n",
+        "utf-8",
+      );
+
+      const result = await service.scanSkillStage({
+        bundleId: "nvidia-pii",
+        displayName: "NVIDIA PII",
+        source: "url",
+        managed: true,
+        stageDir,
+      });
+
+      expect(result.verdict).toBe("quarantined");
+      expect(result.findings.some((finding) => finding.code === "nvidia-pii-email_detected"))
+        .toBe(true);
+    },
+  );
+
   it("warns on shell connectors without blocking safe plugin packs", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,

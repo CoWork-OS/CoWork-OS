@@ -1,6 +1,9 @@
 ---
 name: spotify-player
 description: "Terminal Spotify playback/search via spogo (preferred) or spotify_player."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Spotify-player

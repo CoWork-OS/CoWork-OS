@@ -1,6 +1,10 @@
 ---
 name: taste-skill
 description: High-agency frontend design system for distinctive premium UI with anti-slop layout, motion, typography, and engineering rules.
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "Leonxlnx"
 ---
 
 # Taste Skill

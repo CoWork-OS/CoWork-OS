@@ -1,6 +1,9 @@
 ---
 name: gemini
 description: "Gemini CLI for one-shot Q&A, summaries, and generation."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Gemini

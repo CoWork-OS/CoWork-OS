@@ -1,6 +1,9 @@
 ---
 name: llm-wiki
 description: "Build and maintain a workspace-local, Obsidian-friendly research vault using Karpathy's LLM Wiki pattern."
+version: "1.1.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # LLM Wiki

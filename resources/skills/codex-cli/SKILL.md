@@ -1,6 +1,9 @@
 ---
 name: codex-cli
 description: "Run OpenAI Codex CLI as a background agent — detect, install, configure, and execute tasks via codex exec."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # codex-cli

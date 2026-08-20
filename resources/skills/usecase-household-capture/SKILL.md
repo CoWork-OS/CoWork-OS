@@ -1,6 +1,9 @@
 ---
 name: usecase-household-capture
 description: "Turn a messy household message into Notion tasks + optional reminders."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Household Capture

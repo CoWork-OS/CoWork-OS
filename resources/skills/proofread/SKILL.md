@@ -1,6 +1,9 @@
 ---
 name: proofread
 description: "Check document for grammar and clarity"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Proofread

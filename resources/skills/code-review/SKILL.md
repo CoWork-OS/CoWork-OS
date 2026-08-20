@@ -1,6 +1,9 @@
 ---
 name: code-review
 description: "Review code for best practices and potential issues"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Code Review

@@ -6880,7 +6880,7 @@ ${skillDescriptions}`;
 
     const providerDesc =
       paidProviders.length > 0
-        ? `Configured providers: ${paidProviders.map((p) => p.name).join(", ")} (with DuckDuckGo as fallback)`
+        ? `Configured providers: ${paidProviders.map((p) => p.name).join(", ")}. Only the explicitly configured fallback may be used; SearXNG never falls through to another provider.`
         : `Using DuckDuckGo (free built-in search)`;
 
     return [
@@ -6925,6 +6925,14 @@ ${skillDescriptions}`;
             region: {
               type: "string",
               description: 'Region code for localized results (e.g., "us", "uk", "de")',
+            },
+            language: {
+              type: "string",
+              description: 'Language or locale for results (e.g., "tr-TR", "en-US")',
+            },
+            safeSearch: {
+              type: "boolean",
+              description: "Enable or disable the provider safe-search filter",
             },
           },
           required: ["query"],

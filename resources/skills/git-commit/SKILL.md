@@ -1,6 +1,9 @@
 ---
 name: git-commit
 description: "Create a well-formatted commit message from staged changes"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Git Commit

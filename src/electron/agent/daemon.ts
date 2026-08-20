@@ -7823,6 +7823,15 @@ export class AgentDaemon extends EventEmitter {
     }
   }
 
+  /** Return whether a live executor currently owns the workspace. */
+  hasActiveExecutorsForWorkspace(workspaceId: string): boolean {
+    for (const cached of this.activeTasks.values()) {
+      if (cached.status !== "active" || !cached.executor) continue;
+      if (cached.executor.getWorkspaceId?.() === workspaceId) return true;
+    }
+    return false;
+  }
+
   /**
    * Get the most recently used non-temporary workspace, if any.
    */

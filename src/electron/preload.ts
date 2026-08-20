@@ -3,7 +3,15 @@ import { contextBridge, ipcRenderer } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import { randomBytes } from "crypto";
-import { IPC_CHANNELS as SHARED_IPC_CHANNELS, isTempWorkspaceId } from "../shared/types";
+import {
+  IPC_CHANNELS as SHARED_IPC_CHANNELS,
+  isTempWorkspaceId,
+} from "../shared/types";
+import type {
+  FilesystemCheckpoint,
+  FilesystemCheckpointDiff,
+  FilesystemCheckpointRollbackResult,
+} from "../shared/types";
 import type {
   ApplyOnboardingProfileRequest,
   ApplyOnboardingProfileResult,
@@ -2711,8 +2719,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
   pruneTempWorkspaces: (options?: { dryRun?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_PRUNE_TEMP, options),
   touchWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_TOUCH, id),
-  updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) =>
+  updateWorkspacePermissions: (
+    id: string,
+    permissions: { shell?: boolean; network?: boolean; filesystemCheckpoints?: boolean },
+  ) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
+  listFilesystemCheckpoints: (workspaceId: string): Promise<FilesystemCheckpoint[]> =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHECKPOINT_LIST, workspaceId),
+  getFilesystemCheckpointStatus: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHECKPOINT_STATUS, workspaceId),
+  diffFilesystemCheckpoint: (request: {
+    workspaceId: string;
+    sequence: number;
+  }): Promise<FilesystemCheckpointDiff> => ipcRenderer.invoke(IPC_CHANNELS.CHECKPOINT_DIFF, request),
+  rollbackFilesystemCheckpoint: (request: {
+    workspaceId: string;
+    sequence: number;
+    restoreAll?: boolean;
+    paths?: string[];
+    confirmed?: boolean;
+    taskId?: string;
+  }): Promise<FilesystemCheckpointRollbackResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHECKPOINT_ROLLBACK, request),
 
   // Approval APIs
   respondToApproval: (data: ApprovalResponse) =>
@@ -5744,8 +5772,27 @@ export interface ElectronAPI {
   touchWorkspace: (id: string) => Promise<Any>;
   updateWorkspacePermissions: (
     id: string,
-    permissions: { shell?: boolean; network?: boolean },
+    permissions: { shell?: boolean; network?: boolean; filesystemCheckpoints?: boolean },
   ) => Promise<Any>;
+  listFilesystemCheckpoints: (workspaceId: string) => Promise<FilesystemCheckpoint[]>;
+  getFilesystemCheckpointStatus: (workspaceId: string) => Promise<{
+    checkpoints: number;
+    totalBytes: number;
+    storeBytes: number;
+    maxCheckpoints: number;
+  }>;
+  diffFilesystemCheckpoint: (request: {
+    workspaceId: string;
+    sequence: number;
+  }) => Promise<FilesystemCheckpointDiff>;
+  rollbackFilesystemCheckpoint: (request: {
+    workspaceId: string;
+    sequence: number;
+    restoreAll?: boolean;
+    paths?: string[];
+    confirmed?: boolean;
+    taskId?: string;
+  }) => Promise<FilesystemCheckpointRollbackResult>;
   respondToApproval: (data: ApprovalResponse) => Promise<void>;
   setSessionAutoApprove: (enabled: boolean) => Promise<void>;
   getSessionAutoApprove: () => Promise<boolean>;

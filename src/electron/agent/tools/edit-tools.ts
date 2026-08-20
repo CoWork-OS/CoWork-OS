@@ -8,6 +8,7 @@ import {
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
 import { LLMTool } from "../llm/types";
+import { FilesystemCheckpointService } from "../../checkpoints/FilesystemCheckpointService";
 
 /**
  * EditTools provides surgical file editing capabilities
@@ -167,7 +168,40 @@ export class EditTools {
       }
 
       // Write file
+      if (FilesystemCheckpointService.isContentExcluded(newContent)) {
+        this.daemon.logEvent(this.taskId, "log", {
+          message: "Filesystem checkpoint coverage warning",
+          paths: [file_path],
+          warnings: ["content matches a secret-like pattern"],
+        });
+      }
+      const checkpoint = FilesystemCheckpointService.isEnabled(this.workspace)
+        ? await FilesystemCheckpointService.ensureCheckpoint({
+            workspacePath: workspaceRoot,
+            taskId: this.taskId,
+            reason: `before edit_file: ${file_path}`,
+          })
+        : null;
+      if (checkpoint) {
+        this.daemon.logEvent(this.taskId, "checkpoint_created", {
+          checkpointId: checkpoint.id,
+          sequence: checkpoint.sequence,
+          reason: checkpoint.reason,
+        });
+      }
       fs.writeFileSync(fullPath, newContent, "utf-8");
+      try {
+        await FilesystemCheckpointService.recordMutation({
+          workspacePath: workspaceRoot,
+          checkpoint,
+          paths: [file_path],
+        });
+      } catch (checkpointError) {
+        this.daemon.logEvent(this.taskId, "log", {
+          message: "Filesystem checkpoint mutation recording failed",
+          error: checkpointError instanceof Error ? checkpointError.message : String(checkpointError),
+        });
+      }
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "edit_file",

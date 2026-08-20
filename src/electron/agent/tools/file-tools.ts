@@ -31,6 +31,7 @@ import {
   buildUntrustedContentBanner,
   isUntrustedExternalSource,
 } from "../security/export-permission-context";
+import { FilesystemCheckpointService } from "../../checkpoints/FilesystemCheckpointService";
 
 // Limits to prevent context overflow
 const DEFAULT_READ_WINDOW_CHARS = 300 * 1024; // 300KB default read window
@@ -92,6 +93,71 @@ export class FileTools {
 
   setWorkspacePathAliasPolicy(policy: WorkspacePathAliasPolicy | undefined): void {
     this.workspacePathAliasPolicy = this.resolveWorkspacePathAliasPolicy(policy);
+  }
+
+  private async prepareFilesystemCheckpoint(
+    reason: string,
+    paths: string[] = [],
+    proposedSize?: number,
+    proposedContent?: string,
+  ) {
+    if (!FilesystemCheckpointService.isEnabled(this.workspace)) return null;
+    const warnings = new Set<string>();
+    if (typeof proposedSize === "number") {
+      const exclusion = FilesystemCheckpointService.isPathExcluded(paths[0] || "", proposedSize);
+      if (exclusion) warnings.add(exclusion);
+    }
+    if (proposedContent && FilesystemCheckpointService.isContentExcluded(proposedContent)) {
+      warnings.add("content matches a secret-like pattern");
+    }
+    for (const requestedPath of paths) {
+      try {
+        const stat = await fs.lstat(path.resolve(this.workspace.path, requestedPath));
+        if (stat.isSymbolicLink()) warnings.add("symlink paths are tracked but not followed");
+        const exclusion = FilesystemCheckpointService.isPathExcluded(requestedPath, stat.size);
+        if (exclusion) warnings.add(exclusion);
+      } catch {
+        // New output paths have no existing metadata to inspect.
+      }
+    }
+    if (warnings.size > 0) {
+      this.daemon.logEvent(this.taskId, "log", {
+        message: "Filesystem checkpoint coverage warning",
+        paths,
+        warnings: [...warnings],
+      });
+    }
+    const checkpoint = await FilesystemCheckpointService.ensureCheckpoint({
+      workspacePath: this.workspace.path,
+      taskId: this.taskId,
+      reason,
+    });
+    if (checkpoint) {
+      this.daemon.logEvent(this.taskId, "checkpoint_created", {
+        checkpointId: checkpoint.id,
+        sequence: checkpoint.sequence,
+        reason: checkpoint.reason,
+      });
+    }
+    return checkpoint;
+  }
+
+  private async recordFilesystemMutation(
+    checkpoint: Awaited<ReturnType<typeof this.prepareFilesystemCheckpoint>>,
+    paths?: string[],
+  ): Promise<void> {
+    try {
+      await FilesystemCheckpointService.recordMutation({
+        workspacePath: this.workspace.path,
+        checkpoint,
+        paths,
+      });
+    } catch (error) {
+      this.daemon.logEvent(this.taskId, "log", {
+        message: "Filesystem checkpoint mutation recording failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private resolveWorkspacePathAliasPolicy(value: unknown): WorkspacePathAliasPolicy {
@@ -1221,6 +1287,13 @@ export class FileTools {
       );
     }
 
+    const checkpoint = await this.prepareFilesystemCheckpoint(
+      `before write_file: ${requestedPath}`,
+      [requestedPath],
+      contentSizeBytes,
+      content,
+    );
+
     try {
       // Ensure directory exists
       await this.runWriteFilePhase("create parent directory", requestedPath, options, () =>
@@ -1251,6 +1324,7 @@ export class FileTools {
         previewTruncated,
         language: ext,
       });
+      await this.recordFilesystemMutation(checkpoint, [reportedPath]);
 
       return {
         success: true,
@@ -1602,6 +1676,11 @@ export class FileTools {
     await this.enforceSymlinkSafeAccess(oldFullPath, "write");
     await this.enforceSymlinkSafeAccess(newFullPath, "write");
 
+    const checkpoint = await this.prepareFilesystemCheckpoint(
+      `before rename_file: ${oldPath} -> ${newPath}`,
+      [oldPath, newPath],
+    );
+
     try {
       // Ensure target directory exists
       await fs.mkdir(path.dirname(newFullPath), { recursive: true });
@@ -1613,6 +1692,7 @@ export class FileTools {
         from: oldPath,
         to: newPath,
       });
+      await this.recordFilesystemMutation(checkpoint, [oldPath, newPath]);
 
       return { success: true };
     } catch (error) {
@@ -1650,6 +1730,11 @@ export class FileTools {
     await this.enforceSymlinkSafeAccess(sourceFullPath, "read");
     await this.enforceSymlinkSafeAccess(destFullPath, "write");
 
+    const checkpoint = await this.prepareFilesystemCheckpoint(
+      `before copy_file: ${sourcePath} -> ${requestedDestPath}`,
+      [sourcePath, requestedDestPath],
+    );
+
     try {
       // Ensure target directory exists
       await fs.mkdir(path.dirname(destFullPath), { recursive: true });
@@ -1661,6 +1746,7 @@ export class FileTools {
         path: requestedDestPath,
         copiedFrom: sourcePath,
       });
+      await this.recordFilesystemMutation(checkpoint, [requestedDestPath]);
 
       return {
         success: true,
@@ -1698,6 +1784,11 @@ export class FileTools {
       throw new Error("User denied file deletion");
     }
 
+    const checkpoint = await this.prepareFilesystemCheckpoint(
+      `before delete_file: ${relativePath}`,
+      [relativePath],
+    );
+
     try {
       // For .app bundles on macOS, use shell.trashItem directly (safer and expected behavior)
       if (fullPath.endsWith(".app")) {
@@ -1712,6 +1803,7 @@ export class FileTools {
           path: relativePath,
           movedToTrash: true,
         });
+        await this.recordFilesystemMutation(checkpoint);
 
         return { success: true, movedToTrash: true };
       }
@@ -1728,6 +1820,7 @@ export class FileTools {
       this.daemon.logEvent(this.taskId, "file_deleted", {
         path: relativePath,
       });
+      await this.recordFilesystemMutation(checkpoint);
 
       return { success: true };
     } catch (error) {
@@ -1751,6 +1844,7 @@ export class FileTools {
             path: relativePath,
             movedToTrash: true,
           });
+          await this.recordFilesystemMutation(checkpoint);
 
           return { success: true, movedToTrash: true };
         } catch (trashError) {
@@ -1783,6 +1877,11 @@ export class FileTools {
     await this.enforceProjectAccess(fullPath);
     await this.enforceSymlinkSafeAccess(fullPath, "write");
 
+    const checkpoint = await this.prepareFilesystemCheckpoint(
+      `before create_directory: ${requestedPath}`,
+      [requestedPath],
+    );
+
     try {
       await fs.mkdir(fullPath, { recursive: true });
 
@@ -1790,6 +1889,7 @@ export class FileTools {
         path: requestedPath,
         type: "directory",
       });
+      await this.recordFilesystemMutation(checkpoint, [requestedPath]);
 
       return { success: true };
     } catch (error) {

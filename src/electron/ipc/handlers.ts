@@ -51,6 +51,7 @@ import type {
 } from "../../shared/document-preview";
 import type { WebPagePreview } from "../../shared/web-page-preview";
 import { DocumentEditorSessionService } from "../documents/DocumentEditorSessionService";
+import { FilesystemCheckpointService } from "../checkpoints/FilesystemCheckpointService";
 import { MailboxService } from "../mailbox/MailboxService";
 import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { AgentMailRealtimeService } from "../agentmail/AgentMailRealtimeService";
@@ -4549,6 +4550,7 @@ export async function setupIpcHandlers(
         read?: boolean;
         write?: boolean;
         delete?: boolean;
+        filesystemCheckpoints?: boolean;
       },
     ) => {
       const workspace = workspaceRepo.findById(id);
@@ -4560,6 +4562,98 @@ export async function setupIpcHandlers(
       // Notify active task executors so they pick up new tool availability (e.g. run_command when shell enabled)
       agentDaemon.refreshActiveExecutorsForWorkspace(id);
       return workspaceRepo.findById(id);
+    },
+  );
+
+  const resolveCheckpointWorkspace = (workspaceId: string) => {
+    const workspace = workspaceRepo.findById(workspaceId);
+    if (!workspace) {
+      throw new Error(`Workspace not found: ${workspaceId}`);
+    }
+    return workspace;
+  };
+
+  const resolveCheckpointSequence = (sequence: unknown): number => {
+    if (typeof sequence !== "number" || !Number.isInteger(sequence) || sequence < 1) {
+      throw new Error("Checkpoint sequence must be a positive integer");
+    }
+    return sequence;
+  };
+
+  ipcMain.handle(IPC_CHANNELS.CHECKPOINT_LIST, async (_, workspaceId: string) => {
+    const workspace = resolveCheckpointWorkspace(workspaceId);
+    return FilesystemCheckpointService.list(workspace.path);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CHECKPOINT_STATUS, async (_, workspaceId: string) => {
+    const workspace = resolveCheckpointWorkspace(workspaceId);
+    return FilesystemCheckpointService.status(workspace.path);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHECKPOINT_DIFF,
+    async (_, request: { workspaceId: string; sequence: number }) => {
+      const workspace = resolveCheckpointWorkspace(request?.workspaceId);
+      return FilesystemCheckpointService.diff(
+        workspace.path,
+        resolveCheckpointSequence(request?.sequence),
+      );
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHECKPOINT_ROLLBACK,
+    async (
+      _,
+      request: {
+        workspaceId: string;
+        sequence: number;
+        restoreAll?: boolean;
+        paths?: string[];
+        confirmed?: boolean;
+        taskId?: string;
+      },
+    ) => {
+      const workspace = resolveCheckpointWorkspace(request?.workspaceId);
+      if (request?.restoreAll === true && request?.confirmed !== true) {
+        throw new Error("A confirmation is required before using restoreAll");
+      }
+      const activeTask = taskRepo
+        .findByWorkspace(workspace.id)
+        .find((task) =>
+          task.status === "queued" ||
+          task.status === "planning" ||
+          task.status === "executing" ||
+          task.status === "paused",
+        );
+      if (activeTask || agentDaemon.hasActiveExecutorsForWorkspace(workspace.id)) {
+        throw new Error(
+          activeTask
+            ? `Cannot restore workspace while task ${activeTask.id} is ${activeTask.status}`
+            : "Cannot restore workspace while an agent executor is active",
+        );
+      }
+      const result = await FilesystemCheckpointService.rollback({
+        workspacePath: workspace.path,
+        sequence: resolveCheckpointSequence(request?.sequence),
+        restoreAll: request?.restoreAll === true,
+        paths: Array.isArray(request?.paths) ? request.paths : undefined,
+      });
+      logger.info("Filesystem checkpoint restored", {
+        workspaceId: workspace.id,
+        sequence: result.checkpoint.sequence,
+        restored: result.restored.length,
+        kept: result.kept.length,
+      });
+      if (request?.taskId) {
+        agentDaemon.logEvent(request.taskId, "checkpoint_restored", {
+          checkpointId: result.checkpoint.id,
+          sequence: result.checkpoint.sequence,
+          restored: result.restored,
+          kept: result.kept,
+        });
+      }
+      return result;
     },
   );
 

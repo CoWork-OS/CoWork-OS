@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { _testUtils } from "../shell-tools";
+import { _testUtils, isLikelyMutatingShellCommand } from "../shell-tools";
 
 const {
   isValidPid,
@@ -318,6 +318,21 @@ describe("ShellTools Integration", () => {
 
     it("routes interactive commands to the direct shell path", () => {
       expect(shouldUsePersistentShell("vim README.md")).toBe(false);
+    });
+  });
+
+  describe("filesystem checkpoint mutation detection", () => {
+    it("recognizes common write and destructive shell commands", () => {
+      expect(isLikelyMutatingShellCommand("rm -rf src")).toBe(true);
+      expect(isLikelyMutatingShellCommand("printf 'x' > README.md")).toBe(true);
+      expect(isLikelyMutatingShellCommand("git restore package.json")).toBe(true);
+      expect(isLikelyMutatingShellCommand("npm install")).toBe(true);
+    });
+
+    it("does not checkpoint read-only inspection commands", () => {
+      expect(isLikelyMutatingShellCommand("git status")).toBe(false);
+      expect(isLikelyMutatingShellCommand("rg TODO src")).toBe(false);
+      expect(isLikelyMutatingShellCommand("cat README.md")).toBe(false);
     });
   });
 

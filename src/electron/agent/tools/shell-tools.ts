@@ -12,6 +12,7 @@ import {
 import { createSandbox } from "../sandbox/sandbox-factory";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
 import { createLogger } from "../../utils/logger";
+import { FilesystemCheckpointService } from "../../checkpoints/FilesystemCheckpointService";
 
 const log = createLogger("ShellTools");
 
@@ -53,6 +54,25 @@ const MAX_TIMEOUT = 5 * 60 * 1000; // 5 minutes max
 const DEFAULT_TIMEOUT = 60 * 1000; // 1 minute default
 const MAX_OUTPUT_SIZE = 100 * 1024; // 100KB max output
 const UNSANDBOXED_SHELL_OVERRIDE_ENV = "COWORK_ALLOW_UNSANDBOXED_SHELL";
+
+/**
+ * Shell commands are opaque to the file tools, so checkpoint only commands
+ * that have an obvious filesystem mutation signal. The command still passes
+ * through the normal approval and guardrail pipeline before this is used.
+ */
+export function isLikelyMutatingShellCommand(command: string): boolean {
+  const text = String(command || "");
+  return (
+    /(?:^|[;&|]\s*|\s)(?:rm|rmdir|mv|cp|install|mkdir|touch|truncate|dd|shred|chmod|chown)\b/i.test(
+      text,
+    ) ||
+    /(?:^|[;&|]\s*|\s)(?:git\s+(?:clean|checkout|restore|reset|rm)|npm\s+(?:install|uninstall|update)|pnpm\s+(?:install|remove|update)|yarn\s+(?:add|remove|install|upgrade)|pip\s+install)\b/i.test(
+      text,
+    ) ||
+    /(?:>>?|<<?)/.test(text) ||
+    /(?:^|\s)(?:sed|perl)\s+[^\n]*\s-i(?:\s|$)/i.test(text)
+  );
+}
 
 const SHELL_OUTPUT_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   {
@@ -1133,6 +1153,35 @@ export class ShellTools {
       if (reused) return reused;
       this.markVerificationCommandRunning(verificationCommandKey);
     }
+    // Shell commands are opaque: when recovery is enabled, checkpoint every
+    // approved command so scripts and custom CLIs cannot bypass coverage.
+    // Snapshot creation is manifest-deduplicated, so read-only commands do
+    // not create additional checkpoint records.
+    const mutationCheckpoint = FilesystemCheckpointService.isEnabled(this.workspace)
+      ? await FilesystemCheckpointService.ensureCheckpoint({
+          workspacePath: this.workspace.path,
+          taskId: this.taskId,
+          reason: `before run_command: ${command.slice(0, 200)}`,
+        })
+      : null;
+    if (mutationCheckpoint) {
+      this.daemon.logEvent(this.taskId, "checkpoint_created", {
+        checkpointId: mutationCheckpoint.id,
+        sequence: mutationCheckpoint.sequence,
+        reason: mutationCheckpoint.reason,
+      });
+    }
+    const recordMutation = async (): Promise<void> => {
+      if (!mutationCheckpoint) return;
+      try {
+        await FilesystemCheckpointService.recordMutation({
+          workspacePath: this.workspace.path,
+          checkpoint: mutationCheckpoint,
+        });
+      } catch (error) {
+        log.warn("Failed to record filesystem checkpoint mutation:", error);
+      }
+    };
     const dirName = (() => {
       const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
       return parts[parts.length - 1] ?? "";
@@ -1150,6 +1199,7 @@ export class ShellTools {
         policies,
       });
       if (sandboxResult) {
+        await recordMutation();
         return this.recordVerificationCommandResult(verificationCommandKey, sandboxResult);
       }
     }
@@ -1210,6 +1260,7 @@ export class ShellTools {
           terminationReason: persistentResult.terminationReason,
         });
         if (persistentResult.usedPersistentSession) {
+          await recordMutation();
           return this.recordVerificationCommandResult(verificationCommandKey, {
             success: persistentResult.success,
             stdout: this.sanitizeCommandOutput(persistentResult.stdout),
@@ -1403,7 +1454,7 @@ export class ShellTools {
         });
       });
 
-      child.on("close", (code: number | null) => {
+      child.on("close", async (code: number | null) => {
         clearTimeout(timeoutId);
         this.activeProcess = null; // Clear active process reference
         // Clear any pending escalation timeouts to prevent killing reused PIDs
@@ -1450,6 +1501,7 @@ export class ShellTools {
           error: errorMessage,
         });
 
+        await recordMutation();
         resolve(this.recordVerificationCommandResult(verificationCommandKey, {
           success,
           stdout: this.sanitizeCommandOutput(truncatedStdout),
@@ -1460,7 +1512,7 @@ export class ShellTools {
         }));
       });
 
-      child.on("error", (error: Error) => {
+      child.on("error", async (error: Error) => {
         clearTimeout(timeoutId);
         this.activeProcess = null; // Clear active process reference
         // Clear any pending escalation timeouts to prevent killing reused PIDs
@@ -1484,6 +1536,7 @@ export class ShellTools {
           terminationReason,
         });
 
+        await recordMutation();
         resolve(this.recordVerificationCommandResult(verificationCommandKey, {
           success: false,
           stdout: this.sanitizeCommandOutput(this.truncateOutput(stdout)),

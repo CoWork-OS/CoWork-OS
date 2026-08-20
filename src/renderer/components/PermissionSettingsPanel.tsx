@@ -159,6 +159,8 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [workspaceRules, setWorkspaceRules] = useState<PersistedPermissionRule[]>([]);
   const [workspaceRulesLoading, setWorkspaceRulesLoading] = useState(false);
+  const [filesystemCheckpointsEnabled, setFilesystemCheckpointsEnabled] = useState(false);
+  const [filesystemCheckpointsSaving, setFilesystemCheckpointsSaving] = useState(false);
   const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -171,6 +173,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
 
   useEffect(() => {
     void loadWorkspaceRules(workspaceId);
+    void loadWorkspaceCheckpointSetting(workspaceId);
   }, [workspaceId]);
 
   const loadSettings = async () => {
@@ -262,6 +265,42 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       setWorkspaceRules([]);
     } finally {
       setWorkspaceRulesLoading(false);
+    }
+  };
+
+  const loadWorkspaceCheckpointSetting = async (nextWorkspaceId?: string) => {
+    if (!nextWorkspaceId) {
+      setFilesystemCheckpointsEnabled(false);
+      return;
+    }
+    try {
+      const workspaces = await window.electronAPI.listWorkspaces();
+      const workspace = workspaces.find((candidate) => candidate.id === nextWorkspaceId);
+      setFilesystemCheckpointsEnabled(workspace?.permissions.filesystemCheckpoints === true);
+    } catch (error) {
+      console.error("Failed to load filesystem checkpoint setting:", error);
+      setFilesystemCheckpointsEnabled(false);
+    }
+  };
+
+  const toggleFilesystemCheckpoints = async (enabled: boolean) => {
+    if (!workspaceId) return;
+    try {
+      setFilesystemCheckpointsSaving(true);
+      await window.electronAPI.updateWorkspacePermissions(workspaceId, {
+        filesystemCheckpoints: enabled,
+      });
+      setFilesystemCheckpointsEnabled(enabled);
+      setStatusMessage(
+        enabled
+          ? "Filesystem recovery checkpoints enabled for this workspace."
+          : "Filesystem recovery checkpoints disabled for this workspace.",
+      );
+    } catch (error) {
+      console.error("Failed to update filesystem checkpoint setting:", error);
+      setStatusMessage("Failed to update filesystem checkpoint setting.");
+    } finally {
+      setFilesystemCheckpointsSaving(false);
     }
   };
 
@@ -445,6 +484,31 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
         <p className="settings-hint">
           Full access starts new tasks with permission bypass and Shell access enabled.
         </p>
+      </div>
+
+      <div className="settings-subsection">
+        <h4 style={{ margin: "0 0 8px" }}>Filesystem recovery</h4>
+        {!workspaceId ? (
+          <p className="settings-hint">Open a workspace to enable recovery checkpoints.</p>
+        ) : (
+          <>
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={filesystemCheckpointsEnabled}
+                disabled={filesystemCheckpointsSaving}
+                onChange={(event) => void toggleFilesystemCheckpoints(event.target.checked)}
+              />
+              <span>Snapshot files before agent mutations</span>
+            </label>
+            <p className="settings-hint">
+              Opt-in recovery snapshots let you inspect changes and restore a prior workspace
+              state. Git metadata, dependencies, generated output, and secret-looking files are
+              excluded; files over 10 MB and filesystem ACL/xattr metadata are not covered. Up to
+              50 checkpoints are retained per workspace.
+            </p>
+          </>
+        )}
       </div>
 
       <div className="settings-subsection">

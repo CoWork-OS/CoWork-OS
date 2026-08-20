@@ -755,6 +755,8 @@ export type EventType =
   | "file_created"
   | "file_modified"
   | "file_deleted"
+  | "checkpoint_created"
+  | "checkpoint_restored"
   | "image_generated"
   | "error"
   | "log"
@@ -4001,6 +4003,8 @@ export interface WorkspacePermissions {
   delete: boolean;
   network: boolean;
   shell: boolean;
+  /** Opt-in local filesystem recovery snapshots before agent mutations. */
+  filesystemCheckpoints?: boolean;
   allowedDomains?: string[];
   // Broader filesystem access (like Claude Code)
   unrestrictedFileAccess?: boolean; // Allow reading/writing files outside workspace
@@ -4008,6 +4012,43 @@ export interface WorkspacePermissions {
   // Sandbox configuration
   sandboxType?: SandboxType; // Which sandbox to use (auto-detect if not specified)
   dockerConfig?: DockerSandboxConfig; // Docker-specific configuration
+}
+
+export interface FilesystemCheckpoint {
+  id: string;
+  sequence: number;
+  workspacePath: string;
+  taskId?: string;
+  reason: string;
+  createdAt: number;
+  fileCount: number;
+  directoryCount?: number;
+  symlinkCount?: number;
+  skippedCount?: number;
+}
+
+export type FilesystemCheckpointDiffStatus = "added" | "modified" | "deleted";
+
+export interface FilesystemCheckpointDiffEntry {
+  path: string;
+  status: FilesystemCheckpointDiffStatus;
+  kind?: "file" | "directory" | "symlink";
+  previousSize?: number;
+  currentSize?: number;
+  previousMode?: number;
+  currentMode?: number;
+}
+
+export interface FilesystemCheckpointDiff {
+  checkpoint: FilesystemCheckpoint;
+  entries: FilesystemCheckpointDiffEntry[];
+}
+
+export interface FilesystemCheckpointRollbackResult {
+  checkpoint: FilesystemCheckpoint;
+  preRollbackCheckpoint: FilesystemCheckpoint | null;
+  restored: string[];
+  kept: string[];
 }
 
 /**
@@ -7967,6 +8008,10 @@ export const IPC_CHANNELS = {
   TASK_SEND_STDIN: "task:sendStdin", // Send stdin input to running command
   TASK_KILL_COMMAND: "task:killCommand", // Kill running command (Ctrl+C)
   TASK_UPDATE_WORKSPACE: "task:updateWorkspace",
+  CHECKPOINT_LIST: "checkpoint:list",
+  CHECKPOINT_DIFF: "checkpoint:diff",
+  CHECKPOINT_ROLLBACK: "checkpoint:rollback",
+  CHECKPOINT_STATUS: "checkpoint:status",
   SHELL_SESSION_EVENT: "shell:sessionEvent",
   SHELL_SESSION_GET: "shell:sessionGet",
   SHELL_SESSION_LIST: "shell:sessionList",

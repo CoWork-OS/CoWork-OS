@@ -5120,6 +5120,120 @@ export function App() {
       integrationMentions?: IntegrationMentionSelection[];
     },
   ) => {
+    const rollbackCommand = message
+      .trim()
+      .match(
+        /^\/rollback(?:\s+(diff\s+)?(\d+)(?:\s+((?!--all(?:\s|$))[^\s]+))?(?:\s+--all)?)?$/i,
+      );
+    if (rollbackCommand) {
+      if (remoteTaskView) {
+        addToast({
+          type: "warning",
+          title: "Rollback is local-only",
+          message: "Open the task on its owning CoWork device to manage workspace checkpoints.",
+        });
+        return;
+      }
+      const rollbackTask = selectedTaskId
+        ? tasksRef.current.find((task) => task.id === selectedTaskId)
+        : undefined;
+      if (
+        rollbackTask &&
+        (rollbackTask.status === "queued" ||
+          rollbackTask.status === "planning" ||
+          rollbackTask.status === "executing" ||
+          rollbackTask.status === "paused")
+      ) {
+        addToast({
+          type: "warning",
+          title: "Task still running",
+          message: "Stop or complete the active task before restoring workspace files.",
+        });
+        return;
+      }
+      if (!currentWorkspace) {
+        addToast({ type: "warning", title: "No workspace selected", message: "Open a workspace first." });
+        return;
+      }
+      try {
+        const sequenceText = rollbackCommand[2];
+        if (!sequenceText) {
+          const checkpoints = await window.electronAPI.listFilesystemCheckpoints(currentWorkspace.id);
+          addToast({
+            type: "info",
+            title: "Filesystem checkpoints",
+            message:
+              checkpoints.length === 0
+                ? "No checkpoints yet. Enable Filesystem recovery in Permissions to start capturing them."
+                : checkpoints
+                    .slice(-8)
+                    .reverse()
+                    .map(
+                      (checkpoint) =>
+                        `#${checkpoint.sequence} · ${checkpoint.reason}${
+                          checkpoint.skippedCount ? ` · ${checkpoint.skippedCount} excluded` : ""
+                        }`,
+                    )
+                    .join("\n"),
+            durationMs: 12000,
+          });
+          return;
+        }
+
+        const sequence = Number(sequenceText);
+        if (rollbackCommand[1]) {
+          const diff = await window.electronAPI.diffFilesystemCheckpoint({
+            workspaceId: currentWorkspace.id,
+            sequence,
+          });
+          addToast({
+            type: "info",
+            title: `Checkpoint #${sequence} diff`,
+            message:
+              diff.entries.length === 0
+                ? "No tracked file changes since this checkpoint."
+                : diff.entries
+                    .slice(0, 12)
+                    .map((entry) => `${entry.status}: ${entry.path}`)
+                    .join("\n") +
+                  (diff.entries.length > 12 ? `\n…and ${diff.entries.length - 12} more` : ""),
+            durationMs: 12000,
+          });
+          return;
+        }
+
+        const restoreAll = /\s--all$/i.test(message.trim());
+        if (
+          restoreAll &&
+          !window.confirm(
+            "Restore this checkpoint with --all? This may overwrite hand edits in the selected workspace.",
+          )
+        ) {
+          return;
+        }
+        const result = await window.electronAPI.rollbackFilesystemCheckpoint({
+          workspaceId: currentWorkspace.id,
+          sequence,
+          restoreAll,
+          paths: rollbackCommand[3] ? [rollbackCommand[3]] : undefined,
+          confirmed: restoreAll,
+          taskId: selectedTaskId || undefined,
+        });
+        addToast({
+          type: result.kept.length > 0 ? "warning" : "success",
+          title: `Restored checkpoint #${sequence}${rollbackCommand[3] ? ` (${rollbackCommand[3]})` : ""}`,
+          message: `${result.restored.length} file(s) restored${
+            result.kept.length > 0 ? `; ${result.kept.length} hand-edited file(s) kept` : ""
+          }. Use /rollback diff ${sequence} to inspect the checkpoint diff.`,
+          durationMs: 10000,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Checkpoint operation failed";
+        addToast({ type: "error", title: "Checkpoint operation failed", message: errorMessage });
+      }
+      return;
+    }
+
     if (!selectedTaskId) return;
 
     try {

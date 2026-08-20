@@ -1,6 +1,9 @@
 ---
 name: usecase-inbox-manager
 description: "Triage Inbox Agent Today lanes, search mailbox evidence, prepare manual or AI-assisted replies, and suggest cleanup automations with strict confirmation gates."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Inbox Manager

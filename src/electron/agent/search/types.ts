@@ -9,6 +9,7 @@ export type SearchProviderType =
   | "brave"
   | "serpapi"
   | "google"
+  | "searxng"
   | "duckduckgo";
 
 export type SearchType = "web" | "news" | "images";
@@ -26,6 +27,9 @@ export interface SearchProviderConfig {
   // Google Custom Search-specific
   googleApiKey?: string;
   googleSearchEngineId?: string;
+  // SearXNG-specific
+  searxngBaseUrl?: string;
+  searxngAllowPrivate?: boolean;
 }
 
 export interface SearchQuery {
@@ -37,6 +41,11 @@ export interface SearchQuery {
   region?: string; // e.g., 'us', 'uk', 'de'
   language?: string; // e.g., 'en', 'de', 'fr'
   safeSearch?: boolean;
+  // Task/workspace policy applied to a configurable provider endpoint.
+  endpointDomainPolicy?: {
+    allowedDomains: string[];
+    blockedDomains: string[];
+  };
   // Override provider for this query
   provider?: SearchProviderType;
 }
@@ -141,6 +150,12 @@ export const SEARCH_PROVIDER_INFO = {
     supportedTypes: ["web", "images"] as SearchType[],
     envVars: ["GOOGLE_API_KEY", "GOOGLE_SEARCH_ENGINE_ID"],
     signupUrl: "https://developers.google.com/custom-search/v1/introduction",
+  },
+  searxng: {
+    displayName: "SearXNG",
+    description: "Self-hosted metasearch with no commercial API key required",
+    supportedTypes: ["web", "news", "images"] as SearchType[],
+    signupUrl: "https://docs.searxng.org/admin/installation.html",
   },
   duckduckgo: {
     displayName: "DuckDuckGo",

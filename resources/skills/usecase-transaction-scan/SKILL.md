@@ -1,6 +1,9 @@
 ---
 name: usecase-transaction-scan
 description: "Scan recent messages/emails for card transactions and flag suspicious charges."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Transaction Scan

@@ -1,6 +1,9 @@
 ---
 name: tax-optimizer
 description: "Tax optimization strategies including tax-loss harvesting, wash sale rule navigation, asset location optimization, Roth conversion analysis, and charitable giving strategies."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Tax Optimizer

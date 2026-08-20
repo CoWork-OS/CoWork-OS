@@ -1,6 +1,9 @@
 ---
 name: tmux
 description: "Remote-control tmux sessions for interactive CLIs by sending keystrokes and scraping pane output."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Tmux

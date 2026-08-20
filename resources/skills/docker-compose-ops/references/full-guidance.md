@@ -36,7 +36,7 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=development
-      - DATABASE_URL=postgres://user:pass@db:5432/app
+      - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL in the environment}
       - REDIS_URL=redis://redis:6379
     volumes:
       - .:/app
@@ -76,7 +76,7 @@ services:
     build: .
     command: node worker.js
     environment:
-      - DATABASE_URL=postgres://user:pass@db:5432/app
+      - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL in the environment}
       - REDIS_URL=redis://redis:6379
     depends_on:
       - db

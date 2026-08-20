@@ -1,6 +1,9 @@
 ---
 name: twin-pr-triage
 description: "Scan open pull requests, assess risk and complexity, and build a prioritized review queue. Used by digital twin personas to reduce PR review cognitive load."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # PR Triage & Review Queue

@@ -1,6 +1,9 @@
 ---
 name: sag
 description: "ElevenLabs text-to-speech with mac-style say UX."
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Sag

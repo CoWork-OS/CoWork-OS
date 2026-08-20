@@ -1,6 +1,9 @@
 ---
 name: dependency-check
 description: "Audit dependencies for updates and vulnerabilities"
+version: "1.0.0"
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
 ---
 
 # Dependency Check

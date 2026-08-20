@@ -1,6 +1,11 @@
 ---
 name: email-marketing-bible
 description: "Comprehensive, data-backed email marketing consultant for audits, win-back/re-engagement flows, copy, deliverability, compliance, and campaign/platform strategy."
+version: "0.4"
+license: MIT
+metadata:
+  author: CoWork OS Contributors <info@coworkosapp.com>
+  source-author: "George Hartley"
 ---
 
 # Email Marketing Bible

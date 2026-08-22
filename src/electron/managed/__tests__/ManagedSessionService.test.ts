@@ -713,7 +713,7 @@ describeWithSqlite("ManagedSessionService", () => {
     expect(db.prepare("SELECT COUNT(1) AS count FROM tasks").get() as Any).toMatchObject({ count: 0 });
   });
 
-  it("starts team-mode sessions through the daemon path and blocks direct follow-up user messages", async () => {
+  it("starts team-mode sessions through the daemon path and accepts direct follow-up messages", async () => {
     const workspace = insertWorkspace();
     const roleRepo = new AgentRoleRepository(db);
     const lead = roleRepo.create({
@@ -752,13 +752,11 @@ describeWithSqlite("ManagedSessionService", () => {
     expect(session.backingTeamRunId).toBeTruthy();
     expect(service.getSession(session.id)?.status).toBe("running");
 
-    await expect(
-      service.sendEvent(session.id, {
-        type: "user.message",
-        content: [{ type: "text", text: "One more thing" }],
-      }),
-    ).rejects.toThrow(/team-mode managed sessions/i);
-    expect(daemon.sendMessage).not.toHaveBeenCalled();
+    await service.sendEvent(session.id, {
+      type: "user.message",
+      content: [{ type: "text", text: "One more thing" }],
+    });
+    expect(daemon.sendMessage).toHaveBeenCalledWith(session.backingTaskId, "One more thing");
   });
 
   it("enforces managed approval policy on direct sessions and mirrored agent roles", async () => {

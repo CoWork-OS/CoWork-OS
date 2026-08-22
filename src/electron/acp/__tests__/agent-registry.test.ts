@@ -89,6 +89,23 @@ describe("ACPAgentRegistry", () => {
       const retrieved = registry.getAgent(card.id, []);
       expect(retrieved?.status).toBe("busy");
     });
+
+    it("rejects nested inline secrets and endpoint user-info", () => {
+      expect(() =>
+        registry.registerRemoteAgent({
+          name: "Unsafe",
+          description: "Nested secret",
+          metadata: { headers: { authorization: "Bearer plaintext" } },
+        }),
+      ).toThrow("metadata.credentialRef");
+      expect(() =>
+        registry.registerRemoteAgent({
+          name: "Unsafe URL",
+          description: "URL secret",
+          endpoint: "https://user:password@example.com/a2a",
+        }),
+      ).toThrow("cannot contain credentials");
+    });
   });
 
   describe("discover", () => {

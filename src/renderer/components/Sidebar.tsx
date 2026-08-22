@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, useDeferredValue, memo } from "react";
-import { ChevronDown, ChevronRight, SlidersHorizontal, EyeOff, AppWindow, Bell, HardDrive, Rows3, Search, Server, Workflow, HeartPulse, Lightbulb, Inbox, Users, UsersRound, ListFilter, EllipsisVertical, Shapes, Plus, Sparkles, Repeat2 } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, SlidersHorizontal, EyeOff, AppWindow, Bell, HardDrive, Rows3, Search, Server, Workflow, HeartPulse, Lightbulb, Inbox, Users, UsersRound, ListFilter, EllipsisVertical, Shapes, Plus, Sparkles, Repeat2 } from "lucide-react";
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { Task, Workspace, UiDensity, InfraStatus, UpdateInfo } from "../../shared/types";
@@ -50,6 +50,7 @@ interface SidebarProps {
   isIdeasActive?: boolean;
   isInboxAgentActive?: boolean;
   isAgentsActive?: boolean;
+  isBotsActive?: boolean;
   isEverydayAgentActive?: boolean;
   isMissionControlActive?: boolean;
   isHealthActive?: boolean;
@@ -61,6 +62,7 @@ interface SidebarProps {
   onOpenIdeas?: () => void;
   onOpenInboxAgent?: () => void;
   onOpenAgents?: () => void;
+  onOpenBots?: () => void;
   onOpenEverydayAgent?: () => void;
   onOpenHealth?: () => void;
   onNewSession?: () => void;
@@ -593,6 +595,7 @@ function SidebarComponent({
   isIdeasActive = false,
   isInboxAgentActive = false,
   isAgentsActive = false,
+  isBotsActive = false,
   isEverydayAgentActive = false,
   isMissionControlActive = false,
   isHealthActive = false,
@@ -603,6 +606,7 @@ function SidebarComponent({
   onOpenIdeas,
   onOpenInboxAgent,
   onOpenAgents,
+  onOpenBots,
   onOpenEverydayAgent,
   onOpenHealth,
   onNewSession,
@@ -1837,6 +1841,24 @@ function SidebarComponent({
                   <Plus size={16} strokeWidth={2} style={{ display: "block" }} />
                 </span>
                 <span>New</span>
+              </span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isBotsActive ? "active" : ""}`}
+            onClick={onOpenBots}
+            aria-pressed={isBotsActive}
+            title="Bots"
+          >
+            <span className="cli-btn-text">
+              <span className="terminal-only">bots</span>
+              <span className="modern-only cli-new-task-modern-label">
+                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: "flex" }}>
+                  <Bot size={16} strokeWidth={2} style={{ display: "block" }} />
+                </span>
+                <span>Bots</span>
               </span>
             </span>
           </button>

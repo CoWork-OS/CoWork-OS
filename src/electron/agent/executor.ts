@@ -322,6 +322,7 @@ import {
 } from "./executor-completion-utils";
 import {
   CANONICAL_ARTIFACT_EXTENSION_REGEX,
+  analyzeInstructionIntent,
   deriveStepContractMode,
   isArtifactPathLikeToken,
   isLikelyCommandSnippet,
@@ -4149,7 +4150,11 @@ export class TaskExecutor {
   }
 
   private dropNonExecutablePlanSteps(steps: PlanStep[]): PlanStep[] {
-    return steps.filter((step) => !this.isNonExecutableFormatListPlanStep(step.description));
+    return steps.filter(
+      (step) =>
+        !this.isNonExecutableFormatListPlanStep(step.description) &&
+        !analyzeInstructionIntent(step.description).constraintOnly,
+    );
   }
 
   private sanitizePlan(plan: Plan): Plan {
@@ -10428,7 +10433,7 @@ ${transcript}
   }
 
   private extractRequiredToolsFromStepDescription(description: string): Set<string> {
-    const desc = String(description || "").toLowerCase();
+    const desc = analyzeInstructionIntent(description).positiveText.toLowerCase();
     const required = new Set<string>();
     const hasWriteIntent = descriptionHasWriteIntent(desc);
     const executionMode = this.getEffectiveExecutionMode();
@@ -10925,8 +10930,9 @@ ${transcript}
 
   private resolveStepExecutionContract(step: PlanStep): StepExecutionContract {
     const descriptionRaw = String(step.description || "");
-    const description = descriptionRaw.toLowerCase();
-    const requiredTools = this.extractRequiredToolsFromStepDescription(description);
+    const instructionIntent = analyzeInstructionIntent(descriptionRaw);
+    const description = instructionIntent.positiveText.toLowerCase();
+    const requiredTools = this.extractRequiredToolsFromStepDescription(descriptionRaw);
     const buildHealthReadOnlyStep = this.isBuildHealthReadOnlyStep(step);
     if (buildHealthReadOnlyStep) {
       for (const toolName of [

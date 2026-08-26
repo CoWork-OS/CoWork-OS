@@ -45,6 +45,8 @@ export interface LLMProviderConfig {
   deepseekBaseUrl?: string;
   // OpenAI-specific
   openaiApiKey?: string;
+  openaiBaseUrl?: string;
+  openaiResponsesApi?: boolean;
   openaiReasoningEffort?: OpenAIReasoningEffort;
   openaiTextVerbosity?: LLMTextVerbosity;
   openaiAccessToken?: string; // OAuth access token
@@ -246,6 +248,16 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
   groq: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   kimi: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   pi: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
+  opencode: {
+    supportsImages: true,
+    maxImageBytes: 20 * 1024 * 1024,
+    supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  },
+  "opencode-go": {
+    supportsImages: true,
+    maxImageBytes: 20 * 1024 * 1024,
+    supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  },
 };
 
 export interface LLMToolResult {

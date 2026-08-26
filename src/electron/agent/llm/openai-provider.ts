@@ -89,6 +89,8 @@ export class OpenAIProvider implements LLMProvider {
   private model: string;
   private openaiReasoningEffort?: OpenAIReasoningEffort;
   private openaiTextVerbosity?: LLMTextVerbosity;
+  private openaiBaseUrl?: string;
+  private forceResponsesApi: boolean;
   private oauthTokenUpdater?: LLMProviderConfig["openaiOAuthTokenUpdater"];
 
   constructor(config: LLMProviderConfig) {
@@ -99,6 +101,8 @@ export class OpenAIProvider implements LLMProvider {
     this.model = config.model;
     this.openaiReasoningEffort = config.openaiReasoningEffort || "medium";
     this.openaiTextVerbosity = config.openaiTextVerbosity || "medium";
+    this.openaiBaseUrl = config.openaiBaseUrl;
+    this.forceResponsesApi = config.openaiResponsesApi === true;
     this.oauthTokenUpdater = config.openaiOAuthTokenUpdater;
 
     if (accessToken && refreshToken) {
@@ -123,7 +127,10 @@ export class OpenAIProvider implements LLMProvider {
       );
     } else if (apiKey) {
       // Use API key - standard OpenAI SDK
-      this.client = new OpenAI({ apiKey });
+      this.client = new OpenAI({
+        apiKey,
+        ...(this.openaiBaseUrl ? { baseURL: this.openaiBaseUrl } : {}),
+      });
       this.authMethod = "api_key";
       logger.debug("Using API key authentication");
     } else {
@@ -292,7 +299,10 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private shouldUseResponsesApi(modelId: string | undefined): boolean {
-    return this.normalizeCodexModelId(modelId || this.model).startsWith("gpt-5");
+    return (
+      this.forceResponsesApi ||
+      this.normalizeCodexModelId(modelId || this.model).startsWith("gpt-5")
+    );
   }
 
   private getOpenAIReasoningEffort(request: LLMRequest): OpenAIReasoningEffort | undefined {
@@ -694,6 +704,15 @@ export class OpenAIProvider implements LLMProvider {
         // For API key, use standard OpenAI SDK
         if (!this.client) {
           return { success: false, error: "OpenAI client not initialized" };
+        }
+
+        if (this.forceResponsesApi || this.shouldUseResponsesApi(this.model)) {
+          await (this.client as Any).responses.create({
+            model: this.model || "gpt-5.5",
+            input: [{ role: "user", content: [{ type: "input_text", text: "Hi" }] }],
+            max_output_tokens: 10,
+          });
+          return { success: true };
         }
 
         await this.client.chat.completions.create({

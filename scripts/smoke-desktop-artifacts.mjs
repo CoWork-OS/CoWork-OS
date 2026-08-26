@@ -2,7 +2,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +14,9 @@ const MIN_DMG_BYTES = 50 * 1024 * 1024;
 const MIN_EXE_BYTES = 100 * 1024 * 1024;
 const MAC_LAUNCH_MS = 8_000;
 const WINDOWS_LAUNCH_MS = 20_000;
+const PLATFORM_SUPPORT = JSON.parse(
+  readFileSync(path.join(ROOT, "src", "shared", "platform-support.json"), "utf8"),
+);
 
 function parseArgs(argv) {
   const args = {
@@ -426,8 +429,20 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
     const plistPath = path.join(appPath, "Contents", "Info.plist");
     const executableName = plistValue(plistPath, "CFBundleExecutable");
     const bundleVersion = plistValue(plistPath, "CFBundleShortVersionString");
+    const bundleIdentifier = plistValue(plistPath, "CFBundleIdentifier");
+    const minimumSystemVersion = plistValue(plistPath, "LSMinimumSystemVersion");
     if (bundleVersion !== expectedVersion) {
       throw new Error(`Expected macOS app version ${expectedVersion}, found ${bundleVersion}`);
+    }
+    if (bundleIdentifier !== "com.cowork-os.app") {
+      throw new Error(
+        `Expected macOS bundle identifier com.cowork-os.app, found ${bundleIdentifier}`,
+      );
+    }
+    if (minimumSystemVersion !== PLATFORM_SUPPORT.macos.minimumProductVersion) {
+      throw new Error(
+        `Expected LSMinimumSystemVersion ${PLATFORM_SUPPORT.macos.minimumProductVersion}, found ${minimumSystemVersion}`,
+      );
     }
 
     const executablePath = path.join(appPath, "Contents", "MacOS", executableName);

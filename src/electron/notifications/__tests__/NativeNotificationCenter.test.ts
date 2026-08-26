@@ -133,4 +133,23 @@ describe("NativeNotificationCenter", () => {
     );
     warn.mockRestore();
   });
+
+  it("reports asynchronous native delivery failure once so the caller can show a fallback", async () => {
+    const onFailed = vi.fn();
+    const center = await loadNotificationCenter();
+
+    const result = center.show(
+      {
+        id: "n1",
+        title: "Task complete",
+        message: "Report finished",
+      },
+      onFailed,
+    );
+
+    expect(result).toBe(true);
+    mockState.instances[0]?.emit("failed");
+    mockState.instances[0]?.emit("failed");
+    expect(onFailed).toHaveBeenCalledOnce();
+  });
 });

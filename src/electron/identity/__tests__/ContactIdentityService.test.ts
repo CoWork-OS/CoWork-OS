@@ -376,6 +376,21 @@ describeWithSqlite("ContactIdentityService", () => {
       const fetched = service.getIdentity(identity!.id);
       const slackHandles = fetched?.handles.filter((h) => h.handleType === "slack_user_id") ?? [];
       expect(slackHandles).toHaveLength(0);
+
+      const audit = db
+        .prepare(
+          `SELECT handle_id, detail_json
+           FROM contact_identity_audit
+           WHERE action = 'handle_unlinked'
+           ORDER BY created_at DESC
+           LIMIT 1`,
+        )
+        .get() as { handle_id: string | null; detail_json: string };
+      expect(audit.handle_id).toBeNull();
+      expect(JSON.parse(audit.detail_json)).toMatchObject({
+        handleId: handle!.id,
+        handleType: "slack_user_id",
+      });
     });
 
     it("returns false for a non-existent handle id", () => {

@@ -1213,6 +1213,7 @@ export class DatabaseManager {
         title TEXT NOT NULL,
         status TEXT NOT NULL,
         surface TEXT DEFAULT 'runtime',
+        interaction_mode TEXT,
         workspace_id TEXT NOT NULL,
         backing_task_id TEXT,
         backing_team_run_id TEXT,
@@ -6521,6 +6522,176 @@ export class DatabaseManager {
       `);
     } catch {
       // Table or indexes already exist, ignore
+    }
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS managed_agent_runtime_bindings (
+          agent_id TEXT PRIMARY KEY,
+          agent_role_id TEXT UNIQUE,
+          default_environment_id TEXT,
+          canonical_session_id TEXT,
+          runtime_kind TEXT NOT NULL DEFAULT 'local',
+          device_id TEXT,
+          browser_profile_id TEXT,
+          memory_scope_id TEXT,
+          avatar_json TEXT,
+          pinned INTEGER NOT NULL DEFAULT 0,
+          sidebar_group TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (agent_id) REFERENCES managed_agents(id) ON DELETE CASCADE,
+          FOREIGN KEY (default_environment_id) REFERENCES managed_environments(id),
+          FOREIGN KEY (canonical_session_id) REFERENCES managed_sessions(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS bot_messages (
+          id TEXT PRIMARY KEY,
+          from_agent_id TEXT NOT NULL,
+          to_agent_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          content_type TEXT NOT NULL,
+          body TEXT NOT NULL,
+          data_json TEXT,
+          artifact_refs_json TEXT,
+          conversation_id TEXT,
+          correlation_id TEXT,
+          reply_to TEXT,
+          source_protocol TEXT,
+          source_task_id TEXT,
+          status TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          max_attempts INTEGER NOT NULL DEFAULT 3,
+          idempotency_key TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          claimed_at INTEGER,
+          completed_at INTEGER,
+          expires_at INTEGER,
+          last_error TEXT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_messages_idempotency
+          ON bot_messages(from_agent_id, to_agent_id, idempotency_key)
+          WHERE idempotency_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_bot_messages_inbox
+          ON bot_messages(to_agent_id, status, created_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_bot_messages_conversation
+          ON bot_messages(conversation_id, created_at ASC);
+
+        CREATE TABLE IF NOT EXISTS bot_rooms (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          owner_agent_id TEXT,
+          execution_mode TEXT NOT NULL DEFAULT 'sequential',
+          max_rounds INTEGER NOT NULL DEFAULT 3,
+          max_messages INTEGER NOT NULL DEFAULT 10,
+          epoch INTEGER NOT NULL DEFAULT 0,
+          current_round INTEGER NOT NULL DEFAULT 0,
+          active_run_id TEXT,
+          lease_owner TEXT,
+          lease_expires_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS bot_room_members (
+          room_id TEXT NOT NULL,
+          agent_id TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'local',
+          member_session_id TEXT,
+          last_seen_seq INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'active',
+          joined_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (room_id, agent_id),
+          FOREIGN KEY (room_id) REFERENCES bot_rooms(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS bot_room_messages (
+          id TEXT PRIMARY KEY,
+          room_id TEXT NOT NULL,
+          run_id TEXT,
+          epoch INTEGER NOT NULL,
+          round INTEGER NOT NULL DEFAULT 0,
+          seq INTEGER NOT NULL,
+          from_agent_id TEXT,
+          body TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'delivered',
+          reply_to TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (room_id) REFERENCES bot_rooms(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS bot_room_runs (
+          id TEXT PRIMARY KEY,
+          room_id TEXT NOT NULL,
+          source_message_id TEXT NOT NULL,
+          retry_of_run_id TEXT,
+          epoch INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          current_round INTEGER NOT NULL DEFAULT 1,
+          stop_requested_at INTEGER,
+          error_summary TEXT,
+          lease_owner TEXT,
+          lease_expires_at INTEGER,
+          started_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          FOREIGN KEY (room_id) REFERENCES bot_rooms(id) ON DELETE CASCADE,
+          FOREIGN KEY (source_message_id) REFERENCES bot_room_messages(id) ON DELETE CASCADE,
+          FOREIGN KEY (retry_of_run_id) REFERENCES bot_room_runs(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_bot_room_runs_room
+          ON bot_room_runs(room_id, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_bot_room_runs_status
+          ON bot_room_runs(status, lease_expires_at);
+
+        CREATE TABLE IF NOT EXISTS bot_room_run_turns (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          room_id TEXT NOT NULL,
+          round INTEGER NOT NULL,
+          agent_id TEXT NOT NULL,
+          session_id TEXT,
+          status TEXT NOT NULL,
+          error_summary TEXT,
+          started_at INTEGER,
+          completed_at INTEGER,
+          FOREIGN KEY (run_id) REFERENCES bot_room_runs(id) ON DELETE CASCADE,
+          FOREIGN KEY (room_id) REFERENCES bot_rooms(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_room_run_turns_run
+          ON bot_room_run_turns(run_id, round, agent_id);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_room_messages_seq
+          ON bot_room_messages(room_id, seq);
+        CREATE INDEX IF NOT EXISTS idx_bot_messages_claim_recovery
+          ON bot_messages(status, claimed_at);
+        CREATE INDEX IF NOT EXISTS idx_bot_messages_retention
+          ON bot_messages(status, completed_at);
+        CREATE INDEX IF NOT EXISTS idx_bot_room_messages_retention
+          ON bot_room_messages(room_id, created_at DESC);
+      `);
+      try {
+        this.db.exec("ALTER TABLE managed_sessions ADD COLUMN interaction_mode TEXT");
+      } catch {
+        // Column already exists.
+      }
+      try {
+        this.db.exec("ALTER TABLE bot_rooms ADD COLUMN current_round INTEGER NOT NULL DEFAULT 0");
+      } catch {
+        // Existing column.
+      }
+      try {
+        this.db.exec("ALTER TABLE bot_room_messages ADD COLUMN round INTEGER NOT NULL DEFAULT 0");
+      } catch {
+        // Existing column.
+      }
+    } catch (error) {
+      schemaLogger.error("[DatabaseManager] Failed bot foundation migration:", error);
+      throw error;
     }
     this.seedLlmPricing();
   }

@@ -17,6 +17,63 @@ import type {
   ACPAgentRegisterParams,
 } from "./types";
 import { validateRemoteAgentEndpoint } from "./remote-invoker";
+import { BotMessageRepository } from "../bots/repositories";
+
+const SENSITIVE_METADATA_KEYS = new Set([
+  "authorization",
+  "authorizationheader",
+  "bearertoken",
+  "token",
+  "apikey",
+  "secret",
+  "password",
+  "cookie",
+  "setcookie",
+]);
+
+function normalizedMetadataKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function hasInlineRemoteSecret(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(hasInlineRemoteSecret);
+  return Object.entries(value as Record<string, unknown>).some(([key, nested]) => {
+    if (key === "credentialRef") return false;
+    return SENSITIVE_METADATA_KEYS.has(normalizedMetadataKey(key)) || hasInlineRemoteSecret(nested);
+  });
+}
+
+function sanitizeRemoteValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeRemoteValue);
+  if (!value || typeof value !== "object") return value;
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (key !== "credentialRef" && SENSITIVE_METADATA_KEYS.has(normalizedMetadataKey(key))) {
+      continue;
+    }
+    sanitized[key] = sanitizeRemoteValue(nested);
+  }
+  return sanitized;
+}
+
+function sanitizeRemoteMetadata(metadata?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!metadata) return undefined;
+  const sanitized = sanitizeRemoteValue(metadata) as Record<string, unknown>;
+  return Object.keys(sanitized).length ? sanitized : undefined;
+}
+
+function sanitizePersistedEndpoint(endpoint?: string): string | undefined {
+  if (!endpoint) return undefined;
+  try {
+    const parsed = new URL(endpoint);
+    parsed.username = "";
+    parsed.password = "";
+    return parsed.toString();
+  } catch {
+    return endpoint;
+  }
+}
 
 /**
  * Minimal interface for the AgentRoleRepository dependency.
@@ -45,7 +102,10 @@ export class ACPAgentRegistry {
   /** Maximum messages per inbox before oldest are dropped */
   private maxInboxSize = 100;
 
+  private readonly durableMessages?: BotMessageRepository;
+
   constructor(private db?: Database.Database) {
+    this.durableMessages = db ? new BotMessageRepository(db) : undefined;
     this.loadRemoteAgents();
   }
 
@@ -59,7 +119,10 @@ export class ACPAgentRegistry {
     for (const row of rows) {
       try {
         const card = JSON.parse(row.card_json) as ACPAgentCard;
+        card.metadata = sanitizeRemoteMetadata(card.metadata);
+        card.endpoint = sanitizePersistedEndpoint(card.endpoint);
         this.remoteAgents.set(card.id, card);
+        this.persistRemoteAgent(card);
       } catch {
         // Ignore malformed persisted registrations.
       }
@@ -89,7 +152,7 @@ export class ACPAgentRegistry {
         card.status,
         card.registeredAt,
         Date.now(),
-        JSON.stringify(card),
+        JSON.stringify({ ...card, metadata: sanitizeRemoteMetadata(card.metadata) }),
       );
   }
 
@@ -202,6 +265,9 @@ export class ACPAgentRegistry {
     if (params.endpoint) {
       validateRemoteAgentEndpoint(params.endpoint);
     }
+    if (hasInlineRemoteSecret(params.metadata)) {
+      throw new Error("Remote agent secrets must be stored securely and referenced with metadata.credentialRef");
+    }
     const id = `remote:${randomUUID().slice(0, 8)}-${params.name.toLowerCase().replace(/\s+/g, "-")}`;
 
     const card: ACPAgentCard = {
@@ -220,12 +286,13 @@ export class ACPAgentRegistry {
       inputContentTypes: params.inputContentTypes,
       outputContentTypes: params.outputContentTypes,
       supportsStreaming: params.supportsStreaming,
+      protocol: params.protocol || "cowork-legacy",
       endpoint: params.endpoint,
       origin: "remote",
       registeredAt: Date.now(),
       lastActiveAt: Date.now(),
       status: "available",
-      metadata: params.metadata,
+      metadata: sanitizeRemoteMetadata(params.metadata),
     };
 
     this.remoteAgents.set(id, card);
@@ -260,6 +327,28 @@ export class ACPAgentRegistry {
    * Push a message into an agent's inbox
    */
   pushMessage(agentId: string, message: import("./types").ACPMessage): void {
+    if (this.durableMessages) {
+      try {
+        this.durableMessages.create({
+          id: message.id,
+          fromAgentId: message.from,
+          toAgentId: message.to,
+          kind: "fyi",
+          contentType: message.contentType,
+          body: message.body,
+          data: message.data,
+          correlationId: message.correlationId,
+          replyTo: message.replyTo,
+          sourceProtocol: "cowork-legacy",
+          maxAttempts: 1,
+          expiresAt: message.ttlMs && message.ttlMs > 0 ? message.timestamp + message.ttlMs : undefined,
+        });
+        this.durableMessages.capQueuedInbox(agentId, this.maxInboxSize, "cowork-legacy");
+        return;
+      } catch {
+        // Lightweight ACP tests and old databases can fall back to the bounded in-memory inbox.
+      }
+    }
     let inbox = this.messageInboxes.get(agentId);
     if (!inbox) {
       inbox = [];
@@ -276,6 +365,34 @@ export class ACPAgentRegistry {
    * Get and optionally drain messages from an agent's inbox
    */
   getMessages(agentId: string, drain = false): import("./types").ACPMessage[] {
+    if (this.durableMessages) {
+      try {
+        const durable = this.durableMessages.list({
+          toAgentId: agentId,
+          status: "queued",
+          sourceProtocol: "cowork-legacy",
+          order: "asc",
+          limit: this.maxInboxSize,
+        });
+        if (drain) {
+          for (const message of durable) this.durableMessages.complete(message.id);
+        }
+        return durable.map((message) => ({
+          id: message.id,
+          from: message.fromAgentId,
+          to: message.toAgentId,
+          contentType: message.contentType,
+          body: message.body,
+          data: message.data,
+          correlationId: message.correlationId,
+          replyTo: message.replyTo,
+          timestamp: message.createdAt,
+          ttlMs: message.expiresAt ? Math.max(0, message.expiresAt - message.createdAt) : undefined,
+        }));
+      } catch {
+        // Fall through to the compatibility inbox when the durable schema is unavailable.
+      }
+    }
     const inbox = this.messageInboxes.get(agentId) || [];
     if (drain) {
       this.messageInboxes.delete(agentId);

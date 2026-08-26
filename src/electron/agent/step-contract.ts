@@ -76,6 +76,41 @@ const STRONG_WRITE_VERB_REGEX =
 const PASSIVE_ARTIFACT_WRITE_CUE_REGEX =
   /\b(saved|written|created|generated|produced|updated|edited|rewritten|appended|stored|placed)\s+(?:as|to|at|in|under)\b/;
 
+export interface InstructionIntentAnalysis {
+  positiveText: string;
+  negativeText: string;
+  constraintOnly: boolean;
+}
+
+/**
+ * Separates executable instructions from prohibitions before tool inference.
+ * This is deliberately clause-scoped: a prohibition in one clause must not
+ * suppress a positive instruction in the next clause.
+ */
+export function analyzeInstructionIntent(text: string): InstructionIntentAnalysis {
+  const source = String(text || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/[“"][^”"]*[”"]/g, " ");
+  const clauses = source
+    .split(/(?:[;\n]+|(?<=[.!?])\s+|\bbut\b|\bthen\b)/i)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  const negative: string[] = [];
+  const positive: string[] = [];
+  const negativeCue =
+    /\b(?:do\s+not|don't|dont|never|avoid|refrain\s+from|without|must\s+not|should\s+not|no\s+(?:tool|file|change|edit|write|mutation|delegation))\b/i;
+  for (const clause of clauses) {
+    if (negativeCue.test(clause)) negative.push(clause);
+    else positive.push(clause);
+  }
+  return {
+    positiveText: positive.join("; "),
+    negativeText: negative.join("; "),
+    constraintOnly: negative.length > 0 && positive.length === 0,
+  };
+}
+
 function normalizeWithLeadingDot(extension: string): string {
   const raw = String(extension || "")
     .trim()

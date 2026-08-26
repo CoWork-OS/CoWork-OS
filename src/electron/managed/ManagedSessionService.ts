@@ -334,6 +334,7 @@ export interface ManagedMcpToolAccessResolution {
   allowedTools: string[];
   missingConnections: AgentBuilderConnectionRequirement[];
   hasMcpServerAllowlist: boolean;
+  unresolvedToolMetadataServerIds: string[];
 }
 
 function formatMissingMcpServerLabel(serverId: string): string {
@@ -371,12 +372,14 @@ export function resolveManagedMcpToolAccess(
       allowedTools: [],
       missingConnections: [],
       hasMcpServerAllowlist: false,
+      unresolvedToolMetadataServerIds: [],
     };
   }
   const settings = MCPSettingsManager.loadSettings();
   const prefix = settings.toolNamePrefix || "mcp_";
   const out = new Set<string>();
   const missingConnections: AgentBuilderConnectionRequirement[] = [];
+  const unresolvedToolMetadataServerIds: string[] = [];
   for (const serverId of serverIds) {
     const server = MCPSettingsManager.getServer(serverId);
     const registryServer = getBuiltinRegistryServer(serverId);
@@ -393,6 +396,7 @@ export function resolveManagedMcpToolAccess(
       continue;
     }
     if (!Array.isArray(tools) || tools.length === 0) {
+      unresolvedToolMetadataServerIds.push(serverId);
       missingConnections.push(
         buildMissingMcpServerRequirement(
           serverId,
@@ -409,6 +413,7 @@ export function resolveManagedMcpToolAccess(
     allowedTools: Array.from(out),
     missingConnections,
     hasMcpServerAllowlist: true,
+    unresolvedToolMetadataServerIds,
   };
 }
 
@@ -1037,6 +1042,7 @@ export class ManagedSessionService {
   listManagedAgentRoutines(agentId: string): ManagedAgentRoutineRecord[] {
     const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
     if (workspaceId) this.assertWorkspacePermission(workspaceId, "canViewAgents");
+    if (!this.hasDatabaseTable("automation_routines")) return [];
     const rows = this.db
       .prepare(
         `SELECT * FROM automation_routines
@@ -1788,8 +1794,14 @@ export class ManagedSessionService {
     const backingTaskSource: Task["source"] =
       surface === "agent_panel" ? "managed_agent_panel" : "manual";
     const userPrompt = this.materializeContent(input.initialEvent?.content || []);
+    const mcpToolAccess = this.resolveMcpToolAccess(environment);
+    if (mcpToolAccess.unresolvedToolMetadataServerIds.length > 0) {
+      throw new Error(
+        `Cannot safely enforce the managed MCP allowlist because tool metadata is unavailable for: ${mcpToolAccess.unresolvedToolMetadataServerIds.join(", ")}`,
+      );
+    }
     const baseAgentConfig = this.buildAgentConfig(environment, version);
-    const missingConnections = this.resolveMcpToolAccess(environment).missingConnections;
+    const missingConnections = mcpToolAccess.missingConnections;
     const effectivePrompt = this.composeRootPrompt(version, userPrompt, missingConnections);
     const studio = getStudioConfig(version);
     const sessionTemplatePayload = {
@@ -3091,6 +3103,10 @@ export class ManagedSessionService {
     definition: Routine;
     surface: "slack" | "chatgpt";
   }> {
+    if (!this.hasDatabaseTable("routine_runs") || !this.hasDatabaseTable("automation_routines")) {
+      return [];
+    }
+
     const rows = this.db
       .prepare(
         `SELECT rr.*, ar.definition_json
@@ -3134,6 +3150,15 @@ export class ManagedSessionService {
       runs.push({ run, definition, surface });
     }
     return runs;
+  }
+
+  private hasDatabaseTable(tableName: string): boolean {
+    if (!/^[a-zA-Z0-9_]+$/.test(tableName)) return false;
+    return Boolean(
+      this.db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+        .get(tableName),
+    );
   }
 
   private isSuccessfulSlackRun(run: import("../routines/types").RoutineRun): boolean {

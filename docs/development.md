@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Node.js 24+ and npm
-- macOS 12 (Monterey)+ or Windows 10/11
+- macOS 13 (Ventura)+ or Windows 10/11
 - `sqlite3` CLI (required for eval corpus/replay scripts)
 - macOS: Xcode Command Line Tools (needed for `better-sqlite3`): `xcode-select --install`
 - Windows: Visual Studio Build Tools 2022 (C++) and Python 3 (needed for native module builds)
@@ -758,14 +758,14 @@ See [Enterprise Connectors](enterprise-connectors.md) for the full connector con
 
 | Requirement | Minimum | Recommended |
 |-------------|---------|-------------|
-| **Desktop OS** | macOS 12 / Windows 10 | macOS 13+ / Windows 11 |
+| **Desktop OS** | macOS 13 / Windows 10 | macOS 14+ / Windows 11 |
 | **RAM** | 4 GB | 8 GB+ |
 | **CPU** | 2 cores | 4+ cores |
 | **Architecture** | x64 or arm64 | Native architecture of your host |
 
 ### Supported Desktop OS Versions
 
-- macOS 12 Monterey, 13 Ventura, 14 Sonoma, 15 Sequoia
+- macOS 13 Ventura, 14 Sonoma, 15 Sequoia, and newer supported releases
 - Windows 10 and Windows 11 (x64 and ARM64)
 
 ### Resource Usage

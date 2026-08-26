@@ -1383,6 +1383,7 @@ export class SubconsciousLoopService {
       memoryUpdates,
     };
     await this.artifactStore.writeDreamArtifact(target || null, artifact);
+    await this.artifactStore.writeMemoryIndex(target || null, memoryUpdates);
     await this.appendJournal({
       targetKey: target?.key,
       kind: "dream",

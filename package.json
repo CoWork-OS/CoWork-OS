@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.5.51",
+  "version": "0.5.52",
   "private": false,
   "description": "CoWork OS - GUI-first, CLI-capable local AI super app and everything app for coding, email, agents, documents, spreadsheets, presentations, web design, automations, and agentic work",
   "keywords": [
@@ -151,7 +151,7 @@
     "@aws-sdk/client-bedrock": "^3.1009.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
     "@chenglou/pretext": "^0.0.3",
-    "@electron/rebuild": "^4.0.4",
+    "@electron/rebuild": "4.2.0",
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",
@@ -167,7 +167,7 @@
     "discord.js": "^14.25.1",
     "docx": "^9.5.2",
     "e2b": "^2.39.0",
-    "electron": "^40.10.6",
+    "electron": "44.0.0",
     "electron-updater": "^6.8.9",
     "ethers": "^6.16.0",
     "eventsource": "^4.1.0",
@@ -359,6 +359,7 @@
         }
       ],
       "category": "public.app-category.productivity",
+      "minimumSystemVersion": "13.0",
       "hardenedRuntime": true,
       "gatekeeperAssess": true,
       "entitlements": "build/entitlements.mac.plist",
@@ -370,6 +371,9 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "CoWork OS uses your current location once to answer nearby places and walking route requests."
       },
       "notarize": true
+    },
+    "dmg": {
+      "title": "CoWork OS ${version} — macOS 13+"
     },
     "win": {
       "target": [

@@ -2347,13 +2347,17 @@ function SidebarComponent({
               <button
                 type="button"
                 className="update-banner"
-                aria-label="Open update settings"
+                aria-label={
+                  updateInfo.supported === false
+                    ? "View update system requirements"
+                    : "Open update settings"
+                }
                 onClick={(event) => {
                   event.stopPropagation();
                   onViewUpdate?.();
                 }}
               >
-                Update
+                {updateInfo.supported === false ? "Requires macOS 13+" : "Update"}
               </button>
               <button
                 type="button"

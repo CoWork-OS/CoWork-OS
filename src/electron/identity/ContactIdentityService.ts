@@ -690,14 +690,25 @@ export class ContactIdentityService {
       )
       .get(handleId) as ContactIdentityHandleRow | undefined;
     if (!handle) return false;
-    this.insertAudit({
-      workspaceId: handle.workspace_id,
-      contactIdentityId: handle.contact_identity_id,
-      handleId: handle.id,
-      action: "handle_unlinked",
-      detail: { handleType: handle.handle_type, normalizedValue: handle.normalized_value },
-    });
-    this.db.prepare("DELETE FROM contact_identity_handles WHERE id = ?").run(handleId);
+    this.db.transaction(() => {
+      // Legacy schemas use a restrictive FK from audit rows to handles. Clear
+      // those references before deletion and retain the removed id in the
+      // durable unlink audit payload instead.
+      this.db
+        .prepare("UPDATE contact_identity_audit SET handle_id = NULL WHERE handle_id = ?")
+        .run(handleId);
+      this.db.prepare("DELETE FROM contact_identity_handles WHERE id = ?").run(handleId);
+      this.insertAudit({
+        workspaceId: handle.workspace_id,
+        contactIdentityId: handle.contact_identity_id,
+        action: "handle_unlinked",
+        detail: {
+          handleId: handle.id,
+          handleType: handle.handle_type,
+          normalizedValue: handle.normalized_value,
+        },
+      });
+    })();
     return true;
   }
 

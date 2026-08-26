@@ -145,7 +145,8 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     expect(exported.goals).toHaveLength(1);
     expect(exported.projects).toHaveLength(1);
     expect(exported.issues).toHaveLength(1);
-    expect(exported.projectWorkspaceLinks).toHaveLength(1);
+    expect(exported.projectWorkspaceLinks).toHaveLength(2);
+    expect(exported.projectWorkspaceLinks.filter((link) => link.isPrimary)).toHaveLength(1);
     expect(exported.issueComments).toHaveLength(1);
 
     expect(imported.company.id).not.toBe(company.id);

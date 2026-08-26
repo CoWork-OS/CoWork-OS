@@ -10,6 +10,14 @@ import { MCPSettingsManager } from "../../mcp/settings";
 import { RoutineService } from "../../routines/service";
 import { ManagedSessionService } from "../ManagedSessionService";
 
+vi.mock("../../utils/safe-storage", () => ({
+  getSafeStorage: () => ({
+    isEncryptionAvailable: () => true,
+    encryptString: (value: string) => Buffer.from(value, "utf8"),
+    decryptString: (value: Buffer) => value.toString("utf8"),
+  }),
+}));
+
 const nativeSqliteAvailable = await import("better-sqlite3")
   .then((module) => {
     try {
@@ -564,6 +572,7 @@ describeWithSqlite("ManagedSessionService", () => {
       displayName: "Existing collision role",
       roleKind: "custom",
       systemPrompt: "I already use this name.",
+      capabilities: [],
     });
 
     const created = service.createAgent({

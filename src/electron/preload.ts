@@ -6479,6 +6479,12 @@ export interface ElectronAPI {
     releaseUrl?: string;
     publishedAt?: string;
     updateMode: "git" | "npm" | "electron-updater";
+    supported: boolean;
+    minimumSystemVersion?: string;
+    minimumSystemLabel?: string;
+    lastCompatibleVersion?: string;
+    unsupportedReason?: string;
+    recoveryCommand?: string;
   }>;
   downloadUpdate: (updateInfo: Any) => Promise<{ success: boolean }>;
   installUpdate: () => Promise<{ success: boolean }>;

@@ -291,6 +291,7 @@ export class AgentRoleRepository {
       heartbeatProfile: resolvedHeartbeatProfile,
       activeHours: resolvedActiveHours,
       heartbeatStatus: "idle",
+      monthlyBudgetCost: request.monthlyBudgetCost,
       operatorMandate: request.operatorMandate,
       allowedLoopTypes: request.allowedLoopTypes,
       outputTypes: request.outputTypes,
@@ -311,8 +312,8 @@ export class AgentRoleRepository {
         heartbeat_dispatch_cooldown_minutes, heartbeat_max_dispatches_per_day,
         heartbeat_profile, heartbeat_active_hours, heartbeat_status, operator_mandate, allowed_loop_types,
         output_types, suppression_policy, max_autonomous_outputs_per_cycle,
-        last_useful_output_at, operator_health_score
-      ) VALUES (${new Array(39).fill("?").join(", ")})
+        last_useful_output_at, operator_health_score, monthly_budget_cost, auto_paused_at
+      ) VALUES (${new Array(41).fill("?").join(", ")})
     `);
 
     stmt.run(
@@ -355,6 +356,8 @@ export class AgentRoleRepository {
       role.maxAutonomousOutputsPerCycle ?? 1,
       role.lastUsefulOutputAt ?? null,
       role.operatorHealthScore ?? null,
+      role.monthlyBudgetCost ?? null,
+      role.autoPausedAt ?? null,
     );
 
     const shouldPersistAutomationProfile =
@@ -535,6 +538,14 @@ export class AgentRoleRepository {
     if (request.soul !== undefined) {
       fields.push("soul = ?");
       values.push(request.soul);
+    }
+    if (request.monthlyBudgetCost !== undefined) {
+      fields.push("monthly_budget_cost = ?");
+      values.push(request.monthlyBudgetCost);
+    }
+    if (request.autoPausedAt !== undefined) {
+      fields.push("auto_paused_at = ?");
+      values.push(request.autoPausedAt);
     }
     if (request.operatorMandate !== undefined) {
       fields.push("operator_mandate = ?");
@@ -851,6 +862,10 @@ export class AgentRoleRepository {
       lastPulseResult: row.heartbeat_last_pulse_result || undefined,
       lastDispatchKind: row.heartbeat_last_dispatch_kind || undefined,
       heartbeatStatus: (row.heartbeat_status as HeartbeatStatus) || "idle",
+      monthlyBudgetCost:
+        typeof row.monthly_budget_cost === "number" ? row.monthly_budget_cost : undefined,
+      autoPausedAt:
+        typeof row.auto_paused_at === "number" ? row.auto_paused_at : undefined,
       operatorMandate: row.operator_mandate || undefined,
       allowedLoopTypes: safeJsonParse(row.allowed_loop_types, [], "agentRole.allowedLoopTypes"),
       outputTypes: safeJsonParse(row.output_types, [], "agentRole.outputTypes"),

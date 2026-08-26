@@ -145,7 +145,7 @@ describeWithNativeDb("MemoryObservationService", () => {
   it("searches metadata and returns compact index rows", () => {
     const db = createDb();
     MemoryObservationService.initialize(db);
-    MemoryObservationService.createForMemory({
+    const memory = {
       id: "mem-2",
       workspaceId: "ws-1",
       taskId: "task-2",
@@ -156,7 +156,25 @@ describeWithNativeDb("MemoryObservationService", () => {
       isPrivate: false,
       createdAt: 200,
       updatedAt: 200,
-    });
+    } as const;
+    db.prepare(`
+      INSERT INTO memories (
+        id, workspace_id, task_id, type, content, summary, tokens, is_compressed, is_private, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      memory.id,
+      memory.workspaceId,
+      memory.taskId,
+      memory.type,
+      memory.content,
+      null,
+      memory.tokens,
+      0,
+      0,
+      memory.createdAt,
+      memory.updatedAt,
+    );
+    MemoryObservationService.createForMemory(memory);
 
     const results = MemoryObservationService.search({
       workspaceId: "ws-1",

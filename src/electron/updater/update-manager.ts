@@ -1,9 +1,11 @@
 import { app, BrowserWindow, net } from "electron";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
+import * as os from "os";
 import * as _path from "path";
 import * as _fs from "fs";
 import { UpdateInfo, UpdateProgress, AppVersionInfo, IPC_CHANNELS } from "../../shared/types";
+import { compareVersions, getUpdatePlatformCompatibility } from "../../shared/platform-support";
 
 const execAsync = promisify(exec);
 
@@ -20,11 +22,27 @@ interface GitHubRelease {
   }>;
 }
 
+interface GitUpdateTarget {
+  commit: string;
+  version: string;
+}
+
 export class UpdateManager {
   private mainWindow: BrowserWindow | null = null;
   private repoOwner = "CoWork-OS";
   private repoName = "CoWork-OS";
   private isUpdating = false;
+  private updaterEventsConfigured = false;
+  private pendingUpdateInfo: UpdateInfo | null = null;
+  private checkedGitTarget: GitUpdateTarget | null = null;
+  private pendingGitTarget: GitUpdateTarget | null = null;
+  private lastCheckedUpdateInfo: UpdateInfo | null = null;
+  private updateReadyToInstall = false;
+
+  constructor(
+    private readonly runtimePlatform: NodeJS.Platform | string = process.platform,
+    private readonly runtimeRelease: () => string = os.release,
+  ) {}
 
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
@@ -57,12 +75,12 @@ export class UpdateManager {
 
     if (isDev && !isNpmGlobal) {
       try {
-        const { stdout: branchOut } = await execAsync("git rev-parse --abbrev-ref HEAD", {
+        const { stdout: branchOut } = await this.runGitCommand("git rev-parse --abbrev-ref HEAD", {
           cwd: appPath,
         });
         gitBranch = branchOut.trim();
 
-        const { stdout: commitOut } = await execAsync("git rev-parse --short HEAD", {
+        const { stdout: commitOut } = await this.runGitCommand("git rev-parse --short HEAD", {
           cwd: appPath,
         });
         gitCommit = commitOut.trim();
@@ -103,6 +121,8 @@ export class UpdateManager {
   async checkForUpdates(): Promise<UpdateInfo> {
     const versionInfo = await this.getVersionInfo();
     const currentVersion = versionInfo.version;
+    this.lastCheckedUpdateInfo = null;
+    this.checkedGitTarget = null;
 
     this.sendProgress({ phase: "checking", message: "Checking for updates..." });
 
@@ -120,12 +140,13 @@ export class UpdateManager {
 
       if (!response.ok) {
         if (response.status === 404) {
-          return {
+          return this.recordCheckedUpdate({
             available: false,
             currentVersion,
             latestVersion: currentVersion,
             updateMode: this.getUpdateMode(versionInfo),
-          };
+            supported: true,
+          });
         }
         throw new Error(`GitHub API error: ${response.status}`);
       }
@@ -137,77 +158,108 @@ export class UpdateManager {
       // Determine update mode based on installation type
       const updateMode = this.getUpdateMode(versionInfo);
 
-      if (versionInfo.isGitRepo && !available) {
-        // Only check for new commits if versions are equal (not if local version is newer)
+      if (versionInfo.isGitRepo) {
+        // A source checkout updates from origin/main, so validate that exact
+        // commit instead of assuming it matches the latest release tag.
         const localIsNewer = this.isNewerVersion(currentVersion, latestVersion);
         if (!localIsNewer) {
-          // Check for new commits even if version tag is same
-          const hasNewCommits = await this.checkForNewCommits();
-          if (hasNewCommits) {
-            return {
+          const gitTarget = await this.checkForNewCommits();
+          if (gitTarget) {
+            this.checkedGitTarget = gitTarget;
+            return this.recordCheckedUpdate({
               available: true,
               currentVersion: `${currentVersion} (${versionInfo.gitCommit})`,
-              latestVersion: `${latestVersion} (new commits)`,
+              latestVersion: `${gitTarget.version} (${gitTarget.commit.slice(0, 7)})`,
               releaseNotes: "New commits available on the main branch.",
               releaseUrl: `https://github.com/${this.repoOwner}/${this.repoName}`,
               updateMode: "git",
-            };
+              ...this.getCompatibility(gitTarget.version),
+            });
           }
         }
       }
 
-      return {
-        available,
+      return this.recordCheckedUpdate({
+        // Git updates are offered only when an exact fetched commit was captured above.
+        available: updateMode === "git" ? false : available,
         currentVersion,
         latestVersion,
         releaseNotes: release.body,
         releaseUrl: release.html_url,
         publishedAt: release.published_at,
         updateMode,
-      };
+        ...this.getCompatibility(latestVersion),
+      });
     } catch (error: Any) {
       this.sendError(error.message);
       throw error;
     }
   }
 
-  private async checkForNewCommits(): Promise<boolean> {
+  private recordCheckedUpdate(updateInfo: UpdateInfo): UpdateInfo {
+    this.lastCheckedUpdateInfo = updateInfo;
+    return updateInfo;
+  }
+
+  private runGitCommand(command: string, options: { cwd: string }) {
+    return execAsync(command, options);
+  }
+
+  private async checkForNewCommits(): Promise<GitUpdateTarget | null> {
     try {
       const appPath = app.getAppPath();
 
       // Fetch latest from remote
-      await execAsync("git fetch origin", { cwd: appPath });
+      await this.runGitCommand("git fetch origin", { cwd: appPath });
 
-      // Check if there are commits ahead on remote
-      const { stdout } = await execAsync("git rev-list HEAD..origin/main --count", {
+      const { stdout: commitOut } = await this.runGitCommand("git rev-parse origin/main", {
+        cwd: appPath,
+      });
+      const commit = commitOut.trim();
+      if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(commit)) return null;
+
+      // Check if there are commits ahead on the exact fetched target.
+      const { stdout } = await this.runGitCommand(`git rev-list HEAD..${commit} --count`, {
         cwd: appPath,
       });
       const commitsAhead = parseInt(stdout.trim(), 10);
+      if (commitsAhead <= 0) return null;
 
-      return commitsAhead > 0;
+      const { stdout: packageJsonText } = await this.runGitCommand(
+        `git show ${commit}:package.json`,
+        { cwd: appPath },
+      );
+      const version = JSON.parse(packageJsonText)?.version;
+      if (typeof version !== "string" || !version.trim()) return null;
+
+      return { commit, version: version.trim() };
     } catch {
-      return false;
+      return null;
     }
   }
 
   private isNewerVersion(latest: string, current: string): boolean {
-    // Normalize versions: convert "0.3.9-1" to "0.3.9.1" for comparison
-    const normalizeVersion = (v: string): number[] => {
-      // Replace hyphens with dots for consistent parsing
-      const normalized = v.replace(/-/g, ".");
-      return normalized.split(".").map((n) => parseInt(n, 10) || 0);
-    };
+    return compareVersions(latest, current) > 0;
+  }
 
-    const latestParts = normalizeVersion(latest);
-    const currentParts = normalizeVersion(current);
+  private getCompatibility(targetVersion: string) {
+    return getUpdatePlatformCompatibility({
+      platform: this.runtimePlatform,
+      release: this.runtimeRelease(),
+      targetVersion,
+    });
+  }
 
-    for (let i = 0; i < Math.max(latestParts.length, currentParts.length); i++) {
-      const l = latestParts[i] || 0;
-      const c = currentParts[i] || 0;
-      if (l > c) return true;
-      if (l < c) return false;
-    }
-    return false;
+  private assertUpdateSupported(targetVersion: string): void {
+    const compatibility = this.getCompatibility(targetVersion);
+    if (compatibility.supported) return;
+
+    const recovery = compatibility.recoveryCommand
+      ? ` To keep using this Mac, install the last compatible release with: ${compatibility.recoveryCommand}`
+      : "";
+    throw new Error(
+      `${compatibility.unsupportedReason || "This update is not supported."}${recovery}`,
+    );
   }
 
   private getUpdateMode(versionInfo: AppVersionInfo): "git" | "npm" | "electron-updater" {
@@ -225,16 +277,45 @@ export class UpdateManager {
       throw new Error("Update already in progress");
     }
 
+    const checkedUpdate = this.lastCheckedUpdateInfo;
+    if (
+      !checkedUpdate ||
+      !checkedUpdate.available ||
+      checkedUpdate.latestVersion !== updateInfo.latestVersion ||
+      checkedUpdate.updateMode !== updateInfo.updateMode
+    ) {
+      throw new Error("Check for updates again before starting the update.");
+    }
+
+    const checkedTargetVersion =
+      checkedUpdate.updateMode === "git"
+        ? this.checkedGitTarget?.version
+        : checkedUpdate.latestVersion;
+    if (!checkedTargetVersion) {
+      throw new Error("The checked Git update target is no longer available. Check again.");
+    }
+    this.assertUpdateSupported(checkedTargetVersion);
     this.isUpdating = true;
+    this.updateReadyToInstall = false;
+    this.pendingUpdateInfo = checkedUpdate;
+    this.pendingGitTarget =
+      checkedUpdate.updateMode === "git" && this.checkedGitTarget
+        ? { ...this.checkedGitTarget }
+        : null;
 
     try {
-      if (updateInfo.updateMode === "npm") {
-        await this.npmUpdate();
-      } else if (updateInfo.updateMode === "git") {
+      if (checkedUpdate.updateMode === "npm") {
+        await this.npmUpdate(checkedUpdate.latestVersion);
+      } else if (checkedUpdate.updateMode === "git") {
         await this.gitUpdate();
       } else {
         await this.electronUpdaterUpdate();
       }
+    } catch (error) {
+      this.pendingUpdateInfo = null;
+      this.pendingGitTarget = null;
+      this.updateReadyToInstall = false;
+      throw error;
     } finally {
       this.isUpdating = false;
     }
@@ -242,6 +323,11 @@ export class UpdateManager {
 
   private async gitUpdate(): Promise<void> {
     const appPath = app.getAppPath();
+    const target = this.pendingGitTarget;
+    if (!target || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(target.commit)) {
+      throw new Error("The verified Git update target is unavailable. Check for updates again.");
+    }
+    this.assertUpdateSupported(target.version);
 
     try {
       // Step 1: Stash any local changes
@@ -251,19 +337,18 @@ export class UpdateManager {
         message: "Stashing local changes...",
       });
       try {
-        await execAsync("git stash", { cwd: appPath });
+        await this.runGitCommand("git stash", { cwd: appPath });
       } catch {
         // Ignore if nothing to stash
       }
 
-      // Step 2: Fetch and pull latest
+      // Step 2: Merge the exact commit captured and validated during update check.
       this.sendProgress({
         phase: "downloading",
         percent: 30,
-        message: "Pulling latest changes from GitHub...",
+        message: "Applying verified changes from GitHub...",
       });
-      await execAsync("git fetch origin", { cwd: appPath });
-      await execAsync("git pull origin main", { cwd: appPath });
+      await this.runGitCommand(`git merge --ff-only ${target.commit}`, { cwd: appPath });
 
       // Step 3: Install dependencies
       this.sendProgress({
@@ -288,6 +373,7 @@ export class UpdateManager {
         message: "Update complete! Please restart the application.",
       });
 
+      this.updateReadyToInstall = true;
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, {
           requiresRestart: true,
@@ -301,11 +387,14 @@ export class UpdateManager {
     }
   }
 
-  private async npmUpdate(): Promise<void> {
+  private async npmUpdate(targetVersion: string): Promise<void> {
     try {
+      if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(targetVersion)) {
+        throw new Error(`Invalid checked npm update version: ${targetVersion}`);
+      }
       // Step 1: Run npm update
       this.sendProgress({ phase: "downloading", percent: 20, message: "Updating via npm..." });
-      await this.runNpmGlobalUpdate();
+      await this.runNpmGlobalUpdate(targetVersion);
 
       // Step 2: Complete
       this.sendProgress({
@@ -314,6 +403,7 @@ export class UpdateManager {
         message: "Update complete! Please restart the application.",
       });
 
+      this.updateReadyToInstall = true;
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, {
           requiresRestart: true,
@@ -327,10 +417,12 @@ export class UpdateManager {
     }
   }
 
-  private runNpmGlobalUpdate(): Promise<void> {
+  private runNpmGlobalUpdate(targetVersion: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-      const child = spawn(npm, ["install", "-g", "cowork-os@latest"], { shell: true });
+      const child = spawn(npm, ["install", "-g", `cowork-os@${targetVersion}`], {
+        shell: true,
+      });
 
       let stderr = "";
 
@@ -406,66 +498,92 @@ export class UpdateManager {
         throw new Error("electron-updater not available");
       }
       const { autoUpdater } = electronUpdater;
+      autoUpdater.autoDownload = false;
 
-      autoUpdater.on("checking-for-update", () => {
-        this.sendProgress({ phase: "checking", message: "Checking for updates..." });
-      });
-
-      autoUpdater.on("update-available", () => {
-        this.sendProgress({
-          phase: "downloading",
-          percent: 0,
-          message: "Update available, starting download...",
+      if (!this.updaterEventsConfigured) {
+        this.updaterEventsConfigured = true;
+        autoUpdater.on("checking-for-update", () => {
+          this.sendProgress({ phase: "checking", message: "Checking for updates..." });
         });
-      });
 
-      autoUpdater.on(
-        "download-progress",
-        (progress: { percent: number; transferred: number; total: number }) => {
+        autoUpdater.on("update-available", () => {
           this.sendProgress({
             phase: "downloading",
-            percent: Math.round(progress.percent),
-            message: `Downloading update... ${Math.round(progress.percent)}%`,
-            bytesDownloaded: progress.transferred,
-            bytesTotal: progress.total,
+            percent: 0,
+            message: "Update available, starting download...",
           });
-        },
-      );
-
-      autoUpdater.on("update-downloaded", () => {
-        this.sendProgress({
-          phase: "complete",
-          percent: 100,
-          message: "Update downloaded. Ready to install.",
         });
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, {
-            requiresRestart: true,
-            message: 'Update downloaded. Click "Install & Restart" to apply.',
+
+        autoUpdater.on(
+          "download-progress",
+          (progress: { percent: number; transferred: number; total: number }) => {
+            this.sendProgress({
+              phase: "downloading",
+              percent: Math.round(progress.percent),
+              message: `Downloading update... ${Math.round(progress.percent)}%`,
+              bytesDownloaded: progress.transferred,
+              bytesTotal: progress.total,
+            });
+          },
+        );
+
+        autoUpdater.on("update-downloaded", () => {
+          this.updateReadyToInstall = true;
+          this.sendProgress({
+            phase: "complete",
+            percent: 100,
+            message: "Update downloaded. Ready to install.",
           });
-        }
-      });
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, {
+              requiresRestart: true,
+              message: 'Update downloaded. Click "Install & Restart" to apply.',
+            });
+          }
+        });
 
-      autoUpdater.on("error", (error: Error) => {
-        this.sendProgress({ phase: "error", message: `Update error: ${error.message}` });
-        this.sendError(error.message);
-      });
+        autoUpdater.on("error", (error: Error) => {
+          this.sendProgress({ phase: "error", message: `Update error: ${error.message}` });
+          this.sendError(error.message);
+        });
+      }
 
+      const updateCheck = await autoUpdater.checkForUpdates();
+      if (!updateCheck) {
+        throw new Error("No compatible packaged update is available for this system.");
+      }
+      const checkedVersion = updateCheck.updateInfo?.version;
+      if (
+        this.pendingUpdateInfo &&
+        checkedVersion &&
+        compareVersions(checkedVersion, this.pendingUpdateInfo.latestVersion) !== 0
+      ) {
+        throw new Error(
+          `Packaged updater resolved ${checkedVersion}, but ${this.pendingUpdateInfo.latestVersion} was checked. Check for updates again.`,
+        );
+      }
       await autoUpdater.downloadUpdate();
-    } catch  {
-      // If electron-updater is not available, fall back to manual download
+    } catch (error: Any) {
       this.sendProgress({
         phase: "error",
-        message: "electron-updater not available. Please download manually from GitHub.",
+        message: `Automatic update failed: ${error.message}`,
       });
       throw new Error(
-        "Auto-update not available for packaged builds. Please download the latest release from GitHub.",
+        `${error.message} You can download a compatible release manually from GitHub.`,
       );
     }
   }
 
   async installUpdateAndRestart(): Promise<void> {
     const versionInfo = await this.getVersionInfo();
+    if (!this.pendingUpdateInfo || !this.updateReadyToInstall) {
+      throw new Error("No verified update is ready to install.");
+    }
+    this.assertUpdateSupported(
+      this.pendingUpdateInfo.updateMode === "git" && this.pendingGitTarget
+        ? this.pendingGitTarget.version
+        : this.pendingUpdateInfo.latestVersion,
+    );
 
     if (versionInfo.isGitRepo) {
       // For git-based updates, just restart the app

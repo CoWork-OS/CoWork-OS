@@ -1633,7 +1633,11 @@ if (isCliDirectRunMode()) {
             llmSettings?.kimi?.apiKey ||
             llmSettings?.azure?.apiKey ||
             llmSettings?.bedrock?.accessKeyId ||
-            llmSettings?.bedrock?.profile
+            llmSettings?.bedrock?.profile ||
+            Object.values(llmSettings?.customProviders || {}).some(
+              (provider) =>
+                typeof provider?.apiKey === "string" && provider.apiKey.trim().length > 0,
+            )
           );
           if (!hasAnyLlmCreds) {
             logger.warn(

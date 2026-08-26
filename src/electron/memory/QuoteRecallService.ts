@@ -140,7 +140,9 @@ function scoreQuoteCandidate(params: {
   const lexical = lexicalCoverageScore(params.text, params.query);
   const sourcePriority = SOURCE_PRIORITIES[params.sourceType] ?? 1;
   const recency = recencyScore(params.timestamp);
-  const upstream = Number.isFinite(params.upstreamScore) ? params.upstreamScore || 0 : 0;
+  const upstream = Number.isFinite(params.upstreamScore)
+    ? Math.max(0, Math.min(1, params.upstreamScore || 0))
+    : 0;
   const score = sourcePriority * 10 + lexical.score * 5 + upstream * 2 + recency;
   return {
     score,

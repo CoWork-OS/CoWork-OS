@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Download, CheckCircle, XCircle } from "lucide-react";
 import { transformReleaseNotesUrl } from "../utils/release-notes-markdown";
+import type { UpdateInfo } from "../../shared/types";
 
 interface VersionInfo {
   version: string;
@@ -11,16 +12,6 @@ interface VersionInfo {
   isNpmGlobal: boolean;
   gitBranch?: string;
   gitCommit?: string;
-}
-
-interface UpdateInfo {
-  available: boolean;
-  currentVersion: string;
-  latestVersion: string;
-  releaseNotes?: string;
-  releaseUrl?: string;
-  publishedAt?: string;
-  updateMode: "git" | "npm" | "electron-updater";
 }
 
 interface UpdateProgress {
@@ -187,6 +178,22 @@ export function UpdateSettings() {
                   <span className="arrow">→</span>
                   <span className="latest">Latest: {updateInfo.latestVersion}</span>
                 </div>
+                {updateInfo.supported === false && (
+                  <div className="update-error" role="alert">
+                    <XCircle size={16} strokeWidth={2} />
+                    <div>
+                      <strong>
+                        This update requires {updateInfo.minimumSystemLabel || "a newer macOS"}.
+                      </strong>
+                      <div>{updateInfo.unsupportedReason}</div>
+                      {updateInfo.recoveryCommand && (
+                        <div className="manual-update-commands">
+                          <code>{updateInfo.recoveryCommand}</code>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {updateInfo.publishedAt && (
                   <div className="update-date">
                     Released: {new Date(updateInfo.publishedAt).toLocaleDateString()}
@@ -256,7 +263,7 @@ export function UpdateSettings() {
           </div>
         )}
 
-        {updateInfo?.available && !updating && !updateReady && (
+        {updateInfo?.available && updateInfo.supported !== false && !updating && !updateReady && (
           <button
             className="button-primary update-button"
             onClick={handleDownloadUpdate}
@@ -270,7 +277,7 @@ export function UpdateSettings() {
           </button>
         )}
 
-        {updateReady && (
+        {updateReady && updateInfo?.supported !== false && (
           <button className="button-primary update-button restart" onClick={handleInstallUpdate}>
             Restart to Apply Update
           </button>

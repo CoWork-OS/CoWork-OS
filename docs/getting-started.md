@@ -7,6 +7,8 @@
 
 ## Quick Start
 
+The desktop app requires **macOS 13 Ventura or later** or Windows 10/11. CoWork OS `0.5.51` is the final release compatible with macOS 12 Monterey.
+
 ### Step 1: Install Dependencies
 
 ```bash

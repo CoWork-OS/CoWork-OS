@@ -13,6 +13,7 @@ import {
   ClipboardList,
   Code2,
   CreditCard,
+  Cpu,
   Eye,
   FileSearch,
   FileText,
@@ -59,6 +60,7 @@ type IdeaCategory =
   | "writing"
   | "legal"
   | "ai-media"
+  | "models"
   | "life";
 
 interface Idea {
@@ -69,6 +71,7 @@ interface Idea {
   category: IdeaCategory;
   skill?: string;
   integrations?: string[];
+  action?: "model-settings";
 }
 
 const CATEGORIES: { id: IdeaCategory; label: string }[] = [
@@ -81,6 +84,7 @@ const CATEGORIES: { id: IdeaCategory; label: string }[] = [
   { id: "writing", label: "Writing" },
   { id: "legal", label: "Legal" },
   { id: "ai-media", label: "AI & Media" },
+  { id: "models", label: "Models & Routing" },
   { id: "life", label: "Life" },
 ];
 
@@ -92,6 +96,31 @@ const SECTION_LABELS = Object.fromEntries(
 // knows the intended skill name. They are not resolved against the skill registry at
 // render time — if a skill doesn't exist the agent will fall back to built-in capabilities.
 const IDEAS: Idea[] = [
+  // ── Models & Routing ───────────────────────────────────────────────
+  {
+    title: "Connect another model source",
+    description: "Add an account, API, gateway, cloud route, or local model.",
+    prompt: "",
+    icon: Cpu,
+    category: "models",
+    action: "model-settings",
+  },
+  {
+    title: "Review routing and fallback",
+    description: "Audit the current model route and propose a resilient fallback order.",
+    prompt:
+      "Review my configured model routes and help me design a fallback order. Compare capability, latency, cost boundaries, and tool compatibility. Do not change settings until I approve the plan.",
+    icon: RefreshCw,
+    category: "models",
+  },
+  {
+    title: "Plan a two-model review",
+    description: "Use different model strengths for a draft and an independent critique.",
+    prompt:
+      "Help me plan a two-model workflow for my next task: one route creates the draft and another independently critiques it. Ask what outcome I need, then recommend roles using only configured model routes.",
+    icon: Layers,
+    category: "models",
+  },
   // ── Daily Ops ──────────────────────────────────────────────────────
   {
     title: "Morning chief-of-staff brief",
@@ -532,9 +561,10 @@ function IntegrationIcon({ name }: { name: string }) {
 
 interface IdeasPanelProps {
   onCreateTaskFromPrompt: (prompt: string) => void;
+  onOpenModelSettings?: () => void;
 }
 
-export function IdeasPanel({ onCreateTaskFromPrompt }: IdeasPanelProps) {
+export function IdeasPanel({ onCreateTaskFromPrompt, onOpenModelSettings }: IdeasPanelProps) {
   const [activeCategory, setActiveCategory] = useState<IdeaCategory>("all");
 
   const sections =
@@ -586,7 +616,13 @@ export function IdeasPanel({ onCreateTaskFromPrompt }: IdeasPanelProps) {
                   key={idx}
                   type="button"
                   className="dp-task-card dp-idea-card"
-                  onClick={() => onCreateTaskFromPrompt(idea.prompt)}
+                  onClick={() => {
+                    if (idea.action === "model-settings") {
+                      onOpenModelSettings?.();
+                      return;
+                    }
+                    onCreateTaskFromPrompt(idea.prompt);
+                  }}
                   title={idea.title}
                 >
                   <div className="dp-idea-top">

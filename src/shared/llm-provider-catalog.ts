@@ -306,11 +306,11 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     apiKeyPlaceholder: "sk-... (leave empty for local)",
     apiKeyOptional: true,
     description:
-      "Run local models via hf-agents + llama.cpp. Zero API cost, fully private. Setup: (1) pip install huggingface_hub  (2) hf extensions install hf-agents",
+      "Run local models via hf-agents + llama.cpp. Inference stays local by default; optional remote services follow their own data policies. Setup: (1) pip install huggingface_hub  (2) hf extensions install hf-agents",
   },
 ];
 
-export const CUSTOM_PROVIDER_MAP = new Map(
+export const CUSTOM_PROVIDER_MAP = new Map<LLMProviderType, ProviderCatalogEntry>(
   CUSTOM_PROVIDER_CATALOG.map((provider) => [provider.id, provider]),
 );
 

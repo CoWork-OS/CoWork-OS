@@ -1,123 +1,190 @@
-# CoWork OS — Product Positioning & GTM Strategy
+# CoWork OS Positioning and Go-to-Market Strategy
 
-> Status: Active draft, aligned to current product docs.
+Last reviewed: 2026-08-27
 
-## Category Definition
+## Canonical Positioning
 
-CoWork OS is a **security-hardened, GUI-first, CLI-capable local AI super app, everything app, and personal agentic operating system**.
+**CoWork OS is the free, open-source AI super app for real work.** It brings coding,
+research, browser work, inbox, documents, spreadsheets, presentations, channels,
+automations, and agents into one GUI-first, CLI-capable workspace.
 
-- OpenClaw is best positioned as an agent experimentation toolkit.
-- CoWork OS is positioned as the production runtime for running agents safely across real workflows.
+Underneath that super app is an open, multi-provider agent harness. Users can connect
+supported provider accounts, API keys, compatible gateways, cloud credentials, or local
+models and keep the same CoWork tools, memory, agents, approvals, artifacts, and workflows
+as they change model routes.
 
-## Primary Positioning Statement
+Short line:
 
-CoWork OS is a GUI-first, CLI-capable local AI super app, everything app, and production workbench for users who need:
+> **One app for the work. Your choice of AI.**
 
-- One app for coding, email, web design, research, documents, spreadsheets, decks, generated web pages, live website testing, automations, channels, and devices
-- Visual agent creation, spawning, assignment, monitoring, and review through the desktop operator console, with `cowork` available for terminal-native task starts
-- Generated artifacts and live websites that can be opened, reviewed, tested, lightly edited, annotated, and revised with the agent beside them
-- Guardrails and approval workflows by default
-- Local-first data ownership (BYOK, no telemetry)
-- A multi-channel operating layer (17 messaging channels)
-- A desktop + CLI + headless runtime that can be governed in daily operations
+Supporting line:
 
-Short form:
+> Bring the AI access you already have. CoWork OS is free; provider eligibility, limits,
+> and usage charges remain with each provider.
 
-> OpenClaw is excellent for experimentation. CoWork OS is optimized as the one governed super app where daily work products can be created, reviewed, automated, and revised in-place.
+## Message Architecture
 
-## Core Buyer Profiles
+| Layer | Approved message | What it explains |
+| --- | --- | --- |
+| Category | Free, open-source AI super app / everything app | What CoWork OS is |
+| User benefit | One workspace for real work across code, browser, inbox, files, artifacts, and automation | Why it matters |
+| Differentiator | Open, multi-provider, and MIT-licensed | Why CoWork is structurally different |
+| Technical engine | One agent harness across supported model routes | How model flexibility works |
+| Access promise | Supported subscriptions/accounts, APIs, gateways, cloud credentials, and local models | What users can bring |
+| Continuity promise | Keep tools, skills, memory, approvals, agents, artifacts, and workflows when routes change | The practical advantage |
+| Trust | Local-first state, visible execution, policies, approvals, and source access | Why users can rely on it |
 
-1. Technical founders running customer-facing or ops-heavy automation.
-2. Security-conscious builders who need local control over data and keys.
-3. Team leads who want agent output in existing messaging channels with approval gates.
-4. Power users who want agent autonomy without cloud lock-in.
+The relationship should always be explained in this order:
 
-## Differentiation Pillars
+```text
+supported accounts · APIs · gateways · cloud credentials · local models
+                                  ↓
+                   open multi-provider agent harness
+                 tools · memory · agents · policy · routing
+                                  ↓
+                         CoWork OS super app
+          code · browser · inbox · docs · data · automation · channels
+```
 
-### 1) Playground to Production
+“Agent harness” is a technical and comparison term. It must support—not replace—the
+plain-language super-app category on acquisition and onboarding surfaces.
 
-CoWork OS prioritizes execution discipline over experimentation novelty:
-approval workflows, guardrail budgets, policy enforcement, and sandboxed execution.
+## Positioning Pillars
 
-### 1A) GUI-First Agent Management
+### 1. One super app for real work
 
-CoWork OS is built for users who want to run many agents without turning the whole workflow into terminal babysitting. Agents Hub, Mission Control, visual task timelines, Kanban boards, Teams, Devices, and Automations make agent creation, spawning, assignment, monitoring, review, and handoff visible and manageable.
+CoWork keeps the task, the tools, and the output together. A user can move from research
+to code, a browser check, an inbox action, a document, a spreadsheet, a deck, or an
+automation without rebuilding context in a separate AI product.
 
-### 2) Security-First by Design
+### 2. Your choice of AI
 
-CoWork OS ships with core controls required for practical use:
-dangerous command blocking, configurable limits, encrypted local settings, and context-aware tool controls.
+CoWork is not defined by a single model vendor. Users choose from supported access routes,
+switch per task, compare models, configure routing, or add ordered fallback providers.
+Model-specific capabilities and commercial terms still apply.
 
-### 3) Multi-Channel AI Operating Layer
+### 3. One harness across model strengths
 
-CoWork OS is not just a local runner. It is a messaging-native runtime across 17 channels with shared security modes and governance.
+The surrounding work environment—tools, skills, memory, policies, approvals, agents,
+artifacts, and workspace context—belongs to CoWork. Changing a model route should not mean
+changing the operating system around the work.
 
-### 4) Local-First + BYOK
+### 4. GUI-first, CLI-capable, headless-ready
 
-Users keep control of data and provider keys with optional offline model execution via Ollama.
+The desktop application is the primary visual operator console. The `cowork` CLI and
+headless daemons extend the same runtime to terminals, servers, and remote operations.
 
-### 5) One Super App for Knowledge Work
+### 5. Open control and visible governance
 
-CoWork OS reduces context switching for knowledge workers, founders, and operators by keeping coding, email, generated documents, spreadsheets, presentations, web pages, PDFs, live website testing, and task outputs in one local-first workbench. Users can open artifacts in the app, review or edit them, test websites in the visible Browser Workbench, annotate screenshots, ask for changes, and avoid separate Word, Excel, PowerPoint, browser, mail, and coding apps for everyday work. External-open paths remain available when advanced native behavior is needed.
+CoWork is MIT-licensed and local-first. Execution remains inspectable through timelines,
+approvals, policies, sandboxes, and explicit remote-provider boundaries.
 
-### 6) Everything App Breadth
+## Audience
 
-The artifact workbench should not narrow the product category. CoWork OS also covers coding, repository work, frontend design, research, inbox work, automations, device/remote work, connectors, agent teams, and multi-channel task ingress. The strongest positioning is "the GUI-first AI super app and everything app for real work," with the Everything Workbench as a concrete proof point.
+Primary audiences:
 
-## Proof Points to Reuse in Messaging
+- AI power users who currently split work across several model apps and agent harnesses.
+- Developers who want coding agents without making the coding tool their entire workspace.
+- Operators, founders, and knowledge workers who need files, browser work, communication,
+  automations, and agents in the same environment.
+- Teams that need model flexibility, visible approvals, and a path to local or self-hosted
+  operation.
 
-- 36 LLM provider options, including Grok through xAI API key or SuperGrok OAuth and Mixture of Agents presets
-- 17 messaging channels
-- 151 built-in skills
-- GUI-first agent spawning and management through Agents Hub, Mission Control, task timelines, and visual boards
-- Coding, email, web design, research, automations, channels, devices, and artifact workspaces in one app
-- Everything Workbench for docs, sheets, decks, web pages, live websites, PDFs, and previews
-- 4,932 automated tests in the suite across 390 test files
-- ZeroLeaks report published in-repo
+## Competitive Frame
 
-## Narrative Guardrails
+### Coding agents
 
-Do:
+Claude Code, Codex, Cursor, and OpenCode are primarily evaluated as coding environments or
+coding-agent harnesses. CoWork should not claim automatic coding superiority. Its durable
+contrast is a broader work surface: code plus inbox, research, browser, office artifacts,
+channels, automations, agents, and headless operations.
 
-- Contrast category focus (toolkit vs operating system).
-- Emphasize production readiness and security controls.
-- Stay factual and neutral in competitor references.
-- Explicitly respect OpenClaw and its community.
+### AI workspaces and super apps
 
-Do not:
+ChatGPT and Claude Cowork increasingly span knowledge work, files, connectors, artifacts,
+automation, browser use, and project work. CoWork competes in that broad category while
+differentiating through MIT licensing, model-route flexibility, optional local inference,
+CLI/headless operation, and user-controlled runtime state.
 
-- Frame as "more features than OpenClaw" only.
-- Rely on speculative competitor claims.
-- Use adversarial language.
+### Open personal-agent systems
 
-## SEO Guidance
+OpenClaw and Hermes are open, multi-provider peers. CoWork should differentiate through its
+GUI-first Everything Workbench, artifact editing, inbox and channels, visual approvals,
+operator surfaces, and the combination of desktop, CLI, and headless modes—not simply by
+claiming to be open or multi-provider.
 
-Use these phrases naturally in docs and landing sections:
+Comparison content must be fit-based:
 
-- OpenClaw alternative
-- alternative to OpenClaw
-- OpenClaw vs CoWork OS
+- “Choose them when …”
+- “Choose CoWork when …”
+- “Use both when …”
 
-Keep SEO copy factual and fit-based. Avoid negative or inflammatory wording.
+## Claim Guardrails
 
-## Best Initial Wedges
+| Topic | Approved wording | Do not claim |
+| --- | --- | --- |
+| Price | “CoWork OS is free and MIT-licensed. Provider usage may cost money.” | “All AI is free.” |
+| Breadth | “Dozens of model routes and compatible endpoints.” | “Every LLM” or “all models.” |
+| Accounts | “Supported account-based and subscription routes.” | “Any subscription.” |
+| Lock-in | “Reduce model-provider lock-in.” | “No lock-in.” |
+| Locality | “Local-first persistence with optional local inference.” | “Everything is fully local.” |
+| Credentials | “Credentials are stored locally and sent only to the configured provider or gateway for authentication.” | “Keys never leave the device.” |
+| Analytics | “No mandatory product analytics by default.” | “No telemetry.” |
+| Capability | “One harness across different model strengths.” | “Every model supports identical features.” |
+| Competition | “A broader open workspace for users who want model choice.” | “Better than every harness.” |
 
-> This section describes GTM entry points within the existing category — not a repositioning. CoWork OS remains a security-hardened, local-first AI operating system.
+Use stable capability language instead of hardcoded provider, channel, skill, connector, or
+test counts unless the number is generated from a canonical released source.
 
-The three operational lanes where CoWork OS has the clearest initial ROI are governed, intelligence-heavy workflows that benefit most from approval gates, local data control, and measurable outcome delivery:
+## Provider and Access Proof
 
-| Lane | Pack | Primary Connectors | Why It Wins Early |
-|------|------|--------------------|-------------------|
-| **Support Ops** | Customer Support Pack | Zendesk, ServiceNow | High-volume, well-defined quality criteria; completion rate and response time are measurable on day one |
-| **IT Ops** | DevOps Pack | ServiceNow, Jira, Linear | Incident and release workflows have clear triggers, audit requirements, and high cost of error |
-| **Sales Ops** | Sales CRM Pack | HubSpot, Salesforce | Outbound workflows are repetitive but require personalization — the balance where governed AI delivery performs best |
+`docs/providers.md` is the public contract for model access. It must distinguish:
 
-These are best-fit entry points, not exclusions. CoWork OS works across many workflows; these three have the most predictable buyer, measurable outcome, and vendor-swap-friendly structure.
+1. Supported account or subscription routes.
+2. Direct API-key routes.
+3. Compatible gateways and cloud credentials.
+4. Local inference.
+5. Delegated external agent runtimes.
 
-For the full workflow narrative, see [Best-Fit Operational Workflows](best-fit-workflows.md).
+Every marketed route needs a current smoke check for setup, model discovery, text response,
+streaming, tool use where supported, refresh or expiry behavior, logout/disconnect, and
+clear entitlement/billing errors.
 
-## GTM Assets in This Repo
+## Comparison Evidence Policy
 
-- [OpenClaw Alternative Guide](openclaw-comparison.md)
-- [Migration Guide](migration.md#from-openclaw-to-cowork-os)
-- [Competitive Landscape Research](competitive-landscape-research.md)
+Comparison pages must use official sources and record:
+
+- Product and version or release channel.
+- Claim being made.
+- Source URL.
+- Verification date.
+- Stable, experimental, beta, or planned status.
+- Review owner and next review date.
+
+Use “alternative” for proprietary or single-vendor products. Use neutral “vs” language for
+open-source peers such as Codex, OpenCode, OpenClaw, and Hermes.
+
+## Acquisition Surfaces
+
+All high-signal surfaces must share the same hierarchy:
+
+1. Website hero and social preview.
+2. README and npm description.
+3. Documentation homepage and metadata.
+4. First-run onboarding.
+5. AI & Models / Model Access settings.
+6. About & Updates.
+7. Comparison and migration pages.
+
+Historical changelog and release-note entries should remain historical. Apply this
+positioning to current summaries and the next release entry only.
+
+## Success Criteria
+
+The positioning is working when a new user can answer three questions after the first
+screen:
+
+1. What is CoWork OS? — A free, open-source AI super app for real work.
+2. Why is it different? — One open harness across supported model routes.
+3. What can I use with it? — Supported accounts, APIs, gateways, cloud credentials, and
+   local models, with provider terms and charges remaining separate.

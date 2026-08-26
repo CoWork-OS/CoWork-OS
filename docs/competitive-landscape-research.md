@@ -1,6 +1,8 @@
 # Competitive Landscape Research — CoWork OS
 ## Date: February 15, 2026
 
+> **Historical research snapshot.** Competitor features, pricing, and availability in this document are not maintained. Use the [source-backed comparison hub](comparisons/index.md) for current public positioning.
+
 ---
 
 ## 1. MARKET CONTEXT

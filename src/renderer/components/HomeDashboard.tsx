@@ -23,10 +23,13 @@ import type { FileViewerResult } from "../../electron/preload";
 import type {
   EverydayActionReceipt,
   EverydayAgentProfileResult,
+  LLMProviderInfo,
+  LLMProviderType,
   ProactiveSuggestion,
   Task,
   Workspace,
 } from "../../shared/types";
+import { getModelAccessDescriptor } from "../../shared/model-access";
 import {
   formatOutputLocationLabel,
   getFileName,
@@ -59,6 +62,9 @@ type HomeFilePreviewState =
 interface HomeDashboardProps {
   workspace: Workspace | null;
   tasks: Task[];
+  selectedProvider: LLMProviderType;
+  selectedModel: string;
+  providers: LLMProviderInfo[];
   onOpenTask: (taskId: string) => void;
   onCreateTask: (title: string, prompt: string) => void;
   onNewSession: () => void;
@@ -67,6 +73,7 @@ interface HomeDashboardProps {
   onOpenEverydayAgent: () => void;
   onOpenEventTriggers: () => void;
   onOpenSelfImprove: () => void;
+  onOpenModelSettings: () => void;
   automationInboxFocusTick?: number;
 }
 
@@ -405,6 +412,9 @@ function getAutomationTag(task: Task): string {
 export function HomeDashboard({
   workspace,
   tasks,
+  selectedProvider,
+  selectedModel,
+  providers,
   onOpenTask,
   onCreateTask,
   onNewSession,
@@ -413,6 +423,7 @@ export function HomeDashboard({
   onOpenEverydayAgent,
   onOpenEventTriggers,
   onOpenSelfImprove,
+  onOpenModelSettings,
   automationInboxFocusTick,
 }: HomeDashboardProps) {
   const AUTOMATION_VISIBLE_ROWS = 4;
@@ -433,6 +444,9 @@ export function HomeDashboard({
     useState<EverydayAgentHomeSnapshot | null>(null);
   const automationInboxRef = useRef<HTMLDivElement>(null);
   const currentWorkspaceName = workspace?.name || "Workspace";
+  const selectedProviderName =
+    providers.find((provider) => provider.type === selectedProvider)?.name || selectedProvider;
+  const modelAccess = getModelAccessDescriptor(selectedProvider);
   const everydayAgentStatusText = everydayAgentSnapshot
     ? everydayAgentSnapshot.status === "enabled"
       ? everydayAgentSnapshot.attentionCount > 0 || everydayAgentSnapshot.suggestionCount > 0
@@ -880,6 +894,19 @@ export function HomeDashboard({
           <button type="button" className="home-new-task-btn" onClick={onNewSession}>
             <Plus size={20} strokeWidth={2.5} />
             <span>Start a new Task</span>
+          </button>
+          <button
+            type="button"
+            className="home-model-access"
+            onClick={onOpenModelSettings}
+            aria-label={`Manage model access. Current route: ${selectedProviderName}, ${selectedModel}`}
+          >
+            <Bot size={16} />
+            <span className="home-model-access-copy">
+              <strong>{selectedProviderName}</strong>
+              <span>{selectedModel}</span>
+            </span>
+            <span className="home-model-access-kind">{modelAccess.label}</span>
           </button>
         </section>
 

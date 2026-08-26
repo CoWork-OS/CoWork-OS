@@ -1,0 +1,56 @@
+last_updated: 2026-08-27
+method: "Primary product documentation and official repositories; fit-based claims only."
+non_affiliation: "CoWork OS is not affiliated with the products listed here."
+
+products:
+  cowork_os:
+    sources:
+      - url: https://github.com/CoWork-OS/CoWork-OS
+        supports: open-source repository, product scope, license, runtime surfaces
+      - url: ../providers.md
+        supports: supported model-access routes and billing caveats
+  claude_code:
+    sources:
+      - url: https://docs.anthropic.com/en/docs/claude-code/getting-started
+        supports: Claude-native agentic coding workflow and access requirements
+  codex:
+    sources:
+      - url: https://learn.chatgpt.com/docs/open-source
+        supports: Codex CLI and open-source coding-agent surface
+      - url: https://learn.chatgpt.com/docs/auth
+        supports: Codex account and API authentication paths
+  cursor:
+    sources:
+      - url: https://www.cursor.com/
+        supports: AI code editor positioning
+      - url: https://prod.cursor.com/help/models-and-usage/api-keys
+        supports: selected bring-your-own API key paths and limitations
+  opencode:
+    sources:
+      - url: https://github.com/anomalyco/opencode
+        supports: open-source coding-agent positioning
+      - url: https://opencode.ai/docs/providers
+        supports: provider configuration breadth
+  chatgpt:
+    sources:
+      - url: https://chatgpt.com/
+        supports: hosted ChatGPT product
+      - url: https://learn.chatgpt.com/use-cases?category=integrations&task_type=workflow
+        supports: breadth of documented ChatGPT work use cases
+  claude_cowork:
+    sources:
+      - url: https://support.claude.com/en/articles/15520349-use-claude-cowork-on-web-desktop-and-mobile
+        supports: Claude Cowork availability and work capabilities
+  openclaw:
+    sources:
+      - url: https://docs.openclaw.ai/
+        supports: product and runtime documentation
+      - url: https://docs.openclaw.ai/concepts/model-providers
+        supports: model-provider configuration
+  hermes:
+    sources:
+      - url: https://github.com/hermes-agent-org/hermes
+        supports: open agent repository and runtime scope
+      - url: https://github.com/hermes-agent-org/hermes/blob/main/website/docs/integrations/providers.md
+        supports: provider integrations
+

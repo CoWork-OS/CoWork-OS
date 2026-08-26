@@ -15,6 +15,7 @@ import {
   getLlmModelReasoningEfforts,
   LLM_REASONING_EFFORT_OPTIONS,
 } from "../../../shared/llm-model-selection";
+import { getModelAccessDescriptor } from "../../../shared/model-access";
 import { Sparkles } from "lucide-react";
 import type { SettingsTab } from "./main-content-types";
 
@@ -100,6 +101,7 @@ export function ModelDropdown({
   const currentProviderLabel =
     configuredProviders.find((provider) => provider.type === selectedProvider)?.name ||
     selectedProvider;
+  const currentAccess = getModelAccessDescriptor(selectedProvider);
 
   const selectedReasoningEfforts =
     selectedModelInfo?.reasoningEfforts ||
@@ -212,8 +214,8 @@ export function ModelDropdown({
     >
       <button
         className={`${variant === "label" ? "model-label-subtle" : "model-selector"} ${isOpen ? "open" : ""}`}
-        title={`Model: ${selectedModelLabel}`}
-        aria-label={`Change model, currently ${selectedModelLabel}`}
+        title={`${currentProviderLabel}: ${selectedModelLabel} (${currentAccess.label})`}
+        aria-label={`Change model source, currently ${currentProviderLabel}, ${selectedModelLabel}`}
         aria-expanded={isOpen}
         onClick={() => {
           setIsOpen(!isOpen);
@@ -243,6 +245,8 @@ export function ModelDropdown({
             <path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
           </svg>
         )}
+        <span className="model-label-provider">{currentProviderLabel}</span>
+        <span className="model-label-separator" aria-hidden="true">·</span>
         <span className="model-label-text">{selectedModelLabel}</span>
         {effectiveReasoningEffort && (
           <span className="model-selector-effort">
@@ -366,7 +370,7 @@ export function ModelDropdown({
             </div>
             {otherProviders.length > 0 && (
               <div className="model-dropdown-section model-dropdown-other-providers">
-                <div className="model-dropdown-section-label">Other providers</div>
+                <div className="model-dropdown-section-label">Switch provider</div>
                 <div className="model-dropdown-provider-list">
                   {otherProviders.map((provider) => {
                     const isActive = activeProviderMenu === provider.type;
@@ -387,7 +391,12 @@ export function ModelDropdown({
                             void loadProviderModels(provider.type);
                           }}
                         >
-                          <span className="model-dropdown-item-name">{provider.name}</span>
+                          <span className="model-dropdown-provider-copy">
+                            <span className="model-dropdown-item-name">{provider.name}</span>
+                            <span className="model-dropdown-access-badge">
+                              {getModelAccessDescriptor(provider.type).label}
+                            </span>
+                          </span>
                           <svg
                             width="14"
                             height="14"
@@ -411,7 +420,7 @@ export function ModelDropdown({
                 className="model-dropdown-provider-btn"
                 onClick={handleOpenProviders}
               >
-                Model settings
+                Connect or manage model sources
               </button>
             </div>
           </div>

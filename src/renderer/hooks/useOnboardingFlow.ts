@@ -53,7 +53,7 @@ const SCRIPT = {
   greeting: [
     "Initializing...",
     "Systems online.",
-    "I can talk with you naturally, execute real work across tools, and remember how you like things done.",
+    "I'm your open-source AI super app: one workspace for tools, files, memory, agents, and automation.",
   ],
   ask_name: "Before we start, what should I call myself?",
   confirm_name: (name: string) =>
@@ -109,10 +109,11 @@ const SCRIPT = {
     "Great. I'll keep useful preferences and context, and you can edit or delete memory anytime.",
   confirm_memory_trust_off:
     "Understood. I'll keep memory fully off with no memory storage for now. You can enable it later in Settings > Memory.",
-  transition_setup: "Choose the AI model that should power me.",
+  transition_setup: "Now connect the AI access you want to use.",
   ollama_detected: (modelName: string) =>
     `I found ${modelName} running locally on your machine via Ollama. Want to use it?`,
-  llm_intro: "This engine drives my reasoning and task execution. Pick what fits you best.",
+  llm_intro:
+    "Accounts, APIs, gateways, cloud routes, and local models can power the same CoWork harness. Pick what fits you best.",
   llm_selected: (provider: string) => {
     const responses: Record<string, string> = {
       anthropic: "Claude. That's a good match for us.",
@@ -129,10 +130,10 @@ const SCRIPT = {
     };
     return responses[provider] || "Good choice.";
   },
-  llm_need_key: "To activate this provider, paste an API key from its dashboard.",
+  llm_need_key: "Enter the credential required by this model route.",
   chatgpt_signin: "Opening ChatGPT sign-in...",
   llm_testing: "Connecting...",
-  llm_success: "Connection confirmed. I'm ready to work with context.",
+  llm_success: "Connection confirmed. Your workspace is ready with this model route.",
   llm_error: "That didn't connect. Want to try another key?",
   recap_intro: (name: string) => `Quick recap${name ? `, ${name}` : ""}, before we begin.`,
   final_try_prompt: (name: string) =>

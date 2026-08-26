@@ -231,7 +231,7 @@ export function StructuredInputPromptCard({ request, onSubmit, onDismiss }: Stru
         {activeOtherSelected && (
           <textarea
             className="input-request-other"
-            placeholder="Tell Codex what to do differently..."
+            placeholder="Tell CoWork what to do differently..."
             value={otherTextByQuestion[activeQuestion.id] || ""}
             onChange={(event) =>
               setOtherTextByQuestion((prev) => ({

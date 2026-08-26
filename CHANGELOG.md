@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.52] - 2026-08-27
+
+### Changed
+
+- **Electron 44 desktop baseline**: upgraded and pinned the desktop runtime to Electron `44.0.0`, upgraded `@electron/rebuild` to `4.2.0` for ABI 149 recognition, retained the existing Windows x64 and Linux server targets, and verified the native SQLite and PTY load path.
+- **macOS 13 minimum**: dropped macOS 12 Monterey support. The app bundle declares `LSMinimumSystemVersion=13.0`, updater metadata declares Darwin `22.0.0`, the DMG identifies the macOS 13 requirement, and `0.5.51` is recorded as the final Monterey-compatible release.
+- **Release notes for 0.5.52**: see [Release Notes 0.5.52](docs/release-notes-0.5.52.md).
+
+### Fixed
+
+- **Unsupported update prevention**: update checks now expose platform compatibility, and npm, Git, and packaged update paths re-check support before download, installation, or restart. Monterey users receive a non-destructive `0.5.51` recovery command.
+- **Packaged updater sequencing**: packaged updates now call `checkForUpdates()` with automatic download disabled before explicitly downloading, so system-version metadata is evaluated before applying an artifact.
+- **Native notification fallback**: asynchronous operating-system notification delivery failures now fall back to the in-app notification overlay.
+- **Native dependency repair drift**: missing `better-sqlite3` repair now reads the declared dependency version from the active install root instead of using a stale hard-coded version.
+
 ## [0.5.51] - 2026-08-17
 
 ### Added
@@ -1615,6 +1630,7 @@ This release is the first recommended Windows install baseline for normal users 
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.5.52 | 2026-08-27 | Electron 44, macOS 13 minimum, compatibility-aware updates, packaging support-floor checks, notification fallback, and native repair hardening |
 | 0.5.51 | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery |
 | 0.5.50 | 2026-07-20 | GPT-5.6 subscription controls, Mixture of Agents, browser annotations, inline mail review, video analysis, governed memory writes, safer visible automation, session retention, and new connector/skill workflows |
 | 0.5.49 | 2026-06-08 | CoWork CLI, Browser Use Cloud, Codex Security workflows, automation outcomes, Usage Insights heatmaps, composer link chips, public adoption stats, and security hardening |
@@ -1648,7 +1664,8 @@ This release is the first recommended Windows install baseline for normal users 
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.51...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.52...HEAD
+[0.5.52]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.51...v0.5.52
 [0.5.51]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.50...v0.5.51
 [0.5.50]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.49...v0.5.50
 [0.5.49]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.48...v0.5.49

@@ -1,0 +1,8 @@
+{
+  "macos": {
+    "minimumProductVersion": "13.0",
+    "minimumDarwinVersion": "22.0.0",
+    "minimumLabel": "macOS 13 Ventura",
+    "lastMontereyCompatibleVersion": "0.5.51"
+  }
+}

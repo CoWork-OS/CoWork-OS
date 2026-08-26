@@ -6,6 +6,9 @@ const fs = require('fs');
 const {
   getRuntimeDependencyRepairArgs,
 } = require('../scripts/npm_install_mode.cjs');
+const {
+  getLauncherPlatformCompatibility,
+} = require('../scripts/platform-support.cjs');
 
 const packageDir = path.resolve(__dirname, '..');
 const packageJsonPath = path.join(packageDir, 'package.json');
@@ -13,6 +16,21 @@ const mainPath = path.join(packageDir, 'dist', 'electron', 'electron', 'main.js'
 const rendererIndexPath = path.join(packageDir, 'dist', 'renderer', 'index.html');
 const args = process.argv.slice(2);
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+function enforcePlatformSupport() {
+  let packageVersion = 'unknown';
+  try {
+    packageVersion = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).version;
+  } catch {
+    // The normal missing-package diagnostics below will handle an incomplete install.
+  }
+
+  const compatibility = getLauncherPlatformCompatibility({ targetVersion: packageVersion });
+  if (compatibility.supported) return;
+
+  console.error(`\n[cowork-os] Unsupported operating system\n${compatibility.message}\n`);
+  process.exit(1);
+}
 
 function mapSignalToCode(signal) {
   if (signal === 'SIGKILL') return 137;
@@ -40,6 +58,8 @@ function buildAppAndLaunch() {
     launchApp();
   });
 }
+
+enforcePlatformSupport();
 
 if (fs.existsSync(mainPath) && fs.existsSync(rendererIndexPath)) {
   prepareAndLaunchApp();

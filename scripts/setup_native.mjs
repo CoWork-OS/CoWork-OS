@@ -22,7 +22,6 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-const BETTER_SQLITE3_VERSION = "12.6.2";
 const NPM_CMD = process.platform === "win32" ? "npm.cmd" : "npm";
 const NPM_EXEC_PATH = (() => {
   const raw = process.env.npm_execpath;
@@ -80,6 +79,19 @@ function getInstallRootDir() {
 
   if (fs.existsSync(installRootPkg)) return installRoot;
   return process.cwd();
+}
+
+function getInstallRootDependencyVersion(installRootDir, packageName) {
+  try {
+    const installRootPackage = readJson(path.join(installRootDir, "package.json"));
+    const version =
+      installRootPackage.optionalDependencies?.[packageName] ??
+      installRootPackage.dependencies?.[packageName] ??
+      installRootPackage.devDependencies?.[packageName];
+    return typeof version === "string" && version.trim() ? version.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function spawnNpm(args, opts = {}) {
@@ -332,8 +344,19 @@ function ensureBetterSqlite3(env, installRootDir) {
     return { status: 0, signal: null };
   }
 
+  const betterSqlite3Version = getInstallRootDependencyVersion(
+    installRootDir,
+    "better-sqlite3",
+  );
+  if (!betterSqlite3Version) {
+    console.error(
+      `[cowork] better-sqlite3 is missing and its required version could not be read from ${path.join(installRootDir, "package.json")}.`,
+    );
+    return { status: 1, signal: null };
+  }
+
   console.log(
-    `[cowork] better-sqlite3 is missing; installing ${BETTER_SQLITE3_VERSION}...`
+    `[cowork] better-sqlite3 is missing; installing ${betterSqlite3Version}...`
   );
 
   if (installRootDir !== process.cwd()) {
@@ -349,7 +372,7 @@ function ensureBetterSqlite3(env, installRootDir) {
       "--foreground-scripts",
       ...getNpmInstallModeArgs(installRootDir),
       "--no-save",
-      `better-sqlite3@${BETTER_SQLITE3_VERSION}`,
+      `better-sqlite3@${betterSqlite3Version}`,
     ],
     { env, cwd: installRootDir }
   );
@@ -493,7 +516,7 @@ function main() {
       }`
     );
 
-    // 2) Rebuild the one native module against Electron's ABI.
+    // 2) Rebuild native modules against Electron's ABI.
     if (electronVersion) {
       if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
         console.log(

@@ -242,6 +242,7 @@ export async function runMontyCode(options: RunMontyOptions): Promise<MontyRunRe
       const m = new Monty(code, {
         scriptName,
         inputs: ["input"],
+        externalFunctions: Object.keys(externalFunctions),
         typeCheck: false,
       });
       dump = m.dump();

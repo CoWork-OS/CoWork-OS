@@ -208,8 +208,8 @@ features:
     details: Bundled legal practice packs expose upstream-style slash commands through CoWork's plugin-pack system. Legal workflow selections are editable before launch, and matter-heavy tasks can show structured main-view intake cards such as the dedicated demand-letter intake form.
   - title: Multitask Command
     details: `/multitask [N] <task>` starts a fresh collaborative run, splits the prompt into 2-8 lane-specific child tasks, respects the global task queue, and synthesizes the lane outputs through the existing team orchestration flow.
-  - title: Next Release 0.5.51
-    details: Opt-in Numbat agent security, bounded long-document analysis, long-session timeline stability, native System Voice TTS, WSL native framing, persistent UI density, and stronger browser/runtime recovery.
+  - title: Next Release 0.5.52
+    details: Electron 44 desktop runtime, macOS 13 Ventura minimum, compatibility-aware updates, explicit Monterey recovery guidance, packaged support-floor validation, and notification fallback recovery.
   - title: Inbox Agent
     details: Local-first email workspace with Classic and Today modes, AI triage, Ask Inbox sidebar chat with live agentic steps and hybrid evidence retrieval, `@Inbox` main-composer routing, manual reply/reply-all/forward, editable AI drafts, commitment queues, sender cleanup, attachment indexing, and resync-safe background sync.
   - title: Managed Devices

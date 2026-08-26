@@ -4981,6 +4981,7 @@ export interface UpdateAgentRoleRequest {
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
   soul?: string;
+  monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;
   operatorMandate?: string;
   allowedLoopTypes?: CompanyLoopType[];
@@ -8756,6 +8757,7 @@ export const BUILTIN_LLM_PROVIDER_TYPES = [
 export const CUSTOM_LLM_PROVIDER_TYPES = [
   "moonshot",
   "opencode",
+  "opencode-go",
   "google-vertex",
   "google-antigravity",
   "google-gemini-cli",
@@ -8815,6 +8817,8 @@ export const MULTI_LLM_PROVIDER_DISPLAY: Record<
   },
   moa: { name: "Mixture of Agents", icon: "\u{2699}\uFE0F", color: "#0f766e" },
   "nano-gpt": { name: "NanoGPT", icon: "\u{2728}", color: "#22c55e" },
+  opencode: { name: "OpenCode Zen", icon: "\u{1F517}", color: "#111827" },
+  "opencode-go": { name: "OpenCode Go", icon: "\u{1F517}", color: "#111827" },
 };
 
 export interface CachedModelInfo {
@@ -10108,6 +10112,12 @@ export interface UpdateInfo {
   releaseUrl?: string;
   publishedAt?: string;
   updateMode: UpdateMode;
+  supported: boolean;
+  minimumSystemVersion?: string;
+  minimumSystemLabel?: string;
+  lastCompatibleVersion?: string;
+  unsupportedReason?: string;
+  recoveryCommand?: string;
 }
 
 export interface UpdateProgress {

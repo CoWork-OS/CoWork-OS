@@ -40,10 +40,10 @@ import { DeepSeekProvider } from "./deepseek-provider";
 import { PiProvider } from "./pi-provider";
 import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider";
-import { OpenCodeGoProvider } from "./opencode-go-provider";
+import { OpenCodeProvider } from "./opencode-go-provider";
 import { MoaProvider, type ResolvedMoaSlot } from "./moa-provider";
 import { GitHubCopilotProvider } from "./github-copilot-provider";
-import { isOpenCodeGoBaseUrl } from "./opencode-go-routing";
+import { isOpenCodeBaseUrl } from "./opencode-go-routing";
 import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
 import {
   CUSTOM_PROVIDER_CATALOG,
@@ -518,8 +518,11 @@ function createCustomProvider(
     );
   }
 
-  if (resolvedType === "opencode" && isOpenCodeGoBaseUrl(baseUrl)) {
-    return new OpenCodeGoProvider({
+  if (
+    (resolvedType === "opencode" || resolvedType === "opencode-go") &&
+    isOpenCodeBaseUrl(baseUrl)
+  ) {
+    return new OpenCodeProvider({
       type: resolvedType,
       providerName: entry.name,
       apiKey,
@@ -2478,8 +2481,8 @@ export class LLMProviderFactory {
       case "openai-compatible": {
         const baseUrl =
           config.openaiCompatibleBaseUrl || "http://localhost:1234/v1";
-        const ProviderClass = isOpenCodeGoBaseUrl(baseUrl)
-          ? OpenCodeGoProvider
+        const ProviderClass = isOpenCodeBaseUrl(baseUrl)
+          ? OpenCodeProvider
           : OpenAICompatibleProvider;
         provider = new ProviderClass({
           type: "openai-compatible",
@@ -4737,22 +4740,35 @@ export class LLMProviderFactory {
       );
     }
 
-    const provider =
-      entry.compatibility === "anthropic"
-        ? new AnthropicCompatibleProvider({
-            type: resolvedProviderType,
-            providerName: entry.name,
-            apiKey,
-            baseUrl,
-            defaultModel: entry.defaultModel,
-          })
-        : new OpenAICompatibleProvider({
-            type: resolvedProviderType,
-            providerName: entry.name,
-            apiKey,
-            baseUrl,
-            defaultModel: entry.defaultModel,
-          });
+    let provider: AnthropicCompatibleProvider | OpenAICompatibleProvider | OpenCodeProvider;
+    if (
+      (resolvedProviderType === "opencode" || resolvedProviderType === "opencode-go") &&
+      isOpenCodeBaseUrl(baseUrl)
+    ) {
+      provider = new OpenCodeProvider({
+        type: resolvedProviderType,
+        providerName: entry.name,
+        apiKey,
+        baseUrl,
+        defaultModel: entry.defaultModel,
+      });
+    } else if (entry.compatibility === "anthropic") {
+      provider = new AnthropicCompatibleProvider({
+        type: resolvedProviderType,
+        providerName: entry.name,
+        apiKey,
+        baseUrl,
+        defaultModel: entry.defaultModel,
+      });
+    } else {
+      provider = new OpenAICompatibleProvider({
+        type: resolvedProviderType,
+        providerName: entry.name,
+        apiKey,
+        baseUrl,
+        defaultModel: entry.defaultModel,
+      });
+    }
 
     const models = await provider.getAvailableModels();
     const cachedModels = mergeCustomProviderModels(

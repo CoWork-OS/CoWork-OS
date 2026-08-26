@@ -1,5 +1,19 @@
 # Troubleshooting
 
+## CoWork OS says this macOS version is unsupported
+
+CoWork OS `0.5.52` and later use Electron 44 and require **macOS 13 Ventura or later**. macOS 12 Monterey cannot launch this runtime. `0.5.51` is the final Monterey-compatible CoWork OS release.
+
+If you installed through npm and must remain on Monterey, reinstall the compatible release:
+
+```bash
+npm install -g cowork-os@0.5.51
+```
+
+This changes the installed application version; it does not remove the CoWork database or other app data. Back up your normal app-data directory before any manual data migration, and do not delete it as an installation workaround.
+
+An **unsupported operating system** message is not a Gatekeeper/signing problem. Gatekeeper messages mention Apple verification, malware checking, or **Open Anyway**. The macOS version requirement cannot be bypassed with `xattr`, `codesign`, or Privacy & Security settings; upgrade macOS or use `0.5.51`.
+
 ## WSL/WSLg title bar or window controls look wrong
 
 When the Electron process is running on Linux under WSL, CoWork keeps the native window frame enabled and renders the in-app toolbar as a normal non-draggable row. Detection requires `process.platform === "linux"` plus either `WSL_DISTRO_NAME` or a kernel release containing `Microsoft`.
@@ -18,7 +32,7 @@ This is a best-effort WSL/WSLg compatibility path, not a claim of general Linux 
 
 ## macOS app won't launch with "Apple could not verify"
 
-CoWork OS macOS DMGs are currently unsigned. On first launch, macOS may show **"Apple could not verify CoWork OS is free of malware"** or **`"CoWork OS" was blocked to protect your Mac`**.
+On a supported macOS version, an unsigned CoWork OS DMG may show **"Apple could not verify CoWork OS is free of malware"** or **`"CoWork OS" was blocked to protect your Mac`** on first launch.
 
 Use the macOS Gatekeeper override:
 

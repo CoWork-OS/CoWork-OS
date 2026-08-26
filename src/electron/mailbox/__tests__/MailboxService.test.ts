@@ -1037,25 +1037,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("creates a follow-up task when a commitment is accepted and syncs done/dismissed states", async () => {
-    const workspaceId = "workspace-follow-up";
-    db.prepare(
-      `INSERT INTO workspaces
-        (id, name, path, created_at, last_used_at, permissions)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      workspaceId,
-      "Main Workspace",
-      "/tmp/main-workspace",
-      now,
-      now,
-      JSON.stringify({
-        read: true,
-        write: true,
-        delete: false,
-        network: true,
-        shell: false,
-      }),
-    );
+    const workspaceId = core.getDefaultCompany().defaultWorkspaceId!;
 
     const commitmentId = randomUUID();
     db.prepare(
@@ -1173,10 +1155,10 @@ describeWithSqlite("MailboxService", () => {
       now,
     );
 
-    const recentThreads = await service.listThreads({ sortBy: "recent" });
+    const recentThreads = await service.listThreads({ mailboxView: "all", sortBy: "recent" });
     expect(recentThreads[0]?.id).toBe("gmail-thread:alpha");
 
-    const priorityThreads = await service.listThreads({ sortBy: "priority" });
+    const priorityThreads = await service.listThreads({ mailboxView: "all", sortBy: "priority" });
     expect(priorityThreads[0]?.id).toBe("gmail-thread:beta");
 
     const inboxThreads = await service.listThreads({ mailboxView: "inbox" });
@@ -2068,7 +2050,7 @@ describeWithSqlite("MailboxService", () => {
       expect(row.urgency_score).toBe(4);
       expect(row.classification_state).toBe("classified");
       expect(row.classification_model_key).toBe("gpt-4o-mini");
-      expect(row.classification_prompt_version).toBe("v1");
+      expect(row.classification_prompt_version).toBe("v3");
       expect(row.classification_confidence).toBeGreaterThan(0.9);
       expect(row.classification_fingerprint).toBeTruthy();
       expect(row.classification_json).toContain("transactional");
@@ -2305,7 +2287,7 @@ describeWithSqlite("MailboxService", () => {
         "gmail:test@example.com",
         "test@example.com",
         {
-          id: "gmail-thread:alpha",
+          id: "alpha",
           messages: [
             {
               id: "gmail-thread:alpha-message",
@@ -2341,7 +2323,7 @@ describeWithSqlite("MailboxService", () => {
         "gmail:test@example.com",
         "test@example.com",
         {
-          id: "gmail-thread:beta",
+          id: "beta",
           messages: [
             {
               id: "gmail-thread:beta-message",
@@ -2383,7 +2365,7 @@ describeWithSqlite("MailboxService", () => {
 
       expect(row.classification_state).toBe("classified");
       expect(row.classification_model_key).toBe("gpt-4o-mini");
-      expect(row.classification_prompt_version).toBe("v1");
+      expect(row.classification_prompt_version).toBe("v3");
       expect(row.category).toBe("updates");
       expect(row.needs_reply).toBe(0);
     } finally {
@@ -2395,6 +2377,7 @@ describeWithSqlite("MailboxService", () => {
     const { GoogleWorkspaceSettingsManager } = await import("../../settings/google-workspace-manager");
     const loadSettingsSpy = vi.spyOn(GoogleWorkspaceSettingsManager, "loadSettings").mockReturnValue({
       enabled: true,
+      accessToken: "token",
       timeoutMs: 20_000,
     } as never);
     const syncGmailSpy = vi.spyOn(service as Any, "syncGmail").mockResolvedValue({
@@ -2552,7 +2535,14 @@ describeWithSqlite("MailboxService", () => {
     const operator =
       agentRoleRepo.findByCompanyId(company.id, false).find((role) =>
         /customer ops|founder office|growth|planner/i.test(role.displayName),
-      ) || agentRoleRepo.findByCompanyId(company.id, false)[0];
+      ) ||
+      agentRoleRepo.findByCompanyId(company.id, false)[0] ||
+      agentRoleRepo.create({
+        name: `mailbox-operator-${company.id.slice(0, 8)}`,
+        displayName: "Customer Ops Operator",
+        companyId: company.id,
+        capabilities: ["communicate", "manage"],
+      });
 
     expect(operator).toBeTruthy();
 
@@ -2815,7 +2805,7 @@ describeWithSqlite("MailboxService", () => {
     });
     expect(linkedSignalHandle).toBeTruthy();
 
-    const replyTargets = service.getReplyTargets(resolution?.identity?.id || "");
+    const replyTargets = await service.getReplyTargets("gmail-thread:alpha");
     expect(replyTargets.some((target) => target.channelType === "signal")).toBe(true);
     expect(replyTargets.find((target) => target.channelType === "signal")?.chatId).toBe("signal-chat-1");
 
@@ -2970,18 +2960,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("hides threads from the main inbox when a saved view opts out, unless also linked to a show-in-inbox view", async () => {
-    const workspaceId = "workspace-sv-inbox-filter";
-    db.prepare(
-      `INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      workspaceId,
-      "Main",
-      "/tmp/ws-sv-inbox-filter",
-      now,
-      now,
-      JSON.stringify({ read: true, write: true, delete: false, network: true, shell: false }),
-    );
+    const workspaceId = core.getDefaultCompany().defaultWorkspaceId!;
 
     const viewHide = randomUUID();
     db.prepare(
@@ -3011,18 +2990,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("keeps inbox counts aligned with hide-only saved view filtering", async () => {
-    const workspaceId = "workspace-sv-counts";
-    db.prepare(
-      `INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      workspaceId,
-      "Main",
-      "/tmp/ws-sv-counts",
-      now,
-      now,
-      JSON.stringify({ read: true, write: true, delete: false, network: true, shell: false }),
-    );
+    const workspaceId = core.getDefaultCompany().defaultWorkspaceId!;
 
     const hiddenViewId = randomUUID();
     db.prepare(

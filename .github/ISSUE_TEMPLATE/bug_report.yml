@@ -49,11 +49,26 @@ body:
     attributes:
       label: Operating System
       options:
+        - macOS 26 (Tahoe)
         - macOS 15 (Sequoia)
         - macOS 14 (Sonoma)
         - macOS 13 (Ventura)
-        - macOS 12 (Monterey)
-        - Other (please specify in description)
+        - Older macOS (unsupported by 0.5.52+; specify version)
+        - Windows 11
+        - Windows 10
+        - Other (specify in description)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation Method
+      options:
+        - GitHub DMG / installer
+        - npm global install
+        - Source checkout
+        - Other / Unknown
     validations:
       required: true
 

@@ -1206,11 +1206,14 @@ export class TrayManager {
       message: body,
       taskId,
     };
-    if (NativeNotificationCenter.getInstance().show(notification)) {
+    const showOverlayFallback = () => {
+      NotificationOverlayManager.getInstance().show(notification);
+    };
+    if (NativeNotificationCenter.getInstance().show(notification, showOverlayFallback)) {
       return;
     }
 
-    NotificationOverlayManager.getInstance().show(notification);
+    showOverlayFallback();
   }
 
   /**

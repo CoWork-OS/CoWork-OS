@@ -259,10 +259,16 @@ describeWithSqlite("StrategicPlannerService", () => {
   it("uses the control-plane workspace link tool instructions for project workspace issues", async () => {
     const workspace = insertWorkspace();
     const company = core.getDefaultCompany();
-    core.createProject({
+    const project = core.createProject({
       companyId: company.id,
       name: "Docs Workspace Mapping",
     });
+    for (const link of core.listProjectWorkspaces(project.id)) {
+      core.unlinkProjectWorkspace(project.id, link.workspaceId);
+    }
+    // Exercise the legacy/migrated state where neither the project nor its
+    // company has a workspace available for planner dispatch.
+    db.prepare("UPDATE companies SET default_workspace_id = NULL WHERE id = ?").run(company.id);
 
     const plannerAgent =
       agentRoleRepo.findByName("project_manager") ||

@@ -1617,10 +1617,6 @@ export class DatabaseManager {
         ON tasks(workspace_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_tasks_created_at
         ON tasks(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_tasks_workspace_completed_at
-        ON tasks(workspace_id, completed_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_tasks_completed_at
-        ON tasks(completed_at DESC);
       CREATE INDEX IF NOT EXISTS idx_task_session_metadata_archived
         ON task_session_metadata(archived_at);
       CREATE INDEX IF NOT EXISTS idx_hook_sessions_task ON hook_sessions(task_id);
@@ -2892,6 +2888,7 @@ export class DatabaseManager {
 
     // Migration: Add strategy routing + execution result metadata columns to tasks table
     const strategyAndResultColumns = [
+      "ALTER TABLE tasks ADD COLUMN completed_at INTEGER",
       "ALTER TABLE tasks ADD COLUMN raw_prompt TEXT",
       "ALTER TABLE tasks ADD COLUMN strategy_lock INTEGER DEFAULT 0",
       "ALTER TABLE tasks ADD COLUMN budget_profile TEXT",
@@ -3242,7 +3239,9 @@ export class DatabaseManager {
           suppression_policy TEXT,
           max_autonomous_outputs_per_cycle INTEGER DEFAULT 1,
           last_useful_output_at INTEGER,
-          operator_health_score REAL
+          operator_health_score REAL,
+          monthly_budget_cost REAL,
+          auto_paused_at INTEGER
         );
 
         CREATE INDEX IF NOT EXISTS idx_agent_roles_active ON agent_roles(is_active);
@@ -3251,6 +3250,28 @@ export class DatabaseManager {
       `);
     } catch {
       // Table already exists, ignore
+    }
+
+    for (const sql of [
+      "ALTER TABLE agent_roles ADD COLUMN monthly_budget_cost REAL",
+      "ALTER TABLE agent_roles ADD COLUMN auto_paused_at INTEGER",
+    ]) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, ignore.
+      }
+    }
+
+    try {
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tasks_workspace_completed_at
+          ON tasks(workspace_id, completed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_tasks_completed_at
+          ON tasks(completed_at DESC);
+      `);
+    } catch {
+      // A partially corrupt legacy table can retry after its schema is repaired.
     }
 
     // Migration: Add assigned_agent_role_id to tasks table
@@ -4741,29 +4762,10 @@ export class DatabaseManager {
       // Table already exists
     }
 
-    try {
-      this.db.exec(`
-        CREATE TRIGGER IF NOT EXISTS prevent_automation_profile_delete_with_core_history
-        BEFORE DELETE ON automation_profiles
-        FOR EACH ROW
-        WHEN EXISTS (SELECT 1 FROM core_traces WHERE profile_id = OLD.id LIMIT 1)
-          OR EXISTS (SELECT 1 FROM core_memory_candidates WHERE profile_id = OLD.id LIMIT 1)
-          OR EXISTS (SELECT 1 FROM core_memory_distill_runs WHERE profile_id = OLD.id LIMIT 1)
-          OR EXISTS (SELECT 1 FROM core_failure_records WHERE profile_id = OLD.id LIMIT 1)
-          OR EXISTS (SELECT 1 FROM core_failure_clusters WHERE profile_id = OLD.id LIMIT 1)
-          OR EXISTS (SELECT 1 FROM core_eval_cases WHERE profile_id = OLD.id LIMIT 1)
-          OR EXISTS (SELECT 1 FROM core_harness_experiments WHERE profile_id = OLD.id LIMIT 1)
-          OR EXISTS (SELECT 1 FROM core_learnings_log WHERE profile_id = OLD.id LIMIT 1)
-        BEGIN
-          SELECT RAISE(ABORT, 'Cannot delete automation profile with preserved core history');
-        END;
-      `);
-    } catch (error) {
-      schemaLogger.warn(
-        "[DatabaseManager] Failed to install automation profile delete guard:",
-        error,
-      );
-    }
+    // Older builds could install this trigger before its referenced core tables
+    // existed. SQLite then rejects unrelated ALTER TABLE operations while
+    // validating the broken trigger. Reinstall it after the core schema exists.
+    this.db.exec("DROP TRIGGER IF EXISTS prevent_automation_profile_delete_with_core_history");
 
     try {
       this.db.exec(`
@@ -5390,6 +5392,30 @@ export class DatabaseManager {
       `);
     } catch {
       // Table already exists
+    }
+
+    try {
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS prevent_automation_profile_delete_with_core_history
+        BEFORE DELETE ON automation_profiles
+        FOR EACH ROW
+        WHEN EXISTS (SELECT 1 FROM core_traces WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_memory_candidates WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_memory_distill_runs WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_failure_records WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_failure_clusters WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_eval_cases WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_harness_experiments WHERE profile_id = OLD.id LIMIT 1)
+          OR EXISTS (SELECT 1 FROM core_learnings_log WHERE profile_id = OLD.id LIMIT 1)
+        BEGIN
+          SELECT RAISE(ABORT, 'Cannot delete automation profile with preserved core history');
+        END;
+      `);
+    } catch (error) {
+      schemaLogger.warn(
+        "[DatabaseManager] Failed to install automation profile delete guard:",
+        error,
+      );
     }
 
     try {

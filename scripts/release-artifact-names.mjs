@@ -1,6 +1,12 @@
 import fs from "fs/promises";
 import path from "path";
 
+const ROOT = path.resolve(import.meta.dirname, "..");
+const packageJson = JSON.parse(await fs.readFile(path.join(ROOT, "package.json"), "utf8"));
+const platformSupport = JSON.parse(
+  await fs.readFile(path.join(ROOT, "src", "shared", "platform-support.json"), "utf8"),
+);
+
 const args = process.argv.slice(2);
 const checkOnly = args.includes("--check");
 const dirFlagIndex = args.indexOf("--dir");
@@ -70,6 +76,33 @@ async function renameIfNeeded(fromName, toName) {
   return true;
 }
 
+async function alignMacPlatformMetadata(metadataPath) {
+  const minimumDarwinVersion = platformSupport.macos.minimumDarwinVersion;
+  let content = await fs.readFile(metadataPath, "utf8");
+  const match = /^minimumSystemVersion:\s*(.+)$/m.exec(content);
+  const currentValue = match?.[1]?.trim();
+
+  if (currentValue === minimumDarwinVersion) return;
+  if (checkOnly) {
+    throw new Error(
+      `latest-mac.yml minimumSystemVersion must be ${minimumDarwinVersion}, found ${currentValue || "missing"}.`,
+    );
+  }
+
+  if (match) {
+    content = content.replace(
+      /^minimumSystemVersion:\s*.+$/m,
+      `minimumSystemVersion: ${minimumDarwinVersion}`,
+    );
+  } else {
+    const versionLine = /^version:\s*.+$/m;
+    content = versionLine.test(content)
+      ? content.replace(versionLine, (line) => `${line}\nminimumSystemVersion: ${minimumDarwinVersion}`)
+      : `minimumSystemVersion: ${minimumDarwinVersion}\n${content}`;
+  }
+  await fs.writeFile(metadataPath, content, "utf8");
+}
+
 async function alignEntry(entry, allFiles) {
   const desiredName = entry.name;
   const existing = allFiles.find((file) => file.name === desiredName);
@@ -111,6 +144,13 @@ async function alignEntry(entry, allFiles) {
 }
 
 async function main() {
+  const configuredMinimum = packageJson.build?.mac?.minimumSystemVersion;
+  if (configuredMinimum !== platformSupport.macos.minimumProductVersion) {
+    throw new Error(
+      `package.json build.mac.minimumSystemVersion must match platform policy ${platformSupport.macos.minimumProductVersion}.`,
+    );
+  }
+
   const metadataFiles = ["latest.yml", "latest-mac.yml"];
   const existingMetadataFiles = [];
 
@@ -130,6 +170,9 @@ async function main() {
   }
 
   for (const metadataPath of existingMetadataFiles) {
+    if (path.basename(metadataPath) === "latest-mac.yml") {
+      await alignMacPlatformMetadata(metadataPath);
+    }
     const entries = await readMetadataEntries(metadataPath);
     let files = await listReleaseFiles();
     for (const entry of entries) {

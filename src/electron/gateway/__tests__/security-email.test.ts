@@ -1,7 +1,15 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../../utils/safe-storage", () => ({
+  getSafeStorage: () => ({
+    isEncryptionAvailable: () => true,
+    encryptString: (value: string) => Buffer.from(value, "utf8"),
+    decryptString: (value: Buffer) => value.toString("utf8"),
+  }),
+}));
 
 const nativeSqliteAvailable = await import("better-sqlite3")
   .then((module) => {

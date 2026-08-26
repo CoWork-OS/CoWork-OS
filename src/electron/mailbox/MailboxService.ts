@@ -990,7 +990,8 @@ function stripHtml(html: string): string {
     .replace(/&apos;/gi, "'")
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
     .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/\s+\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
@@ -1646,7 +1647,7 @@ function mailboxClassificationFallback(
         "other",
       ),
       needsReply: false,
-      priorityScore: clampScore(snapshot.unreadCount > 0 ? 25 : 5),
+      priorityScore: clampScore(snapshot.unreadCount > 0 ? 15 : 5),
       urgencyScore: clampScore(snapshot.unreadCount > 0 ? 10 : 0),
       cleanupCandidate: false,
       handled: snapshot.unreadCount === 0,
@@ -1657,7 +1658,7 @@ function mailboxClassificationFallback(
       "other",
     ),
     needsReply: false,
-    priorityScore: clampScore(snapshot.unreadCount > 0 ? 25 : 5),
+    priorityScore: clampScore(snapshot.unreadCount > 0 ? 15 : 5),
     urgencyScore: clampScore(snapshot.unreadCount > 0 ? 10 : 0),
     staleFollowup: false,
     cleanupCandidate: false,
@@ -3302,8 +3303,8 @@ export class MailboxService {
       return { usedLlm: false };
     }
     const workspaceId = this.resolveDefaultWorkspaceId() || "";
-    const provider = LLMProviderFactory.createProvider();
     try {
+      const provider = LLMProviderFactory.createProvider();
       const evidence = await Promise.all(
         results.slice(0, 8).map(async (result) => {
           const detail = await this.getThread(result.thread.id);
@@ -3373,7 +3374,7 @@ export class MailboxService {
           workspaceId,
           sourceKind: "mailbox_ask",
           sourceId: query.slice(0, 120),
-          providerType: provider.type,
+          providerType: modelSelection.providerType,
           modelKey: modelSelection.modelKey,
           modelId: modelSelection.modelId,
         },
@@ -3389,7 +3390,7 @@ export class MailboxService {
           workspaceId,
           sourceKind: "mailbox_ask",
           sourceId: query.slice(0, 120),
-          providerType: provider.type,
+          providerType: modelSelection.providerType,
           modelKey: modelSelection.modelKey,
           modelId: modelSelection.modelId,
         },
@@ -3735,9 +3736,9 @@ export class MailboxService {
       return fallback;
     }
 
-    const provider = LLMProviderFactory.createProvider();
     const workspaceId = this.resolveDefaultWorkspaceId() || "";
     try {
+      const provider = LLMProviderFactory.createProvider();
       const response = await provider.createMessage({
         model: modelSelection.modelId,
         maxTokens: 320,
@@ -3786,7 +3787,7 @@ export class MailboxService {
           workspaceId,
           sourceKind: "mailbox_ask_action_plan",
           sourceId: query.slice(0, 120),
-          providerType: provider.type,
+          providerType: modelSelection.providerType,
           modelKey: modelSelection.modelKey,
           modelId: modelSelection.modelId,
         },
@@ -3803,7 +3804,7 @@ export class MailboxService {
           workspaceId,
           sourceKind: "mailbox_ask_action_plan",
           sourceId: query.slice(0, 120),
-          providerType: provider.type,
+          providerType: modelSelection.providerType,
           modelKey: modelSelection.modelKey,
           modelId: modelSelection.modelId,
         },
@@ -5979,6 +5980,9 @@ export class MailboxService {
   }
 
   async scheduleReply(threadId: string): Promise<{ threadId: string; suggestions: string[]; summary: string }> {
+    if (!(await this.summarizeThread(threadId))) {
+      throw new Error("Mailbox thread not found");
+    }
     const suggestion = await this.getScheduleSuggestion();
     this.upsertProposal({
       threadId,
@@ -8727,10 +8731,26 @@ export class MailboxService {
          WHERE email = ?`,
       )
       .get(email) as MailboxContactRow | undefined;
-    if (!row) return null;
+    const insights = this.getContactInsights(thread.account_id, email);
+    if (!row) {
+      const participant = parseJsonArray<MailboxParticipant>(thread.participants_json).find(Boolean);
+      return {
+        id: `contact:${email}`,
+        accountId: thread.account_id,
+        email,
+        name: participant?.name,
+        company: companyFromEmail(email),
+        crmLinks: [],
+        learnedFacts: [],
+        openCommitments: this.getCommitmentsForThread(threadId).filter(
+          (commitment) => commitment.state === "suggested" || commitment.state === "accepted",
+        ).length,
+        ...insights,
+      };
+    }
     return {
       ...this.mapContactRow(row),
-      ...this.getContactInsights(thread.account_id, email),
+      ...insights,
     };
   }
 
@@ -9066,7 +9086,7 @@ export class MailboxService {
           defaultWorkspaceId: company.defaultWorkspaceId,
         } satisfies MailboxCompanyCandidate;
       })
-      .filter((candidate) => candidate.confidence > 0.05)
+      .filter((candidate) => candidate.confidence >= 0.05)
       .sort((a, b) => b.confidence - a.confidence);
 
     return scored.slice(0, 5);

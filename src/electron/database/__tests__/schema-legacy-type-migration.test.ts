@@ -31,6 +31,16 @@ describeWithSqlite("DatabaseManager legacy_type migration", () => {
     const dbPath = path.join(tmpDir, "cowork-os.db");
     const db = new Database(dbPath);
     db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        status TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
       CREATE TABLE task_events (
         id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
@@ -87,6 +97,12 @@ describeWithSqlite("DatabaseManager legacy_type migration", () => {
       nested: { value: "y".repeat(300_000) },
     });
     const seedDb = new Database(dbPath);
+    seedDb
+      .prepare(
+        `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run("task-1", "Payload maintenance", "Sanitize event", "completed", "ws-1", Date.now(), Date.now());
     seedDb
       .prepare(
         `

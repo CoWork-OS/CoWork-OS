@@ -119,6 +119,8 @@ describeWithSqlite("SymphonyService", () => {
     const service = new SymphonyService({
       db,
       agentDaemon: {
+        on: vi.fn(),
+        off: vi.fn(),
         createTask: async (params: Any) => {
           const task = taskRepo.create({
             title: params.title,
@@ -172,6 +174,8 @@ describeWithSqlite("SymphonyService", () => {
     const service = new SymphonyService({
       db,
       agentDaemon: {
+        on: vi.fn(),
+        off: vi.fn(),
         createTask: async (params: Any) =>
           taskRepo.create({
             title: params.title,

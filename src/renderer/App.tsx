@@ -3651,6 +3651,16 @@ export function App() {
               );
               return appendRendererTaskEvents(prev, incomingEvents);
             });
+            if (isSelectedTask) {
+              const cachedTimeline = taskTimelineCacheRef.current.get(event.taskId);
+              if (cachedTimeline) {
+                const nextEvents = appendRendererTaskEvents(cachedTimeline.events, incomingEvents);
+                taskTimelineCacheRef.current.set(event.taskId, {
+                  ...cachedTimeline,
+                  events: nextEvents,
+                });
+              }
+            }
           };
           if (options?.transition) {
             startTransition(applyAppend);

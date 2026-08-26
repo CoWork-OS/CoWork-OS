@@ -17,6 +17,7 @@ function makeEvent(
     timestamp: overrides.timestamp,
     payload: overrides.payload ?? {},
     schemaVersion: overrides.schemaVersion ?? 2,
+    ...(overrides.eventId ? { eventId: overrides.eventId } : {}),
     ...(overrides.stepId ? { stepId: overrides.stepId } : {}),
     ...(overrides.groupId ? { groupId: overrides.groupId } : {}),
   };
@@ -135,6 +136,31 @@ describe("appendRendererTaskEvents", () => {
     });
     const updated = makeEvent({
       id: "evt-123",
+      taskId: "t1",
+      type: "assistant_message",
+      timestamp: 1,
+      payload: {
+        message: "Here is a draft.",
+        inlineFrames: [{ kind: "mail_compose", draftId: "d1" }],
+      },
+    });
+    const result = appendRendererTaskEvents([original], [updated]);
+    expect(result).toHaveLength(1);
+    expect((result[0].payload as Record<string, unknown>).inlineFrames).toBeDefined();
+  });
+
+  it("replaces existing events by eventId when the timeline envelope omits the database ID", () => {
+    const original = makeEvent({
+      id: "evt-123",
+      eventId: "timeline-123",
+      taskId: "t1",
+      type: "assistant_message",
+      timestamp: 1,
+      payload: { message: "Here is a draft." },
+    });
+    const updated = makeEvent({
+      id: "evt-123",
+      eventId: "timeline-123",
       taskId: "t1",
       type: "assistant_message",
       timestamp: 1,

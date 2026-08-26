@@ -30,7 +30,7 @@
   <a href="docs/terminal-tabs.md">Terminal Tabs</a> &middot;
   <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.51.md">Release Notes 0.5.51</a> &middot;
+  <a href="docs/release-notes-0.5.52.md">Release Notes 0.5.52</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -103,7 +103,7 @@ See [Everyday Agent](docs/everyday-agent.md), [Workflow Intelligence](docs/workf
 
 ### Latest Release
 
-**`0.5.51`** is the next release candidate. It adds opt-in Numbat agent security, bounded long-document analysis, bounded long-session timeline replay, native System Voice TTS, WSL native-frame support, persistent UI density, and stronger browser/runtime recovery. Start with [Release Notes 0.5.51](docs/release-notes-0.5.51.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
+**`0.5.52`** upgrades the desktop runtime to Electron 44 and raises the macOS minimum to **macOS 13 Ventura**. It also adds updater compatibility blocking, clearer npm recovery guidance, packaged artifact support-floor checks, and notification fallback recovery. macOS 12 Monterey users should remain on `0.5.51`. Start with [Release Notes 0.5.52](docs/release-notes-0.5.52.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
 
 The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox compose/send upgrades, runtime network/sandbox policy controls, Dreaming memory curation, and `/multitask` lane fan-out. See [Release Notes 0.5.45](docs/release-notes-0.5.45.md), [Managed Agents](docs/managed-agents.md), [Claude-for-Legal Workflows](docs/claude-for-legal.md), [Multitask Command](docs/multitask.md), and [Dreaming](docs/dreaming.md).
 
@@ -115,12 +115,14 @@ Download the latest release from [GitHub Releases](https://github.com/CoWork-OS/
 
 | Platform | Download | Install |
 |----------|----------|---------|
-| **macOS** | `.dmg` | Drag CoWork OS into Applications |
+| **macOS 13 Ventura or later** | `.dmg` | Drag CoWork OS into Applications |
 | **Windows** | `.exe` (NSIS installer) | Run the installer and follow the prompts |
+
+> **macOS 12 Monterey:** `0.5.51` is the final compatible CoWork OS release. The `0.5.52` app, installer, and automatic updater require macOS 13 or later. npm users who must remain on Monterey can run `npm install -g cowork-os@0.5.51`; this does not remove their existing CoWork data.
 
 #### macOS unsigned app workaround
 
-CoWork OS macOS DMGs are currently unsigned, so the first launch needs a one-time Gatekeeper override:
+This Gatekeeper warning is different from the macOS 13 system requirement. On a supported Mac, an unsigned CoWork OS DMG may still need a one-time Gatekeeper override:
 
 1. Open the downloaded `.dmg` and drag **CoWork OS** into **Applications**.
 
@@ -567,7 +569,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Beginner's Guide](docs/cowork-school.md) | Practical guide to what CoWork OS is for and which workflows to try first |
-| [Release Notes 0.5.51](docs/release-notes-0.5.51.md) | What is new in the upcoming release |
+| [Release Notes 0.5.52](docs/release-notes-0.5.52.md) | Electron 44 migration and macOS support changes |
 | [Composer Mentions](docs/composer-mentions.md) | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing |
 | [Message Box Shortcuts](docs/message-box-shortcuts.md) | `/` picker for deterministic app commands and skill-backed workflow shortcuts |
 | [Side Chat](docs/side-chat.md) | Right-side read-only questions about an active running session without steering or stopping the parent task |

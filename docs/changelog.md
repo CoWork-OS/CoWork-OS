@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.52] - 2026-08-27
+
+### Changed
+
+- **Release notes for 0.5.52**: see [Release Notes 0.5.52](release-notes-0.5.52.md).
+- Upgraded the desktop runtime to Electron `44.0.0` and raised the minimum supported Mac to macOS 13 Ventura.
+- Added a shared platform policy for the app bundle, updater metadata, npm launcher, documentation, and artifact smoke tests. `0.5.51` remains the final Monterey-compatible release.
+
+### Fixed
+
+- Blocked incompatible npm, Git, and packaged updates before mutation and added explicit rollback guidance.
+- Added in-app fallback when native notification delivery fails asynchronously.
+- Derived native SQLite repair versions from the active package manifest.
+
 ## [0.5.51] - 2026-08-17
 
 ### Added
@@ -1194,6 +1208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.5.52 | 2026-08-27 | Electron 44, macOS 13 minimum, compatibility-aware updates, packaging support-floor checks, notification fallback, and native repair hardening |
 | 0.5.51 | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery |
 | 0.5.50 | 2026-07-20 | GPT-5.6 subscription controls, Mixture of Agents, browser annotations, inline mail review, video analysis, governed memory writes, safer visible automation, session retention, and new connector/skill workflows |
 | 0.5.49 | 2026-06-08 | CoWork CLI, Browser Use Cloud, Codex Security workflows, automation outcomes, Usage Insights heatmaps, composer link chips, public adoption stats, and security hardening |
@@ -1222,7 +1237,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.51...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.52...HEAD
+[0.5.52]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.51...v0.5.52
 [0.5.51]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.50...v0.5.51
 [0.5.50]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.49...v0.5.50
 [0.5.49]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.48...v0.5.49

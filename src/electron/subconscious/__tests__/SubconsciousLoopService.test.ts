@@ -62,6 +62,27 @@ describeWithSqlite("SubconsciousLoopService", () => {
     }
   };
 
+  const insertAutomationProfile = (
+    agentRoleId: string,
+    options: { status?: string; lastHeartbeatAt?: number; pulseResult?: string } = {},
+  ) => {
+    const timestamp = Date.now();
+    db.prepare(
+      `INSERT INTO automation_profiles (
+        id, agent_role_id, enabled, heartbeat_status, last_heartbeat_at,
+        heartbeat_last_pulse_result, created_at, updated_at
+      ) VALUES (?, ?, 1, ?, ?, ?, ?, ?)`,
+    ).run(
+      `profile-${agentRoleId}`,
+      agentRoleId,
+      options.status || "idle",
+      options.lastHeartbeatAt || null,
+      options.pulseResult || null,
+      timestamp,
+      timestamp,
+    );
+  };
+
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-subconscious-"));
     previousUserDataDir = process.env.COWORK_USER_DATA_DIR;
@@ -118,7 +139,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("normalizes tasks, mailbox, heartbeat, scheduled jobs, triggers, briefing, and playbook signals into stable target refs", async () => {
+  it("normalizes tasks, mailbox, heartbeat, scheduled jobs, triggers, briefing, and playbook signals into stable target evidence", async () => {
     const workspace = insertWorkspace("alpha");
     initGitRepo(workspace.path, "https://github.com/CoWork-OS/CoWork-OS.git");
     const now = Date.now();
@@ -144,6 +165,11 @@ describeWithSqlite("SubconsciousLoopService", () => {
         id, name, display_name, capabilities, created_at, updated_at, heartbeat_enabled, last_heartbeat_at, heartbeat_status, heartbeat_last_pulse_result
       ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     ).run("role-1", "Researcher", "Researcher", "[]", now, now, now, "active", "Pulse landed");
+    insertAutomationProfile("role-1", {
+      status: "active",
+      lastHeartbeatAt: now,
+      pulseResult: "Pulse landed",
+    });
 
     db.prepare(
       `INSERT INTO heartbeat_runs (
@@ -192,19 +218,28 @@ describeWithSqlite("SubconsciousLoopService", () => {
     const targets = service.listTargets();
     const keys = new Set(targets.map((target) => target.key));
 
-    expect(result.targetCount).toBeGreaterThanOrEqual(8);
+    expect(result.targetCount).toBeGreaterThanOrEqual(4);
     expect([...keys]).toEqual(
       expect.arrayContaining([
         "global:brain",
         `workspace:${workspace.id}`,
         "code_workspace:github:CoWork-OS/CoWork-OS",
-        "mailbox_thread:thread-1",
         "agent_role:role-1",
-        "scheduled_task:job-1",
-        "event_trigger:trigger-1",
-        `briefing:${workspace.id}`,
       ]),
     );
+    const workspaceDetail = await service.getTargetDetail(`workspace:${workspace.id}`);
+    expect(workspaceDetail?.latestEvidence.map((item) => item.type)).toEqual(
+      expect.arrayContaining([
+        "task_signal",
+        "memory_playbook",
+        "mailbox_event",
+        "event_trigger",
+        "scheduled_task",
+        "briefing",
+      ]),
+    );
+    const roleDetail = await service.getTargetDetail("agent_role:role-1");
+    expect(roleDetail?.latestEvidence.map((item) => item.type)).toContain("heartbeat_signal");
   });
 
   it("deduplicates code targets by repo and prefers the canonical CoWork OS workspace root", async () => {
@@ -275,6 +310,10 @@ describeWithSqlite("SubconsciousLoopService", () => {
     const targetKey = `workspace:${workspace.id}`;
     const now = Date.now();
 
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+    await service.refreshTargets();
+
     for (const id of ["backlog-1", "backlog-2"]) {
       db.prepare(
         `INSERT INTO subconscious_backlog_items (
@@ -288,14 +327,11 @@ describeWithSqlite("SubconsciousLoopService", () => {
         "open",
         90,
         "task",
-        `run-${id}`,
+        null,
         now,
         now,
       );
     }
-
-    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
-    const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
 
     await service.refreshTargets();
 
@@ -362,6 +398,8 @@ describeWithSqlite("SubconsciousLoopService", () => {
       now,
       "active",
     );
+    insertAutomationProfile("operator-role", { status: "active", lastHeartbeatAt: now });
+    insertAutomationProfile("twin-role", { status: "active", lastHeartbeatAt: now });
 
     db.prepare(
       `INSERT INTO subconscious_targets (
@@ -429,7 +467,8 @@ describeWithSqlite("SubconsciousLoopService", () => {
 
     const run = await service.runNow("code_workspace:github:CoWork-OS/CoWork-OS");
     expect(run).not.toBeNull();
-    expect(createTask).toHaveBeenCalledTimes(1);
+    expect(createTask).not.toHaveBeenCalled();
+    expect(run?.dispatchKind).toBe("suggestion");
 
     const runRoot = path.join(
       workspace.path,
@@ -568,7 +607,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
 
     const firstRun = await first.runNow(targetKey);
     expect(firstRun).not.toBeNull();
-    expect(firstCreateTask).toHaveBeenCalledTimes(1);
+    expect(firstCreateTask).not.toHaveBeenCalled();
     first.stop();
 
     db.prepare("UPDATE subconscious_targets SET next_eligible_at = ? WHERE target_key = ?").run(
@@ -606,10 +645,11 @@ describeWithSqlite("SubconsciousLoopService", () => {
     const workspace = insertWorkspace("delta");
     const now = Date.now();
     db.prepare(
-      `INSERT INTO mailbox_events (
-        id, fingerprint, workspace_id, event_type, thread_id, provider, subject, summary_text, payload_json, created_at, last_seen_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(randomUUID(), "mailbox-fp", workspace.id, "message_received", "thread-2", "gmail", "Delta", "Follow up", "{}", now, now);
+      `INSERT INTO agent_roles (
+        id, name, display_name, capabilities, created_at, updated_at, role_kind, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("session-role", "session-role", "Session Role", "[]", now, now, "custom", 1);
+    insertAutomationProfile("session-role", { status: "active", lastHeartbeatAt: now });
 
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
     const first = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
@@ -620,7 +660,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
       durableTargetKinds: ["workspace"],
     });
     await first.refreshTargets();
-    expect(first.listTargets().some((target) => target.key === `mailbox_thread:thread-2`)).toBe(true);
+    expect(first.listTargets().some((target) => target.key === "agent_role:session-role")).toBe(true);
     first.stop();
 
     const second = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
@@ -633,10 +673,10 @@ describeWithSqlite("SubconsciousLoopService", () => {
     await second.start({} as unknown as import("../../agent/daemon").AgentDaemon);
 
     const targets = second.listTargets();
-    const mailbox = targets.find((target) => target.key === `mailbox_thread:thread-2`);
+    const role = targets.find((target) => target.key === "agent_role:session-role");
     const workspaceTarget = targets.find((target) => target.key === `workspace:${workspace.id}`);
 
-    expect(mailbox?.persistence).toBe("sessionOnly");
+    expect(role?.persistence).toBe("sessionOnly");
     expect(workspaceTarget?.persistence).toBe("durable");
     second.stop();
   });
@@ -647,6 +687,23 @@ describeWithSqlite("SubconsciousLoopService", () => {
     const staleTargetKey = `workspace:${staleWorkspace.id}`;
     const old = Date.now() - 5 * 24 * 60 * 60 * 1000;
     const now = Date.now();
+
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const service = new SubconsciousLoopService(db, { getGlobalRoot: () => freshWorkspace.path });
+    service.saveSettings({
+      ...DEFAULT_SUBCONSCIOUS_SETTINGS,
+      enabled: true,
+      autoRun: false,
+    });
+    await service.refreshTargets();
+
+    db.prepare(
+      `UPDATE subconscious_targets
+       SET health = 'watch', next_eligible_at = ?, last_observed_at = ?, last_action_at = ?,
+           last_meaningful_outcome = 'defer', last_run_at = ?, last_evidence_at = ?,
+           backlog_count = 1, evidence_fingerprint = 'stale-fingerprint', updated_at = ?
+       WHERE target_key = ?`,
+    ).run(old, old, old, old, old, old, staleTargetKey);
 
     db.prepare(
       `INSERT INTO subconscious_backlog_items (
@@ -660,44 +717,6 @@ describeWithSqlite("SubconsciousLoopService", () => {
       "open",
       90,
       "task",
-      "stale-run",
-      old,
-      old,
-    );
-
-    db.prepare(
-      `INSERT INTO subconscious_targets (
-        target_key, kind, workspace_id, ref_json, health, state, persistence, missed_run_policy,
-        next_eligible_at, last_observed_at, last_action_at, expires_at, jitter_ms, last_meaningful_outcome,
-        last_winner, last_run_at, last_evidence_at, backlog_count, evidence_fingerprint,
-        last_dispatch_kind, last_dispatch_status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      staleTargetKey,
-      "workspace",
-      staleWorkspace.id,
-      JSON.stringify({
-        key: staleTargetKey,
-        kind: "workspace",
-        workspaceId: staleWorkspace.id,
-        label: staleWorkspace.name,
-      }),
-      "watch",
-      "idle",
-      "durable",
-      "catchUp",
-      old,
-      old,
-      old,
-      null,
-      0,
-      "defer",
-      null,
-      old,
-      old,
-      1,
-      "stale-fingerprint",
-      null,
       null,
       old,
       old,
@@ -707,14 +726,6 @@ describeWithSqlite("SubconsciousLoopService", () => {
       `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run("fresh-task", "Investigate a new failure", "Investigate", "failed", freshWorkspace.id, now, now, "verification_failed");
-
-    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
-    const service = new SubconsciousLoopService(db, { getGlobalRoot: () => freshWorkspace.path });
-    service.saveSettings({
-      ...DEFAULT_SUBCONSCIOUS_SETTINGS,
-      enabled: true,
-      autoRun: false,
-    });
 
     await service.refreshTargets();
     const run = await service.runNow();

@@ -5,6 +5,7 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { BrowserService } from "../browser/browser-service";
 import {
+  BrowserUseApiError,
   BrowserUseCloudClient,
   BrowserUseCloudSettings,
   BrowserUseBrowserSession,
@@ -1438,7 +1439,7 @@ export class BrowserTools {
                   };
                 }
               }
-              if (retryable && attempt === 0) {
+              if (retryable && attempt === 0 && !(error instanceof BrowserUseApiError)) {
                 continue;
               }
               break;
@@ -1448,6 +1449,7 @@ export class BrowserTools {
             success: false,
             error: lastError instanceof Error ? lastError.message : String(lastError),
             browserProvider: "browser-use-cloud",
+            retryable: lastError instanceof BrowserUseApiError && lastError.retryable,
           };
         }
         let result;

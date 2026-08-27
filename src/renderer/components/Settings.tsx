@@ -1499,6 +1499,15 @@ export function Settings({
     Array<{ id: string; name: string; context_length: number }>
   >([]);
   const [loadingOpenRouterModels, setLoadingOpenRouterModels] = useState(false);
+  const [openrouterImageModels, setOpenrouterImageModels] = useState<
+    Array<{
+      id: string;
+      name: string;
+      description: string;
+      supported_parameters: Record<string, Any>;
+    }>
+  >([]);
+  const [loadingOpenRouterImageModels, setLoadingOpenRouterImageModels] = useState(false);
 
   // OpenAI state
   const [openaiApiKey, setOpenaiApiKey] = useState("");
@@ -1541,9 +1550,7 @@ export function Settings({
   const [imageGeminiApiKey, setImageGeminiApiKey] = useState("");
   const [imageGeminiModel, setImageGeminiModel] = useState<"nano-banana-2">("nano-banana-2");
   const [imageOpenRouterApiKey, setImageOpenRouterApiKey] = useState("");
-  const [imageOpenRouterBaseUrl, setImageOpenRouterBaseUrl] = useState(
-    "https://openrouter.ai/api/v1",
-  );
+  const [imageOpenRouterBaseUrl, setImageOpenRouterBaseUrl] = useState("");
   const [imageOpenRouterModel, setImageOpenRouterModel] = useState("openai/gpt-image-2");
   const [imageOpenAICodexModel, setImageOpenAICodexModel] = useState("gpt-image-2");
   const [imageOpenAITimeoutSeconds, setImageOpenAITimeoutSeconds] = useState("300");
@@ -2813,7 +2820,7 @@ export function Settings({
       setImageGeminiApiKey(ig?.gemini?.apiKey ?? "");
       setImageGeminiModel(ig?.gemini?.model ?? "nano-banana-2");
       setImageOpenRouterApiKey(ig?.openrouter?.apiKey ?? "");
-      setImageOpenRouterBaseUrl(ig?.openrouter?.baseUrl ?? "https://openrouter.ai/api/v1");
+      setImageOpenRouterBaseUrl(ig?.openrouter?.baseUrl ?? "");
       setImageOpenRouterModel(ig?.openrouter?.model ?? "openai/gpt-image-2");
       setImageOpenAICodexModel("gpt-image-2");
       setImageOpenAITimeoutSeconds(String(ig?.timeouts?.openai ?? 300));
@@ -2985,6 +2992,29 @@ export function Settings({
       setOpenrouterModels([]);
     } finally {
       setLoadingOpenRouterModels(false);
+    }
+  };
+
+  const loadOpenRouterImageModels = async (apiKey?: string) => {
+    try {
+      setLoadingOpenRouterImageModels(true);
+      const models = await window.electronAPI.getOpenRouterImageModels(
+        apiKey || imageOpenRouterApiKey || openrouterApiKey,
+        imageOpenRouterBaseUrl || openrouterBaseUrl || undefined,
+      );
+      setOpenrouterImageModels(models || []);
+      if (
+        models &&
+        models.length > 0 &&
+        !imageOpenRouterModel.trim()
+      ) {
+        setImageOpenRouterModel(models[0].id);
+      }
+    } catch (error) {
+      console.error("Failed to load OpenRouter image models:", error);
+      setOpenrouterImageModels([]);
+    } finally {
+      setLoadingOpenRouterImageModels(false);
     }
   };
 
@@ -4566,21 +4596,55 @@ export function Settings({
               value={imageOpenRouterBaseUrl}
               onChange={(e) => setImageOpenRouterBaseUrl(e.target.value)}
             />
+            <button
+              type="button"
+              className="button-small button-secondary"
+              style={{ marginTop: "8px" }}
+              onClick={() => loadOpenRouterImageModels()}
+              disabled={loadingOpenRouterImageModels}
+            >
+              {loadingOpenRouterImageModels ? "Loading..." : "Refresh Image Models"}
+            </button>
             <label className="settings-label">Default model</label>
-            <input
-              className="settings-input"
-              type="text"
-              placeholder="openai/gpt-image-2"
-              value={imageOpenRouterModel}
-              onChange={(e) => {
-                setImageOpenRouterModel(e.target.value);
-                setImageGenDefaultModel(
-                  e.target.value.toLowerCase().includes("gpt-image-2")
-                    ? "gpt-image-2"
-                    : "gpt-image-1.5",
-                );
-              }}
-            />
+            {openrouterImageModels.length > 0 ? (
+              <SearchableSelect
+                options={openrouterImageModels.map((model) => ({
+                  value: model.id,
+                  label: model.name,
+                  description: model.description || model.id,
+                }))}
+                value={imageOpenRouterModel}
+                onChange={(value) => {
+                  setImageOpenRouterModel(value);
+                  setImageGenDefaultModel(
+                    value.toLowerCase().includes("nano-banana")
+                      ? "nano-banana-2"
+                      : "gpt-image-2",
+                  );
+                }}
+                placeholder="Select an image model..."
+                allowCustomValue
+              />
+            ) : (
+              <input
+                className="settings-input"
+                type="text"
+                placeholder="meta/muse-image"
+                value={imageOpenRouterModel}
+                onChange={(e) => {
+                  setImageOpenRouterModel(e.target.value);
+                  setImageGenDefaultModel(
+                    e.target.value.toLowerCase().includes("nano-banana")
+                      ? "nano-banana-2"
+                      : "gpt-image-2",
+                  );
+                }}
+              />
+            )}
+            <p className="settings-hint">
+              Refresh to load every image-generation model currently available on OpenRouter,
+              including Meta Muse Image. Custom model IDs are also accepted.
+            </p>
             {renderImageTimeoutField(
               imageOpenRouterTimeoutSeconds,
               setImageOpenRouterTimeoutSeconds,

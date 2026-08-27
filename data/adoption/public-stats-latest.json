@@ -3584,6 +3584,14 @@
         "downloads": 1018,
         "start": "2026-07-26",
         "end": "2026-08-24"
+      },
+      "allTime": {
+        "period": "all-time",
+        "downloads": 7380,
+        "start": "2025-02-27",
+        "end": "2026-08-26",
+        "packageFirstPublished": "2026-02-01",
+        "coverage": "complete"
       }
     }
   },

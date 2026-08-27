@@ -2,20 +2,22 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: 'CoWork OS',
-  description: 'CoWork OS is a local-first, security-hardened desktop and CLI runtime for operating AI agents in production.',
+  description: 'CoWork OS is a free, open-source AI super app powered by a multi-provider agent harness for desktop, CLI, and headless work.',
   base: '/CoWork-OS/',
 
   ignoreDeadLinks: true,
 
   head: [
     ['meta', { name: 'theme-color', content: '#646cff' }],
-    ['meta', { name: 'description', content: 'CoWork OS helps teams run local-first AI workflows from desktop and CLI surfaces with approvals, guardrails, and multi-channel operations.' }],
-    ['meta', { name: 'keywords', content: 'local-first AI agent OS, AI CLI, approvals, guardrails, production AI workflows' }],
+    ['meta', { name: 'description', content: 'One app for the work. Your choice of AI. Bring supported accounts, APIs, gateways, or local models into an open AI super app for coding, knowledge work, artifacts, channels, and automation.' }],
+    ['meta', { name: 'keywords', content: 'AI super app, everything app, open-source agent harness, multi-provider AI, local AI, BYOK, AI CLI, model routing, approvals, automation' }],
   ],
 
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/getting-started' },
+      { text: 'Models & Access', link: '/providers' },
+      { text: 'Compare', link: '/comparisons/' },
       { text: 'CLI', link: '/cli' },
       { text: 'Platform Updates', link: '/integration-skill-bootstrap-lifecycle' },
       { text: 'Release Notes', link: '/release-notes-0.5.50' },
@@ -33,6 +35,15 @@ export default defineConfig({
           { text: 'CoWork CLI', link: '/cli' },
           { text: "Beginner's Guide", link: '/cowork-school' },
           { text: 'Platform Updates', link: '/integration-skill-bootstrap-lifecycle' },
+        ],
+      },
+      {
+        text: 'Models, Access & Comparison',
+        items: [
+          { text: 'Models & Access', link: '/providers' },
+          { text: 'Compare CoWork OS', link: '/comparisons/' },
+          { text: 'Migration Guide', link: '/migration' },
+          { text: 'OpenClaw Comparison', link: '/openclaw-comparison' },
         ],
       },
       {

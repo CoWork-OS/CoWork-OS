@@ -8,14 +8,14 @@ CoWork OS is a security-first, GUI-first, CLI-capable local AI super app and eve
 
 ---
 
-## From OpenClaw to CoWork OS (Alternative Path)
+## From OpenClaw
 
 If you're currently using OpenClaw, the migration is mostly an operating model shift:
 
 - OpenClaw is commonly used as an agent experimentation toolkit.
 - CoWork OS is designed as a GUI-first, CLI-capable production runtime with built-in approvals, guardrails, local-first controls, visual management for many agents, and a terminal entrypoint for local one-shot work.
 
-See also: [OpenClaw alternative guide](openclaw-comparison.md)
+See also: [CoWork OS vs OpenClaw](comparisons/openclaw.md)
 
 ### Practical Migration Plan
 
@@ -32,7 +32,7 @@ See also: [OpenClaw alternative guide](openclaw-comparison.md)
 | Operations | Desktop control plane plus headless runtime options |
 | Safety | Approval-gated destructive actions and configurable command blocking |
 | Governance | Token/cost/iteration guardrails per task |
-| Reach | Unified 14-channel gateway for multi-surface delivery |
+| Reach | Desktop, CLI, daemon, and messaging-channel delivery |
 | Privacy | Local-first storage, BYOK provider model, optional offline Ollama |
 
 ---
@@ -88,8 +88,8 @@ Moving to CoWork OS provides several advantages:
 
 | Feature | Benefit |
 |---------|---------|
-| **36 LLM provider options** | Built-in + compatible gateways with BYOK and supported subscription flexibility, including OpenRouter Pareto Code routing, Grok through xAI API key or SuperGrok OAuth, and Mixture of Agents presets |
-| **Local LLM support** | Run completely free and offline with Ollama |
+| **Dozens of model routes** | Built-in providers, compatible gateways, supported account connections, local runtimes, and Mixture of Agents presets |
+| **Local LLM support** | Run supported models locally with Ollama; model availability and hardware needs vary |
 | **Native desktop app** | Full desktop UX on macOS and Windows (menu bar on macOS, system tray on Windows) |
 | **GUI-first agent management** | Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through Agents Hub and Mission Control |
 | **Real-time timeline** | See exactly what the agent is doing |

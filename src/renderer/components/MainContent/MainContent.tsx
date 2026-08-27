@@ -7908,6 +7908,10 @@ function MainContentComponent({
               </div>
             )}
 
+            <p className="welcome-positioning modern-only">
+              Your AI super app, powered by the models you choose.
+            </p>
+
             <div className="terminal-only">
               <div className="welcome-logo">
                 <img

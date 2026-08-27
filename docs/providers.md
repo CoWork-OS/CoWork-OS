@@ -1,25 +1,52 @@
-# LLM Providers & Costs (BYOK)
+# Models & Access
 
-CoWork OS is **free and open source**. To run tasks, configure your own model credentials or use local models.
+CoWork OS is a **free, open-source AI super app powered by a multi-provider agent harness**.
+The app itself does not require a CoWork subscription. To run AI tasks, connect a supported
+provider account, API key, compatible gateway, cloud credential, or local model.
 
-> **First-run recommendation**: Start with **Sign in with ChatGPT** if you already have a ChatGPT subscription, or use a detected local Ollama model if one is installed. API-key providers, including OpenRouter, Claude, Gemini, Groq, and OpenAI API, are available in **Settings > AI & Models**. The onboarding provider picker marks OpenRouter, Gemini, and Groq with **Free** where a free usage path is available. You can explore the app without AI, but running tasks requires one connected and tested model route.
+> **Cost and eligibility:** CoWork does not proxy or resell model access. Provider eligibility,
+> plan limits, usage charges, and third-party-harness rules remain with each provider and can
+> change independently of CoWork.
+
+The surrounding CoWork workspace stays consistent when routes change: tools, skills, memory,
+agents, approvals, artifacts, automations, and task context belong to the CoWork harness.
+Individual models still differ in tool use, vision, reasoning, streaming, caching, and context
+limits.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-10.webp" alt="LLM provider settings" width="700">
   <br><em>Provider settings centralize built-in models, compatible gateways, authentication, and fallback routing.</em>
 </p>
 
-## Built-in Providers
+## Access Types
+
+### Supported accounts and subscriptions
+
+Account-based routes use provider-controlled authentication. They are not universal
+subscription compatibility, and an eligible plan does not guarantee that every request is
+included in a subscription allowance.
+
+### APIs, gateways, and cloud credentials
+
+Direct API routes are billed by the configured provider. Compatible endpoints and gateways
+let organizations use existing routing infrastructure while keeping the CoWork work surface.
+
+### Local models
+
+Ollama and Hugging Face local routes can keep inference on the machine. Cloud routes send
+prompts and authentication data to the configured provider as required to complete requests.
+
+## Built-in Model Routes
 
 | Provider | Configuration | Billing |
 |----------|---------------|---------|
-| Claude | Claude API key or Claude subscription token in Settings | API: pay-per-token; subscription: uses your Claude account |
+| Claude | Claude API key or supported account token in Settings | API or provider-controlled extra usage; verify current Anthropic terms |
 | Azure Anthropic | API key + endpoint + deployment in Settings | Pay-per-token via Azure |
 | Google Gemini | API key in Settings | Free usage available through Google AI Studio subject to Google's current limits; pay-per-token beyond free limits |
 | OpenRouter | API key in Settings (default provider) | Free model options available; pay-per-token for premium models |
 | DeepSeek | API key in Settings | Provider billing |
 | OpenAI (API Key) | API key in Settings | Pay-per-token |
-| OpenAI (ChatGPT OAuth) | Sign in with ChatGPT account | Uses your ChatGPT subscription |
+| OpenAI (ChatGPT OAuth) | Sign in with an eligible ChatGPT account | Provider-controlled plan eligibility and usage limits apply |
 | AWS Bedrock | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS |
 | Azure OpenAI | API key + endpoint in Settings | Pay-per-token via Azure |
 | Mixture of Agents | Presets composed from already-configured providers | No separate billing; each selected provider bills normally |
@@ -27,15 +54,16 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 | HuggingFace Local AI | Install `hf-agents` and run `llama.cpp` locally | **Free** (runs locally) |
 | Groq | API key in Settings | Free usage available subject to Groq's current limits; pay-per-token beyond free limits |
 | xAI (Grok API) | API key in Settings | Pay-per-token |
-| xAI Grok OAuth (SuperGrok Subscription) | Browser sign-in in Settings | Uses your active SuperGrok subscription |
+| xAI Grok OAuth | Browser sign-in in Settings | Experimental; provider authorization and plan eligibility apply |
 | Kimi (Moonshot) | API key in Settings | Pay-per-token |
 | Pi (Multi-LLM) | Unified API via pi-ai | Routes to multiple providers |
 
-## Compatible / Gateway Providers
+## Compatible, Gateway, and Additional Routes
 
 | Provider | Configuration | Billing |
 |----------|---------------|---------|
 | OpenCode Zen | API key + base URL in Settings | Provider billing |
+| OpenCode Go | API key or supported account token in Settings | Provider-controlled plan eligibility and usage limits apply |
 | Google Vertex | Access token + base URL in Settings | Provider billing |
 | Google Antigravity | Access token + base URL in Settings | Provider billing |
 | Google Gemini CLI | Access token + base URL in Settings | Provider billing |
@@ -44,7 +72,7 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 | Vercel AI Gateway | API key in Settings | Provider billing |
 | Cerebras | API key in Settings | Provider billing |
 | Mistral | API key in Settings | Provider billing |
-| GitHub Copilot | GitHub token in Settings | Subscription-based |
+| GitHub Copilot | GitHub token in Settings | Experimental; provider authorization and subscription eligibility apply |
 | Moonshot (Kimi) | API key in Settings | Provider billing |
 | Qwen Portal | API key in Settings | Provider billing |
 | MiniMax | API key in Settings | Provider billing |
@@ -57,7 +85,8 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 | OpenAI-Compatible (Custom) | API key + base URL in Settings | Provider billing |
 | Anthropic-Compatible (Custom) | API key + base URL in Settings | Provider billing |
 
-**Your usage is billed directly by your provider.** CoWork OS does not proxy or resell model access.
+**Your usage is billed directly by your provider.** CoWork OS does not proxy or resell model
+access or promise that a commercial provider includes third-party-harness usage in a plan.
 
 ---
 

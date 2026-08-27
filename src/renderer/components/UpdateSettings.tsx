@@ -20,11 +20,7 @@ interface UpdateProgress {
   message: string;
 }
 
-function ReleaseNotesLink({
-  href,
-  children,
-  ...props
-}: React.ComponentPropsWithoutRef<"a">) {
+function ReleaseNotesLink({ href, children, ...props }: React.ComponentPropsWithoutRef<"a">) {
   if (!href) {
     return <>{children}</>;
   }
@@ -129,6 +125,46 @@ export function UpdateSettings() {
   return (
     <div className="update-settings">
       <div className="settings-section">
+        <h3>About CoWork OS</h3>
+        <p className="settings-description">
+          CoWork OS is the free, open-source AI super app for real work. Its multi-provider agent
+          harness keeps tools, skills, memory, agents, approvals, artifacts, and workflows in one
+          workspace while you use supported accounts, APIs, gateways, cloud credentials, or local
+          models.
+        </p>
+        <p className="settings-description">
+          CoWork OS is MIT-licensed and does not require a CoWork subscription. Model eligibility,
+          limits, and usage charges remain with each provider.
+        </p>
+        <div className="update-actions">
+          <a
+            className="button-secondary"
+            href="https://github.com/CoWork-OS/CoWork-OS"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View source
+          </a>
+          <a
+            className="button-secondary"
+            href="https://github.com/CoWork-OS/CoWork-OS/tree/main/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Read documentation
+          </a>
+          <a
+            className="button-secondary"
+            href="https://github.com/CoWork-OS/CoWork-OS/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            MIT license
+          </a>
+        </div>
+      </div>
+
+      <div className="settings-section">
         <h3>Current Version</h3>
         <div className="version-info">
           <div className="version-number">v{versionInfo?.version || "Unknown"}</div>
@@ -205,9 +241,7 @@ export function UpdateSettings() {
                     <div className="release-notes-content markdown-content">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
-                        urlTransform={(url) =>
-                          transformReleaseNotesUrl(url, updateInfo.releaseUrl)
-                        }
+                        urlTransform={(url) => transformReleaseNotesUrl(url, updateInfo.releaseUrl)}
                         components={{ a: ReleaseNotesLink }}
                       >
                         {updateInfo.releaseNotes}

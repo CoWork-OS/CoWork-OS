@@ -1,10 +1,17 @@
-import type { LLMProviderType, LLMSettingsData, Workspace } from "./types";
+import { CUSTOM_PROVIDER_MAP } from "./llm-provider-catalog";
+import { getModelAccessDescriptor } from "./model-access";
+import {
+  LLM_PROVIDER_TYPES,
+  type LLMProviderType,
+  type LLMSettingsData,
+  type Workspace,
+} from "./types";
 
 export type FirstRunModelPath =
-  | "chatgpt_subscription"
-  | "local_ollama"
-  | "saved_provider"
-  | "api_key_provider"
+  | "account_or_subscription"
+  | "local_model"
+  | "gateway_or_cloud"
+  | "api_key"
   | "missing";
 
 export interface FirstRunReadiness {
@@ -40,7 +47,45 @@ function hasClaudeCredential(settings: LLMSettingsData): boolean {
   return hasText(settings.anthropic?.apiKey) || hasText(settings.anthropic?.subscriptionToken);
 }
 
-function hasConfiguredApiKeyProvider(settings: LLMSettingsData, providerType: LLMProviderType): boolean {
+function hasAccountCredential(settings: LLMSettingsData, providerType: LLMProviderType): boolean {
+  switch (providerType) {
+    case "openai":
+      return hasOpenAiOAuth(settings);
+    case "anthropic":
+      return (
+        hasText(settings.anthropic?.subscriptionToken) ||
+        (settings.anthropic?.authMethod === "subscription" &&
+          hasText(settings.anthropic?.apiKey)) ||
+        settings.anthropic?.apiKey?.includes("sk-ant-oat") === true
+      );
+    case "xai":
+    case "xai-oauth":
+      return (
+        settings.xai?.authMethod === "oauth" &&
+        hasText(settings.xai?.accessToken) &&
+        hasText(settings.xai?.refreshToken)
+      );
+    default:
+      return false;
+  }
+}
+
+function modelPathForProvider(
+  settings: LLMSettingsData,
+  providerType: LLMProviderType,
+): FirstRunModelPath {
+  if (hasAccountCredential(settings, providerType)) return "account_or_subscription";
+
+  const access = getModelAccessDescriptor(providerType);
+  if (access.group === "local") return "local_model";
+  if (access.group === "gateways") return "gateway_or_cloud";
+  return "api_key";
+}
+
+function hasConfiguredApiKeyProvider(
+  settings: LLMSettingsData,
+  providerType: LLMProviderType,
+): boolean {
   switch (providerType) {
     case "anthropic":
       return hasClaudeCredential(settings);
@@ -55,10 +100,11 @@ function hasConfiguredApiKeyProvider(settings: LLMSettingsData, providerType: LL
     case "groq":
       return hasText(settings.groq?.apiKey);
     case "xai":
-      return hasText(settings.xai?.apiKey) || (
-        settings.xai?.authMethod === "oauth" &&
-        hasText(settings.xai?.accessToken) &&
-        hasText(settings.xai?.refreshToken)
+      return (
+        hasText(settings.xai?.apiKey) ||
+        (settings.xai?.authMethod === "oauth" &&
+          hasText(settings.xai?.accessToken) &&
+          hasText(settings.xai?.refreshToken))
       );
     case "kimi":
       return hasText(settings.kimi?.apiKey);
@@ -69,15 +115,36 @@ function hasConfiguredApiKeyProvider(settings: LLMSettingsData, providerType: LL
     case "azure-anthropic":
       return hasText(settings.azureAnthropic?.apiKey) && hasText(settings.azureAnthropic?.endpoint);
     case "openai-compatible":
-      return hasText(settings.openaiCompatible?.baseUrl) && hasText(settings.openaiCompatible?.model);
+      return (
+        hasText(settings.openaiCompatible?.baseUrl) && hasText(settings.openaiCompatible?.model)
+      );
     case "bedrock":
       return Boolean(
         hasText(settings.bedrock?.accessKeyId) ||
-          hasText(settings.bedrock?.profile) ||
-          settings.bedrock?.useDefaultCredentials === true ||
-          hasText(settings.bedrock?.region),
+        hasText(settings.bedrock?.profile) ||
+        settings.bedrock?.useDefaultCredentials === true ||
+        hasText(settings.bedrock?.region),
       );
+    case "ollama":
+      return (
+        hasText(settings.ollama?.model) ||
+        (settings.providerType === "ollama" && hasText(settings.modelKey))
+      );
+    case "hf-agents": {
+      const config = settings.customProviders?.[providerType];
+      return hasText(config?.baseUrl) && hasText(config?.model);
+    }
     default:
+      if (CUSTOM_PROVIDER_MAP.has(providerType)) {
+        const config = settings.customProviders?.[providerType];
+        const catalogEntry = CUSTOM_PROVIDER_MAP.get(providerType);
+        return (
+          hasText(config?.apiKey) ||
+          (catalogEntry?.apiKeyOptional === true &&
+            hasText(config?.baseUrl) &&
+            hasText(config?.model))
+        );
+      }
       return false;
   }
 }
@@ -87,25 +154,25 @@ function getUsableProvider(settings: LLMSettingsData): {
   modelPath: FirstRunModelPath;
 } {
   if (hasOpenAiOAuth(settings)) {
-    return { providerType: "openai", modelPath: "chatgpt_subscription" };
+    return { providerType: "openai", modelPath: "account_or_subscription" };
   }
 
   if (
     settings.providerType === "ollama" &&
     (hasText(settings.ollama?.model) || hasText(settings.modelKey))
   ) {
-    return { providerType: "ollama", modelPath: "local_ollama" };
+    return { providerType: "ollama", modelPath: "local_model" };
   }
 
   const providerType = settings.providerType;
   if (providerType && hasConfiguredApiKeyProvider(settings, providerType)) {
     return {
       providerType,
-      modelPath: providerType === "bedrock" ? "saved_provider" : "api_key_provider",
+      modelPath: modelPathForProvider(settings, providerType),
     };
   }
 
-  const providerOrder: LLMProviderType[] = [
+  const preferredProviderOrder: LLMProviderType[] = [
     "anthropic",
     "openai",
     "gemini",
@@ -120,13 +187,17 @@ function getUsableProvider(settings: LLMSettingsData): {
     "openai-compatible",
     "bedrock",
   ];
+  const providerOrder = [
+    ...preferredProviderOrder,
+    ...LLM_PROVIDER_TYPES.filter((provider) => !preferredProviderOrder.includes(provider)),
+  ];
   const fallbackProvider = providerOrder.find((candidate) =>
     hasConfiguredApiKeyProvider(settings, candidate),
   );
   if (fallbackProvider) {
     return {
       providerType: fallbackProvider,
-      modelPath: fallbackProvider === "bedrock" ? "saved_provider" : "api_key_provider",
+      modelPath: modelPathForProvider(settings, fallbackProvider),
     };
   }
 
@@ -148,7 +219,7 @@ export function getFirstRunReadiness(
     providerType: selection.providerType,
     blockingReason: modelReady
       ? undefined
-      : "Connect ChatGPT, local Ollama, or an API key before running AI tasks.",
+      : "Connect a supported account, API or gateway, cloud credential, or local model before running AI tasks.",
   };
 }
 

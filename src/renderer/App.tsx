@@ -2481,6 +2481,15 @@ export function App() {
     return () => window.removeEventListener("open-settings", handler as EventListener);
   }, []);
 
+  useEffect(() => {
+    if (!window.electronAPI?.onTrayOpenAbout) return;
+    const unsubscribe = window.electronAPI.onTrayOpenAbout(() => {
+      setSettingsTab("updates");
+      setCurrentView("settings");
+    });
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, []);
+
   // Load appearance settings on mount
   useEffect(() => {
     const loadAppearanceSettings = async () => {
@@ -6070,6 +6079,9 @@ export function App() {
                 <HomeDashboard
                   workspace={currentWorkspace}
                   tasks={tasks}
+                  selectedProvider={selectedProvider}
+                  selectedModel={selectedModel}
+                  providers={availableProviders}
                   automationInboxFocusTick={homeAutomationFocusTick}
                   onOpenTask={(taskId) => {
                     setSelectedTaskId(taskId);
@@ -6093,6 +6105,10 @@ export function App() {
                   }}
                   onOpenSelfImprove={() => {
                     setSettingsTab("subconscious");
+                    setCurrentView("settings");
+                  }}
+                  onOpenModelSettings={() => {
+                    setSettingsTab("llm");
                     setCurrentView("settings");
                   }}
                   onCreateTask={handleCreateTask}
@@ -6194,7 +6210,13 @@ export function App() {
                   }}
                 />
               ) : currentView === "ideas" ? (
-                <IdeasPanel onCreateTaskFromPrompt={handleCreateTaskFromIdea} />
+                <IdeasPanel
+                  onCreateTaskFromPrompt={handleCreateTaskFromIdea}
+                  onOpenModelSettings={() => {
+                    setSettingsTab("llm");
+                    setCurrentView("settings");
+                  }}
+                />
               ) : currentView === "inboxAgent" ? (
                 <InboxAgentPanel
                   externalAskRequest={inboxAgentAskRequest}

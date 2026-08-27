@@ -4,6 +4,7 @@ import { useVoiceInput } from "../../hooks/useVoiceInput";
 import { AwakeningOrb } from "./AwakeningOrb";
 import { TypewriterText } from "./TypewriterText";
 import type { LLMProviderType } from "../../../shared/types";
+import { getModelAccessDescriptor } from "../../../shared/model-access";
 import { STARTER_MISSIONS } from "../../../shared/starter-missions";
 import {
   buildOnboardingWorkspaceSummary,
@@ -57,13 +58,12 @@ const PROVIDERS: {
   id: LLMProviderType;
   name: string;
   requiresKey: boolean;
-  badge?: string;
 }[] = [
-  { id: "openrouter", name: "OpenRouter", requiresKey: true, badge: "Free" },
+  { id: "openrouter", name: "OpenRouter", requiresKey: true },
   { id: "anthropic", name: "Claude", requiresKey: true },
   { id: "openai", name: "OpenAI", requiresKey: true },
-  { id: "gemini", name: "Gemini", requiresKey: true, badge: "Free" },
-  { id: "groq", name: "Groq", requiresKey: true, badge: "Free" },
+  { id: "gemini", name: "Gemini", requiresKey: true },
+  { id: "groq", name: "Groq", requiresKey: true },
   { id: "xai", name: "Grok", requiresKey: true },
   { id: "deepseek", name: "DeepSeek", requiresKey: true },
   { id: "kimi", name: "Kimi", requiresKey: true },
@@ -85,8 +85,9 @@ const PROVIDER_URLS: Record<string, string> = {
 };
 
 const CAPABILITY_PILLARS = [
-  "Natural conversation",
+  "Everything workspace",
   "Real task execution",
+  "One harness across your models",
   "Shared memory over time",
 ];
 
@@ -1269,6 +1270,11 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         : PROVIDERS.find((provider) => provider.id === onboarding.data.selectedProvider)?.name ||
           onboarding.data.selectedProvider
       : "Not configured yet";
+    const providerAccess = onboarding.data.selectedProvider
+      ? onboarding.data.selectedProvider === "openai" && !onboarding.data.apiKey
+        ? "Account sign-in"
+        : getModelAccessDescriptor(onboarding.data.selectedProvider).label
+      : "Connect later";
     const workStyleLabel =
       onboarding.data.workStyle === "planner"
         ? "Structured planning"
@@ -1313,14 +1319,15 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         <div className="onboarding-recap-hero">
           <div className="onboarding-recap-header">
             <span className="onboarding-recap-eyebrow">Ready to start</span>
-            <h2>
-              {providerName === "ChatGPT" ? "ChatGPT is connected." : "Your setup is ready."}
-            </h2>
+            <h2>Your AI super app is ready.</h2>
             <p>Review the essentials, tune anything that feels off, then start working.</p>
           </div>
-          <div className="onboarding-recap-provider-badge" aria-label={`Provider: ${providerName}`}>
+          <div
+            className="onboarding-recap-provider-badge"
+            aria-label={`Model access: ${providerName}, ${providerAccess}`}
+          >
             <span aria-hidden="true" />
-            {providerName}
+            {providerName} · {providerAccess}
           </div>
         </div>
 
@@ -1355,12 +1362,12 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
 
             <section className="onboarding-recap-card">
               <div className="onboarding-recap-card-copy">
-                <span className="onboarding-recap-row-label">AI provider</span>
+                <span className="onboarding-recap-row-label">Model access</span>
                 <strong>{providerName}</strong>
                 <p>
                   {onboarding.data.selectedProvider
-                    ? "Ready for reasoning and task execution."
-                    : "You can add a provider later in Settings."}
+                    ? `${providerAccess}. This route powers the same CoWork tools, memory, and workflows.`
+                    : "Connect an account, API, gateway, cloud route, or local model later in Settings."}
                 </p>
               </div>
               <div className="onboarding-recap-edit-actions">
@@ -1446,7 +1453,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
             <div className="onboarding-recap-optional">
               <div>
                 <span className="onboarding-recap-row-label">Optional personalization</span>
-                <p>Add more context now, or start with ChatGPT and fill this in later.</p>
+                <p>Add more context now, or start working and fill this in later.</p>
               </div>
               <div className="onboarding-recap-edit-actions">
                 {!hasWorkContext && renderEditButton("Add profile", "user_profile")}
@@ -1606,7 +1613,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         </div>
         <p className="onboarding-ollama-detection-model">{modelName}</p>
         <p className="onboarding-ollama-detection-note">
-          Local model — no API key needed, completely private.
+          Local model — no API key needed. Inference runs on this machine for the detected local endpoint.
         </p>
         <div className="onboarding-actions" style={{ marginTop: 20 }}>
           <button
@@ -1629,6 +1636,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
   // Render provider selection
   const renderProviders = () => (
     <div className={`onboarding-setup-section ${onboarding.showProviders ? "visible" : ""}`}>
+      <div className="onboarding-provider-heading">Subscriptions and sign-ins</div>
       <div className="onboarding-ai-primary-grid">
         <button
           type="button"
@@ -1640,9 +1648,12 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
             {onboarding.chatGptSignInLoading ? "Opening ChatGPT..." : "Sign in with ChatGPT"}
           </span>
           <span className="onboarding-ai-primary-copy">
-            Easiest if you already use ChatGPT. No API key required.
+            Use an eligible ChatGPT account. Provider plan limits and usage terms apply.
           </span>
         </button>
+      </div>
+      <div className="onboarding-provider-heading">Local models</div>
+      <div className="onboarding-ai-primary-grid">
         {onboarding.data.detectedOllamaModel ? (
           <button
             type="button"
@@ -1651,7 +1662,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
           >
             <span className="onboarding-ai-primary-title">Use local Ollama</span>
             <span className="onboarding-ai-primary-copy">
-              Found {onboarding.data.detectedOllamaModel} on this computer. Runs privately.
+              Found {onboarding.data.detectedOllamaModel} on this computer. Inference runs locally.
             </span>
           </button>
         ) : (
@@ -1672,7 +1683,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
           <span>{onboarding.chatGptSignInError}</span>
         </div>
       )}
-      <div className="onboarding-provider-heading">Use an API key or advanced provider</div>
+      <div className="onboarding-provider-heading">Provider APIs and gateways</div>
       <div className="onboarding-provider-pills">
         {PROVIDERS.map((provider) => (
           <button
@@ -1683,7 +1694,9 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
             onClick={() => onboarding.selectProvider(provider.id)}
           >
             <span className="onboarding-provider-name">{provider.name}</span>
-            {provider.badge && <span className="onboarding-provider-badge">{provider.badge}</span>}
+            <span className="onboarding-provider-badge">
+              {getModelAccessDescriptor(provider.id).label}
+            </span>
           </button>
         ))}
       </div>

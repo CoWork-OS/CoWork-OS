@@ -19494,6 +19494,24 @@ a,
   border: 1px solid var(--color-border);
 }
 
+.llm-provider-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.llm-provider-group {
+  display: grid;
+  gap: 7px;
+}
+
+.llm-provider-group-heading {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .more-channels-tab,
 .integrations-tab,
 .llm-provider-tab {
@@ -19546,6 +19564,21 @@ a,
 .llm-provider-tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.llm-provider-access-label {
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.llm-provider-tab.active .llm-provider-access-label {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  color: var(--color-text);
 }
 
 .llm-provider-tab-status {

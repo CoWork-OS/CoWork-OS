@@ -2,12 +2,18 @@
 layout: home
 hero:
   name: CoWork OS
-  text: The GUI-first, CLI-capable local AI super app and everything app
-  tagline: Code, email, research, design web pages, create documents, work with spreadsheets and decks, spawn and manage agents, run automations, and ask for changes from the desktop app or the cowork CLI without jumping between separate coding, mail, browser, Word, Excel, or PowerPoint apps.
+  text: The free, open-source AI super app for real work
+  tagline: One app for the work. Your choice of AI. Bring supported provider accounts, APIs, gateways, cloud credentials, or local models into one GUI-first, CLI-capable workspace for coding, research, browser work, inbox, documents, data, channels, automations, and agents.
   actions:
     - theme: brand
       text: Get Started
       link: /getting-started
+    - theme: alt
+      text: Models & Access
+      link: /providers
+    - theme: alt
+      text: Compare
+      link: /comparisons/
     - theme: alt
       text: Platform Updates
       link: /integration-skill-bootstrap-lifecycle
@@ -149,7 +155,9 @@ hero:
 
 features:
   - title: AI Super App / Everything App
-    details: CoWork OS keeps coding, email, research, documents, spreadsheets, presentations, web pages, PDFs, memory, skills, providers, approvals, channels, devices, and automations in one local-first governed workspace.
+    details: CoWork OS keeps coding, email, research, documents, spreadsheets, presentations, browser work, PDFs, memory, skills, approvals, channels, devices, and automations in one governed workspace.
+  - title: Open Multi-Provider Harness
+    details: Bring supported provider accounts, API keys, compatible gateways, cloud credentials, or local models. CoWork keeps the surrounding tools, skills, memory, agents, approvals, artifacts, and workflows consistent as model routes change. CoWork is free; provider charges and terms remain separate.
   - title: GUI-First Agent Management
     details: Create reusable agents, spawn parallel work, inspect delegated runs, assign tasks, review approvals, and monitor many agents through Agents Hub, Mission Control, task timelines, and visual boards, while still having a terminal-native entrypoint for fast local runs.
   - title: First-Class CoWork CLI
@@ -164,8 +172,8 @@ features:
     details: Local-first runtime with approvals, guardrails, and governance controls for production agent workflows.
   - title: Linux Server Package
     details: GitHub Releases can ship a Linux x64 server tarball for VPS/systemd installs, with built daemon assets, full resources, connector runtimes, checksum verification, Control Plane smoke tests, and fail-closed managed deployment posture checks. It runs `coworkd-node` without launching the desktop UI.
-  - title: 36 LLM Provider Options
-    details: Connect to Claude, GPT, Gemini, Ollama, OpenRouter, Grok through xAI API keys or SuperGrok OAuth, and more. Bring your own keys, use supported subscription logins, switch models per task or workflow phase, combine advisors and aggregators with Mixture of Agents presets, use OpenRouter Pareto Code/Nitro for coding-score-based routing, and get default-on prompt caching on supported routes.
+  - title: Dozens of Model Routes
+    details: Connect supported accounts, APIs, gateways, cloud credentials, and local inference. Switch models per task or workflow phase, configure ordered fallback chains, and combine advisors and aggregators with Mixture of Agents presets. Model capabilities, eligibility, limits, and charges vary by provider.
   - title: 17 Messaging Channels
     details: WhatsApp, Telegram, Discord, Slack, iMessage, Teams, Google Chat, Feishu/Lark, WeCom, and more. Chat with your AI from anywhere, with channel/chat/thread specialization for workspace, agent role, prompt guidance, tool policy, and shared-memory opt-in.
   - title: Chat Mode

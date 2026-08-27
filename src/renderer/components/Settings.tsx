@@ -81,6 +81,11 @@ import {
   type MoaPreset,
 } from "../../shared/types";
 import { CUSTOM_PROVIDER_MAP } from "../../shared/llm-provider-catalog";
+import {
+  getModelAccessDescriptor,
+  MODEL_ACCESS_GROUP_LABELS,
+  MODEL_ACCESS_GROUP_ORDER,
+} from "../../shared/model-access";
 import { getLlmModelReasoningEfforts } from "../../shared/llm-model-selection";
 import {
   buildClaudeCredentialInput,
@@ -854,7 +859,7 @@ const sidebarItems: SidebarItem[] = [
   },
   {
     tab: "updates",
-    label: "Updates",
+    label: "About & Updates",
     group: "Advanced",
     icon: <RefreshCw {...I} />,
   },
@@ -5134,29 +5139,51 @@ export function Settings({
   const renderLLMPanel = () => (
     <div className="llm-provider-panel">
       <div className="llm-provider-header">
-        <h2>LLM Provider</h2>
-        <p className="settings-description">Choose which service to use for AI model calls</p>
+        <h2>Model Access</h2>
+        <p className="settings-description">
+          Your model sources power the same CoWork OS tools, skills, memory, agents, approvals,
+          artifacts, and workflows. CoWork is free; provider eligibility, limits, and charges remain
+          separate.
+        </p>
       </div>
-      <div className="llm-provider-tabs">
-        {providers.map((provider) => {
-          const providerType = provider.type as LLMProviderType;
-          const resolvedCustomType = resolveCustomProviderId(providerType);
-          const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedCustomType);
-          const icon = getLLMProviderIcon(providerType, customEntry);
+      <div className="llm-provider-groups" aria-label="Model access routes">
+        {MODEL_ACCESS_GROUP_ORDER.map((group) => {
+          const groupedProviders = providers.filter(
+            (provider) =>
+              getModelAccessDescriptor(provider.type as LLMProviderType).group === group,
+          );
+          if (groupedProviders.length === 0) return null;
 
           return (
-            <button
-              key={provider.type}
-              type="button"
-              className={`llm-provider-tab ${settings.providerType === provider.type ? "active" : ""} ${provider.configured ? "configured" : ""}`}
-              onClick={() => handleProviderSelect(providerType)}
-            >
-              {icon}
-              <span className="llm-provider-tab-label">{provider.name}</span>
-              {provider.configured && (
-                <span className="llm-provider-tab-status" title="Configured" />
-              )}
-            </button>
+            <section key={group} className="llm-provider-group">
+              <div className="llm-provider-group-heading">{MODEL_ACCESS_GROUP_LABELS[group]}</div>
+              <div className="llm-provider-tabs">
+                {groupedProviders.map((provider) => {
+                  const providerType = provider.type as LLMProviderType;
+                  const resolvedCustomType = resolveCustomProviderId(providerType);
+                  const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedCustomType);
+                  const icon = getLLMProviderIcon(providerType, customEntry);
+                  const access = getModelAccessDescriptor(providerType);
+
+                  return (
+                    <button
+                      key={provider.type}
+                      type="button"
+                      className={`llm-provider-tab ${settings.providerType === provider.type ? "active" : ""} ${provider.configured ? "configured" : ""}`}
+                      onClick={() => handleProviderSelect(providerType)}
+                      title={`${provider.name}: ${access.label}. ${access.billingNotice}`}
+                    >
+                      {icon}
+                      <span className="llm-provider-tab-label">{provider.name}</span>
+                      <span className="llm-provider-access-label">{access.label}</span>
+                      {provider.configured && (
+                        <span className="llm-provider-tab-status" title="Configured" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
           );
         })}
       </div>
@@ -5218,9 +5245,9 @@ export function Settings({
                   <code>claude setup-token</code> locally and paste the generated token here.
                 </p>
                 <p className="settings-description">
-                  Note: as of April 4, 2026, third-party harnesses connected to your Claude account
-                  draw from extra usage instead of from your subscription. If you do not use them,
-                  nothing changes. If you do, the credit and bundles above have you covered.
+                  Provider notice: third-party harness usage may draw from provider-controlled extra
+                  usage rather than your included subscription allowance. Verify current Anthropic
+                  eligibility, limits, and billing terms before using this route.
                 </p>
                 <input
                   type="password"

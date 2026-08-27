@@ -18,7 +18,7 @@ describe("first-run readiness", () => {
 
     expect(getFirstRunReadiness(settings, { workspace })).toMatchObject({
       modelReady: true,
-      modelPath: "chatgpt_subscription",
+      modelPath: "account_or_subscription",
       providerType: "openai",
       safeStarterReady: true,
     });
@@ -53,7 +53,7 @@ describe("first-run readiness", () => {
 
     expect(getFirstRunReadiness(settings, { workspace })).toMatchObject({
       modelReady: true,
-      modelPath: "local_ollama",
+      modelPath: "local_model",
       providerType: "ollama",
     });
   });
@@ -67,6 +67,40 @@ describe("first-run readiness", () => {
     expect(getFirstRunReadiness(settings, { workspace })).toMatchObject({
       modelReady: false,
       modelPath: "missing",
+    });
+  });
+
+  it("classifies Claude account tokens separately from API keys", () => {
+    const settings: LLMSettingsData = {
+      providerType: "anthropic",
+      modelKey: "sonnet-4-5",
+      anthropic: {
+        authMethod: "subscription",
+        subscriptionToken: "sk-ant-oat-example",
+      },
+    };
+
+    expect(getFirstRunReadiness(settings, { workspace })).toMatchObject({
+      modelReady: true,
+      modelPath: "account_or_subscription",
+      providerType: "anthropic",
+    });
+  });
+
+  it("recognizes a configured compatible gateway", () => {
+    const settings: LLMSettingsData = {
+      providerType: "openai-compatible",
+      modelKey: "custom-model",
+      openaiCompatible: {
+        baseUrl: "https://gateway.example.test/v1",
+        model: "custom-model",
+      },
+    };
+
+    expect(getFirstRunReadiness(settings, { workspace })).toMatchObject({
+      modelReady: true,
+      modelPath: "gateway_or_cloud",
+      providerType: "openai-compatible",
     });
   });
 });

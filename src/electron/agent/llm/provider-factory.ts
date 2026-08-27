@@ -30,6 +30,7 @@ import {
   OPENROUTER_DEFAULT_MODEL,
   OpenRouterProvider,
 } from "./openrouter-provider";
+import { getOpenRouterAttributionHeaders } from "./openrouter-attribution";
 import { OpenAIProvider } from "./openai-provider";
 import { AzureOpenAIProvider } from "./azure-openai-provider";
 import { AzureAnthropicProvider } from "./azure-anthropic-provider";
@@ -78,6 +79,13 @@ let llmCallLogCounter = 0;
 const observedModelMaxTokens = new Map<string, number>();
 const logger = createLogger("LLMProviderFactory");
 const OPENAI_OAUTH_DEFAULT_MODEL = "gpt-5.5";
+
+export interface OpenRouterImageModel {
+  id: string;
+  name: string;
+  description: string;
+  supported_parameters: Record<string, Any>;
+}
 const OPENAI_OAUTH_SUPPORTED_MODELS = new Set([
   "gpt-5.6-sol",
   "gpt-5.6-terra",
@@ -4151,6 +4159,83 @@ export class LLMProviderFactory {
     } catch (error: Any) {
       console.error("Failed to fetch OpenRouter models:", error);
       // Return default models on error instead of empty array
+      return defaultModels;
+    }
+  }
+
+  /**
+   * Fetch OpenRouter's dedicated image-generation catalog. This is separate
+   * from the chat model catalog because image models and their supported
+   * parameters are exposed by /images/models.
+   */
+  static async getOpenRouterImageModels(
+    apiKey?: string,
+    baseUrl?: string,
+  ): Promise<OpenRouterImageModel[]> {
+    const settings = this.loadSettings();
+    const key =
+      apiKey?.trim() ||
+      settings.imageGeneration?.openrouter?.apiKey?.trim() ||
+      settings.openrouter?.apiKey?.trim();
+    const resolvedBaseUrl = (
+      baseUrl?.trim() ||
+      settings.imageGeneration?.openrouter?.baseUrl?.trim() ||
+      settings.openrouter?.baseUrl?.trim() ||
+      "https://openrouter.ai/api/v1"
+    ).replace(/\/+$/, "");
+    const defaultModels: OpenRouterImageModel[] = [
+      {
+        id: "meta/muse-image",
+        name: "Meta: Muse Image",
+        description: "Agentic image generation and editing from Meta.",
+        supported_parameters: {},
+      },
+      {
+        id: "openai/gpt-image-2",
+        name: "OpenAI: GPT Image 2",
+        description: "High-fidelity image generation and editing.",
+        supported_parameters: {},
+      },
+      {
+        id: "openai/gpt-image-1",
+        name: "OpenAI: GPT Image 1",
+        description: "Image generation and editing with accurate text rendering.",
+        supported_parameters: {},
+      },
+      {
+        id: "google/gemini-3.1-flash-image",
+        name: "Google: Nano Banana 2",
+        description: "Gemini image generation and editing.",
+        supported_parameters: {},
+      },
+    ];
+
+    if (!key) return defaultModels;
+
+    try {
+      const response = await fetch(`${resolvedBaseUrl}/images/models`, {
+        headers: {
+          Authorization: `Bearer ${key}`,
+          ...getOpenRouterAttributionHeaders(),
+        },
+      });
+      if (!response.ok) return defaultModels;
+      const data = (await response.json()) as { data?: Any[] };
+      const remoteModels = (data.data || [])
+        .filter((model) => typeof model?.id === "string" && model.id.trim())
+        .map((model) => ({
+          id: model.id,
+          name: typeof model.name === "string" && model.name.trim() ? model.name : model.id,
+          description: typeof model.description === "string" ? model.description : "",
+          supported_parameters:
+            model.supported_parameters && typeof model.supported_parameters === "object"
+              ? model.supported_parameters
+              : {},
+        }));
+      const seen = new Set(remoteModels.map((model) => model.id));
+      return [...remoteModels, ...defaultModels.filter((model) => !seen.has(model.id))];
+    } catch (error) {
+      logger.error("Failed to fetch OpenRouter image models:", error);
       return defaultModels;
     }
   }

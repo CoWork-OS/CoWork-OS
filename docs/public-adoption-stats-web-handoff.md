@@ -85,7 +85,7 @@ Add a stats section or page that renders:
 - release asset downloads, lifetime
 - release asset download delta since previous snapshot
 - downloads by platform
-- npm downloads for last day, week, and month
+- npm downloads for last day, week, month, and all time when the available range reaches the package's first published version
 - GitHub views and clones when available
 - top referrers and paths when available
 
@@ -132,6 +132,10 @@ npm.latestVersion
 npm.downloads.lastDay.downloads
 npm.downloads.lastWeek.downloads
 npm.downloads.lastMonth.downloads
+npm.downloads.allTime.downloads
+npm.downloads.allTime.coverage
+npm.downloads.allTime.start
+npm.downloads.allTime.end
 deltas.releaseDownloads.totalDeltaSincePreviousSnapshot
 deltas.releaseDownloads.platformDeltasSincePreviousSnapshot
 ```

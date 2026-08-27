@@ -109,7 +109,7 @@ See [Everyday Agent](docs/everyday-agent.md), [Workflow Intelligence](docs/workf
 
 ### Latest Release
 
-**`0.5.52`** upgrades the desktop runtime to Electron 44 and raises the macOS minimum to **macOS 13 Ventura**. It also adds updater compatibility blocking, clearer npm recovery guidance, packaged artifact support-floor checks, and notification fallback recovery. macOS 12 Monterey users should remain on `0.5.51`. Start with [Release Notes 0.5.52](docs/release-notes-0.5.52.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
+**`0.5.52`** adds OpenRouter image generation, OpenCode Zen and Go routes, guarded SearXNG search, Atlas Cloud transcription, Browser Use Cloud V4 defaults, and a broader open-source multi-provider AI super app surface. It also upgrades the desktop runtime to Electron 44 and raises the macOS minimum to **macOS 13 Ventura**, with compatibility-aware updates and reliability hardening. macOS 12 Monterey users should remain on `0.5.51`. Start with [Release Notes 0.5.52](docs/release-notes-0.5.52.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
 
 The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox compose/send upgrades, runtime network/sandbox policy controls, Dreaming memory curation, and `/multitask` lane fan-out. See [Release Notes 0.5.45](docs/release-notes-0.5.45.md), [Managed Agents](docs/managed-agents.md), [Claude-for-Legal Workflows](docs/claude-for-legal.md), [Multitask Command](docs/multitask.md), and [Dreaming](docs/dreaming.md).
 
@@ -575,7 +575,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | First-time setup and usage |
 | [Beginner's Guide](docs/cowork-school.md) | Practical guide to what CoWork OS is for and which workflows to try first |
-| [Release Notes 0.5.52](docs/release-notes-0.5.52.md) | Electron 44 migration and macOS support changes |
+| [Release Notes 0.5.52](docs/release-notes-0.5.52.md) | OpenRouter images, OpenCode/SearXNG/Atlas providers, Electron 44, and macOS support changes |
 | [Composer Mentions](docs/composer-mentions.md) | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing |
 | [Message Box Shortcuts](docs/message-box-shortcuts.md) | `/` picker for deterministic app commands and skill-backed workflow shortcuts |
 | [Side Chat](docs/side-chat.md) | Right-side read-only questions about an active running session without steering or stopping the parent task |

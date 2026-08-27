@@ -3014,6 +3014,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_GEMINI_MODELS, apiKey),
   getOpenRouterModels: (apiKey?: string, baseUrl?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENROUTER_MODELS, apiKey, baseUrl),
+  getOpenRouterImageModels: (apiKey?: string, baseUrl?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENROUTER_IMAGE_MODELS, apiKey, baseUrl),
   getOpenAIModels: (apiKey?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENAI_MODELS, apiKey),
   getGroqModels: (apiKey?: string, baseUrl?: string) =>
@@ -5953,6 +5955,17 @@ export interface ElectronAPI {
     apiKey?: string,
     baseUrl?: string,
   ) => Promise<Array<{ id: string; name: string; context_length: number }>>;
+  getOpenRouterImageModels: (
+    apiKey?: string,
+    baseUrl?: string,
+  ) => Promise<
+    Array<{
+      id: string;
+      name: string;
+      description: string;
+      supported_parameters: Record<string, Any>;
+    }>
+  >;
   getOpenAIModels: (
     apiKey?: string,
   ) => Promise<Array<{ id: string; name: string; description: string }>>;

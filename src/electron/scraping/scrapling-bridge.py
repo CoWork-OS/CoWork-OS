@@ -8,6 +8,7 @@ Receives JSON commands on stdin, executes Scrapling operations, returns JSON on 
 import json
 import sys
 import asyncio
+import time
 import traceback
 from typing import Any
 from urllib.parse import urlparse
@@ -59,6 +60,50 @@ def enforce_same_host_final_url(requested_url: str, response: Any) -> str:
     if requested_host and final_host and requested_host != final_host:
         raise ValueError("Scraping redirect crossed to a different host")
     return final_url
+
+
+def get_response_status(response: Any) -> int:
+    """Return a normalized HTTP status when the fetcher exposes one."""
+    try:
+        return int(getattr(response, "status", 200) or 200)
+    except (TypeError, ValueError):
+        return 200
+
+
+def classify_response_status(status: int) -> dict[str, Any]:
+    """Classify target responses without treating provider errors as scraper crashes."""
+    retryable = status in (408, 425, 429) or status >= 500
+    blocked = status in (403, 429)
+    category = None
+    if status == 429:
+        category = "rate_limited"
+    elif status == 403:
+        category = "access_blocked"
+    elif retryable:
+        category = "upstream_error"
+    return {
+        "target_blocked": blocked,
+        "retryable": retryable,
+        **({"status_category": category} if category else {}),
+    }
+
+
+def request_delay_seconds(params: dict) -> float:
+    """Return a bounded delay between requests in a batch/session."""
+    try:
+        delay_ms = float(params.get("request_delay_ms", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(60_000, delay_ms)) / 1000
+
+
+def wait_between_requests(last_request_at: float | None, delay_seconds: float) -> None:
+    """Throttle sequential requests while leaving the first request immediate."""
+    if last_request_at is None or delay_seconds <= 0:
+        return
+    remaining = delay_seconds - (time.monotonic() - last_request_at)
+    if remaining > 0:
+        time.sleep(remaining)
 
 
 # ──────────────────────────────────────────────
@@ -120,11 +165,16 @@ def handle_scrape_page(params: dict) -> None:
         final_url = enforce_same_host_final_url(url, response)
 
         # Extract content
+        status = get_response_status(response)
         result: dict[str, Any] = {
             "success": True,
             "url": final_url,
-            "status": response.status if hasattr(response, "status") else 200,
+            "status": status,
         }
+        result.update(classify_response_status(status))
+        if status >= 400:
+            result["success"] = False
+            result["error"] = f"Target returned HTTP {status}"
 
         # Get page title
         title_els = response.css("title")
@@ -205,6 +255,9 @@ def handle_scrape_multiple(params: dict) -> None:
     fetcher_type = params.get("fetcher", "default")
     selector = params.get("selector")
     max_content_length = params.get("max_content_length", 50000)
+    timeout = params.get("timeout", 30000)
+    proxy = params.get("proxy")
+    delay_seconds = request_delay_seconds(params)
 
     try:
         if fetcher_type == "stealth":
@@ -214,10 +267,17 @@ def handle_scrape_multiple(params: dict) -> None:
         else:
             fetcher = Fetcher(auto_match=True)
 
+        last_request_at = None
         for url in urls[:20]:  # Cap at 20 URLs per batch
             try:
-                response = fetcher.get(url)
+                wait_between_requests(last_request_at, delay_seconds)
+                fetch_kwargs: dict[str, Any] = {"timeout": timeout / 1000}
+                if proxy:
+                    fetch_kwargs["proxies"] = {"http": proxy, "https": proxy}
+                response = fetcher.get(url, **fetch_kwargs)
+                last_request_at = time.monotonic()
                 final_url = enforce_same_host_final_url(url, response)
+                status = get_response_status(response)
 
                 title_els = response.css("title")
                 title = title_els[0].text if title_els else ""
@@ -234,11 +294,15 @@ def handle_scrape_multiple(params: dict) -> None:
 
                 results.append({
                     "url": final_url,
-                    "success": True,
+                    "success": status < 400,
+                    "status": status,
                     "title": title,
                     "content": content,
                     "content_length": len(content),
                 })
+                results[-1].update(classify_response_status(status))
+                if status >= 400:
+                    results[-1]["error"] = f"Target returned HTTP {status}"
             except Exception as e:
                 results.append({
                     "url": url,
@@ -265,6 +329,8 @@ def handle_extract_structured(params: dict) -> None:
     extract_type = params.get("extract_type", "auto")
     selectors = params.get("selectors", {})
     fetcher_type = params.get("fetcher", "default")
+    timeout = params.get("timeout", 30000)
+    proxy = params.get("proxy")
 
     try:
         if fetcher_type == "stealth":
@@ -274,9 +340,21 @@ def handle_extract_structured(params: dict) -> None:
         else:
             fetcher = Fetcher(auto_match=True)
 
-        response = fetcher.get(url)
+        fetch_kwargs: dict[str, Any] = {"timeout": timeout / 1000}
+        if proxy:
+            fetch_kwargs["proxies"] = {"http": proxy, "https": proxy}
+        response = fetcher.get(url, **fetch_kwargs)
         final_url = enforce_same_host_final_url(url, response)
-        result: dict[str, Any] = {"success": True, "url": final_url, "data": {}}
+        status = get_response_status(response)
+        result: dict[str, Any] = {
+            "success": status < 400,
+            "url": final_url,
+            "status": status,
+            "data": {},
+        }
+        result.update(classify_response_status(status))
+        if status >= 400:
+            result["error"] = f"Target returned HTTP {status}"
 
         if extract_type in ("auto", "tables"):
             tables = []
@@ -338,11 +416,15 @@ def handle_scrape_session(params: dict) -> None:
     action = params.get("action", "create")
     steps = params.get("steps", [])
     headless = params.get("headless", True)
+    timeout = params.get("timeout", 30000)
+    proxy = params.get("proxy")
+    delay_seconds = request_delay_seconds(params)
 
     try:
         fetcher = PlayWrightFetcher(auto_match=True)
 
         results = []
+        last_request_at = None
         for step in steps:
             step_action = step.get("action")
             step_url = step.get("url")
@@ -351,18 +433,29 @@ def handle_scrape_session(params: dict) -> None:
             step_wait = step.get("wait_for")
 
             if step_action == "navigate" and step_url:
+                wait_between_requests(last_request_at, delay_seconds)
                 kwargs: dict[str, Any] = {"headless": headless}
+                kwargs["timeout"] = timeout / 1000
+                if proxy:
+                    kwargs["proxies"] = {"http": proxy, "https": proxy}
                 if step_wait:
                     kwargs["wait_selector"] = step_wait
                 response = fetcher.get(step_url, **kwargs)
+                last_request_at = time.monotonic()
                 final_url = enforce_same_host_final_url(step_url, response)
+                status = get_response_status(response)
                 title_els = response.css("title")
-                results.append({
+                result = {
                     "action": "navigate",
                     "url": final_url,
+                    "status": status,
                     "title": title_els[0].text if title_els else "",
-                    "success": True,
-                })
+                    "success": status < 400,
+                }
+                result.update(classify_response_status(status))
+                if status >= 400:
+                    result["error"] = f"Target returned HTTP {status}"
+                results.append(result)
             elif step_action == "extract" and step_selector:
                 # Use the last response
                 if hasattr(fetcher, "_last_response"):

@@ -9,17 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.52] - 2026-08-27
 
+### Added
+
+- **OpenRouter image generation**: added dedicated image API routing for all OpenRouter image models, including `meta/muse-image`, live image-model discovery, endpoint capability negotiation, provider pinning, multi-image output, supported advanced options, and safe local/remote reference-image inputs.
+- **OpenCode Zen and Go**: added curated model catalogs, transport-aware Responses API and Anthropic Messages routing, custom Responses-compatible endpoints, and OpenCode image-capability metadata.
+- **SearXNG and Web Search Plus**: added a guarded private-search provider with explicit provider routing, locale and safe-search controls, endpoint policy forwarding, settings validation, and the Web Search Plus workflow pack.
+- **Atlas Cloud transcription**: added the Atlas Cloud transcription provider and success-state handling for completed transcription jobs.
+- **Provider and model-picker UX**: refreshed the main model picker for richer metadata, responsive layouts, custom model IDs, and clearer model browsing.
+
 ### Changed
 
 - **Release notes for 0.5.52**: see [Release Notes 0.5.52](release-notes-0.5.52.md).
 - Upgraded the desktop runtime to Electron `44.0.0` and raised the minimum supported Mac to macOS 13 Ventura.
 - Added a shared platform policy for the app bundle, updater metadata, npm launcher, documentation, and artifact smoke tests. `0.5.51` remains the final Monterey-compatible release.
+- Made Browser Use Cloud V4 the default cloud browser backend and refreshed product/provider documentation for the open-source multi-provider AI super app positioning.
+- Added bounded Browser Use Cloud retries with `Retry-After` handling and structured retryable errors, plus Scrapling request throttling, timeout/proxy forwarding, and response classification.
+- Added bundled skill distribution metadata and corrected public npm adoption coverage/reporting.
 
 ### Fixed
 
 - Blocked incompatible npm, Git, and packaged updates before mutation and added explicit rollback guidance.
 - Added in-app fallback when native notification delivery fails asynchronously.
 - Derived native SQLite repair versions from the active package manifest.
+- Hardened security evaluation, managed MCP metadata validation, legacy database migrations, task/state persistence, mailbox fallbacks, and custom CLI provider credential recognition.
+- Fixed clean CI and release test preparation for the Node native PTY dependency and pinned Numbat fixture.
 
 ## [0.5.51] - 2026-08-17
 
@@ -1208,7 +1221,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 0.5.52 | 2026-08-27 | Electron 44, macOS 13 minimum, compatibility-aware updates, packaging support-floor checks, notification fallback, and native repair hardening |
+| 0.5.52 | 2026-08-27 | OpenRouter image generation, OpenCode Zen/Go, SearXNG/Web Search Plus, Atlas Cloud, Electron 44, macOS 13 minimum, and reliability hardening |
 | 0.5.51 | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery |
 | 0.5.50 | 2026-07-20 | GPT-5.6 subscription controls, Mixture of Agents, browser annotations, inline mail review, video analysis, governed memory writes, safer visible automation, session retention, and new connector/skill workflows |
 | 0.5.49 | 2026-06-08 | CoWork CLI, Browser Use Cloud, Codex Security workflows, automation outcomes, Usage Insights heatmaps, composer link chips, public adoption stats, and security hardening |

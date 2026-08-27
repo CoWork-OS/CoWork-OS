@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database and state persistence**: hardened legacy migrations and preserved task target nodes, agent budget pause fields, subconscious memory index updates, contact unlink audit history, and current task timeline cache state.
 - **Provider and mailbox resilience**: recognized custom CLI provider credentials, distinguished OpenCode transport failures, clamped upstream quote recall scores, and hardened mailbox fallback/scheduling behavior.
 - **Release CI preparation**: fixed clean CI and release test jobs so `node-pty` is rebuilt for the test runtime and the pinned Numbat fixture is generated before tests run.
+- **Windows Numbat packaging**: preserved native Windows drive paths when extracting the pinned runtime archive so Windows release packaging can complete.
 
 ## [0.5.51] - 2026-08-17
 

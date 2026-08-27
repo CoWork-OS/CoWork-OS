@@ -4,6 +4,10 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import { ScrapingSettingsManager } from "../../scraping/scraping-settings";
+import {
+  getScrapingRequestDelayMs,
+  waitForScrapingSlot,
+} from "../../scraping/scraping-rate-limiter";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
 
 /**
@@ -284,6 +288,7 @@ export class ScrapingTools {
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
     const normalizedUrl = this.ensureNetworkAllowed(input.url, "scrape_page");
+    await waitForScrapingSlot(normalizedUrl, settings.rateLimiting);
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Scraping: ${normalizedUrl} (fetcher: ${input.fetcher || settings.defaultFetcher})`,
@@ -325,6 +330,9 @@ export class ScrapingTools {
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
     const normalizedUrls = input.urls.map((url) => this.ensureNetworkAllowed(url, "scrape_multiple"));
+    if (normalizedUrls.length > 0) {
+      await waitForScrapingSlot(normalizedUrls[0], settings.rateLimiting);
+    }
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Batch scraping ${normalizedUrls.length} URLs`,
@@ -334,8 +342,14 @@ export class ScrapingTools {
       ...input,
       urls: normalizedUrls,
       fetcher: input.fetcher || settings.defaultFetcher,
+      timeout: settings.timeout,
+      request_delay_ms: settings.rateLimiting?.enabled
+        ? getScrapingRequestDelayMs(settings.rateLimiting.requestsPerMinute)
+        : 0,
       max_content_length: input.max_content_length || 50000,
     };
+
+    if (settings.proxy.enabled && settings.proxy.url) params.proxy = settings.proxy.url;
 
     const result = await this.callBridge("scrape_multiple", params);
 
@@ -358,6 +372,7 @@ export class ScrapingTools {
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
     const normalizedUrl = this.ensureNetworkAllowed(input.url, "scrape_extract");
+    await waitForScrapingSlot(normalizedUrl, settings.rateLimiting);
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Extracting structured data from: ${normalizedUrl}`,
@@ -367,7 +382,10 @@ export class ScrapingTools {
       ...input,
       url: normalizedUrl,
       fetcher: input.fetcher || settings.defaultFetcher,
+      timeout: settings.timeout,
     };
+
+    if (settings.proxy.enabled && settings.proxy.url) params.proxy = settings.proxy.url;
 
     const result = await this.callBridge("extract_structured", params);
 
@@ -398,6 +416,8 @@ export class ScrapingTools {
       ...step,
       ...(step.url ? { url: this.ensureNetworkAllowed(step.url, "scrape_session") } : {}),
     }));
+    const firstUrl = steps.find((step) => step.url)?.url;
+    if (firstUrl) await waitForScrapingSlot(firstUrl, settings.rateLimiting);
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Running scraping session with ${steps.length} steps`,
@@ -407,7 +427,13 @@ export class ScrapingTools {
       ...input,
       steps,
       headless: input.headless ?? settings.headless,
+      timeout: settings.timeout,
+      request_delay_ms: settings.rateLimiting?.enabled
+        ? getScrapingRequestDelayMs(settings.rateLimiting.requestsPerMinute)
+        : 0,
     };
+
+    if (settings.proxy.enabled && settings.proxy.url) params.proxy = settings.proxy.url;
 
     const result = await this.callBridge("scrape_session", params);
 

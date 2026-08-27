@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger website docs refresh
+        if: ${{ secrets.WEBSITE_REPO_DISPATCH_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.WEBSITE_REPO_DISPATCH_TOKEN }}
         run: |
@@ -26,3 +27,7 @@ jobs:
             -f event_type=cowork_os_docs_changed \
             -f client_payload[source_repo]="${{ github.repository }}" \
             -f client_payload[sha]="${{ github.sha }}"
+
+      - name: Report unavailable website refresh token
+        if: ${{ secrets.WEBSITE_REPO_DISPATCH_TOKEN == '' }}
+        run: echo "::warning::WEBSITE_REPO_DISPATCH_TOKEN is not configured; website docs refresh was skipped."

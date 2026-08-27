@@ -121,6 +121,11 @@ jobs:
       - name: Install Electron binary
         run: node node_modules/electron/install.js
 
+      - name: Prepare native test dependencies and Numbat fixtures
+        run: |
+          npm rebuild node-pty --ignore-scripts=false --no-audit --no-fund
+          npm run numbat:build
+
       - name: Run tests
         run: npm test
 

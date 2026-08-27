@@ -1065,6 +1065,10 @@ rateLimiter.configure(
   RATE_LIMIT_CONFIGS.standard,
 );
 rateLimiter.configure(
+  IPC_CHANNELS.LLM_GET_OPENROUTER_IMAGE_MODELS,
+  RATE_LIMIT_CONFIGS.standard,
+);
+rateLimiter.configure(
   IPC_CHANNELS.LLM_GET_BEDROCK_MODELS,
   RATE_LIMIT_CONFIGS.standard,
 );
@@ -7073,6 +7077,20 @@ export async function setupIpcHandlers(
       }));
       LLMProviderFactory.saveCachedModels("openrouter", cachedModels);
       return models;
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.LLM_GET_OPENROUTER_IMAGE_MODELS,
+    async (_, apiKey?: string, baseUrl?: string) => {
+      checkRateLimit(IPC_CHANNELS.LLM_GET_OPENROUTER_IMAGE_MODELS);
+      const validatedBaseUrl = await validateOptionalProviderBaseUrl(baseUrl, {
+        providerLabel: "OpenRouter",
+      });
+      return LLMProviderFactory.getOpenRouterImageModels(
+        validateOptionalProviderApiKey(apiKey, "OpenRouter"),
+        validatedBaseUrl,
+      );
     },
   );
 

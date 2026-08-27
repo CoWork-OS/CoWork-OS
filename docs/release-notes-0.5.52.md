@@ -21,6 +21,7 @@ Release `0.5.52` expands CoWork OS as a free, open-source multi-provider AI supe
 - **Reliability and security hardening.** Capability-bundle evaluation now fails closed for incomplete coverage and unresolved managed metadata; legacy migrations and task/state persistence are hardened; mailbox/provider fallbacks are more resilient; and asynchronous native notification failures fall back to the in-app overlay.
 - **Documentation and adoption reporting.** Product positioning, provider/access/comparison documentation, bundled skill distribution metadata, and npm all-time coverage reporting were refreshed for this release.
 - **Release CI preparation.** Clean test jobs now rebuild the native PTY dependency and generate the pinned Numbat fixture before running the suite.
+- **Windows packaging compatibility.** Pinned Numbat archive extraction now uses native Windows drive paths, keeping the Windows installer build aligned with the macOS release path.
 
 ## macOS upgrade guidance
 

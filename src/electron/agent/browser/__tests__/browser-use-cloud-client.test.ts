@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BrowserUseCloudClient,
+  BrowserUseApiError,
   isPrivateOrLocalBrowserTarget,
   normalizeBrowserUseProxyCountryCode,
   normalizeBrowserUseTimeoutMinutes,
+  parseRetryAfterMs,
   redactBrowserUseErrorText,
   redactBrowserUseUrl,
 } from "../browser-use-cloud-client";
@@ -86,6 +88,69 @@ describe("BrowserUseCloudClient", () => {
         body: JSON.stringify({ action: "stop" }),
       }),
     );
+  });
+
+  it("retries provider rate limits and honors Retry-After", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("busy", { status: 429, headers: { "Retry-After": "3" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "browser-session-1" }), { status: 201 }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const client = new BrowserUseCloudClient("test-key", {
+      fetchImpl: fetchImpl as Any,
+      sleep,
+      maxRetries: 2,
+    });
+
+    const session = await client.createBrowserSession({});
+
+    expect(session.id).toBe("browser-session-1");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(3000);
+  });
+
+  it("returns a structured retryable error after exhausting provider retries", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response('{"message":"temporarily unavailable"}', { status: 503 }),
+    );
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const client = new BrowserUseCloudClient("test-key", {
+      fetchImpl: fetchImpl as Any,
+      sleep,
+      maxRetries: 2,
+    });
+
+    await expect(client.stopBrowserSession("browser-session-1")).rejects.toMatchObject<Partial<BrowserUseApiError>>({
+      name: "BrowserUseApiError",
+      status: 503,
+      retryable: true,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry non-retryable authentication failures", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("unauthorized", { status: 401 }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const client = new BrowserUseCloudClient("test-key", {
+      fetchImpl: fetchImpl as Any,
+      sleep,
+    });
+
+    await expect(client.createBrowserSession({})).rejects.toMatchObject({ status: 401 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("parses rate-limit reset headers when Retry-After is absent", () => {
+    const headers = new Headers({ "x-ratelimit-reset": "4" });
+    expect(parseRetryAfterMs(headers)).toBe(4000);
+  });
+
+  it("parses absolute rate-limit reset timestamps", () => {
+    const now = 1_700_000_000_000;
+    const headers = new Headers({ "x-ratelimit-reset": "1700000004" });
+    expect(parseRetryAfterMs(headers, now)).toBe(4000);
   });
 
   it("normalizes Browser Use option inputs", () => {

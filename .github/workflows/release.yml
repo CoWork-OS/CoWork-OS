@@ -137,8 +137,10 @@ jobs:
 
       - name: Run tests
         if: runner.os != 'Windows'
-        continue-on-error: true
-        run: npm test
+        run: |
+          npm rebuild node-pty --ignore-scripts=false --no-audit --no-fund
+          npm run numbat:build
+          npm test
 
       - name: Validate npm tarball first-install flow
         if: runner.os != 'Windows'

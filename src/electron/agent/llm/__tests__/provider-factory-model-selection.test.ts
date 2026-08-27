@@ -628,6 +628,40 @@ describe("LLMProviderFactory OpenRouter Pareto configuration", () => {
       context_length: 200000,
     });
   });
+
+  it("loads the dedicated OpenRouter image catalog and capabilities", async () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "openrouter",
+      modelKey: "openrouter/pareto-code",
+      openrouter: { apiKey: "openrouter-key" },
+    } as LLMSettings);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ({
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            data: [
+              {
+                id: "meta/muse-image",
+                name: "Meta: Muse Image",
+                description: "Image generation and editing.",
+                supported_parameters: {},
+              },
+            ],
+          }),
+        }) as unknown as Response,
+      ),
+    );
+
+    const models = await LLMProviderFactory.getOpenRouterImageModels();
+
+    expect(models[0]).toMatchObject({
+      id: "meta/muse-image",
+      name: "Meta: Muse Image",
+      supported_parameters: {},
+    });
+  });
 });
 
 describe("LLMProviderFactory profile-based task model routing", () => {

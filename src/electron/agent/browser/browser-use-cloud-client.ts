@@ -2,6 +2,13 @@ import { SecureSettingsRepository } from "../../database/SecureSettingsRepositor
 
 type FetchLike = typeof fetch;
 
+type BrowserUseCloudClientOptions = {
+  baseUrl?: string;
+  fetchImpl?: FetchLike;
+  sleep?: (delayMs: number) => Promise<void>;
+  maxRetries?: number;
+};
+
 export interface BrowserUseCloudSettings {
   enabled?: boolean;
   apiKey?: string;
@@ -35,10 +42,22 @@ export interface BrowserUseBrowserSession {
   recordingUrl?: string | null;
 }
 
+export class BrowserUseApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryable: boolean,
+    readonly retryAfterMs?: number,
+  ) {
+    super(message);
+    this.name = "BrowserUseApiError";
+  }
+}
+
 export class BrowserUseCloudClient {
   constructor(
     private readonly apiKey: string,
-    private readonly options: { baseUrl?: string; fetchImpl?: FetchLike } = {},
+    private readonly options: BrowserUseCloudClientOptions = {},
   ) {}
 
   static loadSettings(): BrowserUseCloudSettings {
@@ -86,28 +105,75 @@ export class BrowserUseCloudClient {
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     const fetchImpl = this.options.fetchImpl || fetch;
     const baseUrl = (this.options.baseUrl || "https://api.browser-use.com/api/v4").replace(/\/$/, "");
-    const response = await fetchImpl(`${baseUrl}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        "X-Browser-Use-API-Key": this.apiKey,
-        ...(init.headers || {}),
-      },
-    });
-    if (!response.ok) {
-      let details = "";
-      try {
-        details = await response.text();
-      } catch {
-        details = "";
+    const maxAttempts = Math.max(1, Math.min(5, Math.round(this.options.maxRetries ?? 3)));
+    const sleep =
+      this.options.sleep || ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const response = await fetchImpl(`${baseUrl}${path}`, {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Browser-Use-API-Key": this.apiKey,
+          ...(init.headers || {}),
+        },
+      });
+      if (response.ok) return (await response.json()) as T;
+
+      const retryable = isRetryableBrowserUseStatus(response.status);
+      const retryAfterMs = parseRetryAfterMs(response.headers);
+      const requestMethod = (init.method || "GET").toUpperCase();
+      const safeToReplay = requestMethod !== "POST" || response.status === 429;
+      if (!retryable || !safeToReplay || attempt >= maxAttempts - 1) {
+        let details = "";
+        try {
+          details = await response.text();
+        } catch {
+          details = "";
+        }
+        const redactedDetails = redactBrowserUseErrorText(details);
+        throw new BrowserUseApiError(
+          `Browser Use API request failed with HTTP ${response.status}${redactedDetails ? `: ${redactedDetails.slice(0, 500)}` : ""}`,
+          response.status,
+          retryable,
+          retryAfterMs,
+        );
       }
-      const redactedDetails = redactBrowserUseErrorText(details);
-      throw new Error(
-        `Browser Use API request failed with HTTP ${response.status}${redactedDetails ? `: ${redactedDetails.slice(0, 500)}` : ""}`,
-      );
+
+      const exponentialBackoffMs = 250 * 2 ** attempt;
+      const delayMs = Math.min(60_000, Math.max(retryAfterMs || 0, exponentialBackoffMs));
+      await sleep(delayMs);
     }
-    return (await response.json()) as T;
+
+    throw new Error("Browser Use API request exhausted its retry budget");
   }
+}
+
+export function isRetryableBrowserUseStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+export function parseRetryAfterMs(headers: Pick<Headers, "get">, now = Date.now()): number | undefined {
+  const retryAfter = headers.get("retry-after")?.trim();
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(60_000, Math.ceil(seconds * 1000));
+    const timestamp = Date.parse(retryAfter);
+    if (Number.isFinite(timestamp)) return Math.min(60_000, Math.max(0, timestamp - now));
+  }
+
+  const reset = headers.get("x-ratelimit-reset")?.trim();
+  const resetSeconds = reset ? Number(reset) : NaN;
+  if (Number.isFinite(resetSeconds) && resetSeconds >= 0) {
+    const resetAtMs =
+      resetSeconds >= 100_000_000_000
+        ? resetSeconds
+        : resetSeconds > now / 1000
+          ? resetSeconds * 1000
+          : now + resetSeconds * 1000;
+    return Math.min(60_000, Math.max(0, Math.ceil(resetAtMs - now)));
+  }
+  return undefined;
 }
 
 export function normalizeBrowserUseProxyCountryCode(value: unknown): string | null | undefined {

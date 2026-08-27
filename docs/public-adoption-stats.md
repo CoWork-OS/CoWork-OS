@@ -20,6 +20,7 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 | npm downloads, last day | 77 |
 | npm downloads, last week | 405 |
 | npm downloads, last month | 1,018 |
+| npm downloads, all time | 7,380 |
 | GitHub views, last 14-ish days | 1,568 total / 539 unique |
 | GitHub clones, last 14-ish days | 8,834 total / 473 unique |
 
@@ -91,6 +92,7 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 - This report uses GitHub repository, release, traffic, and npm download APIs.
 - GitHub traffic data is only available for a short rolling window and requires repository access.
 - Release asset downloads are lifetime counters. The headline download totals exclude updater metadata files such as blockmaps, checksums, and YAML manifests. The delta column is computed by comparing the current snapshot with the previous committed snapshot.
+- npm all-time downloads are summed from the available daily range and are shown only when that range reaches the package's first published version.
 - No application telemetry is collected by this report.
 - No prompts, generated outputs, files, emails, workspace names, API keys, account IDs, IP addresses, or installed-app events are collected.
 

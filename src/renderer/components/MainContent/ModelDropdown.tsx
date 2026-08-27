@@ -16,8 +16,18 @@ import {
   LLM_REASONING_EFFORT_OPTIONS,
 } from "../../../shared/llm-model-selection";
 import { getModelAccessDescriptor } from "../../../shared/model-access";
-import { Sparkles } from "lucide-react";
+import { Check, ChevronRight, Search, Settings2, Sparkles } from "lucide-react";
 import type { SettingsTab } from "./main-content-types";
+
+const REASONING_EFFORT_DESCRIPTIONS: Partial<Record<LLMReasoningEffort, string>> = {
+  low: "Quick responses for straightforward tasks",
+  medium: "A balanced default for most tasks",
+  high: "More deliberate analysis for harder work",
+  extra_high: "Maximum depth on supported models",
+  xhigh: "Maximum depth on supported models",
+  max: "Maximum depth on supported models",
+  ultra: "Deepest reasoning, with longer responses",
+};
 
 // Searchable Model Dropdown Component
 export interface ModelDropdownProps {
@@ -213,6 +223,7 @@ export function ModelDropdown({
       ref={containerRef}
     >
       <button
+        type="button"
         className={`${variant === "label" ? "model-label-subtle" : "model-selector"} ${isOpen ? "open" : ""}`}
         title={`${currentProviderLabel}: ${selectedModelLabel} (${currentAccess.label})`}
         aria-label={`Change model source, currently ${currentProviderLabel}, ${selectedModelLabel}`}
@@ -275,56 +286,28 @@ export function ModelDropdown({
           onMouseLeave={() => setActiveProviderMenu(null)}
         >
           <div className="model-dropdown-panel">
-            {selectedReasoningEfforts.length > 0 && (
-              <div
-                className="model-dropdown-section"
-                onMouseEnter={() => setActiveProviderMenu(null)}
-              >
-                <div className="model-dropdown-section-label">Intelligence</div>
-                {LLM_REASONING_EFFORT_OPTIONS.filter((option) =>
-                  selectedReasoningEfforts.includes(option.value),
-                ).map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`model-dropdown-item compact ${option.value === effectiveReasoningEffort ? "selected" : ""}`}
-                    onClick={() =>
-                      onModelChange({
-                        providerType: selectedProvider,
-                        modelKey: selectedModel,
-                        reasoningEffort: option.value,
-                      })
-                    }
-                  >
-                    <span className="model-dropdown-item-name">{option.label}</span>
-                    {option.value === effectiveReasoningEffort && (
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M20 6L9 17l-5-5" />
-                      </svg>
-                    )}
-                  </button>
-                ))}
+            <div className="model-dropdown-header">
+              <div className="model-dropdown-header-copy">
+                <span className="model-dropdown-kicker">MODEL SOURCE</span>
+                <div className="model-dropdown-current-provider">
+                  <span>{currentProviderLabel}</span>
+                  <span className="model-dropdown-access-badge">{currentAccess.label}</span>
+                </div>
               </div>
-            )}
+              <div className="model-dropdown-current-selection">
+                <span className="model-dropdown-current-label">Current model</span>
+                <strong>{selectedModelLabel}</strong>
+                {effectiveReasoningEffort && (
+                  <span>
+                    {LLM_REASONING_EFFORT_OPTIONS.find(
+                      (option) => option.value === effectiveReasoningEffort,
+                    )?.label} intelligence
+                  </span>
+                )}
+              </div>
+            </div>
             <div className="model-dropdown-search" onMouseEnter={() => setActiveProviderMenu(null)}>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-              </svg>
+              <Search size={16} aria-hidden="true" />
               <input
                 ref={inputRef}
                 type="text"
@@ -335,116 +318,158 @@ export function ModelDropdown({
                 autoFocus
               />
             </div>
-            <div className="model-dropdown-section-label model-dropdown-provider-label">
-              {currentProviderLabel}
-            </div>
-            <div className="model-dropdown-list" onMouseEnter={() => setActiveProviderMenu(null)}>
-              {filteredModels.length === 0 ? (
-                <div className="model-dropdown-no-results">No models found</div>
-              ) : (
-                filteredModels.map((model) => (
-                  <button
-                    key={model.key}
-                    className={`model-dropdown-item ${model.key === selectedModel ? "selected" : ""}`}
-                    onClick={() => selectModel(selectedProvider, model.key, model)}
-                  >
-                    <div className="model-dropdown-item-content">
-                      <span className="model-dropdown-item-name">{model.displayName}</span>
-                      <span className="model-dropdown-item-desc">{model.description}</span>
-                    </div>
-                    {model.key === selectedModel && (
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M20 6L9 17l-5-5" />
-                      </svg>
-                    )}
-                  </button>
-                ))
-              )}
-            </div>
-            {otherProviders.length > 0 && (
-              <div className="model-dropdown-section model-dropdown-other-providers">
-                <div className="model-dropdown-section-label">Switch provider</div>
-                <div className="model-dropdown-provider-list">
-                  {otherProviders.map((provider) => {
-                    const isActive = activeProviderMenu === provider.type;
-                    return (
-                      <div
-                        key={provider.type}
-                        className="model-dropdown-provider-row"
-                        onMouseEnter={() => {
-                          setActiveProviderMenu(provider.type);
-                          void loadProviderModels(provider.type);
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className={`model-dropdown-item compact ${isActive ? "highlighted" : ""}`}
-                          onClick={() => {
-                            setActiveProviderMenu(isActive ? null : provider.type);
-                            void loadProviderModels(provider.type);
-                          }}
-                        >
-                          <span className="model-dropdown-provider-copy">
-                            <span className="model-dropdown-item-name">{provider.name}</span>
-                            <span className="model-dropdown-access-badge">
-                              {getModelAccessDescriptor(provider.type).label}
-                            </span>
-                          </span>
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <path d="M9 18l6-6-6-6" />
-                          </svg>
-                        </button>
-                      </div>
-                    );
-                  })}
+            <div className="model-dropdown-content">
+              <section className="model-dropdown-models" onMouseEnter={() => setActiveProviderMenu(null)}>
+                <div className="model-dropdown-section-heading">
+                  <div>
+                    <span className="model-dropdown-section-label">Models</span>
+                    <span className="model-dropdown-section-caption">{currentProviderLabel} catalog</span>
+                  </div>
+                  <span className="model-dropdown-count">{filteredModels.length}</span>
                 </div>
-              </div>
-            )}
+                <div className="model-dropdown-list">
+                  {filteredModels.length === 0 ? (
+                    <div className="model-dropdown-no-results">No models match “{search}”</div>
+                  ) : (
+                    filteredModels.map((model) => (
+                      <button
+                        key={model.key}
+                        type="button"
+                        className={`model-dropdown-item ${model.key === selectedModel ? "selected" : ""}`}
+                        onClick={() => selectModel(selectedProvider, model.key, model)}
+                      >
+                        <div className="model-dropdown-item-content">
+                          <span className="model-dropdown-item-name">{model.displayName}</span>
+                          <span className="model-dropdown-item-desc">{model.description}</span>
+                          <span className="model-dropdown-item-key">{model.key}</span>
+                        </div>
+                        {model.key === selectedModel && <Check size={16} aria-hidden="true" />}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+              <aside className="model-dropdown-sidebar">
+                {selectedReasoningEfforts.length > 0 && (
+                  <section className="model-dropdown-sidebar-section" onMouseEnter={() => setActiveProviderMenu(null)}>
+                    <div className="model-dropdown-section-heading">
+                      <div>
+                        <span className="model-dropdown-section-label">Intelligence</span>
+                        <span className="model-dropdown-section-caption">Reasoning depth</span>
+                      </div>
+                      <Sparkles size={15} aria-hidden="true" />
+                    </div>
+                    <div className="model-dropdown-reasoning-list">
+                      {LLM_REASONING_EFFORT_OPTIONS.filter((option) =>
+                        selectedReasoningEfforts.includes(option.value),
+                      ).map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`model-dropdown-reasoning-option ${option.value === effectiveReasoningEffort ? "selected" : ""}`}
+                          onClick={() =>
+                            onModelChange({
+                              providerType: selectedProvider,
+                              modelKey: selectedModel,
+                              reasoningEffort: option.value,
+                            })
+                          }
+                        >
+                          <span className="model-dropdown-reasoning-copy">
+                            <span className="model-dropdown-item-name">{option.label}</span>
+                            <span>{REASONING_EFFORT_DESCRIPTIONS[option.value]}</span>
+                          </span>
+                          {option.value === effectiveReasoningEffort && <Check size={15} aria-hidden="true" />}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {otherProviders.length > 0 && (
+                  <section className="model-dropdown-sidebar-section model-dropdown-other-providers">
+                    <div className="model-dropdown-section-heading">
+                      <div>
+                        <span className="model-dropdown-section-label">Other sources</span>
+                        <span className="model-dropdown-section-caption">Browse configured providers</span>
+                      </div>
+                    </div>
+                    <div className="model-dropdown-provider-list">
+                      {otherProviders.map((provider) => {
+                        const isActive = activeProviderMenu === provider.type;
+                        return (
+                          <div
+                            key={provider.type}
+                            className="model-dropdown-provider-row"
+                            onMouseEnter={() => {
+                              setActiveProviderMenu(provider.type);
+                              void loadProviderModels(provider.type);
+                            }}
+                          >
+                            <button
+                              type="button"
+                              aria-expanded={isActive}
+                              className={`model-dropdown-provider-option ${isActive ? "highlighted" : ""}`}
+                              onClick={() => {
+                                setActiveProviderMenu(isActive ? null : provider.type);
+                                void loadProviderModels(provider.type);
+                              }}
+                            >
+                              <span className="model-dropdown-provider-copy">
+                                <span className="model-dropdown-item-name">{provider.name}</span>
+                                <span className="model-dropdown-access-badge">
+                                  {getModelAccessDescriptor(provider.type).label}
+                                </span>
+                              </span>
+                              <ChevronRight size={15} aria-hidden="true" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
+              </aside>
+            </div>
             <div className="model-dropdown-footer" onMouseEnter={() => setActiveProviderMenu(null)}>
               <button
                 type="button"
                 className="model-dropdown-provider-btn"
                 onClick={handleOpenProviders}
               >
-                Connect or manage model sources
+                <Settings2 size={14} aria-hidden="true" />
+                <span>Connect or manage model sources</span>
               </button>
             </div>
           </div>
           {activeProvider && (
             <div className="model-dropdown-submenu">
-              {loadingProviderModels === activeProvider.type ? (
-                <div className="model-dropdown-no-results">Loading models...</div>
-              ) : activeProviderModels.length === 0 ? (
-                <div className="model-dropdown-no-results">No models found</div>
-              ) : (
-                activeProviderModels.map((model) => (
-                  <button
-                    key={model.key}
-                    type="button"
-                    className="model-dropdown-item"
-                    onClick={() => selectModel(activeProvider.type, model.key, model)}
-                  >
-                    <div className="model-dropdown-item-content">
-                      <span className="model-dropdown-item-name">{model.displayName}</span>
-                      <span className="model-dropdown-item-desc">{model.description}</span>
-                    </div>
-                  </button>
-                ))
-              )}
+              <div className="model-dropdown-submenu-header">
+                <span className="model-dropdown-kicker">SWITCH TO</span>
+                <strong>{activeProvider.name}</strong>
+                <span>{activeProviderModels.length} available models</span>
+              </div>
+              <div className="model-dropdown-submenu-list">
+                {loadingProviderModels === activeProvider.type ? (
+                  <div className="model-dropdown-no-results">Loading models…</div>
+                ) : activeProviderModels.length === 0 ? (
+                  <div className="model-dropdown-no-results">No models found</div>
+                ) : (
+                  activeProviderModels.map((model) => (
+                    <button
+                      key={model.key}
+                      type="button"
+                      className="model-dropdown-item"
+                      onClick={() => selectModel(activeProvider.type, model.key, model)}
+                    >
+                      <div className="model-dropdown-item-content">
+                        <span className="model-dropdown-item-name">{model.displayName}</span>
+                        <span className="model-dropdown-item-desc">{model.description}</span>
+                        <span className="model-dropdown-item-key">{model.key}</span>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           )}
         </div>

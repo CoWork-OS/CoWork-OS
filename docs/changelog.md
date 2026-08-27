@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Derived native SQLite repair versions from the active package manifest.
 - Hardened security evaluation, managed MCP metadata validation, legacy database migrations, task/state persistence, mailbox fallbacks, and custom CLI provider credential recognition.
 - Fixed clean CI and release test preparation for the Node native PTY dependency and pinned Numbat fixture.
+- Fixed Windows Numbat archive extraction to retain native drive paths during release packaging.
 
 ## [0.5.51] - 2026-08-17
 

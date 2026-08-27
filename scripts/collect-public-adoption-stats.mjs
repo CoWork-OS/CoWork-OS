@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { spawnSync } from "child_process";
+import { buildNpmAllTimeMetric, getNpmFirstPublishedDay } from "./public-adoption-stats-utils.mjs";
 
 const repoOwner = process.env.ADOPTION_STATS_REPO_OWNER || "CoWork-OS";
 const repoName = process.env.ADOPTION_STATS_REPO_NAME || "CoWork-OS";
@@ -218,15 +219,20 @@ async function fetchNpmPoint(period) {
   }
 }
 
-async function fetchNpmStats() {
-  const [metadata, lastDay, lastWeek, lastMonth] = await Promise.all([
+async function fetchNpmStats(generatedDay) {
+  const [metadata, lastDay, lastWeek, lastMonth, allTimeRange] = await Promise.all([
     fetchJson(`https://registry.npmjs.org/${npmPackage}`, { headers: { Accept: "application/json" } }).catch((error) => ({
       error: error?.message || String(error),
     })),
     fetchNpmPoint("last-day"),
     fetchNpmPoint("last-week"),
     fetchNpmPoint("last-month"),
+    fetchJson(`https://api.npmjs.org/downloads/range/2010-01-01:${generatedDay}/${npmPackage}`, {
+      headers: { Accept: "application/json" },
+    }).catch((error) => ({ error: error?.message || String(error) })),
   ]);
+
+  const packageFirstPublishedDay = getNpmFirstPublishedDay(metadata);
 
   return {
     package: npmPackage,
@@ -236,6 +242,7 @@ async function fetchNpmStats() {
       lastDay,
       lastWeek,
       lastMonth,
+      allTime: buildNpmAllTimeMetric(allTimeRange, packageFirstPublishedDay),
     },
   };
 }
@@ -334,7 +341,7 @@ async function main() {
     fetchGitHubRepo(),
     fetchGitHubReleases(),
     fetchGitHubTraffic(),
-    fetchNpmStats(),
+    fetchNpmStats(dayKey(generatedAt)),
   ]);
 
   const current = {

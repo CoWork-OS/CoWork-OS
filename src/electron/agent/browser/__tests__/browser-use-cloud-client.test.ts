@@ -52,21 +52,35 @@ describe("BrowserUseCloudClient", () => {
     );
   });
 
-  it("stops browser sessions through the v3 patch action", async () => {
+  it("uses the Browser Use V4 API by default", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "browser-session-1" }), { status: 201 }),
+    );
+    const client = new BrowserUseCloudClient("test-key", { fetchImpl: fetchImpl as Any });
+
+    await client.createBrowserSession({ proxyCountryCode: "us" });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.browser-use.com/api/v4/browsers",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("stops browser sessions through the V4 patch action", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: "browser-session-1", status: "stopped" }), {
         status: 200,
       }),
     );
     const client = new BrowserUseCloudClient("test-key", {
-      baseUrl: "https://api.test/api/v3",
+      baseUrl: "https://api.test/api/v4",
       fetchImpl: fetchImpl as Any,
     });
 
     await client.stopBrowserSession("browser-session-1");
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://api.test/api/v3/browsers/browser-session-1",
+      "https://api.test/api/v4/browsers/browser-session-1",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({ action: "stop" }),

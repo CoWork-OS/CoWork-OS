@@ -85,7 +85,7 @@ export class BrowserUseCloudClient {
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     const fetchImpl = this.options.fetchImpl || fetch;
-    const baseUrl = (this.options.baseUrl || "https://api.browser-use.com/api/v3").replace(/\/$/, "");
+    const baseUrl = (this.options.baseUrl || "https://api.browser-use.com/api/v4").replace(/\/$/, "");
     const response = await fetchImpl(`${baseUrl}${path}`, {
       ...init,
       headers: {

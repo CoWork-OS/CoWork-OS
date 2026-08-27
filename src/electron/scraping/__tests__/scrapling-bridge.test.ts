@@ -51,3 +51,23 @@ except ValueError as error:
     expect(output).toBe("Scraping redirect crossed to a different host");
   });
 });
+
+describe("scrapling bridge response classification", () => {
+  it("marks rate limits as blocked and retryable", () => {
+    const output = runBridgeHelperSnippet(`
+print(module.classify_response_status(429))
+`);
+
+    expect(output).toContain("'target_blocked': True");
+    expect(output).toContain("'retryable': True");
+    expect(output).toContain("'status_category': 'rate_limited'");
+  });
+
+  it("leaves successful target responses unblocked", () => {
+    const output = runBridgeHelperSnippet(`
+print(module.classify_response_status(200))
+`);
+
+    expect(output).toBe("{'target_blocked': False, 'retryable': False}");
+  });
+});

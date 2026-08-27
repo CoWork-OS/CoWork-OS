@@ -1,15 +1,15 @@
 {
   "id": "openai-whisper-api",
   "name": "Openai-whisper-api",
-  "description": "Transcribe audio via OpenAI Audio Transcriptions API (Whisper).",
+  "description": "Transcribe audio via OpenAI Whisper or Atlas Cloud speech-to-text APIs.",
   "icon": "☁️",
   "category": "Tools",
-  "prompt": "# OpenAI Whisper API (curl)\n\nTranscribe an audio file via OpenAI’s `/v1/audio/transcriptions` endpoint.\n\n## Quick start\n\n```bash\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a\n```\n\nDefaults:\n\n- Model: `whisper-1`\n- Output: `<input>.txt`\n\n## Useful flags\n\n```bash\n{baseDir}/scripts/transcribe.sh /path/to/audio.ogg --model whisper-1 --out /tmp/transcript.txt\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --language en\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --prompt \"Speaker names: Peter, Daniel\"\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --json --out /tmp/transcript.json\n```\n\n## API key\n\nSet `OPENAI_API_KEY`, or configure it in `~/.CoWork-OSS/CoWork-OSS.json`:\n\n```json5\n{\n  skills: {\n    \"openai-whisper-api\": {\n      apiKey: \"OPENAI_KEY_HERE\",\n    },\n  },\n}\n```",
+  "prompt": "# Audio Transcription APIs (curl)\n\nTranscribe a local audio file through OpenAI Whisper (default) or Atlas Cloud speech-to-text.\n\n## Quick start\n\n```bash\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --provider atlas\n```\n\nDefaults:\n\n- Provider: `openai`\n- OpenAI model: `whisper-1`\n- Atlas Cloud model: `xai/stt-v1`\n- Output: `<input>.txt`\n\n## Useful flags\n\n```bash\n{baseDir}/scripts/transcribe.sh /path/to/audio.ogg --model whisper-1 --out /tmp/transcript.txt\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --provider atlas --language en\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --provider atlas --prompt \"Peter\"\n{baseDir}/scripts/transcribe.sh /path/to/audio.m4a --json --out /tmp/transcript.json\n```\n\nFor Atlas Cloud, `--prompt` is sent as one transcription key term and must be at most 50 characters. Atlas submissions are sent once, then polled with bounded GET requests until completion.\n\n## API keys\n\nSet `OPENAI_API_KEY` or `ATLASCLOUD_API_KEY`. You can also configure provider-specific keys in `~/.CoWork-OSS/CoWork-OSS.json`:\n\n```json5\n{\n  skills: {\n    \"openai-whisper-api\": {\n      apiKey: \"OPENAI_KEY_HERE\",\n      atlasApiKey: \"ATLAS_KEY_HERE\",\n    },\n  },\n}\n```",
   "parameters": [],
   "enabled": true,
   "metadata": {
     "routing": {
-      "useWhen": "Use when the user asks to transcribe audio via OpenAI Audio Transcriptions API Whisper.",
+      "useWhen": "Use when the user asks to transcribe audio through OpenAI Whisper or Atlas Cloud speech-to-text.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
       "outputs": "Outcome from Openai-whisper-api: task-specific result plus concrete action notes.",
       "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.",
@@ -17,7 +17,7 @@
         "positive": [
           "Use the openai-whisper-api skill for this request.",
           "Help me with openai-whisper-api.",
-          "Use when the user asks to transcribe audio via OpenAI Audio Transcriptions API Whisper.",
+          "Use when the user asks to transcribe audio through OpenAI Whisper or Atlas Cloud speech-to-text.",
           "Openai-whisper-api: provide an actionable result."
         ],
         "negative": [
@@ -30,6 +30,7 @@
     },
     "authoring": {
       "complexity": "low"
-    }
+    },
+    "version": "1.1.0"
   }
 }

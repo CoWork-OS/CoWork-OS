@@ -17,6 +17,8 @@ import { LLMTool } from "../llm/types";
  * - OpenAI (gpt-image-* / dall-e-*)
  * - ChatGPT subscription via OAuth (gpt-image-* through the Responses image_generation tool)
  * - Azure OpenAI (deployment-based)
+ * - OpenRouter's dedicated image API (all models in its image catalog, including
+ *   reference-capable models)
  *
  * If multiple are configured, the tool prefers the configured default provider,
  * then falls back to the others unless explicitly overridden.
@@ -54,6 +56,13 @@ export class ImageTools {
       filename?: string;
       imageSize?: ImageSize;
       numberOfImages?: number;
+      aspectRatio?: string;
+      quality?: "auto" | "low" | "medium" | "high";
+      background?: "auto" | "transparent" | "opaque";
+      outputFormat?: "png" | "jpeg" | "webp" | "svg";
+      outputCompression?: number;
+      seed?: number;
+      referenceImages?: string[];
     },
     options?: { signal?: AbortSignal },
   ): Promise<ImageGenerationResult> {
@@ -90,6 +99,13 @@ export class ImageTools {
       filename: input.filename,
       imageSize: input.imageSize || "1K",
       numberOfImages: input.numberOfImages || 1,
+      aspectRatio: input.aspectRatio,
+      quality: input.quality,
+      background: input.background,
+      outputFormat: input.outputFormat,
+      outputCompression: input.outputCompression,
+      seed: input.seed,
+      referenceImages: input.referenceImages,
       signal: options?.signal,
       onProgress: (event) => {
         this.daemon.logEvent(this.taskId, "progress_update", {
@@ -139,6 +155,13 @@ export class ImageTools {
     model?: ImageModel;
     imageSize?: ImageSize;
     numberOfImages?: number;
+    aspectRatio?: string;
+    quality?: "auto" | "low" | "medium" | "high";
+    background?: "auto" | "transparent" | "opaque";
+    outputFormat?: "png" | "jpeg" | "webp" | "svg";
+    outputCompression?: number;
+    seed?: number;
+    referenceImages?: string[];
   }): string {
     return JSON.stringify({
       prompt: String(input.prompt || "").replace(/\s+/g, " ").trim().toLowerCase(),
@@ -146,6 +169,13 @@ export class ImageTools {
       model: input.model || "",
       imageSize: input.imageSize || "1K",
       numberOfImages: input.numberOfImages || 1,
+      aspectRatio: input.aspectRatio,
+      quality: input.quality,
+      background: input.background,
+      outputFormat: input.outputFormat,
+      outputCompression: input.outputCompression,
+      seed: input.seed,
+      referenceImages: input.referenceImages || [],
     });
   }
 
@@ -169,7 +199,8 @@ Providers/models:
 - OpenAI: gpt-image-2, gpt-image-1, gpt-image-1.5, dall-e-3, dall-e-2 (also accepts "gpt-2" and "gpt-1.5" aliases)
 - ChatGPT subscription: gpt-image-2 via ChatGPT/Codex OAuth
 - Azure OpenAI: model maps to a deployment name (configured in Settings)
-- OpenRouter: gpt-image-1.5 via openai/gpt-image-1.5
+- OpenRouter: any model from OpenRouter's image catalog, such as meta/muse-image,
+  openai/gpt-image-2, Recraft, Seedream, Qwen, and Nano Banana
 - Gemini: nano-banana-2 (gemini-3.1-flash-image-preview), gemini-image-pro, gemini-image-fast
 
 The generated images are saved to the workspace folder.`,
@@ -190,7 +221,7 @@ The generated images are saved to the workspace folder.`,
             model: {
               type: "string",
               description:
-                'Optional model override. Examples: "gpt-image-2", "dall-e-3", or an Azure deployment name.',
+                'Optional model override. Examples: "meta/muse-image", "openai/gpt-image-2", or an Azure deployment name.',
             },
             filename: {
               type: "string",
@@ -205,7 +236,46 @@ The generated images are saved to the workspace folder.`,
             },
             numberOfImages: {
               type: "number",
+              minimum: 1,
+              maximum: 4,
               description: "Number of images to generate (1-4, default: 1)",
+            },
+            aspectRatio: {
+              type: "string",
+              description:
+                "Optional OpenRouter aspect ratio, such as 1:1, 16:9, or 9:16. The selected model must support it.",
+            },
+            quality: {
+              type: "string",
+              enum: ["auto", "low", "medium", "high"],
+              description: "Optional OpenRouter image quality setting.",
+            },
+            background: {
+              type: "string",
+              enum: ["auto", "transparent", "opaque"],
+              description: "Optional OpenRouter image background setting.",
+            },
+            outputFormat: {
+              type: "string",
+              enum: ["png", "jpeg", "webp", "svg"],
+              description: "Optional output format for OpenRouter image models.",
+            },
+            outputCompression: {
+              type: "number",
+              minimum: 0,
+              maximum: 100,
+              description: "Optional OpenRouter output compression percentage (0-100).",
+            },
+            seed: {
+              type: "number",
+              description: "Optional OpenRouter seed for reproducible image generation.",
+            },
+            referenceImages: {
+              type: "array",
+              maxItems: 16,
+              items: { type: "string" },
+              description:
+                "Optional input images for image-to-image generation. Use workspace-local paths, HTTP(S) URLs, or image data URLs.",
             },
           },
           required: ["prompt"],

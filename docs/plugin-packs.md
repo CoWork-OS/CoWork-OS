@@ -1296,8 +1296,8 @@ CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 | Feature | CoWork OS | Typical AI Plugins |
 |---------|-----------|-------------------|
 | **Digital Twin integration** | Packs link to proactive personas that work in the background | Reactive only — waits for user prompts |
-| **Multi-model** | Skills work with 36 LLM provider options (OpenAI, Anthropic, Google, Grok, local, and Mixture of Agents presets) | Locked to single provider |
-| **Local-first** | All pack data on device, no cloud dependency | Cloud-dependent |
+| **Multi-model** | Skills work across supported account, API, gateway, cloud, local-model, and Mixture of Agents routes | Commonly tied to one provider |
+| **Local-first** | Pack definitions and runtime state stay local by default; invoked providers and integrations receive required request data | Commonly cloud-dependent |
 | **MCP standard** | Connectors use open Model Context Protocol | Proprietary integrations |
 | **Heartbeat tasks** | Twins proactively surface insights on a schedule | No background processing |
 | **Agent Teams** | Packs include team configurations for multi-agent orchestration | Single agent only |

@@ -2,7 +2,7 @@
 
 ## Production-Ready Implementation
 
-CoWork OS is a **security-first, GUI-first, CLI-capable local AI super app and everything app** with multi-channel messaging support, visual agent management, a terminal entrypoint, comprehensive guardrails, and extensive test coverage.
+CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI super app and everything app** with an open multi-provider agent harness, multi-channel messaging, visual agent management, a terminal entrypoint, comprehensive guardrails, and extensive test coverage.
 
 ### What CoWork OS Is
 
@@ -14,10 +14,10 @@ CoWork OS is a **security-first, GUI-first, CLI-capable local AI super app and e
 - **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices tab
 - **Automation Studio**: A main-sidebar Discover/Library/Builder/Activity surface for versioned structured flows, dry runs, variables, branches, approvals, signed webhooks, durable activity, cancellation, and restart recovery; advanced queueing, prompt-based routines, schedules, triggers, briefing, and Workflow Intelligence remain grouped in Settings
 - **Renderer Performance**: Sidebar and timeline virtualization in the `CoWork-OS/CoWork-OS` repo use `@chenglou/pretext` for text measurement and keep long task feeds responsive
-- **Security-First Design**: 4,932 automated tests across 390 test files, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
+- **Security-First Design**: Extensive automated test coverage, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
 - **Imported Capability Security**: managed skill and pack imports are staged, scanned, reported, and quarantined when blocked instead of being activated directly
-- **Multi-Provider Support**: 36 LLM provider options including free local models via Ollama, OpenRouter coding routers, Grok through xAI API key or SuperGrok OAuth, and Mixture of Agents presets
-- **Local-First Architecture**: Your data stays on your machine, BYOK model
+- **Open Multi-Provider Harness**: Supported account connections, APIs, compatible gateways, cloud credentials, and local inference share CoWork tools, skills, memory, agents, approvals, artifacts, and workflows
+- **Local-First Architecture**: Operational state is persisted locally by default; configured providers, gateways, connectors, channels, and other integrations receive the data required for requests you invoke
 
 ## What's Built and Working
 
@@ -70,7 +70,7 @@ CoWork OS is a **security-first, GUI-first, CLI-capable local AI super app and e
 - [x] Google Gemini
 - [x] OpenRouter (multi-model access, including Pareto Code and Pareto Code Nitro coding routers)
 - [x] OpenAI (API Key: GPT-4o, o1 models)
-- [x] OpenAI (ChatGPT OAuth: Use your ChatGPT subscription)
+- [x] OpenAI (API key plus ChatGPT OAuth for eligible accounts and models)
 - [x] Prompt caching defaults for Anthropic, Azure Anthropic, OpenAI, Azure OpenAI, and OpenRouter GPT/Claude routes
 - [x] AWS Bedrock
 - [x] Ollama (local/free)
@@ -360,7 +360,7 @@ cowork-os/
 │   │   │   ├── executor-*-utils.ts # Modular executor utilities
 │   │   │   ├── executor-event-emitter.ts
 │   │   │   ├── executor-lifecycle-mutex.ts
-│   │   │   ├── llm/           # 30+ providers and compatible gateways
+│   │   │   ├── llm/           # Providers, account routes, local models, and compatible gateways
 │   │   │   ├── search/        # 4 providers
 │   │   │   ├── browser/       # Legacy Playwright fallback service
 │   │   │   ├── tools/         # All tool implementations + git tools
@@ -479,7 +479,7 @@ Operations Requiring Approval:
 
 ### You Can:
 1. Select workspaces and create tasks
-2. Use any configured LLM provider, including local Ollama and 30+ supported provider/gateway options
+2. Use a configured model route, including supported provider accounts, APIs, compatible gateways, cloud credentials, and local Ollama models
 3. Execute multi-step file operations
 4. Create real Office documents (.xlsx, .docx, .pdf, .pptx)
 5. Search the web with multiple providers
@@ -574,15 +574,15 @@ Expected behavior:
 
 ## Summary
 
-**CoWork OS is a production-ready, security-first, GUI-first, CLI-capable local AI super app and everything app:**
+**CoWork OS is a production-ready, free, open-source, security-first, GUI-first, CLI-capable AI super app and everything app:**
 
 ### Core Strengths
-- **Security**: 4,932 automated tests across 390 test files, configurable guardrails, layered permission rules, approval workflows, and brute-force protection
+- **Security**: Extensive automated test coverage, configurable guardrails, layered permission rules, approval workflows, and brute-force protection
 - **Multi-Channel**: WhatsApp, Telegram, Discord, Slack, iMessage integration
-- **Multi-Provider**: 36 LLM provider options and compatible gateways, including Claude, GPT, Gemini, Bedrock, OpenRouter Pareto Code routing, Ollama, Grok through xAI API key or SuperGrok OAuth, and Mixture of Agents presets
+- **Multi-Provider**: Supported account connections, APIs, compatible gateways, cloud credentials, local inference, ordered fallback routes, and Mixture of Agents presets
 - **GUI-first Agents + CLI entrypoint**: Agents Hub, Mission Control, visual task timelines, boards, and approval dialogs for creating, spawning, assigning, and monitoring many agents, plus `cowork` for local terminal starts against the same runtime
-- **Local-First**: Your data stays on your machine, BYOK model
-- **Extensible**: MCP support (Client, Host, Registry), 151 built-in skills, and plugin packs
+- **Local-First**: Operational state is persisted locally by default, with explicit boundaries for configured remote providers and integrations
+- **Extensible**: MCP support (Client, Host, Registry), bundled and installable skills, and plugin packs
 
 ### Feature Highlights
 - Everyday Office-style document creation and review (Excel, Word, PDF, PowerPoint)

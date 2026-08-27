@@ -62,7 +62,7 @@ This is the classic definition of continual learning:
 - adapters or LoRAs
 - model-specific post-training
 
-CoWork OS is model-agnostic. It supports many providers and local models, but it does not depend on hidden weight mutation to improve your runtime over time.
+CoWork OS supports multiple provider and local-model routes. Its continual-learning runtime does not depend on one model vendor or on hidden weight mutation to improve over time.
 
 That is intentional.
 

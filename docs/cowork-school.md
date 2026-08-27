@@ -1,11 +1,11 @@
 ---
 title: "CoWork OS: A Beginner's Guide"
-description: A practical guide to what CoWork OS is, how it differs from chat-only AI tools, how to get started, and which workflows to try first.
+description: A practical guide to CoWork OS as a free, open-source AI super app and multi-provider agent harness, including setup and first workflows.
 ---
 
 # CoWork OS: A Beginner's Guide
 
-A local-first AI operating system that can chat, execute tasks, operate across channels, and run background workflows without giving up approvals, guardrails, or ownership of your data.
+The free, open-source AI super app for real work: one local-first workspace for tasks, tools, artifacts, agents, and automation across supported model routes.
 
 ## Why this guide exists
 
@@ -21,7 +21,7 @@ The goal is not to teach every setting. It is to help you understand what CoWork
 
 ### What is CoWork OS?
 
-CoWork OS is a local-first AI operating system for real work.
+CoWork OS is a free, open-source, local-first AI super app and personal agentic operating system for real work.
 
 In practice, that means:
 
@@ -30,12 +30,13 @@ In practice, that means:
 - it can run across desktop, messaging channels, or a headless control plane
 - it can keep background systems running through Memory, Heartbeat, Workflow Intelligence, Scheduled Tasks, and Daily Briefing
 - it keeps approvals, guardrails, encrypted settings, and workspace boundaries in the product instead of expecting you to bolt them on later
+- it lets supported provider accounts, APIs, compatible gateways, cloud credentials, and local models use the same surrounding tools, skills, memory, agents, approvals, and artifacts
 
 If ChatGPT feels like “ask a smart model a question,” CoWork OS is closer to “give an operator a job, tools, memory, and rules.”
 
 ### How is it different from ChatGPT, Claude, or Codex?
 
-The difference is not just the model. It is the operating model.
+The difference is not just the model. It is the operating model and who controls the harness around it.
 
 Chat-first tools are great when you want an answer, a draft, or a quick burst of reasoning. CoWork OS is better when you want the system to stay with the work.
 
@@ -47,7 +48,9 @@ It can:
 - keep long-running operational loops alive through automations instead of waiting for the next prompt
 - separate profiles, companies, devices, skills, and policies so one setup does not leak into another
 
-In short: most AI tools are conversations. CoWork OS is a governed execution environment.
+In short: CoWork OS keeps the broader work surface and governance layer consistent while you choose among supported model routes. CoWork itself is free and MIT-licensed; model providers and connected services can apply separate eligibility, limits, and charges.
+
+For product-by-product tradeoffs, see [Compare CoWork OS](comparisons/index.md).
 
 ### What can it access?
 

@@ -6,7 +6,7 @@ MoA does not replace provider credentials. It orchestrates the providers you alr
 
 ## Where to Configure It
 
-Open **Settings > AI & Models > AI Model**, then choose **Mixture of Agents** in the LLM Provider list.
+Open **Settings > AI & Models > AI Model**, then choose **Mixture of Agents** in the provider list.
 
 From this panel you can:
 

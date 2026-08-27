@@ -174,7 +174,7 @@ features:
     details: GitHub Releases can ship a Linux x64 server tarball for VPS/systemd installs, with built daemon assets, full resources, connector runtimes, checksum verification, Control Plane smoke tests, and fail-closed managed deployment posture checks. It runs `coworkd-node` without launching the desktop UI.
   - title: Dozens of Model Routes
     details: Connect supported accounts, APIs, gateways, cloud credentials, and local inference. Switch models per task or workflow phase, configure ordered fallback chains, and combine advisors and aggregators with Mixture of Agents presets. Model capabilities, eligibility, limits, and charges vary by provider.
-  - title: 17 Messaging Channels
+  - title: Multi-Channel Gateway
     details: WhatsApp, Telegram, Discord, Slack, iMessage, Teams, Google Chat, Feishu/Lark, WeCom, and more. Chat with your AI from anywhere, with channel/chat/thread specialization for workspace, agent role, prompt guidance, tool policy, and shared-memory opt-in.
   - title: Chat Mode
     details: Direct LLM chat with no tools by default, same-session follow-ups, chat-only streaming for supported providers, and a narrow read-only analysis exception for uploaded PDF turns that need deeper document reading.
@@ -228,7 +228,7 @@ features:
     details: Main-sidebar Automation Studio provides Discover, Library, Builder, and Activity for versioned structured flows with dry runs, variables, Yes/No branches, approvals, cancellation, recovery, and retained evidence. Advanced Settings keeps prompt-based routines, queueing, schedules, webhooks, triggers, briefing, and Workflow Intelligence policy; tasks can still become same-thread or new-task automations from the task menu.
   - title: Heartbeat V3
     details: Default two-lane background automation with cheap Pulse checks, selective Dispatch escalation, signal compression, automation-profile ownership, and truthful Mission Control state that separates Heartbeat agents, global runtime queue pressure, and workspace board work.
-  - title: 151 Built-in Skills
+  - title: Bundled and Installable Skills
     details: Document creation, web research, code generation, image analysis, React/Next.js implementation guidance, and specialized bundled workflows such as `llm-wiki` for persistent research vaults, `manim-video` for technical animation, `architecture-design` for Rhino/Blender/ComfyUI concept architecture workflows, `kami` for editorial PDFs and slide decks, `react-best-practices` for React workspace changes, `unbroker` for consent-gated data-broker cleanup, and `taste-skill` for high-agency frontend design. The bundled CoWork Shortcuts pack adds slash-searchable workflow aliases on top of the same skills runtime. Extensible via custom skills, ClawHub installs, external skill imports, and optional read-only external skill directories, with staged scanning and warning/quarantine handling for managed imports.
   - title: LaTeX PDF Artifacts
     details: Source-first `.tex` workflows compile with installed system TeX engines and render paired source/PDF artifact workbenches in task output surfaces.
@@ -239,13 +239,13 @@ features:
   - title: Agent Teams
     details: Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and performance reviews.
   - title: Enterprise Connectors
-    details: 47 MCP connectors including Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Rhino, Blender, ComfyUI, and more, with connector notifications available to automations and configured connector mentions available from the composer.
+    details: An extensible MCP connector catalog including Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Rhino, Blender, ComfyUI, and more, with connector notifications available to automations and configured connector mentions available from the composer.
   - title: Secure MCP Tunnels
     details: Self-hosted outbound-only relay support lets remote CoWork callers reach selected local or private MCP tools without relying on OpenAI tunnel hosting, ngrok, localtunnel, or public inbound ports on the user's machine.
   - title: Federated Agents
     details: Discover ACP agents, delegate to local or remote specialists, persist ACP task state locally, and invoke A2A-compatible endpoints under shared approvals and endpoint-validation rules.
   - title: Security First
-    details: Local-first architecture, sandboxed execution, layered permission rules, workspace-local policy files, guardrails, approval workflows, encrypted storage, import scanning/quarantine for managed capability bundles, and a verified suite of 4,932 automated tests across 390 test files.
+    details: Local-first architecture, sandboxed execution, layered permission rules, workspace-local policy files, guardrails, approval workflows, encrypted storage, import scanning/quarantine for managed capability bundles, and extensive automated test coverage.
   - title: Best-Fit Operational Workflows
     details: Purpose-built packs for Support Ops, IT Ops, and Sales Ops — governed outcome delivery for the workflows where AI assistance has the clearest ROI. See the Best-Fit Workflows guide.
   - title: Zero-Human Company Ops

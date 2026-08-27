@@ -1,6 +1,8 @@
 # Everything Workbench
 
-CoWork OS is the GUI-first, CLI-capable local AI super app and everything app for everyday work. It is meant to cover more than office-style files: coding, terminal work, email, research, web design, documents, spreadsheets, decks, PDFs, agent spawning and management, automations, inbox work, channels, devices, skills, and long-running tasks all live in one governed workspace. The desktop app is the primary review and workbench surface; `cowork` adds a terminal entrypoint for starting local tasks against the same runtime.
+CoWork OS is the free, open-source, GUI-first, CLI-capable local AI super app and everything app for everyday work. It is meant to cover more than office-style files: coding, terminal work, email, research, web design, documents, spreadsheets, decks, PDFs, agent spawning and management, automations, inbox work, channels, devices, skills, and long-running tasks all live in one governed workspace. The desktop app is the primary review and workbench surface; `cowork` adds a terminal entrypoint for starting local tasks against the same runtime.
+
+An open multi-provider harness sits underneath the workbench. Supported provider accounts, APIs, compatible gateways, cloud credentials, and local models can use the same artifact loop, tools, memory, policies, approvals, agents, and task history. CoWork itself is free and MIT-licensed; provider eligibility, limits, and charges remain separate.
 
 The Everything Workbench is the proof point for that positioning: ask for an artifact, open it in-place, review or edit it, then ask the agent for follow-up changes without leaving the task. For everyday work, CoWork should be the app you reach for instead of a separate coding app, mail app, browser preview, Word processor, spreadsheet tool, or slide deck editor. External-open actions remain available when a specialized native app is still the better tool for advanced edge cases.
 

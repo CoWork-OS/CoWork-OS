@@ -257,15 +257,11 @@ The Control Plane binds to loopback by default. Headless/managed deployments fai
 
 Reverse-proxied dashboards should set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to the public HTTPS origin. Only enable `COWORK_CONTROL_PLANE_TRUST_PROXY=1` behind a proxy that controls forwarded headers.
 
-### No Telemetry
+### Product Analytics and Outbound Data
 
-CoWork OS does **not**:
-- Send usage analytics
-- Track user behavior
-- Phone home to any server
-- Share your data with third parties
+CoWork OS has no mandatory product analytics by default. This is distinct from operational network traffic: model providers, compatible gateways, web search, connectors, channels, update checks, and other services can receive requests when you configure or invoke them.
 
-Your data stays on your machine and only goes to the LLM provider you explicitly configure.
+Task state and application data are persisted locally by default. Prompts, selected memory snippets, files, credentials, and tool payloads leave the machine only when needed for a provider, gateway, connector, channel, browser target, or other external service that you configure or approve. Each service applies its own retention, privacy, and billing terms.
 
 ---
 
@@ -750,8 +746,8 @@ CoWork OS is designed with security in mind:
 | API key storage | Encrypted (OS keychain) |
 | File access | Sandboxed to workspace |
 | Shell execution | Requires approval + sandbox |
-| Network access | Only configured providers |
-| Telemetry | None |
+| Network access | Configured or user-invoked providers, gateways, connectors, channels, browser targets, update services, and other integrations |
+| Product analytics | No mandatory product analytics by default |
 | Electron security | Best practices followed |
 | Guardrails | Configurable limits on tokens, cost, iterations, commands, file size, and domains |
 | Policy system | Monotonic deny-wins precedence |

@@ -223,7 +223,7 @@ NODE
 
   delay=1
   for ((attempt=1; attempt<=60; attempt++)); do
-    if [[ "$status" == "completed" ]]; then
+    if [[ "$status" == "completed" || "$status" == "succeeded" ]]; then
       break
     fi
     if [[ "$status" == "failed" || "$status" == "timeout" ]]; then
@@ -247,7 +247,7 @@ NODE
     fi
   done
 
-  if [[ "$status" != "completed" ]]; then
+  if [[ "$status" != "completed" && "$status" != "succeeded" ]]; then
     echo "Atlas Cloud prediction did not complete after 60 checks." >&2
     exit 1
   fi

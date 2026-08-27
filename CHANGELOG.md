@@ -9,10 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.52] - 2026-08-27
 
+### Added
+
+- **OpenRouter image generation**: added dedicated image API routing for all OpenRouter image models, including `meta/muse-image`, live image-model discovery, endpoint capability negotiation, provider pinning, multi-image output, supported advanced options, and safe local/remote reference-image inputs.
+- **OpenCode Zen and Go**: added curated model catalogs, transport-aware Responses API and Anthropic Messages routing, custom Responses-compatible endpoints, and OpenCode image-capability metadata.
+- **SearXNG and Web Search Plus**: added a guarded private-search provider with explicit provider routing, locale and safe-search controls, endpoint policy forwarding, settings validation, and the Web Search Plus workflow pack.
+- **Atlas Cloud transcription**: added the Atlas Cloud transcription provider and success-state handling for completed transcription jobs.
+- **Provider and model-picker UX**: refreshed the main model picker for richer metadata, responsive layouts, custom model IDs, and clearer model browsing.
+
 ### Changed
 
 - **Electron 44 desktop baseline**: upgraded and pinned the desktop runtime to Electron `44.0.0`, upgraded `@electron/rebuild` to `4.2.0` for ABI 149 recognition, retained the existing Windows x64 and Linux server targets, and verified the native SQLite and PTY load path.
 - **macOS 13 minimum**: dropped macOS 12 Monterey support. The app bundle declares `LSMinimumSystemVersion=13.0`, updater metadata declares Darwin `22.0.0`, the DMG identifies the macOS 13 requirement, and `0.5.51` is recorded as the final Monterey-compatible release.
+- **Browser Use Cloud**: made Browser Use Cloud V4 the default cloud browser backend while retaining explicit routing and safety controls.
+- **Browser Use reliability**: added bounded provider retries, `Retry-After` handling, structured retryable errors, and clearer exhaustion results for Browser Use Cloud.
+- **Scraping controls**: added host-scoped request throttling, timeout/proxy forwarding, sequential batch/session delays, and target response classification for Scrapling.
+- **Open AI super app positioning**: refreshed the product, provider, comparison, and access documentation around the free, open-source multi-provider agent harness model.
+- **Bundled skill distribution**: added distribution metadata and supporting guidance for the expanded bundled skill catalog, including image-generation direction and operational privacy workflows.
+- **Public adoption reporting**: corrected npm all-time coverage handling and refreshed the generated README, documentation, and adoption snapshot outputs.
 - **Release notes for 0.5.52**: see [Release Notes 0.5.52](docs/release-notes-0.5.52.md).
 
 ### Fixed
@@ -21,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Packaged updater sequencing**: packaged updates now call `checkForUpdates()` with automatic download disabled before explicitly downloading, so system-version metadata is evaluated before applying an artifact.
 - **Native notification fallback**: asynchronous operating-system notification delivery failures now fall back to the in-app notification overlay.
 - **Native dependency repair drift**: missing `better-sqlite3` repair now reads the declared dependency version from the active install root instead of using a stale hard-coded version.
+- **Security evaluation fail-closed behavior**: incomplete scans, empty evaluator reports, unresolved managed MCP metadata, and capability-bundle edge cases now fail safely with coverage and severity regression tests.
+- **Database and state persistence**: hardened legacy migrations and preserved task target nodes, agent budget pause fields, subconscious memory index updates, contact unlink audit history, and current task timeline cache state.
+- **Provider and mailbox resilience**: recognized custom CLI provider credentials, distinguished OpenCode transport failures, clamped upstream quote recall scores, and hardened mailbox fallback/scheduling behavior.
+- **Release CI preparation**: fixed clean CI and release test jobs so `node-pty` is rebuilt for the test runtime and the pinned Numbat fixture is generated before tests run.
 
 ## [0.5.51] - 2026-08-17
 
@@ -1630,7 +1648,7 @@ This release is the first recommended Windows install baseline for normal users 
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 0.5.52 | 2026-08-27 | Electron 44, macOS 13 minimum, compatibility-aware updates, packaging support-floor checks, notification fallback, and native repair hardening |
+| 0.5.52 | 2026-08-27 | OpenRouter image generation, OpenCode Zen/Go, SearXNG/Web Search Plus, Atlas Cloud, Electron 44, macOS 13 minimum, and reliability hardening |
 | 0.5.51 | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery |
 | 0.5.50 | 2026-07-20 | GPT-5.6 subscription controls, Mixture of Agents, browser annotations, inline mail review, video analysis, governed memory writes, safer visible automation, session retention, and new connector/skill workflows |
 | 0.5.49 | 2026-06-08 | CoWork CLI, Browser Use Cloud, Codex Security workflows, automation outcomes, Usage Insights heatmaps, composer link chips, public adoption stats, and security hardening |

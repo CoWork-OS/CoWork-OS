@@ -20,6 +20,10 @@ function formatDate(value) {
   return date.toISOString().slice(0, 10);
 }
 
+function renderNpmAllTime(metric) {
+  return metric?.coverage === "complete" ? formatNumber(metric.downloads) : "unavailable";
+}
+
 function markdownEscape(value) {
   return String(value ?? "")
     .replaceAll("\\", "\\\\")
@@ -98,7 +102,7 @@ function renderPlatformTotals(platformTotals, platformDeltas) {
   ].join("\n");
 }
 
-function renderReadmeStatsBlock({ stats, repo, releases, traffic, npm, npmDownloads, releaseDownloadDeltas }) {
+function renderReadmeStatsBlock({ stats, repo, releases, traffic, npmDownloads, releaseDownloadDeltas }) {
   const releaseDelta =
     releaseDownloadDeltas.totalDeltaSincePreviousSnapshot == null
       ? "n/a"
@@ -109,17 +113,17 @@ function renderReadmeStatsBlock({ stats, repo, releases, traffic, npm, npmDownlo
   return `${readmeStatsStart}
 ### Public Adoption Signals
 
-| Signal | Current |
-|---|---:|
-| GitHub stars | ${formatNumber(repo.stars)} |
-| GitHub forks | ${formatNumber(repo.forks)} |
-| Installer/server downloads | ${formatNumber(releases.totalInstallAssetDownloadCount)} |
-| Download delta | ${releaseDelta} |
-| npm downloads, last week | ${formatNumber(npmDownloads.lastWeek?.downloads)} |
-| GitHub views, last 14-ish days | ${renderTrafficMetric(traffic.views, "count", "uniques")} |
-| GitHub clones, last 14-ish days | ${renderTrafficMetric(traffic.clones, "count", "uniques")} |
+| Signal | Current | All time |
+|---|---:|---:|
+| GitHub stars | ${formatNumber(repo.stars)} | n/a |
+| GitHub forks | ${formatNumber(repo.forks)} | n/a |
+| Installer/server downloads | ${formatNumber(releases.totalInstallAssetDownloadCount)} | ${formatNumber(releases.totalInstallAssetDownloadCount)} |
+| Download delta | ${releaseDelta} | n/a |
+| npm downloads | ${formatNumber(npmDownloads.lastWeek?.downloads)} (last week) | ${renderNpmAllTime(npmDownloads.allTime)} |
+| GitHub views, last 14-ish days | ${renderTrafficMetric(traffic.views, "count", "uniques")} | n/a |
+| GitHub clones, last 14-ish days | ${renderTrafficMetric(traffic.clones, "count", "uniques")} | n/a |
 
-Generated ${stats.generatedAt}. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. [Full report](docs/public-adoption-stats.md).
+Generated ${stats.generatedAt}. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. All-time values are shown only where the source API provides lifetime coverage. [Full report](docs/public-adoption-stats.md).
 ${readmeStatsEnd}`;
 }
 
@@ -177,6 +181,7 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 | npm downloads, last day | ${formatNumber(npmDownloads.lastDay?.downloads)} |
 | npm downloads, last week | ${formatNumber(npmDownloads.lastWeek?.downloads)} |
 | npm downloads, last month | ${formatNumber(npmDownloads.lastMonth?.downloads)} |
+| npm downloads, all time | ${renderNpmAllTime(npmDownloads.allTime)} |
 | GitHub views, last 14-ish days | ${renderTrafficMetric(traffic.views, "count", "uniques")} |
 | GitHub clones, last 14-ish days | ${renderTrafficMetric(traffic.clones, "count", "uniques")} |
 
@@ -201,6 +206,7 @@ ${renderTopList(traffic.paths, "path")}
 - This report uses GitHub repository, release, traffic, and npm download APIs.
 - GitHub traffic data is only available for a short rolling window and requires repository access.
 - Release asset downloads are lifetime counters. The headline download totals exclude updater metadata files such as blockmaps, checksums, and YAML manifests. The delta column is computed by comparing the current snapshot with the previous committed snapshot.
+- npm all-time downloads are summed from the available daily range and are shown only when that range reaches the package's first published version.
 - No application telemetry is collected by this report.
 - No prompts, generated outputs, files, emails, workspace names, API keys, account IDs, IP addresses, or installed-app events are collected.
 
@@ -215,7 +221,6 @@ For website implementation work, consume \`data/adoption/public-stats-latest.jso
     repo,
     releases,
     traffic,
-    npm,
     npmDownloads,
     releaseDownloadDeltas,
   });

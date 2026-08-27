@@ -21,6 +21,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const NPM_CMD = process.platform === "win32" ? "npm.cmd" : "npm";
 const NPM_EXEC_PATH = (() => {
@@ -30,6 +31,11 @@ const NPM_EXEC_PATH = (() => {
 })();
 const cwdRequire = createRequire(path.join(process.cwd(), "package.json"));
 const scriptRequire = createRequire(import.meta.url);
+const scriptPackageJsonPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "package.json",
+);
 const { getNpmInstallModeArgs } = scriptRequire("./npm_install_mode.cjs");
 
 function resolveFromCwd(specifier) {
@@ -82,16 +88,22 @@ function getInstallRootDir() {
 }
 
 function getInstallRootDependencyVersion(installRootDir, packageName) {
-  try {
-    const installRootPackage = readJson(path.join(installRootDir, "package.json"));
-    const version =
-      installRootPackage.optionalDependencies?.[packageName] ??
-      installRootPackage.dependencies?.[packageName] ??
-      installRootPackage.devDependencies?.[packageName];
-    return typeof version === "string" && version.trim() ? version.trim() : null;
-  } catch {
-    return null;
+  const manifestPaths = [path.join(installRootDir, "package.json"), scriptPackageJsonPath].filter(
+    (manifestPath, index, paths) => paths.indexOf(manifestPath) === index,
+  );
+  for (const manifestPath of manifestPaths) {
+    try {
+      const packageManifest = readJson(manifestPath);
+      const version =
+        packageManifest.optionalDependencies?.[packageName] ??
+        packageManifest.dependencies?.[packageName] ??
+        packageManifest.devDependencies?.[packageName];
+      if (typeof version === "string" && version.trim()) return version.trim();
+    } catch {
+      // Try the installed package manifest when the npm project is only a consumer.
+    }
   }
+  return null;
 }
 
 function spawnNpm(args, opts = {}) {
@@ -350,7 +362,7 @@ function ensureBetterSqlite3(env, installRootDir) {
   );
   if (!betterSqlite3Version) {
     console.error(
-      `[cowork] better-sqlite3 is missing and its required version could not be read from ${path.join(installRootDir, "package.json")}.`,
+      `[cowork] better-sqlite3 is missing and its required version could not be read from the install manifests at ${installRootDir} or ${scriptPackageJsonPath}.`,
     );
     return { status: 1, signal: null };
   }

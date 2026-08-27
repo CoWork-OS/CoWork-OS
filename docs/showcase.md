@@ -4,7 +4,9 @@ A comprehensive guide to what you can build, automate, and manage with CoWork OS
 
 ## AI Super App For Everyday Work
 
-CoWork OS is positioned as a GUI-first, CLI-capable local AI super app and everything app: one place for coding, email, research, web design, documents, spreadsheets, presentations, agent spawning and management, automations, channels, devices, terminal starts, and long-running work. The product is broader than an office artifact viewer; artifacts are one part of the larger agentic workspace.
+CoWork OS is the free, open-source, GUI-first, CLI-capable local AI super app and everything app: one place for coding, email, research, web design, documents, spreadsheets, presentations, agent spawning and management, automations, channels, devices, terminal starts, and long-running work. The product is broader than an office artifact viewer; artifacts are one part of the larger agentic workspace.
+
+Its open multi-provider harness lets supported provider accounts, APIs, compatible gateways, cloud credentials, and local models use the same tools, skills, memory, agents, approvals, artifacts, and workflows. CoWork itself is free and MIT-licensed; provider eligibility, limits, and charges remain separate. See [Model Providers](providers.md) and [Compare CoWork OS](comparisons/index.md).
 
 CoWork makes many-agent work visible while still offering a terminal entrypoint: users can create reusable agents in Agents Hub, spawn parallel lanes, watch delegated runs in task timelines, assign work through Mission Control, manage teams from GUI surfaces built for normal daily operation, and start local one-shot tasks with `cowork run`.
 
@@ -725,7 +727,7 @@ See [Inbox Agent](inbox-agent.md) for the full feature workflow.
 
 ### Multi-Channel Messaging
 
-Manage conversations across 17 messaging channels — reply to messages, monitor discussions, and send updates from anywhere.
+Manage conversations across supported messaging and communication channels — reply to messages, monitor discussions, and send updates from the surfaces you configure.
 
 **What it handles:**
 - WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more
@@ -742,7 +744,7 @@ Summarize any messages that need a response, draft replies,
 and let me review before sending.
 ```
 
-**Powered by:** 14-channel gateway, channel tools, scheduling service
+**Powered by:** Multi-channel gateway, channel tools, scheduling service
 
 ---
 
@@ -938,7 +940,7 @@ Run the pre-deploy checklist first, then proceed if all green.
 Send me a summary when done.
 ```
 
-**Powered by:** 14-channel multichannel gateway, DevOps plugin pack, approval workflows
+**Powered by:** Multi-channel gateway, DevOps plugin pack, approval workflows
 
 ---
 
@@ -1447,7 +1449,7 @@ Save this as "weekly-metrics-review" and schedule it for Mondays at 9am.
 Route tasks to the best model for the job — compare outputs across providers, run A/B tests, and optimize for cost, speed, or quality.
 
 **What it handles:**
-- Multi-provider support — Claude, GPT-4, Gemini, Llama, Mistral, DeepSeek, Grok API, and Grok subscription OAuth
+- Multiple supported model routes — account connections, provider APIs, compatible gateways, cloud credentials, and local inference
 - Side-by-side output comparison for the same prompt
 - Automatic model selection based on task type (coding → Claude, creative → GPT-4)
 - Cost tracking and budget management per model

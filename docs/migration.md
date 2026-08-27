@@ -4,7 +4,7 @@ This guide helps users transition from other AI assistant platforms or set up Co
 
 ## Overview
 
-CoWork OS is a security-first, GUI-first, CLI-capable local AI super app and everything app that runs on macOS and Windows. If you're coming from another multi-channel AI platform, terminal agent runner, or self-hosted assistant, this guide will help you move into one local runtime for coding, email, documents, spreadsheets, presentations, browser work, agents, automations, desktop review, and terminal task starts.
+CoWork OS is a free, open-source, security-first, GUI-first, CLI-capable AI super app and everything app that runs on macOS and Windows. Its open multi-provider harness lets supported accounts, APIs, compatible gateways, cloud credentials, and local models share one runtime for coding, email, documents, spreadsheets, presentations, browser work, agents, automations, desktop review, and terminal task starts.
 
 ---
 
@@ -12,8 +12,8 @@ CoWork OS is a security-first, GUI-first, CLI-capable local AI super app and eve
 
 If you're currently using OpenClaw, the migration is mostly an operating model shift:
 
-- OpenClaw is commonly used as an agent experimentation toolkit.
-- CoWork OS is designed as a GUI-first, CLI-capable production runtime with built-in approvals, guardrails, local-first controls, visual management for many agents, and a terminal entrypoint for local one-shot work.
+- OpenClaw is an open personal-agent ecosystem with a strong channel-forward operator model.
+- CoWork OS emphasizes a GUI-first Everything Workbench, visible approvals and governance, artifact editing, and a shared desktop, CLI, and headless runtime.
 
 See also: [CoWork OS vs OpenClaw](comparisons/openclaw.md)
 
@@ -33,7 +33,21 @@ See also: [CoWork OS vs OpenClaw](comparisons/openclaw.md)
 | Safety | Approval-gated destructive actions and configurable command blocking |
 | Governance | Token/cost/iteration guardrails per task |
 | Reach | Desktop, CLI, daemon, and messaging-channel delivery |
-| Privacy | Local-first storage, BYOK provider model, optional offline Ollama |
+| Data control | Local-first persistence, explicit remote-service boundaries, and optional local Ollama inference |
+
+---
+
+## From Coding Agents and AI Workspaces
+
+You do not need to remove Claude Code, Codex, Cursor, OpenCode, ChatGPT, or Claude Cowork to start using CoWork OS. A safer migration is to keep the specialist tool for the workflows where it is strongest, then move broader work into CoWork one lane at a time.
+
+1. Connect one supported model route and run a low-risk task in a test workspace.
+2. Recreate only the skills, MCP servers, instructions, and approvals needed for that workflow; configuration formats are not assumed to be portable.
+3. Compare output quality, tool behavior, cost, and approval boundaries against the existing app.
+4. Move adjacent browser, inbox, document, channel, or automation work into CoWork when keeping it in one harness is useful.
+5. Keep both systems where a specialist workflow remains the better fit.
+
+See [Compare CoWork OS](comparisons/index.md) for fit-based guides covering Claude Code, Codex, Cursor, OpenCode, ChatGPT, Claude Cowork, OpenClaw, and Hermes Agent.
 
 ---
 
@@ -132,15 +146,15 @@ npm install
 npm run dev
 ```
 
-### 2. Configure LLM Provider
+### 2. Configure Model Access
 
 1. Open Settings (gear icon)
-2. Select your LLM provider tab
+2. Open **AI & Models** > **Model Access** and select a supported route
 3. Enter your API credentials
 4. Test connection
 5. Save
 
-Available providers include Anthropic, OpenAI, Gemini, OpenRouter, Bedrock, Ollama, Groq, xAI/Grok through either API key or SuperGrok browser OAuth, Kimi, plus compatible gateways such as OpenCode Zen, Google Vertex, Google Antigravity, Google Gemini CLI, Z.AI, GLM, Vercel AI Gateway, Cerebras, Mistral, GitHub Copilot, Qwen Portal, MiniMax, Xiaomi MiMo, Venice AI, Synthetic, Kimi Code, and custom OpenAI- or Anthropic-compatible endpoints. OpenRouter model selection includes `openrouter/pareto-code` and `openrouter/pareto-code:nitro` for coding-score-based model routing.
+Available routes include supported provider accounts, API keys, compatible gateways, cloud credentials, local models, and custom OpenAI- or Anthropic-compatible endpoints. The current route catalog and setup requirements live in [Model Providers](providers.md); provider eligibility, model availability, limits, and charges can change independently of CoWork.
 
 ### 3. Set Up Messaging Channels
 
@@ -208,7 +222,7 @@ Yes. CoWork OS maintains its own pairing database. Users will need to pair again
 
 ### Can I use the same API keys?
 
-Yes. Your LLM provider API keys (Anthropic, OpenAI, etc.) work with any client. Just enter them in CoWork OS Settings.
+Often, if the provider permits the key to be used with third-party clients and CoWork supports the relevant API. Add it under **Settings > AI & Models > Model Access**, test the connection, and confirm the provider's current terms. Account-based access and first-party app subscriptions are not automatically equivalent to API access.
 
 ### Is my data migrated?
 

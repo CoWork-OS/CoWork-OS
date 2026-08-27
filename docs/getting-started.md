@@ -5,6 +5,8 @@
   <br><em>The home screen is the fastest way to start tasks, reopen recent work, and launch common workflows.</em>
 </p>
 
+CoWork OS is the free, open-source AI super app for real work. Its open multi-provider harness lets supported provider accounts, APIs, compatible gateways, cloud credentials, and local models share the same tools, skills, memory, agents, approvals, artifacts, and workflows. CoWork itself is free and MIT-licensed; providers and connected services keep their own eligibility, limits, and charges. See [Model Providers](providers.md) and [Compare CoWork OS](comparisons/index.md).
+
 ## Quick Start
 
 The desktop app requires **macOS 13 Ventura or later** or Windows 10/11. CoWork OS `0.5.51` is the final release compatible with macOS 12 Monterey.
@@ -57,30 +59,30 @@ See [CoWork OS CLI](cli.md) for command syntax, local-vs-remote behavior, JSON o
 
 On first launch, choose the easiest working model route for your machine:
 
-1. **Sign in with ChatGPT** if you already use a ChatGPT subscription. This is the simplest non-technical path because it uses browser sign-in instead of an API key.
-2. **Use local Ollama** if CoWork detects a model already running on your computer. This keeps model calls local and private.
-3. **Use an API key** for Claude, OpenAI API, Gemini, OpenRouter, Groq, xAI, DeepSeek, Kimi, NanoGPT, Bedrock, or other compatible providers. The provider picker marks OpenRouter, Gemini, and Groq with **Free** when a free usage path is available.
+1. **Sign in with ChatGPT** if CoWork supports the account route you want to use. Browser sign-in avoids copying an API key, but model eligibility, limits, and charges remain governed by OpenAI and your account plan.
+2. **Use local Ollama** if CoWork detects a model already running on your computer. Model inference stays on that machine; connected tools and integrations can still send data to services you explicitly configure.
+3. **Use an API key** for Claude, OpenAI API, Gemini, OpenRouter, Groq, xAI, DeepSeek, Kimi, NanoGPT, Bedrock, or another supported or compatible route. Provider pricing and free allowances can change, so confirm current terms with the provider.
 4. **Explore without AI** if you only want to look around. AI tasks stay gated until one route is connected and tested.
 
 The onboarding flow keeps your answers in the renderer while you are moving through setup. CoWork writes the profile, provider choice, memory preference, and related settings only when you confirm the final recap. The recap is a fixed review frame with a scrollable body, so long work-context notes do not push the final action off screen.
 
-If you use the API-key path, open **Settings > AI & Models** and choose a provider:
+If you use the API-key path, open **Settings > AI & Models > Model Access** and choose a provider:
 
-   - **Claude** - Claude API key or Claude subscription token
+   - **Claude** - Claude API key or a supported Claude account-token route, subject to Anthropic's current terms and eligibility
    - **Google Gemini** - Gemini models through Google AI Studio; free usage is available subject to Google's current limits (API key from [aistudio.google.com](https://aistudio.google.com/apikey))
    - **OpenRouter** - Multiple models, including free model options and the Pareto Code coding router (API key from [openrouter.ai](https://openrouter.ai/keys))
    - **OpenAI API** - OpenAI API models (requires API key from [platform.openai.com](https://platform.openai.com/api-keys))
-   - **ChatGPT Subscription** - browser sign-in with your ChatGPT account
+   - **ChatGPT account** - browser sign-in for supported models available to the signed-in account
    - **Groq** - low-latency hosted models with free usage available subject to Groq's current limits
-   - **Grok OAuth** - Grok 4.3 with your active SuperGrok subscription, using browser sign-in
+   - **Grok OAuth** - browser sign-in for supported models available to an eligible xAI account
    - **xAI API Key** - Grok models billed through your xAI API account
    - **AWS Bedrock** - Enterprise AWS (requires AWS credentials)
-   - **Ollama** - Local models (free, requires [Ollama](https://ollama.ai) installed)
+   - **Ollama** - Local inference with [Ollama](https://ollama.ai) installed; there is no hosted-model usage charge from CoWork, but compute runs on your hardware
 
 3. If you choose **Claude**, pick one of these tabs:
    - **Claude API**: paste an API key from [console.anthropic.com](https://console.anthropic.com/)
-   - **Claude Subscription**: install the provider's terminal app, run its token setup flow, and paste the generated `sk-ant-oat...` token
-4. If you choose **Grok OAuth**, click **Sign in with Grok**, complete the xAI browser flow, then keep `grok-4.3` or choose another listed Grok model. No `XAI_API_KEY` is required for this path.
+   - **Claude Subscription**: where supported and permitted for your account, install the provider's terminal app, run its token setup flow, and paste the generated `sk-ant-oat...` token
+4. If you choose **Grok OAuth**, click **Sign in with Grok**, complete the xAI browser flow, then refresh and select a model available to that account. No `XAI_API_KEY` is required for this route.
 5. Click **Refresh Models** to load the live models available to your credential, then choose a model
    - For OpenRouter coding work, choose `openrouter/pareto-code` or `openrouter/pareto-code:nitro`. The optional Pareto score is a decimal from `0` to `1`, not a percentage.
 6. Click **Test Connection** to verify
@@ -126,13 +128,13 @@ Supermemory does not replace CoWork's local memory system. It adds an external p
 ## Troubleshooting
 
 - If **Test Connection** fails with 401/403, verify the API key or token and the account permissions behind it.
-- If the Claude model list is empty, click **Refresh Models** after entering your API key or Claude subscription token.
+- If the Claude model list is empty, click **Refresh Models** after entering your API key or supported account token.
 - If a provider endpoint changes, override the **Base URL** in Settings (custom providers or Groq/xAI/Kimi/OpenRouter).
 - If Ollama fails to connect, confirm the service is running and the base URL is correct (default `http://localhost:11434`).
 - If `cowork run` asks for a missing token, confirm you did not pass `--remote`. Local CLI tasks should run without `COWORK_CONTROL_PLANE_TOKEN`.
 - If `cowork` reports missing build artifacts in a source checkout, run `npm run build:cli`.
 - If `npm run setup` fails on macOS with `Killed: 9`, macOS terminated the native build due to memory pressure. The setup script retries automatically (with exponential backoff); if it still fails, close other apps and run `npm run setup` again.
-- Note: as of April 4, 2026, third-party harnesses connected to your Claude account draw from extra usage instead of from your subscription. If you do not use them, nothing changes. If you do, the credit and bundles above have you covered.
+- Account-based routes can have different eligibility, quotas, and billing rules from first-party apps. Check the provider's current terms and [Model Providers](providers.md) before relying on an account plan for third-party harness usage.
 
 ### Step 4: Create Your First Task
 
@@ -416,29 +418,29 @@ You'll see a dialog with:
 
 ## Configuring Providers
 
-### LLM Providers
+### Model Providers
 
-Open **Settings** > **LLM**:
+Open **Settings > AI & Models > Model Access**:
 
 | Provider | Setup |
 |----------|-------|
-| Claude | Use **Claude API** with a key from [console.anthropic.com](https://console.anthropic.com), or use **Claude Subscription** with a token from `claude setup-token` |
+| Claude | Use **Claude API** with a key from [console.anthropic.com](https://console.anthropic.com), or, where supported and permitted for your account, use the **Claude Subscription** UI route with a token from `claude setup-token` |
 | Google Gemini | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey); Google AI Studio free usage may be available subject to current limits |
 | OpenRouter | Enter API key from [openrouter.ai](https://openrouter.ai/keys); free model options are available, and `openrouter/pareto-code` / `openrouter/pareto-code:nitro` support coding-score-based routing |
 | OpenAI (API Key) | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys) |
-| OpenAI (ChatGPT) | Click "Sign in with ChatGPT" to use your subscription |
+| OpenAI (ChatGPT) | Click **Sign in with ChatGPT** to connect an eligible account; available models, limits, and charges depend on OpenAI and the account plan |
 | AWS Bedrock | Enter AWS Access Key, Secret Key, and Region |
 | Ollama | Install Ollama, pull a model, select it |
 | Groq | Enter API key in Settings; free usage may be available subject to current limits |
 | xAI (Grok API) | Enter API key in Settings |
-| xAI Grok OAuth | Sign in with Grok to use an active SuperGrok subscription; defaults to `grok-4.3` |
+| xAI Grok OAuth | Sign in with an eligible xAI account, refresh the available models, and select one supported for that account |
 | Kimi (Moonshot) | Enter API key in Settings |
 
 Prompt caching is enabled by default on supported Anthropic and GPT-style routes. CoWork automatically keeps stable session prompt sections cacheable and dynamic turn context uncached, so follow-ups can reuse the provider-side prefix without caching the clock, recall, or one-off guidance.
 
 ### Compatible / Gateway Providers
 
-Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, model IDs, and base URLs when required.
+Configure these in **Settings** > **AI & Models** > **Model Access** by entering API keys or tokens, model IDs, and base URLs when required.
 
 | Provider | Setup |
 |----------|-------|
@@ -663,7 +665,7 @@ Output: `release/*.dmg` (macOS) and `release/*.exe` (Windows)
 
 ### Issue: "No LLM provider configured"
 
-**Solution**: Open Settings (gear icon) and configure at least one LLM provider.
+**Solution**: Open **Settings > AI & Models > Model Access** and configure at least one supported model route.
 
 ### Issue: Electron won't start
 
@@ -705,7 +707,7 @@ Don't use system folders like `/System` or `/Applications`.
 3. **Review Plans**: Check the execution plan before it runs
 4. **Respond Carefully**: Read approval requests and structured input prompts before accepting or submitting
 5. **Monitor Progress**: Watch the timeline to understand what's happening, especially when parallel tool groups collapse into summary lanes
-6. **Use Local Models**: Ollama is free and works offline
+6. **Use Local Models**: Ollama can run inference without a hosted-model charge and can work offline after the required models and dependencies are installed
 
 ## Next Steps
 

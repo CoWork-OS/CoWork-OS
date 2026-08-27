@@ -50,8 +50,8 @@ prompts and authentication data to the configured provider as required to comple
 | AWS Bedrock | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS |
 | Azure OpenAI | API key + endpoint in Settings | Pay-per-token via Azure |
 | Mixture of Agents | Presets composed from already-configured providers | No separate billing; each selected provider bills normally |
-| Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
-| HuggingFace Local AI | Install `hf-agents` and run `llama.cpp` locally | **Free** (runs locally) |
+| Ollama (Local) | Install Ollama and pull models | No hosted-model usage charge; compute runs locally |
+| HuggingFace Local AI | Install `hf-agents` and run `llama.cpp` locally | No hosted-model usage charge; compute runs locally |
 | Groq | API key in Settings | Free usage available subject to Groq's current limits; pay-per-token beyond free limits |
 | xAI (Grok API) | API key in Settings | Pay-per-token |
 | xAI Grok OAuth | Browser sign-in in Settings | Experimental; provider authorization and plan eligibility apply |
@@ -254,7 +254,7 @@ Use Azure-hosted Claude models through your Azure subscription.
 ### Setup
 
 1. Deploy a Claude model in your Azure AI Studio account.
-2. Open **Settings** > **LLM** and select **Azure Anthropic**.
+2. Open **Settings > AI & Models > Model Access** and select **Azure Anthropic**.
 3. Enter your Azure API key, endpoint URL (e.g. `https://<resource>.services.ai.azure.com`), and deployment name.
 
 ### Notes
@@ -267,7 +267,7 @@ Use Azure-hosted Claude models through your Azure subscription.
 
 ## Ollama (Local LLMs)
 
-Run completely offline and free.
+Run inference locally without hosted-model usage charges. After the required models and dependencies are installed, this route can operate offline; hardware and electricity costs remain yours.
 
 ### Setup
 
@@ -298,7 +298,7 @@ pip install huggingface_hub
 hf extensions install hf-agents
 ```
 
-Then open **Settings** > **LLM**, choose **HuggingFace Local AI**, select or enter a model, and start the local `llama.cpp` server from the provider panel.
+Then open **Settings > AI & Models > Model Access**, choose **HuggingFace Local AI**, select or enter a model, and start the local `llama.cpp` server from the provider panel.
 
 ### Notes
 
@@ -322,7 +322,7 @@ Models: `gemini-2.0-flash` (default), `gemini-2.5-pro` (most capable), `gemini-2
 Access multiple AI providers through one API.
 
 1. Get API key from [OpenRouter](https://openrouter.ai/keys)
-2. Configure in **Settings** > **LLM** > **OpenRouter**
+2. Configure in **Settings > AI & Models > Model Access > OpenRouter**
 
 Available: Claude, GPT-4, Gemini, Llama, Mistral, and more — see [openrouter.ai/models](https://openrouter.ai/models)
 
@@ -365,12 +365,13 @@ For prompt caching, OpenRouter Claude routes use explicit Anthropic-style cache 
 ## OpenAI / ChatGPT
 
 - **Option 1: API Key** — Standard pay-per-token access to GPT models
-- **Option 2: ChatGPT OAuth** — Sign in with your ChatGPT subscription
+- **Option 2: ChatGPT OAuth** — Sign in with an eligible ChatGPT account
 
-### GPT-5.6 models with ChatGPT OAuth
+### Models with ChatGPT OAuth
 
-ChatGPT subscription accounts can select these GPT-5.6 Codex models when the
-signed-in account is entitled to them:
+The current built-in catalog includes the following GPT-5.6 Codex routes. The
+signed-in account and OpenAI backend remain the source of truth for which models
+and controls are actually available:
 
 | Model ID | Reasoning efforts |
 |----------|-------------------|
@@ -396,7 +397,7 @@ All three GPT-5.6 models support Low, Medium, and High response verbosity. The
 verbosity control changes final-answer detail independently of reasoning
 effort.
 
-Model and effort availability remains subscription- and entitlement-dependent.
+Model and effort availability remains account-, plan-, and entitlement-dependent.
 If a model is listed locally but the ChatGPT backend rejects it, refresh the
 model list, confirm the signed-in account has access, or select an available
 model/effort combination.
@@ -405,17 +406,17 @@ model/effort combination.
 
 ## xAI / Grok
 
-CoWork OS supports Grok through either direct xAI API billing or a browser OAuth login that uses your active SuperGrok subscription.
+CoWork OS supports Grok through either direct xAI API billing or a browser OAuth account connection. Account eligibility, model access, limits, and charges remain controlled by xAI.
 
-### Option 1: SuperGrok Subscription
+### Option 1: Grok Account Connection
 
-Use this when you already have a Grok/SuperGrok subscription and do not want to manage an `XAI_API_KEY`.
+Use this when the OAuth route is available to your xAI account and you do not want to manage an `XAI_API_KEY`.
 
-1. Open **Settings** > **LLM**.
-2. Select **Grok OAuth** or open the **xAI** provider panel and choose **SuperGrok Subscription**.
+1. Open **Settings > AI & Models > Model Access**.
+2. Select **Grok OAuth** or open the **xAI** provider panel and choose the account connection shown there.
 3. Click **Sign in with Grok**.
 4. Complete the xAI browser sign-in and consent flow.
-5. Keep the default model `grok-4.3`, or select another listed Grok chat model.
+5. Refresh the model list and select a model available to the connected account.
 6. Click **Test Connection**, then save settings.
 
 CoWork stores the OAuth tokens in encrypted LLM settings for the current profile and refreshes the access token before model calls. Logging out from the same panel clears the stored xAI OAuth tokens without removing an xAI API key.
@@ -425,12 +426,12 @@ CoWork stores the OAuth tokens in encrypted LLM settings for the current profile
 Use this when you want pay-per-token API billing through the xAI developer console.
 
 1. Create or copy an API key from [xAI Console](https://console.x.ai/).
-2. Open **Settings** > **LLM** and select **xAI API Key**.
+2. Open **Settings > AI & Models > Model Access** and select **xAI API Key**.
 3. Paste the key, click **Refresh Models**, choose a model, then save.
 
 ### Models
 
-The built-in Grok catalog is pinned to the current SuperGrok OAuth chat models:
+The built-in Grok catalog provides fallback model metadata for the OAuth route. Refreshing models against the connected account is the source of truth:
 
 | Model ID | Notes |
 |----------|-------|
@@ -441,14 +442,14 @@ The built-in Grok catalog is pinned to the current SuperGrok OAuth chat models:
 
 ### Transport and endpoint
 
-The OAuth route uses xAI's Responses-style endpoint at `https://api.x.ai/v1`, matching the Hermes Agent `xai-oauth` provider shape. The direct API-key route continues to use the OpenAI-compatible xAI API path. The **Base URL** field can override the endpoint for either mode when xAI changes deployment requirements or when testing a compatible gateway.
+The OAuth route uses xAI's Responses-style endpoint at `https://api.x.ai/v1`. The direct API-key route continues to use the OpenAI-compatible xAI API path. The **Base URL** field can override the endpoint for either mode when xAI changes deployment requirements or when testing a compatible gateway.
 
 ### Troubleshooting
 
 - If the browser sign-in times out, start **Sign in with Grok** again. The loopback authorization window is intentionally finite.
 - If the callback port is busy, CoWork falls back to an ephemeral local port automatically.
 - If token refresh fails because the xAI session was revoked, disconnect the Grok account in Settings and sign in again.
-- If a model call fails with a subscription or entitlement error, confirm the signed-in xAI account has an active SuperGrok subscription.
+- If a model call fails with an account, plan, or entitlement error, refresh the model list and confirm that xAI permits the requested route for the signed-in account.
 
 References: [xAI Grok + Hermes announcement](https://x.ai/news/grok-hermes) and [Hermes xAI Grok OAuth docs](https://hermes-agent.nousresearch.com/docs/guides/xai-grok-oauth).
 

@@ -1,6 +1,6 @@
 # Channel Integrations
 
-CoWork OS supports 17 messaging channels. All channels share these common features:
+CoWork OS supports messaging and communication channels across chat, community, email, and social surfaces. See the channel list below for the current built-in routes. All channels share these common features:
 
 - Security modes (pairing, allowlist, open)
 - Brute-force protection

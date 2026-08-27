@@ -1,11 +1,12 @@
 # CoWork OS Architecture
 
-CoWork OS is a GUI-first, CLI-capable local AI super app, everything app, and runtime for task execution, many-agent orchestration, generated knowledge-work artifacts, background operator loops, and multi-surface automation.
+CoWork OS is a free, open-source, GUI-first, CLI-capable local AI super app, everything app, and runtime for task execution, many-agent orchestration, generated knowledge-work artifacts, background operator loops, and multi-surface automation. Its open multi-provider harness keeps tools, skills, memory, agents, approvals, artifacts, and workflows above the model-access layer so supported routes can change without replacing the surrounding work environment.
 
 ## Core Architecture
 
 - **Electron main process**: task orchestration, agent runtime, heartbeat orchestration, IPC, and tool execution
 - **React renderer**: desktop UI, Agents Hub, Mission Control, task timeline, settings, task boards, approval dialogs, xterm.js terminal tabs, and monitoring surfaces for managing many agents visually while the external CLI covers terminal-native starts
+- **Model-access layer**: supported account connections, provider APIs, compatible gateways, cloud credentials, local inference, and explicitly delegated external agent runtimes resolve through shared provider interfaces. Route-specific capabilities, eligibility, limits, and billing remain visible rather than being flattened into a promise of universal model parity. See [Model Providers](providers.md).
 - **Tool and connector layer**: file, shell, browser, web, native integrations, document generation/compilation tools including source-first LaTeX PDF compilation, MCP connectors, remote execution, and **computer use** (`screenshot`, `click`, `type_text`, and related tools) as a governed desktop-GUI lane (platform helper, single-session lock, policy-gated routing). See [Computer use](computer-use.md).
 - **Secure MCP tunnel layer**: outbound-only WebSocket clients can expose selected local/private MCP JSON-RPC endpoints through a CoWork-operated or self-hosted relay, with separate client/caller tokens, relay-side policy, local policy, request limits, and audit events. See [Secure MCP Tunnels](secure-mcp-tunnels.md).
 - **Terminal tab layer**: workspace terminal tabs use xterm.js in the renderer and `node-pty` in Electron so user-visible terminal work flows through native PTYs instead of custom text emulation. macOS launches the user's login shell with zsh prompt/cwd integration; Windows launches `cmd.exe` through node-pty's ConPTY/winpty backend with a cwd-only prompt. See [Terminal Tabs](terminal-tabs.md).

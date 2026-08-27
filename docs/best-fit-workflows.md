@@ -1,6 +1,6 @@
 # Best-Fit Operational Workflows
 
-> This page explains where CoWork OS delivers the strongest return for teams running governed, intelligence-heavy operational lanes. It is a secondary narrative layer for the same category: CoWork OS remains a **security-hardened, GUI-first, CLI-capable local AI super app, everything app, and personal agentic operating system**.
+> This page explains where CoWork OS delivers the strongest return for teams running governed, intelligence-heavy operational lanes. It is a secondary narrative layer for the same category: CoWork OS remains a **free, open-source, security-hardened, GUI-first, CLI-capable AI super app, everything app, and personal agentic operating system**, powered by an open multi-provider harness.
 
 ---
 
@@ -11,7 +11,7 @@ CoWork OS is built for production use: approval gates, guardrail budgets, local-
 - **Outcome consistency** — the same quality of triage, escalation, or outreach regardless of who runs the shift.
 - **Vendor-swap flexibility** — workflows defined in CoWork OS are not locked to a specific BPO or staffing provider.
 - **Managed oversight** — approval workflows, policy enforcement, and usage insights are on by default, not bolted on later.
-- **Local data control** — BYOK and no-telemetry defaults satisfy typical enterprise data-handling requirements without custom contracts.
+- **Local-first control** — Local persistence, configurable provider routes, visible approvals, and no mandatory product analytics by default give teams a strong governance baseline. Each deployment still needs its own security, privacy, procurement, and provider review.
 
 These are the same reasons teams pick CoWork OS for daily governed operations. The outsourced-workflow fit is additive, not a repositioning.
 

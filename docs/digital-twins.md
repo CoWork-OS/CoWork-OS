@@ -299,7 +299,7 @@ Each twin learns over time through the existing playbook and relationship memory
 
 ## Channel Integration
 
-Since CoWork OS supports 17 messaging channels, twins can be reached from anywhere:
+Because CoWork OS supports multiple messaging and communication channels, twins can be reached from the surfaces you configure:
 
 | Channel | Example |
 |---------|---------|

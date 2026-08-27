@@ -6,7 +6,7 @@ This document describes the reliability system added to CoWork OS to turn produc
 
 - Increase task reliability by replaying known failures continuously.
 - Apply stronger review only when risk justifies it.
-- Keep all reliability data local-first (no telemetry upload path required).
+- Keep reliability data local-first; no mandatory product-analytics upload path is required.
 - Convert reliability policy from docs-only guidance into merge and release gates.
 
 ## Scope Implemented

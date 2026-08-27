@@ -8043,6 +8043,7 @@ export const IPC_CHANNELS = {
   LLM_GET_OLLAMA_MODELS: "llm:getOllamaModels",
   LLM_GET_GEMINI_MODELS: "llm:getGeminiModels",
   LLM_GET_OPENROUTER_MODELS: "llm:getOpenRouterModels",
+  LLM_GET_OPENROUTER_IMAGE_MODELS: "llm:getOpenRouterImageModels",
   LLM_GET_DEEPSEEK_MODELS: "llm:getDeepSeekModels",
   LLM_GET_OPENAI_MODELS: "llm:getOpenAIModels",
   LLM_GET_GROQ_MODELS: "llm:getGroqModels",

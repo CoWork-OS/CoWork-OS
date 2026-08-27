@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as mimetypes from "mime-types";
+import { createHash, randomUUID } from "crypto";
 import OpenAI from "openai";
 import { Workspace } from "../../../shared/types";
 import { getOpenRouterAttributionHeaders } from "../llm/openrouter-attribution";
@@ -36,6 +37,29 @@ export type ImageModel =
 export type ImageSize = "1K" | "2K";
 type OpenAIImageSize = "auto" | "1024x1024" | "1024x1536" | "1536x1024";
 
+type OpenRouterImageParameter = {
+  type?: "enum" | "range" | "boolean";
+  values?: unknown[];
+  min?: number;
+  max?: number;
+};
+
+type OpenRouterImageModelCapabilities = Record<string, OpenRouterImageParameter>;
+
+type OpenRouterImageEndpoint = {
+  providerTag?: string | null;
+  supportedParameters: OpenRouterImageModelCapabilities;
+};
+
+type OpenRouterImageCapabilities = {
+  modelParameters: OpenRouterImageModelCapabilities;
+  endpoints: OpenRouterImageEndpoint[];
+};
+
+const OPENROUTER_IMAGE_CAPABILITIES_CACHE = new Map<string, OpenRouterImageCapabilities>();
+const MAX_OPENROUTER_REFERENCE_BYTES = 20 * 1024 * 1024;
+const MAX_OPENROUTER_OUTPUT_BYTES = 64 * 1024 * 1024;
+
 /**
  * Image generation request
  */
@@ -55,6 +79,14 @@ export interface ImageGenerationRequest {
   filename?: string;
   imageSize?: ImageSize;
   numberOfImages?: number;
+  aspectRatio?: string;
+  quality?: "auto" | "low" | "medium" | "high";
+  background?: "auto" | "transparent" | "opaque";
+  outputFormat?: "png" | "jpeg" | "webp" | "svg";
+  outputCompression?: number;
+  seed?: number;
+  /** Local workspace paths, HTTPS URLs, or image data URLs for image-to-image generation. */
+  referenceImages?: string[];
   /** Internal cancellation signal from the task executor. */
   signal?: AbortSignal;
   /** Internal progress hook for timeline-visible provider transitions. */
@@ -123,7 +155,14 @@ function isTransientImageProviderError(error: string | undefined): boolean {
     lower.includes("socket") ||
     lower.includes("temporarily unavailable") ||
     lower.includes("service unavailable") ||
-    lower.includes("gateway")
+    lower.includes("gateway") ||
+    lower.includes("bad gateway") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests") ||
+    lower.includes("provider returned error") ||
+    lower.includes("no endpoints") ||
+    lower.includes("no route") ||
+    /\b(429|502|503|504)\b/.test(lower)
   );
 }
 
@@ -279,9 +318,301 @@ function inferOpenAIImageModelFromText(text: string): string | null {
 }
 
 function normalizeOpenRouterImageModel(model?: string): string | undefined {
-  const normalized = normalizeOpenAIImageModel(model);
-  if (!normalized) return undefined;
-  return normalized.includes("/") ? normalized : `openai/${normalized}`;
+  const raw = typeof model === "string" ? model.trim() : "";
+  if (!raw) return undefined;
+  // OpenRouter image models are provider-qualified slugs (for example
+  // meta/muse-image). Keep those untouched and only qualify legacy OpenAI
+  // model names for backwards compatibility with existing settings.
+  if (raw.includes("/")) return raw;
+  const normalized = normalizeOpenAIImageModel(raw);
+  return normalized ? `openai/${normalized}` : undefined;
+}
+
+function getSafeImageBaseFilename(filename?: string): string {
+  const fallback = `generated_${Date.now()}_${randomUUID().slice(0, 8)}`;
+  const raw = typeof filename === "string" && filename.trim() ? filename.trim() : fallback;
+  const basename = path.basename(path.win32.basename(raw));
+  const safe = basename
+    .replace(/[^\p{L}\p{N}._-]+/gu, "_")
+    .replace(/^\.+/, "")
+    .slice(0, 120);
+  return safe || fallback;
+}
+
+function decodeBase64Image(
+  value: string,
+  mimeType: string,
+): { buffer: Buffer; mimeType: string } | null {
+  const normalizedMimeType = mimeType.trim().toLowerCase();
+  if (!normalizedMimeType.startsWith("image/")) return null;
+  const normalized = value.replace(/\s/g, "");
+  if (!normalized || normalized.length % 4 === 1 || !/^[a-z0-9+/]*={0,2}$/i.test(normalized)) {
+    return null;
+  }
+  const buffer = Buffer.from(normalized, "base64");
+  if (buffer.length === 0 || buffer.length > MAX_OPENROUTER_OUTPUT_BYTES) return null;
+  return { buffer, mimeType: normalizedMimeType };
+}
+
+function parseImageDataUrl(
+  dataUrl: string,
+  maxBytes = MAX_OPENROUTER_OUTPUT_BYTES,
+): { buffer: Buffer; mimeType: string } | null {
+  const match = dataUrl.match(/^data:(image\/[^;,]+);base64,(.+)$/i);
+  const parsed = match ? decodeBase64Image(match[2], match[1]) : null;
+  return parsed && parsed.buffer.length <= maxBytes ? parsed : null;
+}
+
+function isPathWithinRoot(candidate: string, root: string): boolean {
+  const resolvedCandidate = path.resolve(candidate);
+  const resolvedRoot = path.resolve(root);
+  return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`);
+}
+
+async function prepareOpenRouterReferenceImages(
+  workspace: Workspace,
+  references: string[] | undefined,
+): Promise<string[]> {
+  if (!references || references.length === 0) return [];
+  if (references.length > 16) {
+    throw new Error("OpenRouter accepts at most 16 reference images per request.");
+  }
+
+  const allowedRoots = [workspace.path, ...(workspace.permissions.allowedPaths || [])];
+  const resolvedAllowedRoots = await Promise.all(
+    allowedRoots.map(async (root) => {
+      try {
+        return await fs.promises.realpath(root);
+      } catch {
+        return path.resolve(root);
+      }
+    }),
+  );
+
+  const prepared: string[] = [];
+  for (const reference of references) {
+    const value = typeof reference === "string" ? reference.trim() : "";
+    if (!value) throw new Error("Reference image entries must not be empty.");
+
+    if (/^data:image\//i.test(value)) {
+      const parsed = parseImageDataUrl(value, MAX_OPENROUTER_REFERENCE_BYTES);
+      if (!parsed) throw new Error("Reference image data URLs must contain valid non-empty image data.");
+      prepared.push(value);
+      continue;
+    }
+
+    if (/^https?:\/\//i.test(value)) {
+      prepared.push(value);
+      continue;
+    }
+
+    if (/^[a-z][a-z\d+.-]*:/i.test(value)) {
+      throw new Error("Reference images support only local paths, HTTP(S) URLs, or image data URLs.");
+    }
+
+    if (!workspace.permissions.read) {
+      throw new Error("Read permission is required to use local reference images.");
+    }
+
+    const candidate = path.resolve(workspace.path, value);
+    let realPath: string;
+    try {
+      realPath = await fs.promises.realpath(candidate);
+    } catch {
+      throw new Error(`Reference image was not found: ${value}`);
+    }
+    if (
+      !workspace.permissions.unrestrictedFileAccess &&
+      !resolvedAllowedRoots.some((root) => isPathWithinRoot(realPath, root))
+    ) {
+      throw new Error(`Reference image is outside the workspace allowed paths: ${value}`);
+    }
+
+    const stats = await fs.promises.stat(realPath);
+    if (!stats.isFile()) throw new Error(`Reference image is not a file: ${value}`);
+    if (stats.size === 0 || stats.size > MAX_OPENROUTER_REFERENCE_BYTES) {
+      throw new Error(`Reference image must be between 1 byte and 20 MB: ${value}`);
+    }
+    const mimeType = mimetypes.lookup(realPath);
+    if (typeof mimeType !== "string" || !mimeType.startsWith("image/")) {
+      throw new Error(`Reference image has an unsupported image type: ${value}`);
+    }
+    const contents = await fs.promises.readFile(realPath);
+    prepared.push(`data:${mimeType};base64,${contents.toString("base64")}`);
+  }
+  return prepared;
+}
+
+async function getOpenRouterImageModelCapabilities(args: {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  signal?: AbortSignal;
+}): Promise<OpenRouterImageCapabilities | undefined> {
+  const keyFingerprint = createHash("sha256").update(args.apiKey).digest("hex").slice(0, 16);
+  const cacheKey = `${args.baseUrl}\u0000${args.model}\u0000${keyFingerprint}`;
+  const cached = OPENROUTER_IMAGE_CAPABILITIES_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const headers = {
+    Authorization: `Bearer ${args.apiKey}`,
+    ...getOpenRouterAttributionHeaders(),
+  };
+  let data: { data?: Any[] };
+  try {
+    const response = await fetch(`${args.baseUrl}/images/models`, {
+      headers,
+      signal: args.signal,
+    });
+    if (!response.ok) return undefined;
+    data = (await response.json()) as { data?: Any[] };
+  } catch {
+    // Discovery is optional for basic generation. Do not cache failures so a
+    // temporary outage can recover on the next request.
+    return undefined;
+  }
+
+  const model = data.data?.find((entry) => entry?.id === args.model);
+  const modelParameters =
+    model?.supported_parameters && typeof model.supported_parameters === "object"
+      ? (model.supported_parameters as OpenRouterImageModelCapabilities)
+      : {};
+  const endpointPath =
+    typeof model?.endpoints === "string"
+      ? model.endpoints
+      : `/images/models/${args.model.split("/").map(encodeURIComponent).join("/")}/endpoints`;
+
+  let endpoints: OpenRouterImageEndpoint[] = [];
+  try {
+    const normalizedEndpointPath = endpointPath.startsWith("/") ? endpointPath : `/${endpointPath}`;
+    const endpointUrl =
+      /^https?:\/\//i.test(endpointPath)
+        ? endpointPath
+        : args.baseUrl.endsWith("/api/v1") && normalizedEndpointPath.startsWith("/api/v1/")
+        ? `${args.baseUrl}${normalizedEndpointPath.slice("/api/v1".length)}`
+        : `${args.baseUrl}${normalizedEndpointPath}`;
+    const endpointResponse = await fetch(
+      endpointUrl,
+      { headers, signal: args.signal },
+    );
+    if (endpointResponse.ok) {
+      const endpointData = (await endpointResponse.json()) as Any;
+      const endpointItems = Array.isArray(endpointData?.data)
+        ? endpointData.data
+        : Array.isArray(endpointData?.endpoints)
+          ? endpointData.endpoints
+          : Array.isArray(endpointData?.data?.endpoints)
+            ? endpointData.data.endpoints
+            : [];
+      endpoints = endpointItems
+        .map((entry: Any) => {
+          const providerTag = Object.prototype.hasOwnProperty.call(entry, "provider_tag")
+            ? typeof entry.provider_tag === "string"
+              ? entry.provider_tag
+              : null
+            : typeof entry?.providerTag === "string"
+              ? entry.providerTag
+              : null;
+          return {
+            providerTag,
+            supportedParameters:
+              entry?.supported_parameters && typeof entry.supported_parameters === "object"
+                ? (entry.supported_parameters as OpenRouterImageModelCapabilities)
+                : {},
+          };
+        })
+        .filter((entry: OpenRouterImageEndpoint) => Object.keys(entry.supportedParameters).length > 0);
+    }
+  } catch {
+    // Model-level capabilities remain useful if endpoint discovery is unavailable.
+  }
+
+  const capabilities = { modelParameters, endpoints };
+  OPENROUTER_IMAGE_CAPABILITIES_CACHE.set(cacheKey, capabilities);
+  return capabilities;
+}
+
+function supportsOpenRouterImageParameter(
+  capabilities: OpenRouterImageCapabilities | undefined,
+  name: string,
+): boolean {
+  return Boolean(
+    capabilities &&
+      Object.prototype.hasOwnProperty.call(capabilities.modelParameters, name),
+  );
+}
+
+function getOpenRouterParameter(
+  capabilities: OpenRouterImageCapabilities | undefined,
+  name: string,
+): OpenRouterImageParameter | undefined {
+  return capabilities?.modelParameters[name];
+}
+
+function selectOpenRouterImageEndpoint(
+  capabilities: OpenRouterImageCapabilities | undefined,
+  requested: {
+    count: number;
+    referenceCount: number;
+    resolution?: ImageSize;
+    aspectRatio?: string;
+    quality?: string;
+    background?: string;
+    outputFormat?: string;
+    outputCompression?: number;
+    seed?: number;
+  },
+): OpenRouterImageEndpoint | undefined {
+  const candidates = capabilities?.endpoints || [];
+  const compatible = candidates.filter((endpoint) => {
+    const parameters = endpoint.supportedParameters;
+    const requires = [
+      requested.referenceCount > 0 ? "input_references" : null,
+      requested.resolution === "2K" ? "resolution" : null,
+      requested.aspectRatio ? "aspect_ratio" : null,
+      requested.quality ? "quality" : null,
+      requested.background ? "background" : null,
+      requested.outputFormat ? "output_format" : null,
+      requested.outputCompression !== undefined ? "output_compression" : null,
+      requested.seed !== undefined ? "seed" : null,
+    ].filter((value): value is string => Boolean(value));
+    if (requested.count > 1) requires.push("n");
+    if (requires.some((name) => !Object.prototype.hasOwnProperty.call(parameters, name))) return false;
+    const refs = parameters.input_references;
+    if (
+      requested.referenceCount > 0 &&
+      ((typeof refs?.min === "number" && requested.referenceCount < refs.min) ||
+        (typeof refs?.max === "number" && requested.referenceCount > refs.max))
+    ) {
+      return false;
+    }
+    return true;
+  });
+  return compatible[0];
+}
+
+function selectOpenRouterResolution(
+  capabilities: OpenRouterImageCapabilities | undefined,
+  requested: ImageSize,
+): string | undefined {
+  const parameter = getOpenRouterParameter(capabilities, "resolution");
+  if (!parameter || !Array.isArray(parameter.values)) return undefined;
+  const values = parameter.values.filter((value): value is string => typeof value === "string");
+  if (values.length === 0) return undefined;
+  if (values.includes(requested)) return requested;
+  if (requested === "2K" && values.includes("1K")) return "1K";
+  return values[0];
+}
+
+function clampOpenRouterImageCount(
+  capabilities: OpenRouterImageCapabilities | undefined,
+  requested: number,
+): number | undefined {
+  if (!supportsOpenRouterImageParameter(capabilities, "n")) return undefined;
+  const parameter = getOpenRouterParameter(capabilities, "n");
+  const min = typeof parameter?.min === "number" ? parameter.min : 1;
+  const max = typeof parameter?.max === "number" ? parameter.max : 10;
+  return Math.min(Math.max(Math.round(requested), min), max);
 }
 
 function uniqStrings(values: Array<string | undefined | null>): string[] {
@@ -557,6 +888,7 @@ export function selectImageProviderOrder(args: {
   providerOverride?: ImageProvider | "auto";
   modelOverride?: string;
   prompt: string;
+  preferOpenRouter?: boolean;
 }): Array<{ provider: ImageProvider; modelPreset?: ImageModelPreset }> {
   const settings = args.settings;
   const configured = sortProvidersByDefaultPreference(getConfiguredImageProviders(settings));
@@ -567,7 +899,15 @@ export function selectImageProviderOrder(args: {
   const explicitProvider =
     (args.providerOverride && args.providerOverride !== "auto" ? args.providerOverride : null) ||
     inferImageProviderFromText(args.modelOverride || "") ||
+    (args.modelOverride?.includes("/") ? "openrouter" : null) ||
     inferImageProviderFromText(args.prompt);
+
+  if (args.preferOpenRouter && !explicitProvider && configured.includes("openrouter")) {
+    return [
+      { provider: "openrouter" },
+      ...configured.filter((provider) => provider !== "openrouter").map((provider) => ({ provider })),
+    ];
+  }
 
   const fromSettings = buildProviderOrderFromImageSettings(settings);
   if (fromSettings.length > 0 && !explicitProvider && !args.modelOverride) {
@@ -714,7 +1054,26 @@ export class ImageGenerator {
     const modelOverride = typeof request.model === "string" ? request.model : undefined;
     const filename = request.filename;
     const imageSize = request.imageSize || "1K";
-    const numberOfImages = request.numberOfImages || 1;
+    const requestedNumberOfImages = Number(request.numberOfImages ?? 1);
+    const numberOfImages = Number.isFinite(requestedNumberOfImages)
+      ? Math.min(Math.max(Math.round(requestedNumberOfImages), 1), 4)
+      : 1;
+    const aspectRatio = request.aspectRatio;
+    const quality = request.quality;
+    const background = request.background;
+    const outputFormat = request.outputFormat;
+    const outputCompression = request.outputCompression;
+    const seed = request.seed;
+    const referenceImages = request.referenceImages;
+    const hasOpenRouterSpecificOptions = Boolean(
+      referenceImages?.length ||
+        aspectRatio ||
+        quality ||
+        background ||
+        outputFormat ||
+        outputCompression !== undefined ||
+        seed !== undefined,
+    );
     const signal = request.signal;
     const onProgress = request.onProgress;
 
@@ -725,7 +1084,32 @@ export class ImageGenerator {
       providerOverride,
       modelOverride,
       prompt,
+      preferOpenRouter: hasOpenRouterSpecificOptions,
     });
+
+    if (
+      hasOpenRouterSpecificOptions &&
+      providerOverride !== "auto" &&
+      providerOverride !== "openrouter"
+    ) {
+      return {
+        success: false,
+        images: [],
+        provider: providerOverride,
+        model: modelOverride || "image-generation",
+        error: "Reference images and advanced image options currently require the OpenRouter provider.",
+        actionHint: buildSetupHint("openrouter"),
+      };
+    }
+    if (hasOpenRouterSpecificOptions && !providerOrder.some((entry) => entry.provider === "openrouter")) {
+      return {
+        success: false,
+        images: [],
+        model: modelOverride || "image-generation",
+        error: "Reference images and advanced image options require a configured OpenRouter provider.",
+        actionHint: buildSetupHint("openrouter"),
+      };
+    }
 
     const baseEntry = providerOrder[0];
     const baseProvider = baseEntry?.provider ?? null;
@@ -756,6 +1140,7 @@ export class ImageGenerator {
       model: string,
       timeoutMs: number,
       nextEntry?: { provider: ImageProvider; modelPreset?: ImageModelPreset },
+      timedOut = true,
     ) => {
       if (!nextEntry || signal?.aborted) return;
       onProgress?.({
@@ -764,7 +1149,9 @@ export class ImageGenerator {
         model,
         timeoutMs,
         fallbackModel: nextEntry.modelPreset || nextEntry.provider,
-        message: `${provider} image generation timed out after ${Math.round(timeoutMs / 1000)}s; falling back to ${nextEntry.provider}${nextEntry.modelPreset ? ` (${nextEntry.modelPreset})` : ""}.`,
+        message: timedOut
+          ? `${provider} image generation timed out after ${Math.round(timeoutMs / 1000)}s; falling back to ${nextEntry.provider}${nextEntry.modelPreset ? ` (${nextEntry.modelPreset})` : ""}.`
+          : `${provider} image generation returned a transient error; falling back to ${nextEntry.provider}${nextEntry.modelPreset ? ` (${nextEntry.modelPreset})` : ""}.`,
       });
     };
 
@@ -821,9 +1208,20 @@ export class ImageGenerator {
               signal: attemptSignal,
             }),
           );
-          if (attempt.result.success || !attempt.timedOut) return attempt.result;
+          if (
+            attempt.result.success ||
+            (!attempt.timedOut &&
+              (providerOverride !== "auto" || !isTransientImageProviderError(attempt.result.error)))
+          )
+            return attempt.result;
           considerError(provider, attempt.result.error || "Gemini image generation timed out.", modelId);
-          emitProviderFallback(provider, modelId, providerTimeoutMs, nextProviderEntry);
+          emitProviderFallback(
+            provider,
+            modelId,
+            providerTimeoutMs,
+            nextProviderEntry,
+            attempt.timedOut,
+          );
           continue;
         }
 
@@ -861,9 +1259,20 @@ export class ImageGenerator {
               signal: attemptSignal,
             }),
           );
-          if (attempt.result.success || !attempt.timedOut) return attempt.result;
+          if (
+            attempt.result.success ||
+            (!attempt.timedOut &&
+              (providerOverride !== "auto" || !isTransientImageProviderError(attempt.result.error)))
+          )
+            return attempt.result;
           considerError(provider, attempt.result.error || "OpenAI image generation timed out.", chosenModel);
-          emitProviderFallback(provider, chosenModel, providerTimeoutMs, nextProviderEntry);
+          emitProviderFallback(
+            provider,
+            chosenModel,
+            providerTimeoutMs,
+            nextProviderEntry,
+            attempt.timedOut,
+          );
           continue;
         }
 
@@ -910,13 +1319,24 @@ export class ImageGenerator {
               signal: attemptSignal,
             }),
           );
-          if (attempt.result.success || !attempt.timedOut) return attempt.result;
+          if (
+            attempt.result.success ||
+            (!attempt.timedOut &&
+              (providerOverride !== "auto" || !isTransientImageProviderError(attempt.result.error)))
+          )
+            return attempt.result;
           considerError(
             provider,
             attempt.result.error || "ChatGPT subscription image generation timed out.",
             normalizedChosenModel,
           );
-          emitProviderFallback(provider, normalizedChosenModel, providerTimeoutMs, nextProviderEntry);
+          emitProviderFallback(
+            provider,
+            normalizedChosenModel,
+            providerTimeoutMs,
+            nextProviderEntry,
+            attempt.timedOut,
+          );
           continue;
         }
 
@@ -1033,13 +1453,19 @@ export class ImageGenerator {
           const configuredOpenRouterModel = normalizeOpenRouterImageModel(
             settings.imageGeneration?.openrouter?.model,
           );
+          const requestedOpenRouterModel =
+            modelOverride &&
+            (modelOverride.includes("/") || isOpenAIImageModel(normalizeOpenAIImageModel(modelOverride)))
+              ? normalizeOpenRouterImageModel(modelOverride)
+              : undefined;
           const openaiModel =
             resolveOpenAIModelOverride(modelOverride) ||
             (modelPreset === "gpt-image-2" ? "gpt-image-2" : null) ||
             (modelPreset === "gpt-image-1.5" ? "gpt-image-1.5" : null) ||
             inferOpenAIImageModelFromText(prompt) ||
             "gpt-image-1.5";
-          const openRouterModel = configuredOpenRouterModel || `openai/${openaiModel}`;
+          const openRouterModel =
+            requestedOpenRouterModel || configuredOpenRouterModel || `openai/${openaiModel}`;
           onProgress?.({
             type: "image_generation_attempt",
             provider,
@@ -1056,6 +1482,13 @@ export class ImageGenerator {
               filename,
               imageSize,
               numberOfImages,
+              aspectRatio,
+              quality,
+              background,
+              outputFormat,
+              outputCompression,
+              seed,
+              referenceImages,
               signal: attemptSignal,
             }),
           );
@@ -1065,8 +1498,18 @@ export class ImageGenerator {
             attempt.result.error || "OpenRouter image generation failed",
             attempt.result.model,
           );
-          if (attempt.timedOut) {
-            emitProviderFallback(provider, openRouterModel, providerTimeoutMs, nextProviderEntry);
+          const shouldFallback =
+            !hasOpenRouterSpecificOptions &&
+            (attempt.timedOut ||
+              (providerOverride === "auto" && isTransientImageProviderError(attempt.result.error)));
+          if (shouldFallback) {
+            emitProviderFallback(
+              provider,
+              openRouterModel,
+              providerTimeoutMs,
+              nextProviderEntry,
+              attempt.timedOut,
+            );
             continue;
           }
           return attempt.result;
@@ -1149,7 +1592,7 @@ export class ImageGenerator {
     signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${args.modelId}:generateContent`;
-    const baseFilename = args.filename || `generated_${Date.now()}`;
+    const baseFilename = getSafeImageBaseFilename(args.filename);
     const outputDir = this.workspace.path;
 
     try {
@@ -1272,7 +1715,7 @@ export class ImageGenerator {
     numberOfImages: number;
     signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
-    const baseFilename = args.filename || `generated_${Date.now()}`;
+    const baseFilename = getSafeImageBaseFilename(args.filename);
     const outputDir = this.workspace.path;
     const size = this.mapOpenAIImageSize(args.imageSize);
 
@@ -1392,7 +1835,7 @@ export class ImageGenerator {
     numberOfImages: number;
     signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
-    const baseFilename = args.filename || `generated_${Date.now()}`;
+    const baseFilename = getSafeImageBaseFilename(args.filename);
     const outputDir = this.workspace.path;
     const size = this.mapOpenAIImageSize(args.imageSize);
     const writtenPaths: string[] = [];
@@ -1525,7 +1968,7 @@ export class ImageGenerator {
     numberOfImages: number;
     signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
-    const baseFilename = args.filename || `generated_${Date.now()}`;
+    const baseFilename = getSafeImageBaseFilename(args.filename);
     const outputDir = this.workspace.path;
     const size = this.mapOpenAIImageSize(args.imageSize);
     const endpoint = normalizeAzureImageBaseEndpoint(args.endpoint);
@@ -1656,21 +2099,164 @@ export class ImageGenerator {
     filename?: string;
     imageSize: ImageSize;
     numberOfImages: number;
+    aspectRatio?: string;
+    quality?: "auto" | "low" | "medium" | "high";
+    background?: "auto" | "transparent" | "opaque";
+    outputFormat?: "png" | "jpeg" | "webp" | "svg";
+    outputCompression?: number;
+    seed?: number;
+    referenceImages?: string[];
     signal?: AbortSignal;
   }): Promise<ImageGenerationResult> {
-    const baseFilename = args.filename || `generated_${Date.now()}`;
+    const baseFilename = getSafeImageBaseFilename(args.filename);
     const outputDir = this.workspace.path;
-    const url = `${args.baseUrl}/chat/completions`;
+    const url = `${args.baseUrl}/images`;
 
     try {
       console.log(`[ImageGenerator] Generating image with openrouter (${args.model})`);
 
+      const capabilities = await getOpenRouterImageModelCapabilities({
+        apiKey: args.apiKey,
+        baseUrl: args.baseUrl,
+        model: args.model,
+        signal: args.signal,
+      });
+      const endpoint = selectOpenRouterImageEndpoint(capabilities, {
+        count: args.numberOfImages,
+        referenceCount: args.referenceImages?.length || 0,
+        resolution: args.imageSize,
+        aspectRatio: args.aspectRatio,
+        quality: args.quality,
+        background: args.background,
+        outputFormat: args.outputFormat,
+        outputCompression: args.outputCompression,
+        seed: args.seed,
+      });
+      const requestedAdvancedOption = Boolean(
+        args.referenceImages?.length ||
+          args.numberOfImages > 1 ||
+          args.imageSize === "2K" ||
+          args.aspectRatio ||
+          args.quality ||
+          args.background ||
+          args.outputFormat ||
+          args.outputCompression !== undefined ||
+          args.seed !== undefined,
+      );
+      if (capabilities?.endpoints.length && requestedAdvancedOption && !endpoint) {
+        return {
+          success: false,
+          images: [],
+          provider: "openrouter",
+          model: args.model,
+          error: `No OpenRouter endpoint for ${args.model} supports the requested image options or reference images. Choose another model/provider or remove the unsupported option.`,
+          actionHint: buildSetupHint("openrouter"),
+        };
+      }
+
+      const effectiveCapabilities = endpoint
+        ? { modelParameters: endpoint.supportedParameters, endpoints: [] }
+        : capabilities;
+      const requestedCount = clampOpenRouterImageCount(effectiveCapabilities, args.numberOfImages);
+      const resolution = selectOpenRouterResolution(effectiveCapabilities, args.imageSize);
+      const references = await prepareOpenRouterReferenceImages(
+        this.workspace,
+        args.referenceImages,
+      );
+      const validateOption = (name: string, value: unknown): string | null => {
+        if (value === undefined || value === null || value === "") return null;
+        const parameter = getOpenRouterParameter(effectiveCapabilities, name);
+        if (effectiveCapabilities && !parameter) {
+          return `OpenRouter model ${args.model} does not support the image option ${name}.`;
+        }
+        if (parameter?.values && !parameter.values.includes(value)) {
+          return `OpenRouter model ${args.model} does not support ${name}=${String(value)}.`;
+        }
+        if (parameter?.type === "range" && typeof value === "number") {
+          if (typeof parameter.min === "number" && value < parameter.min) {
+            return `${name} must be at least ${parameter.min}.`;
+          }
+          if (typeof parameter.max === "number" && value > parameter.max) {
+            return `${name} must be at most ${parameter.max}.`;
+          }
+        }
+        return null;
+      };
+      for (const option of [
+        ["aspect_ratio", args.aspectRatio],
+        ["quality", args.quality],
+        ["background", args.background],
+        ["output_format", args.outputFormat],
+        ["output_compression", args.outputCompression],
+        ["seed", args.seed],
+      ] as Array<[string, unknown]>) {
+        const validationError = validateOption(option[0], option[1]);
+        if (validationError) {
+          return {
+            success: false,
+            images: [],
+            provider: "openrouter",
+            model: args.model,
+            error: validationError,
+            actionHint: buildSetupHint("openrouter"),
+          };
+        }
+      }
+      if (references.length > 0) {
+        const referenceParameter = getOpenRouterParameter(effectiveCapabilities, "input_references");
+        if (effectiveCapabilities && !referenceParameter) {
+          return {
+            success: false,
+            images: [],
+            provider: "openrouter",
+            model: args.model,
+            error: `OpenRouter model ${args.model} does not support reference images.`,
+            actionHint: buildSetupHint("openrouter"),
+          };
+        }
+        if (
+          (typeof referenceParameter?.min === "number" && references.length < referenceParameter.min) ||
+          (typeof referenceParameter?.max === "number" && references.length > referenceParameter.max)
+        ) {
+          return {
+            success: false,
+            images: [],
+            provider: "openrouter",
+            model: args.model,
+            error: `OpenRouter model ${args.model} accepts between ${referenceParameter?.min || 1} and ${referenceParameter?.max || 16} reference images.`,
+            actionHint: buildSetupHint("openrouter"),
+          };
+        }
+      }
       const body: Record<string, Any> = {
         model: args.model,
-        messages: [{ role: "user", content: args.prompt }],
-        modalities: ["image", "text"],
-        image_config: { image_size: args.imageSize },
+        prompt: args.prompt,
+        ...(requestedCount !== undefined
+          ? { n: requestedCount }
+          : !capabilities && args.numberOfImages > 1
+            ? { n: Math.min(Math.max(Math.round(args.numberOfImages), 1), 4) }
+            : {}),
+        ...(resolution ? { resolution } : {}),
+        ...(args.aspectRatio ? { aspect_ratio: args.aspectRatio } : {}),
+        ...(args.quality ? { quality: args.quality } : {}),
+        ...(args.background ? { background: args.background } : {}),
+        ...(args.outputFormat ? { output_format: args.outputFormat } : {}),
+        ...(args.outputCompression !== undefined
+          ? { output_compression: Math.min(Math.max(Math.round(args.outputCompression), 0), 100) }
+          : {}),
+        ...(args.seed !== undefined ? { seed: Math.round(args.seed) } : {}),
+        ...(references.length > 0
+          ? {
+              input_references: references.map((reference) => ({
+                type: "image_url",
+                image_url: { url: reference },
+              })),
+            }
+          : {}),
       };
+      if (endpoint?.providerTag) {
+        body.provider = { only: [endpoint.providerTag], allow_fallbacks: false };
+      }
 
       throwIfImageGenerationAborted(args.signal);
       const response = await fetch(url, {
@@ -1704,30 +2290,46 @@ export class ImageGenerator {
       }
 
       const data = (await response.json()) as Any;
-      const message = data?.choices?.[0]?.message;
-      const imageItems: Array<{ image_url?: { url?: string }; imageUrl?: { url?: string } }> =
-        message?.images || message?.content?.filter?.((p: Any) => p.type === "image_url") || [];
+      const imageItems: Any[] = Array.isArray(data?.data) ? data.data : [];
 
       const images: ImageGenerationResult["images"] = [];
-      const n = Math.min(args.numberOfImages, imageItems.length || 4);
+      const n =
+        requestedCount ??
+        (capabilities ? 1 : Math.min(Math.max(Math.round(args.numberOfImages), 1), 4));
 
       for (let i = 0; i < imageItems.length && images.length < n; i++) {
         throwIfImageGenerationAborted(args.signal);
         const item = imageItems[i];
-        const dataUrl =
-          item?.image_url?.url || item?.imageUrl?.url || (typeof item === "string" ? item : null);
-        if (!dataUrl || !dataUrl.startsWith("data:image/")) continue;
+        const b64 =
+          typeof item?.b64_json === "string"
+            ? item.b64_json
+            : typeof item?.base64 === "string"
+              ? item.base64
+              : null;
+        const mediaType =
+          typeof item?.media_type === "string" && item.media_type.startsWith("image/")
+            ? item.media_type
+            : "image/png";
+        const dataUrl = typeof item?.url === "string" ? item.url : null;
+        const decoded = b64 ? decodeBase64Image(b64, mediaType) : null;
+        let imageBuffer: Buffer | null = decoded?.buffer || null;
+        let mimeType = mediaType;
 
-        const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
-        if (!match) continue;
+        if (!imageBuffer && dataUrl?.startsWith("data:image/")) {
+          const parsed = parseImageDataUrl(dataUrl);
+          if (!parsed) continue;
+          imageBuffer = parsed.buffer;
+          mimeType = parsed.mimeType;
+        }
 
-        const mimeType = `image/${match[1]}`;
+        if (!imageBuffer) continue;
         const extension = mimetypes.extension(mimeType) || "png";
         const imageName =
-          imageItems.length > 1 ? `${baseFilename}_${i + 1}.${extension}` : `${baseFilename}.${extension}`;
+          imageItems.length > 1
+            ? `${baseFilename}_${i + 1}.${extension}`
+            : `${baseFilename}.${extension}`;
         const outputPath = path.join(outputDir, imageName);
 
-        const imageBuffer = Buffer.from(match[2], "base64");
         await fs.promises.writeFile(outputPath, imageBuffer);
         const stats = await fs.promises.stat(outputPath);
         images.push({ path: outputPath, filename: imageName, mimeType, size: stats.size });
@@ -1740,7 +2342,6 @@ export class ImageGenerator {
           provider: "openrouter",
           model: args.model,
           error:
-            (message?.content as string) ||
             "No images were returned by OpenRouter. The model may not support image generation.",
           actionHint: buildSetupHint("openrouter"),
         };

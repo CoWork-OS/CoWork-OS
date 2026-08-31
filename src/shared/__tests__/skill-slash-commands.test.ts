@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  parseInlineSkillSlashChain,
-  parseLeadingSkillSlashCommand,
-} from "../skill-slash-commands";
+import { parseInlineSkillSlashChain, parseLeadingSkillSlashCommand } from "../skill-slash-commands";
 
 describe("skill slash command parsing", () => {
   it("parses /simplify with no args", () => {

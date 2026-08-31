@@ -128,10 +128,7 @@ const isSafeExistingTempDirectory = (candidatePath: string, rootPath: string): b
   }
 };
 
-export function ensureTempWorkspaceDirectorySync(
-  tempWorkspaceRoot: string,
-  slug: string,
-): string {
+export function ensureTempWorkspaceDirectorySync(tempWorkspaceRoot: string, slug: string): string {
   const resolvedRoot = ensureTempWorkspaceRootSync(tempWorkspaceRoot);
   if (path.basename(slug) !== slug || slug.includes(path.sep)) {
     throw new Error(`Invalid temp workspace slug: ${slug}`);
@@ -240,13 +237,17 @@ const deleteWorkspaceAndRelatedData = (db: Database.Database, workspaceId: strin
         tableColumns.set(tableName, columns);
       }
 
-      const taskIds = (db.prepare("SELECT id FROM tasks WHERE workspace_id = ?").all(workspaceId) as Array<{
-        id?: string;
-      }>)
+      const taskIds = (
+        db.prepare("SELECT id FROM tasks WHERE workspace_id = ?").all(workspaceId) as Array<{
+          id?: string;
+        }>
+      )
         .map((row) => String(row.id || ""))
         .filter(Boolean);
       const sessionIds = (
-        db.prepare("SELECT id FROM channel_sessions WHERE workspace_id = ?").all(workspaceId) as Array<{
+        db
+          .prepare("SELECT id FROM channel_sessions WHERE workspace_id = ?")
+          .all(workspaceId) as Array<{
           id?: string;
         }>
       )
@@ -267,7 +268,9 @@ const deleteWorkspaceAndRelatedData = (db: Database.Database, workspaceId: strin
       for (const tableName of tables) {
         const columns = tableColumns.get(tableName);
         if (!columns || !columns.has("workspace_id")) continue;
-        db.prepare(`DELETE FROM ${quoteSqlIdentifier(tableName)} WHERE workspace_id = ?`).run(workspaceId);
+        db.prepare(`DELETE FROM ${quoteSqlIdentifier(tableName)} WHERE workspace_id = ?`).run(
+          workspaceId,
+        );
       }
 
       db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId);
@@ -335,7 +338,10 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
   const keepRecent = Math.max(0, options.keepRecent ?? DEFAULT_KEEP_RECENT);
   const maxAgeMs = options.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
   const hardLimit = Math.max(1, options.hardLimit ?? DEFAULT_HARD_LIMIT);
-  const idleSessionProtectMs = Math.max(0, options.idleSessionProtectMs ?? DEFAULT_IDLE_SESSION_PROTECT_MS);
+  const idleSessionProtectMs = Math.max(
+    0,
+    options.idleSessionProtectMs ?? DEFAULT_IDLE_SESSION_PROTECT_MS,
+  );
   const minAgeForHardPruneMs = Math.max(
     0,
     options.minAgeForHardPruneMs ?? DEFAULT_MIN_AGE_FOR_HARD_PRUNE_MS,
@@ -345,7 +351,9 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
       (options.activeTaskStatuses && options.activeTaskStatuses.length > 0
         ? options.activeTaskStatuses
         : DEFAULT_ACTIVE_TASK_STATUSES
-      ).map((status) => String(status || "").trim()).filter(Boolean),
+      )
+        .map((status) => String(status || "").trim())
+        .filter(Boolean),
     ),
   );
   const sessionActiveCutoffMs = nowMs - idleSessionProtectMs;
@@ -465,7 +473,9 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
     const row = rowsById.get(workspaceId);
     if (!row) continue;
 
-    if (hasWorkspaceReferences(options.db, workspaceId, activeTaskStatuses, sessionActiveCutoffMs)) {
+    if (
+      hasWorkspaceReferences(options.db, workspaceId, activeTaskStatuses, sessionActiveCutoffMs)
+    ) {
       continue;
     }
 
@@ -504,7 +514,11 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
     WHERE id = ? OR substr(id, 1, ?) = ?
     ORDER BY COALESCE(last_used_at, created_at) DESC
   `)
-        .all(TEMP_WORKSPACE_ID, TEMP_ID_PREFIX_LENGTH, TEMP_WORKSPACE_ID_PREFIX) as TempWorkspaceRow[]);
+        .all(
+          TEMP_WORKSPACE_ID,
+          TEMP_ID_PREFIX_LENGTH,
+          TEMP_WORKSPACE_ID_PREFIX,
+        ) as TempWorkspaceRow[]);
 
   const protectedPaths = new Set<string>();
   const workspaceIdsByPath = new Map<string, string[]>();
@@ -524,7 +538,9 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
     if (dryRun) {
       candidateDirPaths.add(path.resolve(directoryPath));
       for (const workspaceId of workspaceIds) {
-        if (hasWorkspaceReferences(options.db, workspaceId, activeTaskStatuses, sessionActiveCutoffMs)) {
+        if (
+          hasWorkspaceReferences(options.db, workspaceId, activeTaskStatuses, sessionActiveCutoffMs)
+        ) {
           continue;
         }
         candidateWorkspaceIds.add(workspaceId);
@@ -540,7 +556,9 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
     }
 
     for (const workspaceId of workspaceIds) {
-      if (hasWorkspaceReferences(options.db, workspaceId, activeTaskStatuses, sessionActiveCutoffMs)) {
+      if (
+        hasWorkspaceReferences(options.db, workspaceId, activeTaskStatuses, sessionActiveCutoffMs)
+      ) {
         continue;
       }
       candidateWorkspaceIds.add(workspaceId);

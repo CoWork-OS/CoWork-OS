@@ -33,7 +33,9 @@ function BriefItem({
   return (
     <article
       className={`mc-v2-brief-item ${itemTone(item)}`}
-      onClick={() => { if (item.taskId) onOpenTask(item.taskId); }}
+      onClick={() => {
+        if (item.taskId) onOpenTask(item.taskId);
+      }}
       style={item.taskId ? { cursor: "pointer" } : undefined}
     >
       <div className="mc-v2-brief-item-top">
@@ -98,7 +100,8 @@ function formatRuntimeQueueValue(
   if (state === "loading") return "Loading";
   if (state === "unavailable" || state === "error") return "Unavailable";
   if (running === 0 && waiting === 0) return "All clear";
-  const runningLabel = maxConcurrent > 0 ? `${running}/${maxConcurrent} running` : `${running} running`;
+  const runningLabel =
+    maxConcurrent > 0 ? `${running}/${maxConcurrent} running` : `${running} running`;
   return waiting > 0 ? `${runningLabel} · ${waiting} waiting` : runningLabel;
 }
 
@@ -128,17 +131,32 @@ function RuntimeTaskList({
             <button
               key={taskId}
               className="mc-v2-runtime-task"
-              onClick={() => { if (task) onOpenTask(task.id); }}
+              onClick={() => {
+                if (task) onOpenTask(task.id);
+              }}
               disabled={!task}
-              title={task ? "Open task details" : "Task is outside the current Mission Control workspace filter"}
+              title={
+                task
+                  ? "Open task details"
+                  : "Task is outside the current Mission Control workspace filter"
+              }
             >
-              <span>{title === "Waiting" ? `${index + 1}. ` : ""}{task?.title || `Task ${taskId.slice(0, 8)}`}</span>
-              {task ? <em>{formatRelativeTime(task.updatedAt || task.createdAt)}</em> : <em>outside scope</em>}
+              <span>
+                {title === "Waiting" ? `${index + 1}. ` : ""}
+                {task?.title || `Task ${taskId.slice(0, 8)}`}
+              </span>
+              {task ? (
+                <em>{formatRelativeTime(task.updatedAt || task.createdAt)}</em>
+              ) : (
+                <em>outside scope</em>
+              )}
             </button>
           );
         })}
       </div>
-      {taskIds.length > 4 && <p className="mc-v2-runtime-more">+{taskIds.length - 4} more in chat queue</p>}
+      {taskIds.length > 4 && (
+        <p className="mc-v2-runtime-more">+{taskIds.length - 4} more in chat queue</p>
+      )}
     </div>
   );
 }
@@ -168,7 +186,8 @@ export function MCOverviewTab({ data }: MCOverviewTabProps) {
   } = data;
 
   const brief = missionControlBrief;
-  const attention = brief?.sections.find((section) => section.title === "Needs attention")?.items || [];
+  const attention =
+    brief?.sections.find((section) => section.title === "Needs attention")?.items || [];
   const decisions = brief?.latestDecisions || [];
   const learnings = brief?.learningChanges || [];
   const awareness = brief?.awarenessClusters || [];
@@ -195,10 +214,17 @@ export function MCOverviewTab({ data }: MCOverviewTabProps) {
       <div className="mc-v2-brief-hero">
         <div>
           <h1>Command Brief</h1>
-          <p>{brief ? `Updated ${formatRelativeTime(brief.generatedAt)}` : "Preparing grouped brief..."}</p>
+          <p>
+            {brief
+              ? `Updated ${formatRelativeTime(brief.generatedAt)}`
+              : "Preparing grouped brief..."}
+          </p>
         </div>
         <div className="mc-v2-brief-actions">
-          <button className="mc-v2-icon-btn" onClick={() => void loadMissionControlIntelligence(selectedWorkspaceId)}>
+          <button
+            className="mc-v2-icon-btn"
+            onClick={() => void loadMissionControlIntelligence(selectedWorkspaceId)}
+          >
             Refresh brief
           </button>
           <button className="mc-v2-icon-btn" onClick={() => setActiveTab("feed")}>
@@ -290,17 +316,24 @@ export function MCOverviewTab({ data }: MCOverviewTabProps) {
         <div className="mc-v2-context-empty">
           <strong>No open board work.</strong>
           <span>
-            Mission Control board work is tracked separately from the global runtime queue. The runtime queue currently has {runtimeRunningCount} running and {runtimeQueuedCount} waiting.
+            Mission Control board work is tracked separately from the global runtime queue. The
+            runtime queue currently has {runtimeRunningCount} running and {runtimeQueuedCount}{" "}
+            waiting.
           </span>
         </div>
       )}
 
-      {runtimeQueueReady && totalTasksInQueue === 0 && runtimeQueueTotal === 0 && activeAgentsCount > 0 && (
-        <div className="mc-v2-context-empty">
-          <strong>{activeAgentsCount} Heartbeat agents are enabled and idle.</strong>
-          <span>They can monitor signals, create suggestions, or dispatch work when configured.</span>
-        </div>
-      )}
+      {runtimeQueueReady &&
+        totalTasksInQueue === 0 &&
+        runtimeQueueTotal === 0 &&
+        activeAgentsCount > 0 && (
+          <div className="mc-v2-context-empty">
+            <strong>{activeAgentsCount} Heartbeat agents are enabled and idle.</strong>
+            <span>
+              They can monitor signals, create suggestions, or dispatch work when configured.
+            </span>
+          </div>
+        )}
 
       <div className="mc-v2-brief-grid">
         <BriefSection

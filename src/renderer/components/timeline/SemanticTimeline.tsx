@@ -116,7 +116,8 @@ function estimateTimelineCardChrome(event: UiTimelineEvent, isVerbose: boolean):
   }
 
   const defaultExpanded =
-    event.kind === "approval" || (event.kind === "summary" && isVerbose) ||
+    event.kind === "approval" ||
+    (event.kind === "summary" && isVerbose) ||
     (event.kind === "agent" && (isVerbose || event.status === "running"));
 
   if (defaultExpanded) {
@@ -203,7 +204,9 @@ export function SemanticTimeline({
   const feedRef = useRef<HTMLDivElement>(null);
   const [measuredHeights, setMeasuredHeights] = useState<Record<string, number>>({});
   const [containerWidth, setContainerWidth] = useState(0);
-  const useVirtual = events.length > VIRTUALIZE_THRESHOLD || (!showAll && isPretextEnabled() && events.length > WINDOW_SIZE);
+  const useVirtual =
+    events.length > VIRTUALIZE_THRESHOLD ||
+    (!showAll && isPretextEnabled() && events.length > WINDOW_SIZE);
 
   const activePhases = useMemo(() => {
     const phases = new Set<TimelinePhase>();
@@ -217,7 +220,9 @@ export function SemanticTimeline({
 
   const isVerbose = verbosity === "verbose";
   const isWindowed = !showAll;
-  const visibleEvents = isWindowed ? events.slice(-WINDOW_SIZE) : events.slice(-MAX_SHOW_ALL_EVENTS);
+  const visibleEvents = isWindowed
+    ? events.slice(-WINDOW_SIZE)
+    : events.slice(-MAX_SHOW_ALL_EVENTS);
 
   // Auto-scroll to bottom in windowed mode when events change
   useEffect(() => {
@@ -270,7 +275,9 @@ export function SemanticTimeline({
   }, [useVirtual]);
 
   const handleMeasuredHeight = useCallback((eventId: string, height: number) => {
-    setMeasuredHeights((prev) => (prev[eventId] === height ? prev : { ...prev, [eventId]: height }));
+    setMeasuredHeights((prev) =>
+      prev[eventId] === height ? prev : { ...prev, [eventId]: height },
+    );
   }, []);
 
   const getItemHeight = useCallback(

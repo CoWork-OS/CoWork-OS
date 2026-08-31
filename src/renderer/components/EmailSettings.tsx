@@ -44,10 +44,22 @@ const EMAIL_PROVIDER_DEFS: readonly EmailProviderDef[] = [
     label: "Gmail",
     description: "Google personal accounts",
     protocol: "imap-smtp",
-    presets: { imapHost: "imap.gmail.com", imapPort: 993, smtpHost: "smtp.gmail.com", smtpPort: 587 },
+    presets: {
+      imapHost: "imap.gmail.com",
+      imapPort: 993,
+      smtpHost: "smtp.gmail.com",
+      smtpPort: 587,
+    },
     appPasswordHint: "Use an App Password — requires 2FA to be enabled in your Google account",
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <rect x="2" y="4" width="20" height="16" rx="2" />
         <path d="M2 7l10 7 10-7" />
       </svg>
@@ -58,10 +70,22 @@ const EMAIL_PROVIDER_DEFS: readonly EmailProviderDef[] = [
     label: "Microsoft 365",
     description: "Office 365 / Work accounts",
     protocol: "imap-smtp",
-    presets: { imapHost: "outlook.office365.com", imapPort: 993, smtpHost: "smtp.office365.com", smtpPort: 587 },
+    presets: {
+      imapHost: "outlook.office365.com",
+      imapPort: 993,
+      smtpHost: "smtp.office365.com",
+      smtpPort: 587,
+    },
     appPasswordHint: "You may need an App Password if your org requires MFA",
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <rect x="3" y="3" width="8" height="8" rx="1" />
         <rect x="13" y="3" width="8" height="8" rx="1" />
         <rect x="3" y="13" width="8" height="8" rx="1" />
@@ -74,11 +98,23 @@ const EMAIL_PROVIDER_DEFS: readonly EmailProviderDef[] = [
     label: "Outlook.com",
     description: "Hotmail · Live · MSN",
     protocol: "imap-smtp",
-    presets: { imapHost: "imap-mail.outlook.com", imapPort: 993, smtpHost: "smtp-mail.outlook.com", smtpPort: 587 },
+    presets: {
+      imapHost: "imap-mail.outlook.com",
+      imapPort: 993,
+      smtpHost: "smtp-mail.outlook.com",
+      smtpPort: 587,
+    },
     appPasswordHint: null,
     authMethod: "oauth",
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <rect x="2" y="4" width="20" height="16" rx="2" />
         <path d="M2 7l10 7 10-7" />
         <circle cx="8" cy="12" r="2.5" />
@@ -90,10 +126,22 @@ const EMAIL_PROVIDER_DEFS: readonly EmailProviderDef[] = [
     label: "Yahoo Mail",
     description: "Yahoo personal accounts",
     protocol: "imap-smtp",
-    presets: { imapHost: "imap.mail.yahoo.com", imapPort: 993, smtpHost: "smtp.mail.yahoo.com", smtpPort: 465 },
+    presets: {
+      imapHost: "imap.mail.yahoo.com",
+      imapPort: 993,
+      smtpHost: "smtp.mail.yahoo.com",
+      smtpPort: 465,
+    },
     appPasswordHint: "Yahoo requires an App Password — enable it under Account Security settings",
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <path d="M3 5l7 9v5h4v-5l7-9H3z" />
       </svg>
     ),
@@ -103,10 +151,22 @@ const EMAIL_PROVIDER_DEFS: readonly EmailProviderDef[] = [
     label: "iCloud Mail",
     description: "Apple iCloud accounts",
     protocol: "imap-smtp",
-    presets: { imapHost: "imap.mail.me.com", imapPort: 993, smtpHost: "smtp.mail.me.com", smtpPort: 587 },
+    presets: {
+      imapHost: "imap.mail.me.com",
+      imapPort: 993,
+      smtpHost: "smtp.mail.me.com",
+      smtpPort: 587,
+    },
     appPasswordHint: "Use an App-Specific Password generated at appleid.apple.com",
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <path d="M17.5 9a5 5 0 00-9.9-1A4 4 0 007 16h10a4 4 0 00.5-7z" />
       </svg>
     ),
@@ -116,10 +176,22 @@ const EMAIL_PROVIDER_DEFS: readonly EmailProviderDef[] = [
     label: "Fastmail",
     description: "Fastmail personal/team",
     protocol: "imap-smtp",
-    presets: { imapHost: "imap.fastmail.com", imapPort: 993, smtpHost: "smtp.fastmail.com", smtpPort: 587 },
+    presets: {
+      imapHost: "imap.fastmail.com",
+      imapPort: 993,
+      smtpHost: "smtp.fastmail.com",
+      smtpPort: 587,
+    },
     appPasswordHint: "Generate an App Password in Fastmail → Settings → Password & Security",
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <path d="M13 3L4 14h8l-1 7 9-11h-8l1-7z" />
       </svg>
     ),
@@ -132,7 +204,14 @@ const EMAIL_PROVIDER_DEFS: readonly EmailProviderDef[] = [
     presets: { imapHost: "127.0.0.1", imapPort: 1143, smtpHost: "127.0.0.1", smtpPort: 1025 },
     appPasswordHint: null,
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7l-9-5z" />
       </svg>
     ),
@@ -145,7 +224,14 @@ const EMAIL_PROVIDER_DEFS: readonly EmailProviderDef[] = [
     presets: undefined,
     appPasswordHint: null,
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <circle cx="12" cy="12" r="3" />
         <path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14" />
       </svg>
@@ -159,7 +245,14 @@ const EMAIL_PROVIDER_DEFS: readonly EmailProviderDef[] = [
     presets: undefined,
     appPasswordHint: null,
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <path d="M12 2v20M2 12h20M6 6l12 12M18 6L6 18" />
       </svg>
     ),
@@ -236,7 +329,9 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
   const [emailAccessToken, setEmailAccessToken] = useState("");
   const [emailRefreshToken, setEmailRefreshToken] = useState("");
   const [emailTokenExpiresAt, setEmailTokenExpiresAt] = useState<number | undefined>(undefined);
-  const [emailScopes, setEmailScopes] = useState<string[]>([...MICROSOFT_EMAIL_OAUTH_DEFAULT_SCOPES]);
+  const [emailScopes, setEmailScopes] = useState<string[]>([
+    ...MICROSOFT_EMAIL_OAUTH_DEFAULT_SCOPES,
+  ]);
   const [imapHost, setImapHost] = useState("");
   const [imapPort, setImapPort] = useState(993);
   const [smtpHost, setSmtpHost] = useState("");
@@ -304,7 +399,6 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
           setLoomMailboxFolder((emailChannel.config.loomMailboxFolder as string) || "INBOX");
           setLoomPollInterval((emailChannel.config.loomPollInterval as number) || 30000);
         }
-
       }
     } catch (error) {
       console.error("Failed to load Email channel:", error);
@@ -739,7 +833,6 @@ export function EmailSettings({ onStatusChange }: EmailSettingsProps) {
           </div>
         )}
       </div>
-
     </div>
   );
 }
@@ -795,19 +888,15 @@ function EmailProviderModal({
   const isLoom = def.protocol === "loom";
   const isMicrosoftOAuth = !isLoom && emailAuthMethod === "oauth";
 
-  const canSubmit =
-    (isLoom
-      ? Boolean(loomBaseUrl.trim() && loomAccessToken.trim())
-      : isMicrosoftOAuth
-        ? Boolean(email.trim() && emailOauthClientId.trim() && oauthConnected)
-        : Boolean(email.trim() && password.trim() && imapHost.trim() && smtpHost.trim()));
+  const canSubmit = isLoom
+    ? Boolean(loomBaseUrl.trim() && loomAccessToken.trim())
+    : isMicrosoftOAuth
+      ? Boolean(email.trim() && emailOauthClientId.trim() && oauthConnected)
+      : Boolean(email.trim() && password.trim() && imapHost.trim() && smtpHost.trim());
 
   return (
     <div className="mcp-modal-overlay" onClick={onClose}>
-      <div
-        className="mcp-modal email-provider-modal"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="mcp-modal email-provider-modal" onClick={(e) => e.stopPropagation()}>
         <div className="mcp-modal-header">
           <div className="email-modal-header-content">
             <div className="email-modal-header-icon">{def.icon}</div>
@@ -867,19 +956,18 @@ function EmailProviderModal({
                       onChange={(e) => setEmailOauthClientId(e.target.value)}
                     />
                     <p className="settings-hint">
-                      Outlook.com, Hotmail, Live, and MSN accounts need your own Microsoft Entra
-                      app registration before OAuth can work.
+                      Outlook.com, Hotmail, Live, and MSN accounts need your own Microsoft Entra app
+                      registration before OAuth can work.
                     </p>
                     <details style={{ marginTop: "8px" }}>
                       <summary>Outlook.com setup checklist</summary>
                       <ol className="settings-hint">
                         <li>Create a Microsoft Entra app registration in Azure.</li>
+                        <li>Under Supported account types, allow personal Microsoft accounts.</li>
                         <li>
-                          Under Supported account types, allow personal Microsoft accounts.
-                        </li>
-                        <li>
-                          Under Authentication, add the <strong>Mobile and desktop applications</strong>{" "}
-                          platform with redirect URI <code>http://localhost</code>.
+                          Under Authentication, add the{" "}
+                          <strong>Mobile and desktop applications</strong> platform with redirect
+                          URI <code>http://localhost</code>.
                         </li>
                         <li>
                           If Azure shows <strong>Allow public client flows</strong>, enable it for a
@@ -914,8 +1002,8 @@ function EmailProviderModal({
                     {def.appPasswordHint && <p className="settings-hint">{def.appPasswordHint}</p>}
                     {def.id === "protonmail" && (
                       <p className="settings-hint">
-                        Requires Proton Mail Bridge to be installed and running locally.
-                        Use the Bridge password shown in the Bridge app.
+                        Requires Proton Mail Bridge to be installed and running locally. Use the
+                        Bridge password shown in the Bridge app.
                       </p>
                     )}
                   </>
@@ -967,13 +1055,15 @@ function EmailProviderModal({
                           : "Connect Microsoft Account"}
                     </button>
                     <p className="settings-hint">
-                      CoWork opens the Microsoft sign-in flow in your browser and stores the
-                      refresh token for Microsoft Graph mail access.
+                      CoWork opens the Microsoft sign-in flow in your browser and stores the refresh
+                      token for Microsoft Graph mail access.
                     </p>
                     {oauthConnected && (
                       <p className="settings-hint">Microsoft account authorized successfully.</p>
                     )}
-                    {oauthError && <p className="settings-hint warning">OAuth error: {oauthError}</p>}
+                    {oauthError && (
+                      <p className="settings-hint warning">OAuth error: {oauthError}</p>
+                    )}
                   </div>
                 </>
               )}
@@ -1129,11 +1219,7 @@ function EmailProviderModal({
           <button className="button-secondary" onClick={onClose} disabled={saving}>
             Cancel
           </button>
-          <button
-            className="button-primary"
-            onClick={onSubmit}
-            disabled={saving || !canSubmit}
-          >
+          <button className="button-primary" onClick={onSubmit} disabled={saving || !canSubmit}>
             {saving ? "Adding..." : "Add Email"}
           </button>
         </div>

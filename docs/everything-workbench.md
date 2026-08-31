@@ -6,6 +6,12 @@ An open multi-provider harness sits underneath the workbench. Supported provider
 
 The Everything Workbench is the proof point for that positioning: ask for an artifact, open it in-place, review or edit it, then ask the agent for follow-up changes without leaving the task. For everyday work, CoWork should be the app you reach for instead of a separate coding app, mail app, browser preview, Word processor, spreadsheet tool, or slide deck editor. External-open actions remain available when a specialized native app is still the better tool for advanced edge cases.
 
+Every artifact and workbench surface remains governed by the task's [access
+profile](access-profiles.md). The profile controls the reads, writes,
+command-tool work, browser/network calls, and external effects used to create
+or revise an artifact; a viewer's preview sandbox or an external-app button is
+not a second access mode.
+
 ## Broader Positioning
 
 Use CoWork OS as the app where personal agentic work starts and stays:

@@ -170,13 +170,15 @@ export class SessionRetentionService {
     );
 
     return [...groups.entries()]
-      .map(([id, rows]) => this.buildSessionSummary({
-        id,
-        rows,
-        metadata: metadata.get(id),
-        workspacesById,
-        eventsByTaskId,
-      }))
+      .map(([id, rows]) =>
+        this.buildSessionSummary({
+          id,
+          rows,
+          metadata: metadata.get(id),
+          workspacesById,
+          eventsByTaskId,
+        }),
+      )
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
@@ -207,12 +209,9 @@ export class SessionRetentionService {
     );
     const endReasons = uniqueSorted(
       params.rows.flatMap((task) =>
-        [
-          task.status,
-          task.terminalStatus,
-          task.failureClass,
-          task.verificationVerdict,
-        ].flatMap((value) => (typeof value === "string" && value.length > 0 ? [value] : [])),
+        [task.status, task.terminalStatus, task.failureClass, task.verificationVerdict].flatMap(
+          (value) => (typeof value === "string" && value.length > 0 ? [value] : []),
+        ),
       ),
     );
 
@@ -250,7 +249,8 @@ export class SessionRetentionService {
       if (!matchesSetFilter(session.providers, filters.provider)) return false;
       if (!matchesSetFilter(session.models, filters.model)) return false;
       if (!matchesSetFilter(session.endReasons, filters.endReason)) return false;
-      if (!matchesNumberMinMax(session.totalTokens, filters.minTokens, filters.maxTokens)) return false;
+      if (!matchesNumberMinMax(session.totalTokens, filters.minTokens, filters.maxTokens))
+        return false;
       if (!matchesNumberMinMax(session.totalCost, filters.minCost, filters.maxCost)) return false;
       if (!matchesTimeWindow(session.updatedAt, filters)) return false;
       return true;
@@ -298,16 +298,33 @@ function summarizeEvents(
       }
       if (effectiveType !== "llm_usage") continue;
       const payload = normalizePayload(event.payload);
-      const provider = stringValue(payload.providerType ?? payload.provider ?? payload.provider_type);
+      const provider = stringValue(
+        payload.providerType ?? payload.provider ?? payload.provider_type,
+      );
       if (provider) providers.add(provider);
-      const model = stringValue(payload.modelKey ?? payload.modelId ?? payload.model ?? payload.model_key ?? payload.model_id);
+      const model = stringValue(
+        payload.modelKey ??
+          payload.modelId ??
+          payload.model ??
+          payload.model_key ??
+          payload.model_id,
+      );
       if (model) models.add(model);
-      const usage = normalizePayload(payload.totalUsage ?? payload.usage ?? payload.totals ?? payload);
+      const usage = normalizePayload(
+        payload.totalUsage ?? payload.usage ?? payload.totals ?? payload,
+      );
       const inputTokens = numberValue(usage.inputTokens ?? usage.input_tokens);
       const outputTokens = numberValue(usage.outputTokens ?? usage.output_tokens);
       const explicitTotal = numberValue(usage.totalTokens ?? usage.total_tokens);
       totalTokens += explicitTotal ?? (inputTokens ?? 0) + (outputTokens ?? 0);
-      totalCost += numberValue(payload.cost ?? payload.costUsd ?? payload.cost_usd ?? payload.totalCost ?? payload.total_cost) ?? 0;
+      totalCost +=
+        numberValue(
+          payload.cost ??
+            payload.costUsd ??
+            payload.cost_usd ??
+            payload.totalCost ??
+            payload.total_cost,
+        ) ?? 0;
     }
   }
 
@@ -353,7 +370,9 @@ function numberValue(value: unknown): number | undefined {
 
 function uniqueSorted(values: Array<string | undefined | null>): string[] {
   return Array.from(
-    new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0)),
+    new Set(
+      values.filter((value): value is string => typeof value === "string" && value.length > 0),
+    ),
   ).sort();
 }
 
@@ -396,17 +415,17 @@ function matchesTimeWindow(value: number, filters: SessionRetentionFilters): boo
 function hasExplicitSelectionFilter(filters: SessionRetentionFilters): boolean {
   return Boolean(
     filters.newerThanMs ||
-      filters.afterMs ||
-      filters.beforeMs ||
-      filters.title ||
-      filters.source ||
-      filters.cwd ||
-      filters.provider ||
-      filters.model ||
-      filters.endReason ||
-      typeof filters.minTokens === "number" ||
-      typeof filters.maxTokens === "number" ||
-      typeof filters.minCost === "number" ||
-      typeof filters.maxCost === "number",
+    filters.afterMs ||
+    filters.beforeMs ||
+    filters.title ||
+    filters.source ||
+    filters.cwd ||
+    filters.provider ||
+    filters.model ||
+    filters.endReason ||
+    typeof filters.minTokens === "number" ||
+    typeof filters.maxTokens === "number" ||
+    typeof filters.minCost === "number" ||
+    typeof filters.maxCost === "number",
   );
 }

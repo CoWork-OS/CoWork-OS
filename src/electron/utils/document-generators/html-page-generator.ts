@@ -221,7 +221,10 @@ export async function generateLandingPage(
 
 function markdownToHtml(md: string): string {
   let html = escapeHtml(md || "");
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => `<pre><code>${code.trim()}</code></pre>`);
+  html = html.replace(
+    /```(\w*)\n([\s\S]*?)```/g,
+    (_m, _lang, code) => `<pre><code>${code.trim()}</code></pre>`,
+  );
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, href) => {
     const safeHref = escapeAttribute(sanitizeHref(href));
     return `<a href="${safeHref}">${label}</a>`;
@@ -253,7 +256,12 @@ function sanitizeHref(raw: string): string {
   const href = String(raw || "").trim();
   if (!href) return "#";
 
-  if (href.startsWith("#") || href.startsWith("/") || href.startsWith("./") || href.startsWith("../")) {
+  if (
+    href.startsWith("#") ||
+    href.startsWith("/") ||
+    href.startsWith("./") ||
+    href.startsWith("../")
+  ) {
     return href;
   }
 
@@ -275,9 +283,16 @@ function sanitizeHref(raw: string): string {
 const DEFAULT_ACCENT_RGB = "124, 58, 237"; // #7c3aed
 
 function hexToRgb(hex: string): string {
-  const cleaned = String(hex || "").replace("#", "").trim();
+  const cleaned = String(hex || "")
+    .replace("#", "")
+    .trim();
   const normalized =
-    cleaned.length === 3 ? cleaned.split("").map((c) => `${c}${c}`).join("") : cleaned.slice(0, 6);
+    cleaned.length === 3
+      ? cleaned
+          .split("")
+          .map((c) => `${c}${c}`)
+          .join("")
+      : cleaned.slice(0, 6);
   if (!/^[0-9a-fA-F]+$/.test(normalized) || normalized.length < 3) {
     return DEFAULT_ACCENT_RGB;
   }

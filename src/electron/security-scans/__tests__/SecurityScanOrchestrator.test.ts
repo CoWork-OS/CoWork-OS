@@ -51,7 +51,9 @@ describe("SecurityScanOrchestrator", () => {
       scanId: "test-scan",
     });
 
-    expect(result.paths.scanDir).toBe(path.join(repoRoot, ".cowork", "security-scans", "repo", "test-scan"));
+    expect(result.paths.scanDir).toBe(
+      path.join(repoRoot, ".cowork", "security-scans", "repo", "test-scan"),
+    );
     expect(fs.existsSync(result.paths.rankInput)).toBe(true);
     expect(fs.existsSync(result.paths.deepReviewInput)).toBe(true);
     expect(result.rankInputRows).toBeGreaterThan(0);

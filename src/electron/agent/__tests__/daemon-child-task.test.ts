@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AgentDaemon } from "../daemon";
+import { PermissionSettingsManager } from "../../security/permission-settings-manager";
 
 describe("AgentDaemon.createChildTask", () => {
   it("persists the original child prompt as rawPrompt", async () => {
@@ -141,6 +142,198 @@ describe("AgentDaemon.createChildTask", () => {
     );
   });
 
+  it("does not let a legacy child permission mode bypass a parent ceiling", async () => {
+    const taskRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "parent-1",
+        agentConfig: { permissionMode: "default" },
+      }),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({
+        id: "child-task-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...task,
+      })),
+    };
+    const loadSettings = vi.spyOn(PermissionSettingsManager, "loadSettings").mockReturnValue({
+      version: 1,
+      defaultMode: "default",
+      defaultShellEnabled: false,
+      defaultPermissionAccess: "default",
+      defaultAccessProfileId: "ask_for_approval",
+      accessProfiles: [],
+      rules: [],
+    });
+    const daemonLike = {
+      taskRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+
+    try {
+      const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+        title: "Restricted worker",
+        prompt: "Inspect the repository.",
+        workspaceId: "ws-1",
+        parentTaskId: "parent-1",
+        agentType: "sub",
+        agentConfig: { permissionMode: "bypass_permissions" },
+      });
+
+      expect(child.agentConfig?.permissionMode).toBe("default");
+    } finally {
+      loadSettings.mockRestore();
+    }
+  });
+
+  it("allows a child to select a strictly narrower profile than an explicit parent profile", async () => {
+    const taskRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "parent-1",
+        workspaceId: "ws-1",
+        agentConfig: { accessProfileId: "ask_for_approval" },
+      }),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({
+        id: "child-task-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...task,
+      })),
+    };
+    const workspaceRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "ws-1",
+        name: "Workspace",
+        path: "/tmp/workspace",
+        permissions: {
+          read: true,
+          write: true,
+          delete: true,
+          network: true,
+          shell: true,
+          sandboxType: "none",
+          allowedPaths: [],
+        },
+      }),
+    };
+    const narrowProfile = {
+      id: "read_only_local",
+      label: "Read only local",
+      description: "Read-only local worker",
+      sandbox: "read-only",
+      approval: "untrusted",
+      reviewer: "user",
+      network: "disabled",
+      shellAccess: false,
+    };
+    const loadSettings = vi.spyOn(PermissionSettingsManager, "loadSettings").mockReturnValue({
+      version: 1,
+      defaultMode: "default",
+      defaultShellEnabled: false,
+      defaultPermissionAccess: "default",
+      defaultAccessProfileId: "ask_for_approval",
+      accessProfiles: [narrowProfile],
+      rules: [],
+    });
+    const daemonLike = {
+      taskRepo,
+      workspaceRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+
+    try {
+      const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+        title: "Read-only worker",
+        prompt: "Inspect the repository.",
+        workspaceId: "ws-1",
+        parentTaskId: "parent-1",
+        agentType: "sub",
+        agentConfig: { accessProfileId: narrowProfile.id },
+      });
+
+      expect(child.agentConfig?.accessProfileId).toBe(narrowProfile.id);
+      expect(child.agentConfig?.permissionMode).not.toBe("bypass_permissions");
+    } finally {
+      loadSettings.mockRestore();
+    }
+  });
+
+  it("rejects a child custom profile that adds scope beyond an unscoped parent", async () => {
+    const taskRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "parent-1",
+        workspaceId: "ws-1",
+        agentConfig: {},
+      }),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({
+        id: "child-task-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...task,
+      })),
+    };
+    const customProfile = {
+      id: "shared_docs",
+      label: "Shared docs",
+      description: "Adds an external root.",
+      sandbox: "workspace-write",
+      approval: "on-request",
+      reviewer: "user",
+      network: "on-request",
+      workspaceRoots: ["../shared-docs"],
+    };
+    const loadSettings = vi.spyOn(PermissionSettingsManager, "loadSettings").mockReturnValue({
+      version: 1,
+      defaultMode: "default",
+      defaultShellEnabled: false,
+      defaultPermissionAccess: "default",
+      defaultAccessProfileId: "ask_for_approval",
+      accessProfiles: [customProfile],
+      rules: [],
+    });
+    const daemonLike = {
+      taskRepo,
+      workspaceRepo: {
+        findById: vi.fn().mockReturnValue({
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/workspace",
+          permissions: {
+            read: true,
+            write: true,
+            delete: true,
+            network: true,
+            shell: true,
+            sandboxType: "none",
+            allowedPaths: [],
+          },
+        }),
+      },
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+
+    try {
+      const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+        title: "Scoped worker",
+        prompt: "Read the shared docs.",
+        workspaceId: "ws-1",
+        parentTaskId: "parent-1",
+        agentType: "sub",
+        agentConfig: { accessProfileId: customProfile.id },
+      });
+
+      expect(child.agentConfig?.accessProfileId).toBeUndefined();
+      expect(child.agentConfig?.permissionMode).toBe("default");
+    } finally {
+      loadSettings.mockRestore();
+    }
+  });
+
   it("maps inherited full access to approve-all for external runtime child tasks", async () => {
     const taskRepo = {
       findById: vi.fn().mockReturnValue({
@@ -197,9 +390,7 @@ describe("AgentDaemon.createChildTask", () => {
       },
     } as Any;
 
-    const result = (
-      AgentDaemon.prototype as Any
-    ).applyAgentRoleOverrides.call(daemonLike, {
+    const result = (AgentDaemon.prototype as Any).applyAgentRoleOverrides.call(daemonLike, {
       id: "task-1",
       assignedAgentRoleId: "role-reviewer",
       agentConfig: { toolRestrictions: ["group:destructive"] },
@@ -224,14 +415,15 @@ describe("AgentDaemon.createChildTask", () => {
       },
     } as Any;
 
-    const result = await (
-      AgentDaemon.prototype as Any
-    ).runReadOnlyChildTaskAndWait.call(daemonLike, {
-      parentTask: { id: "parent-1", workspaceId: "ws-1", depth: 0 },
-      title: "Read-only check",
-      prompt: "Check git state.",
-      timeoutMs: 10,
-    });
+    const result = await (AgentDaemon.prototype as Any).runReadOnlyChildTaskAndWait.call(
+      daemonLike,
+      {
+        parentTask: { id: "parent-1", workspaceId: "ws-1", depth: 0 },
+        title: "Read-only check",
+        prompt: "Check git state.",
+        timeoutMs: 10,
+      },
+    );
 
     expect(result.status).toBe("completed");
     expect(createChildTask).toHaveBeenCalledWith(

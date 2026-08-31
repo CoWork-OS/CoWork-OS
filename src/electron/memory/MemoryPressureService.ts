@@ -2,6 +2,17 @@ import fs from "fs/promises";
 import path from "path";
 import { WORKSPACE_KIT_CONTRACTS } from "../context/kit-contracts";
 
+type FilesystemReadGuard = (candidatePath: string) => boolean;
+
+function canReadPath(readGuard: FilesystemReadGuard | undefined, candidatePath: string): boolean {
+  if (!readGuard) return true;
+  try {
+    return readGuard(candidatePath) === true;
+  } catch {
+    return false;
+  }
+}
+
 export interface MemoryPressureFileStatus {
   file: "USER.md" | "MEMORY.md" | "SOUL.md";
   relPath: string;
@@ -49,9 +60,12 @@ function levelForPressure(pressure: number): MemoryPressureFileStatus["level"] {
 }
 
 export class MemoryPressureService {
-  static async analyze(workspacePath: string): Promise<MemoryPressureReport> {
+  static async analyze(
+    workspacePath: string,
+    readGuard?: FilesystemReadGuard,
+  ): Promise<MemoryPressureReport> {
     const files = await Promise.all(
-      PRESSURE_FILES.map((file) => this.analyzeFile(workspacePath, file)),
+      PRESSURE_FILES.map((file) => this.analyzeFile(workspacePath, file, readGuard)),
     );
     return {
       workspacePath,
@@ -63,6 +77,7 @@ export class MemoryPressureService {
   static async analyzeFile(
     workspacePath: string,
     file: MemoryPressureFileStatus["file"],
+    readGuard?: FilesystemReadGuard,
   ): Promise<MemoryPressureFileStatus> {
     const relPath = path.join(".cowork", file).replace(/\\/g, "/");
     const absPath = path.join(workspacePath, ".cowork", file);
@@ -70,6 +85,19 @@ export class MemoryPressureService {
     const maxChars = Math.max(1, contract?.maxChars ?? 3000);
     let content = "";
     let exists = false;
+    if (!canReadPath(readGuard, absPath)) {
+      return {
+        file,
+        relPath,
+        exists: false,
+        charCount: 0,
+        maxChars,
+        pressure: 0,
+        duplicateLineCount: 0,
+        level: "ok",
+        recommendations: ["The active access profile does not allow reading this file."],
+      };
+    }
     try {
       content = await fs.readFile(absPath, "utf8");
       exists = true;
@@ -85,7 +113,9 @@ export class MemoryPressureService {
 
     if (!exists) recommendations.push("Create the file before relying on this memory lane.");
     if (level === "compact") {
-      recommendations.push("Run compaction: merge related entries and archive stale or redundant lines.");
+      recommendations.push(
+        "Run compaction: merge related entries and archive stale or redundant lines.",
+      );
     } else if (level === "watch") {
       recommendations.push("Review soon: this file is approaching its prompt budget.");
     }

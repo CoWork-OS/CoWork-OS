@@ -40,6 +40,7 @@ export type CompletionContract = {
   requiresExecutionEvidence: boolean;
   requiresDirectAnswer: boolean;
   requiresDecisionSignal: boolean;
+  allowsOperationalStatus: boolean;
   requiresArtifactEvidence: boolean;
   requiredArtifactExtensions: string[];
   requiresVerificationEvidence: boolean;
@@ -219,13 +220,10 @@ export function isNonRetryableLLMError(errorMessage: string): boolean {
   // Rate limit (429) is transient for LLM — we retry
   if (/429|rate limit|too many requests|free-models-per-min/i.test(msg)) return false;
   // Billing/quota/payment are non-retryable
-  return (
-    /quota.*exceeded|exceeds?.*usage.*limit|resource.*exhausted|billing|payment.*required|upgrade your plan/i.test(
-      msg,
-    )
+  return /quota.*exceeded|exceeds?.*usage.*limit|resource.*exhausted|billing|payment.*required|upgrade your plan/i.test(
+    msg,
   );
 }
-
 
 /**
  * Check if an error is input-dependent (normal operational error)
@@ -265,7 +263,9 @@ export function isRecoverablePathDriftError(errorMessage: string): boolean {
   if (!lower.trim()) return false;
   return (
     /enoent|no such file|does not exist|cannot find|not found|enotdir|eisdir/i.test(lower) &&
-    !/outside workspace boundary|path traversal outside workspace|protected system path/i.test(lower)
+    !/outside workspace boundary|path traversal outside workspace|protected system path/i.test(
+      lower,
+    )
   );
 }
 
@@ -519,7 +519,10 @@ export class ToolCallDeduplicator {
         .replace(/site:(twitter\.com|x\.com|reddit\.com|github\.com)/gi, "")
         .replace(/\b(reddit|twitter|x\.com|github)\b/gi, "")
         .replace(/\b(19|20)\d{2}\b/g, "")
-        .replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/gi, "")
+        .replace(
+          /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
+          "",
+        )
         .replace(/\b(today|latest|breaking|news)\b/gi, "")
         .replace(/["']/g, "")
         .replace(/\s+/g, " ")
@@ -563,10 +566,7 @@ export class ToolCallDeduplicator {
         });
 
       const normalizedQuery = keptEntries
-        .map(
-          ([key, value]) =>
-            `${encodeURIComponent(key)}=${encodeURIComponent(value)}`,
-        )
+        .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
         .join("&");
 
       const normalizedPath = url.pathname.replace(/\/+$/, "") || "/";
@@ -997,7 +997,10 @@ export class ToolFailureTracker {
 
     // Input-dependent errors (missing params, file not found, etc.)
     // These are tracked separately with a higher threshold
-    if (!runtimeTimeoutFailure && (browserHttpStatusFailure || isInputDependentError(errorMessage))) {
+    if (
+      !runtimeTimeoutFailure &&
+      (browserHttpStatusFailure || isInputDependentError(errorMessage))
+    ) {
       const existing = this.inputDependentFailures.get(toolName) || { count: 0, lastError: "" };
       existing.count++;
       existing.lastError = errorMessage;
@@ -1409,6 +1412,33 @@ export class FileOperationTracker {
     const normalizedPath = this.normalizePath(filePath);
     this.createdFilePaths.set(normalizedPath, filePath);
     this.incrementOperation("create_file");
+  }
+
+  /** Keep cross-step file knowledge aligned after a rename or move. */
+  recordFileRename(oldPath: string, newPath: string): void {
+    const oldNormalizedPath = this.normalizePath(oldPath);
+    const newNormalizedPath = this.normalizePath(newPath);
+
+    const readEntry = this.readFiles.get(oldNormalizedPath);
+    if (readEntry) {
+      this.readFiles.delete(oldNormalizedPath);
+      this.readFiles.set(newNormalizedPath, readEntry);
+    }
+
+    const createdPath = this.createdFilePaths.get(oldNormalizedPath);
+    if (createdPath) {
+      this.createdFilePaths.delete(oldNormalizedPath);
+      this.createdFilePaths.set(newNormalizedPath, newPath);
+      const oldFilenameKey = this.normalizeFilename(createdPath);
+      if (this.createdFiles.get(oldFilenameKey) === createdPath) {
+        this.createdFiles.delete(oldFilenameKey);
+      }
+      this.createdFiles.set(this.normalizeFilename(newPath), newPath);
+    }
+
+    this.invalidateDirectoryListing(path.dirname(oldPath));
+    this.invalidateDirectoryListing(path.dirname(newPath));
+    this.incrementOperation("rename_file");
   }
 
   /**

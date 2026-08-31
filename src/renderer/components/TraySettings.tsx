@@ -113,8 +113,8 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
                 <p className="tray-settings-option-desc">
                   {isMacOS ? (
                     <>
-                      Adds a CoWork icon to the menu bar for quick access. Turn off to hide the icon;
-                      the app can still run from the Dock or when you open a window.
+                      Adds a CoWork icon to the menu bar for quick access. Turn off to hide the
+                      icon; the app can still run from the Dock or when you open a window.
                     </>
                   ) : (
                     <>
@@ -144,8 +144,8 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
                   <span className="tray-settings-option-title">Show Dock icon</span>
                   <p className="tray-settings-option-desc">
                     While CoWork is open, show its icon in the Dock. Turn off if you prefer to work
-                    from the menu bar only (the Dock icon can still appear briefly when you focus the
-                    app).
+                    from the menu bar only (the Dock icon can still appear briefly when you focus
+                    the app).
                   </p>
                 </div>
                 <label className="settings-toggle tray-settings-toggle">
@@ -187,7 +187,9 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
           <div className="settings-form-group tray-settings-option">
             <div className="tray-settings-option-inner">
               <div className="tray-settings-option-text">
-                <span className="tray-settings-option-title">Close button hides, does not quit</span>
+                <span className="tray-settings-option-title">
+                  Close button hides, does not quit
+                </span>
                 <p className="tray-settings-option-desc">
                   When you close the main window, CoWork keeps running in the background. Turn off
                   to make the close button quit the app (you can still quit from the {trayLabel}{" "}
@@ -232,9 +234,7 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
           <div className="settings-form-group tray-settings-option">
             <div className="tray-settings-option-inner">
               <div className="tray-settings-option-text">
-                <span className="tray-settings-option-title">
-                  Approval saved notifications
-                </span>
+                <span className="tray-settings-option-title">Approval saved notifications</span>
                 <p className="tray-settings-option-desc">
                   Show a banner when an approval decision is saved for reuse, such as after using
                   allow once or approve all. Off by default.
@@ -266,8 +266,8 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
               menu (channels, workspaces, quick task, window show/hide, settings, quit).
             </li>
             <li>
-              <strong>Show or hide the window:</strong> choose &quot;Show Window&quot; or
-              &quot;Hide Window&quot; from that menu.
+              <strong>Show or hide the window:</strong> choose &quot;Show Window&quot; or &quot;Hide
+              Window&quot; from that menu.
             </li>
           </ul>
         </div>

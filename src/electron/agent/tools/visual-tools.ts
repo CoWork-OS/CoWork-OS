@@ -14,6 +14,10 @@ import { existsSync } from "fs";
 import * as path from "path";
 import { Workspace } from "../../../shared/types";
 import { CanvasManager } from "../../canvas/canvas-manager";
+import {
+  assertWorkspaceReadableFileAccessWithApproval,
+  type WorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 
@@ -66,14 +70,34 @@ type AnnotatorBootstrap = {
   instructions?: string;
 };
 
-function resolveWorkspacePath(workspaceRoot: string, inputPath: string): string {
-  const root = path.resolve(workspaceRoot);
-  const abs = path.resolve(path.isAbsolute(inputPath) ? inputPath : path.join(root, inputPath));
-  // Ensure the file is within the workspace root
-  if (abs !== root && !abs.startsWith(root + path.sep)) {
-    throw new Error("imagePath must be within the workspace");
+async function resolveReadableImagePath(
+  workspace: Workspace,
+  inputPath: string,
+  approvalHandlers: WorkspaceFilesystemApprovalHandlers = {},
+): Promise<string> {
+  if (!workspace.permissions.read) {
+    throw new Error("Read permission not granted for visual annotation");
   }
-  return abs;
+  const abs = path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(workspace.path, inputPath);
+  if (!existsSync(abs)) {
+    throw new Error(`Image not found: ${inputPath}`);
+  }
+  try {
+    return await assertWorkspaceReadableFileAccessWithApproval(
+      workspace,
+      abs,
+      "visual annotation image",
+      approvalHandlers,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/profile_filesystem_denied/.test(message)) {
+      throw new Error(`Path is denied by the active access profile: ${abs}`);
+    }
+    throw new Error(`imagePath must be within the workspace: ${message}`);
+  }
 }
 
 function safeJsonForHtml(value: unknown): string {
@@ -848,6 +872,41 @@ export class VisualTools {
     this.workspace = workspace;
   }
 
+  private getFileApprovalHandlers(): WorkspaceFilesystemApprovalHandlers {
+    const daemon = this.daemon as unknown as {
+      requestApproval?: (
+        taskId: string,
+        type: "external_file_access",
+        description: string,
+        details: Record<string, unknown>,
+      ) => Promise<boolean>;
+      consumeExternalFileApproval?: (
+        taskId: string,
+        filePath: string,
+        operation: "read" | "write" | "delete",
+      ) => boolean;
+    };
+    return {
+      ...(typeof daemon.requestApproval === "function"
+        ? {
+            request: ({ path: approvedPath, operation, label }) =>
+              daemon.requestApproval!(
+                this.taskId,
+                "external_file_access",
+                `Allow ${operation} access to external ${label}: ${approvedPath}`,
+                { path: approvedPath, operation, tool: "visual_annotator" },
+              ),
+          }
+        : {}),
+      ...(typeof daemon.consumeExternalFileApproval === "function"
+        ? {
+            consume: (approvedPath: string, operation: "read" | "write" | "delete") =>
+              daemon.consumeExternalFileApproval!(this.taskId, approvedPath, operation),
+          }
+        : {}),
+    };
+  }
+
   private async getOrCreateSession(input: {
     sessionId?: string;
     title?: string;
@@ -902,10 +961,11 @@ export class VisualTools {
       throw new Error("Missing required parameter: imagePath");
     }
 
-    const absImagePath = resolveWorkspacePath(this.workspace.path, input.imagePath.trim());
-    if (!existsSync(absImagePath)) {
-      throw new Error(`Image not found: ${input.imagePath}`);
-    }
+    const absImagePath = await resolveReadableImagePath(
+      this.workspace,
+      input.imagePath.trim(),
+      this.getFileApprovalHandlers(),
+    );
 
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "visual_open_annotator",
@@ -966,10 +1026,11 @@ export class VisualTools {
     const session = this.canvasManager.getSession(input.sessionId);
     if (!session) throw new Error(`Canvas session not found: ${input.sessionId}`);
 
-    const absImagePath = resolveWorkspacePath(this.workspace.path, input.imagePath.trim());
-    if (!existsSync(absImagePath)) {
-      throw new Error(`Image not found: ${input.imagePath}`);
-    }
+    const absImagePath = await resolveReadableImagePath(
+      this.workspace,
+      input.imagePath.trim(),
+      this.getFileApprovalHandlers(),
+    );
 
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "visual_update_annotator",

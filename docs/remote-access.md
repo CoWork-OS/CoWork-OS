@@ -28,6 +28,27 @@ It also includes basic workspace, channel, and account management so you can bri
 
 In headless/managed deployments, CoWork fails closed on raw public binds. Binding the Control Plane to `0.0.0.0` or `::` is blocked unless Tailscale is enabled, the process is running inside a privately published container (`COWORK_CONTROL_PLANE_BIND_CONTEXT=container`), or you set the break-glass `COWORK_CONTROL_PLANE_ALLOW_INSECURE_PUBLIC_BIND=1`.
 
+## Remote task access profiles
+
+Remote access transports task requests; it does not transfer local authority. A remote task may
+include an explicit `accessProfileId`, and the target CoWork node resolves and enforces that id
+using its own profile settings, sandbox backend, administrator policy, workspace boundary, and
+guardrails. The local client cannot use a remote connection to widen the target's policy.
+
+- Prefer an explicit profile such as `ask_for_approval` or a target-defined custom id when creating
+  a remote task.
+- The target's configured default is used only when the request does not specify a profile and the
+  task is eligible for modern defaulting.
+- Missing, invalid, or backend-incompatible profiles fail closed as unavailable read-only tasks and
+  may require user action on the target node.
+- Child tasks, scheduled follow-ups, managed sessions, and worktrees keep the remote task's profile
+  ceiling and may only narrow it.
+- Local provider credentials, cookies, browser partitions, and other secrets are not transferred
+  by selecting a profile. Configure the required provider or connector on the target separately.
+
+The CLI equivalent is `cowork run "task" --remote --access-profile <id>`. See [Access Profiles](access-profiles.md#surfaces-and-inheritance)
+and [CoWork OS CLI](cli.md#access-profiles).
+
 ## Finding the Remote Address
 
 Before connecting from your main CoWork machine, determine the address that is actually reachable from the client.

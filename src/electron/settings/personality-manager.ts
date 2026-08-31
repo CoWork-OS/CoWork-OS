@@ -86,8 +86,12 @@ function migrateV1ToV2(v1: PersonalitySettings): PersonalityConfigV2 {
     ...(v1.responseStyle && {
       ...(v1.responseStyle.emojiUsage && { emojiUsage: v1.responseStyle.emojiUsage }),
       ...(v1.responseStyle.responseLength && { responseLength: v1.responseStyle.responseLength }),
-      ...(v1.responseStyle.codeCommentStyle && { codeCommentStyle: v1.responseStyle.codeCommentStyle }),
-      ...(v1.responseStyle.explanationDepth && { explanationDepth: v1.responseStyle.explanationDepth }),
+      ...(v1.responseStyle.codeCommentStyle && {
+        codeCommentStyle: v1.responseStyle.codeCommentStyle,
+      }),
+      ...(v1.responseStyle.explanationDepth && {
+        explanationDepth: v1.responseStyle.explanationDepth,
+      }),
     }),
   };
   return {
@@ -107,7 +111,8 @@ function migrateV1ToV2(v1: PersonalitySettings): PersonalityConfigV2 {
     quirks: { ...DEFAULT_QUIRKS_V2, ...v1.quirks },
     relationship: v1.relationship,
     workStyle: v1.workStyle,
-    soulDocument: v1.activePersonality === "custom" && v1.customPrompt ? v1.customPrompt : undefined,
+    soulDocument:
+      v1.activePersonality === "custom" && v1.customPrompt ? v1.customPrompt : undefined,
     activePersonality: v1.activePersonality,
     customPrompt: v1.customPrompt,
     customName: v1.customName,
@@ -154,7 +159,9 @@ export class PersonalityManager {
     };
   }
 
-  private static configV2ToSettings(config: PersonalityConfigV2 | null): PersonalitySettings | null {
+  private static configV2ToSettings(
+    config: PersonalityConfigV2 | null,
+  ): PersonalitySettings | null {
     if (!config) return null;
     const presetId = config.activePersonality ?? "professional";
     return {
@@ -473,22 +480,31 @@ export class PersonalityManager {
     const enabled = rules.filter(
       (r) =>
         r.enabled &&
-        (!r.context?.length || !contextMode || r.context.includes(contextMode) || r.context.includes("all")),
+        (!r.context?.length ||
+          !contextMode ||
+          r.context.includes(contextMode) ||
+          r.context.includes("all")),
     );
     if (enabled.length === 0) return "";
     const lines = enabled.map((r) => `- ${r.type.toUpperCase()}: ${r.rule}`);
     return "BEHAVIORAL RULES:\n" + lines.join("\n");
   }
 
-  private static renderCustomInstructions(ci: { aboutUser?: string; responseGuidance?: string }): string {
+  private static renderCustomInstructions(ci: {
+    aboutUser?: string;
+    responseGuidance?: string;
+  }): string {
     if (!ci?.aboutUser?.trim() && !ci?.responseGuidance?.trim()) return "";
     const lines: string[] = ["CUSTOM INSTRUCTIONS:"];
     if (ci.aboutUser?.trim()) lines.push(`About the user: "${ci.aboutUser.trim()}"`);
-    if (ci.responseGuidance?.trim()) lines.push(`Response guidance: "${ci.responseGuidance.trim()}"`);
+    if (ci.responseGuidance?.trim())
+      lines.push(`Response guidance: "${ci.responseGuidance.trim()}"`);
     return lines.join("\n");
   }
 
-  private static renderTraitsPrompt(traits: { id: string; label: string; intensity: number }[]): string {
+  private static renderTraitsPrompt(
+    traits: { id: string; label: string; intensity: number }[],
+  ): string {
     const high: string[] = [];
     const low: string[] = [];
     for (const t of traits) {
@@ -565,7 +581,9 @@ export class PersonalityManager {
     return lines.length > 1 ? lines.join("\n") : "";
   }
 
-  private static renderExpertisePrompt(expertise: { domain: string; level: string; notes?: string }[]): string {
+  private static renderExpertisePrompt(
+    expertise: { domain: string; level: string; notes?: string }[],
+  ): string {
     if (!expertise?.length) return "";
     const lines = expertise.map(
       (e) => `- ${e.level} in ${e.domain}${e.notes ? ` (${e.notes})` : ""}`,
@@ -1008,15 +1026,15 @@ COMPANION MINDSET:
    */
   static renderSoulDocument(config: PersonalityConfigV2): string {
     const lines: string[] = ["# SOUL", "## Personality"];
-    const traitStr = config.traits
-      .map((t) => `${t.label}: ${t.intensity}`)
-      .join(", ");
+    const traitStr = config.traits.map((t) => `${t.label}: ${t.intensity}`).join(", ");
     if (traitStr) lines.push(traitStr);
     lines.push("");
 
     if (config.rules?.length) {
       lines.push("## Rules");
-      config.rules.filter((r) => r.enabled).forEach((r) => lines.push(`- ${r.type.toUpperCase()}: ${r.rule}`));
+      config.rules
+        .filter((r) => r.enabled)
+        .forEach((r) => lines.push(`- ${r.type.toUpperCase()}: ${r.rule}`));
       lines.push("");
     }
 
@@ -1046,7 +1064,12 @@ COMPANION MINDSET:
     if (config.examples?.length) {
       lines.push("## Examples");
       config.examples.forEach((ex, i) => {
-        lines.push(`### Example ${i + 1}`, `**User:** ${ex.userMessage}`, `**Assistant:** ${ex.idealResponse}`, "");
+        lines.push(
+          `### Example ${i + 1}`,
+          `**User:** ${ex.userMessage}`,
+          `**Assistant:** ${ex.idealResponse}`,
+          "",
+        );
       });
     }
 
@@ -1098,19 +1121,26 @@ COMPANION MINDSET:
         }
         if (rules.length) result.rules = rules;
       } else if (head?.includes("About the User") && content) {
-        if (!result.customInstructions) result.customInstructions = { ...DEFAULT_CUSTOM_INSTRUCTIONS };
+        if (!result.customInstructions)
+          result.customInstructions = { ...DEFAULT_CUSTOM_INSTRUCTIONS };
         result.customInstructions.aboutUser = content;
       } else if (head?.includes("Response Guidance") && content) {
-        if (!result.customInstructions) result.customInstructions = { ...DEFAULT_CUSTOM_INSTRUCTIONS };
+        if (!result.customInstructions)
+          result.customInstructions = { ...DEFAULT_CUSTOM_INSTRUCTIONS };
         result.customInstructions.responseGuidance = content;
       } else if (head?.includes("Expertise") && content) {
-        const expertise: { id: string; domain: string; level: "familiar" | "proficient" | "expert"; notes?: string }[] = [];
+        const expertise: {
+          id: string;
+          domain: string;
+          level: "familiar" | "proficient" | "expert";
+          notes?: string;
+        }[] = [];
         const exRe = /-\s*(.+?)\s*\((\w+)\)(?:\s*:\s*(.+))?/g;
         const validLevels = ["familiar", "proficient", "expert"];
         let em;
         while ((em = exRe.exec(content))) {
           const level = validLevels.includes(em[2].toLowerCase())
-            ? em[2].toLowerCase() as "familiar" | "proficient" | "expert"
+            ? (em[2].toLowerCase() as "familiar" | "proficient" | "expert")
             : "proficient";
           expertise.push({
             id: `ex-${expertise.length}`,
@@ -1195,7 +1225,10 @@ COMPANION MINDSET:
     return this.buildPromptFromConfig(merged, contextMode);
   }
 
-  private static buildPromptFromConfig(config: PersonalityConfigV2, contextMode?: ContextMode): string {
+  private static buildPromptFromConfig(
+    config: PersonalityConfigV2,
+    contextMode?: ContextMode,
+  ): string {
     if (config.soulDocument?.trim()) {
       const base = config.soulDocument.trim();
       const persona =
@@ -1235,7 +1268,10 @@ COMPANION MINDSET:
   /**
    * Get trait presets for quick-start templates
    */
-  static getTraitPresets(): Record<string, { name: string; description: string; icon: string; traits: Record<string, number> }> {
+  static getTraitPresets(): Record<
+    string,
+    { name: string; description: string; icon: string; traits: Record<string, number> }
+  > {
     return { ...TRAIT_PRESETS };
   }
 
@@ -1271,7 +1307,11 @@ COMPANION MINDSET:
   /**
    * Set expertise for a domain
    */
-  static setExpertise(domain: string, level: "familiar" | "proficient" | "expert", notes?: string): void {
+  static setExpertise(
+    domain: string,
+    level: "familiar" | "proficient" | "expert",
+    notes?: string,
+  ): void {
     const config = this.loadConfigV2();
     config.expertise = config.expertise ?? [];
     const existing = config.expertise.find((e) => e.domain.toLowerCase() === domain.toLowerCase());

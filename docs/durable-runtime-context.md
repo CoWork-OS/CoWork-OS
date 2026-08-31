@@ -71,6 +71,13 @@ should not leak the answer from a different task. If the active task does not co
 
 The service also skips injected memory blocks and durable-context tool-result payloads. This prevents recursive recall, where a previous `context_grep` answer becomes a new durable fact and later outranks the original source.
 
+Durable context tools are read-only and still pass through the active task's
+[access profile](access-profiles.md), execution mode, and tool restrictions.
+They cannot grant command tools, expand filesystem/network scope, or turn a
+cross-task lookup into an implicit permission. Background or memory-only
+callers use the same profile-derived read guard and skip work when that guard
+cannot be satisfied.
+
 Skipped injected blocks include:
 
 - `<cowork_memory_recall>`

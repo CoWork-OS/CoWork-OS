@@ -1,6 +1,11 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
-import { HeartbeatDispatchKind, HeartbeatRun, HeartbeatRunEvent, HeartbeatRunType } from "../../shared/types";
+import {
+  HeartbeatDispatchKind,
+  HeartbeatRun,
+  HeartbeatRunEvent,
+  HeartbeatRunType,
+} from "../../shared/types";
 
 interface CreateHeartbeatRunInput {
   issueId?: string;
@@ -163,11 +168,15 @@ export class HeartbeatRunRepository {
       return;
     }
     this.db
-      .prepare("INSERT INTO heartbeat_run_events (id, run_id, timestamp, type, payload) VALUES (?, ?, ?, ?, ?)")
+      .prepare(
+        "INSERT INTO heartbeat_run_events (id, run_id, timestamp, type, payload) VALUES (?, ?, ?, ?, ?)",
+      )
       .run(event.id, event.runId, event.timestamp, event.type, JSON.stringify(event.payload));
   }
 
-  reconcileInterruptedAgentRuns(errorMessage = "Heartbeat service restarted before run completed"): number {
+  reconcileInterruptedAgentRuns(
+    errorMessage = "Heartbeat service restarted before run completed",
+  ): number {
     const now = Date.now();
     if (!this.db) {
       let updated = 0;
@@ -214,9 +223,7 @@ export class HeartbeatRunRepository {
     if (!this.db) {
       return Array.from(this.memoryRuns.values()).filter(
         (run) =>
-          run.agentRoleId === agentRoleId &&
-          run.runType === "dispatch" &&
-          run.createdAt >= sinceMs,
+          run.agentRoleId === agentRoleId && run.runType === "dispatch" && run.createdAt >= sinceMs,
       );
     }
     const rows = this.db

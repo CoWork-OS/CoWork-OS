@@ -139,7 +139,10 @@ export class ProfileManager {
     return toSummary(profileId, profileDir, metadata);
   }
 
-  static async exportProfile(profileId: string, destinationRoot: string): Promise<ProfileExportResult> {
+  static async exportProfile(
+    profileId: string,
+    destinationRoot: string,
+  ): Promise<ProfileExportResult> {
     const summary = await this.ensureProfile(profileId);
     const destinationDir = path.resolve(destinationRoot);
     await fs.mkdir(destinationDir, { recursive: true, mode: 0o700 });
@@ -176,7 +179,10 @@ export class ProfileManager {
     return { profile: summary, bundlePath };
   }
 
-  static async importProfile(sourcePath: string, requestedName?: string): Promise<AppProfileSummary> {
+  static async importProfile(
+    sourcePath: string,
+    requestedName?: string,
+  ): Promise<AppProfileSummary> {
     const importRoot = path.resolve(sourcePath);
     const stat = await fs.stat(importRoot).catch(() => null);
     if (!stat?.isDirectory()) {
@@ -199,7 +205,8 @@ export class ProfileManager {
       }
     }
 
-    const targetHint = requestedName?.trim() || importedLabel || importedId || path.basename(importRoot);
+    const targetHint =
+      requestedName?.trim() || importedLabel || importedId || path.basename(importRoot);
     const summary = await this.ensureProfile(targetHint);
     const existingEntries = await fs.readdir(summary.userDataDir).catch(() => []);
     const allowedEmptyEntries = new Set([PROFILE_META_FILE]);
@@ -221,7 +228,11 @@ export class ProfileManager {
       label: importedLabel || requestedName?.trim() || summary.label,
       createdAt: summary.createdAt,
     });
-    return toSummary(summary.id, summary.userDataDir, await readProfileMetadata(summary.userDataDir));
+    return toSummary(
+      summary.id,
+      summary.userDataDir,
+      await readProfileMetadata(summary.userDataDir),
+    );
   }
 
   static async switchProfile(profileId: string): Promise<{ success: true; relaunching: true }> {

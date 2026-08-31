@@ -42,9 +42,11 @@ export function resolveOperationalAutonomyPolicy(
 
     return {
       preset: policy.preset,
-      autonomousMode: typeof policy.autonomousMode === "boolean" ? policy.autonomousMode : undefined,
+      autonomousMode:
+        typeof policy.autonomousMode === "boolean" ? policy.autonomousMode : undefined,
       autoApproveTypes: normalizeApprovalTypes(policy.autoApproveTypes),
-      allowUserInput: typeof policy.allowUserInput === "boolean" ? policy.allowUserInput : undefined,
+      allowUserInput:
+        typeof policy.allowUserInput === "boolean" ? policy.allowUserInput : undefined,
       humanInputPolicy:
         policy.humanInputPolicy === "none" ||
         policy.humanInputPolicy === "hard_blockers" ||
@@ -56,7 +58,8 @@ export function resolveOperationalAutonomyPolicy(
         typeof policy.pauseForRequiredDecision === "boolean"
           ? policy.pauseForRequiredDecision
           : undefined,
-      requireWorktree: typeof policy.requireWorktree === "boolean" ? policy.requireWorktree : undefined,
+      requireWorktree:
+        typeof policy.requireWorktree === "boolean" ? policy.requireWorktree : undefined,
     };
   } catch {
     return undefined;
@@ -70,12 +73,16 @@ export function buildAgentConfigFromAutonomyPolicy(
 
   if (policy.preset === "manual") {
     return {
-      ...(typeof policy.allowUserInput === "boolean" ? { allowUserInput: policy.allowUserInput } : {}),
+      ...(typeof policy.allowUserInput === "boolean"
+        ? { allowUserInput: policy.allowUserInput }
+        : {}),
       ...(policy.humanInputPolicy ? { humanInputPolicy: policy.humanInputPolicy } : {}),
       ...(typeof policy.pauseForRequiredDecision === "boolean"
         ? { pauseForRequiredDecision: policy.pauseForRequiredDecision }
         : {}),
-      ...(typeof policy.requireWorktree === "boolean" ? { requireWorktree: policy.requireWorktree } : {}),
+      ...(typeof policy.requireWorktree === "boolean"
+        ? { requireWorktree: policy.requireWorktree }
+        : {}),
     };
   }
 
@@ -93,7 +100,9 @@ export function buildAgentConfigFromAutonomyPolicy(
     allowUserInput: policy.allowUserInput ?? false,
     humanInputPolicy: policy.humanInputPolicy ?? "none",
     pauseForRequiredDecision: policy.pauseForRequiredDecision ?? false,
-    ...(typeof policy.requireWorktree === "boolean" ? { requireWorktree: policy.requireWorktree } : {}),
+    ...(typeof policy.requireWorktree === "boolean"
+      ? { requireWorktree: policy.requireWorktree }
+      : {}),
   };
 }
 

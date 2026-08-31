@@ -116,7 +116,13 @@ describe("secure MCP tunnel relay", () => {
         tunnelId: created.id,
         protocolVersion: 1,
         targetType: "http",
-        policy: { allowedTools: [], readOnly: false, maxRequestBytes: 999999, maxResponseBytes: 999999, requestTimeoutMs: 60000 },
+        policy: {
+          allowedTools: [],
+          readOnly: false,
+          maxRequestBytes: 999999,
+          maxResponseBytes: 999999,
+          requestTimeoutMs: 60000,
+        },
       }),
     );
 

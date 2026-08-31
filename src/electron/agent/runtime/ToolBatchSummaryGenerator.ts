@@ -57,7 +57,9 @@ function normalizeLabel(text: string): string {
 }
 
 function normalizeToolKey(value: string): string {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function buildIntentLabel(intent: string): string {
@@ -109,12 +111,7 @@ function inferBatchFamilyLabel(toolNames: string[]): string {
     "browser_navigate",
     "browser_snapshot",
   ]);
-  const codeSearchTools = new Set([
-    "search_files",
-    "grep",
-    "rg_search",
-    "glob",
-  ]);
+  const codeSearchTools = new Set(["search_files", "grep", "rg_search", "glob"]);
   const fileWriteTools = new Set([
     "write_file",
     "edit_file",
@@ -168,7 +165,9 @@ function describeToolInput(toolInput: unknown): string {
 }
 
 function buildDeterministicLabel(input: ToolBatchSummaryInput): string {
-  const toolNames = input.callReports.map((report) => report.effectiveToolName || report.call.toolUse.name);
+  const toolNames = input.callReports.map(
+    (report) => report.effectiveToolName || report.call.toolUse.name,
+  );
   const firstTool = toolNames[0] || "tool";
   const plural = toolNames.length > 1 ? "s" : "";
   const readableTool = firstTool
@@ -228,7 +227,9 @@ function getSummaryPrompt(input: ToolBatchSummaryInput): string {
     "Do not use punctuation, quotes, bullets, or explanations.",
     "",
     `Phase: ${input.phase}`,
-    ...(input.assistantIntent ? [`Assistant intent: ${compactText(input.assistantIntent, 240)}`] : []),
+    ...(input.assistantIntent
+      ? [`Assistant intent: ${compactText(input.assistantIntent, 240)}`]
+      : []),
     "",
     "Completed tools:",
     ...toolLines,

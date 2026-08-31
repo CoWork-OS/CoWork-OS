@@ -147,7 +147,13 @@ export function DocumentArtifactCard({
             fill="none"
             aria-hidden="true"
           >
-            <path d="M3.5 5.25L7 8.75L10.5 5.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d="M3.5 5.25L7 8.75L10.5 5.25"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         </button>
       </div>
@@ -158,9 +164,18 @@ export function DocumentArtifactCard({
             className="document-artifact-menu"
             ref={menuRef}
             role="menu"
-            style={{ position: "fixed", top: menuPosition.top, left: menuPosition.left, right: "auto" }}
+            style={{
+              position: "fixed",
+              top: menuPosition.top,
+              left: menuPosition.left,
+              right: "auto",
+            }}
           >
-            <button type="button" role="menuitem" onClick={() => handleOpenWithApp("Microsoft Word")}>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => handleOpenWithApp("Microsoft Word")}
+            >
               <span className="document-artifact-app-icon word">W</span>
               Microsoft Word
             </button>

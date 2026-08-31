@@ -12,9 +12,7 @@ export function resolveSkillSlashAlias(commandName: string): string | null {
   for (const plugin of registry.getPluginsByType("pack")) {
     if (plugin.state === "disabled" || !isPackAllowed(plugin.manifest.name)) continue;
     const slashCommands = plugin.manifest.slashCommands || [];
-    const match = slashCommands.find(
-      (command) => normalizeSlashCommandName(command.name) === name,
-    );
+    const match = slashCommands.find((command) => normalizeSlashCommandName(command.name) === name);
     if (!match || !isValidSlashCommandName(match.skillId)) continue;
 
     const skill = loader.getSkill(match.skillId);

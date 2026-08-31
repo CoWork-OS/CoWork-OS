@@ -47,11 +47,7 @@ function durationMs(start: number, end: number): number {
 // Canonical action kind mapping
 // ---------------------------------------------------------------------------
 
-const FILE_READ_TOOLS = new Set([
-  "read_file",
-  "list_directory",
-  "get_file_info",
-]);
+const FILE_READ_TOOLS = new Set(["read_file", "list_directory", "get_file_info"]);
 
 const FILE_WRITE_TOOLS = new Set([
   "write_file",
@@ -65,10 +61,7 @@ const FILE_EDIT_TOOLS = new Set(["edit_file"]);
 
 const FILE_DELETE_TOOLS = new Set(["delete_file"]);
 
-const SEARCH_CODE_TOOLS = new Set([
-  "search_files",
-  "grep",
-]);
+const SEARCH_CODE_TOOLS = new Set(["search_files", "grep"]);
 
 const SEARCH_WEB_TOOLS = new Set(["web_search"]);
 
@@ -109,16 +102,9 @@ const BROWSER_TOOLS = new Set([
   "browser_close",
 ]);
 
-const MEMORY_READ_TYPES = new Set([
-  "memory_retrieved",
-  "memory_queried",
-]);
+const MEMORY_READ_TYPES = new Set(["memory_retrieved", "memory_queried"]);
 
-const MEMORY_WRITE_TYPES = new Set([
-  "memory_stored",
-  "memory_updated",
-  "memory_deleted",
-]);
+const MEMORY_WRITE_TYPES = new Set(["memory_stored", "memory_updated", "memory_deleted"]);
 
 /** Map a raw event to a canonical action kind */
 function toCanonicalKind(event: NormalizerInputEvent): CanonicalActionKind {
@@ -137,11 +123,7 @@ function toCanonicalKind(event: NormalizerInputEvent): CanonicalActionKind {
   if (type === "task_completed") return "task.complete";
 
   // Sub-agent lifecycle
-  if (
-    type === "subagent_start" ||
-    type === "agent_start" ||
-    type === "agent_started"
-  )
+  if (type === "subagent_start" || type === "agent_start" || type === "agent_started")
     return "agent.start";
   if (
     type === "subagent_stop" ||
@@ -231,11 +213,7 @@ function inferPhase(event: NormalizerInputEvent, kind: CanonicalActionKind): Tim
   if (EXECUTE_KINDS.has(kind)) return "execute";
 
   // Verification patterns in event type
-  if (
-    event.type.includes("verif") ||
-    event.type.includes("lint") ||
-    event.type.includes("test")
-  )
+  if (event.type.includes("verif") || event.type.includes("lint") || event.type.includes("test"))
     return "verify";
 
   return "execute";
@@ -314,12 +292,17 @@ function extractEvidence(events: NormalizerInputEvent[]): TimelineEvidence[] {
       }
     }
 
-    if (kind === "file.read" || kind === "file.write" || kind === "file.edit" || kind === "file.delete") {
+    if (
+      kind === "file.read" ||
+      kind === "file.write" ||
+      kind === "file.edit" ||
+      kind === "file.delete"
+    ) {
       const path =
         safeStr(payload.path) ||
         safeStr(payload.filePath) ||
         safeStr(payload.file) ||
-        safeStr((asObject(payload.input)).path);
+        safeStr(asObject(payload.input).path);
       if (path && !seenPaths.has(path)) {
         seenPaths.add(path);
         const opMap: Partial<Record<CanonicalActionKind, "read" | "write" | "edit" | "delete">> = {
@@ -341,23 +324,21 @@ function extractEvidence(events: NormalizerInputEvent[]): TimelineEvidence[] {
         safeStr(payload.pattern) ||
         safeStr(payload.query) ||
         safeStr(payload.regex) ||
-        safeStr((asObject(payload.input)).pattern);
+        safeStr(asObject(payload.input).pattern);
       if (query) {
         evidence.push({ type: "query", label: "Code search", query });
       }
     }
 
     if (kind === "search.web") {
-      const query = safeStr(payload.query) || safeStr((asObject(payload.input)).query);
+      const query = safeStr(payload.query) || safeStr(asObject(payload.input).query);
       if (query) {
         evidence.push({ type: "query", label: "Web search", query });
       }
     }
 
     if (kind === "shell.run") {
-      const command =
-        safeStr(payload.command) ||
-        safeStr((asObject(payload.input)).command);
+      const command = safeStr(payload.command) || safeStr(asObject(payload.input).command);
       if (command) {
         const output = safeStr(payload.output) || safeStr(payload.stdout);
         evidence.push({
@@ -390,7 +371,7 @@ function extractEvidence(events: NormalizerInputEvent[]): TimelineEvidence[] {
 
     // URL evidence from browser events
     if (kind === "browser.action") {
-      const url = safeStr(payload.url) || safeStr((asObject(payload.input)).url);
+      const url = safeStr(payload.url) || safeStr(asObject(payload.input).url);
       if (url) {
         evidence.push({ type: "url", label: "Browser", url });
       }
@@ -428,7 +409,7 @@ function buildSummary(events: NormalizerInputEvent[], kind: CanonicalActionKind)
       const paths = events
         .map((e) => {
           const p = asObject(e.payload);
-          return safeStr(p.path) || safeStr(p.filePath) || safeStr((asObject(p.input)).path);
+          return safeStr(p.path) || safeStr(p.filePath) || safeStr(asObject(p.input).path);
         })
         .filter(Boolean);
       const commonPrefix = findCommonPrefix(paths);
@@ -490,19 +471,19 @@ function buildSummary(events: NormalizerInputEvent[], kind: CanonicalActionKind)
     }
 
     case "search.web": {
-      const query = safeStr(payload.query) || safeStr((asObject(payload.input)).query);
+      const query = safeStr(payload.query) || safeStr(asObject(payload.input).query);
       if (query) return `Searched the web for "${truncate(query, 40)}"`;
       return "Searched the web";
     }
 
     case "shell.run": {
-      const command = safeStr(payload.command) || safeStr((asObject(payload.input)).command);
+      const command = safeStr(payload.command) || safeStr(asObject(payload.input).command);
       if (command) return `Ran command: ${truncate(command, 60)}`;
       return "Ran shell command";
     }
 
     case "browser.action": {
-      const url = safeStr(payload.url) || safeStr((asObject(payload.input)).url);
+      const url = safeStr(payload.url) || safeStr(asObject(payload.input).url);
       if (url) return `Browsed ${truncate(url, 60)}`;
       return "Browser action";
     }
@@ -525,8 +506,10 @@ function buildSummary(events: NormalizerInputEvent[], kind: CanonicalActionKind)
       return "Created artifact";
     }
 
-    case "memory.read": return "Retrieved relevant memories";
-    case "memory.write": return "Stored new memory";
+    case "memory.read":
+      return "Retrieved relevant memories";
+    case "memory.write":
+      return "Stored new memory";
 
     case "agent.start": {
       const actor = safeStr(payload.actor) || safeStr(payload.agentName) || "agent";
@@ -537,21 +520,20 @@ function buildSummary(events: NormalizerInputEvent[], kind: CanonicalActionKind)
       return `${capitalise(actor)} agent finished`;
     }
 
-    case "task.complete": return "Task completed";
+    case "task.complete":
+      return "Task completed";
 
     case "step.update": {
       const isTimelineGroup =
-        events[0]?.type === "timeline_group_started" || events[0]?.type === "timeline_group_finished";
+        events[0]?.type === "timeline_group_started" ||
+        events[0]?.type === "timeline_group_finished";
       const groupLabel = safeStr(payload.groupLabel);
       const message = safeStr(payload.message);
       const preferredMessage =
         isTimelineGroup && groupLabel
           ? groupLabel
           : message.replace(/:\s*\d+\s+succeeded(?:,\s*\d+\s+failed)?$/i, "").trim();
-      const summary =
-        preferredMessage ||
-        groupLabel ||
-        safeStr(asObject(payload.step).description);
+      const summary = preferredMessage || groupLabel || safeStr(asObject(payload.step).description);
       if (summary) return truncate(summary, 80);
       return "Step in progress";
     }
@@ -664,7 +646,7 @@ const BATCHABLE_FAMILIES: Record<CanonicalActionKind, string> = {
   "agent.stop": "_none_",
   "task.complete": "_none_",
   "step.update": "step",
-  "generic": "_none_",
+  generic: "_none_",
 };
 
 interface EventGroup {
@@ -676,7 +658,12 @@ interface EventGroup {
   lastTimestamp: number;
 }
 
-function canMerge(group: EventGroup, event: NormalizerInputEvent, kind: CanonicalActionKind, batchWindowMs: number): boolean {
+function canMerge(
+  group: EventGroup,
+  event: NormalizerInputEvent,
+  kind: CanonicalActionKind,
+  batchWindowMs: number,
+): boolean {
   if (BATCH_BREAKERS.has(event.type)) return false;
   if (BATCH_BREAKERS.has(group.events[group.events.length - 1]?.type ?? "")) return false;
 
@@ -706,7 +693,11 @@ function resolveActor(event: NormalizerInputEvent, defaultActor = "Main"): strin
 // Canonical event → internal accumulator group
 // ---------------------------------------------------------------------------
 
-function startGroup(event: NormalizerInputEvent, kind: CanonicalActionKind, defaultActor: string): EventGroup {
+function startGroup(
+  event: NormalizerInputEvent,
+  kind: CanonicalActionKind,
+  defaultActor: string,
+): EventGroup {
   const phase = inferPhase(event, kind);
   const actor = resolveActor(event, defaultActor);
   const family = BATCHABLE_FAMILIES[kind];
@@ -754,10 +745,7 @@ function projectGroupToAgent(group: EventGroup): UiTimelineEvent {
   const first = group.events[0];
   const last = group.events[group.events.length - 1];
   const payload = asObject(first.payload);
-  const actor =
-    safeStr(payload.actor) ||
-    safeStr(payload.agentName) ||
-    resolveActor(first);
+  const actor = safeStr(payload.actor) || safeStr(payload.agentName) || resolveActor(first);
 
   const startTs = first.timestamp ?? 0;
   const endTs = last.timestamp ?? 0;

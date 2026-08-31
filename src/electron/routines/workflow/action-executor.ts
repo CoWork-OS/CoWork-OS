@@ -1,4 +1,5 @@
 import type { RoutineWorkflowActionExecutorParams } from "./engine";
+import type { AccessProfileId } from "../../../shared/access-profiles";
 import { getWorkflowOperation } from "./catalog";
 import { MCPClientManager } from "../../mcp/client/MCPClientManager";
 import { GoogleWorkspaceSettingsManager } from "../../settings/google-workspace-manager";
@@ -19,6 +20,7 @@ export interface RoutineWorkflowActionExecutorDeps {
     title: string;
     prompt: string;
     workspaceId: string;
+    accessProfileId?: AccessProfileId;
   }) => Promise<{ id: string }>;
   getTaskSnapshot: (taskId: string) =>
     | Promise<{
@@ -136,6 +138,7 @@ async function executeAgentBackedAction(
     title: `${params.routine.name}: ${params.node.name}`,
     prompt,
     workspaceId: params.routine.workspaceId,
+    ...(params.accessProfileId ? { accessProfileId: params.accessProfileId } : {}),
   });
   if (params.signal.aborted) {
     await deps.cancelAgentTask?.(task.id).catch(() => undefined);
@@ -150,7 +153,7 @@ async function executeAgentBackedAction(
       const snapshot = await deps.getTaskSnapshot(task.id);
       if (!snapshot) throw new Error(`Workflow action task disappeared: ${task.id}`);
       if (snapshot.status === "completed") {
-        const text = snapshot.resultSummary || snapshot.semanticSummary || "";
+        const text = snapshot.resultSummary || "";
         const parsed = parsePotentialJson(text);
         if (params.node.operation === "ai.decide") {
           const decision =

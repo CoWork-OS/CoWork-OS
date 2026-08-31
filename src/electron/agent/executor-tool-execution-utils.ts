@@ -1,9 +1,5 @@
 import { truncateToolResult } from "./context-manager";
-import type {
-  LLMImageMimeType,
-  LLMToolResult,
-  LLMToolResultCompanionContent,
-} from "./llm";
+import type { LLMImageMimeType, LLMToolResult, LLMToolResultCompanionContent } from "./llm";
 import { canonicalizeToolName } from "./tool-semantics";
 
 export interface NormalizedToolFailureReason {
@@ -147,7 +143,10 @@ function safeJsonParseValue(value: string): Any | null {
   }
 }
 
-function compactStringValue(value: string, maxChars = LOCAL_MODEL_JSON_STRING_VALUE_MAX_CHARS): string {
+function compactStringValue(
+  value: string,
+  maxChars = LOCAL_MODEL_JSON_STRING_VALUE_MAX_CHARS,
+): string {
   if (value.length <= maxChars) return value;
   const head = Math.max(0, maxChars - 160);
   return `${value.slice(0, head)}\n[... truncated ${value.length - head} chars ...]`;
@@ -197,7 +196,10 @@ function compactJsonValueForLocalModel(value: Any, depth = 0): Any {
   for (const key of IMPORTANT_JSON_KEYS) {
     if (!(key in source)) continue;
     used.add(key);
-    compact[key] = depth >= 3 ? compactStringValue(JSON.stringify(source[key]), 1200) : compactJsonValueForLocalModel(source[key], depth + 1);
+    compact[key] =
+      depth >= 3
+        ? compactStringValue(JSON.stringify(source[key]), 1200)
+        : compactJsonValueForLocalModel(source[key], depth + 1);
   }
 
   let extraCount = 0;
@@ -216,7 +218,9 @@ function compactJsonValueForLocalModel(value: Any, depth = 0): Any {
     }
   }
 
-  const omittedKeys = Object.keys(source).filter((key) => !used.has(key) && !NOISY_JSON_KEYS.has(key));
+  const omittedKeys = Object.keys(source).filter(
+    (key) => !used.has(key) && !NOISY_JSON_KEYS.has(key),
+  );
   if (omittedKeys.length > 0) {
     compact._omittedKeys = omittedKeys.slice(0, 24);
     if (omittedKeys.length > 24) compact._omittedKeyCount = omittedKeys.length;
@@ -228,10 +232,14 @@ function compactTextForLocalModel(text: string): string {
   if (text.length <= LOCAL_MODEL_NETWORK_BODY_MAX_CHARS) return text;
   const headingLines = text
     .split(/\r?\n/)
-    .filter((line) => /^\s{0,3}(#{1,6}\s+|[-*]\s+|release|version|feature|changelog|date\b)/i.test(line))
+    .filter((line) =>
+      /^\s{0,3}(#{1,6}\s+|[-*]\s+|release|version|feature|changelog|date\b)/i.test(line),
+    )
     .slice(0, 80)
     .join("\n");
-  const headingBlock = headingLines ? `\n\n[Extracted headings/key lines]\n${headingLines.slice(0, 3_000)}` : "";
+  const headingBlock = headingLines
+    ? `\n\n[Extracted headings/key lines]\n${headingLines.slice(0, 3_000)}`
+    : "";
   return (
     text.slice(0, LOCAL_MODEL_NETWORK_BODY_HEAD_CHARS) +
     headingBlock +
@@ -348,7 +356,9 @@ export function preflightValidateAndRepairToolInput(opts: {
 }): ToolInputValidationResult {
   const toolName = String(opts.toolName || "");
   let input: Any =
-    opts.input && typeof opts.input === "object" && !Array.isArray(opts.input) ? { ...opts.input } : {};
+    opts.input && typeof opts.input === "object" && !Array.isArray(opts.input)
+      ? { ...opts.input }
+      : {};
   let repaired = false;
   let repairable = false;
   const repairReasons: string[] = [];
@@ -402,7 +412,10 @@ export function preflightValidateAndRepairToolInput(opts: {
     }
   } else if (toolName === "write_file") {
     repairable = true;
-    if ((typeof input.path !== "string" || input.path.trim().length === 0) && typeof input.filename === "string") {
+    if (
+      (typeof input.path !== "string" || input.path.trim().length === 0) &&
+      typeof input.filename === "string"
+    ) {
       input.path = input.filename;
       repaired = true;
       repairReasons.push("normalized filename -> path");
@@ -482,12 +495,18 @@ function prependRunCommandTerminationContext(sanitizedResult: string, result: An
 }
 
 function normalizeImageMimeType(value: unknown): LLMImageMimeType | null {
-  switch (String(value || "").trim().toLowerCase()) {
+  switch (
+    String(value || "")
+      .trim()
+      .toLowerCase()
+  ) {
     case "image/png":
     case "image/jpeg":
     case "image/gif":
     case "image/webp":
-      return String(value || "").trim().toLowerCase() as LLMImageMimeType;
+      return String(value || "")
+        .trim()
+        .toLowerCase() as LLMImageMimeType;
     default:
       return null;
   }
@@ -508,7 +527,8 @@ function buildComputerUseCompanionContent(
     return null;
   }
 
-  const action = typeof result.action === "string" && result.action.trim() ? result.action.trim() : toolName;
+  const action =
+    typeof result.action === "string" && result.action.trim() ? result.action.trim() : toolName;
   const appName =
     typeof result?.target?.appName === "string" && result.target.appName.trim()
       ? result.target.appName.trim()
@@ -517,7 +537,8 @@ function buildComputerUseCompanionContent(
     typeof result?.target?.windowTitle === "string" && result.target.windowTitle.trim()
       ? result.target.windowTitle.trim()
       : undefined;
-  const note = typeof result.note === "string" && result.note.trim() ? result.note.trim() : undefined;
+  const note =
+    typeof result.note === "string" && result.note.trim() ? result.note.trim() : undefined;
 
   const compactResult = JSON.stringify({
     ok: true,
@@ -588,21 +609,24 @@ export function buildNormalizedToolResult(opts: {
     ? normalizeToolFailureReason(opts.result, "Tool execution failed")
     : null;
   const toolFailureReason = normalizedFailure?.message || "";
-  const companion = !resultIsError ? buildComputerUseCompanionContent(opts.toolName, opts.result) : null;
+  const companion = !resultIsError
+    ? buildComputerUseCompanionContent(opts.toolName, opts.result)
+    : null;
 
   return {
     toolResult: {
       type: "tool_result",
       tool_use_id: opts.toolUseId,
-      content: resultIsError && !advisoryFallbackFailure
-        ? JSON.stringify({
-            error: toolFailureReason,
-            ...(normalizedFailure?.kind ? { kind: normalizedFailure.kind } : {}),
-            ...(normalizedFailure?.display ? { display: normalizedFailure.display } : {}),
-            ...(normalizedFailure?.code ? { code: normalizedFailure.code } : {}),
-            ...(opts.result?.url ? { url: opts.result.url } : {}),
-          })
-        : companion?.compactResult || sanitizedResult,
+      content:
+        resultIsError && !advisoryFallbackFailure
+          ? JSON.stringify({
+              error: toolFailureReason,
+              ...(normalizedFailure?.kind ? { kind: normalizedFailure.kind } : {}),
+              ...(normalizedFailure?.display ? { display: normalizedFailure.display } : {}),
+              ...(normalizedFailure?.code ? { code: normalizedFailure.code } : {}),
+              ...(opts.result?.url ? { url: opts.result.url } : {}),
+            })
+          : companion?.compactResult || sanitizedResult,
       is_error: resultIsError && !advisoryFallbackFailure,
       ...(companion ? { companion_user_content: companion.companionUserContent } : {}),
     },
@@ -771,10 +795,13 @@ const CLOUD_ACTION_READ_ONLY_ACTIONS = new Set([
 ]);
 
 const READ_ONLY_ACTION_PREFIX = /^(get_|list_|search|read_|query_|describe_|check_)/;
-const MUTATING_ACTION_PREFIX = /^(create_|update_|delete_|remove_|move_|copy_|rename_|upload_|write_|set_|add_|append_|patch_|modify_)/;
+const MUTATING_ACTION_PREFIX =
+  /^(create_|update_|delete_|remove_|move_|copy_|rename_|upload_|write_|set_|add_|append_|patch_|modify_)/;
 
 function isReadOnlyCloudAction(action: string): boolean {
-  const normalized = String(action || "").trim().toLowerCase();
+  const normalized = String(action || "")
+    .trim()
+    .toLowerCase();
   if (!normalized) return false;
   if (CLOUD_ACTION_READ_ONLY_ACTIONS.has(normalized)) return true;
   if (MUTATING_ACTION_PREFIX.test(normalized)) return false;
@@ -888,7 +915,8 @@ export function getToolInputValidationError(toolName: string, input: Any): strin
     if (toolName === "create_document" && !input?.format) {
       return "create_document requires a format (docx or pdf)";
     }
-    if (toolName === "create_document" && !input?.content) return "create_document requires content";
+    if (toolName === "create_document" && !input?.content)
+      return "create_document requires content";
     if (toolName === "generate_document" && !input?.markdown && !input?.sections) {
       return "generate_document requires markdown or sections";
     }
@@ -990,8 +1018,8 @@ export function isHardToolFailure(toolName: string, result: Any, failureReason =
 export function isAdvisoryToolFailureResult(result: Any): boolean {
   return Boolean(
     result &&
-      result.success === false &&
-      (result.nonBlocking === true || result.recoverableFallback === true),
+    result.success === false &&
+    (result.nonBlocking === true || result.recoverableFallback === true),
   );
 }
 
@@ -999,8 +1027,12 @@ export function getToolFailureReason(result: Any, fallback: string): string {
   return normalizeToolFailureReason(result, fallback).message;
 }
 
-export function normalizeToolFailureReason(result: Any, fallback: string): NormalizedToolFailureReason {
-  const fallbackMessage = typeof fallback === "string" && fallback.trim() ? fallback : "unknown error";
+export function normalizeToolFailureReason(
+  result: Any,
+  fallback: string,
+): NormalizedToolFailureReason {
+  const fallbackMessage =
+    typeof fallback === "string" && fallback.trim() ? fallback : "unknown error";
   const errorValue = result?.error;
 
   if (typeof errorValue === "string" && errorValue.trim()) {
@@ -1033,7 +1065,11 @@ export function normalizeToolFailureReason(result: Any, fallback: string): Norma
 
   if (typeof result?.terminationReason === "string" && result.terminationReason.trim()) {
     const terminationReason = result.terminationReason.trim();
-    if (terminationReason === "normal" && typeof result?.exitCode === "number" && result.exitCode !== 0) {
+    if (
+      terminationReason === "normal" &&
+      typeof result?.exitCode === "number" &&
+      result.exitCode !== 0
+    ) {
       return { message: `exit code ${result.exitCode}` };
     }
     return { message: `termination: ${terminationReason}` };

@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { resolveTaskResultText } from "../result-text";
 import type { TaskEvent } from "../../../shared/types";
 
-function makeEvent(type: TaskEvent["type"], payload: Record<string, unknown>, timestamp: number): TaskEvent {
+function makeEvent(
+  type: TaskEvent["type"],
+  payload: Record<string, unknown>,
+  timestamp: number,
+): TaskEvent {
   return {
     id: `evt-${timestamp}`,
     taskId: "task-1",
@@ -42,18 +46,43 @@ describe("resolveTaskResultText", () => {
   it("falls back to summary when timeline messages are only progress noise", () => {
     const summary = "Final concise summary.";
     const events: TaskEvent[] = [
-      makeEvent("timeline_step_updated", { actor: "agent", message: "Executing step 1/7: Collect data" }, 100),
-      makeEvent("timeline_group_finished", { actor: "tool", message: "Tool batch: 1 succeeded" }, 101),
+      makeEvent(
+        "timeline_step_updated",
+        { actor: "agent", message: "Executing step 1/7: Collect data" },
+        100,
+      ),
+      makeEvent(
+        "timeline_group_finished",
+        { actor: "tool", message: "Tool batch: 1 succeeded" },
+        101,
+      ),
     ];
 
     const result = resolveTaskResultText({ summary, events });
     expect(result).toBe(summary);
   });
 
+  it("never returns semantic timeline metadata as scheduled-task output", () => {
+    const semanticSummary = "Browser Navigate https://web.whatsapp.com/ · List Directory";
+    const events: TaskEvent[] = [makeEvent("task_completed", { semanticSummary }, 100)];
+
+    expect(resolveTaskResultText({ semanticSummary, events })).toBeUndefined();
+    expect(
+      resolveTaskResultText({
+        summary: "The user-facing answer.",
+        semanticSummary,
+      }),
+    ).toBe("The user-facing answer.");
+  });
+
   it("uses legacy assistant_message content when available", () => {
     const summary = "Short summary";
     const events: TaskEvent[] = [
-      makeEvent("assistant_message", { message: "Detailed user-facing completion text with context." }, 100),
+      makeEvent(
+        "assistant_message",
+        { message: "Detailed user-facing completion text with context." },
+        100,
+      ),
     ];
 
     const result = resolveTaskResultText({ summary, events });

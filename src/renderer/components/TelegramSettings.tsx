@@ -483,7 +483,11 @@ export function TelegramSettings({ onStatusChange }: TelegramSettingsProps) {
             Restrict routing to specific groups if you want tighter control.
           </p>
         </div>
-        <button className="button-secondary" onClick={handleUpdateRoutingSettings} disabled={saving}>
+        <button
+          className="button-secondary"
+          onClick={handleUpdateRoutingSettings}
+          disabled={saving}
+        >
           {saving ? "Saving..." : "Save Routing Settings"}
         </button>
       </div>

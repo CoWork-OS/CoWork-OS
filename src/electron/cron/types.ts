@@ -4,6 +4,7 @@
 
 import type { ChannelType } from "../gateway/channels/types";
 import type { AgentConfig } from "../../shared/types";
+import type { AccessProfileId } from "../../shared/access-profiles";
 
 /**
  * Schedule type definitions:
@@ -108,6 +109,9 @@ export interface CronJob {
   name: string;
   description?: string;
   enabled: boolean;
+  /** Named access policy for scheduled executions. */
+  accessProfileId?: AccessProfileId;
+  /** @deprecated Legacy command-tool override for jobs created before profiles. */
   shellAccess?: boolean;
   allowUserInput?: boolean;
   deleteAfterRun?: boolean; // For one-shot jobs
@@ -255,6 +259,7 @@ export interface CronServiceDeps {
     routineId: string;
     jobId: string;
     runAtMs: number;
+    agentConfig?: AgentConfig;
   }) => Promise<{
     runId: string;
     status: "queued" | "running" | "completed" | "partial_success" | "needs_user_action" | "failed";
@@ -262,43 +267,38 @@ export interface CronServiceDeps {
     error?: string;
   }>;
   // Optional task status hooks (enables waiting for completion + delivering final output)
-  getTaskStatus?: (
-    taskId: string,
-  ) => Promise<
-    | {
-        status: string;
-        error?: string | null;
-        resultSummary?: string | null;
-        terminalStatus?:
-          | "ok"
-          | "partial_success"
-          | "needs_user_action"
-          | "awaiting_approval"
-          | "resume_available"
-          | "failed"
-          | null;
-        failureClass?:
-          | "budget_exhausted"
-          | "tool_error"
-          | "contract_error"
-          | "contract_unmet_write_required"
-          | "required_contract"
-          | "required_verification"
-          | "optional_enrichment"
-          | "dependency_unavailable"
-          | "provider_quota"
-          | "user_blocker"
-          | "unknown"
-          | null;
-        budgetUsage?: {
-          turns: number;
-          toolCalls: number;
-          webSearchCalls: number;
-          duplicatesBlocked: number;
-        } | null;
-      }
-    | null
-  >;
+  getTaskStatus?: (taskId: string) => Promise<{
+    status: string;
+    error?: string | null;
+    resultSummary?: string | null;
+    terminalStatus?:
+      | "ok"
+      | "partial_success"
+      | "needs_user_action"
+      | "awaiting_approval"
+      | "resume_available"
+      | "failed"
+      | null;
+    failureClass?:
+      | "budget_exhausted"
+      | "tool_error"
+      | "contract_error"
+      | "contract_unmet_write_required"
+      | "required_contract"
+      | "required_verification"
+      | "optional_enrichment"
+      | "dependency_unavailable"
+      | "provider_quota"
+      | "user_blocker"
+      | "unknown"
+      | null;
+    budgetUsage?: {
+      turns: number;
+      toolCalls: number;
+      webSearchCalls: number;
+      duplicatesBlocked: number;
+    } | null;
+  } | null>;
   getTaskResultText?: (taskId: string) => Promise<string | undefined>;
   findActiveTaskForJob?: (params: {
     jobId: string;

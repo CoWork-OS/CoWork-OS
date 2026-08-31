@@ -253,7 +253,11 @@ export function WebAccessClient() {
           </div>
           <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af" }}>
             Health:{" "}
-            <strong style={{ color: healthOk === true ? "#34d399" : healthOk === false ? "#f87171" : "#fbbf24" }}>
+            <strong
+              style={{
+                color: healthOk === true ? "#34d399" : healthOk === false ? "#f87171" : "#fbbf24",
+              }}
+            >
               {healthOk === null ? "checking..." : healthOk ? "ok" : "down"}
             </strong>{" "}
             | Status: <strong style={{ color: "#e5e7eb" }}>{statusMessage}</strong>
@@ -269,7 +273,9 @@ export function WebAccessClient() {
               border: "1px solid rgba(255,255,255,0.12)",
             }}
           >
-            <h2 style={{ marginTop: 0, marginBottom: 10, fontSize: 14, color: "#9ca3af" }}>Create Task</h2>
+            <h2 style={{ marginTop: 0, marginBottom: 10, fontSize: 14, color: "#9ca3af" }}>
+              Create Task
+            </h2>
             <label style={{ fontSize: 12, color: "#9ca3af", display: "block", marginBottom: 6 }}>
               Workspace
             </label>
@@ -294,7 +300,13 @@ export function WebAccessClient() {
             </select>
 
             <label
-              style={{ fontSize: 12, color: "#9ca3af", display: "block", marginTop: 10, marginBottom: 6 }}
+              style={{
+                fontSize: 12,
+                color: "#9ca3af",
+                display: "block",
+                marginTop: 10,
+                marginBottom: 6,
+              }}
             >
               Title
             </label>
@@ -312,7 +324,13 @@ export function WebAccessClient() {
             />
 
             <label
-              style={{ fontSize: 12, color: "#9ca3af", display: "block", marginTop: 10, marginBottom: 6 }}
+              style={{
+                fontSize: 12,
+                color: "#9ca3af",
+                display: "block",
+                marginTop: 10,
+                marginBottom: 6,
+              }}
             >
               Prompt
             </label>
@@ -356,7 +374,9 @@ export function WebAccessClient() {
               border: "1px solid rgba(255,255,255,0.12)",
             }}
           >
-            <h2 style={{ marginTop: 0, marginBottom: 10, fontSize: 14, color: "#9ca3af" }}>Task Control</h2>
+            <h2 style={{ marginTop: 0, marginBottom: 10, fontSize: 14, color: "#9ca3af" }}>
+              Task Control
+            </h2>
             <label style={{ fontSize: 12, color: "#9ca3af", display: "block", marginBottom: 6 }}>
               Task
             </label>
@@ -398,7 +418,13 @@ export function WebAccessClient() {
             </button>
 
             <label
-              style={{ fontSize: 12, color: "#9ca3af", display: "block", marginTop: 10, marginBottom: 6 }}
+              style={{
+                fontSize: 12,
+                color: "#9ca3af",
+                display: "block",
+                marginTop: 10,
+                marginBottom: 6,
+              }}
             >
               Follow-up Message
             </label>

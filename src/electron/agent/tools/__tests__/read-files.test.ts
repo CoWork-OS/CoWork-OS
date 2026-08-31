@@ -75,6 +75,61 @@ describe("readFilesByPatterns", () => {
     expect(res.files[1].content).toContain("export const b");
   });
 
+  it("enforces access-profile filesystem rules for reads, writes, and enumeration", async () => {
+    const protectedDir = path.join(tmpDir, "private");
+    const readableDir = path.join(tmpDir, "shared");
+    writeFile(path.join(protectedDir, "secret.txt"), "secret");
+    writeFile(path.join(readableDir, "public.txt"), "public");
+    const scopedWorkspace: Workspace = {
+      ...workspace,
+      isTemp: false,
+      permissions: {
+        ...workspace.permissions,
+        accessFilesystemRules: [
+          { path: protectedDir, access: "deny" },
+          { path: readableDir, access: "read" },
+        ],
+      },
+    };
+    const daemon = { logEvent: vi.fn(), requestApproval: vi.fn() } as Any;
+    const scopedFileTools = new FileTools(scopedWorkspace, daemon, "task-profile");
+    const scopedGlobTools = new GlobTools(scopedWorkspace, daemon, "task-profile");
+
+    await expect(scopedFileTools.readFile("private/secret.txt")).rejects.toThrow(
+      /denied by the active access profile/i,
+    );
+    await expect(scopedFileTools.writeFile("private/new.txt", "blocked")).rejects.toThrow(
+      /denied by the active access profile/i,
+    );
+    const listing = await scopedFileTools.listDirectory(".");
+    expect(listing.files.map((entry) => entry.name)).not.toContain("private");
+    const glob = await scopedGlobTools.glob({ pattern: "**/*.txt" });
+    expect(glob.matches.map((entry) => entry.path)).toEqual([path.join("shared", "public.txt")]);
+  });
+
+  it("does not treat rename as a write-only operation", async () => {
+    const sourcePath = path.join(tmpDir, "source.txt");
+    writeFile(sourcePath, "content");
+    const writeOnlyWorkspace: Workspace = {
+      ...workspace,
+      permissions: {
+        ...workspace.permissions,
+        delete: false,
+      },
+    };
+    const writeOnlyFileTools = new FileTools(
+      writeOnlyWorkspace,
+      { logEvent: vi.fn(), requestApproval: vi.fn() } as Any,
+      "task-rename",
+    );
+
+    await expect(writeOnlyFileTools.renameFile("source.txt", "renamed.txt")).rejects.toThrow(
+      /delete permission/i,
+    );
+    expect(fs.existsSync(sourcePath)).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, "renamed.txt"))).toBe(false);
+  });
+
   it("reads PDFs through the dedicated text extractor", async () => {
     writeFile(path.join(tmpDir, "docs", "book.pdf"), "%PDF-1.7");
     extractPdfTextMock.mockResolvedValue({
@@ -263,19 +318,25 @@ describe("readFilesByPatterns", () => {
   });
 
   it("remaps /workspace alias paths into the active workspace for writes", async () => {
-    const out = await fileTools.writeFile("/workspace/influencer-chat-app/src/data/influencers.ts", "ok");
+    const out = await fileTools.writeFile(
+      "/workspace/influencer-chat-app/src/data/influencers.ts",
+      "ok",
+    );
     expect(out.success).toBe(true);
     expect(out.path).toBe("influencer-chat-app/src/data/influencers.ts");
     expect(
-      fs.readFileSync(path.join(tmpDir, "influencer-chat-app", "src", "data", "influencers.ts"), "utf-8"),
+      fs.readFileSync(
+        path.join(tmpDir, "influencer-chat-app", "src", "data", "influencers.ts"),
+        "utf-8",
+      ),
     ).toBe("ok");
   });
 
   it("blocks /workspace alias paths when strict alias policy is enabled", async () => {
     fileTools.setWorkspacePathAliasPolicy("strict_fail");
-    await expect(fileTools.writeFile("/workspace/influencer-chat-app/src/data/influencers.ts", "x")).rejects.toThrow(
-      /alias policy/i,
-    );
+    await expect(
+      fileTools.writeFile("/workspace/influencer-chat-app/src/data/influencers.ts", "x"),
+    ).rejects.toThrow(/alias policy/i);
   });
 
   it("blocks destructive root package.json marker-only overwrites", async () => {
@@ -410,7 +471,9 @@ describe("readFilesByPatterns", () => {
       /Refusing to overwrite root package-lock\.json/,
     );
 
-    const packageLock = JSON.parse(fs.readFileSync(path.join(tmpDir, "package-lock.json"), "utf-8"));
+    const packageLock = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, "package-lock.json"), "utf-8"),
+    );
     expect(packageLock.packages[""].name).toBe("cowork-os");
   });
 
@@ -459,7 +522,11 @@ describe("readFilesByPatterns", () => {
     const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-read-files-git-"));
     try {
       fs.mkdirSync(path.join(repoDir, ".git", "info"), { recursive: true });
-      fs.writeFileSync(path.join(repoDir, ".git", "info", "exclude"), "# existing excludes\n", "utf-8");
+      fs.writeFileSync(
+        path.join(repoDir, ".git", "info", "exclude"),
+        "# existing excludes\n",
+        "utf-8",
+      );
       const gitWorkspace: Workspace = {
         ...workspace,
         path: repoDir,

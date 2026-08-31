@@ -361,7 +361,11 @@ export class GitService {
       body: string;
     },
   ): Promise<PullRequestResult> {
-    const existing = await GitService.findPullRequest(repoPath, params.branchName, params.baseBranch);
+    const existing = await GitService.findPullRequest(
+      repoPath,
+      params.branchName,
+      params.baseBranch,
+    );
     if (existing.success) {
       return existing;
     }
@@ -383,8 +387,16 @@ export class GitService {
         ],
         repoPath,
       );
-      const createdUrl = stdout.trim().split("\n").find((line) => /^https?:\/\//.test(line.trim()))?.trim();
-      const created = await GitService.findPullRequest(repoPath, params.branchName, params.baseBranch);
+      const createdUrl = stdout
+        .trim()
+        .split("\n")
+        .find((line) => /^https?:\/\//.test(line.trim()))
+        ?.trim();
+      const created = await GitService.findPullRequest(
+        repoPath,
+        params.branchName,
+        params.baseBranch,
+      );
       if (created.success) {
         return created;
       }

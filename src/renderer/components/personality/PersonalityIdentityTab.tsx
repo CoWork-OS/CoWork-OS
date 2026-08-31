@@ -25,9 +25,7 @@ export function PersonalityIdentityTab({
   return (
     <div className="personality-identity-tab settings-section">
       <h3>Identity</h3>
-      <p className="settings-description">
-        Agent name, your name, and relationship stats.
-      </p>
+      <p className="settings-description">Agent name, your name, and relationship stats.</p>
 
       <div className="form-group">
         <label htmlFor="agent-name">Assistant Name</label>

@@ -125,7 +125,9 @@ describe("VisionTools cache and page range guards", () => {
         emitToolError: false,
       });
       expect(result.success).toBe(false);
-      const emittedToolError = daemon.logEvent.mock.calls.some((call: Any[]) => call[1] === "tool_error");
+      const emittedToolError = daemon.logEvent.mock.calls.some(
+        (call: Any[]) => call[1] === "tool_error",
+      );
       expect(emittedToolError).toBe(false);
     } finally {
       loadSettingsSpy.mockRestore();

@@ -4,7 +4,7 @@ These guides explain how to use each CoWork channel after it is connected. They 
 
 For setup instructions, see [Channel Integrations](../channels.md). For shared remote commands and task lifecycle behavior, see [Using CoWork from WhatsApp and Other Channels](../gateway-user-guide.md) and [Gateway Message Lifecycle](../gateway-message-lifecycle.md).
 
-Admins can also use [Channel Specialization](../channels.md#channel-specialization) to make a whole channel, specific chat/group, or topic/thread default to a workspace, agent role, prompt guidance, tool restrictions, and shared-memory policy.
+Admins can also use [Channel Specialization](../channels.md#channel-specialization) to make a whole channel, specific chat/group, or topic/thread default to a workspace, agent role, prompt guidance, tool restrictions, and shared-memory policy. Channel-created tasks inherit the target workspace's [access profile](../access-profiles.md); channel rules and specialization can narrow that profile, but cannot widen its command-tool, filesystem, network, domain, or approval boundary.
 
 ## Guides
 

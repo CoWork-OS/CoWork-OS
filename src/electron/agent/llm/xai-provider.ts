@@ -103,12 +103,7 @@ export class XAIProvider implements LLMProvider {
   private async refreshOAuthIfNeeded(): Promise<void> {
     if (!this.oauthTokens || !this.responsesClient) return;
     if (!this.oauthTokens.refresh_token) return;
-    if (
-      !isXAIAccessTokenExpiring(
-        this.oauthTokens.access_token,
-        this.oauthTokens.expires_at,
-      )
-    ) {
+    if (!isXAIAccessTokenExpiring(this.oauthTokens.access_token, this.oauthTokens.expires_at)) {
       return;
     }
     const refreshed = await XAIOAuth.refreshTokens(this.oauthTokens);

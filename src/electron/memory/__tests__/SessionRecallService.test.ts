@@ -15,7 +15,9 @@ async function createWorkspace(): Promise<string> {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  await Promise.all(createdDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    createdDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
 });
 
 describe("SessionRecallService", () => {

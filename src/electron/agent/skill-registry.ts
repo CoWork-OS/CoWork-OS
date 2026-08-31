@@ -183,7 +183,9 @@ function stringValue(value: unknown): string | undefined {
 
 function arrayValue(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+    return value.filter(
+      (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+    );
   }
   if (typeof value === "string" && value.trim().length > 0) {
     return [value.trim()];
@@ -495,11 +497,7 @@ export class SkillRegistry {
     }
   }
 
-  private writeSkillStage(
-    stageDir: string,
-    skill: CustomSkill,
-    sourceDir?: string,
-  ): CustomSkill {
+  private writeSkillStage(stageDir: string, skill: CustomSkill, sourceDir?: string): CustomSkill {
     fs.mkdirSync(stageDir, { recursive: true });
     const safeId = sanitizeSkillId(skill.id);
     if (!safeId) {
@@ -601,7 +599,9 @@ export class SkillRegistry {
     return null;
   }
 
-  private findCustomSkillManifest(rootDir: string): { manifestPath: string; supportDir?: string } | null {
+  private findCustomSkillManifest(
+    rootDir: string,
+  ): { manifestPath: string; supportDir?: string } | null {
     const candidates = fs
       .readdirSync(rootDir)
       .filter(
@@ -643,17 +643,17 @@ export class SkillRegistry {
     const metadataPath = path.join(bundleDir, "metadata.json");
     if (fs.existsSync(metadataPath)) {
       try {
-        metadataJson = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as Record<string, unknown>;
+        metadataJson = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as Record<
+          string,
+          unknown
+        >;
       } catch (error) {
         console.warn("[SkillRegistry] Failed to parse metadata.json for imported skill:", error);
       }
     }
 
     const fallbackName = path.basename(bundleDir);
-    const name =
-      stringValue(frontmatter.name) ||
-      stringValue(metadataJson.name) ||
-      fallbackName;
+    const name = stringValue(frontmatter.name) || stringValue(metadataJson.name) || fallbackName;
     const slugCandidate =
       stringValue(frontmatter.slug) ||
       stringValue(frontmatter.id) ||
@@ -668,23 +668,20 @@ export class SkillRegistry {
       stringValue(frontmatter.description) ||
       stringValue(metadataJson.description) ||
       stringValue(metadataJson.abstract) ||
-      body.split("\n").map((line) => line.trim()).find(Boolean) ||
+      body
+        .split("\n")
+        .map((line) => line.trim())
+        .find(Boolean) ||
       `Imported skill from ${sourceRef}`;
     const version = stringValue(metadataJson.version) || "1.0.0";
     const author =
-      stringValue(frontmatter.author) ||
-      stringValue(metadataJson.author) ||
-      "External";
+      stringValue(frontmatter.author) || stringValue(metadataJson.author) || "External";
     const category =
       stringValue(frontmatter.category) ||
       stringValue(metadataJson.organization) ||
       IMPORTED_SKILL_CATEGORY;
     const tags = Array.from(
-      new Set([
-        ...arrayValue(frontmatter.tags),
-        ...arrayValue(metadataJson.tags),
-        "external",
-      ]),
+      new Set([...arrayValue(frontmatter.tags), ...arrayValue(metadataJson.tags), "external"]),
     );
 
     return {
@@ -880,9 +877,7 @@ export class SkillRegistry {
           return null;
         }
 
-        const data = (await response.json()) as
-          | { status?: string; value?: unknown }
-          | null;
+        const data = (await response.json()) as { status?: string; value?: unknown } | null;
         if (!data || data.status !== "success") {
           return null;
         }
@@ -987,8 +982,7 @@ export class SkillRegistry {
       stringValue((payload.skill.tags as Record<string, unknown> | undefined)?.latest) ||
       "latest";
     const ownerHandle =
-      stringValue(payload.owner?.handle) ||
-      stringValue(payload.owner?.displayName);
+      stringValue(payload.owner?.handle) || stringValue(payload.owner?.displayName);
     const stats =
       payload.skill.stats && typeof payload.skill.stats === "object"
         ? (payload.skill.stats as Record<string, unknown>)
@@ -997,7 +991,8 @@ export class SkillRegistry {
     return {
       id: slug,
       name: stringValue(payload.skill.displayName) || stringValue(payload.skill.name) || slug,
-      description: stringValue(payload.skill.summary) || stringValue(payload.skill.description) || "",
+      description:
+        stringValue(payload.skill.summary) || stringValue(payload.skill.description) || "",
       version: latestVersion,
       source: "clawhub",
       author: ownerHandle ? `@${ownerHandle.replace(/^@/, "")}` : "ClawHub",
@@ -1017,9 +1012,7 @@ export class SkillRegistry {
 
   private mapClawHubListItem(item: Record<string, unknown>): SkillRegistryEntry | null {
     const skill =
-      item.skill && typeof item.skill === "object"
-        ? (item.skill as Record<string, unknown>)
-        : item;
+      item.skill && typeof item.skill === "object" ? (item.skill as Record<string, unknown>) : item;
     const slug = stringValue(skill.slug);
     if (!slug) {
       return null;
@@ -1063,9 +1056,7 @@ export class SkillRegistry {
       icon: IMPORTED_SKILL_ICON,
       category: "ClawHub",
       updatedAt:
-        typeof skill.updatedAt === "number"
-          ? new Date(skill.updatedAt).toISOString()
-          : undefined,
+        typeof skill.updatedAt === "number" ? new Date(skill.updatedAt).toISOString() : undefined,
       homepage: ownerHandle
         ? `${CLAWHUB_WEB_URL}/${ownerHandle.replace(/^@/, "")}/${slug}`
         : `${CLAWHUB_WEB_URL}/skills`,
@@ -1127,7 +1118,9 @@ export class SkillRegistry {
 
     const versionsData = await this.fetchJson(`${CLAWHUB_API_URL}/skills/${slug}/versions`);
     const items =
-      versionsData && typeof versionsData === "object" && Array.isArray((versionsData as Record<string, unknown>).items)
+      versionsData &&
+      typeof versionsData === "object" &&
+      Array.isArray((versionsData as Record<string, unknown>).items)
         ? ((versionsData as Record<string, unknown>).items as unknown[])
         : Array.isArray(versionsData)
           ? versionsData
@@ -1140,7 +1133,10 @@ export class SkillRegistry {
     return null;
   }
 
-  private async downloadClawHubFiles(slug: string, version: string): Promise<Record<string, string>> {
+  private async downloadClawHubFiles(
+    slug: string,
+    version: string,
+  ): Promise<Record<string, string>> {
     const url = `${CLAWHUB_API_URL}/download?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(version)}`;
     const response = await fetch(url);
     if (!response.ok) {
@@ -1274,12 +1270,16 @@ export class SkillRegistry {
           nonSuspiciousOnly: false,
         });
         const items =
-          value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).page)
+          value &&
+          typeof value === "object" &&
+          Array.isArray((value as Record<string, unknown>).page)
             ? ((value as Record<string, unknown>).page as unknown[])
             : [];
 
         results = items
-          .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+          .filter((item): item is Record<string, unknown> =>
+            Boolean(item && typeof item === "object"),
+          )
           .map((item) => this.mapClawHubListItem(item))
           .filter((entry): entry is SkillRegistryEntry => Boolean(entry));
       } else {
@@ -1292,7 +1292,9 @@ export class SkillRegistry {
         const items = Array.isArray(value) ? value : [];
 
         results = items
-          .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+          .filter((item): item is Record<string, unknown> =>
+            Boolean(item && typeof item === "object"),
+          )
           .map((item) => this.mapClawHubListItem(item))
           .filter((entry): entry is SkillRegistryEntry => Boolean(entry));
       }
@@ -1473,7 +1475,12 @@ export class SkillRegistry {
               : "Skill installed successfully",
         });
       } else if (result.security?.state === "quarantined") {
-        notify({ status: "failed", progress: 0, message: result.security.summary, error: result.security.summary });
+        notify({
+          status: "failed",
+          progress: 0,
+          message: result.security.summary,
+          error: result.security.summary,
+        });
       }
 
       return result;
@@ -1487,9 +1494,7 @@ export class SkillRegistry {
     }
   }
 
-  async installFromClawHub(
-    identifierOrUrl: string,
-  ): Promise<SkillInstallResult> {
+  async installFromClawHub(identifierOrUrl: string): Promise<SkillInstallResult> {
     const source = parseClawHubInput(identifierOrUrl);
     if (!source) {
       return { success: false, error: `Invalid ClawHub identifier: ${identifierOrUrl}` };
@@ -1507,12 +1512,18 @@ export class SkillRegistry {
 
     const version = await this.resolveClawHubVersion(source.slug, payload);
     if (!version) {
-      return { success: false, error: `Unable to resolve a downloadable ClawHub version for ${source.slug}` };
+      return {
+        success: false,
+        error: `Unable to resolve a downloadable ClawHub version for ${source.slug}`,
+      };
     }
 
     const files = await this.downloadClawHubFiles(source.slug, version);
     if (!files["SKILL.md"]) {
-      return { success: false, error: `ClawHub bundle for ${source.slug} did not include SKILL.md` };
+      return {
+        success: false,
+        error: `ClawHub bundle for ${source.slug} did not include SKILL.md`,
+      };
     }
 
     const tempDir = this.buildTempDir(source.slug);
@@ -1537,7 +1548,11 @@ export class SkillRegistry {
         homepage: sourceUrl,
         repository: sourceUrl,
         tags: Array.from(
-          new Set([...(skill.metadata?.tags || []), ...this.normalizeClawHubTags(payload.skill.tags), "clawhub"]),
+          new Set([
+            ...(skill.metadata?.tags || []),
+            ...this.normalizeClawHubTags(payload.skill.tags),
+            "clawhub",
+          ]),
         ),
       };
       skill.category = "ClawHub";
@@ -1570,7 +1585,10 @@ export class SkillRegistry {
       }
 
       const contentType = response.headers?.get?.("content-type") || "";
-      if (contentType.includes("application/json") || normalizedUrl.toLowerCase().endsWith(".json")) {
+      if (
+        contentType.includes("application/json") ||
+        normalizedUrl.toLowerCase().endsWith(".json")
+      ) {
         const raw = await readResponseTextWithLimit(
           response,
           MAX_IMPORTED_SKILL_TEXT_BYTES,
@@ -1597,7 +1615,10 @@ export class SkillRegistry {
         stringValue(frontmatter.slug) || stringValue(frontmatter.id) || normalizeSkillSlug(name),
       );
       if (!safeId) {
-        return { success: false, error: "Unable to derive a valid skill ID from the imported SKILL.md" };
+        return {
+          success: false,
+          error: "Unable to derive a valid skill ID from the imported SKILL.md",
+        };
       }
 
       const tempDir = this.buildTempDir(safeId);
@@ -1618,9 +1639,7 @@ export class SkillRegistry {
     }
   }
 
-  async installFromGit(
-    gitUrl: string,
-  ): Promise<SkillInstallResult> {
+  async installFromGit(gitUrl: string): Promise<SkillInstallResult> {
     const parsed = parseGitUrl(gitUrl);
     if (!parsed) {
       return { success: false, error: `Invalid or unsupported git URL: ${gitUrl}` };

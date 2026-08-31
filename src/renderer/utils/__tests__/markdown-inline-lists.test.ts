@@ -137,8 +137,7 @@ Preamble line
 
 describe("normalizeMarkdownForCollab", () => {
   it("applies both heading and list normalization", () => {
-    const input =
-      "From X: ### Architecture Overview You'll find (1) first (2) second";
+    const input = "From X: ### Architecture Overview You'll find (1) first (2) second";
     const output = normalizeMarkdownForCollab(input);
     expect(output).toContain("From X:\n### Architecture Overview");
     expect(output).toContain("\n1. first");

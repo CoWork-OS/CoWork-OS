@@ -259,9 +259,12 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
   const [overviewData, setOverviewData] = useState<OverviewLoadState | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
-  const [selectedPreset, setSelectedPreset] =
-    useState<UsageInsightsPeriodPreset>(DEFAULT_USAGE_INSIGHTS_PERIOD_PRESET);
-  const [customStart, setCustomStart] = useState(() => toISODate(new Date(Date.now() - 30 * 86_400_000)));
+  const [selectedPreset, setSelectedPreset] = useState<UsageInsightsPeriodPreset>(
+    DEFAULT_USAGE_INSIGHTS_PERIOD_PRESET,
+  );
+  const [customStart, setCustomStart] = useState(() =>
+    toISODate(new Date(Date.now() - 30 * 86_400_000)),
+  );
   const [customEnd, setCustomEnd] = useState(() => toISODate(new Date()));
   const [showCustomPicker, setShowCustomPicker] = useState(false);
   const customPickerRef = useRef<HTMLDivElement>(null);
@@ -360,16 +363,15 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
     setOverviewError(null);
     setOverviewData((current) => (current?.workspaceId === workspaceId ? current : null));
     try {
-      const result = await window.electronAPI.getUsageInsights(
-        workspaceId,
-        OVERVIEW_PERIOD_DAYS,
-      );
+      const result = await window.electronAPI.getUsageInsights(workspaceId, OVERVIEW_PERIOD_DAYS);
       cacheRef.current.set(cacheKey, result);
       if (overviewRequestSeqRef.current !== requestId) return;
       setOverviewData({ workspaceId, data: result });
     } catch (err: unknown) {
       if (overviewRequestSeqRef.current === requestId) {
-        setOverviewError(err instanceof Error ? err.message : "Failed to load 12-month token activity");
+        setOverviewError(
+          err instanceof Error ? err.message : "Failed to load 12-month token activity",
+        );
         setOverviewData((current) => (current?.workspaceId === workspaceId ? current : null));
       }
     } finally {
@@ -411,7 +413,9 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
         setDataAgeDays(null);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [workspaceId]);
 
   useEffect(() => {
@@ -440,9 +444,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
 
   useEffect(() => {
     if (!isValidWorkspaceId(workspaceId) || selectedPreset === "custom") return;
-    const numericPresets: Array<
-      Exclude<UsageInsightsPeriodPreset, "custom">
-    > = visiblePresets
+    const numericPresets: Array<Exclude<UsageInsightsPeriodPreset, "custom">> = visiblePresets
       .filter(
         (
           preset,
@@ -452,26 +454,22 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
         } => typeof preset.value === "number",
       )
       .map((preset) => preset.value);
-    const selectedPeriodDays =
-      periodDays as Exclude<UsageInsightsPeriodPreset, "custom">;
+    const selectedPeriodDays = periodDays as Exclude<UsageInsightsPeriodPreset, "custom">;
     const selectedIndex = numericPresets.indexOf(selectedPeriodDays);
-    const adjacent = [
-      numericPresets[selectedIndex - 1],
-      numericPresets[selectedIndex + 1],
-    ].filter(
-      (
-        value,
-      ): value is Exclude<UsageInsightsPeriodPreset, "custom"> =>
-        value !== undefined,
+    const adjacent = [numericPresets[selectedIndex - 1], numericPresets[selectedIndex + 1]].filter(
+      (value): value is Exclude<UsageInsightsPeriodPreset, "custom"> => value !== undefined,
     );
     for (const preset of adjacent) {
       const cacheKey = `${workspaceId}|${preset}`;
       if (cacheRef.current.has(cacheKey)) continue;
-      void window.electronAPI.getUsageInsights(workspaceId, preset).then((result) => {
-        cacheRef.current.set(cacheKey, result);
-      }).catch(() => {
-        // Ignore prefetch failures.
-      });
+      void window.electronAPI
+        .getUsageInsights(workspaceId, preset)
+        .then((result) => {
+          cacheRef.current.set(cacheKey, result);
+        })
+        .catch(() => {
+          // Ignore prefetch failures.
+        });
     }
   }, [workspaceId, periodDays, selectedPreset, visiblePresets]);
 
@@ -605,7 +603,11 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
       {overviewError && !activeOverviewData && (
         <div className="insights-overview-status">
           <span>Could not load 12-month token activity.</span>
-          <button type="button" className="insights-overview-status-btn" onClick={() => void loadOverview()}>
+          <button
+            type="button"
+            className="insights-overview-status-btn"
+            onClick={() => void loadOverview()}
+          >
             Retry
           </button>
         </div>
@@ -650,9 +652,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                         }
                       }}
                     >
-                      {selectedPreset === "custom"
-                        ? `${customStart} – ${customEnd}`
-                        : label}
+                      {selectedPreset === "custom" ? `${customStart} – ${customEnd}` : label}
                     </button>
                     {showCustomPicker && (
                       <div className="insights-custom-picker">
@@ -802,7 +802,9 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                   <span className="insights-runtime-label">Satisfaction</span>
                 </div>
                 <div className="insights-runtime-metric">
-                  <span className="insights-runtime-value">{feedbackMetrics?.totalFeedback ?? 0}</span>
+                  <span className="insights-runtime-value">
+                    {feedbackMetrics?.totalFeedback ?? 0}
+                  </span>
                   <span className="insights-runtime-label">Feedback events</span>
                 </div>
                 <div className="insights-runtime-metric">
@@ -881,14 +883,14 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
               <div className="insights-card-header">Token & Runtime</div>
               <div className="insights-cost-hero">
                 <span className="insights-cost-amount">{formatTokens(em.totalTokens)}</span>
-                <span className="insights-cost-tokens">
-                  total tokens (prompt + completion)
-                </span>
+                <span className="insights-cost-tokens">total tokens (prompt + completion)</span>
               </div>
               <div className="insights-cost-split">
                 <div className="insights-cost-split-item">
                   <span className="insights-cost-split-label">Prompt</span>
-                  <span className="insights-cost-split-value">{formatTokens(em.totalPromptTokens)}</span>
+                  <span className="insights-cost-split-value">
+                    {formatTokens(em.totalPromptTokens)}
+                  </span>
                 </div>
                 <div className="insights-cost-split-item">
                   <span className="insights-cost-split-label">Completion</span>
@@ -909,7 +911,9 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                 </div>
                 <div className="insights-runtime-metric">
                   <span className="insights-runtime-value">
-                    {em.avgTokensPerLlmCall !== null ? formatTokens(em.avgTokensPerLlmCall) : "\u2014"}
+                    {em.avgTokensPerLlmCall !== null
+                      ? formatTokens(em.avgTokensPerLlmCall)
+                      : "\u2014"}
                   </span>
                   <span className="insights-runtime-label">Tok / call</span>
                 </div>
@@ -966,7 +970,9 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                           <div key={tool.tool} className="insights-model-row">
                             <span className="insights-model-name">{tool.tool}</span>
                             <MiniBar value={tool.calls} max={em.topTools[0].calls} />
-                            <span className="insights-model-cost">{formatUsageCount(tool.calls)}</span>
+                            <span className="insights-model-cost">
+                              {formatUsageCount(tool.calls)}
+                            </span>
                             <span className="insights-model-calls">
                               {tool.errors > 0 ? `${tool.errors} err` : "\u00A0"}
                             </span>
@@ -1008,7 +1014,8 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                 <div className="insights-card-header-group">
                   <div className="insights-card-header">Agent Efficiency (AWU)</div>
                   <div className="insights-awu-chart-subtitle">
-                    Bars show completed work units by day. The line shows same-day {awuLineMetricLabel.toLowerCase()}.
+                    Bars show completed work units by day. The line shows same-day{" "}
+                    {awuLineMetricLabel.toLowerCase()}.
                   </div>
                 </div>
                 <div className="insights-awu-toggle" role="tablist" aria-label="AWU line metric">
@@ -1069,7 +1076,10 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
               )}
               <div className="insights-chart-wrap insights-awu-chart-wrap">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={awuDailyRows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+                  <ComposedChart
+                    data={awuDailyRows}
+                    margin={{ top: 8, right: 12, left: 0, bottom: 4 }}
+                  >
                     <CartesianGrid
                       strokeDasharray="3 3"
                       stroke="var(--color-border, rgba(255,255,255,0.08))"

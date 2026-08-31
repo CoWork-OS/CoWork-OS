@@ -45,6 +45,9 @@ hero:
       text: Dreaming
       link: /dreaming
     - theme: alt
+      text: Box Brain
+      link: /box-brain
+    - theme: alt
       text: 24/7 Learning Guide
       link: /continual-learning-in-cowork
     - theme: alt
@@ -92,6 +95,9 @@ hero:
     - theme: alt
       text: Permission System
       link: /permission-system
+    - theme: alt
+      text: Access Profiles
+      link: /access-profiles
     - theme: alt
       text: Runtime Visibility
       link: /operator-runtime-visibility
@@ -170,6 +176,8 @@ features:
     details: xterm.js + node-pty terminal tabs bring native macOS shell and Windows cmd sessions into the workspace, with Tab completion, arrows, Ctrl+C, interactive prompts, resize, closeable tabs, and cwd-only prompts. Coding, direct CLI work, agent runs, artifacts, browser testing, approvals, and automations can stay in one super-app surface.
   - title: Production Runtime
     details: Local-first runtime with approvals, guardrails, and governance controls for production agent workflows.
+  - title: Governed Access Profiles
+    details: Choose Ask for approval, Approve for me, Full access, or a validated Custom profile. Each profile combines sandbox, approvals, reviewer behavior, network, filesystem, and domain boundaries; command tools do not have a separate shell toggle.
   - title: Linux Server Package
     details: GitHub Releases can ship a Linux x64 server tarball for VPS/systemd installs, with built daemon assets, full resources, connector runtimes, checksum verification, Control Plane smoke tests, and fail-closed managed deployment posture checks. It runs `coworkd-node` without launching the desktop UI.
   - title: Dozens of Model Routes
@@ -184,6 +192,8 @@ features:
     details: Visible learning progression after each task, unified recall across tasks/messages/files, persistent shell sessions, and live provider routing/fallback status.
   - title: Structured Memory
     details: Local archive memories now have inspectable observation metadata, progressive index/timeline/detail recall tools, Memory Hub privacy controls, deterministic rebuild status, and soft-delete suppression.
+  - title: Box Brain
+    details: Opt-in, bounded background indexing from one Box folder through Hosted MCP, incremental private local recall with preserved Box source URLs, and reviewable Dreaming candidates. Box remains the source of truth and the background index never writes back.
   - title: Rich Artifact Previews
     details: Format-aware in-app preview popup for HTML, Markdown, code (with syntax highlighting), JSON tree view, CSV/TSV tables, XLSX, DOCX, PDF, images (fit/actual-size toggle, dimensions, alpha checkerboard), video, audio (with duration), LaTeX, and PPTX. Each format adapts the modal width, header subtitle metadata, and per-format actions; Copy path / Show in Finder / Open externally / Close are unified across every format.
   - title: Smart PDF Attachments

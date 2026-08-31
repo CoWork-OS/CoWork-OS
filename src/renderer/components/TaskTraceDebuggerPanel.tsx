@@ -9,12 +9,7 @@ import {
 } from "react";
 import "./task-trace-debugger.css";
 import ReactMarkdown, { type Components } from "react-markdown";
-import {
-  Copy,
-  ExternalLink,
-  RefreshCw,
-  Search,
-} from "lucide-react";
+import { Copy, ExternalLink, RefreshCw, Search } from "lucide-react";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import type {
@@ -135,8 +130,7 @@ export function TaskTraceDebuggerPanel({
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>(
     initialWorkspaceId || ALL_WORKSPACES,
   );
-  const [statusFilter, setStatusFilter] =
-    useState<(typeof STATUS_OPTIONS)[number]>("all");
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_OPTIONS)[number]>("all");
   const [runSearch, setRunSearch] = useState("");
   const [actorFilter, setActorFilter] = useState<TaskTraceRowActor | "all">("all");
   const [rowSearch, setRowSearch] = useState("");
@@ -147,9 +141,7 @@ export function TaskTraceDebuggerPanel({
   const [listLoading, setListLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedRowIds, setSelectedRowIds] = useState<
-    Partial<Record<TaskTraceTab, string>>
-  >({});
+  const [selectedRowIds, setSelectedRowIds] = useState<Partial<Record<TaskTraceTab, string>>>({});
   const [copied, setCopied] = useState(false);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const reloadTimerRef = useRef<number | null>(null);
@@ -173,34 +165,37 @@ export function TaskTraceDebuggerPanel({
     }
   }, []);
 
-  const loadRuns = useCallback(async (nextSelectedTaskId?: string | null) => {
-    setListLoading(true);
-    setError(null);
-    try {
-      const request: ListTaskTraceRunsRequest = {
-        ...(selectedWorkspaceId !== ALL_WORKSPACES ? { workspaceId: selectedWorkspaceId } : {}),
-        ...(statusFilter !== "all" ? { status: statusFilter } : {}),
-        ...(deferredRunSearch.trim() ? { query: deferredRunSearch.trim() } : {}),
-        limit: 80,
-      };
-      const loadedRuns = await window.electronAPI.listTaskTraceRuns(request);
-      startTransition(() => {
-        setRuns(loadedRuns || []);
-        setSelectedTaskId((previous) => {
-          const desired = nextSelectedTaskId ?? previous;
-          if (desired && loadedRuns.some((item) => item.taskId === desired)) return desired;
-          return loadedRuns[0]?.taskId || null;
+  const loadRuns = useCallback(
+    async (nextSelectedTaskId?: string | null) => {
+      setListLoading(true);
+      setError(null);
+      try {
+        const request: ListTaskTraceRunsRequest = {
+          ...(selectedWorkspaceId !== ALL_WORKSPACES ? { workspaceId: selectedWorkspaceId } : {}),
+          ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+          ...(deferredRunSearch.trim() ? { query: deferredRunSearch.trim() } : {}),
+          limit: 80,
+        };
+        const loadedRuns = await window.electronAPI.listTaskTraceRuns(request);
+        startTransition(() => {
+          setRuns(loadedRuns || []);
+          setSelectedTaskId((previous) => {
+            const desired = nextSelectedTaskId ?? previous;
+            if (desired && loadedRuns.some((item) => item.taskId === desired)) return desired;
+            return loadedRuns[0]?.taskId || null;
+          });
         });
-      });
-    } catch (loadError) {
-      logger.error("Failed to load task trace runs:", loadError);
-      setError(loadError instanceof Error ? loadError.message : "Failed to load trace runs.");
-      setRuns([]);
-      setSelectedTaskId(null);
-    } finally {
-      setListLoading(false);
-    }
-  }, [deferredRunSearch, selectedWorkspaceId, statusFilter]);
+      } catch (loadError) {
+        logger.error("Failed to load task trace runs:", loadError);
+        setError(loadError instanceof Error ? loadError.message : "Failed to load trace runs.");
+        setRuns([]);
+        setSelectedTaskId(null);
+      } finally {
+        setListLoading(false);
+      }
+    },
+    [deferredRunSearch, selectedWorkspaceId, statusFilter],
+  );
 
   const loadDetail = useCallback(async (taskId: string | null) => {
     if (!taskId) {
@@ -345,7 +340,11 @@ export function TaskTraceDebuggerPanel({
           </select>
         </div>
         <div className="task-trace-debugger-toolbar-group">
-          <button type="button" className="task-trace-action-btn" onClick={() => void loadRuns(selectedTaskId)}>
+          <button
+            type="button"
+            className="task-trace-action-btn"
+            onClick={() => void loadRuns(selectedTaskId)}
+          >
             <RefreshCw size={14} />
             Refresh
           </button>
@@ -373,12 +372,16 @@ export function TaskTraceDebuggerPanel({
                     <span className={`task-trace-run-status status-${run.status}`}>
                       {run.status.replace(/_/g, " ")}
                     </span>
-                    <span className="task-trace-run-updated">{formatRelativeTime(run.updatedAt)}</span>
+                    <span className="task-trace-run-updated">
+                      {formatRelativeTime(run.updatedAt)}
+                    </span>
                   </div>
                   <div className="task-trace-run-title">{run.title}</div>
                   <div className="task-trace-run-meta">
                     <span>{shortenSessionId(run.sessionId)}</span>
-                    <span>{run.runCount} run{run.runCount === 1 ? "" : "s"}</span>
+                    <span>
+                      {run.runCount} run{run.runCount === 1 ? "" : "s"}
+                    </span>
                     {workspace && <span>{workspace.name}</span>}
                   </div>
                 </button>
@@ -429,7 +432,9 @@ export function TaskTraceDebuggerPanel({
                       className={`task-trace-run-chip ${run.taskId === detail.task.id ? "active" : ""}`}
                       onClick={() => setSelectedTaskId(run.taskId)}
                     >
-                      <span>{run.continuationWindow ? `Run ${run.continuationWindow}` : "Run"}</span>
+                      <span>
+                        {run.continuationWindow ? `Run ${run.continuationWindow}` : "Run"}
+                      </span>
                       {run.branchLabel && <span>{run.branchLabel}</span>}
                     </button>
                   ))}
@@ -442,7 +447,8 @@ export function TaskTraceDebuggerPanel({
                   <div className="task-trace-metric-chip">
                     <span>Tokens</span>
                     <strong>
-                      {formatMetricNumber(detail.metrics.inputTokens)} / {formatMetricNumber(detail.metrics.outputTokens)}
+                      {formatMetricNumber(detail.metrics.inputTokens)} /{" "}
+                      {formatMetricNumber(detail.metrics.outputTokens)}
                     </strong>
                   </div>
                   <div className="task-trace-metric-chip">
@@ -543,7 +549,9 @@ export function TaskTraceDebuggerPanel({
                           setSelectedRowIds((previous) => ({ ...previous, [activeTab]: row.id }))
                         }
                       >
-                        <div className={`task-trace-feed-label tone-${rowToneClass(row)}`}>{row.label}</div>
+                        <div className={`task-trace-feed-label tone-${rowToneClass(row)}`}>
+                          {row.label}
+                        </div>
                         <div className="task-trace-feed-body">
                           <div className="task-trace-feed-title">
                             <MarkdownInline text={row.title} />
@@ -595,7 +603,10 @@ export function TaskTraceDebuggerPanel({
                         {selectedRow.inspector.fields.length > 0 && (
                           <div className="task-trace-inspector-grid">
                             {selectedRow.inspector.fields.map((field) => (
-                              <div key={`${selectedRow.id}:${field.label}`} className="task-trace-inspector-field">
+                              <div
+                                key={`${selectedRow.id}:${field.label}`}
+                                className="task-trace-inspector-field"
+                              >
                                 <span>{field.label}</span>
                                 <strong>{field.value}</strong>
                               </div>
@@ -622,7 +633,10 @@ export function TaskTraceDebuggerPanel({
             </>
           ) : (
             <div className="task-trace-empty task-trace-empty-large">
-              {error || (listLoading ? "Loading trace debugger…" : "Select a task session to inspect its trace.")}
+              {error ||
+                (listLoading
+                  ? "Loading trace debugger…"
+                  : "Select a task session to inspect its trace.")}
             </div>
           )}
         </section>

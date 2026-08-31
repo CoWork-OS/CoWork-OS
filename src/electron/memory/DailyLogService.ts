@@ -49,8 +49,19 @@ export class DailyLogService {
     await fs.appendFile(absPath, lines.join("\n") + "\n", "utf8");
   }
 
-  static async readDay(workspacePath: string, dayIso: string): Promise<string | null> {
+  static async readDay(
+    workspacePath: string,
+    dayIso: string,
+    readGuard?: (candidatePath: string) => boolean,
+  ): Promise<string | null> {
     const absPath = this.resolveDailyLogPath(workspacePath, dayIso);
+    if (readGuard) {
+      try {
+        if (!readGuard(absPath)) return null;
+      } catch {
+        return null;
+      }
+    }
     try {
       return await fs.readFile(absPath, "utf8");
     } catch {
@@ -62,12 +73,31 @@ export class DailyLogService {
    * Returns the ISO day strings (YYYY-MM-DD) that have log files,
    * sorted descending (most recent first), limited to `maxDays`.
    */
-  static async listRecentDays(workspacePath: string, maxDays = 7): Promise<string[]> {
+  static async listRecentDays(
+    workspacePath: string,
+    maxDays = 7,
+    readGuard?: (candidatePath: string) => boolean,
+  ): Promise<string[]> {
     const dir = this.resolveLogDir(workspacePath);
+    if (readGuard) {
+      try {
+        if (!readGuard(dir)) return [];
+      } catch {
+        return [];
+      }
+    }
     try {
       const entries = await fs.readdir(dir);
       return entries
         .filter((f) => /^\d{4}-\d{2}-\d{2}\.md$/.test(f))
+        .filter((f) => {
+          if (!readGuard) return true;
+          try {
+            return readGuard(path.join(dir, f)) === true;
+          } catch {
+            return false;
+          }
+        })
         .map((f) => f.replace(".md", ""))
         .sort()
         .reverse()

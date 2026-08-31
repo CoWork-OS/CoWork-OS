@@ -56,15 +56,12 @@ describeWithSqlite("SymphonyService", () => {
     previousUserDataDir = process.env.COWORK_USER_DATA_DIR;
     process.env.COWORK_USER_DATA_DIR = tmpDir;
 
-    const [
-      { DatabaseManager },
-      { ControlPlaneCoreService },
-      { TaskRepository },
-    ] = await Promise.all([
-      import("../../database/schema"),
-      import("../ControlPlaneCoreService"),
-      import("../../database/repositories"),
-    ]);
+    const [{ DatabaseManager }, { ControlPlaneCoreService }, { TaskRepository }] =
+      await Promise.all([
+        import("../../database/schema"),
+        import("../ControlPlaneCoreService"),
+        import("../../database/repositories"),
+      ]);
 
     manager = new DatabaseManager();
     db = manager.getDatabase();

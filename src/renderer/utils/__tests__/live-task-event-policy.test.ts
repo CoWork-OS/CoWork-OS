@@ -25,9 +25,7 @@ describe("live task event policy", () => {
   });
 
   it("batches successful tool results", () => {
-    expect(classifyLiveTaskEvent(event("tool_result", { tool: "read_file" }))).toBe(
-      "batchable",
-    );
+    expect(classifyLiveTaskEvent(event("tool_result", { tool: "read_file" }))).toBe("batchable");
   });
 
   it("coalesces repeated provider and network failures", () => {

@@ -52,7 +52,8 @@ export async function startDebugModeSession(
     stepId: `debug_ingest:${taskId}`,
     status: "completed",
     actor: "system",
-    message: "Debug ingest endpoint (POST JSON or text). Instrument code to send logs here during reproduction.",
+    message:
+      "Debug ingest endpoint (POST JSON or text). Instrument code to send logs here during reproduction.",
     debugIngestUrl: true,
     evidenceRefs: [
       {

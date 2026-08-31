@@ -76,7 +76,7 @@ describe("SpawnedAgentSidebar", () => {
     expect(markup).toContain("Spawned from Parent task");
     expect(markup).toContain("Euclid");
     expect(markup).toContain("1 event");
-    expect(markup).not.toContain("role=\"tab\"");
+    expect(markup).not.toContain('role="tab"');
   });
 
   it("renders switchable tabs for multiple spawned agents", () => {
@@ -85,8 +85,8 @@ describe("SpawnedAgentSidebar", () => {
       selectedTaskId: "child-2",
     });
 
-    expect(markup).toContain("role=\"tablist\"");
-    expect(markup).toContain("aria-selected=\"true\"");
+    expect(markup).toContain('role="tablist"');
+    expect(markup).toContain('aria-selected="true"');
     expect(markup).toContain("Ada");
     expect(markup).toContain("Done");
   });

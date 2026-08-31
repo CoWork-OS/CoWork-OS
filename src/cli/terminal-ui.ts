@@ -87,7 +87,10 @@ export function renderWelcomeScreen(options: WelcomeScreenOptions = {}): string 
   return rows.join("\n");
 }
 
-export function renderPromptLine(width = process.stdout.columns ?? 100, color = shouldColor()): string {
+export function renderPromptLine(
+  width = process.stdout.columns ?? 100,
+  color = shouldColor(),
+): string {
   const marker = styled("❯", ANSI.bold + ACCENT, color);
   const input = `${marker} `;
   return styled(padVisible(input, width), ANSI.bgInput, color);

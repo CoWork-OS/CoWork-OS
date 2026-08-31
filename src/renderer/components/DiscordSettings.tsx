@@ -400,7 +400,8 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
           <div className="settings-section" style={{ marginTop: 24 }}>
             <h4>Supervisor Mode (Optional)</h4>
             <p className="settings-description">
-              Configure a dedicated Discord coordination lane where one CoWork agent supervises another.
+              Configure a dedicated Discord coordination lane where one CoWork agent supervises
+              another.
             </p>
 
             <label className="settings-checkbox">
@@ -446,7 +447,8 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
                     onChange={(e) => setPeerBotUserIds(e.target.value)}
                   />
                   <p className="settings-hint">
-                    These bot user IDs are allowed to participate in the strict coordination protocol.
+                    These bot user IDs are allowed to participate in the strict coordination
+                    protocol.
                   </p>
                 </div>
 
@@ -534,10 +536,7 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
             className="button-primary"
             onClick={handleAddChannel}
             disabled={
-              saving ||
-              !botToken.trim() ||
-              !applicationId.trim() ||
-              !!supervisorValidationError
+              saving || !botToken.trim() || !applicationId.trim() || !!supervisorValidationError
             }
           >
             {saving ? "Adding..." : "Add Discord Bot"}
@@ -683,7 +682,8 @@ export function DiscordSettings({ onStatusChange }: DiscordSettingsProps) {
       <div className="settings-section">
         <h4>Supervisor Mode</h4>
         <p className="settings-description">
-          Configure a strict coordination channel for worker and supervisor agents, plus the human escalation target.
+          Configure a strict coordination channel for worker and supervisor agents, plus the human
+          escalation target.
         </p>
 
         <label className="settings-checkbox">

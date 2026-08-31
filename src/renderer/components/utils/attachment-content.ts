@@ -42,10 +42,7 @@ const truncateTextForTaskPrompt = (value: string): string => {
   return `${value.slice(0, MAX_EXTRACTED_ATTACHMENT_CHARS)}\n\n[... excerpt truncated to first ${MAX_EXTRACTED_ATTACHMENT_CHARS} characters ...]`;
 };
 
-const truncatePdfExcerpt = (
-  value: string,
-  maxChars = PDF_ATTACHMENT_EXCERPT_MAX_CHARS,
-): string => {
+const truncatePdfExcerpt = (value: string, maxChars = PDF_ATTACHMENT_EXCERPT_MAX_CHARS): string => {
   const trimmed = value.trim();
   if (trimmed.length <= maxChars) return trimmed;
   return [
@@ -123,7 +120,10 @@ const buildPdfAttachmentContent = (params: {
 };
 
 const stripStrategyContextBlock = (value: string): string =>
-  value.replace(STRATEGY_CONTEXT_BLOCK_PATTERN, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  value
+    .replace(STRATEGY_CONTEXT_BLOCK_PATTERN, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 
 const stripPptxBubbleContent = (value: string): string => {
   const lines = value.split("\n");

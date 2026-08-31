@@ -6,6 +6,7 @@ import {
   SearchResult,
   SearchType,
 } from "./types";
+import { assertNetworkPolicyAllowed } from "../../security/network-policy";
 
 /**
  * SerpAPI provider - aggregates multiple search engines
@@ -50,6 +51,13 @@ export class SerpApiProvider implements SearchProvider {
       ...(query.dateRange && { tbs: this.mapDateRange(query.dateRange) }),
     });
 
+    assertNetworkPolicyAllowed({
+      url: this.baseUrl,
+      toolName: "web_search",
+      networkEnabled: query.networkEnabled,
+      accessNetworkMode: query.accessNetworkMode,
+      profileDomainRules: query.profileDomainRules,
+    });
     const response = await fetch(`${this.baseUrl}?${params}`);
 
     if (!response.ok) {

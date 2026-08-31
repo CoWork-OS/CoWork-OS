@@ -59,7 +59,11 @@ describe("ComputerUseHelperRuntime Windows helper integrity", () => {
 
     existsSyncMock.mockImplementation((target: unknown) => {
       const value = String(target);
-      return value.endsWith("resources/computer-use/bridge.ps1") || value === helperPath || value.endsWith("bridge.sha256");
+      return (
+        value.endsWith("resources/computer-use/bridge.ps1") ||
+        value === helperPath ||
+        value.endsWith("bridge.sha256")
+      );
     });
     readFileMock.mockImplementation(async (target: unknown) => {
       const value = String(target);

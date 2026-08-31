@@ -7,6 +7,7 @@ import {
   type XAIOAuthTokens,
   isXAIAccessTokenExpiring,
 } from "../llm/xai-oauth";
+import { evaluateNetworkPolicy } from "../../security/network-policy";
 
 const DEFAULT_X_SEARCH_MODEL = "grok-4.20-reasoning";
 const DEFAULT_X_SEARCH_TIMEOUT_SECONDS = 180;
@@ -43,7 +44,11 @@ function normalizeApiKey(value?: string): string | undefined {
 function normalizeHandles(handles: unknown, fieldName: string): string[] {
   if (!Array.isArray(handles)) return [];
   const cleaned = handles
-    .map((handle) => String(handle || "").trim().replace(/^@+/, ""))
+    .map((handle) =>
+      String(handle || "")
+        .trim()
+        .replace(/^@+/, ""),
+    )
     .filter(Boolean);
   if (cleaned.length > MAX_HANDLES) {
     throw new Error(`${fieldName} supports at most ${MAX_HANDLES} handles`);
@@ -193,9 +198,7 @@ export class XSearchTools {
 
   private getRetries(): number {
     const parsed = Number(process.env.COWORK_X_SEARCH_RETRIES);
-    return Number.isFinite(parsed)
-      ? Math.max(0, Math.round(parsed))
-      : DEFAULT_X_SEARCH_RETRIES;
+    return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : DEFAULT_X_SEARCH_RETRIES;
   }
 
   private async pause(attempt: number): Promise<void> {
@@ -206,6 +209,18 @@ export class XSearchTools {
     const query = String(input?.query || "").trim();
     if (!query) {
       return { success: false, provider: "xai", tool: "x_search", error: "query is required" };
+    }
+    if (
+      this.workspace.permissions?.network === false ||
+      this.workspace.permissions?.accessNetworkMode === "disabled"
+    ) {
+      return {
+        success: false,
+        provider: "xai",
+        tool: "x_search",
+        error: "Network access disabled by the active access profile.",
+        error_type: "NetworkPolicyError",
+      };
     }
 
     let credential: XSearchCredential;
@@ -218,6 +233,26 @@ export class XSearchTools {
         tool: "x_search",
         error: error?.message || "No xAI credentials available.",
         error_type: error?.name || "CredentialError",
+      };
+    }
+
+    const endpointUrl = `${credential.baseUrl}/responses`;
+    const endpointDecision = evaluateNetworkPolicy({
+      url: endpointUrl,
+      toolName: "x_search",
+      networkEnabled: this.workspace.permissions?.network,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions?.accessDomainRules,
+    });
+    this.daemon.logEvent(this.taskId, "network_policy_decision", endpointDecision);
+    if (endpointDecision.action === "deny") {
+      return {
+        success: false,
+        provider: "xai",
+        tool: "x_search",
+        error: `Network access denied for "${endpointUrl}": ${endpointDecision.reason}`,
+        error_type: "NetworkPolicyError",
+        policyReason: endpointDecision.reason,
       };
     }
 
@@ -259,7 +294,7 @@ export class XSearchTools {
 
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-          response = await fetch(`${credential.baseUrl}/responses`, {
+          response = await fetch(endpointUrl, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${credential.apiKey}`,

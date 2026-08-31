@@ -68,7 +68,8 @@ export async function runWorkspaceKitLintCli(argv = process.argv): Promise<numbe
     return 0;
   }
 
-  const rawWorkspace = getArgValue("--workspace") || getPositionalWorkspaceArg(argv) || process.cwd();
+  const rawWorkspace =
+    getArgValue("--workspace") || getPositionalWorkspaceArg(argv) || process.cwd();
   const workspacePath = path.resolve(rawWorkspace);
   const emitJson = hasArgFlag("--json");
   const strict = hasArgFlag("--strict");
@@ -77,8 +78,13 @@ export async function runWorkspaceKitLintCli(argv = process.argv): Promise<numbe
   const lintWarnings = status.lintWarningCount || 0;
   const lintErrors = status.lintErrorCount || 0;
   const missingEntries = status.files.filter((entry) => !entry.exists);
-  const filesWithIssues = status.files.filter((entry) => !entry.exists || (entry.issues?.length || 0) > 0);
-  const fail = !status.hasKitDir || lintErrors > 0 || (strict && (lintWarnings > 0 || missingEntries.length > 0));
+  const filesWithIssues = status.files.filter(
+    (entry) => !entry.exists || (entry.issues?.length || 0) > 0,
+  );
+  const fail =
+    !status.hasKitDir ||
+    lintErrors > 0 ||
+    (strict && (lintWarnings > 0 || missingEntries.length > 0));
 
   if (emitJson) {
     console.log(JSON.stringify(status, null, 2));
@@ -98,7 +104,9 @@ export async function runWorkspaceKitLintCli(argv = process.argv): Promise<numbe
   if (status.onboarding) {
     console.log(`bootstrapPresent: ${status.onboarding.bootstrapPresent ? "yes" : "no"}`);
     if (status.onboarding.bootstrapSeededAt) {
-      console.log(`bootstrapSeededAt: ${new Date(status.onboarding.bootstrapSeededAt).toISOString()}`);
+      console.log(
+        `bootstrapSeededAt: ${new Date(status.onboarding.bootstrapSeededAt).toISOString()}`,
+      );
     }
     if (status.onboarding.onboardingCompletedAt) {
       console.log(

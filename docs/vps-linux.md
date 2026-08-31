@@ -588,14 +588,26 @@ Also see: `docs/remote-access.md` (SSH + Tailscale Serve/Funnel).
 
 For private MCP tool access, use Secure MCP Tunnels instead of exposing connector or MCP host ports directly. The tunnel client holds an outbound WebSocket to a CoWork-operated relay, while callers authenticate with a separate caller token and relay-side policy. See `docs/secure-mcp-tunnels.md`.
 
-## Approvals Over Control Plane
+## Access Profiles and Approvals Over Control Plane
 
-In headless mode, approval prompts (shell commands, deletions, etc.) can be handled remotely over the Control Plane:
+In headless mode, the target daemon applies the configured [access profile](access-profiles.md)
+before exposing command tools or other actions. Approval prompts (command tools, deletions, external
+writes, and other profile-permitted actions) can be handled remotely over the Control Plane:
 
 - CoWork broadcasts `approval_requested` events including an `approvalId`
 - Respond via `approval.respond` with `{ approvalId, approved }`
 
 This enables running a VPS instance without requiring a local UI or messaging channels for approvals.
+
+For a task-specific profile, include it in the task's agent config:
+
+```bash
+node bin/coworkctl.js call task.create '{"workspaceId":"...","title":"Review","prompt":"Inspect the workspace","agentConfig":{"accessProfileId":"ask_for_approval"}}'
+```
+
+The profile is resolved on the VPS, not on the client. Missing or invalid profiles fail closed as
+read-only tasks; an approval response cannot turn them into unrestricted runs. Legacy
+`shellAccess`/permission-mode inputs remain compatibility paths only.
 
 ## Uninstall / Remove (VPS)
 

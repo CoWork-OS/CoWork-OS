@@ -115,7 +115,12 @@ describe("FileMutationVerifier", () => {
 
     const failed = verifier.getFailedMutations();
     expect(failed.map((m) => m.targetPath)).toEqual([
-      "a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt",
+      "a.txt",
+      "b.txt",
+      "c.txt",
+      "d.txt",
+      "e.txt",
+      "f.txt",
     ]);
   });
 });

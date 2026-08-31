@@ -23,6 +23,12 @@ export class GitTools {
    * Get git status of the working directory.
    */
   async gitStatus(): Promise<string> {
+    this.daemon.assertTaskWorkspaceFilesystemAccess(
+      this.taskId,
+      this.workspace.path,
+      "read",
+      "git workspace",
+    );
     const isRepo = await GitService.isGitRepo(this.workspace.path);
     if (!isRepo) {
       return "This workspace is not a git repository.";
@@ -39,6 +45,20 @@ export class GitTools {
    * Get diff of changes.
    */
   async gitDiff(input: { staged?: boolean; file?: string }): Promise<string> {
+    this.daemon.assertTaskWorkspaceFilesystemAccess(
+      this.taskId,
+      this.workspace.path,
+      "read",
+      "git workspace",
+    );
+    if (input.file) {
+      this.daemon.assertTaskWorkspaceFilesystemAccess(
+        this.taskId,
+        input.file,
+        "read",
+        "git diff path",
+      );
+    }
     const isRepo = await GitService.isGitRepo(this.workspace.path);
     if (!isRepo) {
       return "This workspace is not a git repository.";
@@ -66,6 +86,13 @@ export class GitTools {
     if (!task?.worktreeBranch) {
       return "git_commit requires an active worktree. Enable worktree isolation in Settings > Git to use this tool.";
     }
+
+    this.daemon.assertTaskWorkspaceFilesystemAccess(
+      this.taskId,
+      this.workspace.path,
+      "write",
+      "git worktree",
+    );
 
     const isRepo = await GitService.isGitRepo(this.workspace.path);
     if (!isRepo) {
@@ -103,6 +130,23 @@ export class GitTools {
     if (!info) {
       return "No worktree info found for this task.";
     }
+    const baseRepoPath = info.repoPath || this.daemon.getWorkspaceById(info.workspaceId)?.path;
+    if (!baseRepoPath) {
+      throw new Error("Cannot verify the base repository path for this worktree.");
+    }
+
+    this.daemon.assertTaskWorkspaceFilesystemAccess(
+      this.taskId,
+      info.worktreePath,
+      "write",
+      "git worktree",
+    );
+    this.daemon.assertTaskBaseWorkspaceFilesystemAccess(
+      this.taskId,
+      baseRepoPath,
+      "write",
+      "git base repository",
+    );
 
     this.daemon.logEvent(this.taskId, "worktree_merge_start", {
       branch: info.branchName,

@@ -29,6 +29,8 @@ export interface DocumentAnalysisChunk {
   content: string;
 }
 
+export type DocumentAnalysisReadGuard = (candidatePath: string) => boolean;
+
 function normalizeForMatch(value: string): string {
   return String(value || "")
     .normalize("NFKD")
@@ -42,7 +44,11 @@ function isOfficeLockFile(name: string): boolean {
   return name.startsWith("~$");
 }
 
-async function collectDocuments(root: string, maxDepth = 4): Promise<string[]> {
+async function collectDocuments(
+  root: string,
+  maxDepth = 4,
+  readGuard?: DocumentAnalysisReadGuard,
+): Promise<string[]> {
   const results: string[] = [];
   const visit = async (directory: string, depth: number): Promise<void> => {
     if (depth > maxDepth) return;
@@ -62,7 +68,7 @@ async function collectDocuments(root: string, maxDepth = 4): Promise<string[]> {
       }
       if (!entry.isFile()) continue;
       if (SUPPORTED_DOCUMENT_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
-        results.push(fullPath);
+        if (!readGuard || readGuard(fullPath)) results.push(fullPath);
       }
     }
   };
@@ -74,8 +80,9 @@ async function collectDocuments(root: string, maxDepth = 4): Promise<string[]> {
 export async function discoverDocumentForAnalysis(
   workspacePath: string,
   taskText: string,
+  readGuard?: DocumentAnalysisReadGuard,
 ): Promise<string | null> {
-  const candidates = await collectDocuments(workspacePath);
+  const candidates = await collectDocuments(workspacePath, 4, readGuard);
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
 
@@ -102,6 +109,7 @@ export async function discoverDocumentForAnalysis(
 export async function extractDocumentForAnalysis(
   workspacePath: string,
   documentPath: string,
+  readGuard?: DocumentAnalysisReadGuard,
 ): Promise<DocumentAnalysisSource> {
   const resolvedWorkspace = await fs.realpath(workspacePath);
   const resolvedDocument = await fs.realpath(documentPath);
@@ -110,6 +118,9 @@ export async function extractDocumentForAnalysis(
     !resolvedDocument.startsWith(`${resolvedWorkspace}${path.sep}`)
   ) {
     throw new Error("Document analysis source must be inside the workspace.");
+  }
+  if (readGuard && !readGuard(resolvedDocument)) {
+    throw new Error("Document analysis source is denied by the active access profile.");
   }
 
   const extension = path.extname(resolvedDocument).toLowerCase();

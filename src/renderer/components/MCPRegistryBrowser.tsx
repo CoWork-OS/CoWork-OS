@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 
 // Types (matching electron mcp types)
 type MCPInstallMethod = "npm" | "pip" | "binary" | "docker" | "manual";
-type MCPTransportType = "stdio" | "sse" | "websocket";
+type MCPTransportType = "stdio" | "sse" | "websocket" | "streamable-http";
 
 interface MCPRegistryEntry {
   id: string;
@@ -18,6 +18,7 @@ interface MCPRegistryEntry {
   packageName?: string;
   transport: MCPTransportType;
   defaultCommand?: string;
+  defaultUrl?: string;
   defaultArgs?: string[];
   defaultEnv?: Record<string, string>;
   tools: Array<{ name: string; description: string }>;

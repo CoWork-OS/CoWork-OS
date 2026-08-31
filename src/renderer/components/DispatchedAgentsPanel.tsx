@@ -10,6 +10,7 @@ import { replaceEmojisInChildren } from "../utils/emoji-replacer";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
 import { formatProviderErrorForDisplay } from "../../shared/provider-error-format";
+import { formatUserFacingCompletionSummary } from "../../shared/task-completion";
 
 interface AgentRoleInfo {
   id: string;
@@ -91,28 +92,14 @@ function isCompactStreamEventType(type: StreamEventType): boolean {
 
 function buildTaskCompletionStreamText(payload: TaskEvent["payload"]): string {
   const p = payload as Record<string, unknown> | undefined;
-  const resultSummary =
-    typeof p?.resultSummary === "string" ? p.resultSummary.trim() : "";
-  const semanticSummary =
-    typeof p?.semanticSummary === "string" ? p.semanticSummary.trim() : "";
-  const verificationVerdict =
-    typeof p?.verificationVerdict === "string" ? p.verificationVerdict.trim() : "";
-  const verificationReport =
-    typeof p?.verificationReport === "string" ? p.verificationReport.trim() : "";
-
-  const summary = [resultSummary, semanticSummary].filter((value) => value.length > 0).join("\n\n");
-  if (!verificationVerdict && !verificationReport) {
-    return summary || "Task completed successfully";
-  }
-
-  const verification = [
-    verificationVerdict ? `Verification: ${verificationVerdict}` : "",
-    verificationReport || "",
-  ]
-    .filter((value) => value.length > 0)
-    .join("\n");
-
-  return [summary, verification].filter((value) => value.length > 0).join("\n\n");
+  const resultSummary = typeof p?.resultSummary === "string" ? p.resultSummary.trim() : "";
+  return (
+    formatUserFacingCompletionSummary({
+      resultSummary,
+      verificationVerdict: p?.verificationVerdict,
+      verificationReport: p?.verificationReport,
+    }) || "Task completed successfully"
+  );
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event payloads are untyped
@@ -124,7 +111,8 @@ function formatEventContent(
   const p = payload as Record<string, unknown> | undefined;
   const step = p?.step as Record<string, unknown> | undefined;
   const plan = p?.plan as Record<string, unknown> | undefined;
-  const sanitize = (value: unknown): string => sanitizeToolCallTextFromAssistant(String(value || "")).text;
+  const sanitize = (value: unknown): string =>
+    sanitizeToolCallTextFromAssistant(String(value || "")).text;
   switch (type) {
     case "assistant_message":
       return sanitize(p?.message);
@@ -145,7 +133,11 @@ function formatEventContent(
     case "task_cancelled":
       return "Task was cancelled";
     case "error":
-      return sanitize(formatProviderErrorForDisplay(String(p?.message || p?.error || "An error occurred"), { task }));
+      return sanitize(
+        formatProviderErrorForDisplay(String(p?.message || p?.error || "An error occurred"), {
+          task,
+        }),
+      );
     default:
       return "";
   }

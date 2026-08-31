@@ -1,7 +1,7 @@
 import { DreamingRepository } from "./DreamingRepository";
 import { DreamingService } from "./DreamingService";
 import { MemoryPressureService } from "./MemoryPressureService";
-import { TranscriptStore } from "./TranscriptStore";
+import { TranscriptStore, type TranscriptReadGuard } from "./TranscriptStore";
 
 export interface MemoryNudgeResult {
   triggered: boolean;
@@ -18,6 +18,7 @@ export interface MemoryNudgeRequest {
   db: ConstructorParameters<typeof DreamingRepository>[0];
   minIntervalMs?: number;
   now?: number;
+  readGuard?: TranscriptReadGuard;
 }
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -47,10 +48,15 @@ export class MemoryNudgeService {
       return { triggered: false, reason: "cooldown" };
     }
 
-    const report = await MemoryPressureService.analyze(request.workspacePath);
+    const report = await MemoryPressureService.analyze(request.workspacePath, request.readGuard);
     const pressureInstructions = MemoryPressureService.buildCompactionInstructions(report);
     const recent = request.taskId
-      ? await TranscriptStore.loadRecentSpans(request.workspacePath, request.taskId, 12)
+      ? await TranscriptStore.loadRecentSpans(
+          request.workspacePath,
+          request.taskId,
+          12,
+          request.readGuard,
+        )
       : [];
     const recentText = recent
       .map((span) =>
@@ -75,6 +81,7 @@ export class MemoryNudgeService {
       instructions:
         pressureInstructions ||
         "Periodic memory nudge: review recent task evidence for durable preferences, corrections, open loops, recurring tasks, stale facts, or ignored-noise patterns. Create reviewable candidates only.",
+      readGuard: request.readGuard,
     });
 
     return {

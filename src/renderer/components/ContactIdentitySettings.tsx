@@ -22,8 +22,12 @@ function statCard(label: string, value: number) {
         background: "var(--color-bg-secondary)",
       }}
     >
-      <div style={{ fontSize: "1.3rem", fontWeight: 700, color: "var(--color-text-primary)" }}>{value}</div>
-      <div style={{ marginTop: "4px", fontSize: "0.76rem", color: "var(--color-text-muted)" }}>{label}</div>
+      <div style={{ fontSize: "1.3rem", fontWeight: 700, color: "var(--color-text-primary)" }}>
+        {value}
+      </div>
+      <div style={{ marginTop: "4px", fontSize: "0.76rem", color: "var(--color-text-muted)" }}>
+        {label}
+      </div>
     </div>
   );
 }
@@ -114,7 +118,11 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
     }
     setManualSearchLoading(true);
     try {
-      const results = await window.electronAPI.searchIdentityLinkTargets(workspaceId, query.trim(), 24);
+      const results = await window.electronAPI.searchIdentityLinkTargets(
+        workspaceId,
+        query.trim(),
+        24,
+      );
       setManualSearchResults(results);
     } finally {
       setManualSearchLoading(false);
@@ -154,8 +162,8 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
       <div className="more-channels-header">
         <h2>Identity Resolution</h2>
         <p className="settings-description">
-          Review mailbox-to-channel matches, search explicit handles, and see coverage across Slack, Teams,
-          WhatsApp, Signal, iMessage, and CRM-linked records.
+          Review mailbox-to-channel matches, search explicit handles, and see coverage across Slack,
+          Teams, WhatsApp, Signal, iMessage, and CRM-linked records.
         </p>
       </div>
 
@@ -168,15 +176,25 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
               padding: "16px",
               borderRadius: "14px",
               border: "1px solid var(--color-border-subtle)",
-              background: "linear-gradient(180deg, rgba(124,92,191,0.08) 0%, var(--color-bg-secondary) 100%)",
+              background:
+                "linear-gradient(180deg, rgba(124,92,191,0.08) 0%, var(--color-bg-secondary) 100%)",
             }}
           >
-            <div style={{ fontSize: "0.92rem", fontWeight: 700, color: "var(--color-text-primary)" }}>
+            <div
+              style={{ fontSize: "0.92rem", fontWeight: 700, color: "var(--color-text-primary)" }}
+            >
               Manual search and link
             </div>
-            <div style={{ marginTop: "4px", fontSize: "0.78rem", color: "var(--color-text-muted)", lineHeight: 1.5 }}>
-              Search for a channel user, Signal number, iMessage handle, or CRM record, then explicitly attach it to the
-              chosen identity.
+            <div
+              style={{
+                marginTop: "4px",
+                fontSize: "0.78rem",
+                color: "var(--color-text-muted)",
+                lineHeight: 1.5,
+              }}
+            >
+              Search for a channel user, Signal number, iMessage handle, or CRM record, then
+              explicitly attach it to the chosen identity.
             </div>
             <div
               style={{
@@ -248,7 +266,9 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
             >
               <select
                 value={manualHandleType}
-                onChange={(event) => setManualHandleType(event.target.value as ContactIdentityHandleType)}
+                onChange={(event) =>
+                  setManualHandleType(event.target.value as ContactIdentityHandleType)
+                }
                 style={{
                   width: "100%",
                   boxSizing: "border-box",
@@ -356,18 +376,46 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: "0.84rem", fontWeight: 600, color: "var(--color-text-primary)" }}>
+                        <div
+                          style={{
+                            fontSize: "0.84rem",
+                            fontWeight: 600,
+                            color: "var(--color-text-primary)",
+                          }}
+                        >
                           {result.displayValue}
                         </div>
-                        <div style={{ marginTop: "4px", fontSize: "0.74rem", color: "var(--color-text-muted)" }}>
-                          {result.sourceLabel} · {result.handleType} · {Math.round(result.confidence * 100)}% match
+                        <div
+                          style={{
+                            marginTop: "4px",
+                            fontSize: "0.74rem",
+                            color: "var(--color-text-muted)",
+                          }}
+                        >
+                          {result.sourceLabel} · {result.handleType} ·{" "}
+                          {Math.round(result.confidence * 100)}% match
                         </div>
-                        <div style={{ marginTop: "4px", fontSize: "0.72rem", color: "var(--color-text-secondary)" }}>
+                        <div
+                          style={{
+                            marginTop: "4px",
+                            fontSize: "0.72rem",
+                            color: "var(--color-text-secondary)",
+                          }}
+                        >
                           {result.normalizedValue}
-                          {result.linkedIdentityName ? ` · linked to ${result.linkedIdentityName}` : ""}
+                          {result.linkedIdentityName
+                            ? ` · linked to ${result.linkedIdentityName}`
+                            : ""}
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          flexWrap: "wrap",
+                          justifyContent: "flex-end",
+                        }}
+                      >
                         <button
                           type="button"
                           style={actionButtonStyle()}
@@ -383,7 +431,9 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                           type="button"
                           style={actionButtonStyle()}
                           onClick={() => void handleManualLink(result)}
-                          disabled={manualBusyKey === result.id || !manualTargetIdentityId || !workspaceId}
+                          disabled={
+                            manualBusyKey === result.id || !manualTargetIdentityId || !workspaceId
+                          }
                         >
                           {manualBusyKey === result.id ? "Linking..." : "Link"}
                         </button>
@@ -426,17 +476,31 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                   background: "var(--color-bg-secondary)",
                 }}
               >
-                <div style={{ fontSize: "0.92rem", fontWeight: 700, color: "var(--color-text-primary)" }}>
+                <div
+                  style={{
+                    fontSize: "0.92rem",
+                    fontWeight: 700,
+                    color: "var(--color-text-primary)",
+                  }}
+                >
                   {section.title}
                 </div>
                 {items.length === 0 ? (
-                  <div style={{ marginTop: "10px", fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
+                  <div
+                    style={{
+                      marginTop: "10px",
+                      fontSize: "0.78rem",
+                      color: "var(--color-text-muted)",
+                    }}
+                  >
                     {section.empty}
                   </div>
                 ) : (
                   <div style={{ display: "grid", gap: "10px", marginTop: "12px" }}>
                     {items.map((candidate) => {
-                      const identity = identities.find((item) => item.id === candidate.contactIdentityId);
+                      const identity = identities.find(
+                        (item) => item.id === candidate.contactIdentityId,
+                      );
                       const linkedHandle = identity?.handles.find(
                         (handle) =>
                           handle.handleType === candidate.handleType &&
@@ -461,17 +525,43 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                             }}
                           >
                             <div style={{ minWidth: 0, flex: 1 }}>
-                              <div style={{ fontSize: "0.84rem", fontWeight: 600, color: "var(--color-text-primary)" }}>
-                                {identity?.displayName || "Unknown identity"} → {candidate.sourceLabel}
+                              <div
+                                style={{
+                                  fontSize: "0.84rem",
+                                  fontWeight: 600,
+                                  color: "var(--color-text-primary)",
+                                }}
+                              >
+                                {identity?.displayName || "Unknown identity"} →{" "}
+                                {candidate.sourceLabel}
                               </div>
-                              <div style={{ marginTop: "4px", fontSize: "0.76rem", color: "var(--color-text-secondary)" }}>
+                              <div
+                                style={{
+                                  marginTop: "4px",
+                                  fontSize: "0.76rem",
+                                  color: "var(--color-text-secondary)",
+                                }}
+                              >
                                 {candidate.displayValue}
                               </div>
-                              <div style={{ marginTop: "4px", fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                                {Math.round(candidate.confidence * 100)}% confidence · {candidate.reasonCodes.join(" · ")}
+                              <div
+                                style={{
+                                  marginTop: "4px",
+                                  fontSize: "0.72rem",
+                                  color: "var(--color-text-muted)",
+                                }}
+                              >
+                                {Math.round(candidate.confidence * 100)}% confidence ·{" "}
+                                {candidate.reasonCodes.join(" · ")}
                               </div>
                               {identity?.handles?.length ? (
-                                <div style={{ marginTop: "6px", fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
+                                <div
+                                  style={{
+                                    marginTop: "6px",
+                                    fontSize: "0.72rem",
+                                    color: "var(--color-text-muted)",
+                                  }}
+                                >
                                   Linked:{" "}
                                   {identity.handles
                                     .map((handle) => handle.channelType || handle.handleType)
@@ -479,7 +569,14 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                                 </div>
                               ) : null}
                             </div>
-                            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "6px",
+                                flexWrap: "wrap",
+                                justifyContent: "flex-end",
+                              }}
+                            >
                               {section.key === "suggested" && (
                                 <>
                                   <button
@@ -506,19 +603,20 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                                   </button>
                                 </>
                               )}
-                              {(section.key === "confirmed" || section.key === "auto_linked") && linkedHandle && (
-                                <button
-                                  style={actionButtonStyle("danger")}
-                                  onClick={() =>
-                                    void runAction(candidate.id, () =>
-                                      window.electronAPI.unlinkIdentityHandle(linkedHandle.id),
-                                    )
-                                  }
-                                  disabled={busyId === candidate.id}
-                                >
-                                  Unlink
-                                </button>
-                              )}
+                              {(section.key === "confirmed" || section.key === "auto_linked") &&
+                                linkedHandle && (
+                                  <button
+                                    style={actionButtonStyle("danger")}
+                                    onClick={() =>
+                                      void runAction(candidate.id, () =>
+                                        window.electronAPI.unlinkIdentityHandle(linkedHandle.id),
+                                      )
+                                    }
+                                    disabled={busyId === candidate.id}
+                                  >
+                                    Unlink
+                                  </button>
+                                )}
                             </div>
                           </div>
                         </div>

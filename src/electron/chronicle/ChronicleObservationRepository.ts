@@ -42,7 +42,9 @@ async function ensureWorkspaceDirs(workspacePath: string): Promise<{
   return { observationsDir, assetsDir };
 }
 
-async function readObservationFile(filePath: string): Promise<ChroniclePersistedObservation | null> {
+async function readObservationFile(
+  filePath: string,
+): Promise<ChroniclePersistedObservation | null> {
   try {
     const raw = await fs.readFile(filePath, "utf8");
     return JSON.parse(raw) as ChroniclePersistedObservation;

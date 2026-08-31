@@ -127,7 +127,10 @@ export function TaskBoard({ workspaceId, onTaskSelect }: TaskBoardProps) {
       const effectiveType = getEffectiveTaskEventType(event as Any);
       if (effectiveType === "created" && event.task?.workspaceId === workspaceId) {
         setTasks((prev) => [event.task, ...prev]);
-      } else if (effectiveType === "task_created" && event.payload?.task?.workspaceId === workspaceId) {
+      } else if (
+        effectiveType === "task_created" &&
+        event.payload?.task?.workspaceId === workspaceId
+      ) {
         const incoming = event.payload.task as Task;
         setTasks((prev) => (prev.some((t) => t.id === incoming.id) ? prev : [incoming, ...prev]));
       } else if (effectiveType === "updated" && event.task) {

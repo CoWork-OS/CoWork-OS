@@ -165,10 +165,12 @@ export class PiProvider implements LLMProvider {
   /**
    * Get available Pi providers from pi-ai
    */
-  static async getAvailableProviders(): Promise<Array<{
-    id: string;
-    name: string;
-  }>> {
+  static async getAvailableProviders(): Promise<
+    Array<{
+      id: string;
+      name: string;
+    }>
+  > {
     try {
       const { getProviders } = await loadPiAiModule();
       const providers = getProviders();

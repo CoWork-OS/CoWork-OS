@@ -34,7 +34,11 @@ describe("StepFeed UX snapshots", () => {
         showConnectorBelow: true,
         expandable: true,
         expanded: false,
-        details: React.createElement("div", { className: "timeline-step-details" }, "hidden details"),
+        details: React.createElement(
+          "div",
+          { className: "timeline-step-details" },
+          "hidden details",
+        ),
       }),
     );
 
@@ -46,7 +50,11 @@ describe("StepFeed UX snapshots", () => {
     const details = React.createElement(
       "div",
       { className: "timeline-step-details" },
-      React.createElement("pre", { key: "cmd", className: "timeline-command-snippet" }, "cd /workspace && node contract_training_v2.js"),
+      React.createElement(
+        "pre",
+        { key: "cmd", className: "timeline-command-snippet" },
+        "cd /workspace && node contract_training_v2.js",
+      ),
       React.createElement(
         "div",
         { key: "evidence", className: "timeline-evidence-chips" },
@@ -81,7 +89,11 @@ describe("StepFeed UX snapshots", () => {
     const details = React.createElement(
       "div",
       { className: "timeline-step-details" },
-      React.createElement("p", null, "Visual QA Report — Commercial Contract Negotiation Training Deck"),
+      React.createElement(
+        "p",
+        null,
+        "Visual QA Report — Commercial Contract Negotiation Training Deck",
+      ),
       React.createElement("p", null, "41 issues found — 8 High, 19 Medium, 14 Low"),
       React.createElement("p", null, "Slide 05 — Content cut off at slide bottom edge"),
     );
@@ -123,7 +135,11 @@ describe("StepFeed UX snapshots", () => {
       details: React.createElement(
         "div",
         { className: "timeline-step-details" },
-        React.createElement("a", { href: "/workspace/negotiation_cheat_sheet.pdf" }, "/workspace/negotiation_cheat_sheet.pdf"),
+        React.createElement(
+          "a",
+          { href: "/workspace/negotiation_cheat_sheet.pdf" },
+          "/workspace/negotiation_cheat_sheet.pdf",
+        ),
       ),
     });
 
@@ -131,12 +147,14 @@ describe("StepFeed UX snapshots", () => {
       "section",
       { className: "final-delivery-summary" },
       React.createElement("h3", null, "Deliverables"),
-      React.createElement("ul", null, React.createElement("li", null, "negotiation_cheat_sheet.pdf")),
+      React.createElement(
+        "ul",
+        null,
+        React.createElement("li", null, "negotiation_cheat_sheet.pdf"),
+      ),
     );
 
-    const markup = render(
-      React.createElement("div", null, artifactCard, finalMessage),
-    );
+    const markup = render(React.createElement("div", null, artifactCard, finalMessage));
 
     expect(markup).toContain("Sharing negotiation_cheat_sheet.pdf");
     expect(markup).toContain("negotiation_cheat_sheet.pdf");

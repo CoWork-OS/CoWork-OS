@@ -3,6 +3,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // Mock electron
 vi.mock("electron", () => ({
@@ -115,6 +118,42 @@ describe("EditTools", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("not found");
+    });
+
+    it("should reject a file denied by the active access profile", async () => {
+      const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-profile-"));
+      const deniedPath = path.join(workspacePath, "secret.txt");
+      fs.writeFileSync(deniedPath, "old\n");
+
+      try {
+        const tools = new EditTools(
+          {
+            ...mockWorkspace,
+            path: workspacePath,
+            permissions: {
+              read: true,
+              write: true,
+              delete: true,
+              network: false,
+              shell: false,
+              accessFilesystemRules: [{ path: deniedPath, access: "deny" }],
+            },
+          } as Workspace,
+          mockDaemon as Any,
+          "test-task-id",
+        );
+        const result = await tools.editFile({
+          file_path: "secret.txt",
+          old_string: "old",
+          new_string: "new",
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("denied by the active access profile");
+        expect(fs.readFileSync(deniedPath, "utf8")).toBe("old\n");
+      } finally {
+        fs.rmSync(workspacePath, { recursive: true, force: true });
+      }
     });
   });
 

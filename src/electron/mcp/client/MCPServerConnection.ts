@@ -23,11 +23,13 @@ import {
 import { StdioTransport } from "./transports/StdioTransport";
 import { SSETransport } from "./transports/SSETransport";
 import { WebSocketTransport } from "./transports/WebSocketTransport";
+import { StreamableHttpTransport } from "./transports/StreamableHttpTransport";
 import { createLogger } from "../../utils/logger";
 import { isLikelyIntegrationAuthError } from "../../notifications/integration-auth";
 
 // MCP Protocol version we support
 const PROTOCOL_VERSION = "2024-11-05";
+const STREAMABLE_HTTP_PROTOCOL_VERSION = "2025-06-18";
 
 // Client info to send during initialize
 const CLIENT_INFO = {
@@ -252,7 +254,9 @@ export class MCPServerConnection extends EventEmitter {
         .map((uri) => String(uri || "").trim())
         .filter(Boolean),
     );
-    const toUnsubscribe = Array.from(this.subscribedResourceUris).filter((uri) => !nextUris.has(uri));
+    const toUnsubscribe = Array.from(this.subscribedResourceUris).filter(
+      (uri) => !nextUris.has(uri),
+    );
     const toSubscribe = Array.from(nextUris).filter((uri) => !this.subscribedResourceUris.has(uri));
     for (const uri of toUnsubscribe) {
       await this.unsubscribeResource(uri);
@@ -286,6 +290,11 @@ export class MCPServerConnection extends EventEmitter {
           throw new Error("URL is required for WebSocket transport");
         }
         return new WebSocketTransport(this.config);
+      case "streamable-http":
+        if (!this.config.url) {
+          throw new Error("URL is required for Streamable HTTP transport");
+        }
+        return new StreamableHttpTransport(this.config);
       default:
         throw new Error(`Unknown transport type: ${this.config.transport}`);
     }
@@ -326,7 +335,10 @@ export class MCPServerConnection extends EventEmitter {
     logger.debug(`Initializing connection to ${this.config.name}`);
 
     const result = await this.transport!.sendRequest(MCP_METHODS.INITIALIZE, {
-      protocolVersion: PROTOCOL_VERSION,
+      protocolVersion:
+        this.config.transport === "streamable-http"
+          ? STREAMABLE_HTTP_PROTOCOL_VERSION
+          : PROTOCOL_VERSION,
       capabilities: {
         // Declare capabilities we actually support
         // Note: roots capability removed - we don't respond to roots/list requests

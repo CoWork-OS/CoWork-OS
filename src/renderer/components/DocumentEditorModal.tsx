@@ -207,7 +207,9 @@ export function DocumentEditorModal({
       <div className="document-editor-modal" onClick={(event) => event.stopPropagation()}>
         <div className="document-editor-header">
           <div>
-            <div className="document-editor-title">{session?.currentFileName || "Document editor"}</div>
+            <div className="document-editor-title">
+              {session?.currentFileName || "Document editor"}
+            </div>
             <div className="document-editor-subtitle">
               {session?.fileType === "pdf"
                 ? "Drag a region on the page and describe the change."
@@ -217,7 +219,9 @@ export function DocumentEditorModal({
           <div className="document-editor-header-actions">
             <button
               className="file-viewer-action-btn"
-              onClick={() => void window.electronAPI.openFile(session?.currentPath || filePath, workspacePath)}
+              onClick={() =>
+                void window.electronAPI.openFile(session?.currentPath || filePath, workspacePath)
+              }
               title="Open in external app"
             >
               Open
@@ -348,7 +352,9 @@ export function DocumentEditorModal({
                 <>
                   <div className="document-editor-task-header">
                     <span className="document-editor-task-name">{activeTask.title}</span>
-                    <span className={`document-editor-task-badge document-editor-task-badge--${activeTask.status}`}>
+                    <span
+                      className={`document-editor-task-badge document-editor-task-badge--${activeTask.status}`}
+                    >
                       {(activeTask.status === "executing" || activeTask.status === "planning") && (
                         <span className="document-editor-spinner" />
                       )}

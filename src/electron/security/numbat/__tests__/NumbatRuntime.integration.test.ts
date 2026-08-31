@@ -26,13 +26,7 @@ describe.skipIf(!runtimeAvailable)("pinned Numbat runtime", () => {
     toolName: "run_command",
     toolInput: { command: "rm -rf /" },
   });
-  const rulesDir = path.join(
-    process.cwd(),
-    "build",
-    "numbat",
-    "rules",
-    "cowork-recommended",
-  );
+  const rulesDir = path.join(process.cwd(), "build", "numbat", "rules", "cowork-recommended");
 
   it("observes a matching action without overriding CoWork in monitor mode", async () => {
     const response = await invokeNumbatHook({

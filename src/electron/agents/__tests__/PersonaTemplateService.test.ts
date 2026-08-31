@@ -30,11 +30,12 @@ describeWithSqlite("PersonaTemplateService company assignment", () => {
     previousUserDataDir = process.env.COWORK_USER_DATA_DIR;
     process.env.COWORK_USER_DATA_DIR = tmpDir;
 
-    const [{ DatabaseManager }, { AgentRoleRepository }, { ControlPlaneCoreService }] = await Promise.all([
-      import("../../database/schema"),
-      import("../AgentRoleRepository"),
-      import("../../control-plane/ControlPlaneCoreService"),
-    ]);
+    const [{ DatabaseManager }, { AgentRoleRepository }, { ControlPlaneCoreService }] =
+      await Promise.all([
+        import("../../database/schema"),
+        import("../AgentRoleRepository"),
+        import("../../control-plane/ControlPlaneCoreService"),
+      ]);
 
     manager = new DatabaseManager();
     const db = manager.getDatabase();

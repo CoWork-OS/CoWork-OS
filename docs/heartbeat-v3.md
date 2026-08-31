@@ -170,6 +170,12 @@ When Pulse or workflow reflection exposes memory drift, correction learning, or 
 
 Dreaming should not consume dispatch budget, create heartbeat tasks, or turn general activity signals into memory writes. Its output remains reviewable memory candidates. See [Dreaming](dreaming.md).
 
+Before a memory-specific Dreaming run, Heartbeat resolves the workspace's [access profile](access-profiles.md)
+and builds a read guard for file-backed workspace-kit and transcript evidence. Profile resolution
+errors, unavailable profiles, and denied candidate paths fail closed: pressure analysis and Dreaming
+are skipped rather than performed with a broader filesystem boundary. Candidate review/application
+still follows the normal memory-write governance path.
+
 ## Default Configuration
 
 Automation-profile-backed operators now use the v3 decision model by default. The main config fields are:

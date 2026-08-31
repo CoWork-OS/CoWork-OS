@@ -30,9 +30,20 @@ const STDERR_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: string }>
   { pattern: /\bAKIA[0-9A-Z]{16}\b/g, replacement: "[REDACTED_AWS_KEY]" },
   { pattern: /\bgh[pousr]_[A-Za-z0-9_]{16,}\b/g, replacement: "[REDACTED_GITHUB_TOKEN]" },
   { pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, replacement: "Bearer [REDACTED]" },
-  { pattern: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, replacement: "[REDACTED_JWT]" },
-  { pattern: /("(?:access_token|refresh_token|api_key|apiKey|secret_key|client_secret|password|token)":\s*")([^"]{8,})(")/gi, replacement: "$1[REDACTED]$3" },
-  { pattern: /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z]+)? PRIVATE KEY-----/g, replacement: "[REDACTED_PRIVATE_KEY]" },
+  {
+    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+    replacement: "[REDACTED_JWT]",
+  },
+  {
+    pattern:
+      /("(?:access_token|refresh_token|api_key|apiKey|secret_key|client_secret|password|token)":\s*")([^"]{8,})(")/gi,
+    replacement: "$1[REDACTED]$3",
+  },
+  {
+    pattern:
+      /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z]+)? PRIVATE KEY-----/g,
+    replacement: "[REDACTED_PRIVATE_KEY]",
+  },
 ];
 
 function redactStderr(text: string): string {
@@ -50,7 +61,8 @@ interface NormalizedStdioSpawnCommand {
 }
 
 const WINDOWS_CMD_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn", "yarnpkg"]);
-const LOCAL_CONNECTOR_SCRIPT_PATH_REGEX = /(?:^|[\\/])connectors[\\/][^\\/]+[\\/]dist[\\/]index\.js$/i;
+const LOCAL_CONNECTOR_SCRIPT_PATH_REGEX =
+  /(?:^|[\\/])connectors[\\/][^\\/]+[\\/]dist[\\/]index\.js$/i;
 
 export function splitStdioCommandLine(input: string): string[] {
   const tokens: string[] = [];
@@ -468,7 +480,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
         try {
           const message = JSON.parse(line);
           this.handleMessage(message);
-        } catch  {
+        } catch {
           logger.warn(`Failed to parse message: ${line}`);
         }
       }

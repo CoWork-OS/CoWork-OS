@@ -52,12 +52,17 @@ export function buildBestKnownOutcome(params: {
   failureClass?: StepFailureClass;
   confidence?: "low" | "medium" | "high";
 }): TaskBestKnownOutcome | undefined {
-  const trimmedSummary = typeof params.resultSummary === "string" ? params.resultSummary.trim() : "";
+  const trimmedSummary =
+    typeof params.resultSummary === "string" ? params.resultSummary.trim() : "";
   const completedStepIds = Array.isArray(params.completedStepIds)
-    ? Array.from(new Set(params.completedStepIds.map((id) => String(id || "").trim()).filter(Boolean)))
+    ? Array.from(
+        new Set(params.completedStepIds.map((id) => String(id || "").trim()).filter(Boolean)),
+      )
     : [];
   const blockingIssues = Array.isArray(params.blockingIssues)
-    ? Array.from(new Set(params.blockingIssues.map((issue) => String(issue || "").trim()).filter(Boolean)))
+    ? Array.from(
+        new Set(params.blockingIssues.map((issue) => String(issue || "").trim()).filter(Boolean)),
+      )
     : [];
   if (!trimmedSummary && !hasTaskOutputs(params.outputSummary) && completedStepIds.length === 0) {
     return undefined;
@@ -89,7 +94,11 @@ export function mergeBestKnownOutcome(
   return {
     capturedAt: Math.max(previous.capturedAt || 0, incoming.capturedAt || 0),
     ...(preferredSummary ? { resultSummary: preferredSummary } : {}),
-    outputSummary: incomingHasOutputs ? incoming.outputSummary : previousHasOutputs ? previous.outputSummary : incoming.outputSummary || previous.outputSummary,
+    outputSummary: incomingHasOutputs
+      ? incoming.outputSummary
+      : previousHasOutputs
+        ? previous.outputSummary
+        : incoming.outputSummary || previous.outputSummary,
     completedStepIds: Array.from(
       new Set([...(previous.completedStepIds || []), ...(incoming.completedStepIds || [])]),
     ),
@@ -189,6 +198,8 @@ export function decideTaskOutcome(input: OutcomeDecisionInput): OutcomeDecision 
   };
 }
 
-export function getTaskBestKnownOutcome(task?: Pick<Task, "bestKnownOutcome"> | null): TaskBestKnownOutcome | undefined {
+export function getTaskBestKnownOutcome(
+  task?: Pick<Task, "bestKnownOutcome"> | null,
+): TaskBestKnownOutcome | undefined {
   return task?.bestKnownOutcome;
 }

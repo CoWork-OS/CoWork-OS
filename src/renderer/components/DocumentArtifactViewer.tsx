@@ -86,11 +86,7 @@ function getFileName(filePath: string): string {
 
 function getDocumentViewerIconLabel(filePath: string, fileType?: ViewerData["fileType"]): string {
   const lowerPath = filePath.toLowerCase();
-  if (
-    fileType === "markdown" ||
-    lowerPath.endsWith(".md") ||
-    lowerPath.endsWith(".markdown")
-  ) {
+  if (fileType === "markdown" || lowerPath.endsWith(".md") || lowerPath.endsWith(".markdown")) {
     return "M";
   }
   return "W";
@@ -105,9 +101,7 @@ function formatAttachmentSize(size: number): string {
 }
 
 function isImageAttachment(attachment: PendingDocumentAttachment): boolean {
-  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(
-    attachment.mimeType || "",
-  );
+  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(attachment.mimeType || "");
 }
 
 function buildFallbackPreview(data: ViewerData): DocumentPreview {
@@ -135,12 +129,13 @@ function buildFallbackPreview(data: ViewerData): DocumentPreview {
 function textToHtml(text: string): string {
   return text
     .split(/\n{2,}/)
-    .map((paragraph) =>
-      `<p>${paragraph
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\n/g, "<br>")}</p>`,
+    .map(
+      (paragraph) =>
+        `<p>${paragraph
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\n/g, "<br>")}</p>`,
     )
     .join("");
 }
@@ -170,9 +165,7 @@ function renderEditableDocumentHtml(blocks: EditableDocumentBlock[] | undefined)
       if (block.type === "table") {
         const rows = block.rows || [];
         return `<table ${attrs}>${rows
-          .map((row) =>
-            `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`,
-          )
+          .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`)
           .join("")}</table>`;
       }
       if (block.type === "heading") {
@@ -253,9 +246,14 @@ function blockFromElement(element: HTMLElement): EditableDocumentBlock[] {
       },
     ];
   }
-  if (tagName === "DIV" && Array.from(element.children).some((child) =>
-    ["P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "TABLE"].includes(child.tagName.toUpperCase())
-  )) {
+  if (
+    tagName === "DIV" &&
+    Array.from(element.children).some((child) =>
+      ["P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "TABLE"].includes(
+        child.tagName.toUpperCase(),
+      ),
+    )
+  ) {
     return Array.from(element.children)
       .filter((child): child is HTMLElement => child instanceof HTMLElement)
       .flatMap(blockFromElement);
@@ -319,20 +317,21 @@ export function DocumentArtifactViewer({
   const [editorInitializedKey, setEditorInitializedKey] = useState("");
   const [fullscreenMessage, setFullscreenMessage] = useState("");
   const [fullscreenSending, setFullscreenSending] = useState(false);
-  const [fullscreenAttachments, setFullscreenAttachments] = useState<
-    PendingDocumentAttachment[]
-  >([]);
+  const [fullscreenAttachments, setFullscreenAttachments] = useState<PendingDocumentAttachment[]>(
+    [],
+  );
   const [attachmentError, setAttachmentError] = useState("");
   const [voiceNotice, setVoiceNotice] = useState("");
   const [turnContextExpanded, setTurnContextExpanded] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const fileName = fileData?.fileName || getFileName(filePath);
-  const fullscreenLabel = mode === "fullscreen" ? "Exit full screen" : "Open document in full screen";
+  const fullscreenLabel =
+    mode === "fullscreen" ? "Exit full screen" : "Open document in full screen";
   const voiceInput = useVoiceInput({
     onTranscript: (text) => {
       setVoiceNotice("");
-      setFullscreenMessage((current) => current ? `${current} ${text}` : text);
+      setFullscreenMessage((current) => (current ? `${current} ${text}` : text));
     },
     onError: (message) => setVoiceNotice(message),
     onNotConfigured: () => {
@@ -482,46 +481,46 @@ export function DocumentArtifactViewer({
   }, [workspacePath]);
 
   const removeAttachment = useCallback((id: string) => {
-    setFullscreenAttachments((current) =>
-      current.filter((attachment) => attachment.id !== id),
-    );
+    setFullscreenAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }, []);
 
-  const buildMessageWithAttachments = useCallback(async (message: string) => {
-    if (fullscreenAttachments.length === 0) {
-      return { message, images: undefined as ImageAttachment[] | undefined };
-    }
+  const buildMessageWithAttachments = useCallback(
+    async (message: string) => {
+      if (fullscreenAttachments.length === 0) {
+        return { message, images: undefined as ImageAttachment[] | undefined };
+      }
 
-    const importedAttachments = workspaceId
-      ? await window.electronAPI.importFilesToWorkspace({
-          workspaceId,
-          files: fullscreenAttachments.map((attachment) => attachment.path),
-        })
-      : [];
-    const attachmentLines =
-      importedAttachments.length > 0
-        ? importedAttachments.map(
-            (attachment) => `- ${attachment.fileName} (${attachment.relativePath})`,
-          )
-        : fullscreenAttachments.map((attachment) => `- ${attachment.name} (${attachment.path})`);
-    const base = message || "Please review the attached files.";
-    const images = fullscreenAttachments
-      .filter(isImageAttachment)
-      .map((attachment) => ({
+      const importedAttachments = workspaceId
+        ? await window.electronAPI.importFilesToWorkspace({
+            workspaceId,
+            files: fullscreenAttachments.map((attachment) => attachment.path),
+          })
+        : [];
+      const attachmentLines =
+        importedAttachments.length > 0
+          ? importedAttachments.map(
+              (attachment) => `- ${attachment.fileName} (${attachment.relativePath})`,
+            )
+          : fullscreenAttachments.map((attachment) => `- ${attachment.name} (${attachment.path})`);
+      const base = message || "Please review the attached files.";
+      const images = fullscreenAttachments.filter(isImageAttachment).map((attachment) => ({
         filePath: attachment.path,
         mimeType: attachment.mimeType as ImageAttachment["mimeType"],
         filename: attachment.name,
         sizeBytes: attachment.size,
       }));
-    return {
-      message: `${base}\n\nAttached files:\n${attachmentLines.join("\n")}`,
-      images: images.length > 0 ? images : undefined,
-    };
-  }, [fullscreenAttachments, workspaceId]);
+      return {
+        message: `${base}\n\nAttached files:\n${attachmentLines.join("\n")}`,
+        images: images.length > 0 ? images : undefined,
+      };
+    },
+    [fullscreenAttachments, workspaceId],
+  );
 
   const handleFullscreenSend = async () => {
     const message = fullscreenMessage.trim();
-    if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending) return;
+    if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending)
+      return;
     const previousMessage = fullscreenMessage;
     const previousAttachments = fullscreenAttachments;
     setFullscreenSending(true);
@@ -543,7 +542,8 @@ export function DocumentArtifactViewer({
   const renderDocumentBody = () => {
     if (loading) return <div className="document-viewer-state">Loading document...</div>;
     if (error) return <div className="document-viewer-state document-viewer-error">{error}</div>;
-    if (!preview) return <div className="document-viewer-state">No document preview available.</div>;
+    if (!preview)
+      return <div className="document-viewer-state">No document preview available.</div>;
     if (preview.previewMode === "unavailable") {
       return (
         <div className="document-viewer-state">
@@ -618,10 +618,20 @@ export function DocumentArtifactViewer({
       <div className={`document-viewer-titlebar ${canEditDirectly ? "is-editor-toolbar" : ""}`}>
         {canEditDirectly ? (
           <>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("undo")} title="Undo">
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("undo")}
+              title="Undo"
+            >
               <Undo2 size={15} />
             </button>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("redo")} title="Redo">
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("redo")}
+              title="Redo"
+            >
               <Redo2 size={15} />
             </button>
             <select
@@ -647,25 +657,76 @@ export function DocumentArtifactViewer({
               <option value="Georgia">Georgia</option>
               <option value="Courier New">Courier New</option>
             </select>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("fontSize", "2")} title="Smaller text">-</button>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("fontSize", "3")} title="Normal size">11</button>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("fontSize", "4")} title="Larger text">+</button>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("bold")} title="Bold">
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("fontSize", "2")}
+              title="Smaller text"
+            >
+              -
+            </button>
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("fontSize", "3")}
+              title="Normal size"
+            >
+              11
+            </button>
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("fontSize", "4")}
+              title="Larger text"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("bold")}
+              title="Bold"
+            >
               <Bold size={15} />
             </button>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("italic")} title="Italic">
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("italic")}
+              title="Italic"
+            >
               <Italic size={15} />
             </button>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("underline")} title="Underline">
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("underline")}
+              title="Underline"
+            >
               <Underline size={15} />
             </button>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("justifyLeft")} title="Align left">
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("justifyLeft")}
+              title="Align left"
+            >
               <AlignLeft size={15} />
             </button>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("insertUnorderedList")} title="Bulleted list">
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("insertUnorderedList")}
+              title="Bulleted list"
+            >
               <List size={15} />
             </button>
-            <button type="button" className="document-viewer-icon-tool" onClick={() => runEditorCommand("insertOrderedList")} title="Numbered list">
+            <button
+              type="button"
+              className="document-viewer-icon-tool"
+              onClick={() => runEditorCommand("insertOrderedList")}
+              title="Numbered list"
+            >
               <ListOrdered size={15} />
             </button>
             <button
@@ -739,9 +800,7 @@ export function DocumentArtifactViewer({
                 <div className="spreadsheet-viewer-turn-body">
                   <p>{turnContext.summary}</p>
                   {turnContext.secondaryText && (
-                    <p className="spreadsheet-viewer-turn-secondary">
-                      {turnContext.secondaryText}
-                    </p>
+                    <p className="spreadsheet-viewer-turn-secondary">{turnContext.secondaryText}</p>
                   )}
                   {turnContext.events && turnContext.events.length > 0 && (
                     <div className="spreadsheet-viewer-turn-events">
@@ -752,9 +811,7 @@ export function DocumentArtifactViewer({
                             event.tone ? `tone-${event.tone}` : ""
                           }`}
                         >
-                          <span className="spreadsheet-viewer-turn-event-text">
-                            {event.text}
-                          </span>
+                          <span className="spreadsheet-viewer-turn-event-text">{event.text}</span>
                         </div>
                       ))}
                     </div>
@@ -780,7 +837,9 @@ export function DocumentArtifactViewer({
                         <span className="attachment-name" title={attachment.name}>
                           {attachment.name}
                         </span>
-                        <span className="attachment-size">{formatAttachmentSize(attachment.size)}</span>
+                        <span className="attachment-size">
+                          {formatAttachmentSize(attachment.size)}
+                        </span>
                         <button
                           type="button"
                           className="attachment-remove"
@@ -872,12 +931,6 @@ export function DocumentArtifactViewer({
             </div>
             <div className="input-below-actions spreadsheet-viewer-composer-actions">
               <span className="input-status-workspace">Work in a folder</span>
-              <span className="shell-toggle shell-toggle-inline enabled">
-                Shell
-                <span className="goal-mode-switch-track on">
-                  <span className="goal-mode-switch-thumb" />
-                </span>
-              </span>
               <span className="input-status-mode">Execute</span>
               <span className="input-status-mode">Auto</span>
             </div>

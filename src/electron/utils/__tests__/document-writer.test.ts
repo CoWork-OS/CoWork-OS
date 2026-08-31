@@ -60,7 +60,9 @@ describe("document writer", () => {
 
     const afterZip = await JSZip.loadAsync(await fs.readFile(outPath));
     const afterPreview = await buildDocumentPreviewFromFile(outPath);
-    expect(await afterZip.file("word/header1.xml")?.async("text")).toContain("Keep this header part");
+    expect(await afterZip.file("word/header1.xml")?.async("text")).toContain(
+      "Keep this header part",
+    );
     expect(afterPreview.text).toContain("Original Title");
     expect(afterPreview.text).toContain("Updated paragraph");
   });
@@ -72,11 +74,7 @@ describe("document writer", () => {
     await writeEditableDocumentBlocksToDocxFile(outPath, [
       {
         type: "paragraph",
-        runs: [
-          { text: "Plain " },
-          { text: "bold", bold: true },
-          { text: " tail" },
-        ],
+        runs: [{ text: "Plain " }, { text: "bold", bold: true }, { text: " tail" }],
       },
     ]);
 
@@ -88,8 +86,9 @@ describe("document writer", () => {
 
     const afterZip = await JSZip.loadAsync(await fs.readFile(outPath));
     const documentXml = await afterZip.file("word/document.xml")?.async("text");
-    const textNodes = Array.from(documentXml?.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || [])
-      .map((match) => match[1]);
+    const textNodes = Array.from(documentXml?.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || []).map(
+      (match) => match[1],
+    );
     expect(textNodes).toEqual(expect.arrayContaining(["Plain ", "bold", " tail"]));
   });
 

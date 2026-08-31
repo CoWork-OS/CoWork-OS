@@ -3,10 +3,13 @@
  */
 
 import { BoxConnectionTestResult, BoxSettingsData } from "../../shared/types";
+import { BoxSettingsManager } from "../settings/box-manager";
 
 export const BOX_API_BASE = "https://api.box.com/2.0";
 export const BOX_UPLOAD_BASE = "https://upload.box.com/api/2.0";
+export const BOX_TOKEN_URL = "https://api.box.com/oauth2/token";
 const DEFAULT_TIMEOUT_MS = 20000;
+let boxRefreshPromise: Promise<string> | null = null;
 
 function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
@@ -38,13 +41,81 @@ export interface BoxRequestResult {
   raw?: string;
 }
 
+export async function getBoxAccessToken(settings: BoxSettingsData): Promise<string> {
+  if (!settings.accessToken && !settings.refreshToken) {
+    throw new Error("Box access token not configured. Add it in Settings > Integrations > Box.");
+  }
+
+  const refreshBeforeMs = 60_000;
+  const tokenIsFresh =
+    Boolean(settings.accessToken) &&
+    (!settings.tokenExpiresAt || settings.tokenExpiresAt > Date.now() + refreshBeforeMs);
+  if (tokenIsFresh) {
+    return settings.accessToken!;
+  }
+
+  if (!settings.refreshToken || !settings.clientId || !settings.clientSecret) {
+    if (settings.accessToken) return settings.accessToken;
+    throw new Error("Box OAuth credentials are incomplete. Reconnect Box with OAuth.");
+  }
+
+  if (boxRefreshPromise) return boxRefreshPromise;
+
+  boxRefreshPromise = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), settings.timeoutMs || DEFAULT_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(BOX_TOKEN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: settings.clientId!,
+          client_secret: settings.clientSecret!,
+          refresh_token: settings.refreshToken!,
+        }).toString(),
+        signal: controller.signal,
+      });
+      const rawText = await response.text();
+      const data = rawText ? parseJsonSafe(rawText) : undefined;
+      if (!response.ok) {
+        throw new Error(formatBoxError(response.status, data, response.statusText));
+      }
+      if (!data?.access_token) {
+        throw new Error("Box OAuth refresh did not return an access token");
+      }
+
+      const refreshed: BoxSettingsData = {
+        ...settings,
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token || settings.refreshToken,
+        tokenExpiresAt:
+          typeof data.expires_in === "number" ? Date.now() + data.expires_in * 1000 : undefined,
+      };
+      BoxSettingsManager.saveSettings(refreshed);
+      Object.assign(settings, refreshed);
+      return data.access_token as string;
+    } catch (error: Any) {
+      if (error?.name === "AbortError") {
+        throw new Error("Box OAuth refresh timed out");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  })().finally(() => {
+    boxRefreshPromise = null;
+  });
+
+  return boxRefreshPromise;
+}
+
 export async function boxRequest(
   settings: BoxSettingsData,
   options: BoxRequestOptions,
 ): Promise<BoxRequestResult> {
-  if (!settings.accessToken) {
-    throw new Error("Box access token not configured. Add it in Settings > Integrations > Box.");
-  }
+  const accessToken = await getBoxAccessToken(settings);
 
   const params = new URLSearchParams();
   if (options.query) {
@@ -57,7 +128,7 @@ export async function boxRequest(
   const url = `${BOX_API_BASE}${options.path}${queryString ? `?${queryString}` : ""}`;
 
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${settings.accessToken}`,
+    Authorization: `Bearer ${accessToken}`,
   };
 
   if (options.method !== "GET" && options.method !== "DELETE") {
@@ -102,9 +173,7 @@ export async function boxUploadFile(
   settings: BoxSettingsData,
   opts: { fileName: string; parentId: string; data: Uint8Array; timeoutMs?: number },
 ): Promise<BoxRequestResult> {
-  if (!settings.accessToken) {
-    throw new Error("Box access token not configured. Add it in Settings > Integrations > Box.");
-  }
+  const accessToken = await getBoxAccessToken(settings);
 
   if (typeof FormData === "undefined") {
     throw new Error("FormData not available in this environment");
@@ -118,7 +187,7 @@ export async function boxUploadFile(
 
   const url = `${BOX_UPLOAD_BASE}/files/content`;
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${settings.accessToken}`,
+    Authorization: `Bearer ${accessToken}`,
   };
 
   const timeoutMs = opts.timeoutMs ?? settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;

@@ -36,9 +36,7 @@ export function isAllowedWebviewUrl(value: string): boolean {
     const parsed = parseUrl(raw);
     if (!parsed) return false;
     return (
-      parsed.protocol === "https:" ||
-      parsed.protocol === "http:" ||
-      parsed.protocol === "canvas:"
+      parsed.protocol === "https:" || parsed.protocol === "http:" || parsed.protocol === "canvas:"
     );
   } catch {
     return false;

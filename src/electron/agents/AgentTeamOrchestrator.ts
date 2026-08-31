@@ -13,7 +13,10 @@ import type {
   MultiLlmParticipant,
   WorkerRoleKind,
 } from "../../shared/types";
-import { IPC_CHANNELS, MULTI_LLM_PROVIDER_DISPLAY as _MULTI_LLM_PROVIDER_DISPLAY } from "../../shared/types";
+import {
+  IPC_CHANNELS,
+  MULTI_LLM_PROVIDER_DISPLAY as _MULTI_LLM_PROVIDER_DISPLAY,
+} from "../../shared/types";
 import {
   resolveModelPreferenceToModelKey,
   resolvePersonalityPreference,
@@ -87,7 +90,12 @@ export type AgentTeamOrchestratorDeps = {
   appendOrchestrationGraphNodes?: (params: {
     runId: string;
     nodes: OrchestrationGraphNodeInput[];
-    edges?: Array<{ fromNodeId?: string; fromNodeKey?: string; toNodeId?: string; toNodeKey?: string }>;
+    edges?: Array<{
+      fromNodeId?: string;
+      fromNodeKey?: string;
+      toNodeId?: string;
+      toNodeKey?: string;
+    }>;
   }) => Promise<OrchestrationGraphSnapshot | undefined>;
   findOrchestrationGraphByTeamRunId?: (teamRunId: string) => OrchestrationGraphSnapshot | undefined;
 };
@@ -95,7 +103,7 @@ export type AgentTeamOrchestratorDeps = {
 function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     if (!electron || typeof electron !== "object") return [];
     const BrowserWindow = electron?.BrowserWindow;
@@ -501,7 +509,11 @@ export class AgentTeamOrchestrator {
             workspaceId: rootTask.workspaceId,
             kind: "team",
             maxParallel: Math.max(1, Number(team.maxParallelAgents || 1)),
-            metadata: { teamRunId: run.id, collaborativeMode: run.collaborativeMode, multiLlmMode: run.multiLlmMode },
+            metadata: {
+              teamRunId: run.id,
+              collaborativeMode: run.collaborativeMode,
+              multiLlmMode: run.multiLlmMode,
+            },
             nodes: graphNodes,
           });
 
@@ -521,7 +533,7 @@ export class AgentTeamOrchestrator {
           sourceTaskId: node?.taskId,
           status: nextStatus,
         });
-      if (updatedItem && node?.taskId) {
+        if (updatedItem && node?.taskId) {
           emitTeamEvent({
             type: "team_item_spawned",
             timestamp: Date.now(),
@@ -723,9 +735,7 @@ export class AgentTeamOrchestrator {
 
       if (childAgentCollaborativeRun) {
         if (stillInProgress.length === 0) {
-          const status = refreshedItems.some((i) => i.status === "failed")
-            ? "failed"
-            : "completed";
+          const status = refreshedItems.some((i) => i.status === "failed") ? "failed" : "completed";
           const updated = this.runRepo.update(run.id, {
             status,
             phase: "complete",
@@ -782,8 +792,12 @@ export class AgentTeamOrchestrator {
         parts.push(itemDescription.trim());
       }
       parts.push("");
-      parts.push("Work only on this lane. Do not duplicate other lanes unless required for context.");
-      parts.push("Report what you did or found, list changed files if any, and call out risks or blockers.");
+      parts.push(
+        "Work only on this lane. Do not duplicate other lanes unless required for context.",
+      );
+      parts.push(
+        "Report what you did or found, list changed files if any, and call out risks or blockers.",
+      );
       parts.push("Your result will be synthesized with the other multitask lanes.");
       return parts.join("\n");
     }
@@ -929,11 +943,11 @@ export class AgentTeamOrchestrator {
 
     // Spawn a synthesis task assigned to the leader (or judge in multi-LLM mode)
     const depth = (typeof rootTask.depth === "number" ? rootTask.depth : 0) + 1;
-      const agentConfig: AgentConfig = {
-        retainMemory: false,
-        bypassQueue: true,
-        conversationMode: "chat", // Skip planning/steps — single-turn text synthesis
-        qualityPasses: 1,
+    const agentConfig: AgentConfig = {
+      retainMemory: false,
+      bypassQueue: true,
+      conversationMode: "chat", // Skip planning/steps — single-turn text synthesis
+      qualityPasses: 1,
       llmProfile: rootTask.agentConfig?.llmProfileHint || "strong",
       maxTurns: 3,
     };
@@ -986,7 +1000,8 @@ export class AgentTeamOrchestrator {
       return;
     }
     const predecessorNodes = (existingGraph?.nodes || []).filter(
-      (node: Any) => node.teamRunId === run.id && node.teamItemId && node.teamItemId !== synthesisItem.id,
+      (node: Any) =>
+        node.teamRunId === run.id && node.teamItemId && node.teamItemId !== synthesisItem.id,
     );
     const appended = await this.deps.appendOrchestrationGraphNodes({
       runId: existingGraph.run.id,
@@ -1044,7 +1059,9 @@ export class AgentTeamOrchestrator {
       rootTask.prompt,
       "",
       "=== TEAM MEMBER ANALYSES (COMPACTED) ===",
-      thoughts.length > 0 ? groupAndCompactThoughts(thoughts, compactBudget) : "No team member analyses were captured.",
+      thoughts.length > 0
+        ? groupAndCompactThoughts(thoughts, compactBudget)
+        : "No team member analyses were captured.",
       "=== END OF TEAM MEMBER ANALYSES ===",
     ].join("\n");
 
@@ -1137,7 +1154,9 @@ export class AgentTeamOrchestrator {
     }
 
     parts.push("YOUR TASK:");
-    parts.push("Produce your synthesis in a SINGLE response. Do NOT create sub-tasks or use planning tools.");
+    parts.push(
+      "Produce your synthesis in a SINGLE response. Do NOT create sub-tasks or use planning tools.",
+    );
     parts.push("Using ONLY the team member analyses provided above:");
     parts.push("1. Identify agreements, conflicts, and key insights across the analyses.");
     parts.push("2. Synthesize a comprehensive final answer that addresses the original request.");
@@ -1165,7 +1184,9 @@ export class AgentTeamOrchestrator {
       parts.push("Special instruction: you are the rotating idea proposer for this run.");
       parts.push("You must introduce at least one concrete new growth idea worth debating.");
     } else {
-      parts.push("Special instruction: challenge weak ideas, refine strong ones, and push toward action.");
+      parts.push(
+        "Special instruction: challenge weak ideas, refine strong ones, and push toward action.",
+      );
     }
     parts.push("");
     parts.push("TASK:");
@@ -1216,7 +1237,9 @@ export class AgentTeamOrchestrator {
     }
 
     parts.push("YOUR TASK:");
-    parts.push("Produce your synthesis in a SINGLE response. Do NOT create sub-tasks or use planning tools.");
+    parts.push(
+      "Produce your synthesis in a SINGLE response. Do NOT create sub-tasks or use planning tools.",
+    );
     parts.push("Using ONLY the model outputs provided above:");
     parts.push(
       "1. Compare and evaluate each model's response for accuracy, completeness, and quality.",
@@ -1231,7 +1254,9 @@ export class AgentTeamOrchestrator {
   private buildCouncilSynthesisPrompt(rootTask: Task, thoughts: AgentThought[]): string {
     const parts: string[] = [];
     parts.push("You are the judge and synthesizer for an R&D Council run.");
-    parts.push("Multiple models debated a business/product growth question using a curated source bundle.");
+    parts.push(
+      "Multiple models debated a business/product growth question using a curated source bundle.",
+    );
     parts.push("Your job is to produce a single decision memo.");
     parts.push("");
     parts.push("IMPORTANT INSTRUCTIONS:");
@@ -1254,7 +1279,9 @@ export class AgentTeamOrchestrator {
       parts.push("");
     }
 
-    parts.push("Produce your synthesis in a SINGLE response. Do NOT create sub-tasks or use planning tools.");
+    parts.push(
+      "Produce your synthesis in a SINGLE response. Do NOT create sub-tasks or use planning tools.",
+    );
     parts.push("");
     parts.push("Return the memo using EXACTLY these sections and headings:");
     parts.push("## Executive Summary");

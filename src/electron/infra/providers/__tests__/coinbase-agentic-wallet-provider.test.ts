@@ -30,7 +30,9 @@ describe("CoinbaseAgenticWalletProvider", () => {
   });
 
   it("forwards the x402 payment policy envelope to the remote signer", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const provider = new CoinbaseAgenticWalletProvider();

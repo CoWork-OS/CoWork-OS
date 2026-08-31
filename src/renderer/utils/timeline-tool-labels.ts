@@ -252,7 +252,9 @@ export function friendlyToolCallTitle(tool: string | undefined, input: ToolInput
   if (isBrowserToolName(tc)) {
     if (tc === "browser_navigate") {
       const url = typeof ins.url === "string" ? ins.url.trim() : "";
-      return url ? `Browser navigate: ${truncateLabel(hostOrPathFromUrl(url), 52)}` : "Browser navigate";
+      return url
+        ? `Browser navigate: ${truncateLabel(hostOrPathFromUrl(url), 52)}`
+        : "Browser navigate";
     }
     if (tc === "browser_get_text") {
       const selector = asTrimmedString(ins.selector) || asTrimmedString(ins.ref);
@@ -410,7 +412,10 @@ export function friendlyToolResultTitle(
 }
 
 /** Lane row when a parallel tool lane finishes */
-export function friendlyToolLaneCompletedLabel(toolName: string | undefined, failed: boolean): string {
+export function friendlyToolLaneCompletedLabel(
+  toolName: string | undefined,
+  failed: boolean,
+): string {
   const t = (toolName || "").trim();
   if (!t) return failed ? "Step failed" : "Done";
   if (failed) {

@@ -75,7 +75,11 @@ function createService(overrides?: Partial<HeartbeatServiceDeps>): HeartbeatServ
         Array.from(mockAgents.values()).filter((agent) => includeInactive || agent.isActive),
       findHeartbeatEnabled: () =>
         Array.from(mockAgents.values()).filter((agent) => agent.isActive && agent.heartbeatEnabled),
-      updateHeartbeatStatus: (id: string, status: AgentRole["heartbeatStatus"], lastHeartbeatAt?: number) => {
+      updateHeartbeatStatus: (
+        id: string,
+        status: AgentRole["heartbeatStatus"],
+        lastHeartbeatAt?: number,
+      ) => {
         const agent = mockAgents.get(id);
         if (!agent) return;
         agent.heartbeatStatus = status;
@@ -138,6 +142,7 @@ function createService(overrides?: Partial<HeartbeatServiceDeps>): HeartbeatServ
     getDefaultWorkspaceId: () => "workspace-1",
     getDefaultWorkspacePath: () => workspacePaths.get("workspace-1"),
     getWorkspacePath: (workspaceId: string) => workspacePaths.get(workspaceId),
+    getWorkspaceMemoryReadGuard: () => () => true,
     hasActiveForegroundTask: () => false,
     listWorkspaceContexts: () =>
       Array.from(workspacePaths.entries()).map(([workspaceId, workspacePath]) => ({
@@ -345,9 +350,7 @@ describe("HeartbeatService v3", () => {
 
     expect(createdTasks).toHaveLength(0);
     const pulseEvents = heartbeatEvents.filter((event) => event.type === "pulse_completed");
-    expect(["idle", "suggestion"]).toContain(
-      pulseEvents.at(-1)?.result?.pulseOutcome as string,
-    );
+    expect(["idle", "suggestion"]).toContain(pulseEvents.at(-1)?.result?.pulseOutcome as string);
   });
 
   it("observer profile never executes HEARTBEAT.md checklist items", async () => {
@@ -596,6 +599,64 @@ describe("HeartbeatService v3", () => {
     expect(createdTasks).toHaveLength(0);
     expect(service.getStatus("agent-1")?.lastPulseResult).toBe("idle");
     expect(heartbeatEvents.some((event) => event.type === "dispatch_skipped")).toBe(true);
+  });
+
+  it("passes the workspace access guard into background memory dreaming", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const readGuard = vi.fn((_candidatePath: string) => true);
+    let dreamingReadGuard: ((candidatePath: string) => boolean) | undefined;
+    const service = createService({
+      getWorkspaceMemoryReadGuard: () => readGuard,
+      runMemoryDreaming: async (params) => {
+        dreamingReadGuard = params.readGuard;
+        return { id: "dreaming-1", status: "completed", candidateCount: 0 };
+      },
+    });
+
+    service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "memory_drift",
+      source: "hook",
+      fingerprint: "memory-guard",
+      urgency: "high",
+      confidence: 1,
+      reason: "Memory needs review",
+    });
+
+    const result = await service.triggerHeartbeat("agent-1");
+
+    expect(result.dreamingRunId).toBe("dreaming-1");
+    expect(dreamingReadGuard).toBe(readGuard);
+    expect(readGuard).toHaveBeenCalled();
+  });
+
+  it("skips background memory dreaming when access-profile resolution fails", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const runMemoryDreaming = vi.fn(async () => ({ id: "should-not-run" }));
+    const service = createService({
+      getWorkspaceMemoryReadGuard: () => {
+        throw new Error("settings unavailable");
+      },
+      runMemoryDreaming,
+    });
+
+    service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "memory_drift",
+      source: "hook",
+      fingerprint: "memory-guard-error",
+      urgency: "high",
+      confidence: 1,
+      reason: "Memory needs review",
+    });
+
+    const result = await service.triggerHeartbeat("agent-1");
+
+    expect(result.status).not.toBe("error");
+    expect(result.dreamingRunId).toBeUndefined();
+    expect(runMemoryDreaming).not.toHaveBeenCalled();
   });
 
   it("reconciles stale agent heartbeat runs on service start without touching issue-linked runs", async () => {

@@ -31,22 +31,30 @@ export function MissionControlPanel({
   initialIssueId = null,
   initialEverydayAgentFocus = false,
 }: MissionControlPanelProps) {
-  const data = useMissionControlData(
-    initialCompanyId,
-    initialIssueId,
-    initialEverydayAgentFocus,
-  );
+  const data = useMissionControlData(initialCompanyId, initialIssueId, initialEverydayAgentFocus);
 
   const {
-    loading, activeTab,
-    editingAgent, setEditingAgent, isCreatingAgent, agentError, handleSaveAgent,
-    standupOpen, setStandupOpen, selectedWorkspace,
-    teamsOpen, setTeamsOpen, agents, tasks, setDetailPanel,
-    reviewsOpen, setReviewsOpen,
-    agentContext, detailPanel,
+    loading,
+    activeTab,
+    editingAgent,
+    setEditingAgent,
+    isCreatingAgent,
+    agentError,
+    handleSaveAgent,
+    standupOpen,
+    setStandupOpen,
+    selectedWorkspace,
+    teamsOpen,
+    setTeamsOpen,
+    agents,
+    tasks,
+    setDetailPanel,
+    reviewsOpen,
+    setReviewsOpen,
+    agentContext,
+    detailPanel,
   } = data;
-  const supportsWorkspaceReports =
-    !!selectedWorkspace && !isTempWorkspaceId(selectedWorkspace.id);
+  const supportsWorkspaceReports = !!selectedWorkspace && !isTempWorkspaceId(selectedWorkspace.id);
 
   if (loading) {
     return (
@@ -65,7 +73,9 @@ export function MissionControlPanel({
               role={editingAgent}
               isCreating={isCreatingAgent}
               onSave={handleSaveAgent}
-              onCancel={() => { setEditingAgent(null); }}
+              onCancel={() => {
+                setEditingAgent(null);
+              }}
               error={agentError}
             />
           </div>
@@ -114,8 +124,17 @@ export function MissionControlPanel({
                 setTeamsOpen(false);
               }}
             />
-            <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end", padding: "0 16px 16px" }}>
-              <button className="mc-v2-icon-btn" onClick={() => setTeamsOpen(false)}>Close</button>
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                justifyContent: "flex-end",
+                padding: "0 16px 16px",
+              }}
+            >
+              <button className="mc-v2-icon-btn" onClick={() => setTeamsOpen(false)}>
+                Close
+              </button>
             </div>
           </div>
         </div>

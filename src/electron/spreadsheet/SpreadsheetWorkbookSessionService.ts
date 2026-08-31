@@ -120,9 +120,7 @@ function ensureSheetBounds(
   while (sheet.rows.length < targetRows) {
     const rowNumber = sheet.rows.length + 1;
     sheet.rows.push(
-      Array.from({ length: targetColumns }, (_, index) =>
-        createCell(rowNumber, index + 1),
-      ),
+      Array.from({ length: targetColumns }, (_, index) => createCell(rowNumber, index + 1)),
     );
   }
   for (let rowIndex = 0; rowIndex < targetRows; rowIndex += 1) {
@@ -158,7 +156,11 @@ function cellType(cell: SpreadsheetPreviewCell | undefined): SpreadsheetCellData
   return "string";
 }
 
-function toCellData(cell: SpreadsheetPreviewCell | undefined, row: number, column: number): SpreadsheetCellData {
+function toCellData(
+  cell: SpreadsheetPreviewCell | undefined,
+  row: number,
+  column: number,
+): SpreadsheetCellData {
   const base = cell || createCell(row, column);
   return {
     ...base,
@@ -170,7 +172,10 @@ function toCellData(cell: SpreadsheetPreviewCell | undefined, row: number, colum
   };
 }
 
-function createWarnings(preview: SpreadsheetPreview, format: SpreadsheetWorkbookFormat): SpreadsheetCompatibilityWarning[] {
+function createWarnings(
+  preview: SpreadsheetPreview,
+  format: SpreadsheetWorkbookFormat,
+): SpreadsheetCompatibilityWarning[] {
   const warnings: SpreadsheetCompatibilityWarning[] = [
     {
       code: "compat-preview-backed-session",
@@ -264,10 +269,7 @@ export class SpreadsheetWorkbookSessionService {
     workspacePath: string;
     fileName?: string;
   }): Promise<SpreadsheetOpenWorkbookResult> {
-    const safePath = await resolveWorkbookPathWithinWorkspace(
-      input.filePath,
-      input.workspacePath,
-    );
+    const safePath = await resolveWorkbookPathWithinWorkspace(input.filePath, input.workspacePath);
     const format = normalizeFormat(safePath.filePath);
     const preview =
       format === "csv" || format === "tsv"
@@ -462,7 +464,10 @@ export class SpreadsheetWorkbookSessionService {
     return index;
   }
 
-  private getSheetById(record: SessionRecord, sheetId: string): SpreadsheetPreviewSheet | undefined {
+  private getSheetById(
+    record: SessionRecord,
+    sheetId: string,
+  ): SpreadsheetPreviewSheet | undefined {
     const index = record.session.sheets.findIndex((sheet) => sheet.id === sheetId);
     return index >= 0 ? record.preview.sheets[index] : undefined;
   }
@@ -553,18 +558,18 @@ export class SpreadsheetWorkbookSessionService {
       case "insertColumns": {
         const beforeColumn = clampPositiveInteger(patch.beforeColumn, 1);
         const count = clampPositiveInteger(patch.count, 1);
-        ensureSheetBounds(sheet, Math.max(sheet.rowCount, 1), Math.max(sheet.columnCount, beforeColumn - 1));
+        ensureSheetBounds(
+          sheet,
+          Math.max(sheet.rowCount, 1),
+          Math.max(sheet.columnCount, beforeColumn - 1),
+        );
         for (const row of sheet.rows) {
           const cells = Array.from({ length: count }, (_, offset) =>
             createCell(1, beforeColumn + offset),
           );
           row.splice(beforeColumn - 1, 0, ...cells);
         }
-        sheet.columnWidths.splice(
-          beforeColumn - 1,
-          0,
-          ...Array.from({ length: count }, () => 12),
-        );
+        sheet.columnWidths.splice(beforeColumn - 1, 0, ...Array.from({ length: count }, () => 12));
         this.readdressSheet(sheet);
         break;
       }
@@ -621,12 +626,11 @@ export class SpreadsheetWorkbookSessionService {
       truncated: sheet.truncated,
     }));
     record.session.activeSheetId =
-      record.session.sheets.find(
-        (sheet) => sheet.name === record.preview.activeSheetName,
-      )?.id || record.session.sheets[0]?.id || "sheet-1";
+      record.session.sheets.find((sheet) => sheet.name === record.preview.activeSheetName)?.id ||
+      record.session.sheets[0]?.id ||
+      "sheet-1";
     record.session.warnings = createWarnings(record.preview, record.session.format);
   }
 }
 
-export const spreadsheetWorkbookSessionService =
-  new SpreadsheetWorkbookSessionService();
+export const spreadsheetWorkbookSessionService = new SpreadsheetWorkbookSessionService();

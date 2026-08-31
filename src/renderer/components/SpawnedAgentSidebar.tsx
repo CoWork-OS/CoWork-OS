@@ -49,11 +49,7 @@ type SpawnedAgentSidebarProps = {
 };
 
 function isWorkingTask(task: Task): boolean {
-  return (
-    task.status === "executing" ||
-    task.status === "planning" ||
-    task.status === "interrupted"
-  );
+  return task.status === "executing" || task.status === "planning" || task.status === "interrupted";
 }
 
 function formatDuration(startMs?: number, endMs?: number): string | null {
@@ -133,7 +129,8 @@ export function SpawnedAgentSidebar({
   const durationLabel = selectedTask
     ? formatDuration(
         selectedTask.createdAt,
-        selectedTask.completedAt ?? (isWorkingTask(selectedTask) ? undefined : selectedTask.updatedAt),
+        selectedTask.completedAt ??
+          (isWorkingTask(selectedTask) ? undefined : selectedTask.updatedAt),
       )
     : null;
 
@@ -195,7 +192,9 @@ export function SpawnedAgentSidebar({
           <div className="spawned-agent-sidebar-meta">
             <StatusBadge task={selectedTask} />
             {durationLabel ? <span>{durationLabel}</span> : null}
-            <span>{selectedEvents.length} event{selectedEvents.length === 1 ? "" : "s"}</span>
+            <span>
+              {selectedEvents.length} event{selectedEvents.length === 1 ? "" : "s"}
+            </span>
           </div>
         </div>
         <button type="button" className="spawned-agent-sidebar-close" onClick={onClose}>
@@ -211,9 +210,7 @@ export function SpawnedAgentSidebar({
               type="button"
               role="tab"
               aria-selected={task.id === selectedTask.id}
-              className={`spawned-agent-sidebar-tab ${
-                task.id === selectedTask.id ? "active" : ""
-              }`}
+              className={`spawned-agent-sidebar-tab ${task.id === selectedTask.id ? "active" : ""}`}
               onClick={() => onSelectTask(task.id)}
             >
               <span className="spawned-agent-sidebar-tab-label">{task.title}</span>
@@ -251,9 +248,7 @@ export function SpawnedAgentSidebar({
                 ? () => onCancelTask(selectedTask.id)
                 : undefined
             }
-            inputRequest={
-              inputRequest?.taskId === selectedTask.id ? inputRequest : null
-            }
+            inputRequest={inputRequest?.taskId === selectedTask.id ? inputRequest : null}
             onTasksChanged={onTasksChanged}
             onOpenSettings={onOpenSettings as never}
             selectedModel={selectedModel}

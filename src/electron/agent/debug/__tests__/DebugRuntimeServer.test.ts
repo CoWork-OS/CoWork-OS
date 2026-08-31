@@ -1,8 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import {
-  closeDebugRuntimeSession,
-  openDebugRuntimeSession,
-} from "../DebugRuntimeServer";
+import { closeDebugRuntimeSession, openDebugRuntimeSession } from "../DebugRuntimeServer";
 
 describe("DebugRuntimeServer", () => {
   afterEach(() => {

@@ -51,7 +51,10 @@ describe("TaskExecutor getToolTimeoutMs", () => {
         {
           id: "delivery_mode",
           question: "Choose delivery mode",
-          options: [{ label: "A", description: "A" }, { label: "B", description: "B" }],
+          options: [
+            { label: "A", description: "A" },
+            { label: "B", description: "B" },
+          ],
         },
       ],
     });
@@ -122,6 +125,25 @@ describe("TaskExecutor getToolTimeoutMs", () => {
     });
 
     expect(timeoutMs).toBe(600_000);
+    timeoutSpy.mockRestore();
+  });
+
+  it("does not let approval review consume the ordinary tool timeout", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: { deepWorkMode: false } };
+    executor.toolRegistry = {
+      getApprovalType: vi.fn().mockReturnValue("workspace_write"),
+    };
+
+    const timeoutSpy = vi
+      .spyOn(BuiltinToolsSettingsManager, "getToolTimeoutMs")
+      .mockReturnValue(null);
+
+    const timeoutMs = executor.getToolTimeoutMs("create_directory", {
+      path: "inbox/finance",
+    });
+
+    expect(timeoutMs).toBe(300_000);
     timeoutSpy.mockRestore();
   });
 });

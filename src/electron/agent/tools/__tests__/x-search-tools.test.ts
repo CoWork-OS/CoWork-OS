@@ -67,6 +67,50 @@ describe("XSearchTools", () => {
     expect(XSearchTools.hasCredentials()).toBe(true);
   });
 
+  it("blocks X search before resolving credentials when networking is disabled", async () => {
+    const tools = new XSearchTools(
+      {
+        ...workspace,
+        permissions: { shell: false, network: false, accessNetworkMode: "disabled" },
+      },
+      daemon,
+      "task-1",
+    );
+
+    const result = await tools.search({ query: "should not leave the workspace" });
+
+    expect(result.success).toBe(false);
+    expect(result.error_type).toBe("NetworkPolicyError");
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks the xAI endpoint when a custom profile denies its domain", async () => {
+    setSettings({
+      providerType: "xai",
+      modelKey: "grok-4.3",
+      xai: { apiKey: "xai-key" },
+    });
+    const tools = new XSearchTools(
+      {
+        ...workspace,
+        permissions: {
+          shell: false,
+          network: true,
+          accessDomainRules: [{ pattern: "api.x.ai", access: "deny" }],
+        },
+      },
+      daemon,
+      "task-1",
+    );
+
+    const result = await tools.search({ query: "should not leave the workspace" });
+
+    expect(result.success).toBe(false);
+    expect(result.error_type).toBe("NetworkPolicyError");
+    expect(result.policyReason).toBe("profile_domain_denied");
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it("calls the xAI Responses API with the built-in x_search tool", async () => {
     setSettings({
       providerType: "xai",

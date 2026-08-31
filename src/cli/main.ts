@@ -73,6 +73,7 @@ const VALUE_FLAGS = new Set([
   "--name",
   "--title",
   "--permission-mode",
+  "--access-profile",
   "--session-id",
   "--days",
   "--older-than",
@@ -613,7 +614,7 @@ async function runTask(ctx: CommandContext): Promise<number> {
   const prompt = ctx.parsed.rest.join(" ").trim();
   if (!prompt) {
     process.stderr.write(
-      'Usage: cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--shell] [--detach]\n',
+      'Usage: cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--detach]\n',
     );
     return 1;
   }
@@ -633,11 +634,14 @@ async function runTask(ctx: CommandContext): Promise<number> {
   try {
     const cwd = path.resolve(getFlag(ctx.parsed, "--cwd") || process.cwd());
     const workspaceId = await resolveWorkspaceId(client, ctx, cwd);
+    const requestedAccessProfileId =
+      getFlag(ctx.parsed, "--access-profile") ||
+      (hasFlag(ctx.parsed, "--shell") ? "ask_for_approval" : undefined);
     const params: Record<string, unknown> = {
       workspaceId,
       title: getFlag(ctx.parsed, "--title") || buildTaskTitle(prompt),
       prompt,
-      ...(hasFlag(ctx.parsed, "--shell") ? { shellAccess: true } : {}),
+      ...(requestedAccessProfileId ? { accessProfileId: requestedAccessProfileId } : {}),
       ...(getFlag(ctx.parsed, "--permission-mode")
         ? { permissionMode: getFlag(ctx.parsed, "--permission-mode") }
         : {}),
@@ -716,6 +720,12 @@ function buildDirectTaskArgs(ctx: CommandContext, prompt: string): string[] {
       ? ["--workspace-id", getFlag(ctx.parsed, "--workspace-id")!]
       : []),
     ...(hasFlag(ctx.parsed, "--shell") ? ["--shell"] : []),
+    ...(getFlag(ctx.parsed, "--access-profile")
+      ? ["--access-profile", getFlag(ctx.parsed, "--access-profile")!]
+      : []),
+    ...(getFlag(ctx.parsed, "--permission-mode")
+      ? ["--permission-mode", getFlag(ctx.parsed, "--permission-mode")!]
+      : []),
   ];
 }
 
@@ -1897,8 +1907,8 @@ function usage(): void {
       "  cowork daemon start [--background]",
       "  cowork workspace list",
       "  cowork workspace create [path]",
-      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--shell] [--detach] [--force]',
-      '  cowork run "task prompt" --remote [--url <ws-url>] [--token <token>]',
+      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--detach] [--force]',
+      '  cowork run "task prompt" --remote [--url <ws-url>] [--token <token>] [--access-profile <id>]',
       "  cowork tail <taskId>",
       "  cowork tasks list [--active] [--cli]",
       "  cowork tasks cancel <taskId>",

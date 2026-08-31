@@ -182,7 +182,11 @@
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s, border-color 0.15s, transform 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s,
+    transform 0.15s;
 }
 
 .ea-primary-button svg,
@@ -916,7 +920,9 @@
 .ea-capability-card:hover {
   transform: translateY(-4px) scale(1.01);
   border-color: var(--color-accent-subtle);
-  box-shadow: var(--shadow-lg), 0 10px 20px -10px color-mix(in srgb, var(--color-accent) 20%, transparent);
+  box-shadow:
+    var(--shadow-lg),
+    0 10px 20px -10px color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 .ea-capability-card.active {

@@ -36,7 +36,10 @@ vi.mock("../../settings/personality-manager", () => ({
 }));
 
 describe("TaskExecutor chat mode", () => {
-  const createInferredChatExecutor = (prompt: string, agentConfig: Record<string, unknown> = {}) => {
+  const createInferredChatExecutor = (
+    prompt: string,
+    agentConfig: Record<string, unknown> = {},
+  ) => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = {
       id: "task-inferred-chat",
@@ -288,7 +291,9 @@ describe("TaskExecutor chat mode", () => {
     executor.promptRequestsArtifactOutput = vi.fn().mockReturnValue(false);
     executor.isLikelyTaskRequest = vi.fn().mockReturnValue(false);
 
-    expect((TaskExecutor as Any).prototype.shouldShortCircuitSimpleNonExecuteAnswer.call(executor)).toBe(false);
+    expect(
+      (TaskExecutor as Any).prototype.shouldShortCircuitSimpleNonExecuteAnswer.call(executor),
+    ).toBe(false);
   });
 
   it("does not route local walking errand prompts through companion mode", () => {
@@ -480,14 +485,38 @@ describe("TaskExecutor chat mode", () => {
         { id: "1", description: "Interpret the task as a simple chat greeting.", kind: "primary" },
         { id: "2", description: "Draft a concise reply.", kind: "primary" },
         { id: "3", description: "Send the greeting response.", kind: "primary" },
-        { id: "4", description: "Verify: confirm the reply includes a greeting and help offer.", kind: "verification" },
+        {
+          id: "4",
+          description: "Verify: confirm the reply includes a greeting and help offer.",
+          kind: "verification",
+        },
       ],
     };
 
-    expect((TaskExecutor as Any).prototype.isLastVisibleAssistantStep.call(executor, executor.plan.steps[0])).toBe(false);
-    expect((TaskExecutor as Any).prototype.isLastVisibleAssistantStep.call(executor, executor.plan.steps[1])).toBe(false);
-    expect((TaskExecutor as Any).prototype.isLastVisibleAssistantStep.call(executor, executor.plan.steps[2])).toBe(true);
-    expect((TaskExecutor as Any).prototype.isLastVisibleAssistantStep.call(executor, executor.plan.steps[3])).toBe(false);
+    expect(
+      (TaskExecutor as Any).prototype.isLastVisibleAssistantStep.call(
+        executor,
+        executor.plan.steps[0],
+      ),
+    ).toBe(false);
+    expect(
+      (TaskExecutor as Any).prototype.isLastVisibleAssistantStep.call(
+        executor,
+        executor.plan.steps[1],
+      ),
+    ).toBe(false);
+    expect(
+      (TaskExecutor as Any).prototype.isLastVisibleAssistantStep.call(
+        executor,
+        executor.plan.steps[2],
+      ),
+    ).toBe(true);
+    expect(
+      (TaskExecutor as Any).prototype.isLastVisibleAssistantStep.call(
+        executor,
+        executor.plan.steps[3],
+      ),
+    ).toBe(false);
   });
 
   it("uses the 48K cap for explicit chat sessions", async () => {
@@ -547,7 +576,9 @@ describe("TaskExecutor chat mode", () => {
 
   it("reuses a cached explicit chat summary instead of regenerating it every turn", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
-    const buildCompactionSummaryBlock = vi.fn().mockResolvedValue("<cowork_compaction_summary>\nsummary\n</cowork_compaction_summary>");
+    const buildCompactionSummaryBlock = vi
+      .fn()
+      .mockResolvedValue("<cowork_compaction_summary>\nsummary\n</cowork_compaction_summary>");
 
     executor.conversationHistory = Array.from({ length: 30 }, (_, index) => ({
       role: index % 2 === 0 ? "user" : "assistant",
@@ -572,14 +603,10 @@ describe("TaskExecutor chat mode", () => {
     expect(buildCompactionSummaryBlock).toHaveBeenCalledTimes(1);
     expect(executor.explicitChatSummaryBlock).toContain("summary");
     expect(
-      typeof first[0].content === "string"
-        ? first[0].content
-        : JSON.stringify(first[0].content),
+      typeof first[0].content === "string" ? first[0].content : JSON.stringify(first[0].content),
     ).toContain("<cowork_compaction_summary>");
     expect(
-      typeof second[0].content === "string"
-        ? second[0].content
-        : JSON.stringify(second[0].content),
+      typeof second[0].content === "string" ? second[0].content : JSON.stringify(second[0].content),
     ).toContain("<cowork_compaction_summary>");
   });
 

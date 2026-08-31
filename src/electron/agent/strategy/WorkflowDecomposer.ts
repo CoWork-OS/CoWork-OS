@@ -62,7 +62,9 @@ const PHASE_TYPE_PATTERNS: Array<[RegExp, WorkflowPhase["phaseType"]]> = [
   [/\b(analyze|compare|evaluate|assess|review|summarize|audit|benchmark)\b/i, "analyze"],
 ];
 
-export function workflowPhaseTypeToCapability(phaseType: WorkflowPhaseType): ModelCapability | undefined {
+export function workflowPhaseTypeToCapability(
+  phaseType: WorkflowPhaseType,
+): ModelCapability | undefined {
   switch (phaseType) {
     case "research":
     case "analyze":
@@ -152,7 +154,10 @@ export class WorkflowDecomposer {
 
       // Extract text from response
       const text = (response.content || [])
-        .filter((b): b is { type: "text"; text: string } => b.type === "text" && typeof (b as { text?: string }).text === "string")
+        .filter(
+          (b): b is { type: "text"; text: string } =>
+            b.type === "text" && typeof (b as { text?: string }).text === "string",
+        )
         .map((b) => b.text)
         .join("");
 
@@ -221,7 +226,12 @@ export class WorkflowDecomposer {
         messages: [
           {
             role: "user",
-            content: [{ type: "text", text: `Split this step into ordered sub-steps:\n\n${stepDescription}` }],
+            content: [
+              {
+                type: "text",
+                text: `Split this step into ordered sub-steps:\n\n${stepDescription}`,
+              },
+            ],
           },
         ],
       });
@@ -236,7 +246,10 @@ export class WorkflowDecomposer {
       );
 
       const text = (response.content || [])
-        .filter((b): b is { type: "text"; text: string } => b.type === "text" && typeof (b as { text?: string }).text === "string")
+        .filter(
+          (b): b is { type: "text"; text: string } =>
+            b.type === "text" && typeof (b as { text?: string }).text === "string",
+        )
         .map((b) => b.text)
         .join("");
 

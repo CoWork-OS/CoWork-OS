@@ -326,6 +326,12 @@ Best practices:
 
 ## Approvals
 
+Tasks started from a channel use the target workspace's [access profile](access-profiles.md).
+Command tools are available only when that profile exposes them; there is no separate shell
+enable/disable command. A profile or administrator boundary can still deny an action after a user
+has approved an individual request, and finite filesystem/domain scopes cannot be widened by an
+approval shortcut.
+
 When CoWork asks for approval, respond with:
 
 ```text

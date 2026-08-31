@@ -2,7 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { randomBytes } from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { SecureSettingsRepository, type SettingsCategory } from "../database/SecureSettingsRepository";
+import {
+  SecureSettingsRepository,
+  type SettingsCategory,
+} from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
@@ -36,7 +39,8 @@ export class SecureMcpTunnelSettingsManager {
       return this.cachedSettings;
     }
 
-    const loaded = this.loadFromRepository() ?? this.loadFromFile() ?? DEFAULT_SECURE_MCP_TUNNEL_SETTINGS;
+    const loaded =
+      this.loadFromRepository() ?? this.loadFromFile() ?? DEFAULT_SECURE_MCP_TUNNEL_SETTINGS;
     this.cachedSettings = this.decryptSettings(this.normalizeSettings(loaded));
     return this.cachedSettings;
   }
@@ -93,8 +97,14 @@ export class SecureMcpTunnelSettingsManager {
       targetUrl:
         updates.targetUrl !== undefined ? updates.targetUrl.trim() || undefined : current.targetUrl,
       coworkHostPort: updates.coworkHostPort ?? current.coworkHostPort,
-      clientToken: updates.clientToken !== undefined ? updates.clientToken.trim() || undefined : current.clientToken,
-      callerToken: updates.callerToken !== undefined ? updates.callerToken.trim() || undefined : current.callerToken,
+      clientToken:
+        updates.clientToken !== undefined
+          ? updates.clientToken.trim() || undefined
+          : current.clientToken,
+      callerToken:
+        updates.callerToken !== undefined
+          ? updates.callerToken.trim() || undefined
+          : current.callerToken,
       policy: {
         ...current.policy,
         ...updates.policy,
@@ -257,11 +267,7 @@ function sanitizeAllowedTools(value: unknown): string[] {
     return [];
   }
   return Array.from(
-    new Set(
-      value
-        .map((item) => (typeof item === "string" ? item.trim() : ""))
-        .filter(Boolean),
-    ),
+    new Set(value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)),
   );
 }
 

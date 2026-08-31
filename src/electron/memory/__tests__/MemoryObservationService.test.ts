@@ -198,7 +198,9 @@ describeWithNativeDb("MemoryObservationService", () => {
     MemoryObservationService.startBackfill(true);
 
     const redacted = MemoryObservationService.redact("ws-1", "mem-3");
-    const memoryRow = db.prepare("SELECT content, is_private FROM memories WHERE id = ?").get("mem-3") as Any;
+    const memoryRow = db
+      .prepare("SELECT content, is_private FROM memories WHERE id = ?")
+      .get("mem-3") as Any;
 
     expect(redacted?.privacyState).toBe("redacted");
     expect(memoryRow.content).toBe("[redacted]");

@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeProvider } from "../opencode-go-provider";
-import {
-  getOpenCodeModelTransport,
-  isOpenCodeBaseUrl,
-} from "../opencode-go-routing";
+import { getOpenCodeModelTransport, isOpenCodeBaseUrl } from "../opencode-go-routing";
 
 const request = {
   model: "",

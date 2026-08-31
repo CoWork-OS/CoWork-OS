@@ -417,7 +417,7 @@ function humanizeStatus(value: string): string {
     input_request: "Input needed",
     user_action_required_disabled: "Action required",
     user_action_required_tool: "Tool approval needed",
-    shell_permission_required: "Shell access needed",
+    shell_permission_required: "Access profile needs command tools",
     workspace_mismatch: "Workspace confirmation",
     workspace_required: "Workspace needed",
     approval_requested: "Approval needed",
@@ -430,7 +430,12 @@ function formatNotificationTitle(title: string): {
   primary: string;
   badge?: string;
 } {
-  const prefixes = ["Quick check-in · ", "Approval needed · ", "Input needed · ", "Action needed · "];
+  const prefixes = [
+    "Quick check-in · ",
+    "Approval needed · ",
+    "Input needed · ",
+    "Action needed · ",
+  ];
   let primary = stripLeadingEmoji(title);
   let badge: string | undefined;
 
@@ -603,9 +608,7 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
                 const isTechnicalReason =
                   /^[a-z][a-z0-9_]*$/.test(notification.message.trim()) &&
                   notification.message.includes("_");
-                const statusBadge = isTechnicalReason
-                  ? humanizeStatus(notification.message)
-                  : null;
+                const statusBadge = isTechnicalReason ? humanizeStatus(notification.message) : null;
                 const showMessage = !isTechnicalReason && notification.message.trim();
                 const displayBadge = statusBadge ?? badge;
 
@@ -635,10 +638,11 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
                       {typeConfig.icon}
                     </div>
                     <div style={styles.notificationContent}>
-                      {displayBadge && (
-                        <span style={styles.notificationBadge}>{displayBadge}</span>
-                      )}
-                      <NotificationMarkdownPreview text={primary} style={styles.notificationTitle} />
+                      {displayBadge && <span style={styles.notificationBadge}>{displayBadge}</span>}
+                      <NotificationMarkdownPreview
+                        text={primary}
+                        style={styles.notificationTitle}
+                      />
                       {showMessage && (
                         <NotificationMarkdownPreview
                           text={notification.message}

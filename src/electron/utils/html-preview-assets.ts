@@ -40,10 +40,7 @@ function shouldInlineAsset(rawUrl: string): boolean {
 function resolveAssetPath(rawUrl: string, baseDir: string, workspaceRoot?: string): string | null {
   if (!shouldInlineAsset(rawUrl)) return null;
   const assetUrl = stripUrlDecorators(rawUrl);
-  const resolved = path.resolve(
-    baseDir,
-    assetUrl.startsWith("/") ? `.${assetUrl}` : assetUrl,
-  );
+  const resolved = path.resolve(baseDir, assetUrl.startsWith("/") ? `.${assetUrl}` : assetUrl);
   if (!workspaceRoot) return resolved;
   const relative = path.relative(path.resolve(workspaceRoot), resolved);
   if (relative.startsWith("..") || path.isAbsolute(relative)) return null;

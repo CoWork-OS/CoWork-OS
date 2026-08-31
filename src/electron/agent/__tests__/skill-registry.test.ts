@@ -145,10 +145,7 @@ vi.mock("child_process", () => ({
       optionsOrCallback: Any,
       maybeCallback?: (error: Error | null, stdout?: string, stderr?: string) => void,
     ) => {
-      const callback =
-        typeof optionsOrCallback === "function"
-          ? optionsOrCallback
-          : maybeCallback;
+      const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback;
 
       if (!callback) {
         return;
@@ -216,17 +213,19 @@ vi.mock("fs", () => ({
       ensureDir(parentDir(normalizedDest));
       mockFiles.set(normalizedDest, value);
     }),
-    readdirSync: vi.fn().mockImplementation((dir: string, options?: { withFileTypes?: boolean }) => {
-      const entries = listDirEntries(dir);
-      if (options?.withFileTypes) {
-        return entries.map((entry) => ({
-          name: entry.name,
-          isDirectory: () => entry.isDirectory,
-          isFile: () => !entry.isDirectory,
-        }));
-      }
-      return entries.map((entry) => entry.name);
-    }),
+    readdirSync: vi
+      .fn()
+      .mockImplementation((dir: string, options?: { withFileTypes?: boolean }) => {
+        const entries = listDirEntries(dir);
+        if (options?.withFileTypes) {
+          return entries.map((entry) => ({
+            name: entry.name,
+            isDirectory: () => entry.isDirectory,
+            isFile: () => !entry.isDirectory,
+          }));
+        }
+        return entries.map((entry) => entry.name);
+      }),
     mkdirSync: vi.fn().mockImplementation((dir: string) => {
       ensureDir(dir);
     }),
@@ -613,7 +612,9 @@ describe("SkillRegistry", () => {
         },
         arrayBuffer: () => {
           const bytes = Buffer.from(JSON.stringify(mockSkillData), "utf8");
-          return Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+          return Promise.resolve(
+            bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+          );
         },
       });
 
@@ -635,7 +636,9 @@ describe("SkillRegistry", () => {
             "---\nname: Imported Bundle\ndescription: Imported bundle description\n---\n# Imported Bundle\n",
             "utf8",
           );
-          return Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+          return Promise.resolve(
+            bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+          );
         },
       });
 
@@ -851,14 +854,13 @@ describe("SkillRegistry", () => {
           ok: true,
           arrayBuffer: () =>
             Promise.resolve(
-              zipBytes.buffer.slice(
-                zipBytes.byteOffset,
-                zipBytes.byteOffset + zipBytes.byteLength,
-              ),
+              zipBytes.buffer.slice(zipBytes.byteOffset, zipBytes.byteOffset + zipBytes.byteLength),
             ),
         });
 
-      const result = await registry.installFromClawHub("https://clawhub.ai/pskoett/self-improving-agent");
+      const result = await registry.installFromClawHub(
+        "https://clawhub.ai/pskoett/self-improving-agent",
+      );
 
       expect(result.success).toBe(true);
       expect(result.skill?.id).toBe("self-improving-agent");
@@ -897,14 +899,13 @@ describe("SkillRegistry", () => {
           ok: true,
           arrayBuffer: () =>
             Promise.resolve(
-              zipBytes.buffer.slice(
-                zipBytes.byteOffset,
-                zipBytes.byteOffset + zipBytes.byteLength,
-              ),
+              zipBytes.buffer.slice(zipBytes.byteOffset, zipBytes.byteOffset + zipBytes.byteLength),
             ),
         });
 
-      const result = await registry.installFromClawHub("https://clawhub.ai/pskoett/self-improving-agent");
+      const result = await registry.installFromClawHub(
+        "https://clawhub.ai/pskoett/self-improving-agent",
+      );
 
       expect(result.success).toBe(true);
       expect(result.skill?.id).toBe("self-improving-agent");
@@ -948,9 +949,7 @@ describe("SkillRegistry", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("network down");
-      expect(mockFiles.get(managedPath("restore-skill.json"))).toBe(
-        JSON.stringify(skillData),
-      );
+      expect(mockFiles.get(managedPath("restore-skill.json"))).toBe(JSON.stringify(skillData));
     });
   });
 
@@ -992,7 +991,10 @@ describe("SkillRegistry", () => {
     });
 
     it("should skip non-json files", () => {
-      mockFiles.set(managedPath("skill-1.json"), JSON.stringify(createMockSkill({ id: "skill-1" })));
+      mockFiles.set(
+        managedPath("skill-1.json"),
+        JSON.stringify(createMockSkill({ id: "skill-1" })),
+      );
       mockFiles.set(managedPath("readme.txt"), "Some text");
 
       const skills = registry.listManagedSkills();

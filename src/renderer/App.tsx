@@ -11,10 +11,7 @@ import {
   Suspense,
   startTransition,
 } from "react";
-import type {
-  KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent,
-} from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useReplayMode, type ReplayControls } from "./hooks/useReplayMode";
 import { useTaskDuration } from "./hooks/useTaskDuration";
 import { Sidebar } from "./components/Sidebar";
@@ -91,10 +88,7 @@ import {
 } from "../shared/task-timeline-limits";
 import { invalidateGlobalMeasurer } from "./utils/pretext-adapter";
 import { applyUiDensityClass } from "./utils/ui-density";
-import {
-  hasTaskOutputs,
-  resolveTaskOutputSummaryFromCompletionEvent,
-} from "./utils/task-outputs";
+import { hasTaskOutputs, resolveTaskOutputSummaryFromCompletionEvent } from "./utils/task-outputs";
 import {
   addUniqueTaskId,
   buildTaskCompletionToast,
@@ -149,6 +143,8 @@ import {
   shouldHydrateTaskSummary,
 } from "./utils/sidebar-task-summaries";
 import { classifyLiveTaskEvent } from "./utils/live-task-event-policy";
+import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
+import { shouldUseFreshTempWorkspaceForNewSession } from "./utils/new-session-workspace";
 
 const Settings = lazy(() =>
   import("./components/Settings").then((module) => ({ default: module.Settings })),
@@ -183,7 +179,9 @@ const PresentationArtifactViewer = lazy(() =>
   })),
 );
 const WebArtifactViewer = lazy(() =>
-  import("./components/WebArtifactViewer").then((module) => ({ default: module.WebArtifactViewer })),
+  import("./components/WebArtifactViewer").then((module) => ({
+    default: module.WebArtifactViewer,
+  })),
 );
 const BrowserWorkbenchView = lazy(() =>
   import("./components/BrowserWorkbenchView").then((module) => ({
@@ -271,13 +269,12 @@ function cleanTurnText(value: unknown, maxLength = 220): string {
 function getEventText(event: TaskEvent | undefined): string {
   if (!event) return "";
   const payload = event.payload || {};
-  const step = payload.step && typeof payload.step === "object" ? payload.step as Record<string, unknown> : null;
+  const step =
+    payload.step && typeof payload.step === "object"
+      ? (payload.step as Record<string, unknown>)
+      : null;
   return cleanTurnText(
-    payload.message ??
-      payload.resultSummary ??
-      payload.semanticSummary ??
-      payload.text ??
-      step?.description,
+    payload.message ?? payload.resultSummary ?? payload.text ?? step?.description,
   );
 }
 
@@ -300,7 +297,10 @@ function getSpreadsheetTurnEventKind(event: TaskEvent): {
 function getSpreadsheetTurnEventText(event: TaskEvent): string {
   const effectiveType = getEffectiveTaskEventType(event);
   const payload = event.payload || {};
-  const step = payload.step && typeof payload.step === "object" ? payload.step as Record<string, unknown> : null;
+  const step =
+    payload.step && typeof payload.step === "object"
+      ? (payload.step as Record<string, unknown>)
+      : null;
   const path =
     typeof payload.path === "string"
       ? payload.path
@@ -318,11 +318,7 @@ function getSpreadsheetTurnEventText(event: TaskEvent): string {
     return cleanTurnText(payload.command ?? payload.description ?? payload.tool, 180);
   }
   return cleanTurnText(
-    payload.message ??
-      payload.resultSummary ??
-      payload.semanticSummary ??
-      payload.text ??
-      step?.description,
+    payload.message ?? payload.resultSummary ?? payload.text ?? step?.description,
     260,
   );
 }
@@ -439,7 +435,9 @@ function buildSpreadsheetTurnContext(args: {
       }
     }
     const detailParts = [
-      modifiedFiles.size > 0 ? `Edited ${modifiedFiles.size} file${modifiedFiles.size === 1 ? "" : "s"}` : "",
+      modifiedFiles.size > 0
+        ? `Edited ${modifiedFiles.size} file${modifiedFiles.size === 1 ? "" : "s"}`
+        : "",
       runningCommandCount > 0
         ? `running ${runningCommandCount} command${runningCommandCount === 1 ? "" : "s"}`
         : "",
@@ -474,9 +472,7 @@ function buildSpreadsheetTurnContext(args: {
   const completionPayload = completionEvent?.payload || {};
   const summary =
     cleanTurnText(completionPayload.resultSummary) ||
-    cleanTurnText(completionPayload.semanticSummary) ||
     cleanTurnText(completionPayload.message) ||
-    cleanTurnText(args.task?.semanticSummary) ||
     cleanTurnText(args.task?.resultSummary) ||
     `Created ${fileName}.`;
 
@@ -708,6 +704,7 @@ type SelectedTaskWorkspaceViewProps = {
     options?: {
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
+      accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
     },
   ) => Promise<void>;
@@ -733,8 +730,7 @@ type SelectedTaskWorkspaceViewProps = {
   onSelectWorkspace: (workspace: Workspace) => void;
   onOpenSettings: (tab?: string) => void;
   onStopTask: () => Promise<void>;
-  onEnableShellForPausedTask: () => Promise<void>;
-  onContinueWithoutShellForPausedTask: () => Promise<void>;
+  onContinueWithoutCommandsForPausedTask: () => Promise<void>;
   onWrapUpTask: () => Promise<void>;
   onSubmitInputRequest: (
     requestId: string,
@@ -774,532 +770,525 @@ function getAppTaskSignature(task: Task | undefined): string {
 
 function getInputRequestSignature(inputRequest: InputRequest | null): string {
   if (!inputRequest) return "none";
-  return [inputRequest.id, inputRequest.taskId, inputRequest.status, inputRequest.requestedAt].join(":");
+  return [inputRequest.id, inputRequest.taskId, inputRequest.status, inputRequest.requestedAt].join(
+    ":",
+  );
 }
 
 function getInputRequestsSignature(inputRequests: InputRequest[]): string {
   if (inputRequests.length === 0) return "none";
   return inputRequests
     .map((request) =>
-      [request.id, request.taskId, request.status, request.requestedAt, request.questions.length].join(":"),
+      [
+        request.id,
+        request.taskId,
+        request.status,
+        request.requestedAt,
+        request.questions.length,
+      ].join(":"),
     )
     .join("|");
 }
 
-const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
-  task,
-  selectedTaskId,
-  workspace,
-  replayControls,
-  sharedTaskEventUi,
-  remoteTaskView,
-  childTasks,
-  childEvents,
-  activeInputRequest,
-  pendingInputRequests,
-  selectedModel,
-  selectedProvider,
-  selectedReasoningEffort,
-  availableModels,
-  availableProviders,
-  uiDensity,
-  homeResearchVaultEnabled,
-  homeNextActionsEnabled,
-  rendererPerfLoggingEnabled,
-  taskSwitchId,
-  hasMoreTimelineHistory,
-  isLoadingTimelineHistory,
-  timelineHistoryError,
-  onLoadMoreTimelineHistory,
-  onLoadTaskEventDetail,
-  onReleaseTaskEventDetail,
-  effectiveRightCollapsed,
-  terminalTabsOpen,
-  browserWorkbenchRequest,
-  sideChat,
-  rightPanelInput,
-  onSelectChildTask,
-  onSelectTask,
-  onSendMessage,
-  onOpenSideChat,
-  onSendSideChatMessage,
-  onCloseSideChat,
-  onOpenSideChatFullThread,
-  onStartOnboarding,
-  onStartFreshSession,
-  onCreateTask,
-  onAskInbox,
-  onChangeWorkspace,
-  onSelectWorkspace,
-  onOpenSettings,
-  onStopTask,
-  onEnableShellForPausedTask,
-  onContinueWithoutShellForPausedTask,
-  onWrapUpTask,
-  onSubmitInputRequest,
-  onDismissInputRequest,
-  onOpenBrowserView,
-  onRevealRightSidebar,
-  onViewTaskOutputs,
-  onTasksChanged,
-  onCancelTaskById,
-  onHighlightConsumed,
-  onCloseTerminalTabs,
-  onModelChange,
-}: SelectedTaskWorkspaceViewProps) {
-  const [spreadsheetArtifact, setSpreadsheetArtifact] = useState<{
-    kind: ActiveArtifactKind;
-    path: string;
-    mode: "sidebar" | "fullscreen";
-  } | null>(null);
-  const [browserWorkbench, setBrowserWorkbench] = useState<{
-    sessionId: string;
-    url?: string;
-    mode: "sidebar" | "fullscreen";
-    requestId?: string;
-  } | null>(null);
-  const [spawnedAgentSidebar, setSpawnedAgentSidebar] = useState<{
-    taskId: string;
-  } | null>(null);
-  const [lastSettledArtifactRefreshKey, setLastSettledArtifactRefreshKey] = useState<{
-    path: string;
-    key: string | null;
-  } | null>(null);
-  const [spreadsheetTurnStartedAt, setSpreadsheetTurnStartedAt] = useState<number | null>(null);
-  const [spreadsheetOptimisticWorkingStartedAt, setSpreadsheetOptimisticWorkingStartedAt] =
-    useState<number | null>(null);
-  const splitLayoutRef = useRef<HTMLDivElement | null>(null);
-  const [spreadsheetSidebarWidth, setSpreadsheetSidebarWidth] = useState(
-    readPersistedSpreadsheetSidebarWidth,
-  );
-  const [isSpreadsheetResizing, setIsSpreadsheetResizing] = useState(false);
-  useEffect(() => {
-    if (!sideChat?.task?.id) return;
-    setSpreadsheetArtifact(null);
-    setBrowserWorkbench(null);
-    setSpawnedAgentSidebar(null);
-  }, [sideChat?.task?.id]);
-  const openSpreadsheetArtifact = useCallback((path: string) => {
-    setBrowserWorkbench(null);
-    setSpawnedAgentSidebar(null);
-    onRevealRightSidebar?.();
-    setSpreadsheetArtifact({ kind: "spreadsheet", path, mode: "sidebar" });
-  }, [onRevealRightSidebar]);
-  const openDocumentArtifact = useCallback((path: string) => {
-    setBrowserWorkbench(null);
-    setSpawnedAgentSidebar(null);
-    onRevealRightSidebar?.();
-    setSpreadsheetArtifact({ kind: "document", path, mode: "sidebar" });
-  }, [onRevealRightSidebar]);
-  const openPresentationArtifact = useCallback((path: string) => {
-    setBrowserWorkbench(null);
-    setSpawnedAgentSidebar(null);
-    onRevealRightSidebar?.();
-    setSpreadsheetArtifact({ kind: "presentation", path, mode: "sidebar" });
-  }, [onRevealRightSidebar]);
-  const openWebArtifact = useCallback((path: string) => {
-    setBrowserWorkbench(null);
-    setSpawnedAgentSidebar(null);
-    onRevealRightSidebar?.();
-    setSpreadsheetArtifact({ kind: "webpage", path, mode: "sidebar" });
-  }, [onRevealRightSidebar]);
-  const closeSpreadsheetArtifact = useCallback(() => {
-    setSpreadsheetArtifact(null);
-  }, []);
-  const closeBrowserWorkbench = useCallback(() => {
-    setBrowserWorkbench(null);
-  }, []);
-  const openSpawnedAgentSidebar = useCallback(
-    (taskId: string) => {
+const SelectedTaskWorkspaceView = memo(
+  function SelectedTaskWorkspaceView({
+    task,
+    selectedTaskId,
+    workspace,
+    replayControls,
+    sharedTaskEventUi,
+    remoteTaskView,
+    childTasks,
+    childEvents,
+    activeInputRequest,
+    pendingInputRequests,
+    selectedModel,
+    selectedProvider,
+    selectedReasoningEffort,
+    availableModels,
+    availableProviders,
+    uiDensity,
+    homeResearchVaultEnabled,
+    homeNextActionsEnabled,
+    rendererPerfLoggingEnabled,
+    taskSwitchId,
+    hasMoreTimelineHistory,
+    isLoadingTimelineHistory,
+    timelineHistoryError,
+    onLoadMoreTimelineHistory,
+    onLoadTaskEventDetail,
+    onReleaseTaskEventDetail,
+    effectiveRightCollapsed,
+    terminalTabsOpen,
+    browserWorkbenchRequest,
+    sideChat,
+    rightPanelInput,
+    onSelectChildTask,
+    onSelectTask,
+    onSendMessage,
+    onOpenSideChat,
+    onSendSideChatMessage,
+    onCloseSideChat,
+    onOpenSideChatFullThread,
+    onStartOnboarding,
+    onStartFreshSession,
+    onCreateTask,
+    onAskInbox,
+    onChangeWorkspace,
+    onSelectWorkspace,
+    onOpenSettings,
+    onStopTask,
+    onContinueWithoutCommandsForPausedTask,
+    onWrapUpTask,
+    onSubmitInputRequest,
+    onDismissInputRequest,
+    onOpenBrowserView,
+    onRevealRightSidebar,
+    onViewTaskOutputs,
+    onTasksChanged,
+    onCancelTaskById,
+    onHighlightConsumed,
+    onCloseTerminalTabs,
+    onModelChange,
+  }: SelectedTaskWorkspaceViewProps) {
+    const [spreadsheetArtifact, setSpreadsheetArtifact] = useState<{
+      kind: ActiveArtifactKind;
+      path: string;
+      mode: "sidebar" | "fullscreen";
+    } | null>(null);
+    const [browserWorkbench, setBrowserWorkbench] = useState<{
+      sessionId: string;
+      url?: string;
+      mode: "sidebar" | "fullscreen";
+      requestId?: string;
+    } | null>(null);
+    const [spawnedAgentSidebar, setSpawnedAgentSidebar] = useState<{
+      taskId: string;
+    } | null>(null);
+    const [lastSettledArtifactRefreshKey, setLastSettledArtifactRefreshKey] = useState<{
+      path: string;
+      key: string | null;
+    } | null>(null);
+    const [spreadsheetTurnStartedAt, setSpreadsheetTurnStartedAt] = useState<number | null>(null);
+    const [spreadsheetOptimisticWorkingStartedAt, setSpreadsheetOptimisticWorkingStartedAt] =
+      useState<number | null>(null);
+    const splitLayoutRef = useRef<HTMLDivElement | null>(null);
+    const [spreadsheetSidebarWidth, setSpreadsheetSidebarWidth] = useState(
+      readPersistedSpreadsheetSidebarWidth,
+    );
+    const [isSpreadsheetResizing, setIsSpreadsheetResizing] = useState(false);
+    useEffect(() => {
+      if (!sideChat?.task?.id) return;
       setSpreadsheetArtifact(null);
       setBrowserWorkbench(null);
-      onRevealRightSidebar?.();
-      setSpawnedAgentSidebar({ taskId });
-    },
-    [onRevealRightSidebar],
-  );
-  const closeSpawnedAgentSidebar = useCallback(() => {
-    setSpawnedAgentSidebar(null);
-  }, []);
-  const selectSpawnedAgentSidebarTask = useCallback((taskId: string) => {
-    setSpawnedAgentSidebar({ taskId });
-  }, []);
-  const showSpreadsheetFullscreen = useCallback(() => {
-    setSpreadsheetArtifact((current) =>
-      current ? { ...current, mode: "fullscreen" } : current,
-    );
-  }, []);
-  const showSpreadsheetSidebar = useCallback(() => {
-    setSpreadsheetArtifact((current) =>
-      current ? { ...current, mode: "sidebar" } : current,
-    );
-  }, []);
-  const showBrowserFullscreen = useCallback(() => {
-    setBrowserWorkbench((current) =>
-      current ? { ...current, mode: "fullscreen" } : current,
-    );
-  }, []);
-  const showBrowserSidebar = useCallback(() => {
-    setBrowserWorkbench((current) =>
-      current ? { ...current, mode: "sidebar" } : current,
-    );
-  }, []);
-  const updateBrowserWorkbenchStatus = useCallback((status: { url?: string }) => {
-    setBrowserWorkbench((current) =>
-      current ? { ...current, url: status.url ?? current.url } : current,
-    );
-  }, []);
-  const openBrowserWorkbenchSidebar = useCallback(
-    (request: { sessionId?: string; url?: string; requestId?: string }) => {
-      setSpreadsheetArtifact(null);
       setSpawnedAgentSidebar(null);
-      onRevealRightSidebar?.();
+    }, [sideChat?.task?.id]);
+    const openSpreadsheetArtifact = useCallback(
+      (path: string) => {
+        setBrowserWorkbench(null);
+        setSpawnedAgentSidebar(null);
+        onRevealRightSidebar?.();
+        setSpreadsheetArtifact({ kind: "spreadsheet", path, mode: "sidebar" });
+      },
+      [onRevealRightSidebar],
+    );
+    const openDocumentArtifact = useCallback(
+      (path: string) => {
+        setBrowserWorkbench(null);
+        setSpawnedAgentSidebar(null);
+        onRevealRightSidebar?.();
+        setSpreadsheetArtifact({ kind: "document", path, mode: "sidebar" });
+      },
+      [onRevealRightSidebar],
+    );
+    const openPresentationArtifact = useCallback(
+      (path: string) => {
+        setBrowserWorkbench(null);
+        setSpawnedAgentSidebar(null);
+        onRevealRightSidebar?.();
+        setSpreadsheetArtifact({ kind: "presentation", path, mode: "sidebar" });
+      },
+      [onRevealRightSidebar],
+    );
+    const openWebArtifact = useCallback(
+      (path: string) => {
+        setBrowserWorkbench(null);
+        setSpawnedAgentSidebar(null);
+        onRevealRightSidebar?.();
+        setSpreadsheetArtifact({ kind: "webpage", path, mode: "sidebar" });
+      },
+      [onRevealRightSidebar],
+    );
+    const closeSpreadsheetArtifact = useCallback(() => {
+      setSpreadsheetArtifact(null);
+    }, []);
+    const closeBrowserWorkbench = useCallback(() => {
+      setBrowserWorkbench(null);
+    }, []);
+    const openSpawnedAgentSidebar = useCallback(
+      (taskId: string) => {
+        setSpreadsheetArtifact(null);
+        setBrowserWorkbench(null);
+        onRevealRightSidebar?.();
+        setSpawnedAgentSidebar({ taskId });
+      },
+      [onRevealRightSidebar],
+    );
+    const closeSpawnedAgentSidebar = useCallback(() => {
+      setSpawnedAgentSidebar(null);
+    }, []);
+    const selectSpawnedAgentSidebarTask = useCallback((taskId: string) => {
+      setSpawnedAgentSidebar({ taskId });
+    }, []);
+    const showSpreadsheetFullscreen = useCallback(() => {
+      setSpreadsheetArtifact((current) => (current ? { ...current, mode: "fullscreen" } : current));
+    }, []);
+    const showSpreadsheetSidebar = useCallback(() => {
+      setSpreadsheetArtifact((current) => (current ? { ...current, mode: "sidebar" } : current));
+    }, []);
+    const showBrowserFullscreen = useCallback(() => {
+      setBrowserWorkbench((current) => (current ? { ...current, mode: "fullscreen" } : current));
+    }, []);
+    const showBrowserSidebar = useCallback(() => {
+      setBrowserWorkbench((current) => (current ? { ...current, mode: "sidebar" } : current));
+    }, []);
+    const updateBrowserWorkbenchStatus = useCallback((status: { url?: string }) => {
+      setBrowserWorkbench((current) =>
+        current ? { ...current, url: status.url ?? current.url } : current,
+      );
+    }, []);
+    const openBrowserWorkbenchSidebar = useCallback(
+      (request: { sessionId?: string; url?: string; requestId?: string }) => {
+        setSpreadsheetArtifact(null);
+        setSpawnedAgentSidebar(null);
+        onRevealRightSidebar?.();
+        const containerWidth =
+          splitLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
+        const maxWidth = Math.max(
+          SPREADSHEET_SIDEBAR_MIN_WIDTH,
+          containerWidth - SPREADSHEET_MAIN_MIN_WIDTH,
+        );
+        const preferredBrowserWidth = Math.max(
+          SPREADSHEET_SIDEBAR_DEFAULT_WIDTH,
+          containerWidth - 460,
+        );
+        setSpreadsheetSidebarWidth(
+          Math.min(Math.max(preferredBrowserWidth, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth),
+        );
+        setBrowserWorkbench({
+          sessionId: request.sessionId || "default",
+          url: request.url,
+          mode: "sidebar",
+          requestId: request.requestId,
+        });
+      },
+      [onRevealRightSidebar],
+    );
+    const openWebLinkInBrowserSidebar = useCallback(
+      (url: string) => {
+        openBrowserWorkbenchSidebar({
+          sessionId: "link-preview",
+          url,
+          requestId: `link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        });
+      },
+      [openBrowserWorkbenchSidebar],
+    );
+    const openEmptyBrowserWorkbenchSidebar = useCallback(() => {
+      openBrowserWorkbenchSidebar({
+        sessionId: "default",
+        requestId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      });
+    }, [openBrowserWorkbenchSidebar]);
+    const sendSpreadsheetFullscreenMessage = useCallback(
+      async (message: string, images?: ImageAttachment[]) => {
+        const startedAt = Date.now();
+        setSpreadsheetTurnStartedAt(startedAt);
+        setSpreadsheetOptimisticWorkingStartedAt(startedAt);
+        await onSendMessage(message, images);
+      },
+      [onSendMessage],
+    );
+    useEffect(() => {
+      setSpreadsheetArtifact(null);
+      setBrowserWorkbench(null);
+      setSpawnedAgentSidebar(null);
+      setLastSettledArtifactRefreshKey(null);
+      setSpreadsheetTurnStartedAt(null);
+      setSpreadsheetOptimisticWorkingStartedAt(null);
+    }, [selectedTaskId, workspace?.path]);
+    useEffect(() => {
+      if (!browserWorkbenchRequest || browserWorkbenchRequest.taskId !== selectedTaskId) return;
+      openBrowserWorkbenchSidebar({
+        sessionId: browserWorkbenchRequest.sessionId || "default",
+        url: browserWorkbenchRequest.url,
+        requestId: browserWorkbenchRequest.requestId,
+      });
+    }, [browserWorkbenchRequest, openBrowserWorkbenchSidebar, selectedTaskId]);
+    useEffect(() => {
+      if (!spawnedAgentSidebar) return;
+      if (childTasks.some((childTask) => childTask.id === spawnedAgentSidebar.taskId)) return;
+      setSpawnedAgentSidebar(null);
+    }, [childTasks, spawnedAgentSidebar]);
+    useEffect(() => {
+      try {
+        window.localStorage.setItem(
+          SPREADSHEET_SIDEBAR_WIDTH_STORAGE_KEY,
+          String(Math.round(spreadsheetSidebarWidth)),
+        );
+      } catch {
+        // Ignore storage failures; resizing should still work for the current session.
+      }
+    }, [spreadsheetSidebarWidth]);
+    const clampSpreadsheetSidebarWidth = useCallback((width: number) => {
       const containerWidth =
         splitLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
       const maxWidth = Math.max(
         SPREADSHEET_SIDEBAR_MIN_WIDTH,
         containerWidth - SPREADSHEET_MAIN_MIN_WIDTH,
       );
-      const preferredBrowserWidth = Math.max(
-        SPREADSHEET_SIDEBAR_DEFAULT_WIDTH,
-        containerWidth - 460,
-      );
-      setSpreadsheetSidebarWidth(
-        Math.min(Math.max(preferredBrowserWidth, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth),
-      );
-      setBrowserWorkbench({
-        sessionId: request.sessionId || "default",
-        url: request.url,
-        mode: "sidebar",
-        requestId: request.requestId,
-      });
-    },
-    [onRevealRightSidebar],
-  );
-  const openWebLinkInBrowserSidebar = useCallback(
-    (url: string) => {
-      openBrowserWorkbenchSidebar({
-        sessionId: "link-preview",
-        url,
-        requestId: `link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      });
-    },
-    [openBrowserWorkbenchSidebar],
-  );
-  const openEmptyBrowserWorkbenchSidebar = useCallback(() => {
-    openBrowserWorkbenchSidebar({
-      sessionId: "default",
-      requestId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    });
-  }, [openBrowserWorkbenchSidebar]);
-  const sendSpreadsheetFullscreenMessage = useCallback(
-    async (message: string, images?: ImageAttachment[]) => {
-      const startedAt = Date.now();
-      setSpreadsheetTurnStartedAt(startedAt);
-      setSpreadsheetOptimisticWorkingStartedAt(startedAt);
-      await onSendMessage(message, images);
-    },
-    [onSendMessage],
-  );
-  useEffect(() => {
-    setSpreadsheetArtifact(null);
-    setBrowserWorkbench(null);
-    setSpawnedAgentSidebar(null);
-    setLastSettledArtifactRefreshKey(null);
-    setSpreadsheetTurnStartedAt(null);
-    setSpreadsheetOptimisticWorkingStartedAt(null);
-  }, [selectedTaskId, workspace?.path]);
-  useEffect(() => {
-    if (!browserWorkbenchRequest || browserWorkbenchRequest.taskId !== selectedTaskId) return;
-    openBrowserWorkbenchSidebar({
-      sessionId: browserWorkbenchRequest.sessionId || "default",
-      url: browserWorkbenchRequest.url,
-      requestId: browserWorkbenchRequest.requestId,
-    });
-  }, [browserWorkbenchRequest, openBrowserWorkbenchSidebar, selectedTaskId]);
-  useEffect(() => {
-    if (!spawnedAgentSidebar) return;
-    if (childTasks.some((childTask) => childTask.id === spawnedAgentSidebar.taskId)) return;
-    setSpawnedAgentSidebar(null);
-  }, [childTasks, spawnedAgentSidebar]);
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        SPREADSHEET_SIDEBAR_WIDTH_STORAGE_KEY,
-        String(Math.round(spreadsheetSidebarWidth)),
-      );
-    } catch {
-      // Ignore storage failures; resizing should still work for the current session.
-    }
-  }, [spreadsheetSidebarWidth]);
-  const clampSpreadsheetSidebarWidth = useCallback((width: number) => {
-    const containerWidth =
-      splitLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
-    const maxWidth = Math.max(
-      SPREADSHEET_SIDEBAR_MIN_WIDTH,
-      containerWidth - SPREADSHEET_MAIN_MIN_WIDTH,
-    );
-    return Math.min(Math.max(width, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth);
-  }, []);
-  useLayoutEffect(() => {
-    if (
-      !(
-        (spreadsheetArtifact && spreadsheetArtifact.mode === "sidebar") ||
-        (browserWorkbench && browserWorkbench.mode === "sidebar") ||
-        spawnedAgentSidebar
-      )
-    ) {
-      return;
-    }
-    setSpreadsheetSidebarWidth((current) => clampSpreadsheetSidebarWidth(current));
-  }, [browserWorkbench, clampSpreadsheetSidebarWidth, spawnedAgentSidebar, spreadsheetArtifact]);
-  useEffect(() => {
-    if (!isSpreadsheetResizing) return;
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-    };
-  }, [isSpreadsheetResizing]);
-  const handleSpreadsheetResizePointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      const rect = splitLayoutRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      event.preventDefault();
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      const resizeHandle = event.currentTarget;
-      const pointerId = event.pointerId;
-      const maxWidth = Math.max(
-        SPREADSHEET_SIDEBAR_MIN_WIDTH,
-        rect.width - SPREADSHEET_MAIN_MIN_WIDTH,
-      );
-      const clampWidth = (width: number) =>
-        Math.min(Math.max(width, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth);
-      setIsSpreadsheetResizing(true);
-      setSpreadsheetSidebarWidth(clampWidth(rect.right - event.clientX));
-
-      const handlePointerMove = (moveEvent: PointerEvent) => {
-        setSpreadsheetSidebarWidth(clampWidth(rect.right - moveEvent.clientX));
+      return Math.min(Math.max(width, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth);
+    }, []);
+    useLayoutEffect(() => {
+      if (
+        !(
+          (spreadsheetArtifact && spreadsheetArtifact.mode === "sidebar") ||
+          (browserWorkbench && browserWorkbench.mode === "sidebar") ||
+          spawnedAgentSidebar
+        )
+      ) {
+        return;
+      }
+      setSpreadsheetSidebarWidth((current) => clampSpreadsheetSidebarWidth(current));
+    }, [browserWorkbench, clampSpreadsheetSidebarWidth, spawnedAgentSidebar, spreadsheetArtifact]);
+    useEffect(() => {
+      if (!isSpreadsheetResizing) return;
+      const previousCursor = document.body.style.cursor;
+      const previousUserSelect = document.body.style.userSelect;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      return () => {
+        document.body.style.cursor = previousCursor;
+        document.body.style.userSelect = previousUserSelect;
       };
-      let finished = false;
-      const handlePointerUp = () => {
-        if (finished) return;
-        finished = true;
-        setIsSpreadsheetResizing(false);
-        resizeHandle.removeEventListener("lostpointercapture", handlePointerUp);
-        if (resizeHandle.hasPointerCapture?.(pointerId)) {
-          resizeHandle.releasePointerCapture?.(pointerId);
+    }, [isSpreadsheetResizing]);
+    const handleSpreadsheetResizePointerDown = useCallback(
+      (event: ReactPointerEvent<HTMLDivElement>) => {
+        const rect = splitLayoutRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        const resizeHandle = event.currentTarget;
+        const pointerId = event.pointerId;
+        const maxWidth = Math.max(
+          SPREADSHEET_SIDEBAR_MIN_WIDTH,
+          rect.width - SPREADSHEET_MAIN_MIN_WIDTH,
+        );
+        const clampWidth = (width: number) =>
+          Math.min(Math.max(width, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth);
+        setIsSpreadsheetResizing(true);
+        setSpreadsheetSidebarWidth(clampWidth(rect.right - event.clientX));
+
+        const handlePointerMove = (moveEvent: PointerEvent) => {
+          setSpreadsheetSidebarWidth(clampWidth(rect.right - moveEvent.clientX));
+        };
+        let finished = false;
+        const handlePointerUp = () => {
+          if (finished) return;
+          finished = true;
+          setIsSpreadsheetResizing(false);
+          resizeHandle.removeEventListener("lostpointercapture", handlePointerUp);
+          if (resizeHandle.hasPointerCapture?.(pointerId)) {
+            resizeHandle.releasePointerCapture?.(pointerId);
+          }
+          window.removeEventListener("pointermove", handlePointerMove);
+          window.removeEventListener("pointerup", handlePointerUp);
+          window.removeEventListener("pointercancel", handlePointerUp);
+        };
+
+        window.addEventListener("pointermove", handlePointerMove);
+        window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointercancel", handlePointerUp);
+        resizeHandle.addEventListener("lostpointercapture", handlePointerUp);
+      },
+      [],
+    );
+    const handleSpreadsheetResizeKeyDown = useCallback(
+      (event: ReactKeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        setSpreadsheetSidebarWidth((current) =>
+          clampSpreadsheetSidebarWidth(current + (event.key === "ArrowLeft" ? 32 : -32)),
+        );
+      },
+      [clampSpreadsheetSidebarWidth],
+    );
+    const spreadsheetEvents = replayControls.replayEvents;
+    const spreadsheetHasActiveChildren = useMemo(
+      () =>
+        childTasks.some(
+          (childTask) =>
+            childTask.status === "executing" ||
+            childTask.status === "planning" ||
+            childTask.status === "interrupted",
+        ),
+      [childTasks],
+    );
+    const isSpreadsheetTaskWorking = useMemo(
+      () => isTaskActivelyWorking(task, spreadsheetEvents, spreadsheetHasActiveChildren),
+      [task, spreadsheetEvents, spreadsheetHasActiveChildren],
+    );
+    useEffect(() => {
+      if (!spreadsheetOptimisticWorkingStartedAt) return;
+      const hasCompletionAfterFollowup = spreadsheetEvents.some(
+        (event) =>
+          event.timestamp >= spreadsheetOptimisticWorkingStartedAt &&
+          getEffectiveTaskEventType(event) === "task_completed",
+      );
+      if (hasCompletionAfterFollowup) {
+        setSpreadsheetOptimisticWorkingStartedAt(null);
+      }
+    }, [spreadsheetEvents, spreadsheetOptimisticWorkingStartedAt]);
+    const isSpreadsheetFollowupWorking = spreadsheetOptimisticWorkingStartedAt !== null;
+    const effectiveSpreadsheetTaskWorking =
+      isSpreadsheetTaskWorking || isSpreadsheetFollowupWorking;
+    const latestSpreadsheetUserMessageTimestamp = useMemo(
+      () => findLatestUserMessageTimestamp(spreadsheetEvents, task?.id),
+      [spreadsheetEvents, task?.id],
+    );
+    const activeSpreadsheetTurnStartedAt =
+      spreadsheetTurnStartedAt ?? latestSpreadsheetUserMessageTimestamp;
+    const spreadsheetWorkStartedAt = task
+      ? (spreadsheetOptimisticWorkingStartedAt ?? activeSpreadsheetTurnStartedAt ?? task.createdAt)
+      : Date.now();
+    const spreadsheetWorkCompletedAt = spreadsheetOptimisticWorkingStartedAt
+      ? undefined
+      : isTerminalTaskStatus(task?.status)
+        ? (task?.completedAt ?? task?.updatedAt)
+        : task?.completedAt;
+    const spreadsheetWorkDuration = useTaskDuration(
+      spreadsheetWorkStartedAt,
+      spreadsheetWorkCompletedAt,
+      Boolean(task && effectiveSpreadsheetTaskWorking),
+    );
+    const spreadsheetTurnContext = useMemo(
+      () =>
+        spreadsheetArtifact
+          ? buildSpreadsheetTurnContext({
+              task,
+              events: spreadsheetEvents,
+              filePath: spreadsheetArtifact.path,
+              isWorking: effectiveSpreadsheetTaskWorking,
+              durationLabel: spreadsheetWorkDuration,
+              turnStartedAt: activeSpreadsheetTurnStartedAt,
+            })
+          : null,
+      [
+        activeSpreadsheetTurnStartedAt,
+        effectiveSpreadsheetTaskWorking,
+        spreadsheetArtifact,
+        spreadsheetEvents,
+        spreadsheetWorkDuration,
+        task,
+      ],
+    );
+    const browserTurnContext = useMemo(
+      () =>
+        browserWorkbench
+          ? buildSpreadsheetTurnContext({
+              task,
+              events: spreadsheetEvents,
+              filePath: browserWorkbench.url || "browser workbench",
+              isWorking: effectiveSpreadsheetTaskWorking,
+              durationLabel: spreadsheetWorkDuration,
+              turnStartedAt: activeSpreadsheetTurnStartedAt,
+            })
+          : null,
+      [
+        activeSpreadsheetTurnStartedAt,
+        browserWorkbench,
+        effectiveSpreadsheetTaskWorking,
+        spreadsheetEvents,
+        spreadsheetWorkDuration,
+        task,
+      ],
+    );
+    const computedArtifactRefreshKey = useMemo(() => {
+      if (!spreadsheetArtifact) return null;
+      let latestTimestamp = 0;
+      const hasActiveTurn = activeSpreadsheetTurnStartedAt !== null;
+      for (const event of spreadsheetEvents) {
+        if (task?.id && event.taskId !== task.id) continue;
+        if (hasActiveTurn && activeSpreadsheetTurnStartedAt !== null) {
+          if (
+            effectiveSpreadsheetTaskWorking &&
+            event.timestamp >= activeSpreadsheetTurnStartedAt
+          ) {
+            continue;
+          }
+          if (
+            !effectiveSpreadsheetTaskWorking &&
+            event.timestamp < activeSpreadsheetTurnStartedAt
+          ) {
+            continue;
+          }
         }
-        window.removeEventListener("pointermove", handlePointerMove);
-        window.removeEventListener("pointerup", handlePointerUp);
-        window.removeEventListener("pointercancel", handlePointerUp);
-      };
-
-      window.addEventListener("pointermove", handlePointerMove);
-      window.addEventListener("pointerup", handlePointerUp);
-      window.addEventListener("pointercancel", handlePointerUp);
-      resizeHandle.addEventListener("lostpointercapture", handlePointerUp);
-    },
-    [],
-  );
-  const handleSpreadsheetResizeKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      event.preventDefault();
-      setSpreadsheetSidebarWidth((current) =>
-        clampSpreadsheetSidebarWidth(current + (event.key === "ArrowLeft" ? 32 : -32)),
-      );
-    },
-    [clampSpreadsheetSidebarWidth],
-  );
-  const spreadsheetEvents = replayControls.replayEvents;
-  const spreadsheetHasActiveChildren = useMemo(
-    () =>
-      childTasks.some((childTask) =>
-        childTask.status === "executing" ||
-        childTask.status === "planning" ||
-        childTask.status === "interrupted",
-      ),
-    [childTasks],
-  );
-  const isSpreadsheetTaskWorking = useMemo(
-    () => isTaskActivelyWorking(task, spreadsheetEvents, spreadsheetHasActiveChildren),
-    [task, spreadsheetEvents, spreadsheetHasActiveChildren],
-  );
-  useEffect(() => {
-    if (!spreadsheetOptimisticWorkingStartedAt) return;
-    const hasCompletionAfterFollowup = spreadsheetEvents.some(
-      (event) =>
-        event.timestamp >= spreadsheetOptimisticWorkingStartedAt &&
-        getEffectiveTaskEventType(event) === "task_completed",
-    );
-    if (hasCompletionAfterFollowup) {
-      setSpreadsheetOptimisticWorkingStartedAt(null);
-    }
-  }, [spreadsheetEvents, spreadsheetOptimisticWorkingStartedAt]);
-  const isSpreadsheetFollowupWorking = spreadsheetOptimisticWorkingStartedAt !== null;
-  const effectiveSpreadsheetTaskWorking = isSpreadsheetTaskWorking || isSpreadsheetFollowupWorking;
-  const latestSpreadsheetUserMessageTimestamp = useMemo(
-    () => findLatestUserMessageTimestamp(spreadsheetEvents, task?.id),
-    [spreadsheetEvents, task?.id],
-  );
-  const activeSpreadsheetTurnStartedAt =
-    spreadsheetTurnStartedAt ?? latestSpreadsheetUserMessageTimestamp;
-  const spreadsheetWorkStartedAt = task
-    ? (spreadsheetOptimisticWorkingStartedAt ?? activeSpreadsheetTurnStartedAt ?? task.createdAt)
-    : Date.now();
-  const spreadsheetWorkCompletedAt = spreadsheetOptimisticWorkingStartedAt
-    ? undefined
-    : isTerminalTaskStatus(task?.status)
-    ? (task?.completedAt ?? task?.updatedAt)
-    : task?.completedAt;
-  const spreadsheetWorkDuration = useTaskDuration(
-    spreadsheetWorkStartedAt,
-    spreadsheetWorkCompletedAt,
-    Boolean(task && effectiveSpreadsheetTaskWorking),
-  );
-  const spreadsheetTurnContext = useMemo(
-    () =>
-      spreadsheetArtifact
-        ? buildSpreadsheetTurnContext({
-            task,
-            events: spreadsheetEvents,
-            filePath: spreadsheetArtifact.path,
-            isWorking: effectiveSpreadsheetTaskWorking,
-            durationLabel: spreadsheetWorkDuration,
-            turnStartedAt: activeSpreadsheetTurnStartedAt,
-          })
-        : null,
-    [
+        const effectiveType = getEffectiveTaskEventType(event);
+        const touchesArtifact =
+          eventPathMatchesSpreadsheet(event, spreadsheetArtifact.path) ||
+          effectiveType === "task_completed";
+        if (!touchesArtifact) continue;
+        latestTimestamp = Math.max(latestTimestamp, event.timestamp);
+      }
+      return latestTimestamp > 0 ? `${spreadsheetArtifact.path}:${latestTimestamp}` : null;
+    }, [
       activeSpreadsheetTurnStartedAt,
       effectiveSpreadsheetTaskWorking,
       spreadsheetArtifact,
       spreadsheetEvents,
-      spreadsheetWorkDuration,
-      task,
-    ],
-  );
-  const browserTurnContext = useMemo(
-    () =>
-      browserWorkbench
-        ? buildSpreadsheetTurnContext({
-            task,
-            events: spreadsheetEvents,
-            filePath: browserWorkbench.url || "browser workbench",
-            isWorking: effectiveSpreadsheetTaskWorking,
-            durationLabel: spreadsheetWorkDuration,
-            turnStartedAt: activeSpreadsheetTurnStartedAt,
-          })
-        : null,
-    [
-      activeSpreadsheetTurnStartedAt,
-      browserWorkbench,
-      effectiveSpreadsheetTaskWorking,
-      spreadsheetEvents,
-      spreadsheetWorkDuration,
-      task,
-    ],
-  );
-  const computedArtifactRefreshKey = useMemo(() => {
-    if (!spreadsheetArtifact) return null;
-    let latestTimestamp = 0;
-    const hasActiveTurn = activeSpreadsheetTurnStartedAt !== null;
-    for (const event of spreadsheetEvents) {
-      if (task?.id && event.taskId !== task.id) continue;
-      if (hasActiveTurn && activeSpreadsheetTurnStartedAt !== null) {
-        if (effectiveSpreadsheetTaskWorking && event.timestamp >= activeSpreadsheetTurnStartedAt) {
-          continue;
-        }
-        if (!effectiveSpreadsheetTaskWorking && event.timestamp < activeSpreadsheetTurnStartedAt) {
-          continue;
-        }
+      task?.id,
+    ]);
+    useEffect(() => {
+      if (!spreadsheetArtifact) {
+        setLastSettledArtifactRefreshKey(null);
+        return;
       }
-      const effectiveType = getEffectiveTaskEventType(event);
-      const touchesArtifact =
-        eventPathMatchesSpreadsheet(event, spreadsheetArtifact.path) ||
-        effectiveType === "task_completed";
-      if (!touchesArtifact) continue;
-      latestTimestamp = Math.max(latestTimestamp, event.timestamp);
-    }
-    return latestTimestamp > 0 ? `${spreadsheetArtifact.path}:${latestTimestamp}` : null;
-  }, [
-    activeSpreadsheetTurnStartedAt,
-    effectiveSpreadsheetTaskWorking,
-    spreadsheetArtifact,
-    spreadsheetEvents,
-    task?.id,
-  ]);
-  useEffect(() => {
-    if (!spreadsheetArtifact) {
-      setLastSettledArtifactRefreshKey(null);
-      return;
-    }
-    if (effectiveSpreadsheetTaskWorking) return;
-    setLastSettledArtifactRefreshKey((current) => {
-      if (
-        current?.path === spreadsheetArtifact.path &&
-        current.key === computedArtifactRefreshKey
-      ) {
-        return current;
-      }
-      return {
-        path: spreadsheetArtifact.path,
-        key: computedArtifactRefreshKey,
-      };
-    });
-  }, [computedArtifactRefreshKey, effectiveSpreadsheetTaskWorking, spreadsheetArtifact]);
-  const artifactRefreshKey =
-    effectiveSpreadsheetTaskWorking
+      if (effectiveSpreadsheetTaskWorking) return;
+      setLastSettledArtifactRefreshKey((current) => {
+        if (
+          current?.path === spreadsheetArtifact.path &&
+          current.key === computedArtifactRefreshKey
+        ) {
+          return current;
+        }
+        return {
+          path: spreadsheetArtifact.path,
+          key: computedArtifactRefreshKey,
+        };
+      });
+    }, [computedArtifactRefreshKey, effectiveSpreadsheetTaskWorking, spreadsheetArtifact]);
+    const artifactRefreshKey = effectiveSpreadsheetTaskWorking
       ? lastSettledArtifactRefreshKey &&
         lastSettledArtifactRefreshKey.path === spreadsheetArtifact?.path
         ? lastSettledArtifactRefreshKey.key
         : null
       : computedArtifactRefreshKey;
 
-  if (browserWorkbench?.mode === "fullscreen" && task) {
-    const selectedModelLabel =
-      availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
-    return (
-      <BrowserWorkbenchView
-        taskId={task.id}
-        sessionId={browserWorkbench.sessionId}
-        initialUrl={browserWorkbench.url}
-        workspaceId={workspace?.id}
-        workspacePath={workspace?.path}
-        mode="fullscreen"
-        onClose={closeBrowserWorkbench}
-        onFullscreen={showBrowserFullscreen}
-        onExitFullscreen={showBrowserSidebar}
-        onStatusChange={updateBrowserWorkbenchStatus}
-        onSendMessage={sendSpreadsheetFullscreenMessage}
-        selectedModelLabel={selectedModelLabel}
-        selectedModel={selectedModel}
-        selectedProvider={selectedProvider}
-        selectedReasoningEffort={selectedReasoningEffort}
-        availableModels={availableModels}
-        availableProviders={availableProviders}
-        onModelChange={onModelChange}
-        onOpenSettings={onOpenSettings}
-        turnContext={browserTurnContext}
-      />
-    );
-  }
-
-  if (spreadsheetArtifact?.mode === "fullscreen" && workspace?.path) {
-    const selectedModelLabel =
-      availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
-    if (spreadsheetArtifact.kind === "document") {
+    if (browserWorkbench?.mode === "fullscreen" && task) {
+      const selectedModelLabel =
+        availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
       return (
-        <DocumentArtifactViewer
-          filePath={spreadsheetArtifact.path}
-          workspacePath={workspace.path}
+        <BrowserWorkbenchView
+          taskId={task.id}
+          sessionId={browserWorkbench.sessionId}
+          initialUrl={browserWorkbench.url}
+          workspaceId={workspace?.id}
+          workspacePath={workspace?.path}
           mode="fullscreen"
-          onClose={closeSpreadsheetArtifact}
-          onFullscreen={showSpreadsheetFullscreen}
-          onExitFullscreen={showSpreadsheetSidebar}
+          onClose={closeBrowserWorkbench}
+          onFullscreen={showBrowserFullscreen}
+          onExitFullscreen={showBrowserSidebar}
+          onStatusChange={updateBrowserWorkbenchStatus}
           onSendMessage={sendSpreadsheetFullscreenMessage}
           selectedModelLabel={selectedModelLabel}
           selectedModel={selectedModel}
@@ -1307,367 +1296,395 @@ const SelectedTaskWorkspaceView = memo(function SelectedTaskWorkspaceView({
           selectedReasoningEffort={selectedReasoningEffort}
           availableModels={availableModels}
           availableProviders={availableProviders}
-          workspaceId={workspace.id}
           onModelChange={onModelChange}
           onOpenSettings={onOpenSettings}
-          turnContext={spreadsheetTurnContext}
-          refreshKey={artifactRefreshKey}
+          turnContext={browserTurnContext}
         />
       );
     }
-    if (spreadsheetArtifact.kind === "presentation") {
-      return (
-        <PresentationArtifactViewer
-          filePath={spreadsheetArtifact.path}
-          workspacePath={workspace.path}
-          mode="fullscreen"
-          onClose={closeSpreadsheetArtifact}
-          onFullscreen={showSpreadsheetFullscreen}
-          onExitFullscreen={showSpreadsheetSidebar}
-          onSendMessage={sendSpreadsheetFullscreenMessage}
-          selectedModelLabel={selectedModelLabel}
-          selectedModel={selectedModel}
-          selectedProvider={selectedProvider}
-          selectedReasoningEffort={selectedReasoningEffort}
-          availableModels={availableModels}
-          availableProviders={availableProviders}
-          workspaceId={workspace.id}
-          onModelChange={onModelChange}
-          onOpenSettings={onOpenSettings}
-          turnContext={spreadsheetTurnContext}
-          refreshKey={artifactRefreshKey}
-        />
-      );
-    }
-    if (spreadsheetArtifact.kind === "webpage") {
-      return (
-        <WebArtifactViewer
-          filePath={spreadsheetArtifact.path}
-          workspacePath={workspace.path}
-          mode="fullscreen"
-          onClose={closeSpreadsheetArtifact}
-          onFullscreen={showSpreadsheetFullscreen}
-          onExitFullscreen={showSpreadsheetSidebar}
-          onSendMessage={sendSpreadsheetFullscreenMessage}
-          selectedModelLabel={selectedModelLabel}
-          selectedModel={selectedModel}
-          selectedProvider={selectedProvider}
-          selectedReasoningEffort={selectedReasoningEffort}
-          availableModels={availableModels}
-          availableProviders={availableProviders}
-          workspaceId={workspace.id}
-          onModelChange={onModelChange}
-          onOpenSettings={onOpenSettings}
-          turnContext={spreadsheetTurnContext}
-          refreshKey={artifactRefreshKey}
-        />
-      );
-    }
-    return (
-      <SpreadsheetArtifactViewer
-        filePath={spreadsheetArtifact.path}
-        workspacePath={workspace.path}
-        mode="fullscreen"
-        onClose={closeSpreadsheetArtifact}
-        onFullscreen={showSpreadsheetFullscreen}
-        onExitFullscreen={showSpreadsheetSidebar}
-        onSendMessage={sendSpreadsheetFullscreenMessage}
-        selectedModelLabel={selectedModelLabel}
-        selectedModel={selectedModel}
-        selectedProvider={selectedProvider}
-        selectedReasoningEffort={selectedReasoningEffort}
-        availableModels={availableModels}
-        availableProviders={availableProviders}
-        workspaceId={workspace.id}
-        onModelChange={onModelChange}
-        onOpenSettings={onOpenSettings}
-        turnContext={spreadsheetTurnContext}
-      />
-    );
-  }
 
-  const hasSpreadsheetSidebar =
-    Boolean(
-      (spreadsheetArtifact || browserWorkbench || spawnedAgentSidebar || sideChat) &&
-        workspace?.path &&
-        !remoteTaskView,
-    );
-
-  return (
-    <div
-      ref={splitLayoutRef}
-      className={`selected-workspace-view ${hasSpreadsheetSidebar ? "has-spreadsheet-sidebar" : ""} ${
-        isSpreadsheetResizing ? "is-resizing" : ""
-      }`}
-    >
-      <div className="selected-workspace-main-row">
-      <Suspense fallback={<TaskViewSkeleton />}>
-        <MainContent
-          task={task}
-          selectedTaskId={selectedTaskId}
-          workspace={workspace}
-          events={replayControls.replayEvents}
-          sharedTaskEventUi={replayControls.isReplayMode ? null : sharedTaskEventUi}
-          replayControls={replayControls}
-          childTasks={remoteTaskView ? [] : childTasks}
-          childEvents={remoteTaskView ? [] : childEvents}
-          onSelectChildTask={onSelectChildTask}
-          onSelectTask={onSelectTask}
-          onSendMessage={onSendMessage}
-          onStartOnboarding={onStartOnboarding}
-          onStartFreshSession={onStartFreshSession}
-          onCreateTask={onCreateTask}
-          onAskInbox={onAskInbox}
-          onChangeWorkspace={onChangeWorkspace}
-          onSelectWorkspace={onSelectWorkspace}
-          onOpenSettings={onOpenSettings as Any}
-          onStopTask={onStopTask}
-          onEnableShellForPausedTask={onEnableShellForPausedTask}
-          onContinueWithoutShellForPausedTask={onContinueWithoutShellForPausedTask}
-          onWrapUpTask={onWrapUpTask}
-          inputRequest={activeInputRequest}
-          pendingInputRequests={pendingInputRequests}
-          onSubmitInputRequest={onSubmitInputRequest}
-          onDismissInputRequest={onDismissInputRequest}
-          onOpenBrowserView={onOpenBrowserView}
-          onViewTaskOutputs={onViewTaskOutputs}
-          onTasksChanged={onTasksChanged}
-          selectedModel={selectedModel}
-          selectedProvider={selectedProvider}
-          selectedReasoningEffort={selectedReasoningEffort}
-          availableModels={availableModels}
-          onModelChange={onModelChange}
-          availableProviders={availableProviders}
-          uiDensity={uiDensity}
-          homeResearchVaultEnabled={homeResearchVaultEnabled}
-          homeNextActionsEnabled={homeNextActionsEnabled}
-          rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-          taskSwitchId={taskSwitchId}
-          hasMoreTimelineHistory={hasMoreTimelineHistory}
-          isLoadingTimelineHistory={isLoadingTimelineHistory}
-          timelineHistoryError={timelineHistoryError}
-          onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
-          onLoadTaskEventDetail={onLoadTaskEventDetail}
-          onReleaseTaskEventDetail={onReleaseTaskEventDetail}
-          remoteSession={
-            remoteTaskView
-              ? { deviceId: remoteTaskView.deviceId, deviceName: remoteTaskView.deviceName }
-              : null
-          }
-          onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
-          onOpenDocumentArtifact={openDocumentArtifact}
-          onOpenPresentationArtifact={openPresentationArtifact}
-          onOpenWebArtifact={openWebArtifact}
-          onOpenBrowserWorkbenchSidebar={
-            task && workspace?.path && !remoteTaskView ? openEmptyBrowserWorkbenchSidebar : undefined
-          }
-          onOpenWebLinkInSidebar={
-            task && workspace?.path && !remoteTaskView ? openWebLinkInBrowserSidebar : undefined
-          }
-          onOpenSideChat={onOpenSideChat}
-          onOpenChildAgentSidebar={openSpawnedAgentSidebar}
-        />
-      </Suspense>
-      {sideChat && workspace?.path && !remoteTaskView ? (
-        <>
-          <ResizableDividerHandle
-            className="spreadsheet-sidebar-resize-handle"
-            role="separator"
-            orientation="vertical"
-            aria-label="Resize side conversation"
-            aria-valuemin={SPREADSHEET_SIDEBAR_MIN_WIDTH}
-            aria-valuenow={Math.round(spreadsheetSidebarWidth)}
-            tabIndex={0}
-            onPointerDown={handleSpreadsheetResizePointerDown}
-            onKeyDown={handleSpreadsheetResizeKeyDown}
+    if (spreadsheetArtifact?.mode === "fullscreen" && workspace?.path) {
+      const selectedModelLabel =
+        availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
+      if (spreadsheetArtifact.kind === "document") {
+        return (
+          <DocumentArtifactViewer
+            filePath={spreadsheetArtifact.path}
+            workspacePath={workspace.path}
+            mode="fullscreen"
+            onClose={closeSpreadsheetArtifact}
+            onFullscreen={showSpreadsheetFullscreen}
+            onExitFullscreen={showSpreadsheetSidebar}
+            onSendMessage={sendSpreadsheetFullscreenMessage}
+            selectedModelLabel={selectedModelLabel}
+            selectedModel={selectedModel}
+            selectedProvider={selectedProvider}
+            selectedReasoningEffort={selectedReasoningEffort}
+            availableModels={availableModels}
+            availableProviders={availableProviders}
+            workspaceId={workspace.id}
+            onModelChange={onModelChange}
+            onOpenSettings={onOpenSettings}
+            turnContext={spreadsheetTurnContext}
+            refreshKey={artifactRefreshKey}
           />
-          <div
-            className="spreadsheet-resizable-sidebar"
-            style={{ width: `${spreadsheetSidebarWidth}px` }}
-          >
+        );
+      }
+      if (spreadsheetArtifact.kind === "presentation") {
+        return (
+          <PresentationArtifactViewer
+            filePath={spreadsheetArtifact.path}
+            workspacePath={workspace.path}
+            mode="fullscreen"
+            onClose={closeSpreadsheetArtifact}
+            onFullscreen={showSpreadsheetFullscreen}
+            onExitFullscreen={showSpreadsheetSidebar}
+            onSendMessage={sendSpreadsheetFullscreenMessage}
+            selectedModelLabel={selectedModelLabel}
+            selectedModel={selectedModel}
+            selectedProvider={selectedProvider}
+            selectedReasoningEffort={selectedReasoningEffort}
+            availableModels={availableModels}
+            availableProviders={availableProviders}
+            workspaceId={workspace.id}
+            onModelChange={onModelChange}
+            onOpenSettings={onOpenSettings}
+            turnContext={spreadsheetTurnContext}
+            refreshKey={artifactRefreshKey}
+          />
+        );
+      }
+      if (spreadsheetArtifact.kind === "webpage") {
+        return (
+          <WebArtifactViewer
+            filePath={spreadsheetArtifact.path}
+            workspacePath={workspace.path}
+            mode="fullscreen"
+            onClose={closeSpreadsheetArtifact}
+            onFullscreen={showSpreadsheetFullscreen}
+            onExitFullscreen={showSpreadsheetSidebar}
+            onSendMessage={sendSpreadsheetFullscreenMessage}
+            selectedModelLabel={selectedModelLabel}
+            selectedModel={selectedModel}
+            selectedProvider={selectedProvider}
+            selectedReasoningEffort={selectedReasoningEffort}
+            availableModels={availableModels}
+            availableProviders={availableProviders}
+            workspaceId={workspace.id}
+            onModelChange={onModelChange}
+            onOpenSettings={onOpenSettings}
+            turnContext={spreadsheetTurnContext}
+            refreshKey={artifactRefreshKey}
+          />
+        );
+      }
+      return (
+        <SpreadsheetArtifactViewer
+          filePath={spreadsheetArtifact.path}
+          workspacePath={workspace.path}
+          mode="fullscreen"
+          onClose={closeSpreadsheetArtifact}
+          onFullscreen={showSpreadsheetFullscreen}
+          onExitFullscreen={showSpreadsheetSidebar}
+          onSendMessage={sendSpreadsheetFullscreenMessage}
+          selectedModelLabel={selectedModelLabel}
+          selectedModel={selectedModel}
+          selectedProvider={selectedProvider}
+          selectedReasoningEffort={selectedReasoningEffort}
+          availableModels={availableModels}
+          availableProviders={availableProviders}
+          workspaceId={workspace.id}
+          onModelChange={onModelChange}
+          onOpenSettings={onOpenSettings}
+          turnContext={spreadsheetTurnContext}
+        />
+      );
+    }
+
+    const hasSpreadsheetSidebar = Boolean(
+      (spreadsheetArtifact || browserWorkbench || spawnedAgentSidebar || sideChat) &&
+      workspace?.path &&
+      !remoteTaskView,
+    );
+
+    return (
+      <div
+        ref={splitLayoutRef}
+        className={`selected-workspace-view ${hasSpreadsheetSidebar ? "has-spreadsheet-sidebar" : ""} ${
+          isSpreadsheetResizing ? "is-resizing" : ""
+        }`}
+      >
+        <div className="selected-workspace-main-row">
+          <Suspense fallback={<TaskViewSkeleton />}>
+            <MainContent
+              task={task}
+              selectedTaskId={selectedTaskId}
+              workspace={workspace}
+              events={replayControls.replayEvents}
+              sharedTaskEventUi={replayControls.isReplayMode ? null : sharedTaskEventUi}
+              replayControls={replayControls}
+              childTasks={remoteTaskView ? [] : childTasks}
+              childEvents={remoteTaskView ? [] : childEvents}
+              onSelectChildTask={onSelectChildTask}
+              onSelectTask={onSelectTask}
+              onSendMessage={onSendMessage}
+              onStartOnboarding={onStartOnboarding}
+              onStartFreshSession={onStartFreshSession}
+              onCreateTask={onCreateTask}
+              onAskInbox={onAskInbox}
+              onChangeWorkspace={onChangeWorkspace}
+              onSelectWorkspace={onSelectWorkspace}
+              onOpenSettings={onOpenSettings as Any}
+              onStopTask={onStopTask}
+              onContinueWithoutCommandsForPausedTask={onContinueWithoutCommandsForPausedTask}
+              onWrapUpTask={onWrapUpTask}
+              inputRequest={activeInputRequest}
+              pendingInputRequests={pendingInputRequests}
+              onSubmitInputRequest={onSubmitInputRequest}
+              onDismissInputRequest={onDismissInputRequest}
+              onOpenBrowserView={onOpenBrowserView}
+              onViewTaskOutputs={onViewTaskOutputs}
+              onTasksChanged={onTasksChanged}
+              selectedModel={selectedModel}
+              selectedProvider={selectedProvider}
+              selectedReasoningEffort={selectedReasoningEffort}
+              availableModels={availableModels}
+              onModelChange={onModelChange}
+              availableProviders={availableProviders}
+              uiDensity={uiDensity}
+              homeResearchVaultEnabled={homeResearchVaultEnabled}
+              homeNextActionsEnabled={homeNextActionsEnabled}
+              rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+              taskSwitchId={taskSwitchId}
+              hasMoreTimelineHistory={hasMoreTimelineHistory}
+              isLoadingTimelineHistory={isLoadingTimelineHistory}
+              timelineHistoryError={timelineHistoryError}
+              onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
+              onLoadTaskEventDetail={onLoadTaskEventDetail}
+              onReleaseTaskEventDetail={onReleaseTaskEventDetail}
+              remoteSession={
+                remoteTaskView
+                  ? { deviceId: remoteTaskView.deviceId, deviceName: remoteTaskView.deviceName }
+                  : null
+              }
+              onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
+              onOpenDocumentArtifact={openDocumentArtifact}
+              onOpenPresentationArtifact={openPresentationArtifact}
+              onOpenWebArtifact={openWebArtifact}
+              onOpenBrowserWorkbenchSidebar={
+                task && workspace?.path && !remoteTaskView
+                  ? openEmptyBrowserWorkbenchSidebar
+                  : undefined
+              }
+              onOpenWebLinkInSidebar={
+                task && workspace?.path && !remoteTaskView ? openWebLinkInBrowserSidebar : undefined
+              }
+              onOpenSideChat={onOpenSideChat}
+              onOpenChildAgentSidebar={openSpawnedAgentSidebar}
+            />
+          </Suspense>
+          {sideChat && workspace?.path && !remoteTaskView ? (
+            <>
+              <ResizableDividerHandle
+                className="spreadsheet-sidebar-resize-handle"
+                role="separator"
+                orientation="vertical"
+                aria-label="Resize side conversation"
+                aria-valuemin={SPREADSHEET_SIDEBAR_MIN_WIDTH}
+                aria-valuenow={Math.round(spreadsheetSidebarWidth)}
+                tabIndex={0}
+                onPointerDown={handleSpreadsheetResizePointerDown}
+                onKeyDown={handleSpreadsheetResizeKeyDown}
+              />
+              <div
+                className="spreadsheet-resizable-sidebar"
+                style={{ width: `${spreadsheetSidebarWidth}px` }}
+              >
+                <Suspense fallback={<RightPanelFallback />}>
+                  <SideChatPanel
+                    parentTask={sideChat.parentTask}
+                    sideTask={sideChat.task}
+                    events={sideChat.events}
+                    loading={sideChat.loading}
+                    sending={sideChat.sending}
+                    onSendMessage={onSendSideChatMessage}
+                    onClose={onCloseSideChat}
+                    onOpenSideTask={onOpenSideChatFullThread}
+                  />
+                </Suspense>
+              </div>
+            </>
+          ) : (spreadsheetArtifact || browserWorkbench || spawnedAgentSidebar) &&
+            workspace?.path &&
+            !remoteTaskView ? (
+            <>
+              <ResizableDividerHandle
+                className="spreadsheet-sidebar-resize-handle"
+                role="separator"
+                orientation="vertical"
+                aria-label="Resize workbench sidebar"
+                aria-valuemin={SPREADSHEET_SIDEBAR_MIN_WIDTH}
+                aria-valuenow={Math.round(spreadsheetSidebarWidth)}
+                tabIndex={0}
+                onPointerDown={handleSpreadsheetResizePointerDown}
+                onKeyDown={handleSpreadsheetResizeKeyDown}
+              />
+              <div
+                className="spreadsheet-resizable-sidebar"
+                style={{ width: `${spreadsheetSidebarWidth}px` }}
+              >
+                <Suspense fallback={<ArtifactSidebarFallback />}>
+                  {spawnedAgentSidebar && task ? (
+                    <SpawnedAgentSidebar
+                      parentTask={task}
+                      childTasks={childTasks}
+                      childEvents={childEvents}
+                      selectedTaskId={spawnedAgentSidebar.taskId}
+                      workspace={workspace}
+                      selectedModel={selectedModel}
+                      selectedProvider={selectedProvider}
+                      selectedReasoningEffort={selectedReasoningEffort}
+                      availableModels={availableModels}
+                      availableProviders={availableProviders}
+                      uiDensity={uiDensity}
+                      rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+                      inputRequest={activeInputRequest}
+                      onSelectTask={selectSpawnedAgentSidebarTask}
+                      onClose={closeSpawnedAgentSidebar}
+                      onCancelTask={onCancelTaskById}
+                      onTasksChanged={onTasksChanged}
+                      onOpenSettings={onOpenSettings}
+                      onModelChange={onModelChange}
+                      onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
+                      onOpenDocumentArtifact={openDocumentArtifact}
+                      onOpenPresentationArtifact={openPresentationArtifact}
+                      onOpenWebArtifact={openWebArtifact}
+                    />
+                  ) : browserWorkbench && task ? (
+                    <BrowserWorkbenchView
+                      key={browserWorkbench.requestId || browserWorkbench.sessionId}
+                      taskId={task.id}
+                      sessionId={browserWorkbench.sessionId}
+                      initialUrl={browserWorkbench.url}
+                      workspaceId={workspace.id}
+                      workspacePath={workspace.path}
+                      mode="sidebar"
+                      onClose={closeBrowserWorkbench}
+                      onFullscreen={showBrowserFullscreen}
+                      onExitFullscreen={showBrowserSidebar}
+                      onStatusChange={updateBrowserWorkbenchStatus}
+                      onSendMessage={sendSpreadsheetFullscreenMessage}
+                    />
+                  ) : spreadsheetArtifact?.kind === "document" ? (
+                    <DocumentArtifactViewer
+                      filePath={spreadsheetArtifact.path}
+                      workspacePath={workspace.path}
+                      mode="sidebar"
+                      onClose={closeSpreadsheetArtifact}
+                      onFullscreen={showSpreadsheetFullscreen}
+                      onExitFullscreen={showSpreadsheetSidebar}
+                      refreshKey={artifactRefreshKey}
+                    />
+                  ) : spreadsheetArtifact?.kind === "presentation" ? (
+                    <PresentationArtifactViewer
+                      filePath={spreadsheetArtifact.path}
+                      workspacePath={workspace.path}
+                      mode="sidebar"
+                      onClose={closeSpreadsheetArtifact}
+                      onFullscreen={showSpreadsheetFullscreen}
+                      onExitFullscreen={showSpreadsheetSidebar}
+                      refreshKey={artifactRefreshKey}
+                    />
+                  ) : spreadsheetArtifact?.kind === "webpage" ? (
+                    <WebArtifactViewer
+                      filePath={spreadsheetArtifact.path}
+                      workspacePath={workspace.path}
+                      mode="sidebar"
+                      onClose={closeSpreadsheetArtifact}
+                      onFullscreen={showSpreadsheetFullscreen}
+                      onExitFullscreen={showSpreadsheetSidebar}
+                      refreshKey={artifactRefreshKey}
+                    />
+                  ) : spreadsheetArtifact ? (
+                    <SpreadsheetArtifactViewer
+                      filePath={spreadsheetArtifact.path}
+                      workspacePath={workspace.path}
+                      mode="sidebar"
+                      onClose={closeSpreadsheetArtifact}
+                      onFullscreen={showSpreadsheetFullscreen}
+                      onExitFullscreen={showSpreadsheetSidebar}
+                    />
+                  ) : null}
+                </Suspense>
+              </div>
+            </>
+          ) : !effectiveRightCollapsed && !remoteTaskView ? (
             <Suspense fallback={<RightPanelFallback />}>
-              <SideChatPanel
-                parentTask={sideChat.parentTask}
-                sideTask={sideChat.task}
-                events={sideChat.events}
-                loading={sideChat.loading}
-                sending={sideChat.sending}
-                onSendMessage={onSendSideChatMessage}
-                onClose={onCloseSideChat}
-                onOpenSideTask={onOpenSideChatFullThread}
+              <RightPanel
+                task={rightPanelInput.task}
+                workspace={rightPanelInput.workspace}
+                events={rightPanelInput.events}
+                sharedTaskEventUi={rightPanelInput.sharedTaskEventUi}
+                hasActiveChildren={rightPanelInput.hasActiveChildren}
+                childTasks={rightPanelInput.childTasks}
+                childEvents={rightPanelInput.childEvents}
+                runningTasks={rightPanelInput.runningTasks}
+                queuedTasks={rightPanelInput.queuedTasks}
+                queueStatus={rightPanelInput.queueStatus}
+                onSelectTask={onSelectTask}
+                onCancelTask={onCancelTaskById}
+                onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
+                onOpenDocumentArtifact={openDocumentArtifact}
+                onOpenPresentationArtifact={openPresentationArtifact}
+                onOpenWebArtifact={openWebArtifact}
+                rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+                highlightOutputPath={rightPanelInput.highlightOutputPath}
+                onHighlightConsumed={onHighlightConsumed}
               />
             </Suspense>
-          </div>
-        </>
-      ) : (spreadsheetArtifact || browserWorkbench || spawnedAgentSidebar) &&
-      workspace?.path &&
-      !remoteTaskView ? (
-        <>
-          <ResizableDividerHandle
-            className="spreadsheet-sidebar-resize-handle"
-            role="separator"
-            orientation="vertical"
-            aria-label="Resize workbench sidebar"
-            aria-valuemin={SPREADSHEET_SIDEBAR_MIN_WIDTH}
-            aria-valuenow={Math.round(spreadsheetSidebarWidth)}
-            tabIndex={0}
-            onPointerDown={handleSpreadsheetResizePointerDown}
-            onKeyDown={handleSpreadsheetResizeKeyDown}
-          />
-          <div
-            className="spreadsheet-resizable-sidebar"
-            style={{ width: `${spreadsheetSidebarWidth}px` }}
-          >
-            <Suspense fallback={<ArtifactSidebarFallback />}>
-              {spawnedAgentSidebar && task ? (
-                <SpawnedAgentSidebar
-                  parentTask={task}
-                  childTasks={childTasks}
-                  childEvents={childEvents}
-                  selectedTaskId={spawnedAgentSidebar.taskId}
-                  workspace={workspace}
-                  selectedModel={selectedModel}
-                  selectedProvider={selectedProvider}
-                  selectedReasoningEffort={selectedReasoningEffort}
-                  availableModels={availableModels}
-                  availableProviders={availableProviders}
-                  uiDensity={uiDensity}
-                  rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-                  inputRequest={activeInputRequest}
-                  onSelectTask={selectSpawnedAgentSidebarTask}
-                  onClose={closeSpawnedAgentSidebar}
-                  onCancelTask={onCancelTaskById}
-                  onTasksChanged={onTasksChanged}
-                  onOpenSettings={onOpenSettings}
-                  onModelChange={onModelChange}
-                  onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
-                  onOpenDocumentArtifact={openDocumentArtifact}
-                  onOpenPresentationArtifact={openPresentationArtifact}
-                  onOpenWebArtifact={openWebArtifact}
-                />
-              ) : browserWorkbench && task ? (
-                <BrowserWorkbenchView
-                  key={browserWorkbench.requestId || browserWorkbench.sessionId}
-                  taskId={task.id}
-                  sessionId={browserWorkbench.sessionId}
-                  initialUrl={browserWorkbench.url}
-                  workspaceId={workspace.id}
-                  workspacePath={workspace.path}
-                  mode="sidebar"
-                  onClose={closeBrowserWorkbench}
-                  onFullscreen={showBrowserFullscreen}
-                  onExitFullscreen={showBrowserSidebar}
-                  onStatusChange={updateBrowserWorkbenchStatus}
-                  onSendMessage={sendSpreadsheetFullscreenMessage}
-                />
-              ) : spreadsheetArtifact?.kind === "document" ? (
-                <DocumentArtifactViewer
-                  filePath={spreadsheetArtifact.path}
-                  workspacePath={workspace.path}
-                  mode="sidebar"
-                  onClose={closeSpreadsheetArtifact}
-                  onFullscreen={showSpreadsheetFullscreen}
-                  onExitFullscreen={showSpreadsheetSidebar}
-                  refreshKey={artifactRefreshKey}
-                />
-              ) : spreadsheetArtifact?.kind === "presentation" ? (
-                <PresentationArtifactViewer
-                  filePath={spreadsheetArtifact.path}
-                  workspacePath={workspace.path}
-                  mode="sidebar"
-                  onClose={closeSpreadsheetArtifact}
-                  onFullscreen={showSpreadsheetFullscreen}
-                  onExitFullscreen={showSpreadsheetSidebar}
-                  refreshKey={artifactRefreshKey}
-                />
-              ) : spreadsheetArtifact?.kind === "webpage" ? (
-                <WebArtifactViewer
-                  filePath={spreadsheetArtifact.path}
-                  workspacePath={workspace.path}
-                  mode="sidebar"
-                  onClose={closeSpreadsheetArtifact}
-                  onFullscreen={showSpreadsheetFullscreen}
-                  onExitFullscreen={showSpreadsheetSidebar}
-                  refreshKey={artifactRefreshKey}
-                />
-              ) : (
-                spreadsheetArtifact ? <SpreadsheetArtifactViewer
-                  filePath={spreadsheetArtifact.path}
-                  workspacePath={workspace.path}
-                  mode="sidebar"
-                  onClose={closeSpreadsheetArtifact}
-                  onFullscreen={showSpreadsheetFullscreen}
-                  onExitFullscreen={showSpreadsheetSidebar}
-                /> : null
-              )}
-            </Suspense>
-          </div>
-        </>
-      ) : !effectiveRightCollapsed && !remoteTaskView ? (
-        <Suspense fallback={<RightPanelFallback />}>
-          <RightPanel
-            task={rightPanelInput.task}
-            workspace={rightPanelInput.workspace}
-            events={rightPanelInput.events}
-            sharedTaskEventUi={rightPanelInput.sharedTaskEventUi}
-            hasActiveChildren={rightPanelInput.hasActiveChildren}
-            childTasks={rightPanelInput.childTasks}
-            childEvents={rightPanelInput.childEvents}
-            runningTasks={rightPanelInput.runningTasks}
-            queuedTasks={rightPanelInput.queuedTasks}
-            queueStatus={rightPanelInput.queueStatus}
-            onSelectTask={onSelectTask}
-            onCancelTask={onCancelTaskById}
-            onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
-            onOpenDocumentArtifact={openDocumentArtifact}
-            onOpenPresentationArtifact={openPresentationArtifact}
-            onOpenWebArtifact={openWebArtifact}
-            rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-            highlightOutputPath={rightPanelInput.highlightOutputPath}
-            onHighlightConsumed={onHighlightConsumed}
-          />
-        </Suspense>
-      ) : null}
+          ) : null}
+        </div>
+        {!remoteTaskView && terminalTabsOpen && (
+          <Suspense fallback={null}>
+            <TerminalTabsDock
+              workspace={workspace}
+              taskId={task?.id ?? selectedTaskId ?? null}
+              onClose={onCloseTerminalTabs}
+            />
+          </Suspense>
+        )}
       </div>
-      {!remoteTaskView && terminalTabsOpen && (
-        <Suspense fallback={null}>
-          <TerminalTabsDock
-            workspace={workspace}
-            taskId={task?.id ?? selectedTaskId ?? null}
-            onClose={onCloseTerminalTabs}
-          />
-        </Suspense>
-      )}
-    </div>
-  );
-}, (prev, next) =>
-  getAppTaskSignature(prev.task) === getAppTaskSignature(next.task) &&
-  prev.selectedTaskId === next.selectedTaskId &&
-  prev.workspace?.path === next.workspace?.path &&
-  prev.replayControls === next.replayControls &&
-  prev.sharedTaskEventUi === next.sharedTaskEventUi &&
-  prev.remoteTaskView?.deviceId === next.remoteTaskView?.deviceId &&
-  prev.remoteTaskView?.task.id === next.remoteTaskView?.task.id &&
-  prev.remoteTaskView?.events === next.remoteTaskView?.events &&
-  prev.childTasks === next.childTasks &&
-  prev.childEvents === next.childEvents &&
-  getInputRequestSignature(prev.activeInputRequest) === getInputRequestSignature(next.activeInputRequest) &&
-  getInputRequestsSignature(prev.pendingInputRequests) ===
-    getInputRequestsSignature(next.pendingInputRequests) &&
-  prev.selectedModel === next.selectedModel &&
-  prev.selectedProvider === next.selectedProvider &&
-  prev.selectedReasoningEffort === next.selectedReasoningEffort &&
-  prev.availableModels === next.availableModels &&
-  prev.availableProviders === next.availableProviders &&
-  prev.uiDensity === next.uiDensity &&
-  prev.homeResearchVaultEnabled === next.homeResearchVaultEnabled &&
-  prev.homeNextActionsEnabled === next.homeNextActionsEnabled &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
-  prev.effectiveRightCollapsed === next.effectiveRightCollapsed &&
-  prev.terminalTabsOpen === next.terminalTabsOpen &&
-  prev.browserWorkbenchRequest?.requestId === next.browserWorkbenchRequest?.requestId &&
-  prev.sideChat === next.sideChat &&
-  prev.rightPanelInput === next.rightPanelInput
+    );
+  },
+  (prev, next) =>
+    getAppTaskSignature(prev.task) === getAppTaskSignature(next.task) &&
+    prev.selectedTaskId === next.selectedTaskId &&
+    prev.workspace?.path === next.workspace?.path &&
+    prev.replayControls === next.replayControls &&
+    prev.sharedTaskEventUi === next.sharedTaskEventUi &&
+    prev.remoteTaskView?.deviceId === next.remoteTaskView?.deviceId &&
+    prev.remoteTaskView?.task.id === next.remoteTaskView?.task.id &&
+    prev.remoteTaskView?.events === next.remoteTaskView?.events &&
+    prev.childTasks === next.childTasks &&
+    prev.childEvents === next.childEvents &&
+    getInputRequestSignature(prev.activeInputRequest) ===
+      getInputRequestSignature(next.activeInputRequest) &&
+    getInputRequestsSignature(prev.pendingInputRequests) ===
+      getInputRequestsSignature(next.pendingInputRequests) &&
+    prev.selectedModel === next.selectedModel &&
+    prev.selectedProvider === next.selectedProvider &&
+    prev.selectedReasoningEffort === next.selectedReasoningEffort &&
+    prev.availableModels === next.availableModels &&
+    prev.availableProviders === next.availableProviders &&
+    prev.uiDensity === next.uiDensity &&
+    prev.homeResearchVaultEnabled === next.homeResearchVaultEnabled &&
+    prev.homeNextActionsEnabled === next.homeNextActionsEnabled &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
+    prev.effectiveRightCollapsed === next.effectiveRightCollapsed &&
+    prev.terminalTabsOpen === next.terminalTabsOpen &&
+    prev.browserWorkbenchRequest?.requestId === next.browserWorkbenchRequest?.requestId &&
+    prev.sideChat === next.sideChat &&
+    prev.rightPanelInput === next.rightPanelInput,
 );
 
 const MAX_RENDERER_CHILD_EVENTS = 300;
@@ -1747,7 +1764,9 @@ function isImmediateTaskAttentionEvent(event: TaskEvent): boolean {
 }
 
 function isShellPermissionPauseReason(reasonCode: string | null | undefined): boolean {
-  return reasonCode === "shell_permission_required" || reasonCode === "shell_permission_still_disabled";
+  return (
+    reasonCode === "shell_permission_required" || reasonCode === "shell_permission_still_disabled"
+  );
 }
 
 function isNotificationWorthyPauseReason(reasonCode: string | null | undefined): boolean {
@@ -1782,15 +1801,12 @@ function describeApprovalPersistence(
         manifestError?: string;
       }
     | undefined;
-  const action = typeof payload?.action === "string" ? (payload.action as ApprovalResponseAction) : "";
+  const action =
+    typeof payload?.action === "string" ? (payload.action as ApprovalResponseAction) : "";
 
   if (!persistence && !action) return null;
 
-  const actionLabel = action
-    ? action.replace(/_/g, " ")
-    : approved
-      ? "allow once"
-      : "deny once";
+  const actionLabel = action ? action.replace(/_/g, " ") : approved ? "allow once" : "deny once";
   if (!persistence?.destination) {
     return {
       type: approved ? "info" : "warning",
@@ -1802,8 +1818,7 @@ function describeApprovalPersistence(
     if (persistence.manifestPersisted === false && persistence.manifestError) {
       return {
         type: "warning",
-        message:
-          `Workspace rule saved to the local database, but manifest write failed: ${persistence.manifestError}`,
+        message: `Workspace rule saved to the local database, but manifest write failed: ${persistence.manifestError}`,
       };
     }
     if (persistence.dbPersisted && persistence.manifestPersisted) {
@@ -1885,10 +1900,12 @@ export function App() {
     id: number;
     query: string;
   } | null>(null);
-  const [missionControlInitialCompanyId, setMissionControlInitialCompanyId] = useState<string | null>(
+  const [missionControlInitialCompanyId, setMissionControlInitialCompanyId] = useState<
+    string | null
+  >(null);
+  const [missionControlInitialIssueId, setMissionControlInitialIssueId] = useState<string | null>(
     null,
   );
-  const [missionControlInitialIssueId, setMissionControlInitialIssueId] = useState<string | null>(null);
   const [missionControlEverydayAgentFocus, setMissionControlEverydayAgentFocus] = useState(false);
   const [browserUrl, setBrowserUrl] = useState<string>("");
   const [browserWorkbenchRequest, setBrowserWorkbenchRequest] =
@@ -1932,7 +1949,9 @@ export function App() {
     return tasks.filter((t) => t.parentTaskId === selectedTaskId && t.agentType === "sub");
   }, [tasks, selectedTaskId]);
   const selectedTask = useMemo(
-    () => remoteTaskView?.task || (selectedTaskId ? tasks.find((task) => task.id === selectedTaskId) : undefined),
+    () =>
+      remoteTaskView?.task ||
+      (selectedTaskId ? tasks.find((task) => task.id === selectedTaskId) : undefined),
     [remoteTaskView, tasks, selectedTaskId],
   );
   const completedTaskIdsSignature = useMemo(
@@ -1953,19 +1972,23 @@ export function App() {
     // Flush any buffered events that now match known child task IDs
     if (pendingChildEventsRef.current.length > 0 && newIds.size > 0) {
       const matched = pendingChildEventsRef.current.filter((e) => newIds.has(e.taskId));
-      pendingChildEventsRef.current = pendingChildEventsRef.current.filter((e) => !newIds.has(e.taskId));
+      pendingChildEventsRef.current = pendingChildEventsRef.current.filter(
+        (e) => !newIds.has(e.taskId),
+      );
       if (matched.length > 0) {
-        setChildEvents((prev) => capTaskEvents(mergeUniqueTaskEvents(prev, matched), MAX_RENDERER_CHILD_EVENTS));
+        setChildEvents((prev) =>
+          capTaskEvents(mergeUniqueTaskEvents(prev, matched), MAX_RENDERER_CHILD_EVENTS),
+        );
       }
     }
   }, [childTasks]);
 
   // Model selection state
   const [selectedModel, setSelectedModel] = useState<string>("opus-4-5");
-  const [selectedProvider, setSelectedProvider] =
-    useState<LLMProviderType>("anthropic");
-  const [selectedReasoningEffort, setSelectedReasoningEffort] =
-    useState<LLMReasoningEffort | undefined>(undefined);
+  const [selectedProvider, setSelectedProvider] = useState<LLMProviderType>("anthropic");
+  const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<
+    LLMReasoningEffort | undefined
+  >(undefined);
   const [sessionModelOverride, setSessionModelOverride] = useState<string>("");
   const [availableModels, setAvailableModels] = useState<LLMModelInfo[]>([]);
   const [availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
@@ -2000,9 +2023,8 @@ export function App() {
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
   const [sessionAutoApproveAll, setSessionAutoApproveAll] = useState(false);
   const [pendingInputRequests, setPendingInputRequests] = useState<InputRequest[]>([]);
-  const [computerUseAppGrantApproval, setComputerUseAppGrantApproval] = useState<ApprovalRequest | null>(
-    null,
-  );
+  const [computerUseAppGrantApproval, setComputerUseAppGrantApproval] =
+    useState<ApprovalRequest | null>(null);
   const [genericApproval, setGenericApproval] = useState<ApprovalRequest | null>(null);
   const [approveAllSessionWarningOpen, setApproveAllSessionWarningOpen] = useState(false);
   const [unseenOutputTaskIds, setUnseenOutputTaskIds] = useState<string[]>([]);
@@ -2082,7 +2104,7 @@ export function App() {
 
   // Purge stale entries from growing Map refs when the task list changes
   useEffect(() => {
-    const activeIds = new Set(tasks.map(t => t.id));
+    const activeIds = new Set(tasks.map((t) => t.id));
     for (const key of latestAttentionEventByTaskIdRef.current.keys()) {
       if (!activeIds.has(key)) latestAttentionEventByTaskIdRef.current.delete(key);
     }
@@ -2146,13 +2168,14 @@ export function App() {
   const mergeSelectedTaskTimelineEvents = useCallback(
     (taskId: string, existing: TaskEvent[], incoming: TaskEvent[]): TaskEvent[] => {
       const incomingIdentities = new Set(incoming.map((event) => getTaskEventIdentity(event)));
-      const relevantExisting = existing.filter((event) =>
-        incomingIdentities.has(getTaskEventIdentity(event)) ||
-        shouldIncludeTaskEventInSelectedSession({
-          selectedTaskId: taskId,
-          event,
-          tasks: tasksRef.current,
-        }),
+      const relevantExisting = existing.filter(
+        (event) =>
+          incomingIdentities.has(getTaskEventIdentity(event)) ||
+          shouldIncludeTaskEventInSelectedSession({
+            selectedTaskId: taskId,
+            event,
+            tasks: tasksRef.current,
+          }),
       );
       return mergeTaskEventsByIdentity(relevantExisting, incoming);
     },
@@ -2284,7 +2307,9 @@ export function App() {
         const canonicalTask = (await window.electronAPI.getTask(taskId)) as Task | null;
         if (!canonicalTask) return null;
 
-        setTasks((prev) => upsertTaskPreservingIdentity(prev, canonicalTask, { prependIfMissing: true }));
+        setTasks((prev) =>
+          upsertTaskPreservingIdentity(prev, canonicalTask, { prependIfMissing: true }),
+        );
 
         if (
           options?.refreshEventsWhenTerminal &&
@@ -2352,10 +2377,7 @@ export function App() {
   const isWindows = platform === "win32";
   useLayoutEffect(() => {
     document.documentElement.classList.toggle("platform-darwin", platform === "darwin");
-    document.documentElement.classList.toggle(
-      "platform-native-frame",
-      usesNativeWindowFrame,
-    );
+    document.documentElement.classList.toggle("platform-native-frame", usesNativeWindowFrame);
     if (isWindows) {
       document.documentElement.classList.add("platform-win32");
       return;
@@ -2728,7 +2750,9 @@ export function App() {
 
     const loadTaskWorkspace = async () => {
       try {
-        let resolved: Workspace | null = await window.electronAPI.selectWorkspace(selectedTask.workspaceId);
+        let resolved: Workspace | null = await window.electronAPI.selectWorkspace(
+          selectedTask.workspaceId,
+        );
         if (!resolved && isTempWorkspaceId(selectedTask.workspaceId)) {
           resolved = await window.electronAPI.getTempWorkspace();
         }
@@ -2836,23 +2860,26 @@ export function App() {
     setPendingInputRequests(pending);
   }, []);
 
-  const handleInputRequestResponse = useCallback(async (data: InputRequestResponse) => {
-    try {
-      const response = await window.electronAPI.respondToInputRequest(data);
-      // Keep the prompt visible while the daemon still reports an in-progress mutation.
-      if (response?.status !== "in_progress") {
-        pendingInputRequestsRef.current.delete(data.requestId);
-        syncPendingInputRequests();
+  const handleInputRequestResponse = useCallback(
+    async (data: InputRequestResponse) => {
+      try {
+        const response = await window.electronAPI.respondToInputRequest(data);
+        // Keep the prompt visible while the daemon still reports an in-progress mutation.
+        if (response?.status !== "in_progress") {
+          pendingInputRequestsRef.current.delete(data.requestId);
+          syncPendingInputRequests();
+        }
+      } catch (error) {
+        console.error("Failed to respond to input request:", error);
+        addToast({
+          type: "error",
+          title: "Input response failed",
+          message: "Could not submit your response. Please try again.",
+        });
       }
-    } catch (error) {
-      console.error("Failed to respond to input request:", error);
-      addToast({
-        type: "error",
-        title: "Input response failed",
-        message: "Could not submit your response. Please try again.",
-      });
-    }
-  }, [addToast, syncPendingInputRequests]);
+    },
+    [addToast, syncPendingInputRequests],
+  );
 
   const handleSessionApproveAllConfirm = () => {
     setSessionAutoApproveAll(true);
@@ -2887,7 +2914,9 @@ export function App() {
   };
 
   const reshowPendingApprovalToasts = () => {
-    setComputerUseAppGrantApproval(pickFirstPendingComputerUseApproval(pendingApprovalsRef.current));
+    setComputerUseAppGrantApproval(
+      pickFirstPendingComputerUseApproval(pendingApprovalsRef.current),
+    );
     setGenericApproval(pickFirstPendingGenericApproval(pendingApprovalsRef.current));
   };
 
@@ -3038,40 +3067,39 @@ export function App() {
   useEffect(() => {
     if (!window.electronAPI?.onTaskEvent || !remoteTaskView) return;
     const view = remoteTaskView;
-    const unsubscribe = window.electronAPI.onTaskEvent((rawEvent: TaskEvent & { deviceId?: string }) => {
-      if (rawEvent.deviceId !== view.deviceId || rawEvent.taskId !== view.task.id) return;
-      const effectiveType = getEffectiveTaskEventType(rawEvent);
-      const event = { ...rawEvent, type: effectiveType } as TaskEvent;
-      setEvents((prev) => capTaskEvents([...prev, event]));
-      setRemoteTaskView((prev) =>
-        prev && prev.deviceId === view.deviceId && prev.task.id === view.task.id
-          ? { ...prev, events: capTaskEvents([...prev.events, event]) }
-          : prev,
-      );
-      const newStatus =
-        isLlmRequestCancelledEvent(event)
+    const unsubscribe = window.electronAPI.onTaskEvent(
+      (rawEvent: TaskEvent & { deviceId?: string }) => {
+        if (rawEvent.deviceId !== view.deviceId || rawEvent.taskId !== view.task.id) return;
+        const effectiveType = getEffectiveTaskEventType(rawEvent);
+        const event = { ...rawEvent, type: effectiveType } as TaskEvent;
+        setEvents((prev) => capTaskEvents([...prev, event]));
+        setRemoteTaskView((prev) =>
+          prev && prev.deviceId === view.deviceId && prev.task.id === view.task.id
+            ? { ...prev, events: capTaskEvents([...prev.events, event]) }
+            : prev,
+        );
+        const newStatus = isLlmRequestCancelledEvent(event)
           ? undefined
           : event.type === "task_status"
             ? event.payload?.status
             : TASK_EVENT_STATUS_MAP[event.type];
-      if (newStatus) {
-        setRemoteTaskView((prev) =>
-          prev && prev.task.id === view.task.id
-            ? {
-                ...prev,
-                task: {
-                  ...prev.task,
-                  status:
-                    resolveTaskStatusUpdateFromEvent(
-                      prev.task,
-                      newStatus as Task["status"],
-                    ) ?? prev.task.status,
-                },
-              }
-            : prev,
-        );
-      }
-    });
+        if (newStatus) {
+          setRemoteTaskView((prev) =>
+            prev && prev.task.id === view.task.id
+              ? {
+                  ...prev,
+                  task: {
+                    ...prev.task,
+                    status:
+                      resolveTaskStatusUpdateFromEvent(prev.task, newStatus as Task["status"]) ??
+                      prev.task.status,
+                  },
+                }
+              : prev,
+          );
+        }
+      },
+    );
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
   }, [remoteTaskView]);
 
@@ -3093,12 +3121,11 @@ export function App() {
       if (sideChatParentTaskId && sideChatParentTaskId === event.taskId) {
         setSideChat((prev) => {
           if (!prev || prev.parentTaskId !== event.taskId || !prev.parentTask) return prev;
-          const parentStatus =
-            isLlmRequestCancelledEvent(event)
-              ? undefined
-              : event.type === "task_status"
-                ? event.payload?.status
-                : TASK_EVENT_STATUS_MAP[event.type];
+          const parentStatus = isLlmRequestCancelledEvent(event)
+            ? undefined
+            : event.type === "task_status"
+              ? event.payload?.status
+              : TASK_EVENT_STATUS_MAP[event.type];
           const nextParentTask =
             parentStatus && typeof parentStatus === "string"
               ? {
@@ -3120,12 +3147,11 @@ export function App() {
       if (isSideChatTaskEvent) {
         setSideChat((prev) => {
           if (!prev?.task || prev.task.id !== event.taskId) return prev;
-          const sideStatus =
-            isLlmRequestCancelledEvent(event)
-              ? undefined
-              : event.type === "task_status"
-                ? event.payload?.status
-                : TASK_EVENT_STATUS_MAP[event.type];
+          const sideStatus = isLlmRequestCancelledEvent(event)
+            ? undefined
+            : event.type === "task_status"
+              ? event.payload?.status
+              : TASK_EVENT_STATUS_MAP[event.type];
           const nextTask =
             sideStatus && typeof sideStatus === "string"
               ? {
@@ -3176,24 +3202,45 @@ export function App() {
       // Check if this is a new task we don't know about (e.g., sub-agent created)
       const isNewTask = !tasksRef.current.some((t) => t.id === event.taskId);
       if (isNewTask && event.type === "task_created") {
-        // Refresh task list to include the new sub-agent task
-        loadTasks();
+        // The task_created event is often delivered before the createTask IPC
+        // promise has committed its optimistic state. Keep the canonical task
+        // from the event so the first sidebar refresh cannot replace the new
+        // session with a stale page (this used to leave the composer on the
+        // welcome screen while the task executed in the background).
+        const eventTask =
+          event.payload?.task && typeof event.payload.task === "object"
+            ? (event.payload.task as Task)
+            : undefined;
+        if (eventTask?.id === event.taskId) {
+          const nextTasks = upsertTaskPreservingIdentity(tasksRef.current, eventTask, {
+            prependIfMissing: true,
+          });
+          tasksRef.current = nextTasks;
+          setTasks((prev) =>
+            upsertTaskPreservingIdentity(prev, eventTask, { prependIfMissing: true }),
+          );
+        }
+        // Refresh the task list to include the new task (or sub-agent). The
+        // event-backed upsert above makes this refresh safe even if the query
+        // began before the row became visible.
+        void loadTasks();
         return;
       }
 
-      const newStatus =
-        isLlmRequestCancelledEvent(event)
-          ? undefined
-          : event.type === "task_status"
-            ? event.payload?.status
-            : TASK_EVENT_STATUS_MAP[event.type];
+      const newStatus = isLlmRequestCancelledEvent(event)
+        ? undefined
+        : event.type === "task_status"
+          ? event.payload?.status
+          : TASK_EVENT_STATUS_MAP[event.type];
       const isAutoApprovalRequested =
         event.type === "approval_requested" && event.payload?.autoApproved === true;
       const isSessionAutoApproval =
         event.type === "approval_requested" && sessionAutoApproveAllRef.current;
       const skipBlockedStateForAutoApproval = isAutoApprovalRequested || isSessionAutoApproval;
       const payloadTerminalStatus =
-        typeof event.payload?.terminalStatus === "string" ? event.payload.terminalStatus : undefined;
+        typeof event.payload?.terminalStatus === "string"
+          ? event.payload.terminalStatus
+          : undefined;
       const eventTerminalStatus =
         payloadTerminalStatus !== undefined
           ? payloadTerminalStatus
@@ -3235,10 +3282,9 @@ export function App() {
               if (isTerminalInputResolution && isTerminalTaskStatus(t.status)) {
                 return t;
               }
-              const resolvedStatus =
-                isNewRunStarted
-                  ? (newStatus as Task["status"])
-                  : resolveTaskStatusUpdateFromEvent(t, newStatus as Task["status"]) ?? t.status;
+              const resolvedStatus = isNewRunStarted
+                ? (newStatus as Task["status"])
+                : (resolveTaskStatusUpdateFromEvent(t, newStatus as Task["status"]) ?? t.status);
               const updates: Partial<Task> = {
                 status: resolvedStatus,
                 updatedAt: Math.max(t.updatedAt || 0, eventTimestamp),
@@ -3340,10 +3386,7 @@ export function App() {
 
                 await window.electronAPI.addNotification({
                   type: approvalFeedback.type,
-                  title:
-                    event.type === "approval_granted"
-                      ? "Approval saved"
-                      : "Approval recorded",
+                  title: event.type === "approval_granted" ? "Approval saved" : "Approval recorded",
                   message: approvalFeedback.message,
                   taskId: event.taskId,
                   workspaceId: tasksRef.current.find((t) => t.id === event.taskId)?.workspaceId,
@@ -3411,7 +3454,11 @@ export function App() {
         const isApproval = event.type === "approval_requested";
         const isInputRequest = event.type === "input_request_created";
         const task = tasksRef.current.find((t) => t.id === event.taskId);
-        const baseTitle = isApproval ? "Approval needed" : isInputRequest ? "Input needed" : "Action needed";
+        const baseTitle = isApproval
+          ? "Approval needed"
+          : isInputRequest
+            ? "Input needed"
+            : "Action needed";
         const title = task?.title ? `${baseTitle} · ${task.title}` : baseTitle;
         const requestQuestion =
           isInputRequest && Array.isArray(event.payload?.request?.questions)
@@ -3422,8 +3469,7 @@ export function App() {
             ? event.payload?.approval?.description
             : isInputRequest
               ? requestQuestion
-              : event.payload?.message) ||
-          "Quick pause - ready to continue once you respond.";
+              : event.payload?.message) || "Quick pause - ready to continue once you respond.";
 
         void (async () => {
           try {
@@ -3513,7 +3559,7 @@ export function App() {
             ? event.payload.terminalStatus
             : typeof task?.terminalStatus === "string"
               ? task.terminalStatus
-            : undefined;
+              : undefined;
         const shouldShowToast =
           toastDecision.show &&
           shouldNotifyForTaskCompletionTerminalStatus(terminalStatus) &&
@@ -3552,7 +3598,8 @@ export function App() {
               actionDependencies: hasTaskOutputs(outputSummary)
                 ? {
                     resolveWorkspacePath: resolveWorkspacePathForTask,
-                    openFile: (path, workspacePath) => window.electronAPI.openFile(path, workspacePath),
+                    openFile: (path, workspacePath) =>
+                      window.electronAPI.openFile(path, workspacePath),
                     showInFinder: (path, workspacePath) =>
                       window.electronAPI.showInFinder(path, workspacePath),
                     onViewInFiles: () => {
@@ -3638,9 +3685,7 @@ export function App() {
         const isMilestone = lane === "immediate" || EVENT_TYPES_MILESTONE.has(event.type);
         const isBatchable =
           isSelectedTask &&
-          (lane === "batchable" ||
-            lane === "coalescible" ||
-            EVENT_TYPES_BATCHABLE.has(event.type));
+          (lane === "batchable" || lane === "coalescible" || EVENT_TYPES_BATCHABLE.has(event.type));
 
         const appendSelectedTaskEvents = (
           incomingEvents: TaskEvent[],
@@ -3743,8 +3788,17 @@ export function App() {
       // Capture events from dispatched child tasks for DispatchedAgentsPanel / CliAgentFrame
       if (!isSelectedTask && event.type !== "llm_streaming" && event.type !== "llm_usage") {
         if (childTaskIdsRef.current.has(event.taskId)) {
-          setChildEvents((prev) => capTaskEvents(mergeUniqueTaskEvents(prev, [rawEvent]), MAX_RENDERER_CHILD_EVENTS));
-        } else if (event.type === "task_created" || event.type === "step_started" || event.type === "tool_call" || event.type === "command_output" || event.type === "progress_update" || event.type === "assistant_message") {
+          setChildEvents((prev) =>
+            capTaskEvents(mergeUniqueTaskEvents(prev, [rawEvent]), MAX_RENDERER_CHILD_EVENTS),
+          );
+        } else if (
+          event.type === "task_created" ||
+          event.type === "step_started" ||
+          event.type === "tool_call" ||
+          event.type === "command_output" ||
+          event.type === "progress_update" ||
+          event.type === "assistant_message"
+        ) {
           // Buffer events from unknown task IDs — they may be from a just-spawned child
           // whose task_created event hasn't been processed yet (race condition)
           pendingChildEventsRef.current.push(rawEvent);
@@ -3842,11 +3896,9 @@ export function App() {
       setEvents(
         latestAttentionEvent
           ? capTaskEvents(
-              mergeSelectedTaskTimelineEvents(
-                requestedTaskId,
-                cachedTimeline.events,
-                [latestAttentionEvent],
-              ),
+              mergeSelectedTaskTimelineEvents(requestedTaskId, cachedTimeline.events, [
+                latestAttentionEvent,
+              ]),
             )
           : capTaskEvents(cachedTimeline.events),
       );
@@ -3925,9 +3977,7 @@ export function App() {
         });
         startTransition(() => {
           setEvents((prev) =>
-            capTaskEvents(
-              mergeSelectedTaskTimelineEvents(requestedTaskId, prev, historicalEvents),
-            ),
+            capTaskEvents(mergeSelectedTaskTimelineEvents(requestedTaskId, prev, historicalEvents)),
           );
         });
         const latestTimestamp = getLatestEventTimestamp(historicalEvents);
@@ -3961,9 +4011,7 @@ export function App() {
     eventDetailPreviewRef.current.delete(cacheKey);
     if (!preview) return;
     setEvents((current) =>
-      current.map((event) =>
-        eventMatchesDetailId(event, normalizedEventId) ? preview : event,
-      ),
+      current.map((event) => (eventMatchesDetailId(event, normalizedEventId) ? preview : event)),
     );
   }, []);
 
@@ -3976,7 +4024,8 @@ export function App() {
       taskId: normalizedTaskId,
       eventId: normalizedEventId,
     });
-    if (!normalizedTaskId || !normalizedEventId || eventDetailInFlightRef.current.has(cacheKey)) return;
+    if (!normalizedTaskId || !normalizedEventId || eventDetailInFlightRef.current.has(cacheKey))
+      return;
     if (!requestedDeviceId && !window.electronAPI?.getTaskEventDetail) return;
     const missingUntil = eventDetailMissingUntilRef.current.get(cacheKey);
     if (missingUntil && missingUntil > Date.now()) return;
@@ -4191,7 +4240,7 @@ export function App() {
     if (!selectedTaskId || !window.electronAPI?.getTask) return;
     if (remoteTaskView) return;
 
-    const currentTask = tasksRef.current.find(t => t.id === selectedTaskId);
+    const currentTask = tasksRef.current.find((t) => t.id === selectedTaskId);
     if (!currentTask || isTerminalTaskStatus(currentTask.status)) return;
 
     let cancelled = false;
@@ -4287,7 +4336,9 @@ export function App() {
           allEvents.push(...evts);
         }
         allEvents.sort((a, b) => a.timestamp - b.timestamp);
-        setChildEvents(capTaskEvents(mergeUniqueTaskEvents([], allEvents), MAX_RENDERER_CHILD_EVENTS));
+        setChildEvents(
+          capTaskEvents(mergeUniqueTaskEvents([], allEvents), MAX_RENDERER_CHILD_EVENTS),
+        );
       } catch (error) {
         console.error("Failed to load child task events:", error);
       }
@@ -4304,10 +4355,13 @@ export function App() {
     if (hasExecutingChildren) {
       pollTimer = setInterval(() => {
         const currentChildren = tasksRef.current.filter(
-          (t) => t.parentTaskId === selectedTaskIdRef.current && t.agentType === "sub"
+          (t) => t.parentTaskId === selectedTaskIdRef.current && t.agentType === "sub",
         );
-        if (!currentChildren.some(t => t.status === "executing" || t.status === "planning")) {
-          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (!currentChildren.some((t) => t.status === "executing" || t.status === "planning")) {
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
           return;
         }
         loadChildHistoricalEvents();
@@ -4384,20 +4438,28 @@ export function App() {
         excludeSources: MAIN_SIDEBAR_EXCLUDED_TASK_SOURCES,
       });
       const receiveMs = performance.now() - startedAt;
-      recordRendererPerfSample(
-        "sidebar.data_receive_ms",
-        receiveMs,
-        rendererPerfLoggingEnabled,
-      );
+      recordRendererPerfSample("sidebar.data_receive_ms", receiveMs, rendererPerfLoggingEnabled);
       markRendererPerfEvent("sidebar_data_received", rendererPerfLoggingEnabled, {
         rowCount: loadedTaskPage.length,
         receiveMs: Number(receiveMs.toFixed(1)),
       });
       const loadedTasks = loadedTaskPage.slice(0, INITIAL_TASK_LOAD);
+      const loadedTaskIds = new Set(loadedTasks.map((task) => task.id));
+      // Preserve a task that was created while this sidebar request was in
+      // flight. The daemon emits task_created before the createTask IPC
+      // promise resolves, so the query can legitimately return a page from
+      // just before the new row was visible.
+      const inFlightTasks = tasksRef.current.filter(
+        (task) =>
+          !loadedTaskIds.has(task.id) &&
+          (task.id === selectedTaskIdRef.current || isTaskPossiblyRunning(task.status)),
+      );
+      const loadedTasksWithInFlight =
+        inFlightTasks.length > 0 ? [...loadedTasks, ...inFlightTasks] : loadedTasks;
       setTasks((prev) =>
         mergeSidebarInitialPageWithSelectedTask(
           prev,
-          loadedTasks,
+          loadedTasksWithInFlight,
           selectedTaskIdRef.current,
         ),
       );
@@ -4459,7 +4521,7 @@ export function App() {
       isLoadingMoreRef.current = false;
       setIsLoadingMoreTasks(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSelectWorkspace = useCallback(
@@ -4480,7 +4542,10 @@ export function App() {
           addToast({
             type: "error",
             title: "Workspace Error",
-            message: error instanceof Error ? error.message : "Could not apply the workspace to this chat.",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Could not apply the workspace to this chat.",
           });
           return;
         }
@@ -4515,7 +4580,6 @@ export function App() {
 
       // Create a new workspace for this folder
       const folderName = folderPath.split(/[\\/]/).filter(Boolean).pop() || "Workspace";
-      const permissionSettings = await window.electronAPI.getPermissionSettings().catch(() => null);
       const workspace = await window.electronAPI.createWorkspace({
         name: folderName,
         path: folderPath,
@@ -4524,7 +4588,9 @@ export function App() {
           write: true,
           delete: true,
           network: true,
-          shell: permissionSettings?.defaultShellEnabled === true,
+          // Command tools are enabled by the selected access profile for a
+          // task; keep the persisted workspace baseline fail-closed.
+          shell: false,
         },
       });
 
@@ -4541,6 +4607,7 @@ export function App() {
       autonomousMode?: boolean;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
+      accessProfileId?: AccessProfileId;
       collaborativeMode?: boolean;
       multiLlmMode?: boolean;
       multiLlmConfig?: MultiLlmConfig;
@@ -4604,7 +4671,8 @@ export function App() {
       addToast({
         type: "info",
         title: "Collaborative mode enabled",
-        message: "Your prompt requests spawning agents — the task will be handled by the collaborative team.",
+        message:
+          "Your prompt requests spawning agents — the task will be handled by the collaborative team.",
       });
     }
 
@@ -4622,6 +4690,7 @@ export function App() {
     const videoGenerationMode = options?.videoGenerationMode === true;
     const permissionMode = options?.permissionMode;
     const shellAccess = options?.shellAccess === true;
+    const accessProfileId = options?.accessProfileId;
     const llmProfile = options?.llmProfile;
     const llmProfileForced = options?.llmProfileForced;
     const explicitAgentConfig = options?.agentConfig;
@@ -4630,8 +4699,12 @@ export function App() {
         ? options.integrationMentions
         : undefined;
     const trimmedSessionModelOverride = sessionModelOverride.trim();
-    const hasSelectedModelInCurrentProvider = availableModels.some((m) => m.key === trimmedSessionModelOverride);
-    const effectiveSessionModelOverride = hasSelectedModelInCurrentProvider ? trimmedSessionModelOverride : "";
+    const hasSelectedModelInCurrentProvider = availableModels.some(
+      (m) => m.key === trimmedSessionModelOverride,
+    );
+    const effectiveSessionModelOverride = hasSelectedModelInCurrentProvider
+      ? trimmedSessionModelOverride
+      : "";
     const effectiveLlmProfile = effectiveSessionModelOverride ? undefined : llmProfile;
     const effectiveLlmProfileForced = effectiveSessionModelOverride ? false : llmProfileForced;
 
@@ -4649,6 +4722,7 @@ export function App() {
       videoGenerationMode ||
       permissionMode ||
       shellAccess ||
+      accessProfileId ||
       integrationMentions ||
       effectiveLlmProfile ||
       explicitAgentConfig
@@ -4680,6 +4754,7 @@ export function App() {
             ...(videoGenerationMode ? { videoGenerationMode: true } : {}),
             ...(permissionMode ? { permissionMode } : {}),
             ...(shellAccess ? { shellAccess: true } : {}),
+            ...(accessProfileId ? { accessProfileId } : {}),
             ...(integrationMentions ? { integrationMentions } : {}),
             ...(effectiveLlmProfile ? { llmProfile: effectiveLlmProfile } : {}),
             ...(effectiveLlmProfileForced ? { llmProfileForced: true } : {}),
@@ -4717,7 +4792,15 @@ export function App() {
         ...(images && images.length > 0 && { images }),
       });
 
-      setTasks((prev) => [task, ...prev]);
+      // Keep the task visible immediately and merge it with any task_created
+      // event that arrived before this IPC call resolved. The previous
+      // prepend-only update could duplicate the row or be overwritten by a
+      // stale sidebar refresh.
+      const optimisticTasks = upsertTaskPreservingIdentity(tasksRef.current, task, {
+        prependIfMissing: true,
+      });
+      tasksRef.current = optimisticTasks;
+      setTasks((prev) => upsertTaskPreservingIdentity(prev, task, { prependIfMissing: true }));
       setSelectedTaskId(task.id);
       setCurrentView("main");
     } catch (error: unknown) {
@@ -4785,7 +4868,9 @@ export function App() {
           ? {
               ...prev,
               task: (updatedTask as Task | null) || prev.task,
-              events: capTaskEvents(mergeUniqueTaskEvents(prev.events, updatedEvents as TaskEvent[])),
+              events: capTaskEvents(
+                mergeUniqueTaskEvents(prev.events, updatedEvents as TaskEvent[]),
+              ),
               sending: false,
               loading: false,
             }
@@ -4828,11 +4913,7 @@ export function App() {
         ((await window.electronAPI.getTask(parentTaskId).catch(() => null)) as Task | null);
       if (sideChatRequestSeqRef.current !== requestSeq) return;
       const existing = sideChatRef.current;
-      if (
-        existing?.parentTaskId === parentTaskId &&
-        existing.task?.id &&
-        !request.fromEventId
-      ) {
+      if (existing?.parentTaskId === parentTaskId && existing.task?.id && !request.fromEventId) {
         setRightSidebarCollapsed(false);
         if (parentTask) {
           setSideChat((prev) =>
@@ -4887,7 +4968,9 @@ export function App() {
         const initialMessageStillSending =
           Boolean(initialMessage) &&
           !isTerminalTaskStatus(forkedTask.status) &&
-          !cappedForkedEvents.some((event) => getEffectiveTaskEventType(event) === "assistant_message");
+          !cappedForkedEvents.some(
+            (event) => getEffectiveTaskEventType(event) === "assistant_message",
+          );
         setSideChat({
           parentTaskId,
           parentTask,
@@ -4951,28 +5034,25 @@ export function App() {
   const rightPanelEvents = replayControls.isReplayMode
     ? replayControls.replayEvents
     : projectedTaskEvents;
-  const rightPanelSharedTaskEventUi = useMemo(
-    () => {
-      if (!replayControls.isReplayMode) return sharedTaskEventUi;
-      return measureRendererPerf("App.rightPanelReplayTaskEventUi", rendererPerfLoggingEnabled, () =>
-        deriveSharedTaskEventUiState({
-          rawEvents: replayControls.replayEvents,
-          task: rightPanelReplayTask,
-          workspace: currentWorkspace,
-          verboseSteps: false,
-        }),
-      );
-    },
-    [
-      currentWorkspace?.id,
-      currentWorkspace?.path,
-      replayControls.isReplayMode,
-      replayControls.replayEvents,
-      rendererPerfLoggingEnabled,
-      rightPanelReplayTask,
-      sharedTaskEventUi,
-    ],
-  );
+  const rightPanelSharedTaskEventUi = useMemo(() => {
+    if (!replayControls.isReplayMode) return sharedTaskEventUi;
+    return measureRendererPerf("App.rightPanelReplayTaskEventUi", rendererPerfLoggingEnabled, () =>
+      deriveSharedTaskEventUiState({
+        rawEvents: replayControls.replayEvents,
+        task: rightPanelReplayTask,
+        workspace: currentWorkspace,
+        verboseSteps: false,
+      }),
+    );
+  }, [
+    currentWorkspace?.id,
+    currentWorkspace?.path,
+    replayControls.isReplayMode,
+    replayControls.replayEvents,
+    rendererPerfLoggingEnabled,
+    rightPanelReplayTask,
+    sharedTaskEventUi,
+  ]);
   const rightPanelChildTasks = remoteTaskView ? [] : childTasks;
   const rightPanelHasActiveChildren = useMemo(
     () =>
@@ -5074,10 +5154,9 @@ export function App() {
             method: "task.events",
             params: { taskId, limit: TASK_TIMELINE_MAX_PAGE_LIMIT },
           });
-          const fallbackEvents =
-            ((eventsResult?.payload as { events?: TaskEvent[] } | undefined)?.events || []).sort(
-              (a, b) => a.timestamp - b.timestamp,
-            );
+          const fallbackEvents = (
+            (eventsResult?.payload as { events?: TaskEvent[] } | undefined)?.events || []
+          ).sort((a, b) => a.timestamp - b.timestamp);
           timelinePage = {
             taskId,
             events: fallbackEvents,
@@ -5136,6 +5215,7 @@ export function App() {
     options?: {
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
+      accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
     },
   ) => {
@@ -5170,26 +5250,16 @@ export function App() {
         ? classifyShellPermissionDecision(message)
         : "unknown";
       let nextMessage = message;
+      let nextOptions = options;
 
-      if (
-        shellPermissionDecision === "enable_shell" &&
-        currentWorkspace &&
-        !currentWorkspace.permissions.shell
-      ) {
-        try {
-          const updatedWorkspace = await window.electronAPI.updateWorkspacePermissions(
-            currentWorkspace.id,
-            { shell: true },
-          );
-          if (updatedWorkspace) {
-            setCurrentWorkspace(updatedWorkspace);
-          }
-        } catch (permissionError) {
-          console.error("Failed to pre-enable shell from user message:", permissionError);
-        }
-        nextMessage = "Please continue with shell access enabled for this workspace.";
+      if (shellPermissionDecision === "enable_shell") {
+        nextMessage = "Please continue using the Ask for approval access profile.";
+        nextOptions = {
+          ...options,
+          accessProfileId: options?.accessProfileId || BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+        };
       } else if (shellPermissionDecision === "continue_without_shell") {
-        nextMessage = "Please continue without shell access and use the limited best-effort path.";
+        nextMessage = "Please continue without command tools and use the limited best-effort path.";
       }
 
       if (remoteTaskView) {
@@ -5201,7 +5271,7 @@ export function App() {
             message: nextMessage,
             images,
             quotedAssistantMessage,
-            ...(options || {}),
+            ...(nextOptions || {}),
           },
         });
       } else {
@@ -5210,7 +5280,7 @@ export function App() {
           nextMessage,
           images,
           quotedAssistantMessage,
-          options,
+          nextOptions,
         );
       }
     } catch (error: unknown) {
@@ -5220,14 +5290,9 @@ export function App() {
     }
   };
 
-  const handleEnableShellForPausedTask = useCallback(async () => {
+  const handleContinueWithoutCommandsForPausedTask = useCallback(async () => {
     if (remoteTaskView) return;
-    await handleSendMessage("enable shell");
-  }, [handleSendMessage, remoteTaskView]);
-
-  const handleContinueWithoutShellForPausedTask = useCallback(async () => {
-    if (remoteTaskView) return;
-    await handleSendMessage("continue without shell");
+    await handleSendMessage("continue without commands");
   }, [handleSendMessage, remoteTaskView]);
 
   const handleCancelTask = async () => {
@@ -5329,6 +5394,16 @@ export function App() {
     setSelectedTaskId(null);
     setEvents([]);
     clearRemoteTaskView();
+
+    // Starting a new task should keep an explicitly selected real workspace.
+    // Only scratch sessions need a newly isolated temp workspace. The previous
+    // behavior always switched to temp, which made the folder selector briefly
+    // show the old folder while the new task was actually created elsewhere.
+    const activeWorkspace = currentWorkspaceRef.current ?? currentWorkspace;
+    if (!shouldUseFreshTempWorkspaceForNewSession(activeWorkspace)) {
+      return;
+    }
+
     try {
       const tempWorkspace = await window.electronAPI.getTempWorkspace({ createNew: true });
       setCurrentWorkspace(tempWorkspace);
@@ -5360,9 +5435,7 @@ export function App() {
       await window.electronAPI?.setLLMModel?.({
         providerType,
         modelKey,
-        ...(selection.reasoningEffort
-          ? { reasoningEffort: selection.reasoningEffort }
-          : {}),
+        ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
       });
       await loadLLMConfig();
     } catch (error) {
@@ -5370,10 +5443,7 @@ export function App() {
       addToast({
         type: "error",
         title: "Model not saved",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Could not update the default model.",
+        message: error instanceof Error ? error.message : "Could not update the default model.",
       });
     }
     // When model changes during a task, clear the current task to start fresh
@@ -5477,8 +5547,7 @@ export function App() {
     : deferredRightPanelInput;
 
   const handleRightSidebarToggle = useCallback(() => {
-    const startedAtMs =
-      typeof performance !== "undefined" ? performance.now() : null;
+    const startedAtMs = typeof performance !== "undefined" ? performance.now() : null;
     setRightSidebarCollapsed((collapsed) => {
       const nextCollapsed = !collapsed;
       if (nextCollapsed) {
@@ -5517,12 +5586,15 @@ export function App() {
     setMissionControlEverydayAgentFocus(false);
     setCurrentView("missionControl");
   }, []);
-  const handleSelectChildTaskFromMainContent = useCallback((taskId: string) => {
-    const task = tasksRef.current.find((candidate) => candidate.id === taskId);
-    if (task && isSynthesisChildTask(task)) return;
-    markTaskSwitchStart(taskId);
-    setSelectedTaskId(taskId);
-  }, [markTaskSwitchStart]);
+  const handleSelectChildTaskFromMainContent = useCallback(
+    (taskId: string) => {
+      const task = tasksRef.current.find((candidate) => candidate.id === taskId);
+      if (task && isSynthesisChildTask(task)) return;
+      markTaskSwitchStart(taskId);
+      setSelectedTaskId(taskId);
+    },
+    [markTaskSwitchStart],
+  );
   const handleSubmitInputRequestFromMainContent = useCallback(
     (requestId: string, answers: Record<string, { optionLabel?: string; otherText?: string }>) => {
       void handleInputRequestResponse({
@@ -5558,9 +5630,7 @@ export function App() {
     [clearRemoteTaskView, markTaskSwitchStart],
   );
   const handleRightPanelHighlightConsumed = useCallback(() => {
-    setRightPanelHighlight((prev) =>
-      prev && prev.taskId === selectedTaskId ? null : prev,
-    );
+    setRightPanelHighlight((prev) => (prev && prev.taskId === selectedTaskId ? null : prev));
   }, [selectedTaskId]);
 
   // When opening a session from history, ensure we have the full task (including prompt)
@@ -5568,7 +5638,8 @@ export function App() {
   useEffect(() => {
     if (!selectedTaskId || remoteTaskView || !window.electronAPI?.getTask) return;
 
-    const hasPrompt = selectedTask && (selectedTask.rawPrompt || selectedTask.userPrompt || selectedTask.prompt);
+    const hasPrompt =
+      selectedTask && (selectedTask.rawPrompt || selectedTask.userPrompt || selectedTask.prompt);
     const displayPrompt = [
       selectedTask?.rawPrompt,
       selectedTask?.userPrompt,
@@ -5964,7 +6035,10 @@ export function App() {
                 <line x1="15" y1="3" x2="15" y2="21" />
               </svg>
               {effectiveRightCollapsed && unseenOutputCount > 0 && (
-                <span className="title-bar-output-badge" aria-label={`${unseenOutputCount} new outputs`}>
+                <span
+                  className="title-bar-output-badge"
+                  aria-label={`${unseenOutputCount} new outputs`}
+                >
                   {unseenOutputCount > 9 ? "9+" : unseenOutputCount}
                 </span>
               )}
@@ -6061,9 +6135,7 @@ export function App() {
               />
             )}
             <Suspense
-              fallback={
-                currentView === "main" ? <TaskViewSkeleton /> : <LazyViewFallback />
-              }
+              fallback={currentView === "main" ? <TaskViewSkeleton /> : <LazyViewFallback />}
             >
               {currentView === "automations" ? (
                 <main className="main-content automation-studio-main">
@@ -6115,88 +6187,100 @@ export function App() {
                 />
               ) : currentView === "devices" ? (
                 <DevicesPanel
-                onOpenTask={(taskId, remote) => {
-                  if (remote) {
-                    void openRemoteTaskView(taskId, remote);
-                    return;
-                  }
-                  clearRemoteTaskView();
-                  setSelectedTaskId(taskId);
-                  setCurrentView("main");
-                }}
-                onCreateTaskHere={async (prompt, options) => {
-                  const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
-                  clearRemoteTaskView();
-                  if (options?.shellAccess && currentWorkspace) {
-                    try {
-                      const updated = await window.electronAPI?.updateWorkspacePermissions?.(currentWorkspace.id, { shell: true });
-                      if (updated) setCurrentWorkspace(updated);
-                    } catch (e) {
-                      console.warn("[Devices] Failed to enable shell for workspace:", e);
+                  onOpenTask={(taskId, remote) => {
+                    if (remote) {
+                      void openRemoteTaskView(taskId, remote);
+                      return;
                     }
-                  }
-                  await handleCreateTask(title, prompt, options ? {
-                    autonomousMode: options.autonomousMode,
-                    collaborativeMode: options.collaborativeMode,
-                    multiLlmMode: options.multiLlmMode,
-                    multiLlmConfig: options.multiLlmConfig,
-                    executionMode: options.executionMode,
-                    taskDomain: options.taskDomain,
-                    chronicleMode: options.chronicleMode,
-                  } : undefined);
-                  loadTasks();
-                }}
-                onNewTaskForDevice={async (nodeId, prompt, options) => {
-                  try {
-                    const res = await window.electronAPI?.deviceAssignTask?.({
-                      nodeId,
+                    clearRemoteTaskView();
+                    setSelectedTaskId(taskId);
+                    setCurrentView("main");
+                  }}
+                  onCreateTaskHere={async (prompt, options) => {
+                    const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
+                    clearRemoteTaskView();
+                    await handleCreateTask(
+                      title,
                       prompt,
-                      workspaceId: currentWorkspace?.id,
-                      agentConfig: options ? {
-                        ...(options.autonomousMode && {
-                          autonomousMode: true,
-                          allowUserInput: false,
-                          humanInputPolicy: "none" as const,
-                        }),
-                        ...(options.collaborativeMode && { collaborativeMode: true }),
-                        ...(options.multiLlmMode && { multiLlmMode: true, multiLlmConfig: options.multiLlmConfig }),
-                        ...(options.executionMode && { executionMode: options.executionMode }),
-                        ...(options.taskDomain && { taskDomain: options.taskDomain }),
-                        ...(options.chronicleMode && { chronicleMode: options.chronicleMode }),
-                      } : undefined,
-                      shellAccess: options?.shellAccess,
-                    });
-                    
-                    if (res?.ok) {
-                      addToast({
-                        type: "success",
-                        title: "Task Started Remotely",
-                        message: "The task is now running on the remote device."
+                      options
+                        ? {
+                            autonomousMode: options.autonomousMode,
+                            collaborativeMode: options.collaborativeMode,
+                            multiLlmMode: options.multiLlmMode,
+                            multiLlmConfig: options.multiLlmConfig,
+                            executionMode: options.executionMode,
+                            taskDomain: options.taskDomain,
+                            chronicleMode: options.chronicleMode,
+                            accessProfileId: options.accessProfileId,
+                          }
+                        : undefined,
+                    );
+                    loadTasks();
+                  }}
+                  onNewTaskForDevice={async (nodeId, prompt, options) => {
+                    try {
+                      const res = await window.electronAPI?.deviceAssignTask?.({
+                        nodeId,
+                        prompt,
+                        workspaceId: currentWorkspace?.id,
+                        agentConfig: options
+                          ? {
+                              ...(options.autonomousMode && {
+                                autonomousMode: true,
+                                allowUserInput: false,
+                                humanInputPolicy: "none" as const,
+                              }),
+                              ...(options.collaborativeMode && { collaborativeMode: true }),
+                              ...(options.multiLlmMode && {
+                                multiLlmMode: true,
+                                multiLlmConfig: options.multiLlmConfig,
+                              }),
+                              ...(options.executionMode && {
+                                executionMode: options.executionMode,
+                              }),
+                              ...(options.taskDomain && { taskDomain: options.taskDomain }),
+                              ...(options.chronicleMode && {
+                                chronicleMode: options.chronicleMode,
+                              }),
+                              ...(options.accessProfileId && {
+                                accessProfileId: options.accessProfileId,
+                              }),
+                            }
+                          : undefined,
+                        accessProfileId: options?.accessProfileId,
+                        shellAccess: options?.shellAccess,
                       });
-                      // Refresh task list to show the new task in the sidebar/dashboard
-                      loadTasks();
-                    } else {
-                      throw new Error(res?.error || "Unknown error assigning task");
+
+                      if (res?.ok) {
+                        addToast({
+                          type: "success",
+                          title: "Task Started Remotely",
+                          message: "The task is now running on the remote device.",
+                        });
+                        // Refresh task list to show the new task in the sidebar/dashboard
+                        loadTasks();
+                      } else {
+                        throw new Error(res?.error || "Unknown error assigning task");
+                      }
+                    } catch (err: any) {
+                      console.error("[Devices] deviceAssignTask record failed:", err);
+                      addToast({
+                        type: "error",
+                        title: "Remote Task Failed",
+                        message: err?.message || "Failed to start task on remote device",
+                      });
                     }
-                  } catch (err: any) {
-                    console.error("[Devices] deviceAssignTask record failed:", err);
-                    addToast({
-                      type: "error",
-                      title: "Remote Task Failed",
-                      message: err?.message || "Failed to start task on remote device"
-                    });
-                  }
-                }}
-                workspace={currentWorkspace}
-                onOpenSettings={(tab) => {
-                  setSettingsTab(
-                    tab === "improvement"
-                      ? "subconscious"
-                      : ((tab as typeof settingsTab | undefined) || "appearance"),
-                  );
-                  setCurrentView("settings");
-                }}
-                availableProviders={availableProviders}
+                  }}
+                  workspace={currentWorkspace}
+                  onOpenSettings={(tab) => {
+                    setSettingsTab(
+                      tab === "improvement"
+                        ? "subconscious"
+                        : (tab as typeof settingsTab | undefined) || "appearance",
+                    );
+                    setCurrentView("settings");
+                  }}
+                  availableProviders={availableProviders}
                 />
               ) : currentView === "health" ? (
                 <HealthPanel
@@ -6280,75 +6364,78 @@ export function App() {
                 </main>
               ) : (
                 <SelectedTaskWorkspaceView
-                task={selectedTask}
-                selectedTaskId={selectedTaskId}
-                workspace={currentWorkspace}
-                replayControls={replayControls}
-                sharedTaskEventUi={sharedTaskEventUi}
-                remoteTaskView={remoteTaskView}
-                childTasks={childTasks}
-                childEvents={childEvents}
-                activeInputRequest={activeInputRequest}
-                pendingInputRequests={pendingInputRequests}
-                selectedModel={selectedModel}
-                selectedProvider={selectedProvider}
-                selectedReasoningEffort={selectedReasoningEffort}
-                availableModels={availableModels}
-                availableProviders={availableProviders}
-                uiDensity={uiDensity}
-                homeResearchVaultEnabled={homeResearchVaultEnabled}
-                homeNextActionsEnabled={homeNextActionsEnabled}
-                rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-                taskSwitchId={selectedTaskSwitchId}
-                hasMoreTimelineHistory={selectedTaskTimelineHistory.hasMoreHistory}
-                isLoadingTimelineHistory={selectedTaskTimelineHistory.isLoadingMore}
-                timelineHistoryError={selectedTaskTimelineHistory.error}
-                onLoadMoreTimelineHistory={handleLoadMoreTaskTimelineHistory}
-                onLoadTaskEventDetail={handleLoadTaskEventDetail}
-                onReleaseTaskEventDetail={handleReleaseTaskEventDetail}
-                effectiveRightCollapsed={effectiveRightCollapsed}
-                terminalTabsOpen={terminalTabsOpen}
-                browserWorkbenchRequest={browserWorkbenchRequest}
-                sideChat={sideChat}
-                rightPanelInput={visibleRightPanelInput}
-                onSelectChildTask={handleSelectChildTaskFromMainContent}
-                onSelectTask={handleSelectTaskFromShell}
-                onSendMessage={handleSendMessage}
-                onOpenSideChat={handleOpenSideChat}
-                onSendSideChatMessage={handleSendSideChatMessage}
-                onCloseSideChat={handleCloseSideChat}
-                onOpenSideChatFullThread={handleOpenSideChatFullThread}
-                onStartOnboarding={handleShowOnboarding}
-                onStartFreshSession={handleClearTaskView}
-                onCreateTask={handleCreateTask}
-                onAskInbox={handleAskInboxFromComposer}
-                onChangeWorkspace={handleChangeWorkspace}
-                onSelectWorkspace={handleSelectWorkspace}
-                onOpenSettings={(tab) => {
-                  setSettingsTab((tab as typeof settingsTab | undefined) || "appearance");
-                  setCurrentView("settings");
-                }}
-                onStopTask={handleCancelTask}
-                onEnableShellForPausedTask={handleEnableShellForPausedTask}
-                onContinueWithoutShellForPausedTask={handleContinueWithoutShellForPausedTask}
-                onWrapUpTask={handleWrapUpTask}
-                onSubmitInputRequest={handleSubmitInputRequestFromMainContent}
-                onDismissInputRequest={handleDismissInputRequestFromMainContent}
-                onOpenBrowserView={handleOpenBrowserView}
-                onRevealRightSidebar={handleRevealRightSidebar}
-                onViewTaskOutputs={handleViewTaskOutputsFromMainContent}
-                onTasksChanged={loadTasks}
-                onCancelTaskById={handleCancelTaskById}
-                onHighlightConsumed={handleRightPanelHighlightConsumed}
-                onCloseTerminalTabs={handleCloseTerminalTabs}
-                onModelChange={handleModelChange}
+                  task={selectedTask}
+                  selectedTaskId={selectedTaskId}
+                  workspace={currentWorkspace}
+                  replayControls={replayControls}
+                  sharedTaskEventUi={sharedTaskEventUi}
+                  remoteTaskView={remoteTaskView}
+                  childTasks={childTasks}
+                  childEvents={childEvents}
+                  activeInputRequest={activeInputRequest}
+                  pendingInputRequests={pendingInputRequests}
+                  selectedModel={selectedModel}
+                  selectedProvider={selectedProvider}
+                  selectedReasoningEffort={selectedReasoningEffort}
+                  availableModels={availableModels}
+                  availableProviders={availableProviders}
+                  uiDensity={uiDensity}
+                  homeResearchVaultEnabled={homeResearchVaultEnabled}
+                  homeNextActionsEnabled={homeNextActionsEnabled}
+                  rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+                  taskSwitchId={selectedTaskSwitchId}
+                  hasMoreTimelineHistory={selectedTaskTimelineHistory.hasMoreHistory}
+                  isLoadingTimelineHistory={selectedTaskTimelineHistory.isLoadingMore}
+                  timelineHistoryError={selectedTaskTimelineHistory.error}
+                  onLoadMoreTimelineHistory={handleLoadMoreTaskTimelineHistory}
+                  onLoadTaskEventDetail={handleLoadTaskEventDetail}
+                  onReleaseTaskEventDetail={handleReleaseTaskEventDetail}
+                  effectiveRightCollapsed={effectiveRightCollapsed}
+                  terminalTabsOpen={terminalTabsOpen}
+                  browserWorkbenchRequest={browserWorkbenchRequest}
+                  sideChat={sideChat}
+                  rightPanelInput={visibleRightPanelInput}
+                  onSelectChildTask={handleSelectChildTaskFromMainContent}
+                  onSelectTask={handleSelectTaskFromShell}
+                  onSendMessage={handleSendMessage}
+                  onOpenSideChat={handleOpenSideChat}
+                  onSendSideChatMessage={handleSendSideChatMessage}
+                  onCloseSideChat={handleCloseSideChat}
+                  onOpenSideChatFullThread={handleOpenSideChatFullThread}
+                  onStartOnboarding={handleShowOnboarding}
+                  onStartFreshSession={handleClearTaskView}
+                  onCreateTask={handleCreateTask}
+                  onAskInbox={handleAskInboxFromComposer}
+                  onChangeWorkspace={handleChangeWorkspace}
+                  onSelectWorkspace={handleSelectWorkspace}
+                  onOpenSettings={(tab) => {
+                    setSettingsTab((tab as typeof settingsTab | undefined) || "appearance");
+                    setCurrentView("settings");
+                  }}
+                  onStopTask={handleCancelTask}
+                  onContinueWithoutCommandsForPausedTask={
+                    handleContinueWithoutCommandsForPausedTask
+                  }
+                  onWrapUpTask={handleWrapUpTask}
+                  onSubmitInputRequest={handleSubmitInputRequestFromMainContent}
+                  onDismissInputRequest={handleDismissInputRequestFromMainContent}
+                  onOpenBrowserView={handleOpenBrowserView}
+                  onRevealRightSidebar={handleRevealRightSidebar}
+                  onViewTaskOutputs={handleViewTaskOutputsFromMainContent}
+                  onTasksChanged={loadTasks}
+                  onCancelTaskById={handleCancelTaskById}
+                  onHighlightConsumed={handleRightPanelHighlightConsumed}
+                  onCloseTerminalTabs={handleCloseTerminalTabs}
+                  onModelChange={handleModelChange}
                 />
               )}
             </Suspense>
           </div>
 
           {/* Quick Task FAB */}
-          {currentWorkspace && currentView === "main" && <QuickTaskFAB onCreateTask={handleQuickTask} />}
+          {currentWorkspace && currentView === "main" && (
+            <QuickTaskFAB onCreateTask={handleQuickTask} />
+          )}
 
           {approveAllSessionWarningOpen ? (
             <ApproveAllSessionWarningDialog
@@ -6373,22 +6460,14 @@ export function App() {
             <BrowserUseApprovalDialog
               approval={genericApproval}
               onRespond={(action) =>
-                void handleApprovalResponse(
-                  genericApproval.id,
-                  action.startsWith("allow_"),
-                  action,
-                )
+                void handleApprovalResponse(genericApproval.id, action.startsWith("allow_"), action)
               }
             />
           ) : genericApproval ? (
             <GenericApprovalDialog
               approval={genericApproval}
               onRespond={(action) =>
-                void handleApprovalResponse(
-                  genericApproval.id,
-                  action.startsWith("allow_"),
-                  action,
-                )
+                void handleApprovalResponse(genericApproval.id, action.startsWith("allow_"), action)
               }
               onApproveAllSession={showApproveAllWarning}
             />

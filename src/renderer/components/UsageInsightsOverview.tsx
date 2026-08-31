@@ -196,9 +196,7 @@ function computeStreaks(requestsByDay: RequestDayRow[]): {
   currentStreak: number;
   longestStreak: number;
 } {
-  const activeSet = new Set(
-    requestsByDay.filter((r) => r.llmCalls > 0).map((r) => r.dateKey),
-  );
+  const activeSet = new Set(requestsByDay.filter((r) => r.llmCalls > 0).map((r) => r.dateKey));
   const activeDays = activeSet.size;
 
   if (activeSet.size === 0) {
@@ -251,8 +249,7 @@ function pickBookComparison(totalTokens: number): string | null {
     best = { name: "Moby-Dick", multiple };
   }
   const mult = best.multiple;
-  const rendered =
-    mult >= 10 ? `~${Math.round(mult)}\u00D7` : `~${mult.toFixed(1)}\u00D7`;
+  const rendered = mult >= 10 ? `~${Math.round(mult)}\u00D7` : `~${mult.toFixed(1)}\u00D7`;
   return `You've used ${rendered} more tokens than ${best.name}.`;
 }
 
@@ -313,7 +310,11 @@ export function UsageInsightsOverview(props: OverviewProps) {
               <h3>Token activity</h3>
               <span className="insights-token-activity-range">{periodLabel}</span>
             </div>
-            <div className="insights-token-activity-tabs" role="tablist" aria-label="Token activity view">
+            <div
+              className="insights-token-activity-tabs"
+              role="tablist"
+              aria-label="Token activity view"
+            >
               {HEATMAP_MODES.map((mode) => (
                 <button
                   key={mode.value}

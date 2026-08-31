@@ -9,15 +9,20 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../DreamingRepository", () => ({
-  DreamingRepository: vi.fn().mockImplementation(function DreamingRepository(this: { db: unknown }, db: unknown) {
+  DreamingRepository: vi.fn().mockImplementation(function DreamingRepository(
+    this: { db: unknown },
+    db: unknown,
+  ) {
     this.db = db;
   }),
 }));
 
 vi.mock("../DreamingService", () => ({
-  DreamingService: vi.fn().mockImplementation(function DreamingService(this: { run: typeof mocks.dreamingRun }) {
-    this.run = mocks.dreamingRun;
-  }),
+  DreamingService: vi
+    .fn()
+    .mockImplementation(function DreamingService(this: { run: typeof mocks.dreamingRun }) {
+      this.run = mocks.dreamingRun;
+    }),
 }));
 
 vi.mock("../TranscriptStore", () => ({

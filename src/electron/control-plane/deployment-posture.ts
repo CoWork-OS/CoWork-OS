@@ -27,7 +27,9 @@ export interface ControlPlaneDeploymentPosture {
 }
 
 export function isLoopbackControlPlaneHost(host?: string): boolean {
-  const normalized = String(host || "").trim().toLowerCase();
+  const normalized = String(host || "")
+    .trim()
+    .toLowerCase();
   return (
     normalized === "" ||
     normalized === "localhost" ||
@@ -38,9 +40,13 @@ export function isLoopbackControlPlaneHost(host?: string): boolean {
 }
 
 export function isPublicControlPlaneBind(host?: string): boolean {
-  const normalized = String(host || "").trim().toLowerCase();
+  const normalized = String(host || "")
+    .trim()
+    .toLowerCase();
   if (isLoopbackControlPlaneHost(normalized)) return false;
-  return normalized === "0.0.0.0" || normalized === "::" || normalized === "[::]" || normalized === "*";
+  return (
+    normalized === "0.0.0.0" || normalized === "::" || normalized === "[::]" || normalized === "*"
+  );
 }
 
 export function isStrongControlPlaneToken(token?: string): boolean {
@@ -58,7 +64,8 @@ export function evaluateControlPlaneDeploymentPosture(
   const managedMode = options.managedDeployment || options.headless;
   const host = settings.host || "127.0.0.1";
   const publicBind = isPublicControlPlaneBind(host);
-  const tailscaleEnabled = settings.tailscale?.mode !== undefined && settings.tailscale.mode !== "off";
+  const tailscaleEnabled =
+    settings.tailscale?.mode !== undefined && settings.tailscale.mode !== "off";
   const operatorTokenStrong = isStrongControlPlaneToken(settings.token);
   const nodeTokenStrong = isStrongControlPlaneToken(settings.nodeToken);
   const reasons: string[] = [];
@@ -73,16 +80,24 @@ export function evaluateControlPlaneDeploymentPosture(
     const permitted =
       tailscaleEnabled || options.bindContext === "container" || options.allowInsecurePublicBind;
     if (!permitted) {
-      reasons.push("Managed/headless deployments cannot bind the Control Plane publicly by default.");
+      reasons.push(
+        "Managed/headless deployments cannot bind the Control Plane publicly by default.",
+      );
       recommendations.push(
         "Set COWORK_CONTROL_PLANE_BIND_CONTEXT=container only for loopback-published containers, enable Tailscale, or explicitly set COWORK_CONTROL_PLANE_ALLOW_INSECURE_PUBLIC_BIND=1.",
       );
     } else if (options.allowInsecurePublicBind) {
       reasons.push("Public bind is enabled through an explicit break-glass override.");
-      recommendations.push("Place the Control Plane behind trusted network controls and rotate tokens regularly.");
+      recommendations.push(
+        "Place the Control Plane behind trusted network controls and rotate tokens regularly.",
+      );
     } else if (options.bindContext === "container") {
-      reasons.push("Public bind is allowed inside a container; host publishing must remain loopback/private.");
-      recommendations.push("Keep Docker/Kubernetes service exposure private and publish host ports on 127.0.0.1.");
+      reasons.push(
+        "Public bind is allowed inside a container; host publishing must remain loopback/private.",
+      );
+      recommendations.push(
+        "Keep Docker/Kubernetes service exposure private and publish host ports on 127.0.0.1.",
+      );
     } else if (tailscaleEnabled) {
       reasons.push("Public bind is allowed because Tailscale exposure is configured.");
     }
@@ -90,11 +105,15 @@ export function evaluateControlPlaneDeploymentPosture(
 
   if (managedMode && !operatorTokenStrong) {
     reasons.push("Managed/headless deployment requires a strong operator token.");
-    recommendations.push("Regenerate the Control Plane token or let CoWork create a 64-character token.");
+    recommendations.push(
+      "Regenerate the Control Plane token or let CoWork create a 64-character token.",
+    );
   }
   if (managedMode && !nodeTokenStrong) {
     reasons.push("Managed/headless deployment requires a strong node token.");
-    recommendations.push("Regenerate the Control Plane token pair before exposing remote device access.");
+    recommendations.push(
+      "Regenerate the Control Plane token pair before exposing remote device access.",
+    );
   }
 
   let status: ControlPlaneDeploymentPostureStatus = "ready";

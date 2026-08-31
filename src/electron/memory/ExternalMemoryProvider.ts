@@ -6,6 +6,8 @@ export interface ExternalMemoryTurnContext {
   query?: string;
   taskId?: string;
   sessionId?: string;
+  /** Automatic external recall/sync is disabled for approval-gated profiles. */
+  allowExternalAccess?: boolean;
 }
 
 export interface ExternalMemoryPrefetchResult {
@@ -30,7 +32,11 @@ export interface ExternalMemoryProvider {
   prefetch(context: ExternalMemoryTurnContext): Promise<ExternalMemoryPrefetchResult | null>;
   syncTurn(input: ExternalMemorySyncTurnInput): Promise<void>;
   extractSession(input: ExternalMemoryExtractSessionInput): Promise<void>;
-  forget(scope: { workspace: Pick<Workspace, "id" | "name">; memoryId?: string; text?: string }): Promise<void>;
+  forget(scope: {
+    workspace: Pick<Workspace, "id" | "name">;
+    memoryId?: string;
+    text?: string;
+  }): Promise<void>;
 }
 
 export class SupermemoryExternalProvider implements ExternalMemoryProvider {
@@ -41,7 +47,7 @@ export class SupermemoryExternalProvider implements ExternalMemoryProvider {
   }
 
   async prefetch(context: ExternalMemoryTurnContext): Promise<ExternalMemoryPrefetchResult | null> {
-    if (!this.isEnabled()) return null;
+    if (!this.isEnabled() || context.allowExternalAccess === false) return null;
     const profile = await SupermemoryService.buildPromptContext({
       workspace: context.workspace,
       query: context.query || "",
@@ -54,7 +60,7 @@ export class SupermemoryExternalProvider implements ExternalMemoryProvider {
   }
 
   async syncTurn(input: ExternalMemorySyncTurnInput): Promise<void> {
-    if (!this.isEnabled()) return;
+    if (!this.isEnabled() || input.allowExternalAccess === false) return;
     for (const memory of input.memories || []) {
       const content = memory.trim();
       if (!content) continue;
@@ -73,7 +79,8 @@ export class SupermemoryExternalProvider implements ExternalMemoryProvider {
   }
 
   async extractSession(input: ExternalMemoryExtractSessionInput): Promise<void> {
-    if (!this.isEnabled() || !input.transcriptSummary.trim()) return;
+    if (!this.isEnabled() || input.allowExternalAccess === false || !input.transcriptSummary.trim())
+      return;
     await SupermemoryService.remember({
       workspace: input.workspace,
       content: input.transcriptSummary,
@@ -114,9 +121,7 @@ export class ExternalMemoryProviderRegistry {
 
   async prefetchAll(context: ExternalMemoryTurnContext): Promise<ExternalMemoryPrefetchResult[]> {
     const results = await Promise.all(
-      this.listEnabled().map((provider) =>
-        provider.prefetch(context).catch(() => null),
-      ),
+      this.listEnabled().map((provider) => provider.prefetch(context).catch(() => null)),
     );
     return results.filter((result): result is ExternalMemoryPrefetchResult => result !== null);
   }

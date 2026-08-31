@@ -14,9 +14,7 @@ export type OutputBudgetProviderFamily =
   | "openrouter"
   | "generic";
 export type OutputTokenParamName = "max_tokens" | "max_completion_tokens" | "max_output_tokens";
-export type OutputTruncationClassification =
-  | "visible_partial_output"
-  | "reasoning_exhausted";
+export type OutputTruncationClassification = "visible_partial_output" | "reasoning_exhausted";
 
 export interface OutputTokenPolicyInput {
   providerType: LLMProviderType | string;
@@ -95,7 +93,9 @@ function readEnvLimit(name: string): number | null {
 }
 
 function isOpenAIReasoningModel(modelId: string): boolean {
-  const normalized = String(modelId || "").toLowerCase().trim();
+  const normalized = String(modelId || "")
+    .toLowerCase()
+    .trim();
   return (
     normalized.startsWith("gpt-5") ||
     normalized.startsWith("o1") ||
@@ -104,8 +104,12 @@ function isOpenAIReasoningModel(modelId: string): boolean {
   );
 }
 
-function inferOpenRouterRoutedFamily(modelId: string): Exclude<OutputBudgetProviderFamily, "openrouter"> | null {
-  const normalized = String(modelId || "").toLowerCase().trim();
+function inferOpenRouterRoutedFamily(
+  modelId: string,
+): Exclude<OutputBudgetProviderFamily, "openrouter"> | null {
+  const normalized = String(modelId || "")
+    .toLowerCase()
+    .trim();
   if (!normalized) return null;
   if (normalized.startsWith("anthropic/")) return "anthropic";
   if (normalized.startsWith("openai/")) return "openai";
@@ -113,15 +117,16 @@ function inferOpenRouterRoutedFamily(modelId: string): Exclude<OutputBudgetProvi
   return null;
 }
 
-function resolvePolicyFamily(opts: {
-  providerType: LLMProviderType | string;
-  modelId: string;
-}): {
+function resolvePolicyFamily(opts: { providerType: LLMProviderType | string; modelId: string }): {
   providerFamily: OutputBudgetProviderFamily;
   routedFamily: Exclude<OutputBudgetProviderFamily, "openrouter"> | null;
 } {
-  const providerType = String(opts.providerType || "").toLowerCase().trim();
-  const modelId = String(opts.modelId || "").toLowerCase().trim();
+  const providerType = String(opts.providerType || "")
+    .toLowerCase()
+    .trim();
+  const modelId = String(opts.modelId || "")
+    .toLowerCase()
+    .trim();
 
   if (providerType === "anthropic") {
     return { providerFamily: "anthropic", routedFamily: "anthropic" };
@@ -160,7 +165,9 @@ function estimateContextLimit(
   }
 
   const modelLimit = normalizePositiveInteger(
-    manager && typeof manager.getModelTokenLimit === "function" ? manager.getModelTokenLimit() : null,
+    manager && typeof manager.getModelTokenLimit === "function"
+      ? manager.getModelTokenLimit()
+      : null,
   );
   if (modelLimit === null) return null;
 
@@ -250,8 +257,12 @@ export function resolveOutputTokenParamName(opts: {
   modelId: string;
   apiMode?: "chat_completions" | "responses";
 }): OutputTokenParamName {
-  const providerType = String(opts.providerType || "").toLowerCase().trim();
-  const modelId = String(opts.modelId || "").toLowerCase().trim();
+  const providerType = String(opts.providerType || "")
+    .toLowerCase()
+    .trim();
+  const modelId = String(opts.modelId || "")
+    .toLowerCase()
+    .trim();
   const apiMode = opts.apiMode;
 
   if (providerType === "gemini") return "max_output_tokens";
@@ -262,9 +273,7 @@ export function resolveOutputTokenParamName(opts: {
   return "max_tokens";
 }
 
-export function resolveOutputTokenBudget(
-  input: OutputTokenPolicyInput,
-): ResolvedOutputTokenBudget {
+export function resolveOutputTokenBudget(input: OutputTokenPolicyInput): ResolvedOutputTokenBudget {
   const mode = getOutputTokenPolicyMode();
   const { providerFamily, routedFamily } = resolvePolicyFamily({
     providerType: input.providerType,
@@ -324,7 +333,9 @@ export function resolveOutputTokenBudget(
   };
 }
 
-export function classifyOutputTruncation(content: LLMContent[] | undefined): OutputTruncationClassification {
+export function classifyOutputTruncation(
+  content: LLMContent[] | undefined,
+): OutputTruncationClassification {
   const blocks = Array.isArray(content) ? content : [];
   const text = blocks
     .filter((block: Any) => block?.type === "text" && typeof block?.text === "string")
@@ -335,9 +346,7 @@ export function classifyOutputTruncation(content: LLMContent[] | undefined): Out
     return "reasoning_exhausted";
   }
 
-  return stripThinkingBlocks(text).length > 0
-    ? "visible_partial_output"
-    : "reasoning_exhausted";
+  return stripThinkingBlocks(text).length > 0 ? "visible_partial_output" : "reasoning_exhausted";
 }
 
 export function responseHasToolUse(content: LLMContent[] | undefined): boolean {

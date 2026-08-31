@@ -295,7 +295,13 @@ describe("ImageGenerator OpenRouter image API", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: vi.fn().mockResolvedValue({
-          data: [{ provider_tag: null, provider_slug: "meta", supported_parameters: supportedParameters }],
+          data: [
+            {
+              provider_tag: null,
+              provider_slug: "meta",
+              supported_parameters: supportedParameters,
+            },
+          ],
         }),
       })
       .mockResolvedValueOnce({
@@ -395,7 +401,9 @@ describe("ImageGenerator OpenRouter image API", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: vi.fn().mockResolvedValue({
-          candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: png } }] } }],
+          candidates: [
+            { content: { parts: [{ inlineData: { mimeType: "image/png", data: png } }] } },
+          ],
         }),
       });
     vi.stubGlobal("fetch", fetchMock);

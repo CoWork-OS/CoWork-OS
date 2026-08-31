@@ -27,19 +27,16 @@ export function isVerificationStepDescription(description?: string | null): bool
 }
 
 export function planHasVerificationStep(
-  plan?:
-    | {
-        steps?: Array<{
-          kind?: string;
-          description?: string | null;
-        }>;
-      }
-    | null,
+  plan?: {
+    steps?: Array<{
+      kind?: string;
+      description?: string | null;
+    }>;
+  } | null,
 ): boolean {
   return Boolean(
     plan?.steps?.some(
-      (step) =>
-        step?.kind === "verification" || isVerificationStepDescription(step?.description),
+      (step) => step?.kind === "verification" || isVerificationStepDescription(step?.description),
     ),
   );
 }

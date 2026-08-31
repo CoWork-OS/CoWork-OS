@@ -53,11 +53,13 @@ function normalizeSlashPath(value: string): string {
 }
 
 function normalizeSlug(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "item";
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "item"
+  );
 }
 
 function stripQuotes(value: string): string {
@@ -127,7 +129,9 @@ function parseFrontmatter(raw: string): ParsedFrontmatterResult {
 
 function arrayValue(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+    return value.filter(
+      (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+    );
   }
   if (typeof value === "string" && value.trim().length > 0) {
     return [value.trim()];
@@ -205,7 +209,9 @@ export class AgentCompaniesService {
           )
           .all(companyId) as Any[])
       : (this.db
-          .prepare("SELECT * FROM company_package_sources ORDER BY updated_at DESC, created_at DESC")
+          .prepare(
+            "SELECT * FROM company_package_sources ORDER BY updated_at DESC, created_at DESC",
+          )
           .all() as Any[]);
     return rows.map((row) => this.mapSource(row));
   }
@@ -264,12 +270,14 @@ export class AgentCompaniesService {
 
   getResolvedGraph(companyId: string): ResolvedCompanyGraph {
     const nodes = this.listGraphNodes(companyId);
-    const sourceIds = Array.from(new Set(nodes.map((node) => node.sourceId).filter(Boolean))) as string[];
+    const sourceIds = Array.from(
+      new Set(nodes.map((node) => node.sourceId).filter(Boolean)),
+    ) as string[];
     const manifests = sourceIds.flatMap((sourceId) => this.listManifests(sourceId));
-    const companyManifest =
-      manifests.find((manifest) => manifest.kind === "company") || null;
+    const companyManifest = manifests.find((manifest) => manifest.kind === "company") || null;
     return {
-      packageName: companyManifest?.name || this.core.getCompany(companyId)?.name || "Company Package",
+      packageName:
+        companyManifest?.name || this.core.getCompany(companyId)?.name || "Company Package",
       companyManifest,
       manifests,
       nodes,
@@ -287,10 +295,9 @@ export class AgentCompaniesService {
       : sourceMatch?.companyId
         ? this.core.getCompany(sourceMatch.companyId)
         : undefined;
-    const existingSource =
-      targetCompany?.id
-        ? this.findSourceByCompanyAndRootUri(targetCompany.id, source.rootUri)
-        : sourceMatch;
+    const existingSource = targetCompany?.id
+      ? this.findSourceByCompanyAndRootUri(targetCompany.id, source.rootUri)
+      : sourceMatch;
     const existingRuntimeIndex = existingSource
       ? this.buildExistingRuntimeIndex(existingSource)
       : undefined;
@@ -313,7 +320,11 @@ export class AgentCompaniesService {
       manifestId: graph.companyManifest?.id,
     });
 
-    for (const node of [...graph.nodes].sort((left, right) => nodeSortWeight(left.kind) - nodeSortWeight(right.kind) || left.name.localeCompare(right.name))) {
+    for (const node of [...graph.nodes].sort(
+      (left, right) =>
+        nodeSortWeight(left.kind) - nodeSortWeight(right.kind) ||
+        left.name.localeCompare(right.name),
+    )) {
       if (node.kind === "company") continue;
 
       if (node.kind === "agent") {
@@ -322,7 +333,9 @@ export class AgentCompaniesService {
           (existingLink?.runtimeEntityId
             ? this.agentRoleRepo.findById(existingLink.runtimeEntityId)
             : undefined) ||
-          roles.find((role) => role.name === this.agentRoleName(companySlug || "company", node.slug));
+          roles.find(
+            (role) => role.name === this.agentRoleName(companySlug || "company", node.slug),
+          );
         items.push({
           id: `preview:${node.id}`,
           manifestKind: "agent",
@@ -520,8 +533,11 @@ export class AgentCompaniesService {
         if (!persistedNodeId) continue;
 
         if (node.kind === "agent") {
-          const existingRoleId = this.findExistingRuntimeLink(existingRuntimeIndex, node, "agent_role")
-            ?.runtimeEntityId;
+          const existingRoleId = this.findExistingRuntimeLink(
+            existingRuntimeIndex,
+            node,
+            "agent_role",
+          )?.runtimeEntityId;
           const existing =
             (existingRoleId ? this.agentRoleRepo.findById(existingRoleId) : undefined) ||
             this.agentRoleRepo
@@ -571,11 +587,12 @@ export class AgentCompaniesService {
         }
 
         if (node.kind === "project") {
-          const existingProjectId = this.findExistingRuntimeLink(existingRuntimeIndex, node, "project")
-            ?.runtimeEntityId;
-          const existing = existingProjectId
-            ? this.core.getProject(existingProjectId)
-            : undefined;
+          const existingProjectId = this.findExistingRuntimeLink(
+            existingRuntimeIndex,
+            node,
+            "project",
+          )?.runtimeEntityId;
+          const existing = existingProjectId ? this.core.getProject(existingProjectId) : undefined;
           const project = existing
             ? this.core.updateProject(existing.id, {
                 name: node.name,
@@ -631,11 +648,12 @@ export class AgentCompaniesService {
         const persistedNodeId = nodeIdMap.get(node.id);
         const manifestId = node.manifestId ? manifestIdMap.get(node.manifestId) : undefined;
         if (!persistedNodeId) continue;
-        const existingIssueId = this.findExistingRuntimeLink(existingRuntimeIndex, node, "issue")
-          ?.runtimeEntityId;
-        const existing = existingIssueId
-          ? this.core.getIssue(existingIssueId)
-          : undefined;
+        const existingIssueId = this.findExistingRuntimeLink(
+          existingRuntimeIndex,
+          node,
+          "issue",
+        )?.runtimeEntityId;
+        const existing = existingIssueId ? this.core.getIssue(existingIssueId) : undefined;
         const metadata = {
           packageNodeSlug: node.slug,
           packageSourceId: source.id,
@@ -841,7 +859,9 @@ export class AgentCompaniesService {
     const warnings: string[] = [];
     const companyManifest = manifests.find((manifest) => manifest.kind === "company") || null;
     if (!companyManifest) {
-      warnings.push("No COMPANY.md found at the package root. Import will infer the company from the folder name.");
+      warnings.push(
+        "No COMPANY.md found at the package root. Import will infer the company from the folder name.",
+      );
     }
 
     const graph = this.buildGraph(manifests, source, warnings);
@@ -937,7 +957,10 @@ export class AgentCompaniesService {
         updatedAt: 0,
       } satisfies CompanyPackageManifest);
 
-    for (const manifest of [companyManifest, ...manifests.filter((entry) => entry.id !== companyManifest.id)]) {
+    for (const manifest of [
+      companyManifest,
+      ...manifests.filter((entry) => entry.id !== companyManifest.id),
+    ]) {
       const parentNodeId =
         manifest.kind === "company" ? undefined : `node:${companyManifest.relativePath}`;
       const node: CompanyGraphNode = {
@@ -974,16 +997,30 @@ export class AgentCompaniesService {
       if (manifest.kind === "agent") {
         const reportsTo = stringValue(frontmatter.reportsTo);
         if (reportsTo) {
-          const targetNode = this.resolveReferencedNode(node.relativePath, reportsTo, manifestByPath, nodeBySlugAndKind, "agent");
+          const targetNode = this.resolveReferencedNode(
+            node.relativePath,
+            reportsTo,
+            manifestByPath,
+            nodeBySlugAndKind,
+            "agent",
+          );
           if (targetNode) {
             edges.push(this.previewEdge("reports_to", node.id, targetNode.id));
           } else {
-            warnings.push(`Could not resolve reportsTo target "${reportsTo}" from ${manifest.relativePath}`);
+            warnings.push(
+              `Could not resolve reportsTo target "${reportsTo}" from ${manifest.relativePath}`,
+            );
           }
         }
 
         for (const skillRef of arrayValue(frontmatter.skills)) {
-          const targetNode = this.resolveReferencedNode(node.relativePath, skillRef, manifestByPath, nodeBySlugAndKind, "skill");
+          const targetNode = this.resolveReferencedNode(
+            node.relativePath,
+            skillRef,
+            manifestByPath,
+            nodeBySlugAndKind,
+            "skill",
+          );
           if (targetNode) {
             edges.push(this.previewEdge("attaches_skill", node.id, targetNode.id));
           }
@@ -993,14 +1030,25 @@ export class AgentCompaniesService {
       if (manifest.kind === "team") {
         const manager = stringValue(frontmatter.manager);
         if (manager) {
-          const managerNode = this.resolveReferencedNode(node.relativePath, manager, manifestByPath, nodeBySlugAndKind, "agent");
+          const managerNode = this.resolveReferencedNode(
+            node.relativePath,
+            manager,
+            manifestByPath,
+            nodeBySlugAndKind,
+            "agent",
+          );
           if (managerNode) {
             edges.push(this.previewEdge("manages_team", managerNode.id, node.id));
           }
         }
 
         for (const includeRef of arrayValue(frontmatter.includes)) {
-          const targetNode = this.resolveReferencedNode(node.relativePath, includeRef, manifestByPath, nodeBySlugAndKind);
+          const targetNode = this.resolveReferencedNode(
+            node.relativePath,
+            includeRef,
+            manifestByPath,
+            nodeBySlugAndKind,
+          );
           if (targetNode) {
             const kind: CompanyGraphEdgeKind =
               targetNode.kind === "agent" ? "belongs_to" : "includes";
@@ -1012,7 +1060,13 @@ export class AgentCompaniesService {
       if (manifest.kind === "task") {
         const assignee = stringValue(frontmatter.assignee);
         if (assignee) {
-          const assigneeNode = this.resolveReferencedNode(node.relativePath, assignee, manifestByPath, nodeBySlugAndKind, "agent");
+          const assigneeNode = this.resolveReferencedNode(
+            node.relativePath,
+            assignee,
+            manifestByPath,
+            nodeBySlugAndKind,
+            "agent",
+          );
           if (assigneeNode) {
             edges.push(this.previewEdge("assigned_to", node.id, assigneeNode.id));
           }
@@ -1020,7 +1074,13 @@ export class AgentCompaniesService {
 
         const project = stringValue(frontmatter.project);
         if (project) {
-          const projectNode = this.resolveReferencedNode(node.relativePath, project, manifestByPath, nodeBySlugAndKind, "project");
+          const projectNode = this.resolveReferencedNode(
+            node.relativePath,
+            project,
+            manifestByPath,
+            nodeBySlugAndKind,
+            "project",
+          );
           if (projectNode) {
             edges.push(this.previewEdge("related_to_project", node.id, projectNode.id));
           }
@@ -1042,8 +1102,12 @@ export class AgentCompaniesService {
     if (!trimmed) return undefined;
 
     if (trimmed.includes("/")) {
-      const baseDir = fromRelativePath ? path.posix.dirname(normalizeSlashPath(fromRelativePath)) : ".";
-      const resolvedPath = normalizeSlashPath(path.posix.normalize(path.posix.join(baseDir, trimmed)));
+      const baseDir = fromRelativePath
+        ? path.posix.dirname(normalizeSlashPath(fromRelativePath))
+        : ".";
+      const resolvedPath = normalizeSlashPath(
+        path.posix.normalize(path.posix.join(baseDir, trimmed)),
+      );
       const manifest = manifestByPath.get(resolvedPath);
       if (manifest) {
         return nodeBySlugAndKind.get(`${manifest.kind}:${manifest.slug}`);
@@ -1055,13 +1119,19 @@ export class AgentCompaniesService {
       if (preferred) return preferred;
     }
 
-    return nodeBySlugAndKind.get(`agent:${normalizeSlug(trimmed)}`)
-      || nodeBySlugAndKind.get(`skill:${normalizeSlug(trimmed)}`)
-      || nodeBySlugAndKind.get(`project:${normalizeSlug(trimmed)}`)
-      || nodeBySlugAndKind.get(`team:${normalizeSlug(trimmed)}`);
+    return (
+      nodeBySlugAndKind.get(`agent:${normalizeSlug(trimmed)}`) ||
+      nodeBySlugAndKind.get(`skill:${normalizeSlug(trimmed)}`) ||
+      nodeBySlugAndKind.get(`project:${normalizeSlug(trimmed)}`) ||
+      nodeBySlugAndKind.get(`team:${normalizeSlug(trimmed)}`)
+    );
   }
 
-  private previewEdge(kind: CompanyGraphEdgeKind, fromNodeId: string, toNodeId: string): CompanyGraphEdge {
+  private previewEdge(
+    kind: CompanyGraphEdgeKind,
+    fromNodeId: string,
+    toNodeId: string,
+  ): CompanyGraphEdge {
     return {
       id: `edge:${kind}:${fromNodeId}:${toNodeId}`,
       sourceId: undefined,
@@ -1124,7 +1194,10 @@ export class AgentCompaniesService {
     };
   }
 
-  private relativePathIdentityKey(kind: CompanyGraphNode["kind"], relativePath?: string): string | null {
+  private relativePathIdentityKey(
+    kind: CompanyGraphNode["kind"],
+    relativePath?: string,
+  ): string | null {
     if (!relativePath) return null;
     return `${kind}:${normalizeSlashPath(relativePath)}`;
   }
@@ -1205,13 +1278,20 @@ export class AgentCompaniesService {
       if (link.syncState.runtimeEntityKind === "issue") {
         const issue = this.core.getIssue(link.syncState.runtimeEntityId);
         if (issue && issue.status !== "cancelled") {
-          this.core.updateIssue(issue.id, { status: "cancelled", completedAt: issue.completedAt ?? now });
+          this.core.updateIssue(issue.id, {
+            status: "cancelled",
+            completedAt: issue.completedAt ?? now,
+          });
         }
       }
     }
   }
 
-  private upsertSource(companyId: string, source: CompanyPackageSourceInput, now: number): CompanyPackageSource {
+  private upsertSource(
+    companyId: string,
+    source: CompanyPackageSourceInput,
+    now: number,
+  ): CompanyPackageSource {
     const existing = this.db
       .prepare(
         `
@@ -1313,9 +1393,7 @@ export class AgentCompaniesService {
     this.db.prepare("DELETE FROM company_package_manifests WHERE source_id = ?").run(sourceId);
   }
 
-  private insertSyncState(
-    state: Omit<CompanySyncState, "id" | "createdAt" | "updatedAt">,
-  ): void {
+  private insertSyncState(state: Omit<CompanySyncState, "id" | "createdAt" | "updatedAt">): void {
     const now = Date.now();
     this.db
       .prepare(

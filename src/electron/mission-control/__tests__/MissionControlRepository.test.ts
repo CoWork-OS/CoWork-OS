@@ -16,15 +16,22 @@ function createRepo(): MissionControlRepository {
           if (sql.includes("WHERE i.fingerprint = ?")) {
             const item = items.find((entry) => entry.fingerprint === params[0]);
             return item
-              ? { ...item, evidence_count: evidence.filter((entry) => entry.item_id === item.id).length }
+              ? {
+                  ...item,
+                  evidence_count: evidence.filter((entry) => entry.item_id === item.id).length,
+                }
               : undefined;
           }
           return undefined;
         },
         all(...params: Any[]) {
-          if (sql.includes("SELECT id FROM mission_control_items WHERE fingerprint LIKE 'task:%'")) {
+          if (
+            sql.includes("SELECT id FROM mission_control_items WHERE fingerprint LIKE 'task:%'")
+          ) {
             const workspaceId = sql.includes("workspace_id = ?") ? params[0] : undefined;
-            const activeTaskIds = sql.includes("task_id NOT IN") ? params.slice(workspaceId ? 1 : 0) : [];
+            const activeTaskIds = sql.includes("task_id NOT IN")
+              ? params.slice(workspaceId ? 1 : 0)
+              : [];
             return items
               .filter((item) => item.fingerprint.startsWith("task:"))
               .filter((item) => !workspaceId || item.workspace_id === workspaceId)
@@ -93,8 +100,18 @@ function createRepo(): MissionControlRepository {
             else items.push(next);
           }
           if (sql.includes("INSERT INTO mission_control_item_evidence")) {
-            const [id, item_id, source_type, source_id, title, summary, payload_json, timestamp] = params;
-            evidence.push({ id, item_id, source_type, source_id, title, summary, payload_json, timestamp });
+            const [id, item_id, source_type, source_id, title, summary, payload_json, timestamp] =
+              params;
+            evidence.push({
+              id,
+              item_id,
+              source_type,
+              source_id,
+              title,
+              summary,
+              payload_json,
+              timestamp,
+            });
           }
           if (sql.includes("DELETE FROM mission_control_item_evidence")) {
             const itemId = params[0];

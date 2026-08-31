@@ -1,7 +1,11 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { PromptComposerInput, formatPastedWebLinkAsMarkdown } from "../PromptComposerInput";
+import {
+  PromptComposerInput,
+  formatPastedWebLinkAsMarkdown,
+  getPastedText,
+} from "../PromptComposerInput";
 
 describe("PromptComposerInput", () => {
   it("renders integration mention chips inline from canonical mention text", () => {
@@ -46,7 +50,21 @@ describe("PromptComposerInput", () => {
   });
 
   it("does not rewrite pasted text containing more than one token", () => {
-    expect(formatPastedWebLinkAsMarkdown("see https://github.com/nousresearch/hermes-agent")).toBeNull();
+    expect(
+      formatPastedWebLinkAsMarkdown("see https://github.com/nousresearch/hermes-agent"),
+    ).toBeNull();
+  });
+
+  it("reads plain text from native paste data", () => {
+    const clipboardData = {
+      getData: (type: string) => (type === "text/plain" ? "Pasted task" : ""),
+    };
+
+    expect(getPastedText(clipboardData)).toBe("Pasted task");
+  });
+
+  it("does not treat an empty clipboard as editor content", () => {
+    expect(getPastedText({ getData: () => "" })).toBe("");
   });
 
   it("renders Markdown web links as inline favicon chips", () => {

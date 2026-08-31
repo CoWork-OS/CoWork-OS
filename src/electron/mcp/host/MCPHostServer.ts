@@ -513,7 +513,12 @@ export class MCPHostServer extends EventEmitter {
   /**
    * Send an error response
    */
-  private buildError(id: string | number | null, code: number, message: string, data?: Any): JSONRPCResponse {
+  private buildError(
+    id: string | number | null,
+    code: number,
+    message: string,
+    data?: Any,
+  ): JSONRPCResponse {
     return {
       jsonrpc: "2.0",
       id: id ?? 0,

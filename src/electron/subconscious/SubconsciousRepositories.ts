@@ -108,26 +108,28 @@ export class SubconsciousTargetRepository {
 
   update(
     key: string,
-    updates: Partial<Pick<
-      SubconsciousTargetSummary,
-      | "health"
-      | "state"
-      | "persistence"
-      | "missedRunPolicy"
-      | "nextEligibleAt"
-      | "lastObservedAt"
-      | "lastActionAt"
-      | "expiresAt"
-      | "jitterMs"
-      | "lastMeaningfulOutcome"
-      | "lastWinner"
-      | "lastRunAt"
-      | "lastEvidenceAt"
-      | "backlogCount"
-      | "evidenceFingerprint"
-      | "lastDispatchKind"
-      | "lastDispatchStatus"
-    >>,
+    updates: Partial<
+      Pick<
+        SubconsciousTargetSummary,
+        | "health"
+        | "state"
+        | "persistence"
+        | "missedRunPolicy"
+        | "nextEligibleAt"
+        | "lastObservedAt"
+        | "lastActionAt"
+        | "expiresAt"
+        | "jitterMs"
+        | "lastMeaningfulOutcome"
+        | "lastWinner"
+        | "lastRunAt"
+        | "lastEvidenceAt"
+        | "backlogCount"
+        | "evidenceFingerprint"
+        | "lastDispatchKind"
+        | "lastDispatchStatus"
+      >
+    >,
   ): void {
     const row = this.findByKey(key);
     if (!row) return;
@@ -276,7 +278,9 @@ export class SubconsciousRunRepository {
     }
     if (!fields.length) return;
     values.push(id);
-    this.db.prepare(`UPDATE subconscious_runs SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    this.db
+      .prepare(`UPDATE subconscious_runs SET ${fields.join(", ")} WHERE id = ?`)
+      .run(...values);
   }
 
   findById(id: string): SubconsciousRun | undefined {
@@ -284,7 +288,10 @@ export class SubconsciousRunRepository {
     return row ? this.mapRow(row) : undefined;
   }
 
-  findLatestByFingerprint(targetKey: string, evidenceFingerprint: string): SubconsciousRun | undefined {
+  findLatestByFingerprint(
+    targetKey: string,
+    evidenceFingerprint: string,
+  ): SubconsciousRun | undefined {
     const row = this.db
       .prepare(
         `SELECT * FROM subconscious_runs
@@ -296,7 +303,12 @@ export class SubconsciousRunRepository {
     return row ? this.mapRow(row) : undefined;
   }
 
-  list(params?: { targetKey?: string; workspaceId?: string; activeOnly?: boolean; limit?: number }): SubconsciousRun[] {
+  list(params?: {
+    targetKey?: string;
+    workspaceId?: string;
+    activeOnly?: boolean;
+    limit?: number;
+  }): SubconsciousRun[] {
     const conditions: string[] = [];
     const values: unknown[] = [];
     if (params?.targetKey) {
@@ -308,7 +320,9 @@ export class SubconsciousRunRepository {
       values.push(params.workspaceId);
     }
     if (params?.activeOnly) {
-      conditions.push("stage IN ('collecting_evidence', 'ideating', 'critiquing', 'synthesizing', 'dispatching')");
+      conditions.push(
+        "stage IN ('collecting_evidence', 'ideating', 'critiquing', 'synthesizing', 'dispatching')",
+      );
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const limitSql = params?.limit ? `LIMIT ${Math.max(1, params.limit)}` : "";
@@ -335,7 +349,10 @@ export class SubconsciousRunRepository {
       dispatchStatus: row.dispatch_status || undefined,
       blockedReason: row.blocked_reason || undefined,
       error: row.error || undefined,
-      confidence: row.confidence !== null && row.confidence !== undefined ? Number(row.confidence) : undefined,
+      confidence:
+        row.confidence !== null && row.confidence !== undefined
+          ? Number(row.confidence)
+          : undefined,
       riskLevel: row.risk_level || undefined,
       evidenceSources: safeJsonParse(row.evidence_sources_json, []),
       evidenceFreshness:
@@ -370,9 +387,7 @@ class JsonListRepository<T extends { id: string }> {
   }
 
   list(whereSql: string, values: unknown[] = []): T[] {
-    const rows = this.db
-      .prepare(`SELECT * FROM ${this.table} ${whereSql}`)
-      .all(...values) as Any[];
+    const rows = this.db.prepare(`SELECT * FROM ${this.table} ${whereSql}`).all(...values) as Any[];
     return rows.map((row) => this.mapper(row));
   }
 }
@@ -738,7 +753,10 @@ export class SubconsciousBacklogRepository {
     const duplicateKey = this.toDuplicateKey(targetKey, title, summary, executorKind);
     const row = rows.find((candidate) => {
       const item = this.mapRow(candidate);
-      return this.toDuplicateKey(item.targetKey, item.title, item.summary, item.executorKind) === duplicateKey;
+      return (
+        this.toDuplicateKey(item.targetKey, item.title, item.summary, item.executorKind) ===
+        duplicateKey
+      );
     });
     return row ? this.mapRow(row) : undefined;
   }
@@ -858,10 +876,7 @@ export function clearSubconsciousHistoryData(db: Database.Database): {
   return deleted;
 }
 
-export function clearSubconsciousTargetData(
-  db: Database.Database,
-  targetKeys: string[],
-): void {
+export function clearSubconsciousTargetData(db: Database.Database, targetKeys: string[]): void {
   if (!targetKeys.length) return;
   const placeholders = targetKeys.map(() => "?").join(", ");
   db.exec("BEGIN");

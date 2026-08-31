@@ -25,14 +25,33 @@ const LINK_TASK_ID_PREFIX = "__link__:";
 
 export function MCBoardTab({ data }: MCBoardTabProps) {
   const {
-    agents, tasks, taskLabels, workspaces,
-    getAgent, getAgentStatus, detailPanel, setDetailPanel,
-    handleMoveTask, dragOverColumn, setDragOverColumn,
-    handleTriggerHeartbeat, handleSetTaskPriority,
-    formatRelativeTime, formatTaskEstimate, getTaskDueInfo, getTaskPriorityMeta,
-    getMissionColumnForTask, getTaskLabels, getTaskAttentionReason,
-    getTaskNextMissionColumn, isTaskTerminal, isTaskStale, isTaskAttentionRequired,
-    agentContext, isAllWorkspacesSelected, getWorkspaceName,
+    agents,
+    tasks,
+    taskLabels,
+    workspaces,
+    getAgent,
+    getAgentStatus,
+    detailPanel,
+    setDetailPanel,
+    handleMoveTask,
+    dragOverColumn,
+    setDragOverColumn,
+    handleTriggerHeartbeat,
+    handleSetTaskPriority,
+    formatRelativeTime,
+    formatTaskEstimate,
+    getTaskDueInfo,
+    getTaskPriorityMeta,
+    getMissionColumnForTask,
+    getTaskLabels,
+    getTaskAttentionReason,
+    getTaskNextMissionColumn,
+    isTaskTerminal,
+    isTaskStale,
+    isTaskAttentionRequired,
+    agentContext,
+    isAllWorkspacesSelected,
+    getWorkspaceName,
   } = data;
 
   const [viewMode, setViewMode] = useState<"active" | "attention" | "all">("active");
@@ -50,7 +69,10 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
   const query = searchQuery.trim().toLowerCase();
 
   const agentOptions = useMemo(
-    () => agents.filter((agent) => agent.isActive).sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    () =>
+      agents
+        .filter((agent) => agent.isActive)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)),
     [agents],
   );
 
@@ -68,14 +90,15 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
 
       if (viewMode === "active" && isTaskTerminal(task)) return false;
       if (
-        viewMode === "attention"
-        && task.status !== "failed"
-        && task.status !== "interrupted"
-        && !isTaskAttentionRequired(task)
+        viewMode === "attention" &&
+        task.status !== "failed" &&
+        task.status !== "interrupted" &&
+        !isTaskAttentionRequired(task)
       ) {
         return false;
       }
-      if (!showHistory && getMissionColumnForTask(task) === "done" && viewMode !== "all") return false;
+      if (!showHistory && getMissionColumnForTask(task) === "done" && viewMode !== "all")
+        return false;
       if (agentFilter !== "all" && task.assignedAgentRoleId !== agentFilter) return false;
       if (labelFilter !== "all" && !task.labels?.includes(labelFilter)) return false;
       if (priorityFilter !== "all" && String(task.priority ?? 0) !== priorityFilter) return false;
@@ -112,7 +135,7 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
   ]);
 
   const sortedTasks = useMemo(() => {
-    const compareByDue = (a: typeof tasks[number], b: typeof tasks[number]) => {
+    const compareByDue = (a: (typeof tasks)[number], b: (typeof tasks)[number]) => {
       if (a.dueDate && b.dueDate) return a.dueDate - b.dueDate;
       if (a.dueDate) return -1;
       if (b.dueDate) return 1;
@@ -120,7 +143,8 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
     };
 
     return [...filteredTasks].sort((a, b) => {
-      if (sortMode === "updated") return (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
+      if (sortMode === "updated")
+        return (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
       if (sortMode === "due") {
         const dueCompare = compareByDue(a, b);
         if (dueCompare !== 0) return dueCompare;
@@ -132,10 +156,12 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
         return compareByDue(a, b) || (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
       }
 
-      const attentionCompare = Number(isTaskAttentionRequired(b)) - Number(isTaskAttentionRequired(a));
+      const attentionCompare =
+        Number(isTaskAttentionRequired(b)) - Number(isTaskAttentionRequired(a));
       if (attentionCompare !== 0) return attentionCompare;
-      const overdueCompare = Number(Boolean(getTaskDueInfo(b.dueDate)?.isOverdue))
-        - Number(Boolean(getTaskDueInfo(a.dueDate)?.isOverdue));
+      const overdueCompare =
+        Number(Boolean(getTaskDueInfo(b.dueDate)?.isOverdue)) -
+        Number(Boolean(getTaskDueInfo(a.dueDate)?.isOverdue));
       if (overdueCompare !== 0) return overdueCompare;
       const priorityCompare = (b.priority ?? 0) - (a.priority ?? 0);
       if (priorityCompare !== 0) return priorityCompare;
@@ -156,10 +182,14 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
   }, [getMissionColumnForTask, sortedTasks, tasks]);
 
   const summary = useMemo(() => {
-    const overdue = filteredTasks.filter((task) => Boolean(getTaskDueInfo(task.dueDate)?.isOverdue)).length;
+    const overdue = filteredTasks.filter((task) =>
+      Boolean(getTaskDueInfo(task.dueDate)?.isOverdue),
+    ).length;
     const stale = filteredTasks.filter((task) => isTaskStale(task)).length;
     const attention = filteredTasks.filter((task) => isTaskAttentionRequired(task)).length;
-    const unassigned = filteredTasks.filter((task) => !task.assignedAgentRoleId && !isTaskTerminal(task)).length;
+    const unassigned = filteredTasks.filter(
+      (task) => !task.assignedAgentRoleId && !isTaskTerminal(task),
+    ).length;
     return { overdue, stale, attention, unassigned };
   }, [filteredTasks, getTaskDueInfo, isTaskAttentionRequired, isTaskStale, isTaskTerminal]);
 
@@ -178,7 +208,8 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
           <div>
             <h2>{agentContext.getUiCopy("mcMissionQueueTitle")}</h2>
             <p className="mc-v2-board-subtitle">
-              Tracked board work for assignment, intervention, and review. Runtime queue tasks are summarized in the Brief.
+              Tracked board work for assignment, intervention, and review. Runtime queue tasks are
+              summarized in the Brief.
             </p>
           </div>
           <div className="mc-v2-board-summary">
@@ -248,7 +279,10 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                 </option>
               ))}
             </select>
-            <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}>
+            <select
+              value={priorityFilter}
+              onChange={(event) => setPriorityFilter(event.target.value)}
+            >
               <option value="all">All priorities</option>
               {TASK_PRIORITY_OPTIONS.map((priority) => (
                 <option key={priority.value} value={String(priority.value)}>
@@ -265,7 +299,10 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
               ))}
             </select>
             {isAllWorkspacesSelected && (
-              <select value={workspaceFilter} onChange={(event) => setWorkspaceFilter(event.target.value)}>
+              <select
+                value={workspaceFilter}
+                onChange={(event) => setWorkspaceFilter(event.target.value)}
+              >
                 <option value="all">All workspaces</option>
                 {workspaces.map((workspace) => (
                   <option key={workspace.id} value={workspace.id}>
@@ -274,7 +311,10 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                 ))}
               </select>
             )}
-            <select value={sortMode} onChange={(event) => setSortMode(event.target.value as typeof sortMode)}>
+            <select
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value as typeof sortMode)}
+            >
               <option value="urgency">Sort: urgency</option>
               <option value="updated">Sort: updated</option>
               <option value="due">Sort: due date</option>
@@ -292,22 +332,35 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
       <div className="mc-v2-kanban">
         {visibleColumns.length === 0 && (
           <div className="mc-v2-column-empty" style={{ minWidth: 280 }}>
-            No board work matches the current filters. Runtime queue items may still be running or waiting outside this board view.
+            No board work matches the current filters. Runtime queue items may still be running or
+            waiting outside this board view.
           </div>
         )}
         {visibleColumns.map((column) => {
           const columnTasks = tasksByColumn.get(column.id) || [];
           const attentionCount = columnTasks.filter((task) => isTaskAttentionRequired(task)).length;
-          const overdueCount = columnTasks.filter((task) => Boolean(getTaskDueInfo(task.dueDate)?.isOverdue)).length;
+          const overdueCount = columnTasks.filter((task) =>
+            Boolean(getTaskDueInfo(task.dueDate)?.isOverdue),
+          ).length;
           const staleCount = columnTasks.filter((task) => isTaskStale(task)).length;
-          const wipLimit = column.id === "assigned" ? 8 : column.id === "in_progress" ? 5 : column.id === "review" ? 4 : null;
+          const wipLimit =
+            column.id === "assigned"
+              ? 8
+              : column.id === "in_progress"
+                ? 5
+                : column.id === "review"
+                  ? 4
+                  : null;
           const overLimit = wipLimit !== null && columnTasks.length > wipLimit;
 
           return (
             <div
               key={column.id}
               className={`mc-v2-kanban-column ${dragOverColumn === column.id ? "drag-over" : ""}`}
-              onDragOver={(event) => { event.preventDefault(); setDragOverColumn(column.id); }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragOverColumn(column.id);
+              }}
               onDragLeave={() => setDragOverColumn(null)}
               onDrop={(event) => {
                 event.preventDefault();
@@ -318,7 +371,10 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
             >
               <div className="mc-v2-column-header">
                 <div className="mc-v2-column-header-top">
-                  <span className="mc-v2-column-dot" style={{ backgroundColor: column.color }}></span>
+                  <span
+                    className="mc-v2-column-dot"
+                    style={{ backgroundColor: column.color }}
+                  ></span>
                   <span className="mc-v2-column-label">{column.label}</span>
                   <span className={`mc-v2-column-count ${overLimit ? "over-limit" : ""}`}>
                     {columnTasks.length}
@@ -326,9 +382,17 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                 </div>
                 {(attentionCount > 0 || overdueCount > 0 || staleCount > 0) && (
                   <div className="mc-v2-column-signals">
-                    {attentionCount > 0 && <span className="mc-v2-column-signal attention">{attentionCount} attention</span>}
-                    {overdueCount > 0 && <span className="mc-v2-column-signal overdue">{overdueCount} overdue</span>}
-                    {staleCount > 0 && <span className="mc-v2-column-signal stale">{staleCount} stale</span>}
+                    {attentionCount > 0 && (
+                      <span className="mc-v2-column-signal attention">
+                        {attentionCount} attention
+                      </span>
+                    )}
+                    {overdueCount > 0 && (
+                      <span className="mc-v2-column-signal overdue">{overdueCount} overdue</span>
+                    )}
+                    {staleCount > 0 && (
+                      <span className="mc-v2-column-signal stale">{staleCount} stale</span>
+                    )}
                   </div>
                 )}
               </div>
@@ -342,7 +406,9 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                   const stale = isTaskStale(task);
                   const estimate = formatTaskEstimate(task.estimatedMinutes);
                   const agentStatus = assignedAgent ? getAgentStatus(assignedAgent.id) : "offline";
-                  const AssignedAgentIcon = assignedAgent ? resolveTwinIcon(assignedAgent.icon) : null;
+                  const AssignedAgentIcon = assignedAgent
+                    ? resolveTwinIcon(assignedAgent.icon)
+                    : null;
                   const hasBadges = Boolean(task.priority) || labels.length > 0;
                   const taskUpdatedAt = formatRelativeTime(task.updatedAt || task.createdAt);
 
@@ -368,7 +434,10 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                         {hasBadges ? (
                           <div className="mc-v2-task-card-badges">
                             {task.priority ? (
-                              <span className="mc-v2-priority-pill" style={{ backgroundColor: priority.color }}>
+                              <span
+                                className="mc-v2-priority-pill"
+                                style={{ backgroundColor: priority.color }}
+                              >
                                 {priority.shortLabel}
                               </span>
                             ) : null}
@@ -376,12 +445,18 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                               <span
                                 key={label.id}
                                 className="mc-v2-label-pill"
-                                style={{ backgroundColor: `${label.color}22`, borderColor: `${label.color}44`, color: label.color }}
+                                style={{
+                                  backgroundColor: `${label.color}22`,
+                                  borderColor: `${label.color}44`,
+                                  color: label.color,
+                                }}
                               >
                                 {label.name}
                               </span>
                             ))}
-                            {labels.length > 2 && <span className="mc-v2-label-pill muted">+{labels.length - 2}</span>}
+                            {labels.length > 2 && (
+                              <span className="mc-v2-label-pill muted">+{labels.length - 2}</span>
+                            )}
                           </div>
                         ) : (
                           <div />
@@ -402,7 +477,10 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                             title="Cycle priority"
                             onClick={(event) => {
                               event.stopPropagation();
-                              void handleSetTaskPriority(task.id, ((task.priority ?? 0) + 1) % TASK_PRIORITY_OPTIONS.length);
+                              void handleSetTaskPriority(
+                                task.id,
+                                ((task.priority ?? 0) + 1) % TASK_PRIORITY_OPTIONS.length,
+                              );
                             }}
                           >
                             <Flag size={12} />
@@ -435,25 +513,44 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                       </div>
                       <div className="mc-v2-task-title">{task.title}</div>
                       <div className="mc-v2-task-meta">
-                        <span className={`mc-v2-status-pill status-${task.status}`}>{task.status}</span>
-                        {taskUpdatedAt && <span className="mc-v2-task-time">Updated {taskUpdatedAt}</span>}
+                        <span className={`mc-v2-status-pill status-${task.status}`}>
+                          {task.status}
+                        </span>
+                        {taskUpdatedAt && (
+                          <span className="mc-v2-task-time">Updated {taskUpdatedAt}</span>
+                        )}
                       </div>
-                      {attentionReason && <div className="mc-v2-task-reason">{attentionReason}</div>}
+                      {attentionReason && (
+                        <div className="mc-v2-task-reason">{attentionReason}</div>
+                      )}
                       {isAllWorkspacesSelected && (
-                        <div className="mc-v2-task-workspace">{getWorkspaceName(task.workspaceId)}</div>
+                        <div className="mc-v2-task-workspace">
+                          {getWorkspaceName(task.workspaceId)}
+                        </div>
                       )}
                       {assignedAgent && (
                         <div className="mc-v2-task-assignee">
-                          <span className="mc-v2-task-assignee-avatar" style={{ backgroundColor: assignedAgent.color }}>
-                            {AssignedAgentIcon ? <AssignedAgentIcon size={12} strokeWidth={2} aria-hidden="true" /> : null}
+                          <span
+                            className="mc-v2-task-assignee-avatar"
+                            style={{ backgroundColor: assignedAgent.color }}
+                          >
+                            {AssignedAgentIcon ? (
+                              <AssignedAgentIcon size={12} strokeWidth={2} aria-hidden="true" />
+                            ) : null}
                           </span>
-                          <span className="mc-v2-task-assignee-name">{assignedAgent.displayName}</span>
+                          <span className="mc-v2-task-assignee-name">
+                            {assignedAgent.displayName}
+                          </span>
                           <span className={`mc-v2-status-dot ${agentStatus}`}></span>
                         </div>
                       )}
                       {(dueInfo || estimate || stale) && (
                         <div className="mc-v2-task-meta">
-                          {dueInfo && <span className={`mc-v2-inline-chip ${dueInfo.tone}`}>{dueInfo.label}</span>}
+                          {dueInfo && (
+                            <span className={`mc-v2-inline-chip ${dueInfo.tone}`}>
+                              {dueInfo.label}
+                            </span>
+                          )}
                           {estimate && <span className="mc-v2-inline-chip">{estimate}</span>}
                           {stale && <span className="mc-v2-inline-chip stale">Stale</span>}
                         </div>
@@ -482,7 +579,10 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                   <button
                     className="mc-v2-column-footer-btn"
                     onClick={() => {
-                      setDetailPanel({ kind: "task", taskId: `${LINK_TASK_ID_PREFIX}${column.id}` });
+                      setDetailPanel({
+                        kind: "task",
+                        taskId: `${LINK_TASK_ID_PREFIX}${column.id}`,
+                      });
                     }}
                   >
                     <ArrowUpRight size={13} /> Link existing

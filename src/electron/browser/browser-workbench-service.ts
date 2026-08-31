@@ -1,11 +1,11 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import type { AccessDomainRule } from "../../shared/access-profiles";
+import type { WorkspacePermissions } from "../../shared/types";
 import { IPC_CHANNELS } from "../../shared/types";
-import {
-  BrowserSessionManager,
-  getBrowserSessionManager,
-} from "./browser-session-manager";
+import { BrowserSessionManager, getBrowserSessionManager } from "./browser-session-manager";
 import { isLocalHtmlFileUrl, normalizeWebviewUrl } from "./webview-url-policy";
+import { assertWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -118,6 +118,28 @@ export class BrowserWorkbenchService {
 
   constructor(private browserSessionManager: BrowserSessionManager = getBrowserSessionManager()) {}
 
+  setAccessPolicy(input: {
+    taskId: string;
+    sessionId?: unknown;
+    networkEnabled: boolean;
+    accessNetworkMode?: "disabled" | "on-request" | "enabled";
+    profileDomainRules?: AccessDomainRule[];
+  }): void {
+    this.browserSessionManager.setAccessPolicy(
+      input.taskId,
+      {
+        networkEnabled: input.networkEnabled,
+        accessNetworkMode: input.accessNetworkMode,
+        profileDomainRules: input.profileDomainRules,
+      },
+      input.sessionId,
+    );
+  }
+
+  clearAccessPolicy(taskId: string, sessionId?: unknown): void {
+    this.browserSessionManager.clearAccessPolicy(taskId, sessionId);
+  }
+
   setMainWindow(window: Any | null): void {
     this.mainWindow = window;
   }
@@ -182,6 +204,7 @@ export class BrowserWorkbenchService {
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return;
     this.allowedLocalPreviewUrls.set(normalized, Date.now() + 5 * 60_000);
+    this.browserSessionManager.allowLocalPreviewUrl(normalized);
   }
 
   isAllowedLocalPreviewUrl(rawUrl: string): boolean {
@@ -197,7 +220,11 @@ export class BrowserWorkbenchService {
     return true;
   }
 
-  async requestOpen(input: { taskId: string; sessionId?: unknown; url?: unknown }): Promise<BrowserWorkbenchSession | null> {
+  async requestOpen(input: {
+    taskId: string;
+    sessionId?: unknown;
+    url?: unknown;
+  }): Promise<BrowserWorkbenchSession | null> {
     const sessionId = normalizeSessionId(input.sessionId);
     const existing = this.getSession(input.taskId, sessionId);
     if (existing) return existing;
@@ -216,12 +243,18 @@ export class BrowserWorkbenchService {
     return await this.waitForSession(input.taskId, sessionId, 12_000);
   }
 
-  async navigate(input: { taskId: string; sessionId?: unknown; url: unknown; waitUntil?: string }): Promise<AnyRecord | null> {
+  async navigate(input: {
+    taskId: string;
+    sessionId?: unknown;
+    url: unknown;
+    waitUntil?: string;
+  }): Promise<AnyRecord | null> {
     const url = normalizeUrl(input.url);
     if (!url) return null;
     const session =
       this.getSession(input.taskId, input.sessionId) ||
       (await this.requestOpen({ taskId: input.taskId, sessionId: input.sessionId, url }));
+    this.browserSessionManager.assertUrlAllowed(input.taskId, url, input.sessionId);
     const contents = await this.getWebContents(session);
     if (!contents) return null;
     this.allowLocalPreviewUrl(url);
@@ -382,9 +415,13 @@ export class BrowserWorkbenchService {
     if (result?.success) {
       const session = this.getSession(input.taskId, input.sessionId);
       const width =
-        typeof result.width === "number" ? result.width : Math.max(320, Math.round(input.width || 1280));
+        typeof result.width === "number"
+          ? result.width
+          : Math.max(320, Math.round(input.width || 1280));
       const height =
-        typeof result.height === "number" ? result.height : Math.max(320, Math.round(input.height || 720));
+        typeof result.height === "number"
+          ? result.height
+          : Math.max(320, Math.round(input.height || 720));
       const deviceScaleFactor =
         typeof result.deviceScaleFactor === "number"
           ? result.deviceScaleFactor
@@ -414,39 +451,64 @@ export class BrowserWorkbenchService {
     const contents = await this.getWebContents(session);
     if (!contents) return null;
     const point = await this.moveCursorToElement(session, contents, selector, "click", "Click");
-    const result = await contents.executeJavaScript(findElementActionScript(selector, `
+    const result = await contents.executeJavaScript(
+      findElementActionScript(
+        selector,
+        `
       el.click();
       return { success: true, element: selector, url: location.href, content: (document.body?.innerText || "").slice(0, 2000) };
-    `));
+    `,
+      ),
+    );
     if (point && result?.success) {
       this.emitCursor(session, { ...point, kind: "click", label: "Click", pulse: true });
     }
     return result;
   }
 
-  async fill(taskId: string, selector: string, value: string, sessionId?: unknown): Promise<AnyRecord | null> {
+  async fill(
+    taskId: string,
+    selector: string,
+    value: string,
+    sessionId?: unknown,
+  ): Promise<AnyRecord | null> {
     const session = this.getSession(taskId, sessionId);
     const contents = await this.getWebContents(session);
     if (!contents) return null;
     await this.moveCursorToElement(session, contents, selector, "fill", "Fill");
-    return await contents.executeJavaScript(findElementActionScript(selector, `
+    return await contents.executeJavaScript(
+      findElementActionScript(
+        selector,
+        `
       el.focus();
       el.value = ${JSON.stringify(value)};
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
       return { success: true, selector, value: el.value, url: location.href };
-    `));
+    `,
+      ),
+    );
   }
 
-  async type(taskId: string, selector: string, text: string, sessionId?: unknown): Promise<AnyRecord | null> {
+  async type(
+    taskId: string,
+    selector: string,
+    text: string,
+    sessionId?: unknown,
+  ): Promise<AnyRecord | null> {
     const session = this.getSession(taskId, sessionId);
     const contents = await this.getWebContents(session);
     if (!contents) return null;
     await this.moveCursorToElement(session, contents, selector, "type", "Type");
-    const focusResult = await contents.executeJavaScript(findElementActionScript(selector, `
+    const focusResult = await contents.executeJavaScript(
+      findElementActionScript(
+        selector,
+        `
       el.focus();
       return { success: true };
-    `));
+    `,
+      ),
+    );
     if (!focusResult?.success) return focusResult;
     await contents.insertText(String(text || ""));
     return { success: true, selector, url: contents.getURL?.() || "" };
@@ -463,7 +525,12 @@ export class BrowserWorkbenchService {
     return { success: true, key: keyCode, url: contents.getURL?.() || "" };
   }
 
-  async scroll(taskId: string, direction: string, amount?: number, sessionId?: unknown): Promise<AnyRecord | null> {
+  async scroll(
+    taskId: string,
+    direction: string,
+    amount?: number,
+    sessionId?: unknown,
+  ): Promise<AnyRecord | null> {
     const session = this.getSession(taskId, sessionId);
     const contents = await this.getWebContents(session);
     if (!contents) return null;
@@ -472,7 +539,14 @@ export class BrowserWorkbenchService {
       x: viewport.x,
       y: viewport.y,
       kind: "scroll",
-      label: direction === "up" ? "Scroll up" : direction === "top" ? "Top" : direction === "bottom" ? "Bottom" : "Scroll",
+      label:
+        direction === "up"
+          ? "Scroll up"
+          : direction === "top"
+            ? "Top"
+            : direction === "bottom"
+              ? "Bottom"
+              : "Scroll",
       pulse: true,
     });
     return await contents.executeJavaScript(`
@@ -487,7 +561,12 @@ export class BrowserWorkbenchService {
     `);
   }
 
-  async waitForSelector(taskId: string, selector: string, timeoutMs?: number, sessionId?: unknown): Promise<AnyRecord | null> {
+  async waitForSelector(
+    taskId: string,
+    selector: string,
+    timeoutMs?: number,
+    sessionId?: unknown,
+  ): Promise<AnyRecord | null> {
     const session = this.getSession(taskId, sessionId);
     const contents = await this.getWebContents(session);
     if (!contents) return null;
@@ -510,12 +589,20 @@ export class BrowserWorkbenchService {
     return result;
   }
 
-  async select(taskId: string, selector: string, value: string, sessionId?: unknown): Promise<AnyRecord | null> {
+  async select(
+    taskId: string,
+    selector: string,
+    value: string,
+    sessionId?: unknown,
+  ): Promise<AnyRecord | null> {
     const session = this.getSession(taskId, sessionId);
     const contents = await this.getWebContents(session);
     if (!contents) return null;
     await this.moveCursorToElement(session, contents, selector, "select", "Select");
-    return await contents.executeJavaScript(findElementActionScript(selector, `
+    return await contents.executeJavaScript(
+      findElementActionScript(
+        selector,
+        `
       if (!(el instanceof HTMLSelectElement)) {
         return { success: false, selector, error: "Element is not a select dropdown" };
       }
@@ -523,7 +610,9 @@ export class BrowserWorkbenchService {
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
       return { success: true, selector, value: el.value, url: location.href };
-    `));
+    `,
+      ),
+    );
   }
 
   async getText(taskId: string, selector: string, sessionId?: unknown): Promise<AnyRecord | null> {
@@ -531,9 +620,14 @@ export class BrowserWorkbenchService {
     const contents = await this.getWebContents(session);
     if (!contents) return null;
     const point = await this.moveCursorToElement(session, contents, selector, "read", "Read");
-    const result = await contents.executeJavaScript(findElementActionScript(selector, `
+    const result = await contents.executeJavaScript(
+      findElementActionScript(
+        selector,
+        `
       return { success: true, text: (el.innerText || el.textContent || el.value || "").trim(), selector };
-    `));
+    `,
+      ),
+    );
     if (point && result?.success) {
       this.emitCursor(session, { ...point, kind: "read", label: "Read" });
     }
@@ -578,15 +672,21 @@ export class BrowserWorkbenchService {
     taskId: string;
     sessionId?: unknown;
     workspacePath: string;
+    workspacePermissions?: WorkspacePermissions;
     filename?: string;
     includeDataUrl?: boolean;
     fullPage?: boolean;
-  }): Promise<{ path: string; fullPath: string; width: number; height: number; dataUrl?: string } | null> {
+  }): Promise<{
+    path: string;
+    fullPath: string;
+    width: number;
+    height: number;
+    dataUrl?: string;
+  } | null> {
     const contents = await this.getWebContents(this.getSession(input.taskId, input.sessionId));
     if (!contents) return null;
-    const capture = input.fullPage === true
-      ? await this.captureFullPage(contents).catch(() => null)
-      : null;
+    const capture =
+      input.fullPage === true ? await this.captureFullPage(contents).catch(() => null) : null;
     const image = capture ? null : await contents.capturePage();
     const size = capture?.size || image.getSize();
     const png = capture?.png || image.toPNG();
@@ -594,8 +694,18 @@ export class BrowserWorkbenchService {
       typeof input.filename === "string" && input.filename.trim()
         ? path.basename(input.filename.trim())
         : `browser-screenshot-${Date.now()}.png`;
-    const relativePath = path.join("artifacts", safeName.endsWith(".png") ? safeName : `${safeName}.png`);
-    const fullPath = path.join(input.workspacePath, relativePath);
+    const relativePath = path.join(
+      "artifacts",
+      safeName.endsWith(".png") ? safeName : `${safeName}.png`,
+    );
+    const fullPath = input.workspacePermissions
+      ? assertWorkspaceFilesystemAccess(
+          { path: input.workspacePath, permissions: input.workspacePermissions },
+          relativePath,
+          "write",
+          "browser screenshot path",
+        )
+      : path.join(input.workspacePath, relativePath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, png);
     return {
@@ -787,15 +897,19 @@ export class BrowserWorkbenchService {
         });
       })()
     `;
-    const evaluated = await debug.sendCommand("Runtime.evaluate", {
-      expression,
-      returnByValue: true,
-      awaitPromise: true,
-    }).catch(() => null);
-    return Array.isArray(evaluated?.result?.value) ? evaluated.result.value as AnyRecord[] : [];
+    const evaluated = await debug
+      .sendCommand("Runtime.evaluate", {
+        expression,
+        returnByValue: true,
+        awaitPromise: true,
+      })
+      .catch(() => null);
+    return Array.isArray(evaluated?.result?.value) ? (evaluated.result.value as AnyRecord[]) : [];
   }
 
-  private async captureFullPage(contents: Any): Promise<{ png: Buffer; size: { width: number; height: number } }> {
+  private async captureFullPage(
+    contents: Any,
+  ): Promise<{ png: Buffer; size: { width: number; height: number } }> {
     const debug = contents.debugger;
     if (!debug) throw new Error("Browser debugger is not available for full-page capture");
     if (!debug.isAttached()) debug.attach("1.3");
@@ -817,7 +931,11 @@ export class BrowserWorkbenchService {
     };
   }
 
-  private waitForSession(taskId: string, sessionId: string, timeoutMs: number): Promise<BrowserWorkbenchSession | null> {
+  private waitForSession(
+    taskId: string,
+    sessionId: string,
+    timeoutMs: number,
+  ): Promise<BrowserWorkbenchSession | null> {
     const existing = this.getSession(taskId, sessionId);
     if (existing) return Promise.resolve(existing);
     const key = sessionKey(taskId, sessionId);
@@ -904,7 +1022,10 @@ export class BrowserWorkbenchService {
     return point;
   }
 
-  private async getElementPoint(contents: Any, selector: string): Promise<{ x: number; y: number } | null> {
+  private async getElementPoint(
+    contents: Any,
+    selector: string,
+  ): Promise<{ x: number; y: number } | null> {
     const result = await contents.executeJavaScript(`
       (() => {
         const selector = ${JSON.stringify(selector)};
@@ -923,12 +1044,14 @@ export class BrowserWorkbenchService {
   }
 
   private async getViewportCenter(contents: Any): Promise<{ x: number; y: number }> {
-    const result = await contents.executeJavaScript(`
+    const result = await contents
+      .executeJavaScript(`
       (() => ({
         x: Math.max(24, Math.round((window.innerWidth || 800) / 2)),
         y: Math.max(24, Math.round((window.innerHeight || 600) / 2)),
       }))()
-    `).catch(() => null);
+    `)
+      .catch(() => null);
     if (!result || typeof result.x !== "number" || typeof result.y !== "number") {
       return { x: 120, y: 120 };
     }

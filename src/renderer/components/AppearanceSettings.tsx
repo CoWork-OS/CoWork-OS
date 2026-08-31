@@ -395,8 +395,8 @@ export function AppearanceSettings({
       <div className="appearance-section">
         <h4>Developer logging</h4>
         <p className="settings-description">
-          When enabled, <code>npm run dev</code> writes redacted text and structured JSONL logs
-          to <code>logs/</code> with automatic cleanup.
+          When enabled, <code>npm run dev</code> writes redacted text and structured JSONL logs to{" "}
+          <code>logs/</code> with automatic cleanup.
         </p>
         <label className="settings-checkbox">
           <input

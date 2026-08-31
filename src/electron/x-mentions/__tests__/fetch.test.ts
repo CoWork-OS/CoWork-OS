@@ -66,9 +66,9 @@ describe("fetchMentionsWithRetry", () => {
         new Error("Command failed: bird --cookie-source chrome: Missing auth_token"),
       ),
     ).toEqual(expect.objectContaining({ code: "auth" }));
-    expect(classifyXMentionFailure(new Error("Command failed: bird --cookie-source chrome"))).toEqual(
-      expect.objectContaining({ code: "cli" }),
-    );
+    expect(
+      classifyXMentionFailure(new Error("Command failed: bird --cookie-source chrome")),
+    ).toEqual(expect.objectContaining({ code: "cli" }));
     expect(classifyXMentionFailure(new Error("spawn EBADF"))).toEqual(
       expect.objectContaining({ code: "cli" }),
     );
@@ -78,7 +78,9 @@ describe("fetchMentionsWithRetry", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     runBirdCommandMock
       .mockRejectedValueOnce(new Error("Timeout: Unspecified"))
-      .mockRejectedValueOnce(new Error("Command failed: bird --cookie-source chrome: Missing auth_token"));
+      .mockRejectedValueOnce(
+        new Error("Command failed: bird --cookie-source chrome: Missing auth_token"),
+      );
 
     await expect(fetchMentionsWithRetry(settings, 25)).rejects.toThrow(/Missing auth_token/);
     expect(warnSpy).not.toHaveBeenCalled();

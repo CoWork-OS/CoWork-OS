@@ -1110,6 +1110,16 @@ export class DatabaseManager {
         FOREIGN KEY (task_id) REFERENCES tasks(id)
       );
 
+      CREATE TABLE IF NOT EXISTS session_progress (
+        task_id TEXT PRIMARY KEY,
+        state_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_session_progress_updated
+        ON session_progress(updated_at DESC);
+
       CREATE TABLE IF NOT EXISTS agent_security_findings (
         finding_id TEXT PRIMARY KEY,
         schema_version TEXT NOT NULL,
@@ -1879,7 +1889,7 @@ export class DatabaseManager {
         embedding TEXT NOT NULL,
         updated_at INTEGER NOT NULL,
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-        FOREIGN KEY (memory_id) REFERENCES memories(id)
+        FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
       );
 
       -- Aggregated semantic summaries
@@ -1999,6 +2009,81 @@ export class DatabaseManager {
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
       );
 
+      -- Box Brain source/index state. Box content is copied into local private
+      -- memories only after the user explicitly enables a bounded source.
+      CREATE TABLE IF NOT EXISTS box_brain_sources (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        server_id TEXT NOT NULL,
+        root_folder_id TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        sync_interval_minutes INTEGER NOT NULL DEFAULT 60,
+        max_items_per_run INTEGER NOT NULL DEFAULT 200,
+        include_content INTEGER NOT NULL DEFAULT 1,
+        use_box_ai_summaries INTEGER NOT NULL DEFAULT 0,
+        improvement_enabled INTEGER NOT NULL DEFAULT 1,
+        max_content_chars INTEGER NOT NULL DEFAULT 10000,
+        last_run_at INTEGER,
+        last_success_at INTEGER,
+        last_improvement_run_at INTEGER,
+        last_error TEXT,
+        last_discovered_count INTEGER NOT NULL DEFAULT 0,
+        last_indexed_count INTEGER NOT NULL DEFAULT 0,
+        last_unchanged_count INTEGER NOT NULL DEFAULT 0,
+        last_skipped_count INTEGER NOT NULL DEFAULT 0,
+        last_deleted_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(workspace_id, server_id, root_folder_id),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS box_brain_items (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        box_id TEXT NOT NULL,
+        box_type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        parent_id TEXT,
+        path TEXT,
+        etag TEXT,
+        version_id TEXT,
+        modified_at INTEGER,
+        size_bytes INTEGER,
+        source_url TEXT NOT NULL,
+        content_hash TEXT,
+        memory_id TEXT,
+        status TEXT NOT NULL DEFAULT 'indexed',
+        error TEXT,
+        first_seen_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        indexed_at INTEGER,
+        deleted_at INTEGER,
+        UNIQUE(source_id, box_id),
+        FOREIGN KEY (source_id) REFERENCES box_brain_sources(id) ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+        FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS box_brain_runs (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        discovered_count INTEGER NOT NULL DEFAULT 0,
+        indexed_count INTEGER NOT NULL DEFAULT 0,
+        unchanged_count INTEGER NOT NULL DEFAULT 0,
+        skipped_count INTEGER NOT NULL DEFAULT 0,
+        deleted_count INTEGER NOT NULL DEFAULT 0,
+        improvement_run_id TEXT,
+        error TEXT,
+        started_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        FOREIGN KEY (source_id) REFERENCES box_brain_sources(id) ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+      );
+
       -- Memory System Indexes
       CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_memories_task ON memories(task_id);
@@ -2034,6 +2119,20 @@ export class DatabaseManager {
         ON dreaming_candidates(workspace_id, status, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_pending_memory_writes_workspace_status
         ON pending_memory_writes(workspace_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_box_brain_sources_enabled_due
+        ON box_brain_sources(enabled, last_run_at, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_box_brain_sources_workspace
+        ON box_brain_sources(workspace_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_box_brain_items_source_status
+        ON box_brain_items(source_id, status, last_seen_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_box_brain_items_memory
+        ON box_brain_items(memory_id);
+      CREATE INDEX IF NOT EXISTS idx_box_brain_items_box
+        ON box_brain_items(source_id, box_id);
+      CREATE INDEX IF NOT EXISTS idx_box_brain_runs_source
+        ON box_brain_runs(source_id, started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_box_brain_runs_workspace
+        ON box_brain_runs(workspace_id, started_at DESC);
 
       -- Workspace Markdown Memory Index (for kit notes, docs, and other durable markdown context)
       CREATE TABLE IF NOT EXISTS memory_markdown_files (
@@ -2683,6 +2782,8 @@ export class DatabaseManager {
         ON mailbox_mission_control_handoffs(company_id, operator_role_id, updated_at DESC);
     `);
 
+    this.upgradeMemoryEmbeddingsCascade();
+
     // Initialize FTS5 for memory search (separate exec to handle if not supported)
     this.initializeMemoryFTS();
     this.initializeMarkdownMemoryFTS();
@@ -3067,6 +3168,51 @@ export class DatabaseManager {
       `);
     } catch (error) {
       schemaLogger.error("[DatabaseManager] Failed managed agents migration:", error);
+    }
+
+    // Durable WorkContext containers group related tasks and managed sessions
+    // without duplicating their transcripts or runtime snapshots.
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS work_contexts (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          active_task_id TEXT,
+          active_managed_session_id TEXT,
+          state_json TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          archived_at INTEGER,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS work_context_members (
+          id TEXT PRIMARY KEY,
+          context_id TEXT NOT NULL,
+          task_id TEXT,
+          managed_session_id TEXT,
+          role TEXT NOT NULL DEFAULT 'primary',
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (context_id) REFERENCES work_contexts(id) ON DELETE CASCADE,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          CHECK (task_id IS NOT NULL OR managed_session_id IS NOT NULL)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_contexts_workspace_updated
+          ON work_contexts(workspace_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_work_context_members_context
+          ON work_context_members(context_id, created_at ASC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_work_context_members_task
+          ON work_context_members(task_id)
+          WHERE task_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_work_context_members_managed_session
+          ON work_context_members(managed_session_id)
+          WHERE managed_session_id IS NOT NULL;
+      `);
+    } catch (error) {
+      schemaLogger.error("[DatabaseManager] Failed WorkContext migration:", error);
     }
 
     // These indexes depend on the timeline-v2 legacy_type column, so create them
@@ -7546,6 +7692,69 @@ export class DatabaseManager {
 
   close() {
     this.db.close();
+  }
+
+  private upgradeMemoryEmbeddingsCascade(): void {
+    try {
+      const foreignKeys = this.db
+        .prepare("PRAGMA foreign_key_list(memory_embeddings)")
+        .all() as Array<{
+        table?: string;
+        from?: string;
+        on_delete?: string;
+      }>;
+      const memoryForeignKey = foreignKeys.find(
+        (foreignKey) => foreignKey.table === "memories" && foreignKey.from === "memory_id",
+      );
+      if (
+        !memoryForeignKey ||
+        String(memoryForeignKey.on_delete || "").toUpperCase() === "CASCADE"
+      ) {
+        return;
+      }
+
+      const foreignKeysEnabled = this.db.pragma("foreign_keys", { simple: true }) as number;
+      try {
+        this.db.pragma("foreign_keys = OFF");
+        this.db.transaction(() => {
+          this.db.exec("DROP TABLE IF EXISTS memory_embeddings_rebuild");
+          this.db.exec(`
+            CREATE TABLE memory_embeddings_rebuild (
+              memory_id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              embedding TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
+              FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+              FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+            );
+          `);
+          this.db.exec(`
+            INSERT INTO memory_embeddings_rebuild (memory_id, workspace_id, embedding, updated_at)
+            SELECT embedding.memory_id, embedding.workspace_id, embedding.embedding, embedding.updated_at
+            FROM memory_embeddings embedding
+            INNER JOIN memories memory ON memory.id = embedding.memory_id
+            INNER JOIN workspaces workspace ON workspace.id = embedding.workspace_id;
+          `);
+          this.db.exec("DROP TABLE memory_embeddings");
+          this.db.exec("ALTER TABLE memory_embeddings_rebuild RENAME TO memory_embeddings");
+          this.db.exec(
+            "CREATE INDEX IF NOT EXISTS idx_memory_embeddings_workspace ON memory_embeddings(workspace_id)",
+          );
+        })();
+        schemaLogger.info(
+          "[DatabaseManager] Upgraded memory_embeddings to cascade deleted memories",
+        );
+      } finally {
+        this.db.pragma(`foreign_keys = ${foreignKeysEnabled ? "ON" : "OFF"}`);
+      }
+    } catch (error) {
+      try {
+        this.db.exec("DROP TABLE IF EXISTS memory_embeddings_rebuild");
+      } catch {
+        // Ignore cleanup failures and preserve the original table.
+      }
+      schemaLogger.error("[DatabaseManager] Failed memory_embeddings cascade migration:", error);
+    }
   }
 
   private upgradeKnowledgeGraphEdgesForTemporalValidity(): void {

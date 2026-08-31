@@ -15,12 +15,20 @@ function formatAgentTaskStatus(status: string): string {
 
 export function MCAgentsTab({ data }: MCAgentsTabProps) {
   const {
-    agents, heartbeatStatuses, tasksByAgent,
-    detailPanel, setDetailPanel,
-    getAgentStatus, handleTriggerHeartbeat,
-    handleCreateAgent, handleEditAgent,
+    agents,
+    heartbeatStatuses,
+    tasksByAgent,
+    detailPanel,
+    setDetailPanel,
+    getAgentStatus,
+    handleTriggerHeartbeat,
+    handleCreateAgent,
+    handleEditAgent,
     runtimeRunningTaskIds,
-    formatRelativeTime, agentContext, isAllWorkspacesSelected, getWorkspaceName,
+    formatRelativeTime,
+    agentContext,
+    isAllWorkspacesSelected,
+    getWorkspaceName,
   } = data;
 
   const activeAgents = agents.filter((a) => a.isActive);
@@ -32,12 +40,14 @@ export function MCAgentsTab({ data }: MCAgentsTabProps) {
         const badge = AUTONOMY_BADGES[agent.autonomyLevel || "specialist"];
         const statusInfo = heartbeatStatuses.find((s) => s.agentRoleId === agent.id);
         const agentTasks = tasksByAgent.get(agent.id) || [];
-        const currentTask = agentTasks.find((task) =>
-          runtimeRunningTaskIds.includes(task.id) || task.status === "executing" || task.status === "planning",
+        const currentTask = agentTasks.find(
+          (task) =>
+            runtimeRunningTaskIds.includes(task.id) ||
+            task.status === "executing" ||
+            task.status === "planning",
         );
-        const trackedTask = currentTask || agentTasks.find((task) =>
-          !TERMINAL_AGENT_TASK_STATUSES.has(task.status),
-        );
+        const trackedTask =
+          currentTask || agentTasks.find((task) => !TERMINAL_AGENT_TASK_STATUSES.has(task.status));
         const isSelected = detailPanel?.kind === "agent" && detailPanel.agentId === agent.id;
         const heartbeatLabel = statusInfo?.heartbeatEnabled ? "Heartbeat enabled" : "Heartbeat off";
         const taskLabel = currentTask
@@ -56,18 +66,27 @@ export function MCAgentsTab({ data }: MCAgentsTabProps) {
             tabIndex={0}
           >
             <div className="mc-v2-agent-avatar" style={{ backgroundColor: agent.color }}>
-              {(() => { const Icon = getEmojiIcon(agent.icon || "🤖"); return <Icon size={20} strokeWidth={2} />; })()}
+              {(() => {
+                const Icon = getEmojiIcon(agent.icon || "🤖");
+                return <Icon size={20} strokeWidth={2} />;
+              })()}
             </div>
             <div className="mc-v2-agent-info">
               <div className="mc-v2-agent-name-row">
                 <span className="mc-v2-agent-name">{agent.displayName}</span>
-                <span className="mc-v2-autonomy-badge" style={{ backgroundColor: badge.color }}>{badge.label}</span>
+                <span className="mc-v2-autonomy-badge" style={{ backgroundColor: badge.color }}>
+                  {badge.label}
+                </span>
               </div>
-              <span className="mc-v2-agent-desc">{agent.description?.slice(0, 40) || agent.name}</span>
+              <span className="mc-v2-agent-desc">
+                {agent.description?.slice(0, 40) || agent.name}
+              </span>
               <span className="mc-v2-agent-task">{taskLabel}</span>
               <span className="mc-v2-agent-task-workspace">{heartbeatLabel}</span>
               {isAllWorkspacesSelected && trackedTask ? (
-                <span className="mc-v2-agent-task-workspace">{getWorkspaceName(trackedTask.workspaceId)}</span>
+                <span className="mc-v2-agent-task-workspace">
+                  {getWorkspaceName(trackedTask.workspaceId)}
+                </span>
               ) : null}
             </div>
             <div className="mc-v2-agent-right">
@@ -83,7 +102,10 @@ export function MCAgentsTab({ data }: MCAgentsTabProps) {
               {statusInfo?.heartbeatEnabled && (
                 <button
                   className="mc-v2-wake-btn"
-                  onClick={(e) => { e.stopPropagation(); handleTriggerHeartbeat(agent.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTriggerHeartbeat(agent.id);
+                  }}
                 >
                   {agentContext.getUiCopy("mcWakeAgent")}
                 </button>

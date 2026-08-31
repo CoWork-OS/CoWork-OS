@@ -170,7 +170,7 @@ export function DigitalTwinsPanel({
       } else {
         setError("Cannot delete system agent roles");
       }
-    } catch  {
+    } catch {
       setError("Failed to delete agent");
     }
   };
@@ -184,7 +184,7 @@ export function DigitalTwinsPanel({
       if (updated) {
         setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
       }
-    } catch  {
+    } catch {
       setError("Failed to update agent status");
     }
   };
@@ -250,10 +250,12 @@ export function DigitalTwinsPanel({
             className={`dt-card-avatar ${isInactive ? "dt-avatar-inactive" : ""}`}
             style={{ backgroundColor: role.color }}
           >
-            {role.icon ? (() => {
-              const Icon = resolveTwinIcon(role.icon);
-              return <Icon size={20} strokeWidth={2} />;
-            })() : null}
+            {role.icon
+              ? (() => {
+                  const Icon = resolveTwinIcon(role.icon);
+                  return <Icon size={20} strokeWidth={2} />;
+                })()
+              : null}
           </div>
           <div className="dt-card-title">
             <span className="dt-card-name">{role.displayName || role.name}</span>
@@ -280,7 +282,9 @@ export function DigitalTwinsPanel({
         {role.companyId && (
           <div className="dt-card-meta-row">
             <span className="dt-company-badge">
-              {selectedCompany?.id === role.companyId ? "Assigned to this company" : "Assigned to another company"}
+              {selectedCompany?.id === role.companyId
+                ? "Assigned to this company"
+                : "Assigned to another company"}
             </span>
           </div>
         )}
@@ -333,9 +337,11 @@ export function DigitalTwinsPanel({
         <div className="dt-header-top">
           <div className="dt-title-area">
             <h2>Agent Personas</h2>
-          <span className="dt-count">
-            {selectedCompany ? `${companyRoles.length} for ${selectedCompany.name}` : `${activeRoles.length} active`}
-          </span>
+            <span className="dt-count">
+              {selectedCompany
+                ? `${companyRoles.length} for ${selectedCompany.name}`
+                : `${activeRoles.length} active`}
+            </span>
           </div>
           <div className="dt-header-actions">
             <button className="dt-btn dt-btn-secondary" onClick={onOpenAgents}>
@@ -354,13 +360,15 @@ export function DigitalTwinsPanel({
         </div>
         <p className="dt-subtitle">
           Create digital twins as optional persona presets or build custom agents. Core automation
-          lives in Mission Control and is intentionally separated from Twins. New managed agents
-          now live in the Agents hub.
+          lives in Mission Control and is intentionally separated from Twins. New managed agents now
+          live in the Agents hub.
         </p>
         {selectedCompany ? (
           <div className="dt-company-context">
             <div className="dt-company-context-copy">
-              <div className="dt-company-context-title">Company context: {selectedCompany.name}</div>
+              <div className="dt-company-context-title">
+                Company context: {selectedCompany.name}
+              </div>
               <div className="dt-company-context-text">
                 Start with operator personas for this company, then configure core automation
                 separately in Mission Control if you want a generic operator to own it.
@@ -412,7 +420,9 @@ export function DigitalTwinsPanel({
               <User size={40} strokeWidth={1} />
             </div>
             <h3>No agent personas yet</h3>
-            <p>Create your first agent persona from a template, or build a custom agent from scratch.</p>
+            <p>
+              Create your first agent persona from a template, or build a custom agent from scratch.
+            </p>
             <button className="dt-btn dt-btn-primary" onClick={() => setGalleryOpen(true)}>
               <User size={14} strokeWidth={1.5} />
               Browse Templates
@@ -423,9 +433,7 @@ export function DigitalTwinsPanel({
         {!loading && selectedCompany && companyRoles.length > 0 && (
           <div className="dt-section">
             <h3 className="dt-section-title">Company Operators</h3>
-            <div className="dt-grid">
-              {companyRoles.map((role) => renderTwinCard(role, false))}
-            </div>
+            <div className="dt-grid">{companyRoles.map((role) => renderTwinCard(role, false))}</div>
           </div>
         )}
 
@@ -445,7 +453,9 @@ export function DigitalTwinsPanel({
 
         {!loading && otherActiveRoles.length > 0 && (
           <div className="dt-section">
-            <h3 className="dt-section-title">{selectedCompany ? "Other Active Agents" : "Active Agents"}</h3>
+            <h3 className="dt-section-title">
+              {selectedCompany ? "Other Active Agents" : "Active Agents"}
+            </h3>
             <div className="dt-grid">
               {otherActiveRoles.map((role) => renderTwinCard(role, false))}
             </div>
@@ -463,7 +473,9 @@ export function DigitalTwinsPanel({
 
         {!loading && showInactive && otherInactiveRoles.length > 0 && (
           <div className="dt-section">
-            <h3 className="dt-section-title">{selectedCompany ? "Other Inactive Agents" : "Inactive Agents"}</h3>
+            <h3 className="dt-section-title">
+              {selectedCompany ? "Other Inactive Agents" : "Inactive Agents"}
+            </h3>
             <div className="dt-grid">
               {otherInactiveRoles.map((role) => renderTwinCard(role, true))}
             </div>

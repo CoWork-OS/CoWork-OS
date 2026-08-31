@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  getLlmProviderDisplayName,
-  normalizeLlmProviderType,
-} from "../llmProviderDisplay";
+import { getLlmProviderDisplayName, normalizeLlmProviderType } from "../llmProviderDisplay";
 import { LLM_PROVIDER_TYPES } from "../types";
 
 describe("llmProviderDisplay", () => {

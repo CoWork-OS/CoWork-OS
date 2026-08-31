@@ -5,6 +5,12 @@ pinned build of [Perplexity Numbat](https://github.com/perplexityai/numbat).
 The integration is disabled by default and is controlled by the organization
 admin policy.
 
+Numbat is an additional restriction layer, not the access model. CoWork resolves the task's
+[access profile](access-profiles.md) and applies its sandbox, command-tool, filesystem, network,
+and approval boundaries before or alongside Numbat's bounded action check. Numbat can deny a
+profile-permitted action, but it cannot grant command tools, widen a profile, suppress an approval,
+or turn an unavailable profile into an executable one.
+
 ## Security boundary
 
 Numbat runs as a local child process with `shell: false`, a minimal environment,

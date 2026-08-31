@@ -66,8 +66,12 @@ describe("CoreMemoryDistiller", () => {
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       autoPromoteToCuratedMemoryEnabled: false,
     } as Any);
-    const curatedSpy = vi.spyOn(CuratedMemoryService, "upsertDistilledEntry").mockResolvedValue(null);
-    const archiveSpy = vi.spyOn(MemoryService, "captureCoreMemory").mockResolvedValue({ id: "mem-1" } as Any);
+    const curatedSpy = vi
+      .spyOn(CuratedMemoryService, "upsertDistilledEntry")
+      .mockResolvedValue(null);
+    const archiveSpy = vi
+      .spyOn(MemoryService, "captureCoreMemory")
+      .mockResolvedValue({ id: "mem-1" } as Any);
 
     const distiller = createDistiller();
     await distiller.runHotPath("trace-1");
@@ -83,7 +87,9 @@ describe("CoreMemoryDistiller", () => {
     const curatedSpy = vi.spyOn(CuratedMemoryService, "upsertDistilledEntry").mockResolvedValue({
       id: "curated-1",
     } as Any);
-    const archiveSpy = vi.spyOn(MemoryService, "captureCoreMemory").mockResolvedValue({ id: "mem-1" } as Any);
+    const archiveSpy = vi
+      .spyOn(MemoryService, "captureCoreMemory")
+      .mockResolvedValue({ id: "mem-1" } as Any);
 
     const distiller = createDistiller();
     await distiller.runHotPath("trace-1");

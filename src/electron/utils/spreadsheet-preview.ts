@@ -59,10 +59,10 @@ function getCellFormula(cell: ExcelJS.Cell): string | undefined {
 function isStyled(cell: ExcelJS.Cell): boolean {
   return Boolean(
     cell.font?.bold ||
-      cell.font?.italic ||
-      cell.font?.color?.argb ||
-      cell.fill?.type === "pattern" ||
-      cell.alignment?.horizontal,
+    cell.font?.italic ||
+    cell.font?.color?.argb ||
+    cell.fill?.type === "pattern" ||
+    cell.alignment?.horizontal,
   );
 }
 
@@ -79,10 +79,7 @@ export async function buildSpreadsheetPreviewFromFile(
       worksheet.columnCount || 0,
     );
     const rowCount = Math.min(sourceRowCount, MAX_PREVIEW_ROWS);
-    const columnCount = Math.min(
-      sourceColumnCount,
-      MAX_PREVIEW_COLUMNS,
-    );
+    const columnCount = Math.min(sourceColumnCount, MAX_PREVIEW_COLUMNS);
     const columnWidths = Array.from({ length: columnCount }, (_, index) => {
       const width = worksheet.getColumn(index + 1).width;
       return typeof width === "number" && Number.isFinite(width) ? width : 10;
@@ -246,10 +243,7 @@ export function spreadsheetPreviewToDelimitedText(
   if (!sheet) return "";
   const rowCount = Math.min(sheet.rowCount || sheet.rows.length || 0, MAX_PREVIEW_ROWS);
   const maxColumns = sheet.rows.length > 0 ? Math.max(...sheet.rows.map((row) => row.length)) : 0;
-  const columnCount = Math.min(
-    sheet.columnCount || maxColumns,
-    MAX_PREVIEW_COLUMNS,
-  );
+  const columnCount = Math.min(sheet.columnCount || maxColumns, MAX_PREVIEW_COLUMNS);
 
   return Array.from({ length: rowCount }, (_, rowIndex) => {
     const row = sheet.rows[rowIndex] || [];
@@ -297,8 +291,9 @@ export async function writeDelimitedSpreadsheetPreviewToFile(
     const previewRow = rowIndex < editableSourceRowCount ? sheet.rows[rowIndex] : undefined;
     const originalRow = originalRows[rowIndex] || [];
     const rowValues = previewRow
-      ? Array.from({ length: previewColumnCount }, (_, columnIndex) =>
-          previewRow[columnIndex]?.value || "",
+      ? Array.from(
+          { length: previewColumnCount },
+          (_, columnIndex) => previewRow[columnIndex]?.value || "",
         )
       : originalRow.slice();
     if (previewRow && originalRow.length > previewColumnCount) {
@@ -307,8 +302,9 @@ export async function writeDelimitedSpreadsheetPreviewToFile(
     return rowValues.map((cell) => escapeDelimitedCell(cell, delimiter)).join(delimiter);
   });
   for (const previewRow of appendedPreviewRows) {
-    const rowValues = Array.from({ length: previewColumnCount }, (_, columnIndex) =>
-      previewRow[columnIndex]?.value || "",
+    const rowValues = Array.from(
+      { length: previewColumnCount },
+      (_, columnIndex) => previewRow[columnIndex]?.value || "",
     );
     lines.push(rowValues.map((cell) => escapeDelimitedCell(cell, delimiter)).join(delimiter));
   }
@@ -344,8 +340,12 @@ export async function writeSpreadsheetPreviewToFile(
 
   for (const sheetPreview of preview.sheets) {
     const worksheet =
-      workbook.getWorksheet(sheetPreview.name) || workbook.addWorksheet(sheetPreview.name || "Sheet");
-    const rowCount = Math.min(sheetPreview.rowCount || sheetPreview.rows.length || 0, MAX_PREVIEW_ROWS);
+      workbook.getWorksheet(sheetPreview.name) ||
+      workbook.addWorksheet(sheetPreview.name || "Sheet");
+    const rowCount = Math.min(
+      sheetPreview.rowCount || sheetPreview.rows.length || 0,
+      MAX_PREVIEW_ROWS,
+    );
     const columnCount = Math.min(
       sheetPreview.columnCount || Math.max(...sheetPreview.rows.map((row) => row.length), 0),
       MAX_PREVIEW_COLUMNS,

@@ -13,9 +13,9 @@ describe("buildPauseBannerPreview", () => {
 
   it("prefers a readable leading sentence when the pause message is long", () => {
     const preview = buildPauseBannerPreview(
-      "I narrowed this down to three migration paths and need your call on which one to pursue next. "
-        + "Option A keeps the existing workflow with less data reshaping, while Option B is cheaper but forces a full template rebuild. "
-        + "Option C removes two integrations we currently depend on.",
+      "I narrowed this down to three migration paths and need your call on which one to pursue next. " +
+        "Option A keeps the existing workflow with less data reshaping, while Option B is cheaper but forces a full template rebuild. " +
+        "Option C removes two integrations we currently depend on.",
       130,
     );
 
@@ -38,7 +38,9 @@ describe("buildPauseBannerPreview", () => {
   });
 
   it("offers details when the original message has multiline structure", () => {
-    const preview = buildPauseBannerPreview("Decision needed:\n- Keep current CRM\n- Move this quarter");
+    const preview = buildPauseBannerPreview(
+      "Decision needed:\n- Keep current CRM\n- Move this quarter",
+    );
 
     expect(preview.summary).toBe("Decision needed: - Keep current CRM - Move this quarter");
     expect(preview.showDetails).toBe(true);

@@ -36,7 +36,7 @@ const logger = createLogger("MCPClientManager");
 function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     const BrowserWindow = electron?.BrowserWindow;
     if (BrowserWindow?.getAllWindows) return BrowserWindow.getAllWindows();
@@ -59,12 +59,13 @@ export class MCPClientManager extends EventEmitter {
   private connectionRefCounts: Map<string, Set<string>> = new Map();
   /** Server IDs that were connected during initial startup — these are never auto-disconnected */
   private initialServerIds: Set<string> = new Set();
-  private startupStats: { enabled: number; attempted: number; connected: number; failed: number } = {
-    enabled: 0,
-    attempted: 0,
-    connected: 0,
-    failed: 0,
-  };
+  private startupStats: { enabled: number; attempted: number; connected: number; failed: number } =
+    {
+      enabled: 0,
+      attempted: 0,
+      connected: 0,
+      failed: 0,
+    };
 
   private constructor() {
     super();
@@ -117,9 +118,7 @@ export class MCPClientManager extends EventEmitter {
           MCPSettingsManager.updateServer(server.id, { enabled: false });
         }
       }
-      logger.info(
-        `Auto-connecting to ${autoConnectServers.length} enabled server(s) in parallel`,
-      );
+      logger.info(`Auto-connecting to ${autoConnectServers.length} enabled server(s) in parallel`);
 
       const connectionPromises = autoConnectServers.map((server) =>
         this.connectServer(server.id).catch((error) => {
@@ -224,9 +223,7 @@ export class MCPClientManager extends EventEmitter {
     }
 
     const disconnectPromises = Array.from(this.connections.keys()).map((id) =>
-      this.disconnectServer(id).catch((error) =>
-        logger.error(`Error disconnecting ${id}:`, error),
-      ),
+      this.disconnectServer(id).catch((error) => logger.error(`Error disconnecting ${id}:`, error)),
     );
 
     await Promise.all(disconnectPromises);
@@ -327,6 +324,12 @@ export class MCPClientManager extends EventEmitter {
     return this.toolServerMap.get(toolName) || null;
   }
 
+  getServerConfigForTool(toolName: string): MCPServerConfig | null {
+    const serverId = this.getServerIdForTool(toolName);
+    if (!serverId) return null;
+    return MCPSettingsManager.getServer(serverId) || null;
+  }
+
   getConnectorIdForTool(toolName: string): string | null {
     const serverId = this.getServerIdForTool(toolName);
     if (!serverId) return null;
@@ -390,6 +393,32 @@ export class MCPClientManager extends EventEmitter {
       throw new Error(`Tool ${toolName} not found`);
     }
 
+    const connection = this.connections.get(serverId);
+    if (!connection) {
+      throw new Error(`Server ${serverId} not connected`);
+    }
+
+    try {
+      return await connection.callTool(toolName, args);
+    } catch (error) {
+      const config = MCPSettingsManager.getServer(serverId);
+      await this.notifyConnectorAuthIssue(serverId, config, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Call a tool on an explicitly selected server.
+   *
+   * Background source synchronizers must not route by global tool name: two
+   * MCP servers can expose the same tool, and the selected server is part of
+   * the source's access boundary.
+   */
+  async callServerTool(
+    serverId: string,
+    toolName: string,
+    args: Record<string, Any> = {},
+  ): Promise<MCPCallResult> {
     const connection = this.connections.get(serverId);
     if (!connection) {
       throw new Error(`Server ${serverId} not connected`);

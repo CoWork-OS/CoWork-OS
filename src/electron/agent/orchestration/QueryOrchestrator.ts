@@ -1,6 +1,11 @@
 import type { MemoryFeaturesSettings } from "../../../shared/types";
-import { ContentBuilder, type BuildExecutionPromptParams, type BuildExecutionPromptResult } from "../content/ContentBuilder";
+import {
+  ContentBuilder,
+  type BuildExecutionPromptParams,
+  type BuildExecutionPromptResult,
+} from "../content/ContentBuilder";
 import { TranscriptStore } from "../../memory/TranscriptStore";
+import type { TranscriptReadGuard } from "../../memory/TranscriptStore";
 
 export interface QueryContextSelection {
   query: string;
@@ -24,6 +29,7 @@ export class QueryOrchestrator {
     taskId: string;
     taskPrompt: string;
     followUpMessage?: string;
+    readGuard?: TranscriptReadGuard;
   }): Promise<QueryContextSelection> {
     const query = this.buildRetrievalQuery(params.taskPrompt, params.followUpMessage);
     if (!this.features.transcriptStoreEnabled) {
@@ -35,12 +41,15 @@ export class QueryOrchestrator {
       taskId: params.taskId,
       query,
       limit: 5,
+      readGuard: params.readGuard,
     });
 
     const transcriptContext = results
       .map((entry) => {
         const payload =
-          typeof entry.payload === "string" ? entry.payload : JSON.stringify(entry.payload).slice(0, 320);
+          typeof entry.payload === "string"
+            ? entry.payload
+            : JSON.stringify(entry.payload).slice(0, 320);
         return `- [${entry.type}] ${payload}`;
       })
       .join("\n");

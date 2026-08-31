@@ -1,8 +1,13 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { DocumentArtifactCard } from "../DocumentArtifactCard";
+
+const cssPath = fileURLToPath(new URL("../MainContent/main-content.css", import.meta.url));
+const artifactCss = readFileSync(cssPath, "utf8");
 
 function render(element: React.ReactElement): string {
   return renderToStaticMarkup(element);
@@ -45,5 +50,11 @@ describe("DocumentArtifactCard", () => {
       );
       expect(markup).toContain(label);
     }
+  });
+
+  it("keeps a safe ink gutter so the first label glyph is not clipped", () => {
+    expect(artifactCss).toMatch(
+      /\.document-artifact-name,\s*\.document-artifact-meta\s*\{[\s\S]*margin-left:\s*-4px;[\s\S]*padding-left:\s*4px;/,
+    );
   });
 });

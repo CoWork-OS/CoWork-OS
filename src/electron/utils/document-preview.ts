@@ -5,10 +5,7 @@ import * as path from "path";
 import { promisify } from "util";
 import JSZip from "jszip";
 import mammoth from "mammoth";
-import {
-  canEditDocumentInApp,
-  getDocumentFormatLabel,
-} from "../../shared/document-formats";
+import { canEditDocumentInApp, getDocumentFormatLabel } from "../../shared/document-formats";
 import type { DocumentPreview } from "../../shared/document-preview";
 import { parseDocxBlocksFromBuffer } from "../documents/docx-blocks";
 
@@ -47,9 +44,7 @@ function htmlToText(html: string): string {
 
 function stripRtfToText(rtf: string): string {
   return rtf
-    .replace(/\\'[0-9a-fA-F]{2}/g, (match) =>
-      String.fromCharCode(parseInt(match.slice(2), 16)),
-    )
+    .replace(/\\'[0-9a-fA-F]{2}/g, (match) => String.fromCharCode(parseInt(match.slice(2), 16)))
     .replace(/\\par[d]?/g, "\n")
     .replace(/\\tab/g, "\t")
     .replace(/\\[a-zA-Z]+-?\d* ?/g, "")
@@ -72,10 +67,7 @@ function extractOdtTextFromXml(xml: string): string {
   return stripXmlTags(xml);
 }
 
-async function buildDocxLikePreview(
-  filePath: string,
-  format: string,
-): Promise<DocumentPreview> {
+async function buildDocxLikePreview(filePath: string, format: string): Promise<DocumentPreview> {
   const buffer = await fs.readFile(filePath);
   const htmlResult = await mammoth.convertToHtml({ buffer });
   const textResult = await mammoth.extractRawText({ buffer });
@@ -157,7 +149,10 @@ async function convertDocWithSoffice(
       tmpDir,
       filePath,
     ]);
-    const expectedPath = path.join(tmpDir, `${path.basename(filePath, path.extname(filePath))}.txt`);
+    const expectedPath = path.join(
+      tmpDir,
+      `${path.basename(filePath, path.extname(filePath))}.txt`,
+    );
     const text = (await fs.readFile(expectedPath, "utf-8")).trim();
     return text || null;
   } catch {
@@ -215,7 +210,12 @@ export async function buildDocumentPreviewFromFile(
       };
     });
 
-  if (extension === ".docx" || extension === ".docm" || extension === ".dotx" || extension === ".dotm") {
+  if (
+    extension === ".docx" ||
+    extension === ".docm" ||
+    extension === ".dotx" ||
+    extension === ".dotm"
+  ) {
     return buildDocxLikePreview(filePath, format);
   }
 
@@ -227,7 +227,9 @@ export async function buildDocumentPreviewFromFile(
       text,
       canEdit: false,
       conversionStatus: text ? "native" : "failed",
-      conversionMessage: text ? undefined : "No readable text could be extracted from this RTF file.",
+      conversionMessage: text
+        ? undefined
+        : "No readable text could be extracted from this RTF file.",
     };
   }
 

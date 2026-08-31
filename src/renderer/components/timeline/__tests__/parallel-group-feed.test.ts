@@ -9,9 +9,7 @@ function render(element: React.ReactElement): string {
   return renderToStaticMarkup(element);
 }
 
-function makeGroup(
-  overrides: Partial<ParallelGroupProjection> = {},
-): ParallelGroupProjection {
+function makeGroup(overrides: Partial<ParallelGroupProjection> = {}): ParallelGroupProjection {
   return {
     groupId: "tools:step:build:1",
     label: "Tool batch (2)",

@@ -50,7 +50,13 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-function listEntryId(workspaceId: string, inboxId: string | undefined, direction: string, listType: string, entry: string): string {
+function listEntryId(
+  workspaceId: string,
+  inboxId: string | undefined,
+  direction: string,
+  listType: string,
+  entry: string,
+): string {
   return [workspaceId, inboxId || "org", direction, listType, entry.toLowerCase()].join(":");
 }
 
@@ -115,17 +121,26 @@ function mapDomain(payload: unknown, workspaceId?: string): AgentMailDomain {
   };
 }
 
-function mapListEntry(payload: unknown, fallback: Partial<AgentMailListEntry> = {}): AgentMailListEntry | null {
+function mapListEntry(
+  payload: unknown,
+  fallback: Partial<AgentMailListEntry> = {},
+): AgentMailListEntry | null {
   const record = asObject(payload) || {};
-  const direction = (asString(record.direction) || fallback.direction) as AgentMailListEntry["direction"] | undefined;
-  const listType = (asString(record.type) || fallback.listType) as AgentMailListEntry["listType"] | undefined;
+  const direction = (asString(record.direction) || fallback.direction) as
+    | AgentMailListEntry["direction"]
+    | undefined;
+  const listType = (asString(record.type) || fallback.listType) as
+    | AgentMailListEntry["listType"]
+    | undefined;
   const entry = asString(record.entry);
   if (!direction || !listType || !entry) return null;
   return {
     direction,
     listType,
     entry,
-    entryType: (asString(record.entry_type) as AgentMailListEntry["entryType"] | undefined) || fallback.entryType,
+    entryType:
+      (asString(record.entry_type) as AgentMailListEntry["entryType"] | undefined) ||
+      fallback.entryType,
     reason: asString(record.reason),
     organizationId: asString(record.organization_id),
     podId: asString(record.pod_id) || fallback.podId,
@@ -309,7 +324,13 @@ export class AgentMailAdminService {
 
   private persistListEntries(workspaceId: string, entries: AgentMailListEntry[]): void {
     for (const entry of entries) {
-      const id = listEntryId(workspaceId, entry.inboxId, entry.direction, entry.listType, entry.entry);
+      const id = listEntryId(
+        workspaceId,
+        entry.inboxId,
+        entry.direction,
+        entry.listType,
+        entry.entry,
+      );
       this.db
         .prepare(
           `INSERT INTO agentmail_lists
@@ -350,7 +371,11 @@ export class AgentMailAdminService {
       .run(listEntryId(workspaceId, inboxId, direction, listType, entry));
   }
 
-  private persistApiKeys(workspaceId: string, inboxId: string, apiKeys: AgentMailApiKeySummary[]): void {
+  private persistApiKeys(
+    workspaceId: string,
+    inboxId: string,
+    apiKeys: AgentMailApiKeySummary[],
+  ): void {
     const seen = new Set(apiKeys.map((item) => item.apiKeyId));
     const currentRows = this.db
       .prepare("SELECT api_key_id FROM agentmail_api_keys WHERE workspace_id = ? AND inbox_id = ?")
@@ -527,7 +552,10 @@ export class AgentMailAdminService {
     return binding;
   }
 
-  async createWorkspacePod(workspaceId: string, podName?: string): Promise<AgentMailWorkspaceBinding> {
+  async createWorkspacePod(
+    workspaceId: string,
+    podName?: string,
+  ): Promise<AgentMailWorkspaceBinding> {
     const pod = mapPod(
       await this.getClient().createPod({
         name: podName,
@@ -618,7 +646,10 @@ export class AgentMailAdminService {
     input: { username?: string; domain?: string; displayName?: string; clientId?: string },
   ): Promise<AgentMailInbox> {
     const binding = this.ensureWorkspaceBinding(workspaceId);
-    const inbox = mapInbox(await this.getClient().createPodInbox(binding.podId, input), workspaceId);
+    const inbox = mapInbox(
+      await this.getClient().createPodInbox(binding.podId, input),
+      workspaceId,
+    );
     this.persistInboxes(workspaceId, binding.podId, [...this.listInboxes(workspaceId), inbox]);
     return inbox;
   }
@@ -636,7 +667,9 @@ export class AgentMailAdminService {
 
   async deleteInbox(workspaceId: string, inboxId: string): Promise<{ success: boolean }> {
     await this.getClient().deleteInbox(inboxId);
-    this.db.prepare("DELETE FROM agentmail_inboxes WHERE workspace_id = ? AND inbox_id = ?").run(workspaceId, inboxId);
+    this.db
+      .prepare("DELETE FROM agentmail_inboxes WHERE workspace_id = ? AND inbox_id = ?")
+      .run(workspaceId, inboxId);
     return { success: true };
   }
 
@@ -707,10 +740,18 @@ export class AgentMailAdminService {
 
   async listListEntries(
     workspaceId: string,
-    options: { inboxId?: string; direction?: AgentMailListEntry["direction"]; listType?: AgentMailListEntry["listType"] } = {},
+    options: {
+      inboxId?: string;
+      direction?: AgentMailListEntry["direction"];
+      listType?: AgentMailListEntry["listType"];
+    } = {},
   ): Promise<AgentMailListEntry[]> {
-    const directions = options.direction ? [options.direction] : (["receive", "reply"] as AgentMailListEntry["direction"][]);
-    const listTypes = options.listType ? [options.listType] : (["allow", "block"] as AgentMailListEntry["listType"][]);
+    const directions = options.direction
+      ? [options.direction]
+      : (["receive", "reply"] as AgentMailListEntry["direction"][]);
+    const listTypes = options.listType
+      ? [options.listType]
+      : (["allow", "block"] as AgentMailListEntry["listType"][]);
     const client = this.getClient();
     const entries: AgentMailListEntry[] = [];
 
@@ -750,10 +791,15 @@ export class AgentMailAdminService {
     },
   ): Promise<AgentMailListEntry> {
     const payload = input.inboxId
-      ? await this.getClient().createInboxListEntry(input.inboxId, input.direction, input.listType, {
-          entry: input.entry,
-          reason: input.reason,
-        })
+      ? await this.getClient().createInboxListEntry(
+          input.inboxId,
+          input.direction,
+          input.listType,
+          {
+            entry: input.entry,
+            reason: input.reason,
+          },
+        )
       : await this.getClient().createListEntry(input.direction, input.listType, {
           entry: input.entry,
           reason: input.reason,
@@ -777,11 +823,22 @@ export class AgentMailAdminService {
     },
   ): Promise<{ success: boolean }> {
     if (input.inboxId) {
-      await this.getClient().deleteInboxListEntry(input.inboxId, input.direction, input.listType, input.entry);
+      await this.getClient().deleteInboxListEntry(
+        input.inboxId,
+        input.direction,
+        input.listType,
+        input.entry,
+      );
     } else {
       await this.getClient().deleteListEntry(input.direction, input.listType, input.entry);
     }
-    this.deleteListEntryRecord(workspaceId, input.inboxId, input.direction, input.listType, input.entry);
+    this.deleteListEntryRecord(
+      workspaceId,
+      input.inboxId,
+      input.direction,
+      input.listType,
+      input.entry,
+    );
     return { success: true };
   }
 

@@ -3,7 +3,9 @@ import type { ChroniclePersistedObservation, ChronicleResolvedContext } from "./
 export const CHRONICLE_PROVENANCE = "untrusted_screen_text" as const;
 
 function truncate(value: string, max = 320): string {
-  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  const normalized = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
 }
 

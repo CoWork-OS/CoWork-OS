@@ -121,7 +121,10 @@ export function MCFeedTab({ data }: MCFeedTabProps) {
             const expanded = Boolean(expandedMissionControlItems[item.id]);
             const evidence = missionControlEvidence[item.id] || [];
             return (
-              <article key={item.id} className={`mc-v2-feed-item mc-v2-intel-item ${severityTone(item.severity)}`}>
+              <article
+                key={item.id}
+                className={`mc-v2-feed-item mc-v2-intel-item ${severityTone(item.severity)}`}
+              >
                 <div className="mc-v2-feed-item-header">
                   <div className="mc-v2-feed-item-meta">
                     <span className={`mc-v2-status-pill ${severityTone(item.severity)}`}>
@@ -149,11 +152,17 @@ export function MCFeedTab({ data }: MCFeedTabProps) {
 
                 <div className="mc-v2-intel-actions">
                   {item.taskId && (
-                    <button className="mc-v2-inline-action" onClick={() => setDetailPanel({ kind: "task", taskId: item.taskId! })}>
+                    <button
+                      className="mc-v2-inline-action"
+                      onClick={() => setDetailPanel({ kind: "task", taskId: item.taskId! })}
+                    >
                       Open task
                     </button>
                   )}
-                  <button className="mc-v2-inline-action" onClick={() => toggleMissionControlEvidence(item.id)}>
+                  <button
+                    className="mc-v2-inline-action"
+                    onClick={() => toggleMissionControlEvidence(item.id)}
+                  >
                     {expanded ? "Hide evidence" : `Show evidence (${item.evidenceCount})`}
                   </button>
                 </div>
@@ -161,7 +170,9 @@ export function MCFeedTab({ data }: MCFeedTabProps) {
                 {expanded && (
                   <div className="mc-v2-evidence-list">
                     {evidence.length === 0 ? (
-                      <div className="mc-v2-empty mc-v2-empty-compact">No evidence rows loaded.</div>
+                      <div className="mc-v2-empty mc-v2-empty-compact">
+                        No evidence rows loaded.
+                      </div>
                     ) : (
                       evidence.map((entry) => (
                         <div key={entry.id} className="mc-v2-evidence-row">

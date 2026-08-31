@@ -153,10 +153,7 @@ function resolveText(record: Record<string, unknown> | undefined): string {
   );
 }
 
-function extractCommand(
-  text: string,
-  prefix: string,
-): { matched: boolean; command: string } {
+function extractCommand(text: string, prefix: string): { matched: boolean; command: string } {
   const normalizedPrefix = prefix.trim();
   if (!normalizedPrefix) return { matched: false, command: "" };
 

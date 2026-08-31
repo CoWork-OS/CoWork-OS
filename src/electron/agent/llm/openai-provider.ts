@@ -53,9 +53,7 @@ const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
   "gpt-5.1",
   "gpt-5.1-codex-max",
 ];
-const UNSUPPORTED_CHATGPT_SUBSCRIPTION_MODEL_IDS = new Set([
-  "gpt-5.1-codex-mini",
-]);
+const UNSUPPORTED_CHATGPT_SUBSCRIPTION_MODEL_IDS = new Set(["gpt-5.1-codex-mini"]);
 const logger = createLogger("OpenAI");
 
 const isToolResult = (item: LLMContent | LLMToolResult): item is LLMToolResult =>
@@ -869,7 +867,11 @@ export class OpenAIProvider implements LLMProvider {
       { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "Advanced reasoning model" },
       { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", description: "Advanced reasoning model" },
       { id: "gpt-5.2", name: "GPT-5.2", description: "Most advanced reasoning" },
-      { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", description: "Entitlement-dependent Codex Spark model" },
+      {
+        id: "gpt-5.3-codex-spark",
+        name: "GPT-5.3 Codex Spark",
+        description: "Entitlement-dependent Codex Spark model",
+      },
     ];
   }
 

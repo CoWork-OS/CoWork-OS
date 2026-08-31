@@ -23,6 +23,9 @@ Structured flows are stored as Routines for compatibility, but each activation p
 - Install and connect an MCP connector before using one of its tools.
 - For a signed outbound webhook, create a signing secret in the webhook step. The flow stores only the secret identifier.
 - Treat templates and prompt-generated plans as drafts. Review every field, variable, account, scope, approval, and destination before turning one on.
+- Choose the access profile that should govern backing agent tasks. Flow and step approval settings
+  can reduce interruption for permitted actions, but cannot widen the profile's command, filesystem,
+  network, domain, or export boundary. See [Access Profiles](access-profiles.md).
 
 ## The four views
 
@@ -189,7 +192,10 @@ New Studio flows default to `confirm_external`. The routine-level policy and opt
 | `confirm_external` | Run | Run | Confirm | Confirm |
 | `strict_confirm` | Run | Confirm | Confirm | Confirm |
 
-`data_export` always requires approval in a live run. A step set to **Always confirm** always pauses. **Skip for safe actions** can bypass confirmation only for `read` and `local_write`; it cannot bypass confirmation for external writes or data exports.
+All step-level approval decisions remain beneath the effective access profile and administrator
+policy. `data_export` always requires approval in a live run. A step set to **Always confirm**
+always pauses. **Skip for safe actions** can bypass confirmation only for `read` and `local_write`;
+it cannot bypass confirmation for external writes or data exports.
 
 Dry runs do not create approval pauses because no external mutation or export is performed. They return a preview record instead.
 
@@ -328,6 +334,13 @@ Read the inline validation message. Common causes are a missing required field, 
 
 Confirm the connector is connected, the tool name still exists, its JSON arguments match the live schema, and the Routine connector allowlist includes the tool's connector/server. Unknown keys are rejected when the connector schema sets `additionalProperties: false`.
 
+### A run says the access profile is unavailable
+
+The named profile is missing, invalid, or cannot be represented by the active sandbox backend. Fix
+or replace the profile in **Settings > System & Security > Permissions** or on the managed
+environment, then retry. The runtime intentionally pauses with read-only access; approving the
+run cannot turn an unavailable profile into a broader one.
+
 ### A run waits for approval after restart
 
 The application stopped while a step was running or retrying, so the runtime cannot prove whether the remote side effect completed. Inspect the destination first. Select **Approve once** only when it is safe to retry; select **Reject** to fail the run without another attempt.
@@ -363,6 +376,7 @@ Do not delete the CoWork database. `RoutineService.ensureSchema()` adds legacy r
 | Google polling starters | `src/electron/routines/workflow/google-starter-watcher.ts` |
 | Secure webhook secrets | `src/electron/routines/workflow/secret-store.ts` |
 | Signed webhook transport | `src/electron/routines/workflow/signed-webhook.ts` |
+| Access-profile resolution and enforcement | `src/electron/security/access-profile-resolver.ts`, `src/electron/security/access-profile-paths.ts` |
 
 ### Persistent tables
 
@@ -417,3 +431,7 @@ For a runtime failure, follow the project failure-triage contract: inspect `logs
 ## Compatibility
 
 Automation Studio is additive. Existing prompt-based Routines, task-sourced automations, schedules, hook mappings, event-trigger history, and Workflow Intelligence behavior retain their current storage and execution paths. Structured flows reuse the Routine shell for workspace, policy, and compiled trigger integration while keeping their versioned graph, deterministic runs, approvals, and durable event inbox in separate tables.
+
+Backing agent tasks use the selected or inherited [access profile](access-profiles.md). Legacy
+`shellAccess` values are accepted only for older routine payloads; new workflow definitions should
+not add a separate shell enable/disable field.

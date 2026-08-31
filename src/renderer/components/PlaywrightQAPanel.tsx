@@ -152,9 +152,7 @@ export function PlaywrightQAPanel({ taskId, workspaceId }: PlaywrightQAPanelProp
 
       if (event.type === "qa:status" && event.data.status) {
         setSelectedRun((prev) =>
-          prev && prev.id === event.runId
-            ? { ...prev, status: event.data.status! }
-            : prev,
+          prev && prev.id === event.runId ? { ...prev, status: event.data.status! } : prev,
         );
       }
 
@@ -557,9 +555,7 @@ export function PlaywrightQAPanel({ taskId, workspaceId }: PlaywrightQAPanelProp
                       ) : (
                         <XCircle size={12} style={{ color: "#ef4444" }} />
                       )}
-                      <span style={{ flex: 1, fontSize: "12px" }}>
-                        {step.description}
-                      </span>
+                      <span style={{ flex: 1, fontSize: "12px" }}>{step.description}</span>
                       {step.error && (
                         <span
                           style={{
@@ -663,9 +659,7 @@ export function PlaywrightQAPanel({ taskId, workspaceId }: PlaywrightQAPanelProp
               color: "var(--accent-primary, #8b5cf6)",
             }}
           />
-          <div style={{ fontSize: "13px", marginBottom: "4px" }}>
-            No QA runs yet
-          </div>
+          <div style={{ fontSize: "13px", marginBottom: "4px" }}>No QA runs yet</div>
           <div style={{ fontSize: "11px" }}>
             Run automated Playwright tests to catch visual and functional bugs.
           </div>

@@ -7,6 +7,11 @@ CoWork OS now ships two bundled, global skills as first-class slash commands:
 
 These are domain-agnostic and work across code, research, writing, operations, and general tasks.
 
+Both skills run inside the task's [access profile](access-profiles.md). A
+quality pass or batch transformation can propose or perform only the reads,
+writes, command-tool calls, network requests, and exports already allowed by
+that profile; parallelization does not widen access.
+
 ## Global Skill Scope
 
 Both skills are bundled and enabled by default:

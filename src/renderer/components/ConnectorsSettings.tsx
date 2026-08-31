@@ -37,7 +37,14 @@ type MCPSettingsData = {
   servers: MCPServerConfig[];
 };
 
-type ConnectorCategory = "" | "crm" | "productivity" | "communication" | "finance" | "legal" | "devtools";
+type ConnectorCategory =
+  | ""
+  | "crm"
+  | "productivity"
+  | "communication"
+  | "finance"
+  | "legal"
+  | "devtools";
 
 interface ConnectorDefinition {
   key: string;
@@ -204,7 +211,8 @@ const CONNECTORS: ConnectorDefinition[] = [
     key: "google-workspace",
     name: "Google Workspace",
     registryId: "google-workspace",
-    description: "Single Google MCP connector for Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, and Chat.",
+    description:
+      "Single Google MCP connector for Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, and Chat.",
     supportsOAuth: true,
     provider: "google-workspace",
   },
@@ -248,7 +256,8 @@ const CONNECTORS: ConnectorDefinition[] = [
     key: "maps",
     name: "Maps",
     registryId: "maps",
-    description: "Nearby place search and walking routes with OSM defaults and optional Google Maps.",
+    description:
+      "Nearby place search and walking routes with OSM defaults and optional Google Maps.",
     supportsOAuth: false,
     envFields: [
       {
@@ -524,9 +533,12 @@ const CONNECTORS: ConnectorDefinition[] = [
     key: "socket",
     name: "Socket",
     registryId: "socket",
-    description: "MCP server for scanning dependencies. Check security scores for npm, PyPI, and more.",
+    description:
+      "MCP server for scanning dependencies. Check security scores for npm, PyPI, and more.",
     supportsOAuth: false,
-    envFields: [{ key: "SOCKET_API_KEY", label: "API Key (optional for public)", type: "password" }],
+    envFields: [
+      { key: "SOCKET_API_KEY", label: "API Key (optional for public)", type: "password" },
+    ],
   },
   {
     key: "metabase",
@@ -955,18 +967,20 @@ export function ConnectorsSettings() {
 
   const connectorRows = useMemo(() => {
     if (!settings) return [];
-    return CONNECTORS.filter((connector) => SHIPPED_CONNECTOR_IDS.has(connector.registryId)).map((connector) => {
-      const config = settings.servers.find((server) => matchConnector(server, connector));
-      const status = config ? serverStatuses.find((s) => s.id === config.id) : undefined;
-      return { connector, config, status };
-    }).filter(({ connector, config }) => {
-      // Always show already-installed connectors.
-      if (config) return true;
-      // If registry info is unavailable, keep previous behavior.
-      if (!registryConnectorIds) return true;
-      // Only advertise connectors currently available from the registry.
-      return registryConnectorIds.has(connector.registryId);
-    });
+    return CONNECTORS.filter((connector) => SHIPPED_CONNECTOR_IDS.has(connector.registryId))
+      .map((connector) => {
+        const config = settings.servers.find((server) => matchConnector(server, connector));
+        const status = config ? serverStatuses.find((s) => s.id === config.id) : undefined;
+        return { connector, config, status };
+      })
+      .filter(({ connector, config }) => {
+        // Always show already-installed connectors.
+        if (config) return true;
+        // If registry info is unavailable, keep previous behavior.
+        if (!registryConnectorIds) return true;
+        // Only advertise connectors currently available from the registry.
+        return registryConnectorIds.has(connector.registryId);
+      });
   }, [settings, serverStatuses, registryConnectorIds]);
 
   // Sync detail view when underlying data changes (e.g. after MCP update)
@@ -1068,11 +1082,14 @@ export function ConnectorsSettings() {
       if (activeFilter === "available") return status?.status !== "connected";
       return true;
     })
-    .filter(({ connector }) => activeCategory === "" || getConnectorCategory(connector) === activeCategory)
+    .filter(
+      ({ connector }) =>
+        activeCategory === "" || getConnectorCategory(connector) === activeCategory,
+    )
     .filter(({ connector }) => {
       if (!normalizedSearchQuery) return true;
-      return [connector.name, connector.description, connector.key, connector.registryId].some((value) =>
-        (value || "").toLowerCase().includes(normalizedSearchQuery),
+      return [connector.name, connector.description, connector.key, connector.registryId].some(
+        (value) => (value || "").toLowerCase().includes(normalizedSearchQuery),
       );
     });
 
@@ -1150,10 +1167,7 @@ export function ConnectorsSettings() {
             <option value="legal">Legal</option>
             <option value="devtools">Dev Tools</option>
           </select>
-          <button
-            className="button-primary button-small"
-            onClick={() => setShowCustomForm(true)}
-          >
+          <button className="button-primary button-small" onClick={() => setShowCustomForm(true)}>
             + Custom connector
           </button>
         </div>
@@ -1323,7 +1337,10 @@ export function ConnectorsSettings() {
               </div>
             </div>
             <div className="cm-custom-modal-footer">
-              <button className="button-secondary button-small" onClick={() => setShowCustomForm(false)}>
+              <button
+                className="button-secondary button-small"
+                onClick={() => setShowCustomForm(false)}
+              >
                 Cancel
               </button>
               <button

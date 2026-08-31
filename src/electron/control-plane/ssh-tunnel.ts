@@ -494,9 +494,7 @@ export class SSHTunnelManager extends EventEmitter {
     // its accepted auth methods. The last one is the most informative —
     // e.g. "publickey,password" tells the user the server will accept a
     // password, which this client currently can't send.
-    const methodsMatches = [
-      ...output.matchAll(/Authentications that can continue:\s*([^\r\n]+)/g),
-    ];
+    const methodsMatches = [...output.matchAll(/Authentications that can continue:\s*([^\r\n]+)/g)];
     const methods = methodsMatches.length
       ? methodsMatches[methodsMatches.length - 1][1].trim()
       : null;

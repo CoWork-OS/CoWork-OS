@@ -590,7 +590,12 @@ export class TelegramAdapter implements ChannelAdapter {
       return true;
     }
 
-    const text = typeof msg?.text === "string" ? msg.text : typeof msg?.caption === "string" ? msg.caption : "";
+    const text =
+      typeof msg?.text === "string"
+        ? msg.text
+        : typeof msg?.caption === "string"
+          ? msg.caption
+          : "";
     const trimmed = String(text || "").trim();
     const botUsername = (this._botUsername || "").replace(/^@/, "").toLowerCase();
     const normalizedText = trimmed.toLowerCase();
@@ -599,8 +604,7 @@ export class TelegramAdapter implements ChannelAdapter {
       String(msg?.reply_to_message?.from?.username || "")
         .replace(/^@/, "")
         .toLowerCase() === botUsername;
-    const isMentioned =
-      botUsername.length > 0 && normalizedText.includes(`@${botUsername}`);
+    const isMentioned = botUsername.length > 0 && normalizedText.includes(`@${botUsername}`);
     const isSlashCommand = trimmed.startsWith("/");
 
     switch (mode) {

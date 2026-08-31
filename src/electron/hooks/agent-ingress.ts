@@ -13,10 +13,7 @@ import {
   getActiveTempWorkspaceLeases,
   touchTempWorkspaceLease,
 } from "../utils/temp-workspace-lease";
-import {
-  ensureTempWorkspaceDirectoryPathSync,
-  pruneTempWorkspaces,
-} from "../utils/temp-workspace";
+import { ensureTempWorkspaceDirectoryPathSync, pruneTempWorkspaces } from "../utils/temp-workspace";
 import { HookSessionRepository } from "./HookSessionRepository";
 import { TEMP_WORKSPACE_NAME, TEMP_WORKSPACE_ROOT_DIR_NAME } from "../../shared/types";
 
@@ -135,9 +132,8 @@ export class HookAgentIngress {
 
       const workspaceId =
         action.workspaceId ||
-        (await this.createTempWorkspace(
-          options.tempWorkspaceKey || this.defaultTempWorkspaceKey,
-        )).id;
+        (await this.createTempWorkspace(options.tempWorkspaceKey || this.defaultTempWorkspaceKey))
+          .id;
 
       const task = await this.agentDaemon.createTask({
         title: action.name || "Webhook Task",

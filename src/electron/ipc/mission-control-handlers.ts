@@ -161,17 +161,19 @@ function getOutputContract(metadata: unknown): CompanyOutputContract | null {
     valueReason: candidate.valueReason,
     reviewRequired: Boolean(candidate.reviewRequired),
     reviewReason:
-      typeof candidate.reviewReason === "string" ? candidate.reviewReason as Any : undefined,
+      typeof candidate.reviewReason === "string" ? (candidate.reviewReason as Any) : undefined,
     evidenceRefs: Array.isArray(candidate.evidenceRefs)
       ? (candidate.evidenceRefs as CompanyEvidenceRef[])
       : [],
     companyPriority:
-      typeof candidate.companyPriority === "string" ? candidate.companyPriority as Any : undefined,
+      typeof candidate.companyPriority === "string"
+        ? (candidate.companyPriority as Any)
+        : undefined,
     triggerReason:
       typeof candidate.triggerReason === "string" ? candidate.triggerReason : undefined,
     expectedOutputType:
       typeof candidate.expectedOutputType === "string"
-        ? candidate.expectedOutputType as Any
+        ? (candidate.expectedOutputType as Any)
         : undefined,
   };
 }
@@ -288,7 +290,9 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   ipcMain.handle(
     IPC_CHANNELS.MISSION_CONTROL_GET_ITEM_EVIDENCE,
     async (_, itemId: string): Promise<MissionControlItemEvidence[]> => {
-      return missionControlIntelligence.getEvidence(requireString(itemId, "Mission Control item ID"));
+      return missionControlIntelligence.getEvidence(
+        requireString(itemId, "Mission Control item ID"),
+      );
     },
   );
 
@@ -428,32 +432,35 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     automationProfileRepo.deleteById(validated);
   });
 
-  ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_ATTACH, async (_, agentRoleId: string, request?: Record<string, unknown>) => {
-    checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_ATTACH);
-    const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-    const validatedRequest = validateInput(
-      AutomationProfileAttachRequestSchema,
-      request ?? {},
-      "automation profile attach request",
-    );
-    const role = agentRoleRepo.findById(validatedRoleId);
-    if (!role) {
-      throw new Error("Agent role not found");
-    }
-    if (role.roleKind === "persona_template") {
-      throw new Error("Digital Twin roles cannot own core automation profiles");
-    }
-    return automationProfileRepo.createOrReplace({
-      agentRoleId: validatedRoleId,
-      enabled: validatedRequest.enabled ?? true,
-      cadenceMinutes: validatedRequest.cadenceMinutes,
-      staggerOffsetMinutes: validatedRequest.staggerOffsetMinutes,
-      dispatchCooldownMinutes: validatedRequest.dispatchCooldownMinutes,
-      maxDispatchesPerDay: validatedRequest.maxDispatchesPerDay,
-      profile: validatedRequest.profile,
-      activeHours: validatedRequest.activeHours,
-    });
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.AUTOMATION_PROFILE_ATTACH,
+    async (_, agentRoleId: string, request?: Record<string, unknown>) => {
+      checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_ATTACH);
+      const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
+      const validatedRequest = validateInput(
+        AutomationProfileAttachRequestSchema,
+        request ?? {},
+        "automation profile attach request",
+      );
+      const role = agentRoleRepo.findById(validatedRoleId);
+      if (!role) {
+        throw new Error("Agent role not found");
+      }
+      if (role.roleKind === "persona_template") {
+        throw new Error("Digital Twin roles cannot own core automation profiles");
+      }
+      return automationProfileRepo.createOrReplace({
+        agentRoleId: validatedRoleId,
+        enabled: validatedRequest.enabled ?? true,
+        cadenceMinutes: validatedRequest.cadenceMinutes,
+        staggerOffsetMinutes: validatedRequest.staggerOffsetMinutes,
+        dispatchCooldownMinutes: validatedRequest.dispatchCooldownMinutes,
+        maxDispatchesPerDay: validatedRequest.maxDispatchesPerDay,
+        profile: validatedRequest.profile,
+        activeHours: validatedRequest.activeHours,
+      });
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_DETACH, async (_, agentRoleId: string) => {
     checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_DETACH);
@@ -461,34 +468,43 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     automationProfileRepo.deleteByAgentRoleId(validatedRoleId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_LIST_HEARTBEAT_RUNS, async (_, payload: { profileId: string; limit?: number }) => {
-    const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
-    const profile = automationProfileRepo.findById(profileId);
-    if (!profile) {
-      throw new Error("Automation profile not found");
-    }
-    const all = heartbeatRunRepo.listRecentDispatches(profile.agentRoleId, 0);
-    return typeof payload?.limit === "number" ? all.slice(0, payload.limit) : all;
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.AUTOMATION_PROFILE_LIST_HEARTBEAT_RUNS,
+    async (_, payload: { profileId: string; limit?: number }) => {
+      const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
+      const profile = automationProfileRepo.findById(profileId);
+      if (!profile) {
+        throw new Error("Automation profile not found");
+      }
+      const all = heartbeatRunRepo.listRecentDispatches(profile.agentRoleId, 0);
+      return typeof payload?.limit === "number" ? all.slice(0, payload.limit) : all;
+    },
+  );
 
-  ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_LIST_SUBCONSCIOUS_RUNS, async (_, payload: { profileId: string; limit?: number }) => {
-    const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
-    const profile = automationProfileRepo.findById(profileId);
-    if (!profile) {
-      throw new Error("Automation profile not found");
-    }
-    return subconsciousRunRepo.list({
-      targetKey: `agent_role:${profile.agentRoleId}`,
-      limit: typeof payload?.limit === "number" ? payload.limit : 20,
-    });
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.AUTOMATION_PROFILE_LIST_SUBCONSCIOUS_RUNS,
+    async (_, payload: { profileId: string; limit?: number }) => {
+      const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
+      const profile = automationProfileRepo.findById(profileId);
+      if (!profile) {
+        throw new Error("Automation profile not found");
+      }
+      return subconsciousRunRepo.list({
+        targetKey: `agent_role:${profile.agentRoleId}`,
+        limit: typeof payload?.limit === "number" ? payload.limit : 20,
+      });
+    },
+  );
 
-  ipcMain.handle(IPC_CHANNELS.CORE_TRACE_LIST, async (_, request?: unknown): Promise<CoreTrace[]> => {
-    const validated = request
-      ? validateInput(CoreTraceListRequestSchema, request, "core trace list request")
-      : {};
-    return coreTraceRepo.list(validated);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.CORE_TRACE_LIST,
+    async (_, request?: unknown): Promise<CoreTrace[]> => {
+      const validated = request
+        ? validateInput(CoreTraceListRequestSchema, request, "core trace list request")
+        : {};
+      return coreTraceRepo.list(validated);
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.CORE_TRACE_GET, async (_, id: string) => {
     const validated = validateInput(StringIdSchema, id, "core trace ID");
@@ -578,11 +594,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     IPC_CHANNELS.CORE_EXPERIMENT_LIST,
     async (_, request?: unknown): Promise<CoreHarnessExperiment[]> => {
       const validated = request
-        ? validateInput(
-            CoreExperimentListRequestSchema,
-            request,
-            "core experiment list request",
-          )
+        ? validateInput(CoreExperimentListRequestSchema, request, "core experiment list request")
         : {};
       return deps.coreHarnessExperimentService.listExperiments(validated);
     },
@@ -615,11 +627,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     IPC_CHANNELS.CORE_LEARNINGS_LIST,
     async (_, request?: unknown): Promise<CoreLearningsEntry[]> => {
       const validated = request
-        ? validateInput(
-            CoreLearningsListRequestSchema,
-            request,
-            "core learnings list request",
-          )
+        ? validateInput(CoreLearningsListRequestSchema, request, "core learnings list request")
         : {};
       return deps.coreLearningsService.list(validated);
     },
@@ -656,7 +664,10 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
 
   ipcMain.handle(
     IPC_CHANNELS.CORE_MEMORY_LIST_DISTILL_RUNS,
-    async (_, payload: { profileId: string; workspaceId?: string; limit?: number }): Promise<CoreMemoryDistillRun[]> => {
+    async (
+      _,
+      payload: { profileId: string; workspaceId?: string; limit?: number },
+    ): Promise<CoreMemoryDistillRun[]> => {
       const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
       const workspaceId =
         typeof payload?.workspaceId === "string" && payload.workspaceId.trim().length > 0
@@ -823,13 +834,13 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       return core.createCompany({
         name: requireString(request.name, "company name"),
         slug: optionalString(request.slug),
-        description:
-          request.description === null ? undefined : optionalString(request.description),
+        description: request.description === null ? undefined : optionalString(request.description),
         status: optionalString(request.status) as "active" | "inactive" | "suspended" | undefined,
         isDefault: typeof request.isDefault === "boolean" ? request.isDefault : undefined,
         monthlyBudgetCost:
           request.monthlyBudgetCost === null ? null : optionalNumber(request.monthlyBudgetCost),
-        budgetPausedAt: request.budgetPausedAt === null ? null : optionalNumber(request.budgetPausedAt),
+        budgetPausedAt:
+          request.budgetPausedAt === null ? null : optionalNumber(request.budgetPausedAt),
       });
     },
   );
@@ -854,13 +865,13 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       return core.updateCompany(validated, {
         name: optionalString(request.name),
         slug: optionalString(request.slug),
-        description:
-          request.description === null ? "" : optionalString(request.description),
+        description: request.description === null ? "" : optionalString(request.description),
         status: optionalString(request.status) as "active" | "inactive" | "suspended" | undefined,
         isDefault: typeof request.isDefault === "boolean" ? request.isDefault : undefined,
         monthlyBudgetCost:
           request.monthlyBudgetCost === null ? null : optionalNumber(request.monthlyBudgetCost),
-        budgetPausedAt: request.budgetPausedAt === null ? null : optionalNumber(request.budgetPausedAt),
+        budgetPausedAt:
+          request.budgetPausedAt === null ? null : optionalNumber(request.budgetPausedAt),
       });
     },
   );
@@ -994,7 +1005,9 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         evidenceRefs: contract.evidenceRefs,
         companyPriority: contract.companyPriority,
         whatChanged: run.summary,
-        nextStep: contract.expectedOutputType ? `Expected next output: ${contract.expectedOutputType}` : undefined,
+        nextStep: contract.expectedOutputType
+          ? `Expected next output: ${contract.expectedOutputType}`
+          : undefined,
       });
     }
 
@@ -1018,12 +1031,19 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         outputType: contract.outputType,
         valueReason: contract.valueReason,
         triggerReason: contract.triggerReason,
-        reviewRequired: contract.reviewRequired || issue.status === "review" || issue.status === "blocked",
+        reviewRequired:
+          contract.reviewRequired || issue.status === "review" || issue.status === "blocked",
         reviewReason:
-          contract.reviewReason || (issue.status === "blocked" ? "operator_attention" : issue.status === "review" ? "strategy" : undefined),
+          contract.reviewReason ||
+          (issue.status === "blocked"
+            ? "operator_attention"
+            : issue.status === "review"
+              ? "strategy"
+              : undefined),
         evidenceRefs: contract.evidenceRefs,
         companyPriority: contract.companyPriority,
-        whatChanged: issue.status === "blocked" ? "Issue is blocked" : `Issue moved to ${issue.status}`,
+        whatChanged:
+          issue.status === "blocked" ? "Issue is blocked" : `Issue moved to ${issue.status}`,
         nextStep: getCompletionNextStep(issue.metadata),
       });
     }
@@ -1039,7 +1059,8 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         summary: activity.description,
         createdAt: activity.createdAt,
         operatorRoleId: contract.operatorRoleId || activity.agentRoleId,
-        taskId: typeof activity.metadata?.taskId === "string" ? activity.metadata.taskId : undefined,
+        taskId:
+          typeof activity.metadata?.taskId === "string" ? activity.metadata.taskId : undefined,
         loopType: contract.loopType,
         outputType: contract.outputType,
         valueReason: contract.valueReason,
@@ -1085,44 +1106,47 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       };
     });
 
-    const executionMap: CompanyExecutionMapItem[] = issues
-      .slice(0, 50)
-      .map((issue) => {
-        const run = issue.activeRunId ? runs.find((entry) => entry.id === issue.activeRunId) : undefined;
-        const task = issue.taskId ? tasks.find((entry) => entry?.id === issue.taskId) : undefined;
-        const contract = getOutputContract(issue.metadata);
-        const origin = getIssueOrigin(issue.metadata);
-        return {
-          issueId: issue.id,
-          issueTitle: issue.title,
-          issueStatus: issue.status,
-          origin: origin.origin,
-          originLabel: origin.label,
-          goalId: issue.goalId,
-          goalTitle: goals.find((goal) => goal.id === issue.goalId)?.title,
-          projectId: issue.projectId,
-          projectName: projects.find((project) => project.id === issue.projectId)?.name,
-          runId: run?.id,
-          runStatus: run?.status,
-          taskId: task?.id,
-          taskStatus: task?.status,
-          outputType: contract?.outputType,
-          ownerAgentRoleId: issue.assigneeAgentRoleId,
-          stale: Date.now() - issue.updatedAt > 3 * 24 * 60 * 60 * 1000,
-        };
-      });
+    const executionMap: CompanyExecutionMapItem[] = issues.slice(0, 50).map((issue) => {
+      const run = issue.activeRunId
+        ? runs.find((entry) => entry.id === issue.activeRunId)
+        : undefined;
+      const task = issue.taskId ? tasks.find((entry) => entry?.id === issue.taskId) : undefined;
+      const contract = getOutputContract(issue.metadata);
+      const origin = getIssueOrigin(issue.metadata);
+      return {
+        issueId: issue.id,
+        issueTitle: issue.title,
+        issueStatus: issue.status,
+        origin: origin.origin,
+        originLabel: origin.label,
+        goalId: issue.goalId,
+        goalTitle: goals.find((goal) => goal.id === issue.goalId)?.title,
+        projectId: issue.projectId,
+        projectName: projects.find((project) => project.id === issue.projectId)?.name,
+        runId: run?.id,
+        runStatus: run?.status,
+        taskId: task?.id,
+        taskStatus: task?.status,
+        outputType: contract?.outputType,
+        ownerAgentRoleId: issue.assigneeAgentRoleId,
+        stale: Date.now() - issue.updatedAt > 3 * 24 * 60 * 60 * 1000,
+      };
+    });
 
     const summary: CompanyCommandCenterSummary = {
       company,
       overview: {
         activeGoalCount: goals.filter((goal) => goal.status === "active").length,
         activeProjectCount: projects.filter((project) => project.status === "active").length,
-        openIssueCount: issues.filter((issue) => !["done", "cancelled"].includes(issue.status)).length,
+        openIssueCount: issues.filter((issue) => !["done", "cancelled"].includes(issue.status))
+          .length,
         blockedIssueCount: issues.filter((issue) => issue.status === "blocked").length,
         pendingReviewCount: reviewQueue.length,
         valuableOutputCount: outputs.length,
         operatorCount: operators.length,
-        healthyOperatorCount: operatorStatuses.filter((operator) => (operator.operatorHealthScore ?? 0.7) >= 0.6).length,
+        healthyOperatorCount: operatorStatuses.filter(
+          (operator) => (operator.operatorHealthScore ?? 0.7) >= 0.6,
+        ).length,
       },
       operators: operatorStatuses,
       outputs: outputs.slice(0, 30),
@@ -1162,8 +1186,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       return core.createGoal({
         companyId: optionalUuid(request.companyId, "company ID"),
         title: requireString(request.title, "goal title"),
-        description:
-          request.description === null ? undefined : optionalString(request.description),
+        description: request.description === null ? undefined : optionalString(request.description),
         status: optionalString(request.status) as
           | "active"
           | "completed"
@@ -1234,8 +1257,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         companyId: optionalUuid(request.companyId, "company ID"),
         goalId: optionalUuid(request.goalId, "goal ID"),
         name: requireString(request.name, "project name"),
-        description:
-          request.description === null ? undefined : optionalString(request.description),
+        description: request.description === null ? undefined : optionalString(request.description),
         status: optionalString(request.status) as
           | "active"
           | "paused"
@@ -1268,8 +1290,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       const validated = validateInput(UUIDSchema, request.projectId, "project ID");
       return core.updateProject(validated, {
         companyId: optionalUuid(request.companyId, "company ID"),
-        goalId:
-          request.goalId === null ? null : optionalUuid(request.goalId, "goal ID"),
+        goalId: request.goalId === null ? null : optionalUuid(request.goalId, "goal ID"),
         name: optionalString(request.name),
         description: request.description === null ? "" : optionalString(request.description),
         status: optionalString(request.status) as
@@ -1312,14 +1333,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         activeRunId?: string;
         title: string;
         description?: string;
-        status?:
-          | "backlog"
-          | "todo"
-          | "in_progress"
-          | "review"
-          | "blocked"
-          | "done"
-          | "cancelled";
+        status?: "backlog" | "todo" | "in_progress" | "review" | "blocked" | "done" | "cancelled";
         priority?: number;
         assigneeAgentRoleId?: string;
         reporterAgentRoleId?: string;
@@ -1339,13 +1353,13 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         taskId: optionalUuid(request.taskId, "task ID"),
         activeRunId: optionalUuid(request.activeRunId, "run ID"),
         title: requireString(request.title, "issue title"),
-        description:
-          request.description === null ? undefined : optionalString(request.description),
+        description: request.description === null ? undefined : optionalString(request.description),
         status: optionalString(request.status) as Issue["status"] | undefined,
         priority: optionalNumber(request.priority),
         assigneeAgentRoleId: optionalUuid(request.assigneeAgentRoleId, "assignee agent role ID"),
         reporterAgentRoleId: optionalUuid(request.reporterAgentRoleId, "reporter agent role ID"),
-        requestDepth: request.requestDepth === null ? undefined : optionalNumber(request.requestDepth),
+        requestDepth:
+          request.requestDepth === null ? undefined : optionalNumber(request.requestDepth),
         billingCode: optionalString(request.billingCode),
         metadata:
           request.metadata && typeof request.metadata === "object" ? request.metadata : undefined,
@@ -1368,14 +1382,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         activeRunId?: string | null;
         title?: string;
         description?: string;
-        status?:
-          | "backlog"
-          | "todo"
-          | "in_progress"
-          | "review"
-          | "blocked"
-          | "done"
-          | "cancelled";
+        status?: "backlog" | "todo" | "in_progress" | "review" | "blocked" | "done" | "cancelled";
         priority?: number;
         assigneeAgentRoleId?: string | null;
         reporterAgentRoleId?: string | null;
@@ -1389,7 +1396,8 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       const validated = validateInput(UUIDSchema, request.issueId, "issue ID");
       return core.updateIssue(validated, {
         goalId: request.goalId === null ? null : optionalUuid(request.goalId, "goal ID"),
-        projectId: request.projectId === null ? null : optionalUuid(request.projectId, "project ID"),
+        projectId:
+          request.projectId === null ? null : optionalUuid(request.projectId, "project ID"),
         parentIssueId:
           request.parentIssueId === null
             ? null
@@ -1397,7 +1405,8 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         workspaceId:
           request.workspaceId === null ? null : optionalUuid(request.workspaceId, "workspace ID"),
         taskId: request.taskId === null ? null : optionalUuid(request.taskId, "task ID"),
-        activeRunId: request.activeRunId === null ? null : optionalUuid(request.activeRunId, "run ID"),
+        activeRunId:
+          request.activeRunId === null ? null : optionalUuid(request.activeRunId, "run ID"),
         title: optionalString(request.title),
         description: request.description === null ? "" : optionalString(request.description),
         status: optionalString(request.status) as Issue["status"] | undefined,

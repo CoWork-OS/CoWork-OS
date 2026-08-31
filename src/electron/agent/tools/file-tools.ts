@@ -2,7 +2,12 @@ import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
-import { SensitiveSourceRef, Task, Workspace, WorkspacePathAliasPolicy } from "../../../shared/types";
+import {
+  SensitiveSourceRef,
+  Task,
+  Workspace,
+  WorkspacePathAliasPolicy,
+} from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
 import {
@@ -13,10 +18,7 @@ import {
 import mammoth from "mammoth";
 import { extractPptxContentFromFile } from "../../utils/pptx-extractor";
 import { extractPdfText } from "../../utils/pdf-text";
-import {
-  detectWorkspacePathAlias,
-  shouldRewriteWorkspaceAliasPath,
-} from "../path-alias";
+import { detectWorkspacePathAlias, shouldRewriteWorkspaceAliasPath } from "../path-alias";
 import {
   buildManagedAutomatedOutputPath,
   isAlreadyInManagedOutputZone,
@@ -31,6 +33,14 @@ import {
   buildUntrustedContentBanner,
   isUntrustedExternalSource,
 } from "../security/export-permission-context";
+import {
+  canonicalizeAccessPath,
+  evaluateWorkspaceFilesystemAccess,
+  isProtectedFilesystemPath,
+  isAccessPathWithin,
+  resolveAccessControlledPath,
+  type AccessFilesystemOperation,
+} from "../../security/access-profile-paths";
 
 // Limits to prevent context overflow
 const DEFAULT_READ_WINDOW_CHARS = 300 * 1024; // 300KB default read window
@@ -58,7 +68,7 @@ interface WriteFileOptions {
 function getElectronShell(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     const shell = electron?.shell;
     if (shell) return shell;
@@ -79,7 +89,7 @@ export class FileTools {
     private daemon: AgentDaemon,
     private taskId: string,
   ) {
-    ensureCoWorkPrivatePathsExcluded(workspace.path);
+    this.ensurePrivatePathsExcluded();
   }
 
   /**
@@ -87,7 +97,18 @@ export class FileTools {
    */
   setWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
-    ensureCoWorkPrivatePathsExcluded(workspace.path);
+    this.ensurePrivatePathsExcluded();
+  }
+
+  private ensurePrivatePathsExcluded(): void {
+    ensureCoWorkPrivatePathsExcluded(this.workspace.path, undefined, {
+      canRead: (candidatePath) =>
+        evaluateWorkspaceFilesystemAccess(this.workspace, candidatePath, "read").decision ===
+        "allow",
+      canWrite: (candidatePath) =>
+        evaluateWorkspaceFilesystemAccess(this.workspace, candidatePath, "write").decision ===
+        "allow",
+    });
   }
 
   setWorkspacePathAliasPolicy(policy: WorkspacePathAliasPolicy | undefined): void {
@@ -114,50 +135,53 @@ export class FileTools {
   }
 
   /**
-   * Dangerous paths that should never be written to, even with unrestricted access
-   */
-  private static readonly PROTECTED_PATHS = [
-    "/System",
-    "/Library",
-    "/usr",
-    "/bin",
-    "/sbin",
-    "/etc",
-    "/var",
-    "/private",
-    "C:\\Windows",
-    "C:\\Program Files",
-    "C:\\Program Files (x86)",
-  ];
-
-  /**
    * Check if a path is in a protected system location
    */
   private isProtectedPath(absolutePath: string): boolean {
-    const normalizedPath = path.normalize(absolutePath).toLowerCase();
-    return FileTools.PROTECTED_PATHS.some((protectedPath) =>
-      normalizedPath.startsWith(protectedPath.toLowerCase()),
-    );
+    return isProtectedFilesystemPath(absolutePath);
   }
 
   /**
    * Check if path is allowed based on allowedPaths configuration
    */
-  private isPathAllowed(absolutePath: string): boolean {
-    const allowedPaths = this.workspace.permissions.allowedPaths;
-    if (!allowedPaths || allowedPaths.length === 0) {
-      return false;
-    }
+  private isPathAllowed(
+    absolutePath: string,
+    operation: AccessFilesystemOperation = "read",
+  ): boolean {
+    return (
+      evaluateWorkspaceFilesystemAccess(this.workspace, absolutePath, operation).decision ===
+      "allow"
+    );
+  }
 
-    const normalizedPath = path.normalize(absolutePath);
-    return allowedPaths.some((allowed) => {
-      const normalizedAllowed = path.normalize(allowed);
-      // Check if the path starts with or equals an allowed path
-      return (
-        normalizedPath === normalizedAllowed ||
-        normalizedPath.startsWith(normalizedAllowed + path.sep)
-      );
+  private assertAccessProfilePathAllowed(
+    absolutePath: string,
+    operation: AccessFilesystemOperation,
+    externalApprovalGranted = false,
+  ): void {
+    const decision = evaluateWorkspaceFilesystemAccess(this.workspace, absolutePath, operation, {
+      externalApprovalGranted,
     });
+    if (decision.decision !== "allow") {
+      if (decision.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${absolutePath}`);
+      }
+      // Leave lexical in-workspace symlink escapes to the async realpath
+      // guard. That guard can report the escape precisely and also checks the
+      // nearest existing parent for writes/deletes. The central evaluator
+      // intentionally canonicalizes first, so it cannot distinguish this
+      // case from an ordinary outside path on its own.
+      const lexicalWorkspace = path.resolve(this.workspace.path);
+      const lexicalRelative = path.relative(lexicalWorkspace, path.resolve(absolutePath));
+      if (
+        decision.reason === "outside_workspace" &&
+        !lexicalRelative.startsWith("..") &&
+        !path.isAbsolute(lexicalRelative)
+      ) {
+        return;
+      }
+      throw new Error(`Path is denied by the active workspace access policy: ${absolutePath}`);
+    }
   }
 
   /**
@@ -249,7 +273,10 @@ export class FileTools {
     absolutePath: string,
     normalizedWorkspace: string,
   ): string | null {
-    for (const candidate of this.getWorkspaceReadRecoveryCandidates(absolutePath, normalizedWorkspace)) {
+    for (const candidate of this.getWorkspaceReadRecoveryCandidates(
+      absolutePath,
+      normalizedWorkspace,
+    )) {
       try {
         if (fsSync.statSync(candidate).isFile()) {
           this.daemon.logEvent(this.taskId, "log", {
@@ -272,9 +299,17 @@ export class FileTools {
    * When unrestrictedFileAccess is enabled, allows absolute paths anywhere (except protected locations)
    * When allowedPaths is configured, allows specific paths outside workspace
    */
-  private resolvePath(inputPath: string, operation: "read" | "write" | "delete" = "read"): string {
+  private resolvePath(
+    inputPath: string,
+    operation: "read" | "write" | "delete" = "read",
+    externalApprovalGranted = false,
+  ): string {
     inputPath = this.expandHomeShortcutPath(inputPath);
     const normalizedWorkspace = path.resolve(this.workspace.path);
+    const finish = (resolvedPath: string): string => {
+      this.assertAccessProfilePathAllowed(resolvedPath, operation, externalApprovalGranted);
+      return resolvedPath;
+    };
 
     // Handle absolute paths
     if (path.isAbsolute(inputPath)) {
@@ -283,7 +318,7 @@ export class FileTools {
       // Check if it's inside workspace (always allowed)
       const relativeToWorkspace = path.relative(normalizedWorkspace, absolutePath);
       if (!relativeToWorkspace.startsWith("..") && !path.isAbsolute(relativeToWorkspace)) {
-        return absolutePath;
+        return finish(absolutePath);
       }
 
       // Recover from stale absolute paths that still embed the current
@@ -296,7 +331,7 @@ export class FileTools {
         this.daemon.logEvent(this.taskId, "log", {
           message: `Remapped stale absolute path to workspace: ${absolutePath} -> ${remappedPath}`,
         });
-        return remappedPath;
+        return finish(remappedPath);
       }
 
       const aliasRemappedPath = this.remapWorkspaceAliasAbsolutePathToWorkspace(
@@ -305,7 +340,7 @@ export class FileTools {
         operation,
       );
       if (aliasRemappedPath) {
-        return aliasRemappedPath;
+        return finish(aliasRemappedPath);
       }
 
       if (operation === "read" && !fsSync.existsSync(absolutePath)) {
@@ -314,25 +349,36 @@ export class FileTools {
           normalizedWorkspace,
         );
         if (recoveredReadPath) {
-          return recoveredReadPath;
+          return finish(recoveredReadPath);
         }
       }
 
       // Outside workspace - check permissions
-      if (this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess) {
+      const legacyTemporaryAccess =
+        this.workspace.isTemp === true &&
+        !this.workspace.permissions.accessProfileId &&
+        this.workspace.permissions.accessProfileScoped !== true;
+      if (legacyTemporaryAccess || this.workspace.permissions.unrestrictedFileAccess) {
         // With unrestricted access, block protected paths for writes
         if (operation !== "read" && this.isProtectedPath(absolutePath)) {
           throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
         }
-        return absolutePath;
+        return finish(absolutePath);
       }
 
       // Check if in allowed paths
-      if (this.isPathAllowed(absolutePath)) {
+      if (this.isPathAllowed(absolutePath, operation)) {
         if (operation !== "read" && this.isProtectedPath(absolutePath)) {
           throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
         }
-        return absolutePath;
+        return finish(absolutePath);
+      }
+
+      if (externalApprovalGranted) {
+        if (operation !== "read" && this.isProtectedPath(absolutePath)) {
+          throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
+        }
+        return finish(absolutePath);
       }
 
       throw new Error(
@@ -348,18 +394,29 @@ export class FileTools {
 
     if (relative.startsWith("..") || path.isAbsolute(relative)) {
       // Path escapes workspace via ../ traversal
-      if (this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess) {
+      const legacyTemporaryAccess =
+        this.workspace.isTemp === true &&
+        !this.workspace.permissions.accessProfileId &&
+        this.workspace.permissions.accessProfileScoped !== true;
+      if (legacyTemporaryAccess || this.workspace.permissions.unrestrictedFileAccess) {
         if (operation !== "read" && this.isProtectedPath(resolved)) {
           throw new Error(`Cannot ${operation} protected system path: ${resolved}`);
         }
-        return resolved;
+        return finish(resolved);
       }
 
-      if (this.isPathAllowed(resolved)) {
+      if (this.isPathAllowed(resolved, operation)) {
         if (operation !== "read" && this.isProtectedPath(resolved)) {
           throw new Error(`Cannot ${operation} protected system path: ${resolved}`);
         }
-        return resolved;
+        return finish(resolved);
+      }
+
+      if (externalApprovalGranted) {
+        if (operation !== "read" && this.isProtectedPath(resolved)) {
+          throw new Error(`Cannot ${operation} protected system path: ${resolved}`);
+        }
+        return finish(resolved);
       }
 
       throw new Error(
@@ -369,14 +426,70 @@ export class FileTools {
       );
     }
 
-    return resolved;
+    return finish(resolved);
+  }
+
+  /**
+   * Resolve a mutation path, requesting a one-shot approval only when the
+   * central evaluator identifies a plain external-workspace crossing. Profile
+   * denies, protected system paths, and disabled capabilities remain hard
+   * denials and never turn into prompts.
+   */
+  private async resolvePathWithExternalApproval(
+    inputPath: string,
+    operation: "read" | "write" | "delete",
+    label: string,
+  ): Promise<string> {
+    try {
+      return this.resolvePath(inputPath, operation);
+    } catch (error) {
+      const candidate = resolveAccessControlledPath(this.workspace.path, inputPath);
+      const access = evaluateWorkspaceFilesystemAccess(this.workspace, candidate, operation);
+      if (access.reason !== "outside_workspace") throw error;
+      if (operation !== "read" && this.isProtectedPath(candidate)) {
+        throw new Error(`Cannot ${operation} protected system path: ${candidate}`);
+      }
+
+      const daemonAny = this.daemon as Any;
+      let approved =
+        typeof daemonAny.consumeExternalFileApproval === "function" &&
+        daemonAny.consumeExternalFileApproval(this.taskId, candidate, operation) === true;
+      if (!approved && typeof daemonAny.requestApproval === "function") {
+        approved =
+          (await daemonAny.requestApproval(
+            this.taskId,
+            "external_file_access",
+            `Allow ${operation} access to external ${label}: ${candidate}`,
+            {
+              path: candidate,
+              operation,
+              tool: "file_tools",
+            },
+          )) === true;
+        if (approved && typeof daemonAny.consumeExternalFileApproval === "function") {
+          // requestApproval records a one-shot grant; consume it before the
+          // filesystem call so it cannot be reused by another operation.
+          daemonAny.consumeExternalFileApproval(this.taskId, candidate, operation);
+        }
+      }
+      if (!approved) throw new Error(`External ${label} access was not approved.`);
+
+      const granted = evaluateWorkspaceFilesystemAccess(this.workspace, candidate, operation, {
+        externalApprovalGranted: true,
+      });
+      if (granted.decision !== "allow") {
+        throw new Error(`Access denied for ${label} "${candidate}": ${granted.reason}`);
+      }
+      return this.resolvePath(inputPath, operation, true);
+    }
   }
 
   private normalizeWorkspaceBoundaryReadPath(
     inputPath: string,
     toolName: "list_directory" | "list_directory_with_sizes" | "search_files",
   ): string {
-    const normalizedInput = typeof inputPath === "string" && inputPath.trim().length > 0 ? inputPath : ".";
+    const normalizedInput =
+      typeof inputPath === "string" && inputPath.trim().length > 0 ? inputPath : ".";
     const homeExpandedInput = this.expandHomeShortcutPath(normalizedInput);
     if (homeExpandedInput !== normalizedInput) {
       this.daemon.logEvent(this.taskId, "home_path_expanded", {
@@ -501,29 +614,24 @@ export class FileTools {
 
   private assertResolvedPathAllowed(
     absolutePath: string,
-    operation: "read" | "write",
+    operation: AccessFilesystemOperation,
     context: "target" | "parent",
   ): void {
-    if (this.isInsideWorkspaceRealpathAware(absolutePath)) return;
-
-    if (this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess) {
-      if (operation !== "read" && this.isProtectedPath(absolutePath)) {
-        throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
-      }
-      return;
+    const result = evaluateWorkspaceFilesystemAccess(this.workspace, absolutePath, operation);
+    if (result.decision !== "allow") {
+      throw new Error(
+        `Path resolves outside workspace boundary via symbolic link (${context}). ` +
+          `Resolved path: ${absolutePath}. Workspace: ${path.resolve(this.workspace.path)}.`,
+      );
     }
-
-    if (this.isPathAllowed(absolutePath)) {
-      if (operation !== "read" && this.isProtectedPath(absolutePath)) {
-        throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
-      }
-      return;
+    const workspaceRoot = canonicalizeAccessPath(this.workspace.path);
+    if (
+      operation !== "read" &&
+      !isAccessPathWithin(workspaceRoot, absolutePath) &&
+      this.isProtectedPath(absolutePath)
+    ) {
+      throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
     }
-
-    throw new Error(
-      `Path resolves outside workspace boundary via symbolic link (${context}). ` +
-        `Resolved path: ${absolutePath}. Workspace: ${path.resolve(this.workspace.path)}.`,
-    );
   }
 
   private async realpathIfExists(p: string): Promise<string | null> {
@@ -584,7 +692,7 @@ export class FileTools {
     }
 
     const redirectedPath = buildManagedAutomatedOutputPath(this.taskId, workspaceRelative);
-    ensureCoWorkPrivatePathsExcluded(this.workspace.path);
+    this.ensurePrivatePathsExcluded();
     this.daemon.logEvent(this.taskId, "log", {
       message: `Redirected automated task output to managed zone: ${workspaceRelative} -> ${redirectedPath}`,
       source: "managed_output_policy",
@@ -601,14 +709,14 @@ export class FileTools {
    */
   private async enforceSymlinkSafeAccess(
     absolutePath: string,
-    operation: "read" | "write",
+    operation: AccessFilesystemOperation,
   ): Promise<void> {
     const realTarget = await this.realpathIfExists(absolutePath);
     if (realTarget) {
       this.assertResolvedPathAllowed(realTarget, operation, "target");
     }
 
-    if (operation === "write") {
+    if (operation === "write" || operation === "delete") {
       const ancestor = await this.realpathNearestExistingAncestor(path.dirname(absolutePath));
       if (ancestor) {
         this.assertResolvedPathAllowed(ancestor, operation, "parent");
@@ -937,7 +1045,10 @@ export class FileTools {
     if (!path.isAbsolute(absolutePath)) return null;
 
     const normalizedWorkspace = path.resolve(this.workspace.path);
-    for (const candidate of this.getWorkspaceReadRecoveryCandidates(absolutePath, normalizedWorkspace)) {
+    for (const candidate of this.getWorkspaceReadRecoveryCandidates(
+      absolutePath,
+      normalizedWorkspace,
+    )) {
       if (!(await this.pathLooksLikeReadableFile(candidate))) continue;
       this.daemon.logEvent(this.taskId, "log", {
         message: `Recovered stale absolute read path to workspace: ${absolutePath} -> ${candidate}`,
@@ -970,7 +1081,10 @@ export class FileTools {
     };
   }
 
-  private sliceContentWindow(content: string, readWindow: ReadWindowOptions): {
+  private sliceContentWindow(
+    content: string,
+    readWindow: ReadWindowOptions,
+  ): {
     content: string;
     truncated: boolean;
     window: ReadWindow;
@@ -1196,11 +1310,11 @@ export class FileTools {
     );
     const requestedPath = redirected.requestedPath;
     if (isCoWorkPrivateGeneratedPath(requestedPath)) {
-      ensureCoWorkPrivatePathsExcluded(this.workspace.path);
+      this.ensurePrivatePathsExcluded();
     }
 
     this.checkPermission("write");
-    const fullPath = this.resolvePath(requestedPath, "write");
+    const fullPath = await this.resolvePathWithExternalApproval(requestedPath, "write", "file");
     await this.runWriteFilePhase("enforce project access", requestedPath, options, () =>
       this.enforceProjectAccess(fullPath),
     );
@@ -1302,7 +1416,9 @@ export class FileTools {
             const elapsedMs = Date.now() - startedAt;
             phaseAbort.abort();
             reject(
-              new Error(`write_file aborted during ${phase} for ${requestedPath} after ${elapsedMs}ms`),
+              new Error(
+                `write_file aborted during ${phase} for ${requestedPath} after ${elapsedMs}ms`,
+              ),
             );
           };
           parentSignal.addEventListener("abort", abortListener, { once: true });
@@ -1313,7 +1429,9 @@ export class FileTools {
     try {
       const operationPromise = operation(phaseAbort.signal);
       const result =
-        guards.length > 0 ? await Promise.race([operationPromise, ...guards]) : await operationPromise;
+        guards.length > 0
+          ? await Promise.race([operationPromise, ...guards])
+          : await operationPromise;
       const elapsedMs = Date.now() - startedAt;
       if (elapsedMs >= 5_000) {
         console.warn(
@@ -1328,7 +1446,11 @@ export class FileTools {
   }
 
   private getWriteFilePhaseTimeoutMs(toolTimeoutMs: number | undefined): number | undefined {
-    if (typeof toolTimeoutMs !== "number" || !Number.isFinite(toolTimeoutMs) || toolTimeoutMs <= 0) {
+    if (
+      typeof toolTimeoutMs !== "number" ||
+      !Number.isFinite(toolTimeoutMs) ||
+      toolTimeoutMs <= 0
+    ) {
       return undefined;
     }
     if (toolTimeoutMs <= 1_000) {
@@ -1364,10 +1486,21 @@ export class FileTools {
     const missingFields = [
       this.isNonEmptyString(next?.name) ? null : "name",
       this.isPlainObject(next?.scripts) ? null : "scripts",
-      ...(this.isNonEmptyString(existing?.scripts?.dev) && !this.isNonEmptyString(next?.scripts?.dev) ? ["scripts.dev"] : []),
-      ...(this.isNonEmptyString(existing?.scripts?.build) && !this.isNonEmptyString(next?.scripts?.build) ? ["scripts.build"] : []),
-      ...(this.isPlainObject(existing?.dependencies) && !this.isPlainObject(next?.dependencies) ? ["dependencies"] : []),
-      ...(this.isPlainObject(existing?.devDependencies) && !this.isPlainObject(next?.devDependencies) ? ["devDependencies"] : []),
+      ...(this.isNonEmptyString(existing?.scripts?.dev) &&
+      !this.isNonEmptyString(next?.scripts?.dev)
+        ? ["scripts.dev"]
+        : []),
+      ...(this.isNonEmptyString(existing?.scripts?.build) &&
+      !this.isNonEmptyString(next?.scripts?.build)
+        ? ["scripts.build"]
+        : []),
+      ...(this.isPlainObject(existing?.dependencies) && !this.isPlainObject(next?.dependencies)
+        ? ["dependencies"]
+        : []),
+      ...(this.isPlainObject(existing?.devDependencies) &&
+      !this.isPlainObject(next?.devDependencies)
+        ? ["devDependencies"]
+        : []),
     ].filter((field): field is string => Boolean(field));
 
     if (missingFields.length > 0) {
@@ -1414,7 +1547,9 @@ export class FileTools {
   }
 
   private hasCriticalPackageScripts(value: Any): boolean {
-    return this.isNonEmptyString(value?.scripts?.dev) || this.isNonEmptyString(value?.scripts?.build);
+    return (
+      this.isNonEmptyString(value?.scripts?.dev) || this.isNonEmptyString(value?.scripts?.build)
+    );
   }
 
   private isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -1435,7 +1570,10 @@ export class FileTools {
   }> {
     // Validate and normalize input (use default if null/undefined)
     const pathToUse = relativePath && typeof relativePath === "string" ? relativePath : ".";
-    const normalizedPathInput = this.normalizeWorkspaceBoundaryReadPath(pathToUse, "list_directory");
+    const normalizedPathInput = this.normalizeWorkspaceBoundaryReadPath(
+      pathToUse,
+      "list_directory",
+    );
 
     this.checkPermission("read");
     const fullPath = this.resolvePath(normalizedPathInput, "read");
@@ -1443,7 +1581,11 @@ export class FileTools {
     await this.enforceSymlinkSafeAccess(fullPath, "read");
 
     try {
-      const entries = await fs.readdir(fullPath, { withFileTypes: true });
+      const entries = (await fs.readdir(fullPath, { withFileTypes: true })).filter(
+        (entry) =>
+          evaluateWorkspaceFilesystemAccess(this.workspace, path.join(fullPath, entry.name), "read")
+            .decision === "allow",
+      );
       const totalCount = entries.length;
 
       // Limit entries to prevent large responses
@@ -1502,7 +1644,11 @@ export class FileTools {
     await this.enforceSymlinkSafeAccess(fullPath, "read");
 
     try {
-      const entries = await fs.readdir(fullPath, { withFileTypes: true });
+      const entries = (await fs.readdir(fullPath, { withFileTypes: true })).filter(
+        (entry) =>
+          evaluateWorkspaceFilesystemAccess(this.workspace, path.join(fullPath, entry.name), "read")
+            .decision === "allow",
+      );
       const totalCount = entries.length;
       const limitedEntries = entries.slice(0, MAX_DIR_ENTRIES);
 
@@ -1594,12 +1740,16 @@ export class FileTools {
       throw new Error("Invalid newPath: must be a non-empty string");
     }
 
+    // A move has two distinct filesystem effects: it removes the source entry
+    // and creates/replaces the destination entry. Requiring only `write` here
+    // would let a write-only profile use rename as an implicit delete.
+    this.checkPermission("delete");
     this.checkPermission("write");
-    const oldFullPath = this.resolvePath(oldPath, "write");
-    const newFullPath = this.resolvePath(newPath, "write");
+    const oldFullPath = await this.resolvePathWithExternalApproval(oldPath, "delete", "file");
+    const newFullPath = await this.resolvePathWithExternalApproval(newPath, "write", "file");
     await this.enforceProjectAccess(oldFullPath);
     await this.enforceProjectAccess(newFullPath);
-    await this.enforceSymlinkSafeAccess(oldFullPath, "write");
+    await this.enforceSymlinkSafeAccess(oldFullPath, "delete");
     await this.enforceSymlinkSafeAccess(newFullPath, "write");
 
     try {
@@ -1638,13 +1788,17 @@ export class FileTools {
     const redirected = await this.maybeRedirectAutomatedOutputPath(destPath);
     const requestedDestPath = redirected.requestedPath;
     if (isCoWorkPrivateGeneratedPath(requestedDestPath)) {
-      ensureCoWorkPrivatePathsExcluded(this.workspace.path);
+      this.ensurePrivatePathsExcluded();
     }
 
     this.checkPermission("read");
     this.checkPermission("write");
-    const sourceFullPath = this.resolvePath(sourcePath, "read");
-    const destFullPath = this.resolvePath(requestedDestPath, "write");
+    const sourceFullPath = await this.resolvePathWithExternalApproval(sourcePath, "read", "file");
+    const destFullPath = await this.resolvePathWithExternalApproval(
+      requestedDestPath,
+      "write",
+      "file",
+    );
     await this.enforceProjectAccess(sourceFullPath);
     await this.enforceProjectAccess(destFullPath);
     await this.enforceSymlinkSafeAccess(sourceFullPath, "read");
@@ -1683,8 +1837,9 @@ export class FileTools {
       throw new Error("Invalid path: path must be a non-empty string");
     }
 
-    const fullPath = this.resolvePath(relativePath, "delete");
+    const fullPath = await this.resolvePathWithExternalApproval(relativePath, "delete", "file");
     await this.enforceProjectAccess(fullPath);
+    await this.enforceSymlinkSafeAccess(fullPath, "delete");
 
     // Request user approval
     const approved = await this.daemon.requestApproval(
@@ -1775,11 +1930,15 @@ export class FileTools {
     const redirected = await this.maybeRedirectAutomatedOutputPath(relativePath);
     const requestedPath = redirected.requestedPath;
     if (isCoWorkPrivateGeneratedPath(requestedPath)) {
-      ensureCoWorkPrivatePathsExcluded(this.workspace.path);
+      this.ensurePrivatePathsExcluded();
     }
 
     this.checkPermission("write");
-    const fullPath = this.resolvePath(requestedPath, "write");
+    const fullPath = await this.resolvePathWithExternalApproval(
+      requestedPath,
+      "write",
+      "directory",
+    );
     await this.enforceProjectAccess(fullPath);
     await this.enforceSymlinkSafeAccess(fullPath, "write");
 
@@ -1814,7 +1973,10 @@ export class FileTools {
     }
 
     this.checkPermission("read");
-    const normalizedPathInput = this.normalizeWorkspaceBoundaryReadPath(relativePath, "search_files");
+    const normalizedPathInput = this.normalizeWorkspaceBoundaryReadPath(
+      relativePath,
+      "search_files",
+    );
     const fullPath = this.resolvePath(normalizedPathInput, "read");
     await this.enforceProjectAccess(fullPath);
     await this.enforceSymlinkSafeAccess(fullPath, "read");
@@ -1841,6 +2003,12 @@ export class FileTools {
 
         const entryPath = path.join(dir, entry.name);
         const relPath = path.relative(this.workspace.path, entryPath);
+
+        if (
+          evaluateWorkspaceFilesystemAccess(this.workspace, entryPath, "read").decision !== "allow"
+        ) {
+          continue;
+        }
 
         // Skip hidden files/directories and node_modules
         if (entry.name.startsWith(".") || entry.name === "node_modules") {

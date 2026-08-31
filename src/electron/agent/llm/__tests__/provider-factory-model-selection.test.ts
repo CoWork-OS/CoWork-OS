@@ -393,11 +393,7 @@ describe("LLMProviderFactory model selection persistence", () => {
       openai: { model: "gpt-4o-mini" },
     };
 
-    const updated = LLMProviderFactory.applyModelSelection(
-      settings,
-      "gpt-4o",
-      "openai",
-    );
+    const updated = LLMProviderFactory.applyModelSelection(settings, "gpt-4o", "openai");
 
     expect(updated.providerType).toBe("openai");
     expect(updated.openai?.model).toBe("gpt-4o");
@@ -411,11 +407,7 @@ describe("LLMProviderFactory model selection persistence", () => {
       azure: { deployment: "gpt-5-deployment" },
     };
 
-    const updated = LLMProviderFactory.applyReasoningEffortSelection(
-      settings,
-      "azure",
-      "high",
-    );
+    const updated = LLMProviderFactory.applyReasoningEffortSelection(settings, "azure", "high");
 
     expect(updated.azure?.reasoningEffort).toBe("high");
   });
@@ -485,9 +477,7 @@ describe("LLMProviderFactory MoA routing", () => {
     const settings: LLMSettings = {
       providerType: "moa",
       modelKey: "frontier-council",
-      fallbackProviders: [
-        { providerType: "openrouter", modelKey: "openai/gpt-4o" },
-      ],
+      fallbackProviders: [{ providerType: "openrouter", modelKey: "openai/gpt-4o" }],
       openai: { apiKey: "openai-key", model: "gpt-4o" },
       openrouter: { apiKey: "openrouter-key", model: "openai/gpt-4o" },
       moa: {
@@ -518,9 +508,7 @@ describe("LLMProviderFactory MoA routing", () => {
       openrouter: { apiKey: "openrouter-key", model: "openai/gpt-4o" },
       moa: {
         defaultPreset: "frontier-council",
-        fallbackProviders: [
-          { providerType: "openrouter", modelKey: "openai/gpt-4o" },
-        ],
+        fallbackProviders: [{ providerType: "openrouter", modelKey: "openai/gpt-4o" }],
         presets: {
           "frontier-council": {
             id: "frontier-council",
@@ -573,9 +561,7 @@ describe("LLMProviderFactory OpenRouter Pareto configuration", () => {
       messages: [{ role: "user", content: "write code" }],
     });
 
-    expect(capturedBody.plugins).toEqual([
-      { id: "pareto-router", min_coding_score: 0.8 },
-    ]);
+    expect(capturedBody.plugins).toEqual([{ id: "pareto-router", min_coding_score: 0.8 }]);
   });
 
   it("uses documented Pareto context length in fallback OpenRouter models", async () => {
@@ -603,19 +589,20 @@ describe("LLMProviderFactory OpenRouter Pareto configuration", () => {
     } as LLMSettings);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        ({
-          ok: true,
-          json: vi.fn().mockResolvedValue({
-            data: [
-              {
-                id: "openrouter/pareto-code",
-                name: "Pareto Code Router",
-                context_length: 123456,
-              },
-            ],
-          }),
-        }) as unknown as Response,
+      vi.fn(
+        async () =>
+          ({
+            ok: true,
+            json: vi.fn().mockResolvedValue({
+              data: [
+                {
+                  id: "openrouter/pareto-code",
+                  name: "Pareto Code Router",
+                  context_length: 123456,
+                },
+              ],
+            }),
+          }) as unknown as Response,
       ),
     );
 
@@ -637,20 +624,21 @@ describe("LLMProviderFactory OpenRouter Pareto configuration", () => {
     } as LLMSettings);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        ({
-          ok: true,
-          json: vi.fn().mockResolvedValue({
-            data: [
-              {
-                id: "meta/muse-image",
-                name: "Meta: Muse Image",
-                description: "Image generation and editing.",
-                supported_parameters: {},
-              },
-            ],
-          }),
-        }) as unknown as Response,
+      vi.fn(
+        async () =>
+          ({
+            ok: true,
+            json: vi.fn().mockResolvedValue({
+              data: [
+                {
+                  id: "meta/muse-image",
+                  name: "Meta: Muse Image",
+                  description: "Image generation and editing.",
+                  supported_parameters: {},
+                },
+              ],
+            }),
+          }) as unknown as Response,
       ),
     );
 
@@ -749,15 +737,13 @@ describe("LLMProviderFactory profile-based task model routing", () => {
   });
 
   it("maps retired Claude 3.5 direct API IDs to active replacements", () => {
-    expect(LLMProviderFactory.getModelId("sonnet-3-5", "anthropic")).toBe(
-      "claude-sonnet-4-5",
-    );
+    expect(LLMProviderFactory.getModelId("sonnet-3-5", "anthropic")).toBe("claude-sonnet-4-5");
     expect(LLMProviderFactory.getModelId("haiku-3-5", "anthropic")).toBe(
       ANTHROPIC_HEALTHCHECK_MODEL_ID,
     );
-    expect(
-      LLMProviderFactory.getModelId("claude-3-5-haiku-20241022", "anthropic"),
-    ).toBe(ANTHROPIC_HEALTHCHECK_MODEL_ID);
+    expect(LLMProviderFactory.getModelId("claude-3-5-haiku-20241022", "anthropic")).toBe(
+      ANTHROPIC_HEALTHCHECK_MODEL_ID,
+    );
   });
 
   it("normalizes retired Anthropic profile routing keys", () => {
@@ -772,10 +758,7 @@ describe("LLMProviderFactory profile-based task model routing", () => {
     };
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
 
-    const routing = LLMProviderFactory.getProviderRoutingSettings(
-      settings,
-      "anthropic",
-    );
+    const routing = LLMProviderFactory.getProviderRoutingSettings(settings, "anthropic");
     const resolved = LLMProviderFactory.resolveTaskModelSelection(
       {
         providerType: "anthropic",
@@ -902,17 +885,10 @@ describe("LLMProviderFactory provider failover chain", () => {
       },
       { allowProviderOverride: true },
     );
-    const openaiChain =
-      LLMProviderFactory.resolveProviderFailoverChain(openaiPrimary);
-    const openaiFailover = LLMProviderFactory.getProviderFailoverSettings(
-      settings,
-      "openai",
-    );
+    const openaiChain = LLMProviderFactory.resolveProviderFailoverChain(openaiPrimary);
+    const openaiFailover = LLMProviderFactory.getProviderFailoverSettings(settings, "openai");
 
-    expect(openaiChain.map((entry) => entry.providerType)).toEqual([
-      "openai",
-      "anthropic",
-    ]);
+    expect(openaiChain.map((entry) => entry.providerType)).toEqual(["openai", "anthropic"]);
     expect(openaiFailover.failoverPrimaryRetryCooldownSeconds).toBe(15);
 
     const azurePrimary = LLMProviderFactory.resolveTaskModelSelection(
@@ -921,17 +897,10 @@ describe("LLMProviderFactory provider failover chain", () => {
       },
       { allowProviderOverride: true },
     );
-    const azureChain =
-      LLMProviderFactory.resolveProviderFailoverChain(azurePrimary);
-    const azureFailover = LLMProviderFactory.getProviderFailoverSettings(
-      settings,
-      "azure",
-    );
+    const azureChain = LLMProviderFactory.resolveProviderFailoverChain(azurePrimary);
+    const azureFailover = LLMProviderFactory.getProviderFailoverSettings(settings, "azure");
 
-    expect(azureChain.map((entry) => entry.providerType)).toEqual([
-      "azure",
-      "openrouter",
-    ]);
+    expect(azureChain.map((entry) => entry.providerType)).toEqual(["azure", "openrouter"]);
     expect(azureFailover.failoverPrimaryRetryCooldownSeconds).toBe(120);
   });
 
@@ -1027,9 +996,7 @@ describe("LLMProviderFactory provider failover chain", () => {
       }),
     );
     expect(chain).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ modelId: "minimax/minimax-m2.5:free" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ modelId: "minimax/minimax-m2.5:free" })]),
     );
   });
 });

@@ -70,7 +70,9 @@ export class BrowserUseCloudClient {
     }
   }
 
-  static resolveApiKey(settings: BrowserUseCloudSettings = BrowserUseCloudClient.loadSettings()): string {
+  static resolveApiKey(
+    settings: BrowserUseCloudSettings = BrowserUseCloudClient.loadSettings(),
+  ): string {
     const envApiKey = normalizeString(process.env.BROWSER_USE_API_KEY);
     if (envApiKey) return envApiKey;
     if (settings.enabled === false) return "";
@@ -82,7 +84,9 @@ export class BrowserUseCloudClient {
     return apiKey ? new BrowserUseCloudClient(apiKey) : null;
   }
 
-  async createBrowserSession(input: BrowserUseCreateBrowserInput): Promise<BrowserUseBrowserSession> {
+  async createBrowserSession(
+    input: BrowserUseCreateBrowserInput,
+  ): Promise<BrowserUseBrowserSession> {
     const session = await this.request<BrowserUseBrowserSession>("/browsers", {
       method: "POST",
       body: JSON.stringify(stripUndefined(input)),
@@ -96,18 +100,25 @@ export class BrowserUseCloudClient {
   async stopBrowserSession(sessionId: string): Promise<BrowserUseBrowserSession> {
     const normalized = normalizeString(sessionId);
     if (!normalized) throw new Error("Browser Use session id is required");
-    return await this.request<BrowserUseBrowserSession>(`/browsers/${encodeURIComponent(normalized)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ action: "stop" }),
-    });
+    return await this.request<BrowserUseBrowserSession>(
+      `/browsers/${encodeURIComponent(normalized)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ action: "stop" }),
+      },
+    );
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     const fetchImpl = this.options.fetchImpl || fetch;
-    const baseUrl = (this.options.baseUrl || "https://api.browser-use.com/api/v4").replace(/\/$/, "");
+    const baseUrl = (this.options.baseUrl || "https://api.browser-use.com/api/v4").replace(
+      /\/$/,
+      "",
+    );
     const maxAttempts = Math.max(1, Math.min(5, Math.round(this.options.maxRetries ?? 3)));
     const sleep =
-      this.options.sleep || ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
+      this.options.sleep ||
+      ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const response = await fetchImpl(`${baseUrl}${path}`, {
@@ -153,11 +164,15 @@ export function isRetryableBrowserUseStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-export function parseRetryAfterMs(headers: Pick<Headers, "get">, now = Date.now()): number | undefined {
+export function parseRetryAfterMs(
+  headers: Pick<Headers, "get">,
+  now = Date.now(),
+): number | undefined {
   const retryAfter = headers.get("retry-after")?.trim();
   if (retryAfter) {
     const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(60_000, Math.ceil(seconds * 1000));
+    if (Number.isFinite(seconds) && seconds >= 0)
+      return Math.min(60_000, Math.ceil(seconds * 1000));
     const timestamp = Date.parse(retryAfter);
     if (Number.isFinite(timestamp)) return Math.min(60_000, Math.max(0, timestamp - now));
   }
@@ -182,12 +197,17 @@ export function normalizeBrowserUseProxyCountryCode(value: unknown): string | nu
   if (!normalized) return undefined;
   if (normalized === "none" || normalized === "off" || normalized === "disabled") return null;
   if (!/^[a-z]{2}$/.test(normalized)) {
-    throw new Error("proxy_country_code must be a two-letter country code, or 'none' to disable proxy");
+    throw new Error(
+      "proxy_country_code must be a two-letter country code, or 'none' to disable proxy",
+    );
   }
   return normalized;
 }
 
-export function normalizeBrowserUseTimeoutMinutes(value: unknown, fallback?: number): number | undefined {
+export function normalizeBrowserUseTimeoutMinutes(
+  value: unknown,
+  fallback?: number,
+): number | undefined {
   const raw = typeof value === "number" ? value : fallback;
   if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
   return Math.max(1, Math.min(240, Math.round(raw)));
@@ -214,7 +234,10 @@ export function isPrivateOrLocalBrowserTarget(rawUrl: unknown): boolean {
     if (/^127\./.test(host) || /^10\./.test(host) || /^0\./.test(host)) return true;
     if (/^192\.168\./.test(host)) return true;
     const parts = host.split(".").map((part) => Number(part));
-    if (parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
+    if (
+      parts.length === 4 &&
+      parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
+    ) {
       if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
       if (parts[0] === 169 && parts[1] === 254) return true;
     }

@@ -706,7 +706,9 @@ describe("listModelInvocableSkills", () => {
 
     await loader.reloadSkills();
 
-    expect(loader.rankModelInvocableSkillsForQuery("run a generic agent on this issue")).toEqual([]);
+    expect(loader.rankModelInvocableSkillsForQuery("run a generic agent on this issue")).toEqual(
+      [],
+    );
     expect(loader.rankModelInvocableSkillsForQuery("run codex on this issue")).toEqual([]);
 
     const ranked = loader.rankModelInvocableSkillsForQuery(
@@ -737,8 +739,7 @@ describe("listModelInvocableSkills", () => {
 
     await loader.reloadSkills();
 
-    const productNewsPrompt =
-      "what's new about gemini based on the last google IO announcements";
+    const productNewsPrompt = "what's new about gemini based on the last google IO announcements";
     expect(loader.rankModelInvocableSkillsForQuery(productNewsPrompt)).toEqual([]);
 
     const productNewsDescriptions = loader.getSkillDescriptionsForModel({
@@ -765,7 +766,8 @@ describe("listModelInvocableSkills", () => {
           useWhen: "Use when the user wants a scientific literature review or evidence synthesis.",
           dontUseWhen: "Do not use for casual summaries or broad business-market research.",
           outputs: "A cited research report with evidence and uncertainties.",
-          successCriteria: "The report is structured, cited, reproducible, and separates evidence from synthesis.",
+          successCriteria:
+            "The report is structured, cited, reproducible, and separates evidence from synthesis.",
           keywords: [
             "autoresearch report",
             "autoresearch-report",
@@ -987,20 +989,16 @@ describe("getSkillDescriptionsForModel", () => {
     const codexCli = createTestSkill({
       id: "codex-cli",
       name: "Codex CLI Agent",
-      description:
-        "Review a PR with Codex CLI.",
+      description: "Review a PR with Codex CLI.",
       category: "Development",
       metadata: {
         routing: {
           keywords: ["codex"],
           useWhen:
             "Use when the user wants to review a PR with Codex CLI. Triggers on: 'codex review', 'spin up codex for review', 'review PR with codex'.",
-          dontUseWhen:
-            "Do not use for planning or discussion only.",
-          outputs:
-            "Review output from Codex CLI agent.",
-          successCriteria:
-            "Codex CLI completes the review and returns output.",
+          dontUseWhen: "Do not use for planning or discussion only.",
+          outputs: "Review output from Codex CLI agent.",
+          successCriteria: "Codex CLI completes the review and returns output.",
           examples: {
             positive: [
               "Use the Codex CLI Agent skill to review PR #55",
@@ -1014,24 +1012,17 @@ describe("getSkillDescriptionsForModel", () => {
     const codingAgent = createTestSkill({
       id: "coding-agent",
       name: "Coding-agent",
-      description:
-        "Run Codex CLI, OpenCode, or Pi Coding Agent via background process.",
+      description: "Run Codex CLI, OpenCode, or Pi Coding Agent via background process.",
       category: "Tools",
       metadata: {
         routing: {
           useWhen:
             "Use when the user asks to run a coding agent. Triggers on: 'coding agent', 'run agent'.",
-          dontUseWhen:
-            "Do not use when the user explicitly names Codex CLI (use codex-cli).",
-          outputs:
-            "Task result from coding agent.",
-          successCriteria:
-            "Coding agent executes the requested task.",
+          dontUseWhen: "Do not use when the user explicitly names Codex CLI (use codex-cli).",
+          outputs: "Task result from coding agent.",
+          successCriteria: "Coding agent executes the requested task.",
           examples: {
-            positive: [
-              "Run a coding agent on this",
-              "Use the coding-agent skill",
-            ],
+            positive: ["Run a coding agent on this", "Use the coding-agent skill"],
             negative: ["Review PR with Codex (use codex-cli)"],
           },
         },
@@ -1057,8 +1048,7 @@ describe("getSkillDescriptionsForModel", () => {
     expect(explicitRanked[0]?.score).toBeGreaterThan(explicitRanked[1]?.score ?? 0);
 
     const genericDescriptions = loader.getSkillDescriptionsForModel({
-      routingQuery:
-        "We need to review PR #55 on cowork os repo. Spin up Codex to review it.",
+      routingQuery: "We need to review PR #55 on cowork os repo. Spin up Codex to review it.",
       shortlistSize: 1,
     });
     expect(genericDescriptions).not.toContain("- codex-cli:");

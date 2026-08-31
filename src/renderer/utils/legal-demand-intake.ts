@@ -241,7 +241,9 @@ export function buildGenericLegalWorkflowFollowUp(
   invocation: LegalWorkflowInvocation,
   values: GenericLegalWorkflowFormValues,
 ): string {
-  const command = invocation.commandName ? `/${invocation.commandName}` : "the selected legal workflow";
+  const command = invocation.commandName
+    ? `/${invocation.commandName}`
+    : "the selected legal workflow";
   const line = (label: string, value: string) => `- ${label}: ${value.trim() || "[not provided]"}`;
   return [
     `Legal workflow context for ${command}.`,

@@ -8,6 +8,7 @@ import {
   getProjectIdFromWorkspaceRelPath,
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
+import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 import { LLMTool } from "../llm/types";
 
 const MAX_GREP_OUTPUT_BYTES = 50_000;
@@ -150,16 +151,18 @@ export class GrepTools {
         throw new Error(`Invalid regex pattern: ${e.message}`);
       }
 
-      const basePath = searchPath
-        ? path.resolve(this.workspace.path, searchPath)
-        : this.workspace.path;
-
-      // Validate path is within workspace
-      if (!basePath.startsWith(this.workspace.path)) {
+      const workspaceRoot = path.resolve(this.workspace.path);
+      const basePath = searchPath ? path.resolve(workspaceRoot, searchPath) : workspaceRoot;
+      const baseAccess = evaluateWorkspaceFilesystemAccess(this.workspace, basePath, "read");
+      if (baseAccess.decision !== "allow") {
+        if (baseAccess.reason === "profile_filesystem_denied") {
+          throw new Error(`Path is denied by the active access profile: ${basePath}`);
+        }
         throw new Error("Search path must be within workspace");
       }
+      const checkedBasePath = baseAccess.path;
 
-      if (!fs.existsSync(basePath)) {
+      if (!fs.existsSync(checkedBasePath)) {
         throw new Error(`Path does not exist: ${searchPath || "."}`);
       }
 
@@ -170,13 +173,13 @@ export class GrepTools {
       const projectAccessCache = new Map<string, boolean>();
 
       // If the user tries to search directly within a denied project, block early.
-      if (await this.isDeniedByProjectAccess(basePath, agentRoleId, projectAccessCache)) {
+      if (await this.isDeniedByProjectAccess(checkedBasePath, agentRoleId, projectAccessCache)) {
         throw new Error("Access denied by project access rules");
       }
 
       // Find files to search
       const files = await this.findFilesToSearch(
-        basePath,
+        checkedBasePath,
         globPattern,
         agentRoleId,
         projectAccessCache,
@@ -195,6 +198,10 @@ export class GrepTools {
       // Search each file
       for (const file of files) {
         if (truncated) break;
+
+        if (evaluateWorkspaceFilesystemAccess(this.workspace, file, "read").decision !== "allow") {
+          continue;
+        }
 
         try {
           const content = fs.readFileSync(file, "utf-8");
@@ -301,13 +308,15 @@ export class GrepTools {
     }
   }
 
-  private applyOutputBudget<T extends Array<{
-    file: string;
-    line?: number;
-    content?: string;
-    context?: { before: string[]; after: string[] };
-    count?: number;
-  }>>(matches: T): { matches: T; truncated: boolean } {
+  private applyOutputBudget<
+    T extends Array<{
+      file: string;
+      line?: number;
+      content?: string;
+      context?: { before: string[]; after: string[] };
+      count?: number;
+    }>,
+  >(matches: T): { matches: T; truncated: boolean } {
     const outputBytes = Buffer.byteLength(JSON.stringify(matches), "utf8");
     if (outputBytes <= MAX_GREP_OUTPUT_BYTES) {
       return { matches, truncated: false };
@@ -376,6 +385,12 @@ export class GrepTools {
       return;
     }
 
+    if (
+      evaluateWorkspaceFilesystemAccess(this.workspace, currentPath, "read").decision !== "allow"
+    ) {
+      return;
+    }
+
     // Skip common non-code directories
     const dirName = path.basename(currentPath);
     const skipDirs = [
@@ -410,6 +425,12 @@ export class GrepTools {
       for (const entry of entries) {
         const fullPath = path.join(currentPath, entry.name);
         const relativePath = path.relative(basePath, fullPath);
+
+        if (
+          evaluateWorkspaceFilesystemAccess(this.workspace, fullPath, "read").decision !== "allow"
+        ) {
+          continue;
+        }
 
         if (entry.isDirectory()) {
           await this.walkDirectory(

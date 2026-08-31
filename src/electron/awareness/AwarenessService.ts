@@ -100,16 +100,15 @@ function defaultPersistedState(): PersistedAwarenessState {
 }
 
 function truncate(value: string, max = 180): string {
-  const normalized = String(value || "").trim().replace(/\s+/g, " ");
+  const normalized = String(value || "")
+    .trim()
+    .replace(/\s+/g, " ");
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, Math.max(0, max - 3))}...`;
 }
 
 function fingerprint(parts: Array<string | number | undefined>): string {
-  return createHash("sha1")
-    .update(parts.filter(Boolean).join("|"))
-    .digest("hex")
-    .slice(0, 16);
+  return createHash("sha1").update(parts.filter(Boolean).join("|")).digest("hex").slice(0, 16);
 }
 
 function redactSensitiveText(text: string): { summary: string; sensitivity: AwarenessSensitivity } {
@@ -225,7 +224,8 @@ export class AwarenessService {
     this.ensureLoaded();
     const belief = this.state.beliefs.find((entry) => entry.id === id);
     if (!belief) return null;
-    if (typeof patch.value === "string" && patch.value.trim()) belief.value = truncate(patch.value, 220);
+    if (typeof patch.value === "string" && patch.value.trim())
+      belief.value = truncate(patch.value, 220);
     if (typeof patch.confidence === "number" && Number.isFinite(patch.confidence)) {
       belief.confidence = Math.max(0, Math.min(1, patch.confidence));
     }
@@ -308,9 +308,10 @@ export class AwarenessService {
       workspaceId,
       currentFocus: summary.currentFocus,
       activeApp: activeAppEvent?.title,
-      activeWindowTitle: typeof activeAppEvent?.payload?.windowTitle === "string"
-        ? String(activeAppEvent.payload.windowTitle)
-        : undefined,
+      activeWindowTitle:
+        typeof activeAppEvent?.payload?.windowTitle === "string"
+          ? String(activeAppEvent.payload.windowTitle)
+          : undefined,
       browserContext: browserEvent?.summary,
       recentFiles,
       recentProjects,
@@ -354,11 +355,12 @@ export class AwarenessService {
       }
       if (item.requiresHeartbeat) wakeReasons.add("due_soon");
     }
-    const currentFocus = events.find((event) =>
-      event.source === "apps" ||
-      event.source === "browser" ||
-      event.source === "tasks" ||
-      event.source === "conversation"
+    const currentFocus = events.find(
+      (event) =>
+        event.source === "apps" ||
+        event.source === "browser" ||
+        event.source === "tasks" ||
+        event.source === "conversation",
     )?.summary;
 
     return {
@@ -373,9 +375,11 @@ export class AwarenessService {
     };
   }
 
-  captureEvent(input: Omit<AwarenessEvent, "id" | "fingerprint" | "timestamp"> & {
-    timestamp?: number;
-  }): AwarenessEvent | null {
+  captureEvent(
+    input: Omit<AwarenessEvent, "id" | "fingerprint" | "timestamp"> & {
+      timestamp?: number;
+    },
+  ): AwarenessEvent | null {
     this.ensureLoaded();
     const policy = this.state.config.sources[input.source];
     if (!policy?.enabled) return null;
@@ -410,7 +414,9 @@ export class AwarenessService {
     } else {
       this.events.push(event);
       if (this.events.length > EVENT_BUFFER_LIMIT) {
-        this.events = this.events.sort((a, b) => b.timestamp - a.timestamp).slice(0, EVENT_BUFFER_LIMIT);
+        this.events = this.events
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, EVENT_BUFFER_LIMIT);
       }
     }
 
@@ -458,7 +464,12 @@ export class AwarenessService {
     });
   }
 
-  captureTaskCompletion(workspaceId: string, title: string, resultSummary?: string, taskId?: string): void {
+  captureTaskCompletion(
+    workspaceId: string,
+    title: string,
+    resultSummary?: string,
+    taskId?: string,
+  ): void {
     const summary = truncate(resultSummary || title, 220);
     this.captureEvent({
       source: "tasks",
@@ -513,7 +524,8 @@ export class AwarenessService {
     this.ensureLoaded();
     const now = Date.now();
     this.events = this.events.filter((event) => {
-      const ttlMinutes = this.state.config.sources[event.source]?.ttlMinutes ?? this.state.config.defaultTtlMinutes;
+      const ttlMinutes =
+        this.state.config.sources[event.source]?.ttlMinutes ?? this.state.config.defaultTtlMinutes;
       return now - event.timestamp <= ttlMinutes * 60 * 1000;
     });
   }
@@ -567,7 +579,12 @@ export class AwarenessService {
     if (event.source === "apps") {
       const appName = String(event.payload?.appName || event.title || "").trim();
       if (appName) {
-        this.maybePromoteRepeatedEvent(event, "device_context", "active_app", `Frequently active in ${appName}`);
+        this.maybePromoteRepeatedEvent(
+          event,
+          "device_context",
+          "active_app",
+          `Frequently active in ${appName}`,
+        );
       }
       return;
     }
@@ -663,7 +680,9 @@ export class AwarenessService {
       }
     }
 
-    const preferenceMatch = text.match(/\b(?:i prefer|please always|please don't|i like|i dislike)\s+([^.!?\n]{3,120})/i);
+    const preferenceMatch = text.match(
+      /\b(?:i prefer|please always|please don't|i like|i dislike)\s+([^.!?\n]{3,120})/i,
+    );
     if (preferenceMatch) {
       push({
         beliefType: "user_preference",
@@ -733,7 +752,9 @@ export class AwarenessService {
     if (existing) {
       existing.updatedAt = now;
       existing.confidence = Math.max(existing.confidence, input.confidence);
-      existing.evidenceRefs = Array.from(new Set([...existing.evidenceRefs, ...input.evidenceRefs])).slice(-8);
+      existing.evidenceRefs = Array.from(
+        new Set([...existing.evidenceRefs, ...input.evidenceRefs]),
+      ).slice(-8);
       existing.promotionStatus =
         existing.promotionStatus === "confirmed" ? "confirmed" : input.promotionStatus;
       this.applyLegacyMemorySideEffects(existing);
@@ -805,7 +826,10 @@ export class AwarenessService {
       source: "apps",
       workspaceId,
       title: context.appName,
-      summary: truncate(`${context.appName}${context.windowTitle ? ` — ${context.windowTitle}` : ""}`, 180),
+      summary: truncate(
+        `${context.appName}${context.windowTitle ? ` — ${context.windowTitle}` : ""}`,
+        180,
+      ),
       sensitivity: "low",
       payload: { appName: context.appName, windowTitle: context.windowTitle },
       tags: ["focus"],
@@ -883,7 +907,9 @@ export class AwarenessService {
         timeout: 4_000,
         maxBuffer: 128 * 1024,
       });
-      const [appNameRaw, windowTitleRaw] = String(stdout || "").trim().split("||");
+      const [appNameRaw, windowTitleRaw] = String(stdout || "")
+        .trim()
+        .split("||");
       const appName = truncate(appNameRaw || "", 80);
       const windowTitle = truncate(windowTitleRaw || "", 160);
       if (!appName) return null;

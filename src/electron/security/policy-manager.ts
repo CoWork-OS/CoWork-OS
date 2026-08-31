@@ -358,11 +358,14 @@ export class SecurityPolicyManager {
 
     // Check network permission
     if (SecurityPolicyManager.requiresNetworkPermission(toolName)) {
-      if (!permissions.network) {
+      if (!permissions.network || permissions.accessNetworkMode === "disabled") {
         return {
           layer: "workspace_permissions",
           decision: "deny",
-          reason: "Workspace does not have network permission",
+          reason:
+            permissions.accessNetworkMode === "disabled"
+              ? "Workspace access profile disables network permission"
+              : "Workspace does not have network permission",
         };
       }
     }
@@ -542,7 +545,10 @@ export function isToolAllowedQuick(
   if (toolName === "run_command" && !permissions.shell) {
     return false;
   }
-  if (SecurityPolicyManager.requiresNetworkPermission(toolName) && !permissions.network) {
+  if (
+    SecurityPolicyManager.requiresNetworkPermission(toolName) &&
+    (!permissions.network || permissions.accessNetworkMode === "disabled")
+  ) {
     return false;
   }
 

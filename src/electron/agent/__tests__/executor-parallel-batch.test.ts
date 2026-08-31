@@ -142,7 +142,9 @@ describe("TaskExecutor parallel tool batches", () => {
 
   it("returns null to force serial fallback when any call is not parallel-eligible", async () => {
     const { executor, events } = createParallelExecutorFixture({
-      isParallelToolCallEligible: vi.fn((_toolName: string, input: Any) => input.parallel !== false),
+      isParallelToolCallEligible: vi.fn(
+        (_toolName: string, input: Any) => input.parallel !== false,
+      ),
     });
     const responseContent = [
       makeToolUse("use-1", "web_fetch", { parallel: true }),
@@ -216,14 +218,12 @@ describe("TaskExecutor parallel tool batches", () => {
     ]);
     params.requiredTools = new Set(["web_fetch"]);
 
-    const result = (await (executor as Any).tryExecuteEligibleToolBatchInParallel(params)) as
-      | {
-          toolResults: LLMToolResult[];
-          hadToolError: boolean;
-          hadAnyToolSuccess: boolean;
-          requiredToolsSucceeded?: Set<string>;
-        }
-      | null;
+    const result = (await (executor as Any).tryExecuteEligibleToolBatchInParallel(params)) as {
+      toolResults: LLMToolResult[];
+      hadToolError: boolean;
+      hadAnyToolSuccess: boolean;
+      requiredToolsSucceeded?: Set<string>;
+    } | null;
 
     expect(result).not.toBeNull();
     expect(result?.hadToolError).toBe(true);
@@ -292,7 +292,9 @@ describe("TaskExecutor parallel tool batches", () => {
     const result = await (executor as Any).tryExecuteEligibleToolBatchInParallel(params);
 
     expect(result).not.toBeNull();
-    const toolCalls = events.filter((entry) => entry.type === "tool_call").map((entry) => entry.payload);
+    const toolCalls = events
+      .filter((entry) => entry.type === "tool_call")
+      .map((entry) => entry.payload);
     expect(toolCalls).toHaveLength(2);
     expect(toolCalls[0]).toMatchObject({
       toolUseId: "follow-1",

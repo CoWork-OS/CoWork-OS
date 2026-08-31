@@ -11,12 +11,8 @@ describe("extractYouTubeVideoId", () => {
       "dQw4w9WgXcQ",
     );
     expect(extractYouTubeVideoId("https://youtu.be/dQw4w9WgXcQ?t=42")).toBe("dQw4w9WgXcQ");
-    expect(extractYouTubeVideoId("https://m.youtube.com/shorts/dQw4w9WgXcQ")).toBe(
-      "dQw4w9WgXcQ",
-    );
-    expect(extractYouTubeVideoId("https://music.youtube.com/live/dQw4w9WgXcQ")).toBe(
-      "dQw4w9WgXcQ",
-    );
+    expect(extractYouTubeVideoId("https://m.youtube.com/shorts/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(extractYouTubeVideoId("https://music.youtube.com/live/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
   });
 
   it("rejects non-YouTube and malformed inputs", () => {

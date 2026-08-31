@@ -168,7 +168,8 @@ function isGenericLaneTitle(
   const trimmed = typeof title === "string" ? title.trim() : "";
   const tool = typeof toolName === "string" ? toolName.trim() : "";
   if (!trimmed || !tool) return true;
-  const genericPast = friendlyToolResultTitle(tool, undefined, !failed).split(" — ")[0]?.trim() || "";
+  const genericPast =
+    friendlyToolResultTitle(tool, undefined, !failed).split(" — ")[0]?.trim() || "";
   return (
     trimmed === laneTitleForToolName(tool) ||
     trimmed === friendlyToolCallTitle(tool, undefined) ||
@@ -341,10 +342,7 @@ export function buildParallelGroupProjection(events: TaskEvent[]): ParallelGroup
       } else if (!lane.title || existingIsGeneric) {
         const finalName = lane.toolName || "";
         if (finalName) {
-          lane.title = friendlyToolLaneCompletedLabel(
-            finalName,
-            lane.status === "failed",
-          );
+          lane.title = friendlyToolLaneCompletedLabel(finalName, lane.status === "failed");
         }
       }
       if (
@@ -529,8 +527,10 @@ export function buildParallelGroupProjection(events: TaskEvent[]): ParallelGroup
     const status = inferGroupStatus(group);
     const lanes = Array.from(group.lanesByKey.values())
       .sort((a, b) => {
-        const aIndex = typeof a.toolCallIndex === "number" ? a.toolCallIndex : Number.POSITIVE_INFINITY;
-        const bIndex = typeof b.toolCallIndex === "number" ? b.toolCallIndex : Number.POSITIVE_INFINITY;
+        const aIndex =
+          typeof a.toolCallIndex === "number" ? a.toolCallIndex : Number.POSITIVE_INFINITY;
+        const bIndex =
+          typeof b.toolCallIndex === "number" ? b.toolCallIndex : Number.POSITIVE_INFINITY;
         if (aIndex !== bIndex) return aIndex - bIndex;
         if (a.firstOrder !== b.firstOrder) return a.firstOrder - b.firstOrder;
         return a.laneKey.localeCompare(b.laneKey);
@@ -540,10 +540,7 @@ export function buildParallelGroupProjection(events: TaskEvent[]): ParallelGroup
         toolUseId: lane.toolUseId,
         toolCallIndex: lane.toolCallIndex,
         toolName: lane.toolName,
-        title:
-          lane.title ||
-          laneTitleForToolName(lane.toolName) ||
-          "Running tool",
+        title: lane.title || laneTitleForToolName(lane.toolName) || "Running tool",
         status: lane.status,
         startedAt: lane.startedAt,
         ...(typeof lane.finishedAt === "number" ? { finishedAt: lane.finishedAt } : {}),

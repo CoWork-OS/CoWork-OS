@@ -17,7 +17,8 @@ SessionRuntime groups all mutable session state into explicit buckets:
 - `checklist`: session-local execution checklist items, nudge state, and checklist timestamps
 - `promptCache`: stable system blocks, stable-prefix hash, tool-schema hash, provider-family mode, and invalidation reason
 - `usage`: cumulative token and cost tracking plus usage offsets
-- `permissions`: default mode, session-local rules, temporary grants, denial counters, and latest prompt context
+- `permissions`: effective access-profile id and boundary, legacy mode compatibility state,
+  session-local rules, temporary grants, denial counters, and latest prompt context
 
 This is the state that used to be mirrored across the executor and related helpers. It now lives in one place so task resume, retry, and completion logic read the same source of truth.
 
@@ -57,10 +58,11 @@ Side Chat uses fork lineage for a stricter read-only side conversation about a r
 
 SessionRuntime also owns the runtime-facing available-tools path used by execution and follow-up turns.
 
-The sequence is:
+The executor resolves and applies the effective [access profile](access-profiles.md) before this
+request-level sequence. SessionRuntime then:
 
 1. start from the tool catalog
-2. apply restriction, allowlist, policy, mode, and intent filters
+2. apply profile, restriction, allowlist, policy, legacy-mode, and intent filters
 3. render prompt-aware descriptions only for the remaining visible tools
 4. cache the rendered result for repeated turns under the same visible-tool and render-context state
 
@@ -71,7 +73,7 @@ The render-context inputs include:
 - execution mode
 - task domain
 - web-search mode
-- shell availability
+- profile-derived command-tool availability
 - agent type
 - worker role
 - user-input allowance
@@ -289,7 +291,7 @@ Persisted task state uses the legacy `conversation_snapshot` event name for comp
 2. It writes a `conversation_snapshot` event with:
    - `schema: "session_runtime_v2"`
    - `version: 2`
-   - transcript, tooling, files, loop, recovery, queues, worker, verification, checklist, prompt-cache, usage, and permissions state
+   - transcript, tooling, files, loop, recovery, queues, worker, verification, checklist, prompt-cache, usage, and permissions/profile state
 3. `TaskExecutor` no longer writes the payload directly.
 
 ### Restore path
@@ -374,8 +376,8 @@ This protects terminal fields from stale post-resume writes and keeps task rows 
 
 When the active workspace changes, SessionRuntime swaps to the new tool registry, invalidates tool availability caches, and preserves the live transcript and loop state. This lets the task continue without resetting the session mirror.
 
-It also clears workspace-derived permission cache entries so the next evaluation uses the refreshed
-workspace rule set.
+It also clears workspace-derived permission and access-profile cache entries so the next evaluation
+uses the refreshed workspace rule set, profile roots, domain rules, and sandbox projection.
 
 ## Related Docs
 
@@ -383,5 +385,6 @@ workspace rule set.
 - [Execution Runtime Model](execution-runtime-model.md)
 - [Features](features.md)
 - [Context Compaction](context-compaction.md)
+- [Access Profiles](access-profiles.md)
 - [Project Status](project-status.md)
 - [Session Note: 2026-04-02](session-notes/2026-04-02-session-runtime-owner.md)

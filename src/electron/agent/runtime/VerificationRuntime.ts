@@ -4,10 +4,7 @@ import type {
   TaskOutputSummary,
   TaskVerificationEvidenceBundle,
 } from "../../../shared/types";
-import {
-  buildWorkerRolePrompt,
-  parseVerificationVerdict,
-} from "./worker-role-registry";
+import { buildWorkerRolePrompt, parseVerificationVerdict } from "./worker-role-registry";
 import type { WorkerRoleKind, VerificationVerdict } from "../../../shared/types";
 
 export interface VerificationRuntimeChildResult {
@@ -138,11 +135,7 @@ export class VerificationRuntime {
   }
 
   private getTaskText(task: Task, parentSummary?: string): string {
-    return [
-      task.title,
-      task.rawPrompt || task.userPrompt || task.prompt,
-      parentSummary || "",
-    ]
+    return [task.title, task.rawPrompt || task.userPrompt || task.prompt, parentSummary || ""]
       .filter(Boolean)
       .join("\n")
       .toLowerCase();
@@ -161,7 +154,9 @@ export class VerificationRuntime {
         workspacePath: task.workspaceId,
         parentSummary: request.parentSummary,
         evidenceBundle: evidenceBlock,
-        outputSummary: request.outputSummary ? JSON.stringify(request.outputSummary, null, 2) : undefined,
+        outputSummary: request.outputSummary
+          ? JSON.stringify(request.outputSummary, null, 2)
+          : undefined,
       }),
       "",
       "## Instructions",
@@ -178,9 +173,7 @@ export class VerificationRuntime {
   }
 }
 
-export function createVerificationRuntime(
-  deps: VerificationRuntimeDeps,
-): VerificationRuntime {
+export function createVerificationRuntime(deps: VerificationRuntimeDeps): VerificationRuntime {
   return new VerificationRuntime(deps);
 }
 

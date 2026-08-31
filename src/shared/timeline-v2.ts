@@ -355,35 +355,35 @@ function toEvidenceRefs(payload: Record<string, unknown>, timestamp: number): Ev
   if (Array.isArray(raw)) {
     const refs: EvidenceRef[] = [];
     raw.forEach((entry, index) => {
-        const obj = asObject(entry);
-        const evidenceId =
-          typeof obj.evidenceId === "string" && obj.evidenceId.trim().length > 0
-            ? obj.evidenceId.trim()
-            : `evidence-${index + 1}`;
-        const sourceType =
-          obj.sourceType === "url" ||
-          obj.sourceType === "file" ||
-          obj.sourceType === "tool_output" ||
-          obj.sourceType === "user_input" ||
-          obj.sourceType === "other"
-            ? obj.sourceType
-            : "other";
-        const sourceUrlOrPath =
-          typeof obj.sourceUrlOrPath === "string" && obj.sourceUrlOrPath.trim().length > 0
-            ? obj.sourceUrlOrPath.trim()
-            : "";
-        if (!sourceUrlOrPath) return;
-        refs.push({
-          evidenceId,
-          sourceType,
-          sourceUrlOrPath,
-          snippet: typeof obj.snippet === "string" ? obj.snippet : undefined,
-          capturedAt:
-            typeof obj.capturedAt === "number" && Number.isFinite(obj.capturedAt)
-              ? obj.capturedAt
-              : timestamp,
-        });
+      const obj = asObject(entry);
+      const evidenceId =
+        typeof obj.evidenceId === "string" && obj.evidenceId.trim().length > 0
+          ? obj.evidenceId.trim()
+          : `evidence-${index + 1}`;
+      const sourceType =
+        obj.sourceType === "url" ||
+        obj.sourceType === "file" ||
+        obj.sourceType === "tool_output" ||
+        obj.sourceType === "user_input" ||
+        obj.sourceType === "other"
+          ? obj.sourceType
+          : "other";
+      const sourceUrlOrPath =
+        typeof obj.sourceUrlOrPath === "string" && obj.sourceUrlOrPath.trim().length > 0
+          ? obj.sourceUrlOrPath.trim()
+          : "";
+      if (!sourceUrlOrPath) return;
+      refs.push({
+        evidenceId,
+        sourceType,
+        sourceUrlOrPath,
+        snippet: typeof obj.snippet === "string" ? obj.snippet : undefined,
+        capturedAt:
+          typeof obj.capturedAt === "number" && Number.isFinite(obj.capturedAt)
+            ? obj.capturedAt
+            : timestamp,
       });
+    });
     return refs;
   }
 
@@ -655,8 +655,7 @@ export function normalizeTaskEventToTimelineV2(params: {
   const groupId =
     (typeof payload.groupId === "string" && payload.groupId.trim().length > 0
       ? payload.groupId.trim()
-      : params.explicitGroupId) ||
-    (stage ? stageToGroupId(stage) : undefined);
+      : params.explicitGroupId) || (stage ? stageToGroupId(stage) : undefined);
 
   const nextPayload: Record<string, unknown> = {
     ...payload,
@@ -735,7 +734,9 @@ export function projectTimelineEventToLegacy(event: TaskEvent): TaskEvent {
   delete legacyPayload.legacyType;
 
   if (
-    (legacyType === "step_started" || legacyType === "step_completed" || legacyType === "step_failed") &&
+    (legacyType === "step_started" ||
+      legacyType === "step_completed" ||
+      legacyType === "step_failed") &&
     !legacyPayload.step
   ) {
     legacyPayload.step = {

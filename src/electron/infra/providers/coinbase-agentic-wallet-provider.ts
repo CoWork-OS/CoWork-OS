@@ -144,7 +144,9 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
   }
 
   private normalizeEndpoint(value: string): string {
-    return String(value || "").trim().replace(/\/+$/, "");
+    return String(value || "")
+      .trim()
+      .replace(/\/+$/, "");
   }
 
   private async callJson<T>(
@@ -193,20 +195,28 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
       );
     }
     if (!this.isAllowedPaymentNetwork(String(result.paymentDetails.network || ""))) {
-      throw new Error(`Coinbase signer returned unsupported x402 network: ${result.paymentDetails.network}`);
+      throw new Error(
+        `Coinbase signer returned unsupported x402 network: ${result.paymentDetails.network}`,
+      );
     }
     if (!this.isAllowedPaymentAsset(result.paymentDetails)) {
-      throw new Error(`Coinbase signer returned unsupported x402 asset: ${result.paymentDetails.asset || "unknown"}`);
+      throw new Error(
+        `Coinbase signer returned unsupported x402 asset: ${result.paymentDetails.asset || "unknown"}`,
+      );
     }
     if (policy.requireApproval && !policy.approvedPaymentDetails) {
-      throw new Error("Coinbase signer made an x402 payment without exact approved payment details");
+      throw new Error(
+        "Coinbase signer made an x402 payment without exact approved payment details",
+      );
     }
 
     const expected = policy.approvedPaymentDetails || policy.preflight?.paymentDetails;
     if (expected) {
       const mismatch = this.getPaymentDetailsMismatch(expected, result.paymentDetails);
       if (mismatch) {
-        throw new Error(`Coinbase signer payment details do not match approved policy (${mismatch})`);
+        throw new Error(
+          `Coinbase signer payment details do not match approved policy (${mismatch})`,
+        );
       }
     }
   }
@@ -240,7 +250,9 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
     const normalized = String(details.asset).trim().toLowerCase();
     const mainnetUsdc = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
     const sepoliaUsdc = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
-    return this.network === "base-sepolia" ? normalized === sepoliaUsdc : normalized === mainnetUsdc;
+    return this.network === "base-sepolia"
+      ? normalized === sepoliaUsdc
+      : normalized === mainnetUsdc;
   }
 
   private getPaymentDetailsMismatch(

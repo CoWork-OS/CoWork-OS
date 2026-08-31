@@ -116,10 +116,13 @@ describe("spreadsheet preview extraction", () => {
   it("extracts and writes CSV previews with quoted cells", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-csv-preview-"));
     const outPath = path.join(tmpDir, "people.csv");
-    const preview = buildDelimitedSpreadsheetPreview('Name,Notes\n"Alice, A.","Line 1\nLine 2"\nBruno,Ready', {
-      delimiter: ",",
-      sheetName: "people",
-    });
+    const preview = buildDelimitedSpreadsheetPreview(
+      'Name,Notes\n"Alice, A.","Line 1\nLine 2"\nBruno,Ready',
+      {
+        delimiter: ",",
+        sheetName: "people",
+      },
+    );
 
     expect(preview.sheetCount).toBe(1);
     expect(preview.sheets[0].name).toBe("people");

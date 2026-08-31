@@ -144,7 +144,13 @@ export function SpreadsheetArtifactCard({
             fill="none"
             aria-hidden="true"
           >
-            <path d="M3.5 5.25L7 8.75L10.5 5.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d="M3.5 5.25L7 8.75L10.5 5.25"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         </button>
       </div>
@@ -155,9 +161,18 @@ export function SpreadsheetArtifactCard({
             className="spreadsheet-artifact-menu"
             ref={menuRef}
             role="menu"
-            style={{ position: "fixed", top: menuPosition.top, left: menuPosition.left, right: "auto" }}
+            style={{
+              position: "fixed",
+              top: menuPosition.top,
+              left: menuPosition.left,
+              right: "auto",
+            }}
           >
-            <button type="button" role="menuitem" onClick={() => handleOpenWithApp("Microsoft Excel")}>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => handleOpenWithApp("Microsoft Excel")}
+            >
               <span className="spreadsheet-artifact-app-icon excel">X</span>
               Microsoft Excel
             </button>
@@ -165,7 +180,11 @@ export function SpreadsheetArtifactCard({
               <span className="spreadsheet-artifact-app-icon numbers">N</span>
               Numbers
             </button>
-            <button type="button" role="menuitem" onClick={() => handleOpenWithApp("Microsoft Outlook")}>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => handleOpenWithApp("Microsoft Outlook")}
+            >
               <span className="spreadsheet-artifact-app-icon outlook">O</span>
               Microsoft Outlook
             </button>

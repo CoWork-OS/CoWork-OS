@@ -82,10 +82,14 @@ export async function fetchMentionsWithRetry(
       throw error;
     }
     try {
-      const retryResult = await runBirdCommand(settings, ["mentions", "-n", String(retryFetchCount)], {
-        json: true,
-        timeoutMs: retryTimeoutMs,
-      });
+      const retryResult = await runBirdCommand(
+        settings,
+        ["mentions", "-n", String(retryFetchCount)],
+        {
+          json: true,
+          timeoutMs: retryTimeoutMs,
+        },
+      );
       return retryResult;
     } catch (retryError) {
       throw retryError;

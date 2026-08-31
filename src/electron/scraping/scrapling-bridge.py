@@ -52,11 +52,34 @@ def get_response_url(response: Any, requested_url: str) -> str:
     return str(response.url) if hasattr(response, "url") else requested_url
 
 
-def enforce_same_host_final_url(requested_url: str, response: Any) -> str:
-    """Block bridge-side redirects to a different host after the TS policy check."""
+def normalize_allowed_hosts(params: dict) -> set[str]:
+    """Normalize the host allowlist supplied by the policy-enforcing caller."""
+    values = params.get("allowed_hosts", [])
+    if not isinstance(values, list):
+        return set()
+    return {
+        str(value).strip().lower().rstrip(".")
+        for value in values
+        if str(value).strip()
+    }
+
+
+def enforce_same_host_final_url(
+    requested_url: str,
+    response: Any,
+    allowed_hosts: set[str] | None = None,
+) -> str:
+    """Block unsafe schemes, cross-host redirects, and unexpected final hosts."""
     final_url = get_response_url(response, requested_url)
-    requested_host = (urlparse(requested_url).hostname or "").lower()
-    final_host = (urlparse(final_url).hostname or requested_host).lower()
+    requested = urlparse(requested_url)
+    final = urlparse(final_url)
+    if requested.scheme not in ("http", "https") or final.scheme not in ("http", "https"):
+        raise ValueError("Scraping only supports HTTP and HTTPS URLs")
+    requested_host = (requested.hostname or "").lower().rstrip(".")
+    final_host = (final.hostname or requested_host).lower().rstrip(".")
+    if allowed_hosts:
+        if requested_host not in allowed_hosts or final_host not in allowed_hosts:
+            raise ValueError("Scraping URL host is outside the approved host set")
     if requested_host and final_host and requested_host != final_host:
         raise ValueError("Scraping redirect crossed to a different host")
     return final_url
@@ -162,7 +185,7 @@ def handle_scrape_page(params: dict) -> None:
 
         # Perform the fetch
         response = fetcher.get(url, **fetch_kwargs)
-        final_url = enforce_same_host_final_url(url, response)
+        final_url = enforce_same_host_final_url(url, response, normalize_allowed_hosts(params))
 
         # Extract content
         status = get_response_status(response)
@@ -276,7 +299,11 @@ def handle_scrape_multiple(params: dict) -> None:
                     fetch_kwargs["proxies"] = {"http": proxy, "https": proxy}
                 response = fetcher.get(url, **fetch_kwargs)
                 last_request_at = time.monotonic()
-                final_url = enforce_same_host_final_url(url, response)
+                final_url = enforce_same_host_final_url(
+                    url,
+                    response,
+                    normalize_allowed_hosts(params),
+                )
                 status = get_response_status(response)
 
                 title_els = response.css("title")
@@ -344,7 +371,7 @@ def handle_extract_structured(params: dict) -> None:
         if proxy:
             fetch_kwargs["proxies"] = {"http": proxy, "https": proxy}
         response = fetcher.get(url, **fetch_kwargs)
-        final_url = enforce_same_host_final_url(url, response)
+        final_url = enforce_same_host_final_url(url, response, normalize_allowed_hosts(params))
         status = get_response_status(response)
         result: dict[str, Any] = {
             "success": status < 400,
@@ -442,7 +469,11 @@ def handle_scrape_session(params: dict) -> None:
                     kwargs["wait_selector"] = step_wait
                 response = fetcher.get(step_url, **kwargs)
                 last_request_at = time.monotonic()
-                final_url = enforce_same_host_final_url(step_url, response)
+                final_url = enforce_same_host_final_url(
+                    step_url,
+                    response,
+                    normalize_allowed_hosts(params),
+                )
                 status = get_response_status(response)
                 title_els = response.css("title")
                 result = {

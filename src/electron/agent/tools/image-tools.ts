@@ -8,6 +8,7 @@ import {
   ImageProvider,
 } from "../skills/image-generator";
 import { LLMTool } from "../llm/types";
+import { createWorkspaceFilesystemApprovalHandlers } from "../../security/access-profile-paths";
 
 /**
  * ImageTools - Tools for AI image generation
@@ -33,7 +34,7 @@ export class ImageTools {
     private daemon: AgentDaemon,
     private taskId: string,
   ) {
-    this.imageGenerator = new ImageGenerator(workspace);
+    this.imageGenerator = this.createImageGenerator(workspace);
   }
 
   /**
@@ -42,7 +43,16 @@ export class ImageTools {
    */
   setWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
-    this.imageGenerator = new ImageGenerator(workspace);
+    this.imageGenerator = this.createImageGenerator(workspace);
+  }
+
+  private createImageGenerator(workspace: Workspace): ImageGenerator {
+    const approvalHandlers = createWorkspaceFilesystemApprovalHandlers(
+      this.daemon,
+      this.taskId,
+      "generate_image",
+    );
+    return new ImageGenerator(workspace, approvalHandlers);
   }
 
   /**
@@ -164,7 +174,10 @@ export class ImageTools {
     referenceImages?: string[];
   }): string {
     return JSON.stringify({
-      prompt: String(input.prompt || "").replace(/\s+/g, " ").trim().toLowerCase(),
+      prompt: String(input.prompt || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase(),
       provider: input.provider || "auto",
       model: input.model || "",
       imageSize: input.imageSize || "1K",

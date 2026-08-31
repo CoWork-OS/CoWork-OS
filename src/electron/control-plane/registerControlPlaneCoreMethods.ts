@@ -274,7 +274,8 @@ export function registerControlPlaneCoreMethods(options: {
           p.reporterAgentRoleId === null ? "" : optionalString(p.reporterAgentRoleId),
         requestDepth: p.requestDepth === null ? null : optionalNumber(p.requestDepth),
         billingCode: p.billingCode === null ? "" : optionalString(p.billingCode),
-        metadata: p.metadata === null ? null : typeof p.metadata === "object" ? p.metadata : undefined,
+        metadata:
+          p.metadata === null ? null : typeof p.metadata === "object" ? p.metadata : undefined,
         completedAt: p.completedAt === null ? null : optionalNumber(p.completedAt),
       }),
     };

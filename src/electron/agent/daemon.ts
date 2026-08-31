@@ -19,6 +19,7 @@ import {
   MemoryType,
 } from "../database/repositories";
 import { SessionRetentionService } from "../sessions/SessionRetentionService";
+import { SessionProgressService } from "../sessions/SessionProgressService";
 import {
   loadSessionRetentionSettings,
   saveSessionRetentionSettings,
@@ -98,6 +99,10 @@ import {
 } from "../../shared/types";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
+import {
+  hasAccessProfileScope,
+  isAccessProfileAtMostPrivileged,
+} from "../../shared/access-profiles";
 import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
 import {
   extractTimelineEvidenceRefs,
@@ -106,6 +111,7 @@ import {
   isTimelineEventType,
   normalizeTaskEventToTimelineV2,
 } from "../../shared/timeline-v2";
+import { buildUserMessageAttachmentMetadata } from "../../shared/user-message-attachments";
 import { sanitizeTimelinePayloadForStorage } from "./timeline-payload-sanitizer";
 import { deriveCanonicalTaskStatus, isTerminalTaskStatus } from "../../shared/task-status";
 import { createTimelineEmitter } from "./timeline-emitter";
@@ -129,6 +135,12 @@ import {
 import { MemoryService } from "../memory/MemoryService";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import {
+  applyDefaultAccessProfile,
+  applyAccessProfileToWorkspace,
+  resolveEffectiveAccessProfile,
+  type EffectiveAccessProfile,
+} from "../security/access-profile-resolver";
 import {
   appendWorkspacePermissionManifestRule,
   loadWorkspacePermissionManifest,
@@ -165,6 +177,14 @@ import {
 } from "../agents/autonomy-policy";
 import { PermissionEngine } from "./runtime/PermissionEngine";
 import { WorktreeManager } from "../git/WorktreeManager";
+import {
+  assertWorkspaceFilesystemAccess,
+  canonicalizeAccessPath,
+  evaluateWorkspaceFilesystemAccess,
+  isAccessPathWithin,
+  resolveAccessControlledPath,
+  type AccessFilesystemOperation,
+} from "../security/access-profile-paths";
 import type { ComparisonService } from "../git/ComparisonService";
 import {
   deriveEntropySweepDecision,
@@ -396,6 +416,8 @@ interface PendingApprovalEntry {
   reject: (reason?: unknown) => void;
   resolved: boolean;
   timeoutHandle: ReturnType<typeof setTimeout>;
+  abortSignal?: AbortSignal;
+  abortListener?: () => void;
 }
 
 function getAllElectronWindows(): Any[] {
@@ -453,6 +475,7 @@ export class AgentDaemon extends EventEmitter {
   private workspacePermissionRuleRepo: WorkspacePermissionRuleRepository;
   private inputRequestRepo: InputRequestRepository;
   private artifactRepo: ArtifactRepository;
+  private sessionProgressService: SessionProgressService;
   private annotationRepo: AnnotationRepository;
   private activityRepo: ActivityRepository;
   private agentRoleRepo: AgentRoleRepository;
@@ -461,6 +484,10 @@ export class AgentDaemon extends EventEmitter {
   private orchestrationGraphEngine: OrchestrationGraphEngine;
   private activeTasks: Map<string, CachedExecutor> = new Map();
   private pendingApprovals: Map<string, PendingApprovalEntry> = new Map();
+  /** Per-turn agentConfig overrides used by scheduled/event dispatch. */
+  private transientAgentConfigOverrides: Map<string, AgentConfig> = new Map();
+  /** One-shot grants consumed by external filesystem operations. */
+  private externalFileApprovalGrants: Map<string, number> = new Map();
   private pendingInputRequests: Map<
     string,
     {
@@ -536,6 +563,7 @@ export class AgentDaemon extends EventEmitter {
     this.workspacePermissionRuleRepo = new WorkspacePermissionRuleRepository(db);
     this.inputRequestRepo = new InputRequestRepository(db);
     this.artifactRepo = new ArtifactRepository(db);
+    this.sessionProgressService = new SessionProgressService(db);
     this.annotationRepo = new AnnotationRepository(db);
     this.activityRepo = new ActivityRepository(db);
     this.agentRoleRepo = new AgentRoleRepository(db);
@@ -609,6 +637,15 @@ export class AgentDaemon extends EventEmitter {
   /** Get the comparison service instance. */
   getComparisonService(): ComparisonService | null {
     return this.comparisonService;
+  }
+
+  /** Return the compact durable state used to restore a session after reload/reconnect. */
+  getSessionProgress(taskId: string) {
+    return this.sessionProgressService.get(taskId);
+  }
+
+  searchSessions(query: string, workspaceId?: string, limit?: number) {
+    return this.sessionProgressService.search(query, { workspaceId, limit });
   }
 
   getDatabase(): Database.Database {
@@ -774,30 +811,110 @@ export class AgentDaemon extends EventEmitter {
   }
 
   private applyTaskWorkspaceOverrides(task: Task, workspace: Workspace): Workspace {
-    if (task.agentConfig?.shellAccess !== true || workspace.permissions.shell === true) {
-      return workspace;
+    const profile = resolveEffectiveAccessProfile({
+      task,
+      workspace,
+      settings: PermissionSettingsManager.loadSettings(),
+      adminPolicies: loadPolicies(),
+    });
+    const profileWorkspace = applyAccessProfileToWorkspace(workspace, profile);
+    const shellOverride =
+      typeof task.agentConfig?.accessProfileId !== "string" &&
+      task.agentConfig?.shellAccess === true &&
+      profile.definition.shellAccess !== false;
+    if (!shellOverride || profileWorkspace.permissions.shell === true) {
+      return profileWorkspace;
     }
     return {
-      ...workspace,
+      ...profileWorkspace,
       permissions: {
-        ...workspace.permissions,
+        ...profileWorkspace.permissions,
         shell: true,
       },
     };
+  }
+
+  /**
+   * Apply a task's access profile to a specific runtime checkout. Worktrees
+   * are separate writable surfaces, but the base repository remains the
+   * task's workspace for explicit Git merge/promotion operations.
+   */
+  private applyTaskWorkspaceOverridesForPath(
+    task: Task,
+    workspace: Workspace,
+    runtimePath?: string,
+  ): Workspace {
+    const pathOverride = runtimePath?.trim();
+    if (!pathOverride || path.resolve(pathOverride) === path.resolve(workspace.path)) {
+      return this.applyTaskWorkspaceOverrides(task, workspace);
+    }
+
+    const runtimeWorkspace = this.applyTaskWorkspaceOverrides(task, {
+      ...workspace,
+      path: pathOverride,
+    });
+    // The active checkout is the only filesystem surface exposed to normal
+    // task tools. The base repository is a separate promotion capability and
+    // must not be added as a generic allowed root (otherwise read/write tools
+    // could escape a worktree-scoped task without using Git).
+    const baseRoot = path.resolve(workspace.path);
+    const filteredLegacyRoots = (runtimeWorkspace.permissions.allowedPaths || []).filter(
+      (allowedRoot) => {
+        const normalizedRoot = path.resolve(allowedRoot);
+        return !(
+          isAccessPathWithin(baseRoot, normalizedRoot) ||
+          isAccessPathWithin(normalizedRoot, baseRoot)
+        );
+      },
+    );
+    return {
+      ...runtimeWorkspace,
+      permissions: {
+        ...runtimeWorkspace.permissions,
+        // Legacy allowedPaths may contain the base repository. Do not expose
+        // that path as a generic worktree root; Git promotion is the only
+        // operation that is allowed to cross back to the base checkout.
+        allowedPaths: filteredLegacyRoots,
+      },
+    };
+  }
+
+  /** Return the live task workspace, resolving profile rules against its checkout. */
+  getEffectiveWorkspaceForTask(taskId: string): Workspace | undefined {
+    const storedTask = this.taskRepo.findById(taskId);
+    const transientTaskResolver = (this as Any).getTaskWithTransientAgentConfig;
+    const task =
+      typeof transientTaskResolver === "function"
+        ? transientTaskResolver.call(this, storedTask)
+        : storedTask;
+    if (!task) return undefined;
+    const baseWorkspace = this.workspaceRepo.findById(task.workspaceId);
+    if (!baseWorkspace) return undefined;
+
+    const liveWorkspace = this.getExecutorForTask(taskId)?.getWorkspace?.();
+    const runtimePath =
+      liveWorkspace?.path ||
+      (task.worktreeStatus === "active" && task.worktreePath ? task.worktreePath : undefined);
+    return this.applyTaskWorkspaceOverridesForPath(task, baseWorkspace, runtimePath);
   }
 
   private applyTaskFollowUpOverrides(
     task: Task,
     options?: Pick<
       TaskFollowUpInput,
-      "permissionMode" | "shellAccess" | "integrationMentions" | "agentConfigOverride"
+      | "permissionMode"
+      | "shellAccess"
+      | "accessProfileId"
+      | "integrationMentions"
+      | "agentConfigOverride"
     >,
   ): { task: Task; changed: boolean } {
     const hasPermissionMode = typeof options?.permissionMode === "string";
     const hasShellAccess = typeof options?.shellAccess === "boolean";
+    const hasAccessProfile = typeof options?.accessProfileId === "string";
     const hasIntegrationMentions =
       Boolean(options) && Object.prototype.hasOwnProperty.call(options, "integrationMentions");
-    if (!hasPermissionMode && !hasShellAccess && !hasIntegrationMentions) {
+    if (!hasPermissionMode && !hasShellAccess && !hasAccessProfile && !hasIntegrationMentions) {
       return { task, changed: false };
     }
 
@@ -810,6 +927,10 @@ export class AgentDaemon extends EventEmitter {
     }
     if (hasShellAccess && nextAgentConfig.shellAccess !== options.shellAccess) {
       nextAgentConfig.shellAccess = options.shellAccess;
+      changed = true;
+    }
+    if (hasAccessProfile && nextAgentConfig.accessProfileId !== options.accessProfileId) {
+      nextAgentConfig.accessProfileId = options.accessProfileId;
       changed = true;
     }
     if (hasIntegrationMentions) {
@@ -1234,8 +1355,17 @@ export class AgentDaemon extends EventEmitter {
       );
       for (const task of orphanedTasks) {
         const workspace = this.workspaceRepo.findById(task.workspaceId);
+        const effectiveWorkspace = workspace
+          ? this.applyTaskWorkspaceOverrides(task, workspace)
+          : null;
         const checkpoint = workspace
-          ? TranscriptStore.loadCheckpointSync(workspace.path, task.id)
+          ? TranscriptStore.loadCheckpointSync(
+              workspace.path,
+              task.id,
+              (candidatePath) =>
+                evaluateWorkspaceFilesystemAccess(effectiveWorkspace!, candidatePath, "read")
+                  .decision === "allow",
+            )
           : null;
         const snapshot = this.eventRepo.findLatestConversationSnapshot(task.id);
         const planEvents = this.eventRepo.findByTaskIdAndTypes(
@@ -1247,7 +1377,9 @@ export class AgentDaemon extends EventEmitter {
         const hasPlan = planEvents.some(
           (event) =>
             RESUME_PLAN_DEFINITION_EVENT_TYPES.includes(
-              this.resolveLegacyEventType(event) as (typeof RESUME_PLAN_DEFINITION_EVENT_TYPES)[number],
+              this.resolveLegacyEventType(
+                event,
+              ) as (typeof RESUME_PLAN_DEFINITION_EVENT_TYPES)[number],
             ) && Boolean(event.payload?.plan),
         );
 
@@ -1459,15 +1591,40 @@ export class AgentDaemon extends EventEmitter {
     // If worktree isolation is enabled, create an isolated worktree for this task.
     // The executor gets a "virtual workspace" with the path swapped to the worktree directory.
     let effectiveWorkspace = this.applyTaskWorkspaceOverrides(executionTask, workspace);
+    const effectiveAccessProfile = resolveEffectiveAccessProfile({
+      task: executionTask,
+      workspace,
+      settings: PermissionSettingsManager.loadSettings(),
+      adminPolicies: loadPolicies(),
+    });
+    if (effectiveAccessProfile.profileUnavailable) {
+      const errorMessage =
+        "The selected access profile is unavailable. Choose a valid profile before running this task.";
+      this.updateTask(executionTask.id, {
+        status: "paused",
+        terminalStatus: "needs_user_action",
+        awaitingUserInputReasonCode: "access_profile_unavailable",
+        error: errorMessage,
+      });
+      this.logEvent(executionTask.id, "task_paused", {
+        message: errorMessage,
+        reason: "access_profile_unavailable",
+        accessProfileId: executionTask.agentConfig?.accessProfileId,
+      });
+      this.finishQueueSlot(executionTask.id);
+      return;
+    }
     const requiresWorktree = executionTask.agentConfig?.requireWorktree === true;
     const canUseWorktree = await this.worktreeManager.shouldUseWorktree(
       workspace.path,
       workspace.isTemp,
       requiresWorktree,
     );
-    if (requiresWorktree && !canUseWorktree) {
+    if (requiresWorktree && (!canUseWorktree || effectiveWorkspace.permissions.write !== true)) {
       const errorMessage =
-        "Task requires git worktree isolation, but worktrees are unavailable for this workspace.";
+        effectiveWorkspace.permissions.write !== true
+          ? "Task requires git worktree isolation, but the active access profile does not allow workspace writes."
+          : "Task requires git worktree isolation, but worktrees are unavailable for this workspace.";
       this.failTask(executionTask.id, errorMessage, {
         terminalStatus: "failed",
         failureClass: "dependency_unavailable",
@@ -1477,8 +1634,23 @@ export class AgentDaemon extends EventEmitter {
       });
       return;
     }
-    if (canUseWorktree) {
+    if (canUseWorktree && effectiveWorkspace.permissions.write === true) {
       try {
+        const worktreeStoragePath = await this.worktreeManager.getWorktreeStoragePath(
+          workspace.path,
+        );
+        this.assertTaskBaseWorkspaceFilesystemAccess(
+          executionTask.id,
+          worktreeStoragePath,
+          "write",
+          "worktree storage",
+        );
+        this.assertTaskBaseWorkspaceFilesystemAccess(
+          executionTask.id,
+          path.join(path.dirname(worktreeStoragePath), ".gitignore"),
+          "write",
+          "worktree gitignore",
+        );
         const worktreeInfo = await this.worktreeManager.createForTask(
           executionTask.id,
           executionTask.title,
@@ -1487,10 +1659,11 @@ export class AgentDaemon extends EventEmitter {
         );
 
         // Create a virtual workspace pointing to the worktree
-        effectiveWorkspace = {
-          ...this.applyTaskWorkspaceOverrides(executionTask, workspace),
-          path: worktreeInfo.worktreePath,
-        };
+        effectiveWorkspace = this.applyTaskWorkspaceOverridesForPath(
+          executionTask,
+          workspace,
+          worktreeInfo.worktreePath,
+        );
 
         // Update task record with worktree metadata
         this.taskRepo.update(executionTask.id, {
@@ -1664,18 +1837,23 @@ export class AgentDaemon extends EventEmitter {
       throw new Error(`Workspace ${task.workspaceId} not found - cannot resume task`);
     }
 
-    const checkpoint = TranscriptStore.loadCheckpointSync(workspace.path, task.id);
-    const events = this.getTaskEventsForResume(task.id, workspace.path);
+    const checkpointWorkspace = this.applyTaskWorkspaceOverrides(task, workspace);
+    const readGuard = (candidatePath: string): boolean =>
+      evaluateWorkspaceFilesystemAccess(checkpointWorkspace, candidatePath, "read").decision ===
+      "allow";
+    const checkpoint = TranscriptStore.loadCheckpointSync(workspace.path, task.id, readGuard);
+    const events = this.getTaskEventsForResume(task.id, workspace.path, readGuard);
 
     // Check if we have meaningful state to restore from
     const hasSnapshot =
-      Boolean(checkpoint) ||
-      events.some((e) => this.isLegacyEventType(e, "conversation_snapshot"));
+      Boolean(checkpoint) || events.some((e) => this.isLegacyEventType(e, "conversation_snapshot"));
     const planEvent = events
       .filter(
         (event) =>
           RESUME_PLAN_DEFINITION_EVENT_TYPES.includes(
-            this.resolveLegacyEventType(event) as (typeof RESUME_PLAN_DEFINITION_EVENT_TYPES)[number],
+            this.resolveLegacyEventType(
+              event,
+            ) as (typeof RESUME_PLAN_DEFINITION_EVENT_TYPES)[number],
           ) && Boolean(event.payload?.plan),
       )
       .pop();
@@ -1702,10 +1880,11 @@ export class AgentDaemon extends EventEmitter {
     let effectiveWorkspace = this.applyTaskWorkspaceOverrides(effectiveTask, workspace);
     if (task.worktreePath && task.worktreeStatus === "active") {
       if (fs.existsSync(task.worktreePath)) {
-        effectiveWorkspace = {
-          ...this.applyTaskWorkspaceOverrides(effectiveTask, workspace),
-          path: task.worktreePath,
-        };
+        effectiveWorkspace = this.applyTaskWorkspaceOverridesForPath(
+          effectiveTask,
+          workspace,
+          task.worktreePath,
+        );
       } else {
         console.warn(
           `[AgentDaemon] Worktree path ${task.worktreePath} no longer exists for task ${task.id}`,
@@ -1744,7 +1923,7 @@ export class AgentDaemon extends EventEmitter {
               ? ("failed" as const)
               : skippedStepIds.has(step.id)
                 ? ("skipped" as const)
-              : ("pending" as const),
+                : ("pending" as const),
         })),
       };
       executor.setPlan(restoredPlan);
@@ -1899,9 +2078,13 @@ export class AgentDaemon extends EventEmitter {
 
     const { task: effectiveTask } = this.applyAgentRoleOverrides(task);
 
-    let effectiveWorkspace = workspace;
+    let effectiveWorkspace = this.applyTaskWorkspaceOverrides(effectiveTask, workspace);
     if (task.worktreePath && task.worktreeStatus === "active" && fs.existsSync(task.worktreePath)) {
-      effectiveWorkspace = { ...workspace, path: task.worktreePath };
+      effectiveWorkspace = this.applyTaskWorkspaceOverridesForPath(
+        effectiveTask,
+        workspace,
+        task.worktreePath,
+      );
     }
 
     const executor = new TaskExecutor(effectiveTask, effectiveWorkspace, this);
@@ -2028,7 +2211,7 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    const task = this.taskRepo.findById(taskId);
+    const task = this.getTaskWithTransientAgentConfig(this.taskRepo.findById(taskId));
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
@@ -2508,11 +2691,15 @@ export class AgentDaemon extends EventEmitter {
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
   }) {
+    const taskAgentConfig = applyDefaultAccessProfile(
+      params.agentConfig,
+      PermissionSettingsManager.loadSettings(),
+    );
     const derived = this.deriveTaskStrategy({
       title: params.title,
       prompt: params.prompt,
       routingPrompt: params.prompt,
-      agentConfig: params.agentConfig,
+      agentConfig: taskAgentConfig,
     });
     const isCronTask = params.source === "cron";
     const cronBudgetProfile = isCronTask
@@ -2673,9 +2860,124 @@ export class AgentDaemon extends EventEmitter {
     const mergedPermissionMode =
       parent?.agentConfig?.permissionMode === "bypass_permissions"
         ? "bypass_permissions"
-        : params.agentConfig?.permissionMode;
+        : (params.agentConfig?.permissionMode ?? parent?.agentConfig?.permissionMode);
     const mergedShellAccess =
       parent?.agentConfig?.shellAccess === true ? true : params.agentConfig?.shellAccess;
+
+    const parentAccessProfileId =
+      typeof parent?.agentConfig?.accessProfileId === "string"
+        ? parent.agentConfig.accessProfileId
+        : undefined;
+    const accessProfileInheritance = (() => {
+      if (!parent) {
+        return {
+          accessProfileId: undefined,
+          fallbackPermissionMode: undefined,
+          stripRequestedProfile: false,
+        };
+      }
+
+      // An explicitly selected parent profile is a ceiling for every child.
+      // A child may choose a strictly narrower profile when the workspace and
+      // profile settings are available; otherwise inherit the parent's exact
+      // profile so a lightweight daemon cannot accidentally widen access.
+      if (parentAccessProfileId) {
+        const childAccessProfileId = params.agentConfig?.accessProfileId;
+        const workspace = this.workspaceRepo?.findById(parent.workspaceId || params.workspaceId);
+        if (
+          workspace &&
+          typeof childAccessProfileId === "string" &&
+          childAccessProfileId.trim().length > 0
+        ) {
+          const settings = PermissionSettingsManager.loadSettings();
+          const adminPolicies = loadPolicies();
+          const parentProfile = resolveEffectiveAccessProfile({
+            task: parent,
+            workspace,
+            settings,
+            adminPolicies,
+          });
+          const childProfile = resolveEffectiveAccessProfile({
+            task: { agentConfig: params.agentConfig },
+            workspace,
+            settings,
+            adminPolicies,
+          });
+          if (isAccessProfileAtMostPrivileged(childProfile.definition, parentProfile.definition)) {
+            return {
+              accessProfileId: undefined,
+              fallbackPermissionMode: undefined,
+              stripRequestedProfile: false,
+            };
+          }
+          return {
+            accessProfileId: undefined,
+            fallbackPermissionMode: parentProfile.permissionMode,
+            stripRequestedProfile: true,
+          };
+        }
+        return {
+          accessProfileId: parentAccessProfileId,
+          fallbackPermissionMode: undefined,
+          stripRequestedProfile: false,
+        };
+      }
+
+      const childAccessProfileId = params.agentConfig?.accessProfileId;
+      const workspace = this.workspaceRepo?.findById(parent.workspaceId || params.workspaceId);
+      const settings = PermissionSettingsManager.loadSettings();
+      const adminPolicies = loadPolicies();
+      const parentProfile = resolveEffectiveAccessProfile({
+        task: parent,
+        workspace,
+        settings,
+        adminPolicies,
+      });
+
+      const childProfile = resolveEffectiveAccessProfile({
+        // Include the already-merged legacy mode when comparing a child that
+        // does not select a named profile. Otherwise a child could request
+        // bypass_permissions while the parent only had a legacy/default mode,
+        // or inherit a broad settings default that the parent had overridden.
+        task: {
+          agentConfig: {
+            ...(params.agentConfig || {}),
+            ...(mergedPermissionMode ? { permissionMode: mergedPermissionMode } : {}),
+          },
+        },
+        workspace,
+        settings,
+        adminPolicies,
+      });
+      const hasChildAccessProfile =
+        typeof childAccessProfileId === "string" && childAccessProfileId.trim().length > 0;
+      const parentHasScopedRules = hasAccessProfileScope(parentProfile.definition);
+      const childHasScopedRules = hasAccessProfileScope(childProfile.definition);
+      const childKeepsScopedRules =
+        !hasChildAccessProfile ||
+        !childHasScopedRules ||
+        (parentHasScopedRules && childProfile.definition.id === parentProfile.definition.id);
+      const isWithinCeiling =
+        isAccessProfileAtMostPrivileged(childProfile.definition, parentProfile.definition) &&
+        childKeepsScopedRules;
+
+      if (isWithinCeiling) {
+        return {
+          accessProfileId: undefined,
+          fallbackPermissionMode: undefined,
+          stripRequestedProfile: false,
+        };
+      }
+
+      // A legacy permission-mode override is still an access escalation even
+      // when the child did not select a named access profile. Strip it and
+      // carry the parent's effective mode forward.
+      return {
+        accessProfileId: undefined,
+        fallbackPermissionMode: parentProfile.permissionMode,
+        stripRequestedProfile: true,
+      };
+    })();
 
     // Prevent privilege escalation: a child task may not become "more private" than its parent.
     const mergedGatewayContext: AgentConfig["gatewayContext"] | undefined = (() => {
@@ -2827,6 +3129,14 @@ export class AgentDaemon extends EventEmitter {
       }
       if (mergedShellAccess !== undefined) {
         next.shellAccess = mergedShellAccess;
+      }
+      if (accessProfileInheritance.accessProfileId) {
+        next.accessProfileId = accessProfileInheritance.accessProfileId;
+      } else if (accessProfileInheritance.stripRequestedProfile) {
+        delete next.accessProfileId;
+        if (accessProfileInheritance.fallbackPermissionMode) {
+          next.permissionMode = accessProfileInheritance.fallbackPermissionMode;
+        }
       }
       if (mergedPermissionMode === "bypass_permissions" && next.externalRuntime?.kind === "acpx") {
         next.externalRuntime = {
@@ -3257,7 +3567,7 @@ export class AgentDaemon extends EventEmitter {
    * This avoids starting sub-agents before the task is clearly defined.
    */
   async dispatchMentionedAgents(taskId: string, plan?: Plan): Promise<void> {
-    const task = this.taskRepo.findById(taskId);
+    const task = this.getTaskWithTransientAgentConfig(this.taskRepo.findById(taskId));
     if (!task || task.parentTaskId) return;
 
     const mentionedRoleIds = (task.mentionedAgentRoleIds || []).filter(Boolean);
@@ -3467,6 +3777,84 @@ export class AgentDaemon extends EventEmitter {
     }
   }
 
+  private getLatestPausedTaskBlocker(taskId: string):
+    | {
+        reasonCode?: string;
+        message?: string;
+        isVerificationFailure: boolean;
+      }
+    | undefined {
+    const events = this.eventRepo.findByTaskId(taskId);
+    let latestPause:
+      | {
+          reasonCode?: string;
+          message?: string;
+          isVerificationFailure: boolean;
+        }
+      | undefined;
+    let latestVerificationFailure:
+      | {
+          reasonCode: string;
+          message?: string;
+          isVerificationFailure: true;
+        }
+      | undefined;
+
+    const getPayload = (event: TaskEvent): Record<string, unknown> => {
+      if (event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)) {
+        return event.payload as Record<string, unknown>;
+      }
+      return {};
+    };
+    const getText = (payload: Record<string, unknown>): string => {
+      for (const key of ["message", "reason", "error", "userMessage"]) {
+        const value = payload[key];
+        if (typeof value === "string" && value.trim()) return value.trim();
+      }
+      return "";
+    };
+    const isVerificationFailureText = (value: string): boolean =>
+      /verification\s+(?:failed|did not pass)|incorrect\s+content|required\s+verification|does not pass|doesn't pass/i.test(
+        value,
+      );
+
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      const type = this.resolveLegacyEventType(event);
+      if (type === "user_message") break;
+
+      const payload = getPayload(event);
+      if (type === "verification_failed" && !latestVerificationFailure) {
+        latestVerificationFailure = {
+          reasonCode: "verification_failed",
+          message: getText(payload) || undefined,
+          isVerificationFailure: true,
+        };
+        continue;
+      }
+
+      if ((type === "task_paused" || type === "awaiting_user_input") && !latestPause) {
+        const reasonCode =
+          typeof payload.reasonCode === "string" && payload.reasonCode.trim()
+            ? payload.reasonCode.trim()
+            : typeof payload.reason === "string" && payload.reason.trim()
+              ? payload.reason.trim()
+              : undefined;
+        const pauseMessage = getText(payload) || undefined;
+        latestPause = {
+          reasonCode,
+          message: pauseMessage,
+          isVerificationFailure:
+            reasonCode === "verification_failed" || isVerificationFailureText(pauseMessage || ""),
+        };
+      }
+    }
+
+    if (latestPause?.isVerificationFailure) return latestPause;
+    if (latestVerificationFailure) return latestVerificationFailure;
+    return latestPause;
+  }
+
   private async acceptTaskCurrentProgress(taskId: string, message: string): Promise<void> {
     const existing = this.taskRepo.findById(taskId);
     const currentStatus = existing ? deriveCanonicalTaskStatus(existing) : undefined;
@@ -3503,13 +3891,76 @@ export class AgentDaemon extends EventEmitter {
       cached.lastAccessed = Date.now();
     }
 
-    const bestKnownOutcome = getTaskBestKnownOutcome(existing);
-    const resultSummary =
-      bestKnownOutcome?.resultSummary ||
-      existing.resultSummary ||
-      "Stopped by user with current progress accepted.";
-
     const completedAt = Date.now();
+    const persistedReasonCode =
+      typeof existing.awaitingUserInputReasonCode === "string" &&
+      existing.awaitingUserInputReasonCode.trim()
+        ? existing.awaitingUserInputReasonCode.trim()
+        : undefined;
+    const pausedBlocker =
+      this.getLatestPausedTaskBlocker(taskId) ||
+      (persistedReasonCode
+        ? {
+            reasonCode: persistedReasonCode,
+            message: undefined,
+            isVerificationFailure: persistedReasonCode === "verification_failed",
+          }
+        : undefined);
+    const bestKnownOutcome = getTaskBestKnownOutcome(existing);
+    const acceptedProgressIsPartial = Boolean(pausedBlocker);
+    const blockerMessage = pausedBlocker?.message
+      ? pausedBlocker.message.slice(0, 800)
+      : pausedBlocker?.reasonCode
+        ? `The task paused for ${pausedBlocker.reasonCode}.`
+        : "";
+    const preservedOutputs = Array.from(
+      new Set([
+        ...(bestKnownOutcome?.outputSummary?.created || []),
+        ...(bestKnownOutcome?.outputSummary?.modifiedFallback || []),
+      ]),
+    )
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .slice(0, 6);
+    const resultSummary = acceptedProgressIsPartial
+      ? [
+          "Stopped with current progress accepted, but the task did not reach a verified success.",
+          preservedOutputs.length > 0
+            ? `Preserved output(s) (not verified): ${preservedOutputs.join(", ")}.`
+            : "Partial progress was preserved; treat it as unverified.",
+          blockerMessage
+            ? `${pausedBlocker?.isVerificationFailure ? "Verification blocker" : "Blocker"}: ${blockerMessage}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : bestKnownOutcome?.resultSummary ||
+        existing.resultSummary ||
+        "Stopped by user with current progress accepted.";
+    const terminalStatus: NonNullable<Task["terminalStatus"]> = acceptedProgressIsPartial
+      ? "partial_success"
+      : "ok";
+    const failureClass: Task["failureClass"] = acceptedProgressIsPartial
+      ? pausedBlocker?.isVerificationFailure
+        ? "required_verification"
+        : "user_blocker"
+      : undefined;
+    const acceptedBestKnownOutcome = bestKnownOutcome
+      ? {
+          ...bestKnownOutcome,
+          capturedAt: completedAt,
+          resultSummary,
+          terminalStatus,
+          ...(failureClass ? { failureClass } : {}),
+          ...(blockerMessage
+            ? {
+                blockingIssues: Array.from(
+                  new Set([...(bestKnownOutcome.blockingIssues || []), blockerMessage]),
+                ).slice(-6),
+              }
+            : {}),
+        }
+      : undefined;
     const lastRunDurationMs = this.calculateLatestRunDurationMs(
       taskId,
       completedAt,
@@ -3521,10 +3972,10 @@ export class AgentDaemon extends EventEmitter {
       completedAt,
       lastRunDurationMs,
       error: null,
-      terminalStatus: "ok",
-      failureClass: undefined,
+      terminalStatus,
+      failureClass,
       resultSummary,
-      ...(bestKnownOutcome ? { bestKnownOutcome } : {}),
+      ...(acceptedBestKnownOutcome ? { bestKnownOutcome: acceptedBestKnownOutcome } : {}),
     });
     this.clearRetryState(taskId);
     this.clearTimelineTaskState(taskId);
@@ -3532,9 +3983,9 @@ export class AgentDaemon extends EventEmitter {
     this.logEvent(taskId, "task_completed", {
       message,
       resultSummary,
-      terminalStatus: "ok",
+      terminalStatus,
       lastRunDurationMs,
-      ...(bestKnownOutcome ? { bestKnownOutcome } : {}),
+      ...(acceptedBestKnownOutcome ? { bestKnownOutcome: acceptedBestKnownOutcome } : {}),
       terminalStatusReason: "user_accepted_current_progress",
     });
 
@@ -3693,6 +4144,28 @@ export class AgentDaemon extends EventEmitter {
     this.queueManager.onTaskFinished(taskId);
   }
 
+  /**
+   * Release queue bookkeeping when a task reaches a terminal state through a
+   * generic status update. Most completion paths call completeTask/failTask,
+   * but executor error handling persists `status: failed` directly via
+   * updateTask; without this guard the queue slot remains occupied forever.
+   */
+  private finishQueueSlotIfTracked(taskId: string): void {
+    if (!this.queueManager) return;
+
+    const wasQueued = this.queueManager.isQueued(taskId);
+    const wasRunning = this.queueManager.isRunning(taskId);
+    if (!wasQueued && !wasRunning) return;
+
+    // A terminal update can race with a queued task that has not started yet.
+    // Remove it before processing the next queued item so it cannot start after
+    // it has already failed/cancelled.
+    if (wasQueued) {
+      this.queueManager.cancelQueuedTask(taskId);
+    }
+    this.finishQueueSlot(taskId);
+  }
+
   private async finishQueueSlotAsync(taskId: string): Promise<void> {
     this.releaseComputerUseSession(taskId);
     await this.queueManager.onTaskFinished(taskId);
@@ -3756,6 +4229,7 @@ export class AgentDaemon extends EventEmitter {
     taskId: string,
     type: ApprovalType | undefined,
     details: Record<string, unknown>,
+    profile?: EffectiveAccessProfile,
   ): { approved: boolean; reason?: string } {
     const policies = loadPolicies();
     if (policies.runtime.autoReview.enabled !== true) {
@@ -3777,13 +4251,39 @@ export class AgentDaemon extends EventEmitter {
       const url = typeof permissionInput.url === "string" ? permissionInput.url : "";
       if (!url) return { approved: false };
       const toolName = typeof details.tool === "string" ? details.tool : "network_access";
-      const decision = evaluateNetworkPolicy({ url, toolName });
+      const decision = evaluateNetworkPolicy({
+        url,
+        toolName,
+        networkEnabled: profile?.networkEnabled,
+        accessNetworkMode: profile?.definition.network,
+        profileDomainRules: profile?.definition.domainRules,
+      });
       this.logEvent(taskId, "network_policy_decision", decision);
       return decision.action === "allow"
         ? { approved: true, reason: "allowed_network_read" }
         : { approved: false };
     }
     return { approved: false };
+  }
+
+  private getEffectiveAccessProfile(
+    taskId: string,
+    task?: Task,
+    workspace?: Workspace,
+  ): EffectiveAccessProfile {
+    const resolvedTask = this.getTaskWithTransientAgentConfig(
+      task || this.taskRepo.findById(taskId),
+    );
+    const resolvedWorkspace =
+      workspace ||
+      this.getExecutorForTask(taskId)?.getWorkspace?.() ||
+      (resolvedTask ? this.workspaceRepo?.findById(resolvedTask.workspaceId) : undefined);
+    return resolveEffectiveAccessProfile({
+      task: resolvedTask,
+      workspace: resolvedWorkspace,
+      settings: PermissionSettingsManager.loadSettings(),
+      adminPolicies: loadPolicies(),
+    });
   }
 
   private getExecutorForTask(taskId: string): TaskExecutor | null {
@@ -3810,6 +4310,10 @@ export class AgentDaemon extends EventEmitter {
       });
       return fallback;
     };
+    if (task?.agentConfig?.accessProfileId) {
+      const profile = this.getEffectiveAccessProfile(taskId, task);
+      return enforceAllowedMode(profile.permissionMode);
+    }
     if (runtime?.getPermissionState().mode) {
       return enforceAllowedMode(runtime.getPermissionState().mode);
     }
@@ -3937,8 +4441,17 @@ export class AgentDaemon extends EventEmitter {
     runtime: TaskExecutor["runtime"] | null;
     workspace: Workspace | undefined;
   } {
-    const task = this.taskRepo.findById(taskId);
-    const workspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
+    const task = this.getTaskWithTransientAgentConfig(this.taskRepo.findById(taskId));
+    const storedWorkspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
+    // Task-level shell access is an explicit in-memory capability override. Keep
+    // permission evaluation aligned with the effective workspace used to build
+    // the executor/tool registry; otherwise run_command is advertised and then
+    // denied here because this check reloads the unmodified DB workspace.
+    const workspace =
+      task && storedWorkspace
+        ? this.getEffectiveWorkspaceForTask(taskId) ||
+          this.applyTaskWorkspaceOverrides(task, storedWorkspace)
+        : storedWorkspace;
     const runtime = this.getExecutorForTask(taskId)?.runtime || null;
     const toolName = this.inferPermissionToolName(type, details);
     const serverName =
@@ -4260,8 +4773,11 @@ export class AgentDaemon extends EventEmitter {
     type: string,
     description: string,
     details: Any,
-    opts?: { allowAutoApprove?: boolean },
+    opts?: { allowAutoApprove?: boolean; signal?: AbortSignal },
   ): Promise<boolean> {
+    if (opts?.signal?.aborted) {
+      throw new Error("Approval request cancelled because tool execution ended");
+    }
     const allowAutoApprove = opts?.allowAutoApprove !== false;
     const enrichedDetails =
       details && typeof details === "object" && !Array.isArray(details)
@@ -4273,12 +4789,41 @@ export class AgentDaemon extends EventEmitter {
       enrichedDetails,
       allowAutoApprove,
     );
+    const storedTask = this.taskRepo.findById(taskId);
+    const task =
+      typeof (this as Any).getTaskWithTransientAgentConfig === "function"
+        ? this.getTaskWithTransientAgentConfig(storedTask)
+        : storedTask;
+    const accessProfile =
+      typeof (this as Any).getEffectiveAccessProfile === "function"
+        ? this.getEffectiveAccessProfile(taskId, task, permission.workspace)
+        : resolveEffectiveAccessProfile({
+            task,
+            workspace: permission.workspace,
+            settings: PermissionSettingsManager.loadSettings(),
+            adminPolicies: loadPolicies(),
+          });
     const permissionDetails = {
       ...enrichedDetails,
       permissionPrompt: permission.promptDetails,
+      accessProfile: {
+        id: accessProfile.id,
+        requestedId: accessProfile.requestedId,
+        sandbox: accessProfile.sandboxMode,
+        approval: accessProfile.definition.approval,
+        reviewer: accessProfile.definition.reviewer,
+        network: accessProfile.definition.network,
+        adminConstrained: accessProfile.adminConstrained,
+        profileUnavailable: accessProfile.profileUnavailable,
+        profileScoped: accessProfile.profileScoped,
+        constraintReason: accessProfile.constraintReason,
+      },
     };
     if (permission.evaluation.decision === "allow") {
       permission.runtime?.recordPermissionSuccess(permission.trackingKey);
+      if (type === "external_file_access") {
+        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
+      }
       if (type === "run_command" && enrichedDetails.approvalMode === "single_bundle") {
         permission.runtime?.addTemporaryPermissionGrant("run_command:single_bundle");
       }
@@ -4324,9 +4869,24 @@ export class AgentDaemon extends EventEmitter {
       return false;
     }
 
-    const autoReview = allowAutoApprove
-      ? this.canAutoReviewApprove(taskId, type as ApprovalType | undefined, permissionDetails)
-      : { approved: false };
+    const explicitProfileSelected = typeof task?.agentConfig?.accessProfileId === "string";
+    const autoReviewEnabledForProfile =
+      accessProfile.definition.reviewer === "auto-review" || !explicitProfileSelected;
+    const autoReviewProfile =
+      explicitProfileSelected ||
+      (accessProfile.definition.domainRules?.length || 0) > 0 ||
+      accessProfile.definition.network === "disabled"
+        ? accessProfile
+        : undefined;
+    const autoReview =
+      allowAutoApprove && autoReviewEnabledForProfile
+        ? this.canAutoReviewApprove(
+            taskId,
+            type as ApprovalType | undefined,
+            permissionDetails,
+            autoReviewProfile,
+          )
+        : { approved: false };
     const safeSessionAutoApprove =
       allowAutoApprove &&
       this.sessionAutoApproveAll &&
@@ -4335,6 +4895,9 @@ export class AgentDaemon extends EventEmitter {
 
     if (safeSessionAutoApprove) {
       permission.runtime?.recordPermissionSuccess(permission.trackingKey);
+      if (type === "external_file_access") {
+        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
+      }
       const approval = this.approvalRepo.create({
         taskId,
         type: type as Any,
@@ -4360,6 +4923,9 @@ export class AgentDaemon extends EventEmitter {
 
     if (autoReview.approved) {
       permission.runtime?.recordPermissionSuccess(permission.trackingKey);
+      if (type === "external_file_access") {
+        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
+      }
       const approval = this.approvalRepo.create({
         taskId,
         type: type as Any,
@@ -4411,6 +4977,9 @@ export class AgentDaemon extends EventEmitter {
             const currentTask = this.taskRepo.findById(taskId);
             const currentStatus = currentTask ? deriveCanonicalTaskStatus(currentTask) : undefined;
             pending.resolved = true;
+            if (pending.abortSignal && pending.abortListener) {
+              pending.abortSignal.removeEventListener("abort", pending.abortListener);
+            }
             this.pendingApprovals.delete(approval.id);
             this.approvalRepo.update(approval.id, "denied");
             if (isTerminalTaskStatus(currentStatus)) {
@@ -4433,14 +5002,35 @@ export class AgentDaemon extends EventEmitter {
         5 * 60 * 1000,
       );
 
-      this.pendingApprovals.set(approval.id, {
+      const pending: PendingApprovalEntry = {
         taskId,
         approval,
         resolve,
         reject,
         resolved: false,
         timeoutHandle,
-      });
+        abortSignal: opts?.signal,
+      };
+      const abortListener = () => {
+        const current = this.pendingApprovals.get(approval.id);
+        if (!current || current.resolved) return;
+        current.resolved = true;
+        clearTimeout(current.timeoutHandle);
+        current.abortSignal?.removeEventListener("abort", abortListener);
+        this.pendingApprovals.delete(approval.id);
+        this.approvalRepo.update(approval.id, "denied");
+        this.logEvent(taskId, "approval_denied", {
+          approvalId: approval.id,
+          reason: "tool_execution_cancelled",
+        });
+        reject(new Error("Approval request cancelled because tool execution ended"));
+      };
+      pending.abortListener = abortListener;
+      this.pendingApprovals.set(approval.id, pending);
+      if (opts?.signal) {
+        opts.signal.addEventListener("abort", abortListener, { once: true });
+        if (opts.signal.aborted) abortListener();
+      }
     });
   }
 
@@ -4510,12 +5100,18 @@ export class AgentDaemon extends EventEmitter {
         ) {
           runtime?.addTemporaryPermissionGrant("run_command:single_bundle");
         }
+        if (didApprove && pending.approval?.type === "external_file_access") {
+          this.grantExternalFileApprovalsFromDetails(pending.taskId, pending.approval.details);
+        }
 
         // Mark as resolved first to prevent race condition with timeout
         pending.resolved = true;
 
         // Clear the timeout
         clearTimeout(pending.timeoutHandle);
+        if (pending.abortSignal && pending.abortListener) {
+          pending.abortSignal.removeEventListener("abort", pending.abortListener);
+        }
 
         this.pendingApprovals.delete(approvalId);
         this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
@@ -4559,6 +5155,9 @@ export class AgentDaemon extends EventEmitter {
       if (pending.taskId !== taskId) continue;
 
       clearTimeout(pending.timeoutHandle);
+      if (pending.abortSignal && pending.abortListener) {
+        pending.abortSignal.removeEventListener("abort", pending.abortListener);
+      }
       this.pendingApprovals.delete(approvalId);
 
       if (pending.resolved) {
@@ -4839,7 +5438,24 @@ export class AgentDaemon extends EventEmitter {
           ? (timelineEvent.legacyType as EventType)
           : undefined
       : undefined;
-    if (stageSourceType) {
+    // A tool can finish unwinding after the task has already reached a terminal
+    // state (most notably after user cancellation). Do not let those late
+    // events reopen a fresh BUILD/VERIFY stage in the timeline.
+    const persistedTaskForStage =
+      stageSourceType && typeof (this as Any).taskRepo?.findById === "function"
+        ? (this as Any).taskRepo.findById(taskId)
+        : undefined;
+    const isTerminalLifecycleEvent =
+      type === "task_completed" ||
+      type === "task_cancelled" ||
+      (type === "task_status" &&
+        ["completed", "failed", "cancelled"].includes(String(payloadObj.status || "")));
+    const suppressTerminalStageInference =
+      !isTerminalLifecycleEvent &&
+      isTerminalTaskStatus(
+        persistedTaskForStage ? deriveCanonicalTaskStatus(persistedTaskForStage) : undefined,
+      );
+    if (stageSourceType && !suppressTerminalStageInference) {
       const inferredStage = inferTimelineStageForLegacyType(stageSourceType);
       if (inferredStage) {
         const currentStage = this.activeTimelineStageByTask.get(taskId);
@@ -4924,7 +5540,12 @@ export class AgentDaemon extends EventEmitter {
     const rawPath = typeof payload.path === "string" ? payload.path.trim() : "";
     if (!rawPath) return;
     const isUrl = /^(https?:\/\/|file:\/\/)/i.test(rawPath);
-    const task = this.taskRepo.findById(taskId);
+    const storedTask = this.taskRepo.findById(taskId);
+    const transientTaskResolver = (this as Any).getTaskWithTransientAgentConfig;
+    const task =
+      typeof transientTaskResolver === "function"
+        ? transientTaskResolver.call(this, storedTask)
+        : storedTask;
     const workspace =
       task && typeof task.workspaceId === "string"
         ? this.workspaceRepo.findById(task.workspaceId)
@@ -5139,10 +5760,47 @@ export class AgentDaemon extends EventEmitter {
 
     const task = this.taskRepo.findById(taskId);
     if (!task) return;
+
+    // Event-driven captures can run after the executor has paused or finished.
+    // Resolve the live task profile here so automatic memory mirroring cannot
+    // use stale workspace permissions or bypass a newly gated network mode.
+    let effectiveMemoryWorkspace: Workspace | undefined;
+    try {
+      effectiveMemoryWorkspace = this.getEffectiveWorkspaceForTask(taskId);
+    } catch {
+      effectiveMemoryWorkspace = undefined;
+    }
+    const memoryPermissions = effectiveMemoryWorkspace?.permissions;
+    const allowExternalMirror = Boolean(
+      memoryPermissions?.network === true &&
+      memoryPermissions.accessProfileUnavailable !== true &&
+      memoryPermissions.accessNetworkMode !== "disabled" &&
+      memoryPermissions.accessNetworkMode !== "on-request",
+    );
     const workspace = this.workspaceRepo.findById(task.workspaceId);
     if (!workspace?.path) return;
+    const effectiveWorkspace = this.applyTaskWorkspaceOverrides(task, workspace);
+    const canRead = (candidatePath: string): boolean =>
+      evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "read").decision ===
+      "allow";
+    const canWrite = (candidatePath: string): boolean =>
+      evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "write").decision ===
+      "allow";
+    const transcriptFilePath = path.join(
+      workspace.path,
+      ".cowork",
+      "memory",
+      "transcripts",
+      "spans",
+      `${task.id}.jsonl`,
+    );
+    const transcriptDirectory = path.dirname(transcriptFilePath);
 
-    if (features.transcriptStoreEnabled) {
+    if (
+      features.transcriptStoreEnabled &&
+      canWrite(transcriptDirectory) &&
+      canWrite(transcriptFilePath)
+    ) {
       const legacyEvent: TaskEvent = {
         ...timelineEvent,
         type: (legacyType as EventType) || timelineEvent.type,
@@ -5152,13 +5810,27 @@ export class AgentDaemon extends EventEmitter {
       await TranscriptStore.appendEvent(workspace.path, legacyEvent).catch(() => undefined);
     }
 
-    if (features.checkpointCaptureEnabled !== false) {
+    const checkpointFilePath = path.join(
+      workspace.path,
+      ".cowork",
+      "memory",
+      "transcripts",
+      "checkpoints",
+      `${task.id}.json`,
+    );
+    if (
+      features.checkpointCaptureEnabled !== false &&
+      canWrite(path.dirname(checkpointFilePath)) &&
+      canWrite(checkpointFilePath)
+    ) {
       await this.maybeCaptureRuntimeCheckpoint({
         task,
         workspacePath: workspace.path,
         event: timelineEvent,
         legacyType,
         legacyPayload,
+        readGuard: canRead,
+        writeGuard: canWrite,
       }).catch(() => undefined);
     }
 
@@ -5380,6 +6052,8 @@ export class AgentDaemon extends EventEmitter {
     event: TaskEvent;
     legacyType?: string;
     legacyPayload: Record<string, unknown>;
+    readGuard?: (candidatePath: string) => boolean;
+    writeGuard?: (candidatePath: string) => boolean;
   }): Promise<void> {
     const effectiveType =
       typeof params.legacyType === "string" && params.legacyType.trim().length > 0
@@ -5397,9 +6071,26 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
+    const checkpointDirectory = path.join(
+      params.workspacePath,
+      ".cowork",
+      "memory",
+      "transcripts",
+      "checkpoints",
+    );
+    const checkpointPath = path.join(checkpointDirectory, `${params.task.id}.json`);
+    if (
+      (params.writeGuard &&
+        (!params.writeGuard(checkpointDirectory) || !params.writeGuard(checkpointPath))) ||
+      (params.readGuard && !params.readGuard(checkpointPath))
+    ) {
+      return;
+    }
+
     const latestCheckpoint = await TranscriptStore.loadCheckpoint(
       params.workspacePath,
       params.task.id,
+      params.readGuard,
     );
     const meaningfulEvents = this.eventRepo
       .findByTaskIdAndTypes(params.task.id, ["user_message", "assistant_message"], 24)
@@ -5467,9 +6158,7 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    if (
-      isMeaningfulExchange && meaningfulExchangeCount > 0
-    ) {
+    if (isMeaningfulExchange && meaningfulExchangeCount > 0) {
       const PERIODIC_EXCHANGE_INTERVAL = 12;
       if (meaningfulExchangeCount % PERIODIC_EXCHANGE_INTERVAL === 0) {
         const messageWindow = meaningfulEvents;
@@ -5541,6 +6230,13 @@ export class AgentDaemon extends EventEmitter {
     if (!workspace?.path) {
       return;
     }
+    const effectiveWorkspace = this.applyTaskWorkspaceOverrides(task, workspace);
+    const canRead = (candidatePath: string): boolean =>
+      evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "read").decision ===
+      "allow";
+    const canWrite = (candidatePath: string): boolean =>
+      evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "write").decision ===
+      "allow";
     this.pendingMemoryConsolidations.add(task.workspaceId);
     setTimeout(() => {
       void (async () => {
@@ -5549,9 +6245,11 @@ export class AgentDaemon extends EventEmitter {
           workspacePath: workspace.path,
           taskId: task.id,
           taskPrompt: task.prompt,
+          readGuard: canRead,
+          writeGuard: canWrite,
         });
         const pressureInstructions = MemoryPressureService.buildCompactionInstructions(
-          await MemoryPressureService.analyze(workspace.path),
+          await MemoryPressureService.analyze(workspace.path, canRead),
         );
         const dreaming = await new DreamingService(
           new DreamingRepository(this.dbManager.getDatabase()),
@@ -5561,6 +6259,7 @@ export class AgentDaemon extends EventEmitter {
           triggerSource: "task_completion",
           sourceTaskId: task.id,
           taskPrompt: task.prompt,
+          readGuard: canRead,
           instructions: [
             "Review recent task completion evidence for memory drift, corrections, stale context, and open loops.",
             pressureInstructions,
@@ -5968,6 +6667,12 @@ export class AgentDaemon extends EventEmitter {
     >;
 
     const task = this.taskRepo.findById(event.taskId);
+    try {
+      this.sessionProgressService.updateFromEvent(storedEvent);
+    } catch (error) {
+      // A projection failure must never interrupt task execution or timeline persistence.
+      log.warn("[session-progress] Failed to update durable projection:", error);
+    }
     this.maybeMaterializeMailComposeInlineFrame(storedEvent, effectiveType, task);
     if (task && effectiveType === "llm_usage") {
       const usagePayload = storedLegacyPayload as {
@@ -6399,6 +7104,20 @@ export class AgentDaemon extends EventEmitter {
     const task = this.taskRepo.findById(taskId);
     if (!task) return;
 
+    let effectiveMemoryWorkspace: Workspace | undefined;
+    try {
+      effectiveMemoryWorkspace = this.getEffectiveWorkspaceForTask(taskId);
+    } catch {
+      effectiveMemoryWorkspace = undefined;
+    }
+    const memoryPermissions = effectiveMemoryWorkspace?.permissions;
+    const allowExternalMirror = Boolean(
+      memoryPermissions?.network === true &&
+      memoryPermissions.accessProfileUnavailable !== true &&
+      memoryPermissions.accessNetworkMode !== "disabled" &&
+      memoryPermissions.accessNetworkMode !== "on-request",
+    );
+
     // Memory retention:
     // - Sub-agents (child tasks) default to retainMemory=false to avoid leaking sensitive
     //   private context into disposable agents.
@@ -6441,6 +7160,8 @@ export class AgentDaemon extends EventEmitter {
                 "Agent approach was corrected by user mid-task",
                 [],
                 `[CORRECTION] ${text.slice(0, 200)}`,
+                [],
+                { allowExternalMirror },
               ).catch(() => {});
             } catch {
               // best-effort
@@ -6500,7 +7221,9 @@ export class AgentDaemon extends EventEmitter {
     }
 
     const forcePrivate = gatewayContext === "group" || gatewayContext === "public";
-    await MemoryService.capture(task.workspaceId, taskId, memoryType, content, forcePrivate);
+    await MemoryService.capture(task.workspaceId, taskId, memoryType, content, forcePrivate, {
+      allowExternalMirror,
+    });
   }
 
   /**
@@ -6813,6 +7536,7 @@ export class AgentDaemon extends EventEmitter {
         size: stats.size,
         createdAt: Date.now(),
       });
+      this.sessionProgressService.rebuild(taskId);
 
       console.log(`[AgentDaemon] Registered artifact: ${filePath}`);
     } catch (error) {
@@ -6946,6 +7670,7 @@ export class AgentDaemon extends EventEmitter {
       if (this.teamOrchestrator && existing?.status !== status) {
         void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
       }
+      this.finishQueueSlotIfTracked(taskId);
     }
   }
 
@@ -6995,6 +7720,128 @@ export class AgentDaemon extends EventEmitter {
    */
   getTask(taskId: string): Task | undefined {
     return this.taskRepo.findById(taskId);
+  }
+
+  /**
+   * Apply a non-persisted agent configuration override to the policy view of
+   * a task. Scheduled/event runs use this so approval checks and the executor
+   * see the same profile for the whole turn without rewriting the task's
+   * user-selected default.
+   */
+  setTransientTaskAgentConfig(taskId: string, override?: AgentConfig): void {
+    if (!override || typeof override !== "object") {
+      this.transientAgentConfigOverrides.delete(taskId);
+      return;
+    }
+    this.transientAgentConfigOverrides.set(taskId, { ...override });
+  }
+
+  clearTransientTaskAgentConfig(taskId: string): void {
+    this.transientAgentConfigOverrides.delete(taskId);
+  }
+
+  private getTaskWithTransientAgentConfig(task?: Task): Task | undefined {
+    if (!task) return undefined;
+    const override = this.transientAgentConfigOverrides?.get(task.id);
+    if (!override) return task;
+    return {
+      ...task,
+      agentConfig: {
+        ...(task.agentConfig || {}),
+        ...override,
+      },
+    };
+  }
+
+  private getExternalFileApprovalKey(
+    taskId: string,
+    rawPath: unknown,
+    operation: AccessFilesystemOperation,
+  ): string | null {
+    const value = typeof rawPath === "string" ? rawPath.trim() : "";
+    if (!value) return null;
+    const task = this.taskRepo.findById(taskId);
+    const workspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
+    let absolutePath: string;
+    try {
+      absolutePath = resolveAccessControlledPath(workspace?.path || process.cwd(), value);
+    } catch {
+      absolutePath = path.isAbsolute(value)
+        ? value
+        : path.resolve(workspace?.path || process.cwd(), value);
+    }
+    return `${taskId}:${operation}:${canonicalizeAccessPath(absolutePath)}`;
+  }
+
+  grantExternalFileApproval(
+    taskId: string,
+    rawPath: unknown,
+    operation: AccessFilesystemOperation = "write",
+  ): void {
+    const key = this.getExternalFileApprovalKey(taskId, rawPath, operation);
+    if (key) this.externalFileApprovalGrants.set(key, Date.now() + 5 * 60 * 1000);
+  }
+
+  consumeExternalFileApproval(
+    taskId: string,
+    rawPath: unknown,
+    operation: AccessFilesystemOperation,
+  ): boolean {
+    const key = this.getExternalFileApprovalKey(taskId, rawPath, operation);
+    // A write approval can safely cover a later read of the same file, but it
+    // must never authorize deletion. Destructive operations require their own
+    // exact one-shot grant.
+    const fallbackKey =
+      operation === "read" ? this.getExternalFileApprovalKey(taskId, rawPath, "write") : null;
+    for (const candidateKey of [key, fallbackKey]) {
+      if (!candidateKey) continue;
+      const expiresAt = this.externalFileApprovalGrants.get(candidateKey);
+      if (!expiresAt) continue;
+      this.externalFileApprovalGrants.delete(candidateKey);
+      return expiresAt >= Date.now();
+    }
+    return false;
+  }
+
+  private grantExternalFileApprovalsFromDetails(taskId: string, details: Any): void {
+    const pathOperations = Array.isArray(details?.pathOperations)
+      ? details.pathOperations
+          .filter(
+            (entry: Any) =>
+              entry &&
+              typeof entry.path === "string" &&
+              ["read", "write", "delete"].includes(entry.operation),
+          )
+          .map((entry: Any) => ({
+            path: entry.path as string,
+            operation: entry.operation as AccessFilesystemOperation,
+          }))
+      : [];
+    if (pathOperations.length > 0) {
+      for (const entry of pathOperations) {
+        this.grantExternalFileApproval(taskId, entry.path, entry.operation);
+      }
+      return;
+    }
+
+    const candidates = new Set<string>();
+    if (typeof details?.path === "string") candidates.add(details.path);
+    if (Array.isArray(details?.paths)) {
+      for (const value of details.paths) {
+        if (typeof value === "string") candidates.add(value);
+      }
+    }
+    const params = details?.params;
+    if (params && typeof params === "object" && !Array.isArray(params)) {
+      for (const key of ["path", "filePath", "targetPath", "destPath", "newPath"]) {
+        if (typeof params[key] === "string") candidates.add(params[key]);
+      }
+    }
+    const operation: AccessFilesystemOperation =
+      details?.operation === "delete" ? "delete" : details?.operation === "read" ? "read" : "write";
+    for (const candidate of candidates) {
+      this.grantExternalFileApproval(taskId, candidate, operation);
+    }
   }
 
   private isRunTerminalEvent(event: TaskEvent): boolean {
@@ -7092,9 +7939,13 @@ export class AgentDaemon extends EventEmitter {
     return this.eventRepo.findByTaskId(taskId);
   }
 
-  private getTaskEventsForResume(taskId: string, workspacePath: string): TaskEvent[] {
+  private getTaskEventsForResume(
+    taskId: string,
+    workspacePath: string,
+    readGuard?: (candidatePath: string) => boolean,
+  ): TaskEvent[] {
     const startedAt = Date.now();
-    const checkpoint = TranscriptStore.loadCheckpointSync(workspacePath, taskId);
+    const checkpoint = TranscriptStore.loadCheckpointSync(workspacePath, taskId, readGuard);
     const snapshot = checkpoint ? null : this.eventRepo.findLatestConversationSnapshot(taskId);
     const planDefinitionEvents = this.eventRepo.findByTaskIdAndTypes(
       taskId,
@@ -7115,8 +7966,7 @@ export class AgentDaemon extends EventEmitter {
         ? this.eventRepo.findEventCursorById(taskId, sourceEventId)
         : null;
       if (!boundaryCursor) {
-        const timestamp =
-          Number(checkpoint.sourceTimestamp ?? checkpoint.timestamp ?? 0) || 0;
+        const timestamp = Number(checkpoint.sourceTimestamp ?? checkpoint.timestamp ?? 0) || 0;
         boundaryCursor = { order: timestamp, timestamp, id: "" };
       }
     } else if (snapshot) {
@@ -7745,10 +8595,17 @@ export class AgentDaemon extends EventEmitter {
       throw new Error(`Task ${taskId} not found after workspace update`);
     }
 
-    const effectiveWorkspace = this.applyTaskWorkspaceOverrides(updatedTask, workspace);
     const cached = this.activeTasks.get(taskId);
     if (cached) {
-      cached.executor.updateTaskWorkspace(updatedTask, effectiveWorkspace);
+      cached.executor.updateTaskWorkspace(
+        updatedTask,
+        this.applyTaskWorkspaceOverridesForPath(
+          updatedTask,
+          workspace,
+          cached.executor.getWorkspace?.().path ||
+            (updatedTask.worktreeStatus === "active" ? updatedTask.worktreePath : undefined),
+        ),
+      );
       cached.lastAccessed = Date.now();
       cached.status = "active";
     }
@@ -7778,17 +8635,61 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Enforce the task's effective access profile for a filesystem-backed
+   * operation. This evaluates against the persisted workspace root: a task
+   * worktree is a child of that root and must not become a way to escape the
+   * profile's base/worktree boundary.
+   */
+  assertTaskWorkspaceFilesystemAccess(
+    taskId: string,
+    rawPath: string,
+    operation: AccessFilesystemOperation,
+    label = "path",
+  ): string {
+    const effectiveWorkspace = this.getEffectiveWorkspaceForTask(taskId);
+    if (!effectiveWorkspace) {
+      const task = this.taskRepo.findById(taskId);
+      if (!task) throw new Error(`Task not found: ${taskId}`);
+      throw new Error(`Workspace not found: ${task.workspaceId}`);
+    }
+    return assertWorkspaceFilesystemAccess(effectiveWorkspace, rawPath, operation, label);
+  }
+
+  /**
+   * Validate the repository used for an explicit Git promotion operation.
+   * Worktree tasks intentionally do not receive this path as a generic
+   * `accessWorkspaceRoots` entry; only Git merge/PR flows may use it.
+   */
+  assertTaskBaseWorkspaceFilesystemAccess(
+    taskId: string,
+    rawPath: string,
+    operation: AccessFilesystemOperation,
+    label = "base repository path",
+  ): string {
+    const task = this.taskRepo.findById(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const baseWorkspace = this.workspaceRepo.findById(task.workspaceId);
+    if (!baseWorkspace) throw new Error(`Workspace not found: ${task.workspaceId}`);
+    const effectiveBaseWorkspace = this.applyTaskWorkspaceOverrides(task, baseWorkspace);
+    return assertWorkspaceFilesystemAccess(effectiveBaseWorkspace, rawPath, operation, label);
+  }
+
+  /**
    * Update workspace permissions and return the refreshed workspace.
    */
   updateWorkspacePermissions(
     workspaceId: string,
-    patch: Partial<WorkspacePermissions>,
+    patch: Omit<Partial<WorkspacePermissions>, "shell">,
   ): Workspace | undefined {
     const workspace = this.workspaceRepo.findById(workspaceId);
     if (!workspace) return undefined;
+    // The public workspace-permission API no longer exposes shell as a
+    // mutable workspace switch. Keep the legacy field readable for old task
+    // records, but ignore it even if an older renderer sends it at runtime.
+    const { shell: _legacyShell, ...profilePatch } = patch as Partial<WorkspacePermissions>;
     const updatedPermissions: WorkspacePermissions = {
       ...workspace.permissions,
-      ...patch,
+      ...profilePatch,
     };
     this.workspaceRepo.updatePermissions(workspaceId, updatedPermissions);
     const refreshed = this.workspaceRepo.findById(workspaceId);
@@ -7798,8 +8699,8 @@ export class AgentDaemon extends EventEmitter {
 
   /**
    * Refresh active task executors that use the given workspace.
-   * Called when workspace permissions change (e.g. Shell toggled in UI) so
-   * executors pick up new tool availability (e.g. run_command when shell enabled).
+   * Called when a legacy workspace permission changes so executors pick up new
+   * tool availability. Named access profiles are the primary task-level control.
    */
   refreshActiveExecutorsForWorkspace(workspaceId: string): void {
     const workspace = this.workspaceRepo.findById(workspaceId);
@@ -7810,7 +8711,15 @@ export class AgentDaemon extends EventEmitter {
       if (cached.status !== "active" || !cached.executor) return;
       if (cached.executor.getWorkspaceId?.() !== workspaceId) return;
       try {
-        cached.executor.updateWorkspace(workspace);
+        const task = this.taskRepo.findById(taskId);
+        if (!task) return;
+        cached.executor.updateWorkspace(
+          this.applyTaskWorkspaceOverridesForPath(
+            task,
+            workspace,
+            cached.executor.getWorkspace?.().path,
+          ),
+        );
         refreshed++;
       } catch (err) {
         console.warn(`[AgentDaemon] Failed to refresh executor for task ${taskId}:`, err);
@@ -7820,6 +8729,33 @@ export class AgentDaemon extends EventEmitter {
       console.log(
         `[AgentDaemon] Refreshed ${refreshed} active executor(s) for workspace ${workspace.name} (permissions updated)`,
       );
+    }
+  }
+
+  /** Refresh every active executor after access-profile settings change. */
+  refreshActiveExecutorsForAccessProfiles(): void {
+    let refreshed = 0;
+    this.activeTasks.forEach((cached, taskId) => {
+      if (cached.status !== "active" || !cached.executor) return;
+      const task = this.taskRepo.findById(taskId);
+      if (!task) return;
+      const workspace = this.workspaceRepo.findById(task.workspaceId);
+      if (!workspace) return;
+      try {
+        cached.executor.updateWorkspace(
+          this.applyTaskWorkspaceOverridesForPath(
+            task,
+            workspace,
+            cached.executor.getWorkspace?.().path,
+          ),
+        );
+        refreshed++;
+      } catch (err) {
+        console.warn(`[AgentDaemon] Failed to refresh access profile for task ${taskId}:`, err);
+      }
+    });
+    if (refreshed > 0) {
+      console.log(`[AgentDaemon] Refreshed ${refreshed} active executor(s) for access profiles`);
     }
   }
 
@@ -7966,6 +8902,7 @@ export class AgentDaemon extends EventEmitter {
       if (this.teamOrchestrator && existing?.status !== updates.status) {
         void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
       }
+      this.finishQueueSlotIfTracked(taskId);
     }
   }
 
@@ -8747,6 +9684,13 @@ export class AgentDaemon extends EventEmitter {
       verificationMessage?: string;
       /** Deterministic checks run in verified mode (shell, files, http, etc.) */
       verificationEvidenceBundle?: TaskVerificationEvidenceBundle;
+      /**
+       * Plan step failures that the executor explicitly recovered via a
+       * completed alternate/recovery step. These are not silent waivers: the
+       * original failure remains in the timeline, but must not block the final
+       * completion gate once the recovery path has succeeded.
+       */
+      recoveredFailedStepIds?: string[];
       semanticSummary?: string;
       verificationVerdict?: VerificationVerdict;
       verificationReport?: string;
@@ -8855,9 +9799,40 @@ export class AgentDaemon extends EventEmitter {
     for (const stepId of waivedVerificationStepIdsFromExecutor.values()) {
       waivedFailedStepIds.add(stepId);
     }
+    const recoveredFailedStepIds = new Set(
+      (metadata?.recoveredFailedStepIds || [])
+        .map((id) => String(id || "").trim())
+        .filter((id) => id.length > 0),
+    );
+    // Executor recovery state is tracked in memory, while this completion
+    // gate tracks failures from the persisted timeline. Match by normalized
+    // step ID so `step:foo` and `foo` resolve the same recovered failure.
+    const recoveredResolvedStepIds = unresolvedFailedSteps.filter((failedStepId) => {
+      const normalizedFailedStepId = normalizeStepIdForComparison(failedStepId);
+      return Array.from(recoveredFailedStepIds).some(
+        (recoveredStepId) =>
+          recoveredStepId === failedStepId ||
+          normalizeStepIdForComparison(recoveredStepId) === normalizedFailedStepId,
+      );
+    });
+    for (const stepId of recoveredResolvedStepIds) {
+      waivedFailedStepIds.add(stepId);
+    }
     const waivedNormalizedStepIds = new Set(
       Array.from(waivedFailedStepIds.values()).map((id) => normalizeStepIdForComparison(id)),
     );
+
+    if (recoveredResolvedStepIds.length > 0) {
+      this.logEvent(taskId, "timeline_step_updated", {
+        stepId: "completion_gate:recovered_failures",
+        status: "completed",
+        actor: "system",
+        message: `Resolved ${recoveredResolvedStepIds.length} failed step(s) via completed recovery steps.`,
+        recoveredFailedStepIds: recoveredResolvedStepIds,
+        gate: "completion_failed_step_gate",
+        legacyType: "progress_update",
+      });
+    }
     const failedMutationRequiredStepIds = new Set(
       (metadata?.failedMutationRequiredStepIds || [])
         .map((id) => String(id || "").trim())
@@ -9516,6 +10491,9 @@ export class AgentDaemon extends EventEmitter {
       ...(Array.isArray(metadata?.failedStepIds) && metadata.failedStepIds.length > 0
         ? { failedStepIds: metadata.failedStepIds }
         : {}),
+      ...(recoveredResolvedStepIds.length > 0
+        ? { recoveredFailedStepIds: recoveredResolvedStepIds }
+        : {}),
       ...(Array.isArray(metadata?.incompleteStepIds) && metadata.incompleteStepIds.length > 0
         ? { incompleteStepIds: metadata.incompleteStepIds }
         : {}),
@@ -9602,11 +10580,18 @@ export class AgentDaemon extends EventEmitter {
       existingTask?.worktreeStatus === "active" &&
       existingTask.worktreePath
     ) {
+      const worktreePath = existingTask.worktreePath;
       const worktreeSettings = this.worktreeManager.getSettings();
       if (worktreeSettings.autoCommitOnComplete) {
         void (async () => {
           try {
             this.taskRepo.update(taskId, { worktreeStatus: "committing" });
+            this.assertTaskWorkspaceFilesystemAccess(
+              taskId,
+              worktreePath,
+              "write",
+              "worktree auto-commit",
+            );
             const commitResult = await this.worktreeManager.commitTaskChanges(
               taskId,
               `${worktreeSettings.commitMessagePrefix}${existingTask.title}`,
@@ -9621,6 +10606,7 @@ export class AgentDaemon extends EventEmitter {
             this.taskRepo.update(taskId, { worktreeStatus: "active" });
           } catch (error: Any) {
             console.error(`[AgentDaemon] Auto-commit failed for task ${taskId}:`, error);
+            this.taskRepo.update(taskId, { worktreeStatus: "active" });
             this.logEvent(taskId, "log", {
               message: `Auto-commit failed: ${error.message}`,
             });
@@ -9748,7 +10734,11 @@ export class AgentDaemon extends EventEmitter {
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: Pick<
       TaskFollowUpInput,
-      "permissionMode" | "shellAccess" | "integrationMentions" | "agentConfigOverride"
+      | "permissionMode"
+      | "shellAccess"
+      | "accessProfileId"
+      | "integrationMentions"
+      | "agentConfigOverride"
     >,
   ): Promise<{ queued: boolean }> {
     let executor: TaskExecutor;
@@ -9793,11 +10783,34 @@ export class AgentDaemon extends EventEmitter {
     if (!workspace) {
       throw new Error(`Workspace ${effectiveTask.workspaceId} not found`);
     }
-    const effectiveWorkspace = this.applyTaskWorkspaceOverrides(effectiveTask, workspace);
+    const effectiveWorkspace = this.applyTaskWorkspaceOverridesForPath(
+      effectiveTask,
+      workspace,
+      cached?.executor.getWorkspace?.().path ||
+        (effectiveTask.worktreeStatus === "active" ? effectiveTask.worktreePath : undefined),
+    );
+    const effectiveAccessProfile = resolveEffectiveAccessProfile({
+      task: effectiveTask,
+      workspace: effectiveWorkspace,
+      settings: PermissionSettingsManager.loadSettings(),
+      adminPolicies: loadPolicies(),
+    });
+    if (effectiveAccessProfile.profileUnavailable) {
+      const errorMessage =
+        "The selected access profile is unavailable. Choose a valid profile before continuing.";
+      this.updateTask(taskId, {
+        status: "paused",
+        terminalStatus: "needs_user_action",
+        awaitingUserInputReasonCode: "access_profile_unavailable",
+        error: errorMessage,
+      });
+      throw new Error(errorMessage);
+    }
 
     this.taskRepo.touch(taskId);
     const annotationContext = this.buildAnnotationFollowUpContext(taskId, message);
     const effectiveMessage = annotationContext.message;
+    const userMessageAttachmentMetadata = buildUserMessageAttachmentMetadata(images);
     if (annotationContext.annotations.length > 0) {
       const changedCount = this.annotationRepo.markAddressing(
         taskId,
@@ -9828,7 +10841,7 @@ export class AgentDaemon extends EventEmitter {
     } else {
       executor = cached.executor;
       executor.updateTaskAgentConfig(effectiveTask.agentConfig);
-      // Update workspace to pick up permission changes (e.g. shell enabled)
+      // Update workspace to pick up legacy workspace permission changes.
       executor.updateWorkspace(effectiveWorkspace);
       cached.lastAccessed = Date.now();
       cached.status = "active";
@@ -9851,6 +10864,9 @@ export class AgentDaemon extends EventEmitter {
       this.logEvent(taskId, "user_message", {
         message,
         ...(effectiveMessage !== message ? { annotationContextInjected: true } : {}),
+        ...(userMessageAttachmentMetadata.length > 0
+          ? { images: userMessageAttachmentMetadata }
+          : {}),
         ...(integrationMentions && integrationMentions.length > 0 ? { integrationMentions } : {}),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
       });
@@ -9863,12 +10879,26 @@ export class AgentDaemon extends EventEmitter {
       this.logEvent(taskId, "user_message", {
         message,
         annotationContextInjected: true,
+        ...(userMessageAttachmentMetadata.length > 0
+          ? { images: userMessageAttachmentMetadata }
+          : {}),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
       });
     }
-    await executor.sendMessage(effectiveMessage, images, quotedAssistantMessage, {
-      agentConfigOverride: effectiveOptions?.agentConfigOverride,
-    });
+    if (effectiveOptions?.agentConfigOverride) {
+      this.setTransientTaskAgentConfig(taskId, effectiveOptions.agentConfigOverride);
+    }
+    try {
+      await executor.sendMessage(effectiveMessage, images, quotedAssistantMessage, {
+        agentConfigOverride: effectiveOptions?.agentConfigOverride,
+      });
+    } finally {
+      if (effectiveOptions?.agentConfigOverride) {
+        this.clearTransientTaskAgentConfig(taskId);
+        const stableWorkspace = this.getEffectiveWorkspaceForTask(taskId);
+        if (stableWorkspace) executor.updateWorkspace(stableWorkspace);
+      }
+    }
     return { queued: false };
   }
 
@@ -9947,8 +10977,15 @@ export class AgentDaemon extends EventEmitter {
             followUp.images,
             followUp.quotedAssistantMessage,
             Object.prototype.hasOwnProperty.call(followUp, "integrationMentions")
-              ? { integrationMentions: followUp.integrationMentions }
-              : undefined,
+              ? {
+                  integrationMentions: followUp.integrationMentions,
+                  ...(followUp.agentConfigOverride
+                    ? { agentConfigOverride: followUp.agentConfigOverride }
+                    : {}),
+                }
+              : followUp.agentConfigOverride
+                ? { agentConfigOverride: followUp.agentConfigOverride }
+                : undefined,
           );
         })
         .then(() => {
@@ -10086,6 +11123,9 @@ export class AgentDaemon extends EventEmitter {
     // Clear all pending approval timeouts and reject pending promises
     this.pendingApprovals.forEach((pending, _approvalId) => {
       clearTimeout(pending.timeoutHandle);
+      if (pending.abortSignal && pending.abortListener) {
+        pending.abortSignal.removeEventListener("abort", pending.abortListener);
+      }
       if (!pending.resolved) {
         pending.resolved = true;
         pending.reject(new Error("Daemon shutting down"));

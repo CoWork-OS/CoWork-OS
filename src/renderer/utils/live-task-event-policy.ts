@@ -35,7 +35,8 @@ const HIDDEN_LIVE_NOISE_EVENT_TYPES = new Set([
   "llm_output_budget_escalation",
 ]);
 
-const NETWORK_FAILURE_RE = /\b(fetch failed|network|timeout|timed out|unable to get local issuer certificate|certificate|tls)\b/i;
+const NETWORK_FAILURE_RE =
+  /\b(fetch failed|network|timeout|timed out|unable to get local issuer certificate|certificate|tls)\b/i;
 
 function asObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -64,8 +65,7 @@ export function getLiveTaskEventCoalesceFingerprint(event: TaskEvent): string | 
   const tool = typeof payload.tool === "string" ? payload.tool.trim() : "";
   const provider = typeof payload.provider === "string" ? payload.provider.trim() : "";
   const code = typeof payload.code === "string" ? payload.code.trim() : "";
-  const failureClass =
-    typeof payload.failureClass === "string" ? payload.failureClass.trim() : "";
+  const failureClass = typeof payload.failureClass === "string" ? payload.failureClass.trim() : "";
   const normalizedText = text.replace(/\s+/g, " ").slice(0, 180);
 
   if (
@@ -84,9 +84,7 @@ export function getLiveTaskEventCoalesceFingerprint(event: TaskEvent): string | 
     effectiveType === "tool_result" &&
     (payload.success === false || payload.isError === true || NETWORK_FAILURE_RE.test(text))
   ) {
-    return [event.taskId, effectiveType, tool, code, normalizedText]
-      .filter(Boolean)
-      .join(":");
+    return [event.taskId, effectiveType, tool, code, normalizedText].filter(Boolean).join(":");
   }
 
   if (

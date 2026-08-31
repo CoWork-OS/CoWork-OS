@@ -86,12 +86,15 @@ export function healMovedDesktopWorkspacePaths(
     const normalizedCandidate = path.resolve(candidate);
     const owner = occupiedPaths.get(normalizedCandidate);
     if (owner && owner !== workspace.id) {
-      options.log?.("Skipped workspace path heal because destination already exists in the workspace registry.", {
-        workspaceId: workspace.id,
-        currentPath: workspace.path,
-        candidatePath: candidate,
-        destinationWorkspaceId: owner,
-      });
+      options.log?.(
+        "Skipped workspace path heal because destination already exists in the workspace registry.",
+        {
+          workspaceId: workspace.id,
+          currentPath: workspace.path,
+          candidatePath: candidate,
+          destinationWorkspaceId: owner,
+        },
+      );
       continue;
     }
 

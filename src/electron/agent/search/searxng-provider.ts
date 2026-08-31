@@ -183,7 +183,13 @@ export class SearXngProvider implements SearchProvider {
 
   async search(query: SearchQuery): Promise<SearchResponse> {
     this.assertWorkspaceEndpointAllowed(query);
-    assertNetworkPolicyAllowed({ url: this.searchUrl.toString(), toolName: "web_search" });
+    assertNetworkPolicyAllowed({
+      url: this.searchUrl.toString(),
+      toolName: "web_search",
+      networkEnabled: query.networkEnabled,
+      accessNetworkMode: query.accessNetworkMode,
+      profileDomainRules: query.profileDomainRules,
+    });
 
     const searchType = query.searchType || "web";
     const params = new URLSearchParams({

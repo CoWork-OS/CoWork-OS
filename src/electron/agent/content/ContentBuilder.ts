@@ -39,6 +39,9 @@ export interface BuildExecutionPromptParams {
   webSearchModeContract: string;
   worktreeBranch?: string;
   allowLayeredMemory?: boolean;
+  /** Task-scoped filesystem guards used by layered-memory reads/writes. */
+  filesystemReadGuard?: (candidatePath: string) => boolean;
+  filesystemWriteGuard?: (candidatePath: string) => boolean;
   totalBudgetTokens: number;
   sectionCache?: Map<string, string | null>;
 }
@@ -107,6 +110,8 @@ export class ContentBuilder {
         workspaceId: params.workspaceId,
         workspacePath: params.workspacePath,
         taskPrompt: params.taskPrompt,
+        readGuard: params.filesystemReadGuard,
+        writeGuard: params.filesystemWriteGuard,
       });
       memoryIndex = snapshot.indexContent;
       topicCount = snapshot.topics.length;

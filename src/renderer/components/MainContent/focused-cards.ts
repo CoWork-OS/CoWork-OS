@@ -16,12 +16,16 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { FocusedCard } from "./main-content-types";
-import {
-  LLM_WIKI_GUI_PROMPT,
-  LLM_WIKI_EXPLORE_GUI_PROMPT,
-} from "../../../shared/starter-missions";
+import { LLM_WIKI_GUI_PROMPT, LLM_WIKI_EXPLORE_GUI_PROMPT } from "../../../shared/starter-missions";
 
-export const EXECUTION_MODE_ORDER: ExecutionMode[] = ["chat", "execute", "plan", "analyze", "debug", "verified"];
+export const EXECUTION_MODE_ORDER: ExecutionMode[] = [
+  "chat",
+  "execute",
+  "plan",
+  "analyze",
+  "debug",
+  "verified",
+];
 export const TASK_DOMAIN_ORDER: TaskDomain[] = [
   "auto",
   "code",

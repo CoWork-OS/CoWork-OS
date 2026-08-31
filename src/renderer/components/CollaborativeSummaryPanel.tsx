@@ -27,7 +27,15 @@ function truncate(str: string, maxLen: number): string {
 type TimelineEntry =
   | { kind: "strategic"; id: string; content: string; ts: number }
   | { kind: "spawn_header"; id: string; count: number; ts: number }
-  | { kind: "spawn"; id: string; title: string; description: string; taskId: string | null; icon?: string; ts: number }
+  | {
+      kind: "spawn";
+      id: string;
+      title: string;
+      description: string;
+      taskId: string | null;
+      icon?: string;
+      ts: number;
+    }
   | { kind: "status"; id: string; label: string; ts: number }
   | { kind: "thought"; id: string; thought: AgentThought; ts: number };
 
@@ -107,7 +115,11 @@ export function CollaborativeSummaryPanel({
         if (event.run?.id === collaborativeRun.id && event.run?.phase) {
           setPhase(event.run.phase);
         }
-        if (event.type === "team_item_spawned" && event.item && event.runId === collaborativeRun.id) {
+        if (
+          event.type === "team_item_spawned" &&
+          event.item &&
+          event.runId === collaborativeRun.id
+        ) {
           setSpawnEvents((prev) => {
             const ts = (event as { timestamp?: number }).timestamp ?? Date.now();
             if (prev.some((e) => e.item.id === event.item!.id)) return prev;
@@ -136,7 +148,8 @@ export function CollaborativeSummaryPanel({
   const childByTaskId = new Map(childTasks.map((t) => [t.id, t]));
   const taskToRoleId = new Map<string, string>();
   for (const item of teamItems) {
-    if (item.sourceTaskId && item.ownerAgentRoleId) taskToRoleId.set(item.sourceTaskId, item.ownerAgentRoleId);
+    if (item.sourceTaskId && item.ownerAgentRoleId)
+      taskToRoleId.set(item.sourceTaskId, item.ownerAgentRoleId);
   }
   const spawnItems = teamItems.map((item) => {
     const childTask = item.sourceTaskId ? childByTaskId.get(item.sourceTaskId) : null;
@@ -203,12 +216,16 @@ export function CollaborativeSummaryPanel({
     const spawnOrder = displayItems
       .map((d) => {
         const childTask = d.taskId ? childByTaskId.get(d.taskId) : null;
-        const roleId = childTask?.assignedAgentRoleId ?? (d.taskId ? taskToRoleId.get(d.taskId) : undefined);
+        const roleId =
+          childTask?.assignedAgentRoleId ?? (d.taskId ? taskToRoleId.get(d.taskId) : undefined);
         const role = roleId ? agentRoles.get(roleId) : undefined;
         const ts =
           spawnEvents.length > 0
             ? spawnEvents.find((e) => e.item.id === d.id || e.item.sourceTaskId === d.taskId)?.ts
-            : childTask?.createdAt ?? childTask?.updatedAt ?? (d as { createdAt?: number }).createdAt ?? d.updatedAt;
+            : (childTask?.createdAt ??
+              childTask?.updatedAt ??
+              (d as { createdAt?: number }).createdAt ??
+              d.updatedAt);
         return {
           id: d.id,
           title: d.title,
@@ -333,10 +350,7 @@ export function CollaborativeSummaryPanel({
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
       >
-        <ChevronDown
-          className={`collab-summary-chevron ${expanded ? "expanded" : ""}`}
-          size={18}
-        />
+        <ChevronDown className={`collab-summary-chevron ${expanded ? "expanded" : ""}`} size={18} />
         <span className="collab-summary-heading-text">
           {allDone ? "Completed" : "In progress"} — {displayItems.length} agent
           {displayItems.length !== 1 ? "s" : ""}
@@ -387,17 +401,19 @@ export function CollaborativeSummaryPanel({
                     <span className="collab-timeline-spawn-desc">
                       {" "}
                       with the instructions:{" "}
-                    <span className="markdown-content markdown-inline">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkBreaks]}
-                        components={{
-                          p: ({ children }) => <>{replaceEmojisInChildren(children, 12)}</>,
-                          li: ({ children }) => <>{replaceEmojisInChildren(children, 12)}</>,
-                        }}
-                      >
-                        {fixUnclosedBold(truncate(normalizeMarkdownForCollab(entry.description), 150))}
-                      </ReactMarkdown>
-                    </span>
+                      <span className="markdown-content markdown-inline">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm, remarkBreaks]}
+                          components={{
+                            p: ({ children }) => <>{replaceEmojisInChildren(children, 12)}</>,
+                            li: ({ children }) => <>{replaceEmojisInChildren(children, 12)}</>,
+                          }}
+                        >
+                          {fixUnclosedBold(
+                            truncate(normalizeMarkdownForCollab(entry.description), 150),
+                          )}
+                        </ReactMarkdown>
+                      </span>
                     </span>
                   </span>
                 </div>
@@ -413,11 +429,7 @@ export function CollaborativeSummaryPanel({
                   {isComplete ? (
                     <Check size={14} strokeWidth={2.5} />
                   ) : entry.id === "status-thinking" || entry.id === "status-synthesize" ? (
-                    <Loader2
-                      className="collab-summary-spinner"
-                      size={14}
-                      strokeWidth={2.5}
-                    />
+                    <Loader2 className="collab-summary-spinner" size={14} strokeWidth={2.5} />
                   ) : null}
                   <span>{entry.label}</span>
                 </div>
@@ -425,7 +437,9 @@ export function CollaborativeSummaryPanel({
             }
             if (entry.kind === "thought") {
               const err = isErrorLike(entry.thought.content);
-              const content = fixUnclosedBold(truncate(normalizeMarkdownForCollab(entry.thought.content), 300));
+              const content = fixUnclosedBold(
+                truncate(normalizeMarkdownForCollab(entry.thought.content), 300),
+              );
               return (
                 <div
                   key={entry.id}

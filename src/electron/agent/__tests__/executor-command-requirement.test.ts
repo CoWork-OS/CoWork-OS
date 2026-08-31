@@ -33,6 +33,66 @@ describe("TaskExecutor command execution requirement detection", () => {
     expect(requires).toBe(false);
   });
 
+  it("treats questions about an existing command as informational", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.getEffectiveTaskDomain = () => "operations";
+    fakeThis.getEffectiveExecutionMode = () => "execute";
+    fakeThis.lastNonVerificationOutput =
+      "The prior task reported npm test and its package metadata.";
+    fakeThis.lastAssistantOutput = fakeThis.lastNonVerificationOutput;
+
+    const message = "What does the test command actually run?";
+    expect(
+      (TaskExecutor as Any).prototype.followUpRequiresCommandExecution.call(fakeThis, message),
+    ).toBe(false);
+    expect(
+      (TaskExecutor as Any).prototype.isKnownContextInformationalFollowUp.call(fakeThis, message),
+    ).toBe(true);
+  });
+
+  it("keeps explicit command requests on the tool-enabled path", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.getEffectiveTaskDomain = () => "operations";
+    fakeThis.getEffectiveExecutionMode = () => "execute";
+    fakeThis.lastNonVerificationOutput = "The prior task reported npm test.";
+    fakeThis.lastAssistantOutput = fakeThis.lastNonVerificationOutput;
+
+    expect(
+      (TaskExecutor as Any).prototype.isKnownContextInformationalFollowUp.call(
+        fakeThis,
+        "Can you run npm test now?",
+      ),
+    ).toBe(false);
+  });
+
+  it("treats approval denial as a terminal follow-up blocker", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+
+    expect(
+      (TaskExecutor as Any).prototype.getApprovalBlockMessage.call(
+        fakeThis,
+        "run_command",
+        "User denied approval",
+      ),
+    ).toBe(
+      "Approval for the shell command was denied, so it was not executed. Approve it and retry if you want the action to run.",
+    );
+    expect(
+      (TaskExecutor as Any).prototype.getApprovalBlockMessage.call(
+        fakeThis,
+        "run_command",
+        "approval request timed out",
+      ),
+    ).toBe("Approval for the shell command timed out before it could run. No action was taken.");
+    expect(
+      (TaskExecutor as Any).prototype.getApprovalBlockMessage.call(
+        fakeThis,
+        "read_file",
+        "ENOENT: no such file or directory",
+      ),
+    ).toBeNull();
+  });
+
   it("keeps analyze mode read-only even for troubleshooting prompts", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
     fakeThis.getEffectiveTaskDomain = () => "operations";

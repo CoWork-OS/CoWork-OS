@@ -23,18 +23,42 @@ const OPS_TABS: { id: OpsSubTab; label: string }[] = [
 
 export function MCOpsTab({ data }: MCOpsTabProps) {
   const {
-    opsSubTab, setOpsSubTab,
-    selectedCompany, commandCenterSummary,
-    commandCenterOutputs, commandCenterReviewQueue,
-    commandCenterOperators, commandCenterExecutionMap,
-    automationOutcomes, automationOutcomeSummary,
-    coreFailureRecords, coreFailureClusters, coreEvalCases, coreExperiments, coreLearnings,
-    plannerConfig, plannerRuns, plannerRunning, plannerSaving, plannerLoading,
-    symphonyConfig, symphonyStatus, symphonySaving, symphonyRunning,
-    selectedPlannerRunId, setSelectedPlannerRunId, selectedPlannerRun,
-    plannerRunIssues, setSelectedIssueId, setDetailPanel,
-    workspaces, agents,
-    handlePlannerConfigChange, handleRunPlanner, handleSymphonyConfigChange, handleRunSymphony,
+    opsSubTab,
+    setOpsSubTab,
+    selectedCompany,
+    commandCenterSummary,
+    commandCenterOutputs,
+    commandCenterReviewQueue,
+    commandCenterOperators,
+    commandCenterExecutionMap,
+    automationOutcomes,
+    automationOutcomeSummary,
+    coreFailureRecords,
+    coreFailureClusters,
+    coreEvalCases,
+    coreExperiments,
+    coreLearnings,
+    plannerConfig,
+    plannerRuns,
+    plannerRunning,
+    plannerSaving,
+    plannerLoading,
+    symphonyConfig,
+    symphonyStatus,
+    symphonySaving,
+    symphonyRunning,
+    selectedPlannerRunId,
+    setSelectedPlannerRunId,
+    selectedPlannerRun,
+    plannerRunIssues,
+    setSelectedIssueId,
+    setDetailPanel,
+    workspaces,
+    agents,
+    handlePlannerConfigChange,
+    handleRunPlanner,
+    handleSymphonyConfigChange,
+    handleRunSymphony,
     formatRelativeTime,
   } = data;
 
@@ -70,7 +94,10 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
           />
         )}
         {selectedCompany && opsSubTab === "operators" && (
-          <OpsOperators operators={commandCenterOperators} formatRelativeTime={formatRelativeTime} />
+          <OpsOperators
+            operators={commandCenterOperators}
+            formatRelativeTime={formatRelativeTime}
+          />
         )}
         {selectedCompany && opsSubTab === "outputs" && (
           <OpsOutputs
@@ -173,7 +200,9 @@ function OpsHarness({
               <div key={cluster.id} className="mc-v2-ops-row">
                 <div>
                   <div className="mc-v2-ops-row-title">{cluster.rootCauseSummary}</div>
-                  <div className="mc-v2-ops-row-subtitle">{cluster.category} · recurred {cluster.recurrenceCount}x</div>
+                  <div className="mc-v2-ops-row-subtitle">
+                    {cluster.category} · recurred {cluster.recurrenceCount}x
+                  </div>
                 </div>
                 <span className="mc-v2-ops-pill">{cluster.status}</span>
               </div>
@@ -185,7 +214,9 @@ function OpsHarness({
         <h3 className="mc-v2-ops-heading">Recent failure records</h3>
         <div className="mc-v2-ops-list">
           {failures.length === 0 ? (
-            <div className="mc-v2-empty mc-v2-empty-compact">No core failure records captured yet.</div>
+            <div className="mc-v2-empty mc-v2-empty-compact">
+              No core failure records captured yet.
+            </div>
           ) : (
             failures.slice(0, 6).map((failure) => (
               <div key={failure.id} className="mc-v2-ops-row">
@@ -205,14 +236,18 @@ function OpsHarness({
         <h3 className="mc-v2-ops-heading">Eval and experiment activity</h3>
         <div className="mc-v2-ops-list">
           {[...evalCases.slice(0, 4), ...experiments.slice(0, 4)].length === 0 ? (
-            <div className="mc-v2-empty mc-v2-empty-compact">No eval or experiment activity yet.</div>
+            <div className="mc-v2-empty mc-v2-empty-compact">
+              No eval or experiment activity yet.
+            </div>
           ) : (
             <>
               {evalCases.slice(0, 4).map((item) => (
                 <div key={item.id} className="mc-v2-ops-row">
                   <div>
                     <div className="mc-v2-ops-row-title">{item.title}</div>
-                    <div className="mc-v2-ops-row-subtitle">passes {item.passCount} · fails {item.failCount}</div>
+                    <div className="mc-v2-ops-row-subtitle">
+                      passes {item.passCount} · fails {item.failCount}
+                    </div>
                   </div>
                   <span className="mc-v2-ops-pill">{item.status}</span>
                 </div>
@@ -311,7 +346,9 @@ function OpsAutomation({
         <h3 className="mc-v2-ops-heading">Recent Automation Outcomes</h3>
         <div className="mc-v2-ops-list">
           {outcomes.length === 0 ? (
-            <div className="mc-v2-empty mc-v2-empty-compact">No automation outcomes recorded yet.</div>
+            <div className="mc-v2-empty mc-v2-empty-compact">
+              No automation outcomes recorded yet.
+            </div>
           ) : (
             outcomes.map((outcome) => {
               const clickable = Boolean(outcome.taskId);
@@ -349,25 +386,39 @@ function OpsAutomation({
 }
 
 // ── Ops Operators ──
-function OpsOperators({ operators, formatRelativeTime }: { operators: any[]; formatRelativeTime: (t?: number) => string }) {
-  if (operators.length === 0) return <div className="mc-v2-empty">No operators linked to this company yet.</div>;
+function OpsOperators({
+  operators,
+  formatRelativeTime,
+}: {
+  operators: any[];
+  formatRelativeTime: (t?: number) => string;
+}) {
+  if (operators.length === 0)
+    return <div className="mc-v2-empty">No operators linked to this company yet.</div>;
   return (
     <div className="mc-v2-ops-operators">
       {operators.map((op: any) => (
         <div key={op.agentRoleId} className="mc-v2-ops-row">
           <div>
             <div className="mc-v2-ops-row-title">
-              <span style={{ color: op.color }}>{op.icon} {op.displayName}</span>
+              <span style={{ color: op.color }}>
+                {op.icon} {op.displayName}
+              </span>
             </div>
             <div className="mc-v2-ops-row-subtitle">
-              {(op.operatorMandate || "No mandate set") + (op.currentBottleneck ? ` · Bottleneck: ${op.currentBottleneck}` : "")}
+              {(op.operatorMandate || "No mandate set") +
+                (op.currentBottleneck ? ` · Bottleneck: ${op.currentBottleneck}` : "")}
             </div>
             <div className="mc-v2-ops-row-subtitle">
-              Last useful output {op.lastUsefulOutputAt ? formatRelativeTime(op.lastUsefulOutputAt) : "never"} · heartbeat {op.heartbeatStatus || "idle"}
+              Last useful output{" "}
+              {op.lastUsefulOutputAt ? formatRelativeTime(op.lastUsefulOutputAt) : "never"} ·
+              heartbeat {op.heartbeatStatus || "idle"}
             </div>
           </div>
           <span className="mc-v2-ops-pill">
-            {typeof op.operatorHealthScore === "number" ? `${Math.round(op.operatorHealthScore * 100)} health` : op.activeLoop || "idle"}
+            {typeof op.operatorHealthScore === "number"
+              ? `${Math.round(op.operatorHealthScore * 100)} health`
+              : op.activeLoop || "idle"}
           </span>
         </div>
       ))}
@@ -376,14 +427,34 @@ function OpsOperators({ operators, formatRelativeTime }: { operators: any[]; for
 }
 
 // ── Ops Outputs & Review ──
-function OpsOutputs({ outputs, reviewQueue, setSelectedIssueId, setDetailPanel, formatRelativeTime, selectedIssueId }: any) {
+function OpsOutputs({
+  outputs,
+  reviewQueue,
+  setSelectedIssueId,
+  setDetailPanel,
+  formatRelativeTime,
+  selectedIssueId,
+}: any) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <div>
-        <h3 style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: "var(--color-text-secondary)", textTransform: "uppercase" as const }}>Operations Feed</h3>
+        <h3
+          style={{
+            margin: "0 0 10px",
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: 0.5,
+            color: "var(--color-text-secondary)",
+            textTransform: "uppercase" as const,
+          }}
+        >
+          Operations Feed
+        </h3>
         <div className="mc-v2-ops-list">
           {outputs.length === 0 ? (
-            <div className="mc-v2-empty" style={{ padding: "12px 0" }}>No valuable outputs yet.</div>
+            <div className="mc-v2-empty" style={{ padding: "12px 0" }}>
+              No valuable outputs yet.
+            </div>
           ) : (
             outputs.map((output: any) => (
               <button
@@ -406,9 +477,13 @@ function OpsOutputs({ outputs, reviewQueue, setSelectedIssueId, setDetailPanel, 
                       </span>
                     )}
                   </div>
-                  <div className="mc-v2-ops-row-subtitle">{output.outputType} · {output.valueReason}</div>
+                  <div className="mc-v2-ops-row-subtitle">
+                    {output.outputType} · {output.valueReason}
+                  </div>
                   {(output.whatChanged || output.nextStep) && (
-                    <div className="mc-v2-ops-row-subtitle">{[output.whatChanged, output.nextStep].filter(Boolean).join(" · ")}</div>
+                    <div className="mc-v2-ops-row-subtitle">
+                      {[output.whatChanged, output.nextStep].filter(Boolean).join(" · ")}
+                    </div>
                   )}
                 </div>
                 <span className={`mc-v2-ops-pill status-${output.status || "idle"}`}>
@@ -420,10 +495,23 @@ function OpsOutputs({ outputs, reviewQueue, setSelectedIssueId, setDetailPanel, 
         </div>
       </div>
       <div>
-        <h3 style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: "var(--color-text-secondary)", textTransform: "uppercase" as const }}>Review Queue</h3>
+        <h3
+          style={{
+            margin: "0 0 10px",
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: 0.5,
+            color: "var(--color-text-secondary)",
+            textTransform: "uppercase" as const,
+          }}
+        >
+          Review Queue
+        </h3>
         <div className="mc-v2-ops-list">
           {reviewQueue.length === 0 ? (
-            <div className="mc-v2-empty" style={{ padding: "12px 0" }}>No human review gates queued.</div>
+            <div className="mc-v2-empty" style={{ padding: "12px 0" }}>
+              No human review gates queued.
+            </div>
           ) : (
             reviewQueue.map((item: any) => (
               <button
@@ -446,7 +534,9 @@ function OpsOutputs({ outputs, reviewQueue, setSelectedIssueId, setDetailPanel, 
                       </span>
                     )}
                   </div>
-                  <div className="mc-v2-ops-row-subtitle">{item.reviewReason} · {item.outputType || item.sourceType}</div>
+                  <div className="mc-v2-ops-row-subtitle">
+                    {item.reviewReason} · {item.outputType || item.sourceType}
+                  </div>
                   {item.summary && <div className="mc-v2-ops-row-subtitle">{item.summary}</div>}
                 </div>
                 <span className="mc-v2-ops-pill">{formatRelativeTime(item.createdAt)}</span>
@@ -460,8 +550,14 @@ function OpsOutputs({ outputs, reviewQueue, setSelectedIssueId, setDetailPanel, 
 }
 
 // ── Ops Execution Map ──
-function OpsExecutionMap({ executionMap, setSelectedIssueId, setDetailPanel, selectedIssueId }: any) {
-  if (executionMap.length === 0) return <div className="mc-v2-empty">No execution lineage yet.</div>;
+function OpsExecutionMap({
+  executionMap,
+  setSelectedIssueId,
+  setDetailPanel,
+  selectedIssueId,
+}: any) {
+  if (executionMap.length === 0)
+    return <div className="mc-v2-empty">No execution lineage yet.</div>;
   return (
     <div className="mc-v2-ops-execution-map">
       {executionMap.slice(0, 20).map((entry: any) => (
@@ -484,10 +580,19 @@ function OpsExecutionMap({ executionMap, setSelectedIssueId, setDetailPanel, sel
               )}
             </div>
             <div className="mc-v2-ops-row-subtitle">
-              {[entry.goalTitle, entry.projectName, entry.outputType, entry.taskStatus ? `task:${entry.taskStatus}` : undefined].filter(Boolean).join(" · ")}
+              {[
+                entry.goalTitle,
+                entry.projectName,
+                entry.outputType,
+                entry.taskStatus ? `task:${entry.taskStatus}` : undefined,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </div>
           </div>
-          <span className={`mc-v2-ops-pill status-${entry.issueStatus}`}>{entry.stale ? "stale" : entry.issueStatus}</span>
+          <span className={`mc-v2-ops-pill status-${entry.issueStatus}`}>
+            {entry.stale ? "stale" : entry.issueStatus}
+          </span>
         </button>
       ))}
     </div>
@@ -496,50 +601,102 @@ function OpsExecutionMap({ executionMap, setSelectedIssueId, setDetailPanel, sel
 
 // ── Ops Planner ──
 function OpsPlanner({
-  config, runs, running, saving, loading,
-  selectedRunId, setSelectedRunId, selectedRun, runIssues,
-  workspaces, agents, onConfigChange, onRun,
-  setSelectedIssueId, setDetailPanel, formatRelativeTime, selectedIssueId,
-  symphonyConfig, symphonyStatus, symphonySaving, symphonyRunning,
-  onSymphonyConfigChange, onRunSymphony,
+  config,
+  runs,
+  running,
+  saving,
+  loading,
+  selectedRunId,
+  setSelectedRunId,
+  selectedRun,
+  runIssues,
+  workspaces,
+  agents,
+  onConfigChange,
+  onRun,
+  setSelectedIssueId,
+  setDetailPanel,
+  formatRelativeTime,
+  selectedIssueId,
+  symphonyConfig,
+  symphonyStatus,
+  symphonySaving,
+  symphonyRunning,
+  onSymphonyConfigChange,
+  onRunSymphony,
 }: any) {
   return (
     <div className="mc-v2-planner-config">
       <div className="mc-v2-detail-section">
         <div className="mc-v2-planner-status-row">
           <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Symphony</h3>
-          <span className={`mc-v2-planner-status-badge ${symphonyConfig?.enabled ? "enabled" : "disabled"}`}>
+          <span
+            className={`mc-v2-planner-status-badge ${symphonyConfig?.enabled ? "enabled" : "disabled"}`}
+          >
             {symphonyConfig?.enabled ? "Enabled" : "Disabled"}
           </span>
-          {symphonySaving && <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Saving...</span>}
-          {symphonyRunning && <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Running...</span>}
+          {symphonySaving && (
+            <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Saving...</span>
+          )}
+          {symphonyRunning && (
+            <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Running...</span>
+          )}
         </div>
         {symphonyConfig && (
           <div className="mc-v2-planner-fields">
             <label className="mc-v2-planner-field checkbox">
-              <input type="checkbox" checked={symphonyConfig.enabled} onChange={(e) => void onSymphonyConfigChange({ enabled: e.target.checked })} />
+              <input
+                type="checkbox"
+                checked={symphonyConfig.enabled}
+                onChange={(e) => void onSymphonyConfigChange({ enabled: e.target.checked })}
+              />
               <span>Watch issues</span>
             </label>
             <label className="mc-v2-planner-field">
               <span>Workspace</span>
-              <select value={symphonyConfig.workspaceId || ""} onChange={(e) => void onSymphonyConfigChange({ workspaceId: e.target.value || null })}>
+              <select
+                value={symphonyConfig.workspaceId || ""}
+                onChange={(e) =>
+                  void onSymphonyConfigChange({ workspaceId: e.target.value || null })
+                }
+              >
                 <option value="">First workspace</option>
-                {workspaces.map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                {workspaces.map((w: any) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="mc-v2-planner-field">
               <span>Runtime</span>
-              <select value={symphonyConfig.runtimeMode} onChange={(e) => void onSymphonyConfigChange({ runtimeMode: e.target.value })}>
+              <select
+                value={symphonyConfig.runtimeMode}
+                onChange={(e) => void onSymphonyConfigChange({ runtimeMode: e.target.value })}
+              >
                 <option value="native">Native</option>
                 <option value="acpx">acpx</option>
               </select>
             </label>
             <label className="mc-v2-planner-field">
               <span>Parallel</span>
-              <input type="number" min={1} max={20} value={symphonyConfig.maxConcurrentIssueRuns}
-                onChange={(e) => void onSymphonyConfigChange({ maxConcurrentIssueRuns: Math.max(1, Number(e.target.value) || 1) })} />
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={symphonyConfig.maxConcurrentIssueRuns}
+                onChange={(e) =>
+                  void onSymphonyConfigChange({
+                    maxConcurrentIssueRuns: Math.max(1, Number(e.target.value) || 1),
+                  })
+                }
+              />
             </label>
-            <button className="mc-v2-icon-btn" onClick={() => void onRunSymphony()} disabled={symphonyRunning}>
+            <button
+              className="mc-v2-icon-btn"
+              onClick={() => void onRunSymphony()}
+              disabled={symphonyRunning}
+            >
               {symphonyRunning ? "Running..." : "Run Symphony"}
             </button>
           </div>
@@ -558,7 +715,9 @@ function OpsPlanner({
             )}
             <div className="mc-v2-ops-list">
               {symphonyStatus.latestDispatches.length === 0 ? (
-                <div className="mc-v2-empty" style={{ padding: "8px 0" }}>No Symphony dispatches yet.</div>
+                <div className="mc-v2-empty" style={{ padding: "8px 0" }}>
+                  No Symphony dispatches yet.
+                </div>
               ) : (
                 symphonyStatus.latestDispatches.map((issue: any) => (
                   <button
@@ -572,7 +731,11 @@ function OpsPlanner({
                   >
                     <div>
                       <div className="mc-v2-ops-row-title">{issue.title}</div>
-                      <div className="mc-v2-ops-row-subtitle">{issue.lastDispatchAt ? formatRelativeTime(issue.lastDispatchAt) : "dispatched"}</div>
+                      <div className="mc-v2-ops-row-subtitle">
+                        {issue.lastDispatchAt
+                          ? formatRelativeTime(issue.lastDispatchAt)
+                          : "dispatched"}
+                      </div>
                     </div>
                     <span className={`mc-v2-ops-pill status-${issue.status}`}>{issue.status}</span>
                   </button>
@@ -588,42 +751,80 @@ function OpsPlanner({
         <span className={`mc-v2-planner-status-badge ${config?.enabled ? "enabled" : "disabled"}`}>
           {config?.enabled ? "Enabled" : "Disabled"}
         </span>
-        {saving && <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Saving...</span>}
-        {loading && <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Loading...</span>}
+        {saving && (
+          <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Saving...</span>
+        )}
+        {loading && (
+          <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Loading...</span>
+        )}
       </div>
 
       {config && (
         <div className="mc-v2-planner-fields">
           <label className="mc-v2-planner-field checkbox">
-            <input type="checkbox" checked={config.enabled} onChange={(e) => void onConfigChange({ enabled: e.target.checked })} />
+            <input
+              type="checkbox"
+              checked={config.enabled}
+              onChange={(e) => void onConfigChange({ enabled: e.target.checked })}
+            />
             <span>Schedule runs</span>
           </label>
           <label className="mc-v2-planner-field checkbox">
-            <input type="checkbox" checked={config.autoDispatch} onChange={(e) => void onConfigChange({ autoDispatch: e.target.checked })} />
+            <input
+              type="checkbox"
+              checked={config.autoDispatch}
+              onChange={(e) => void onConfigChange({ autoDispatch: e.target.checked })}
+            />
             <span>Auto-dispatch</span>
           </label>
           <label className="mc-v2-planner-field">
             <span>Interval</span>
-            <input type="number" min={5} step={5} value={config.intervalMinutes}
-              onChange={(e) => void onConfigChange({ intervalMinutes: Math.max(5, Number(e.target.value) || 5) })} />
+            <input
+              type="number"
+              min={5}
+              step={5}
+              value={config.intervalMinutes}
+              onChange={(e) =>
+                void onConfigChange({ intervalMinutes: Math.max(5, Number(e.target.value) || 5) })
+              }
+            />
           </label>
           <label className="mc-v2-planner-field">
             <span>Workspace</span>
-            <select value={config.planningWorkspaceId || ""} onChange={(e) => void onConfigChange({ planningWorkspaceId: e.target.value || null })}>
+            <select
+              value={config.planningWorkspaceId || ""}
+              onChange={(e) => void onConfigChange({ planningWorkspaceId: e.target.value || null })}
+            >
               <option value="">None</option>
-              {workspaces.map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}
+              {workspaces.map((w: any) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
             </select>
           </label>
           <label className="mc-v2-planner-field">
             <span>Agent</span>
-            <select value={config.plannerAgentRoleId || ""} onChange={(e) => void onConfigChange({ plannerAgentRoleId: e.target.value || null })}>
+            <select
+              value={config.plannerAgentRoleId || ""}
+              onChange={(e) => void onConfigChange({ plannerAgentRoleId: e.target.value || null })}
+            >
               <option value="">Auto-pick</option>
-              {agents.filter((a: any) => a.isActive).map((a: any) => <option key={a.id} value={a.id}>{a.displayName}</option>)}
+              {agents
+                .filter((a: any) => a.isActive)
+                .map((a: any) => (
+                  <option key={a.id} value={a.id}>
+                    {a.displayName}
+                  </option>
+                ))}
             </select>
           </label>
           <label className="mc-v2-planner-field">
             <span>Approval</span>
-            <select value={config.approvalPreset} onChange={(e) => void onConfigChange({ approvalPreset: e.target.value })}>
+            <select
+              value={config.approvalPreset}
+              onChange={(e) => void onConfigChange({ approvalPreset: e.target.value })}
+            >
               <option value="manual">Manual</option>
               <option value="safe_autonomy">Safe autonomy</option>
               <option value="founder_edge">Founder edge</option>
@@ -639,7 +840,9 @@ function OpsPlanner({
         <h4>Recent Runs</h4>
         <div className="mc-v2-planner-runs">
           {runs.length === 0 ? (
-            <div className="mc-v2-empty" style={{ padding: "12px 0" }}>No planner runs yet.</div>
+            <div className="mc-v2-empty" style={{ padding: "12px 0" }}>
+              No planner runs yet.
+            </div>
           ) : (
             runs.map((run: any) => (
               <button
@@ -659,11 +862,17 @@ function OpsPlanner({
                 <div className="mc-v2-planner-run-main">
                   <span className={`mc-v2-planner-run-status ${run.status}`}>{run.status}</span>
                   <span className="mc-v2-planner-run-summary">
-                    {run.summary || `${run.createdIssueCount} created, ${run.dispatchedTaskCount} dispatched`}
+                    {run.summary ||
+                      `${run.createdIssueCount} created, ${run.dispatchedTaskCount} dispatched`}
                   </span>
                 </div>
                 <span className="mc-v2-planner-run-time">
-                  {new Date(run.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  {new Date(run.createdAt).toLocaleString([], {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </span>
               </button>
             ))
@@ -676,9 +885,13 @@ function OpsPlanner({
           <div className="mc-v2-ops-row">
             <div>
               <div className="mc-v2-ops-row-title">{selectedRun.summary || "Planner cycle"}</div>
-              <div className="mc-v2-ops-row-subtitle">{selectedRun.trigger} · {formatRelativeTime(selectedRun.createdAt)}</div>
+              <div className="mc-v2-ops-row-subtitle">
+                {selectedRun.trigger} · {formatRelativeTime(selectedRun.createdAt)}
+              </div>
             </div>
-            <span className={`mc-v2-ops-pill status-${selectedRun.status}`}>{selectedRun.status}</span>
+            <span className={`mc-v2-ops-pill status-${selectedRun.status}`}>
+              {selectedRun.status}
+            </span>
           </div>
           <div className="mc-v2-planner-run-metrics">
             <span>{selectedRun.createdIssueCount} created</span>
@@ -687,7 +900,9 @@ function OpsPlanner({
           </div>
           <div className="mc-v2-ops-list">
             {runIssues.length === 0 ? (
-              <div className="mc-v2-empty" style={{ padding: "8px 0" }}>No issue details for this planner cycle.</div>
+              <div className="mc-v2-empty" style={{ padding: "8px 0" }}>
+                No issue details for this planner cycle.
+              </div>
             ) : (
               runIssues.map((issue: any) => (
                 <button
@@ -701,7 +916,9 @@ function OpsPlanner({
                 >
                   <div>
                     <div className="mc-v2-ops-row-title">{issue.title}</div>
-                    <div className="mc-v2-ops-row-subtitle">{issue.projectId ? "Project-linked" : "Goal-linked"}</div>
+                    <div className="mc-v2-ops-row-subtitle">
+                      {issue.projectId ? "Project-linked" : "Goal-linked"}
+                    </div>
                   </div>
                   <span className={`mc-v2-ops-pill status-${issue.status}`}>{issue.status}</span>
                 </button>

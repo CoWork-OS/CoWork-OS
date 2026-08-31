@@ -19,6 +19,7 @@ Today, CoWork OS already has meaningful defenses:
 - output monitoring in [src/electron/agent/security/output-filter.ts](../src/electron/agent/security/output-filter.ts)
 - memory sanitization in [src/electron/memory/MemoryService.ts](../src/electron/memory/MemoryService.ts) and [src/electron/memory/MemorySynthesizer.ts](../src/electron/memory/MemorySynthesizer.ts)
 - layered permissions in [docs/permission-system.md](permission-system.md)
+- task-level [access profiles](access-profiles.md) that combine sandbox, approvals, reviewer behavior, filesystem, network, and domain boundaries
 - per-app computer-use risk tiers in [docs/computer-use.md](computer-use.md) and [src/electron/computer-use/app-risk-profile.ts](../src/electron/computer-use/app-risk-profile.ts)
 
 The core gap is that the current model is still mostly:
@@ -270,7 +271,8 @@ High-impact actions should require provenance-aware policy decisions.
 
 ### Product behavior
 
-- A shell command triggered by a dubious scraped page should not look identical to a shell command triggered by a local repo task.
+- A command-tool call triggered by a dubious scraped page should not look identical to a command-tool call triggered by a local repo task.
+- Integrity-aware restrictions may narrow the task's effective access profile, but they must never widen it.
 - Sensitive actions should be harder to approve when trust is low.
 
 ### Implementation hooks

@@ -63,10 +63,20 @@ export function extractArrayPayload<T>(payload: unknown, key: string): T[] {
 
 export function formatTaskEventFrame(frame: ControlPlaneFrame): string | null {
   if (frame.type !== "event") return null;
-  const payload = frame.payload && typeof frame.payload === "object" ? (frame.payload as Record<string, unknown>) : {};
-  const inner = payload.event && typeof payload.event === "object" ? (payload.event as Record<string, unknown>) : {};
+  const payload =
+    frame.payload && typeof frame.payload === "object"
+      ? (frame.payload as Record<string, unknown>)
+      : {};
+  const inner =
+    payload.event && typeof payload.event === "object"
+      ? (payload.event as Record<string, unknown>)
+      : {};
   const eventName = frame.event || "event";
-  const kind = stringValue(payload.kind) || stringValue(payload.type) || stringValue(inner.kind) || stringValue(inner.type);
+  const kind =
+    stringValue(payload.kind) ||
+    stringValue(payload.type) ||
+    stringValue(inner.kind) ||
+    stringValue(inner.type);
   const message =
     stringValue(payload.message) ||
     stringValue(payload.text) ||
@@ -90,17 +100,33 @@ export function formatTaskEventFrame(frame: ControlPlaneFrame): string | null {
 
 export function isTerminalTaskFrame(frame: ControlPlaneFrame, taskId?: string): boolean {
   if (frame.type !== "event") return false;
-  if (frame.event === "task.completed" || frame.event === "task.failed") return matchesTask(frame, taskId);
-  const payload = frame.payload && typeof frame.payload === "object" ? (frame.payload as Record<string, unknown>) : {};
-  const inner = payload.event && typeof payload.event === "object" ? (payload.event as Record<string, unknown>) : {};
+  if (frame.event === "task.completed" || frame.event === "task.failed")
+    return matchesTask(frame, taskId);
+  const payload =
+    frame.payload && typeof frame.payload === "object"
+      ? (frame.payload as Record<string, unknown>)
+      : {};
+  const inner =
+    payload.event && typeof payload.event === "object"
+      ? (payload.event as Record<string, unknown>)
+      : {};
   const status = stringValue(payload.status) || stringValue(inner.status);
-  return matchesTask(frame, taskId) && (status === "completed" || status === "failed" || status === "cancelled");
+  return (
+    matchesTask(frame, taskId) &&
+    (status === "completed" || status === "failed" || status === "cancelled")
+  );
 }
 
 export function matchesTask(frame: ControlPlaneFrame, taskId?: string): boolean {
   if (!taskId) return true;
-  const payload = frame.payload && typeof frame.payload === "object" ? (frame.payload as Record<string, unknown>) : {};
-  const inner = payload.event && typeof payload.event === "object" ? (payload.event as Record<string, unknown>) : {};
+  const payload =
+    frame.payload && typeof frame.payload === "object"
+      ? (frame.payload as Record<string, unknown>)
+      : {};
+  const inner =
+    payload.event && typeof payload.event === "object"
+      ? (payload.event as Record<string, unknown>)
+      : {};
   return stringValue(payload.taskId) === taskId || stringValue(inner.taskId) === taskId;
 }
 

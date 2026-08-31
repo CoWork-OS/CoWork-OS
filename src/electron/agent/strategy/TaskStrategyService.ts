@@ -6,7 +6,11 @@ import {
   TaskDomain,
 } from "../../../shared/types";
 import { IntentRoute } from "./IntentRouter";
-import type { DirectResponseMode, PreflightGate, TaskStrategySnapshot } from "./TaskStrategySnapshot";
+import type {
+  DirectResponseMode,
+  PreflightGate,
+  TaskStrategySnapshot,
+} from "./TaskStrategySnapshot";
 
 export interface DerivedTaskStrategy {
   conversationMode: ConversationMode;
@@ -59,7 +63,9 @@ export class TaskStrategyService {
   }
 
   private static isTerminalImageGenerationTask(text: string): boolean {
-    const lower = String(text || "").replace(STRATEGY_CONTEXT_BLOCK_REGEX, "").toLowerCase();
+    const lower = String(text || "")
+      .replace(STRATEGY_CONTEXT_BLOCK_REGEX, "")
+      .toLowerCase();
     if (!lower.trim()) return false;
     if (!this.hasTextToImageGenerationIntent(lower)) return false;
     return !/\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
@@ -68,7 +74,9 @@ export class TaskStrategyService {
   }
 
   private static isSimpleImageGenerationTask(text: string): boolean {
-    const lower = String(text || "").replace(STRATEGY_CONTEXT_BLOCK_REGEX, "").toLowerCase();
+    const lower = String(text || "")
+      .replace(STRATEGY_CONTEXT_BLOCK_REGEX, "")
+      .toLowerCase();
     if (!lower.trim()) return false;
     if (!this.hasTextToImageGenerationIntent(lower)) return false;
     if (this.imageGenerationNeedsPromptGrounding(lower)) return false;
@@ -85,7 +93,9 @@ export class TaskStrategyService {
     return !hasAppWorkIntent && !hasNonImageWorkIntent;
   }
 
-  private static inferArtifactKindFromTaskText(text: string): "none" | "canvas" | "document" | "file" {
+  private static inferArtifactKindFromTaskText(
+    text: string,
+  ): "none" | "canvas" | "document" | "file" {
     if (!text) return "none";
     if (/\b(canvas|artifact)\b/.test(text)) return "canvas";
     if (/\b(docx|pdf|document|report|slide deck|presentation)\b/.test(text)) return "document";
@@ -276,7 +286,9 @@ export class TaskStrategyService {
     const simpleImageGenerationTask = this.isSimpleImageGenerationTask(taskText);
     const terminalImageGenerationTask = this.isTerminalImageGenerationTask(taskText);
     const artifactCreationSignal =
-      /\b(create|build|make|implement|scaffold|generate|start building|start build)\b/.test(taskText) &&
+      /\b(create|build|make|implement|scaffold|generate|start building|start build)\b/.test(
+        taskText,
+      ) &&
       /\b(website|web page|webapp|frontend|landing page|app|application|project|repo|repository|codebase|distro|distribution|iso|image|artifact|file|files|workspace|requirements\.md|config)\b/.test(
         taskText,
       );
@@ -311,7 +323,7 @@ export class TaskStrategyService {
       buildVerifyRenderArtifactRequested ||
       buildRenderArtifactRequested
         ? "execute"
-      : route.intent === "chat" || route.intent === "thinking"
+        : route.intent === "chat" || route.intent === "thinking"
           ? "execute"
           : "plan";
     const existingExecutionMode = existing?.executionMode;
@@ -322,7 +334,8 @@ export class TaskStrategyService {
     // Keep explicit non-execute overrides (plan/analyze/verified), but do not let a
     // stale default `execute` force non-execution intents into full task mode.
     const executionMode =
-      existingExecutionMode && (existingExecutionMode !== "execute" || inferredExecutionMode === "execute")
+      existingExecutionMode &&
+      (existingExecutionMode !== "execute" || inferredExecutionMode === "execute")
         ? existingExecutionMode
         : inferredExecutionMode;
     const taskDomain =

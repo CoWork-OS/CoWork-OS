@@ -34,7 +34,9 @@ function getEventMessage(event: TaskEvent): string {
 function isForkedParentTranscriptEvent(event: TaskEvent): boolean {
   const payload = event.payload && typeof event.payload === "object" ? event.payload : undefined;
   if (!payload || Array.isArray(payload)) return false;
-  return typeof payload.forkedFromTaskId === "string" || typeof payload.forkedFromEventId === "string";
+  return (
+    typeof payload.forkedFromTaskId === "string" || typeof payload.forkedFromEventId === "string"
+  );
 }
 
 function deriveMessages(events: TaskEvent[]): SideChatMessage[] {
@@ -161,7 +163,9 @@ export const SideChatPanel = memo(function SideChatPanel({
             {headerStatus}
           </span>
           <span className="side-chat-meta-separator" aria-hidden="true" />
-          <span className={`side-chat-parent-status side-chat-status-${parentTask?.status || "unknown"}`}>
+          <span
+            className={`side-chat-parent-status side-chat-status-${parentTask?.status || "unknown"}`}
+          >
             Parent {parentStatus}
           </span>
         </div>
@@ -180,19 +184,14 @@ export const SideChatPanel = memo(function SideChatPanel({
           </div>
         ) : (
           messages.map((message) => (
-            <div
-              key={message.id}
-              className={`side-chat-message side-chat-message-${message.role}`}
-            >
+            <div key={message.id} className={`side-chat-message side-chat-message-${message.role}`}>
               <div className="side-chat-message-role">
                 {message.role === "user" ? "You" : "Side"}
               </div>
               <div className="side-chat-message-text markdown-content">
                 <MarkdownRenderer>{message.text}</MarkdownRenderer>
               </div>
-              <div className="side-chat-message-time">
-                {formatSideChatTime(message.timestamp)}
-              </div>
+              <div className="side-chat-message-time">{formatSideChatTime(message.timestamp)}</div>
             </div>
           ))
         )}

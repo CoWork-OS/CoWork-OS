@@ -1,14 +1,7 @@
 import type { TaskDomain } from "./types";
 
 const SUPPORTED_COMMANDS = new Set(["simplify", "batch", "llm-wiki"]);
-const SUPPORTED_DOMAINS = new Set([
-  "auto",
-  "code",
-  "research",
-  "operations",
-  "writing",
-  "general",
-]);
+const SUPPORTED_DOMAINS = new Set(["auto", "code", "research", "operations", "writing", "general"]);
 const SUPPORTED_SIMPLIFY_SCOPES = new Set(["current", "workspace", "path"]);
 const SUPPORTED_EXTERNAL_MODES = new Set(["confirm", "execute", "none"]);
 const SUPPORTED_LLM_WIKI_MODES = new Set(["auto", "init", "ingest", "query", "lint", "refresh"]);

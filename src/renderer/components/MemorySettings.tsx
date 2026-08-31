@@ -221,7 +221,9 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
   const [cleaningRecurringHistory, setCleaningRecurringHistory] = useState(false);
   const [recurringCleanupMessage, setRecurringCleanupMessage] = useState("");
   const [recentMemories, setRecentMemories] = useState<MemoryItem[]>([]);
-  const [chronicleObservations, setChronicleObservations] = useState<ChronicleObservationItem[]>([]);
+  const [chronicleObservations, setChronicleObservations] = useState<ChronicleObservationItem[]>(
+    [],
+  );
   const [memorySearchQuery, setMemorySearchQuery] = useState("");
   const [memorySearchResults, setMemorySearchResults] = useState<MemoryItem[]>([]);
   const [searchingMemories, setSearchingMemories] = useState(false);
@@ -691,7 +693,10 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         <p className="settings-form-hint" style={{ marginTop: "4px", marginBottom: "10px" }}>
           {latestMemory ? formatRelativeTime(latestMemory.createdAt) : "No memory captured yet"}
         </p>
-        <div className="settings-card" style={{ color: "var(--color-text-secondary)", fontSize: "13px", lineHeight: "1.45" }}>
+        <div
+          className="settings-card"
+          style={{ color: "var(--color-text-secondary)", fontSize: "13px", lineHeight: "1.45" }}
+        >
           {latestMemory
             ? (() => {
                 const preview =
@@ -705,9 +710,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
       </div>
 
       {/* Import from other AI providers */}
-      <div
-        className="settings-form-group memory-section"
-      >
+      <div className="settings-form-group memory-section">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div
@@ -733,9 +736,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
 
       {showManageMemories && (
         <>
-          <div
-            className="settings-form-group memory-section"
-          >
+          <div className="settings-form-group memory-section">
             <div
               style={{ fontWeight: 500, color: "var(--color-text-primary)", marginBottom: "8px" }}
             >
@@ -751,7 +752,10 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
             />
             <div className="memory-list" style={{ maxHeight: "220px" }}>
               {searchingMemories && (
-                <div className="memory-list-item" style={{ color: "var(--color-text-secondary)", fontSize: "13px" }}>
+                <div
+                  className="memory-list-item"
+                  style={{ color: "var(--color-text-secondary)", fontSize: "13px" }}
+                >
                   Searching...
                 </div>
               )}
@@ -871,9 +875,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
           </div>
 
           {/* User Profile Facts */}
-          <div
-            className="settings-form-group memory-section"
-          >
+          <div className="settings-form-group memory-section">
             <div
               style={{ fontWeight: 500, color: "var(--color-text-primary)", marginBottom: "4px" }}
             >
@@ -977,9 +979,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
           </div>
 
           {/* Relationship Memory */}
-          <div
-            className="settings-form-group memory-section"
-          >
+          <div className="settings-form-group memory-section">
             <div
               style={{
                 display: "flex",
@@ -1074,10 +1074,16 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                         {item.status === "done" ? "Reopen" : "Done"}
                       </button>
                     )}
-                    <button className="memory-inline-btn" onClick={() => handleEditRelationship(item)}>
+                    <button
+                      className="memory-inline-btn"
+                      onClick={() => handleEditRelationship(item)}
+                    >
                       Edit
                     </button>
-                    <button className="memory-inline-btn danger" onClick={() => handleDeleteRelationship(item.id)}>
+                    <button
+                      className="memory-inline-btn danger"
+                      onClick={() => handleDeleteRelationship(item.id)}
+                    >
                       Forget
                     </button>
                   </div>
@@ -1210,11 +1216,18 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                 <div>
                   <div className="memory-list" style={{ maxHeight: "300px" }}>
                     {importedMemories.map((memory) => {
-                      const { title, preview, ignoredForPromptRecall } = parseImportTag(memory.content);
+                      const { title, preview, ignoredForPromptRecall } = parseImportTag(
+                        memory.content,
+                      );
                       const busy =
-                        deletingImportedEntryId === memory.id || updatingImportedEntryId === memory.id;
+                        deletingImportedEntryId === memory.id ||
+                        updatingImportedEntryId === memory.id;
                       return (
-                        <div key={memory.id} className="memory-list-item" style={{ fontSize: "13px" }}>
+                        <div
+                          key={memory.id}
+                          className="memory-list-item"
+                          style={{ fontSize: "13px" }}
+                        >
                           <div
                             style={{
                               display: "flex",
@@ -1244,7 +1257,10 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                                 {title}
                               </div>
                               {ignoredForPromptRecall && (
-                                <span className="settings-badge settings-badge--warning" style={{ fontSize: "10px" }}>
+                                <span
+                                  className="settings-badge settings-badge--warning"
+                                  style={{ fontSize: "10px" }}
+                                >
                                   ignored in prompts
                                 </span>
                               )}
@@ -1285,7 +1301,10 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                             <button
                               className="memory-inline-btn active"
                               onClick={() =>
-                                handleToggleImportedPromptRecallIgnored(memory.id, ignoredForPromptRecall)
+                                handleToggleImportedPromptRecallIgnored(
+                                  memory.id,
+                                  ignoredForPromptRecall,
+                                )
                               }
                               disabled={busy}
                               style={{ opacity: busy ? 0.6 : 1 }}
@@ -1312,7 +1331,14 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                       <div className="settings-empty">No imported memories found.</div>
                     )}
                     {loadingImported && (
-                      <div className="memory-list-item" style={{ textAlign: "center", color: "var(--color-text-secondary)", fontSize: "13px" }}>
+                      <div
+                        className="memory-list-item"
+                        style={{
+                          textAlign: "center",
+                          color: "var(--color-text-secondary)",
+                          fontSize: "13px",
+                        }}
+                      >
                         Loading...
                       </div>
                     )}
@@ -1322,7 +1348,12 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                     <button
                       className="memory-inline-btn"
                       onClick={() => loadImportedMemories(importedOffset)}
-                      style={{ display: "block", width: "100%", marginTop: "8px", textAlign: "center" }}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        marginTop: "8px",
+                        textAlign: "center",
+                      }}
                     >
                       Load more...
                     </button>
@@ -1332,7 +1363,12 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                     className="settings-button settings-button-danger"
                     onClick={handleDeleteImported}
                     disabled={deletingImported}
-                    style={{ display: "block", width: "100%", marginTop: "8px", opacity: deletingImported ? 0.6 : 1 }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      marginTop: "8px",
+                      opacity: deletingImported ? 0.6 : 1,
+                    }}
                   >
                     {deletingImported ? "Deleting..." : "Delete All Imported Memories"}
                   </button>
@@ -1342,9 +1378,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
           )}
 
           {/* Import from ChatGPT */}
-          <div
-            className="settings-form-group memory-section"
-          >
+          <div className="settings-form-group memory-section">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
                 <div

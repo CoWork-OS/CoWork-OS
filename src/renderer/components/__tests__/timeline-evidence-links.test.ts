@@ -7,7 +7,9 @@ import { describe, expect, it } from "vitest";
 import type { TaskEvent } from "../../../shared/types";
 import { renderEventDetails } from "../MainContent/timeline-event-rendering";
 
-const mainContentStylesPath = fileURLToPath(new URL("../MainContent/main-content.css", import.meta.url));
+const mainContentStylesPath = fileURLToPath(
+  new URL("../MainContent/main-content.css", import.meta.url),
+);
 
 function makeEvidenceEvent(payload: Record<string, unknown>): TaskEvent {
   return {
@@ -16,6 +18,16 @@ function makeEvidenceEvent(payload: Record<string, unknown>): TaskEvent {
     type: "timeline_evidence_attached",
     timestamp: 1,
     payload,
+  } as TaskEvent;
+}
+
+function makeAssistantEvent(): TaskEvent {
+  return {
+    id: "assistant-1",
+    taskId: "task-1",
+    type: "assistant_message",
+    timestamp: 1,
+    payload: { message: "Assistant reply" },
   } as TaskEvent;
 }
 
@@ -83,5 +95,30 @@ describe("timeline evidence links", () => {
       /\.evidence-event-details-scroll\s*\{[^}]*max-height:\s*calc\(\(18px \* 5\) \+ \(4px \* 4\)\);/s,
     );
     expect(source).toMatch(/\.evidence-event-details-scroll\s*\{[^}]*overflow-y:\s*auto;/s);
+  });
+
+  it("renders Fork only for the latest assistant message", () => {
+    const event = makeAssistantEvent();
+    const options = {
+      onForkTaskSession: () => {},
+    };
+
+    const earlierMarkup = renderToStaticMarkup(
+      React.createElement(
+        React.Fragment,
+        null,
+        renderEventDetails(event, false, {}, { ...options, isLastAssistantMessage: false }),
+      ),
+    );
+    const latestMarkup = renderToStaticMarkup(
+      React.createElement(
+        React.Fragment,
+        null,
+        renderEventDetails(event, false, {}, { ...options, isLastAssistantMessage: true }),
+      ),
+    );
+
+    expect(earlierMarkup).not.toContain("message-fork-btn");
+    expect(latestMarkup).toContain("message-fork-btn");
   });
 });

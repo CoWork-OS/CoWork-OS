@@ -9,6 +9,11 @@ This document describes the reliability system added to CoWork OS to turn produc
 - Keep reliability data local-first; no mandatory product-analytics upload path is required.
 - Convert reliability policy from docs-only guidance into merge and release gates.
 
+Reliability risk scoring and review policies are downstream of the task's
+[access profile](access-profiles.md). An eval, retry, or verification policy may
+require more review, but it cannot grant a denied tool, widen a filesystem or
+domain scope, or turn an unavailable profile into an executable task.
+
 ## Scope Implemented
 
 - Phase 1 foundation: eval schema, local corpus, replay runner, baseline metrics.

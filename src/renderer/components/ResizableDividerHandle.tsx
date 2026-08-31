@@ -18,11 +18,7 @@ export function ResizableDividerHandle({
       data-separator="inactive"
       aria-orientation={orientation}
       role={role ?? "separator"}
-      className={[
-        "app-resizable-divider",
-        `app-resizable-divider--${orientation}`,
-        className,
-      ]
+      className={["app-resizable-divider", `app-resizable-divider--${orientation}`, className]
         .filter(Boolean)
         .join(" ")}
       {...props}

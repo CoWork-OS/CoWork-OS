@@ -6,6 +6,12 @@ This page documents the current document artifact concept for local word-process
 
 Document artifacts are one surface of the broader [Everything Workbench](everything-workbench.md): generated knowledge-work files open in-place, can be reviewed or lightly edited, and keep the follow-up composer beside the artifact.
 
+Artifact creation, updates, attachment reads, and external-open actions remain
+subject to the task's [access profile](access-profiles.md) and the normal
+approval/export rules. The document viewer's local preview sandbox is a UI
+boundary, not an additional permission grant; opening a file in Word, Pages,
+or another external app is still an explicit cross-application action.
+
 ## User Experience
 
 When a task creates or updates a Word-style document, the task feed renders a compact artifact card by default:

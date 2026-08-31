@@ -64,7 +64,11 @@ export class ControlPlaneClient {
     return () => this.listeners.delete(listener);
   }
 
-  async request<T = unknown>(method: string, params?: unknown, timeoutMs = this.timeoutMs): Promise<T> {
+  async request<T = unknown>(
+    method: string,
+    params?: unknown,
+    timeoutMs = this.timeoutMs,
+  ): Promise<T> {
     const ws = this.requireSocket();
     const id = randomUUID();
 
@@ -95,7 +99,9 @@ export class ControlPlaneClient {
       ws.on("message", onMessage);
     });
 
-    ws.send(JSON.stringify({ type: "req", id, method, ...(params !== undefined ? { params } : {}) }));
+    ws.send(
+      JSON.stringify({ type: "req", id, method, ...(params !== undefined ? { params } : {}) }),
+    );
     return response;
   }
 

@@ -134,9 +134,9 @@ function hashNumber(value: string): number {
   return parseInt(stableHash(value).slice(0, 8), 16);
 }
 
-function toDispatchPolicyKey(kind: SubconsciousDispatchKind):
-  | keyof SubconsciousSettings["perExecutorPolicy"]
-  | "codeChangeTask" {
+function toDispatchPolicyKey(
+  kind: SubconsciousDispatchKind,
+): keyof SubconsciousSettings["perExecutorPolicy"] | "codeChangeTask" {
   switch (kind) {
     case "code_change_task":
       return "codeChangeTask";
@@ -263,7 +263,9 @@ function isCoworkRepoIdentity(value?: string | null): boolean {
   return value?.toLowerCase() === COWORK_OS_REPO_IDENTITY.toLowerCase();
 }
 
-function buildCodeTargetKey(candidate: Pick<CodeWorkspaceTargetCandidate, "repoRoot" | "repoIdentity">): string {
+function buildCodeTargetKey(
+  candidate: Pick<CodeWorkspaceTargetCandidate, "repoRoot" | "repoIdentity">,
+): string {
   if (candidate.repoIdentity) {
     return `code_workspace:github:${candidate.repoIdentity}`;
   }
@@ -315,7 +317,11 @@ export class SubconsciousLoopService {
     this.migrationService = new SubconsciousMigrationService(db);
   }
 
-  private async finalizeCoreLearning(traceId: string, target?: SubconsciousTargetRef, sourceRunId?: string): Promise<void> {
+  private async finalizeCoreLearning(
+    traceId: string,
+    target?: SubconsciousTargetRef,
+    sourceRunId?: string,
+  ): Promise<void> {
     this.deps.coreMemoryCandidateService?.extractFromTrace(traceId, {
       target,
       sourceRunId,
@@ -427,7 +433,10 @@ export class SubconsciousLoopService {
       this.backlogRepo.dedupeOpenByTarget(targetKey);
       const evidence = data.evidence
         .sort((a, b) => b.createdAt - a.createdAt)
-        .filter((item, index, items) => items.findIndex((other) => other.fingerprint === item.fingerprint) === index);
+        .filter(
+          (item, index, items) =>
+            items.findIndex((other) => other.fingerprint === item.fingerprint) === index,
+        );
       evidenceCount += evidence.length;
       this.latestEvidenceByTarget.set(targetKey, evidence);
       const backlogCount = this.backlogRepo.countOpenByTarget(targetKey);
@@ -438,7 +447,11 @@ export class SubconsciousLoopService {
         this.targetRepo.findByKey(targetKey),
       );
       this.targetRepo.upsert(summary);
-      await this.artifactStore.writeTargetState(summary, evidence, this.backlogRepo.listByTarget(targetKey, 50));
+      await this.artifactStore.writeTargetState(
+        summary,
+        evidence,
+        this.backlogRepo.listByTarget(targetKey, 50),
+      );
     }
     const targets = this.targetRepo.list();
     await this.artifactStore.writeBrainState(this.getBrainSummary(), targets);
@@ -486,9 +499,7 @@ export class SubconsciousLoopService {
     const deduped = this.runRepo.findLatestByFingerprint(target.key, evidenceFingerprint);
     if (
       deduped &&
-      ["sleep", "suggest", "dispatch", "notify", "defer", "dismiss"].includes(
-        deduped.outcome || "",
-      )
+      ["sleep", "suggest", "dispatch", "notify", "defer", "dismiss"].includes(deduped.outcome || "")
     ) {
       this.targetRepo.update(target.key, {
         nextEligibleAt: this.computeNextEligibleAt(target, now()),
@@ -510,7 +521,10 @@ export class SubconsciousLoopService {
       workspaceId: target.target.workspaceId,
       stage: "collecting_evidence",
       evidenceFingerprint,
-      evidenceSummary: evidence.map((item) => item.summary).slice(0, 3).join(" | "),
+      evidenceSummary: evidence
+        .map((item) => item.summary)
+        .slice(0, 3)
+        .join(" | "),
       artifactRoot: this.artifactStore.getRunRoot(target.target, randomUUID()),
       rejectedHypothesisIds: [],
       startedAt: now(),
@@ -613,9 +627,11 @@ export class SubconsciousLoopService {
           },
         );
       }
-      const hypotheses = this.generateHypotheses(target.target, evidence, settings.maxHypothesesPerRun).map(
-        (item) => ({ ...item, runId: run.id }),
-      );
+      const hypotheses = this.generateHypotheses(
+        target.target,
+        evidence,
+        settings.maxHypothesesPerRun,
+      ).map((item) => ({ ...item, runId: run.id }));
       this.hypothesisRepo.replaceForRun(run.id, hypotheses);
       if (coreTrace) {
         this.deps.coreTraceService?.appendPhaseEvent(
@@ -795,7 +811,11 @@ export class SubconsciousLoopService {
             outcome,
           },
         );
-        this.deps.coreTraceService?.completeTrace(coreTrace.id, "completed", finalRun.outcome || outcome);
+        this.deps.coreTraceService?.completeTrace(
+          coreTrace.id,
+          "completed",
+          finalRun.outcome || outcome,
+        );
         await this.finalizeCoreLearning(coreTrace.id, target.target, finalRun.id);
       }
       logger.info("Run completed", {
@@ -900,7 +920,7 @@ export class SubconsciousLoopService {
     if (run.dispatchStatus === "completed" || run.dispatchStatus === "dispatched") {
       return run;
     }
-    return await this.retryRun(runId) || run;
+    return (await this.retryRun(runId)) || run;
   }
 
   dismissTarget(targetKey: string): SubconsciousTargetSummary | undefined {
@@ -921,15 +941,19 @@ export class SubconsciousLoopService {
     this.latestEvidenceByTarget.clear();
     for (const workspace of this.workspaceRepo.findAll()) {
       if (!workspace.path) continue;
-      await fs.rm(path.join(workspace.path, ".cowork", "subconscious"), {
+      await fs
+        .rm(path.join(workspace.path, ".cowork", "subconscious"), {
+          recursive: true,
+          force: true,
+        })
+        .catch(() => undefined);
+    }
+    await fs
+      .rm(path.join(this.resolveGlobalRoot(), ".cowork", "subconscious"), {
         recursive: true,
         force: true,
-      }).catch(() => undefined);
-    }
-    await fs.rm(path.join(this.resolveGlobalRoot(), ".cowork", "subconscious"), {
-      recursive: true,
-      force: true,
-    }).catch(() => undefined);
+      })
+      .catch(() => undefined);
     this.lastDreamAt = undefined;
     this.lastNotificationByIntent.clear();
     return {
@@ -985,7 +1009,8 @@ export class SubconsciousLoopService {
       workspaceId: target.target.workspaceId || workspaceId || "global",
       fingerprint: target.evidenceFingerprint || target.key,
       source: "user_feedback",
-      status: target.state === "active" ? "running" : target.health === "blocked" ? "parked" : "open",
+      status:
+        target.state === "active" ? "running" : target.health === "blocked" ? "parked" : "open",
       readiness: "ready",
       readinessReason: target.lastWinner || undefined,
       title: target.target.label,
@@ -993,7 +1018,8 @@ export class SubconsciousLoopService {
       severity: target.health === "blocked" ? 0.9 : target.health === "watch" ? 0.6 : 0.3,
       recurrenceCount: this.latestEvidenceByTarget.get(target.key)?.length || 0,
       fixabilityScore: 0.8,
-      priorityScore: target.backlogCount + (target.health === "blocked" ? 2 : target.health === "watch" ? 1 : 0),
+      priorityScore:
+        target.backlogCount + (target.health === "blocked" ? 2 : target.health === "watch" ? 1 : 0),
       evidence: (this.latestEvidenceByTarget.get(target.key) || []).map((item) => ({
         type: "user_feedback",
         summary: item.summary,
@@ -1091,9 +1117,15 @@ export class SubconsciousLoopService {
   }
 
   private hasFreshActionableEvidence(target: SubconsciousTargetSummary): boolean {
-    const latestEvidenceAt = (this.latestEvidenceByTarget.get(target.key) || [])[0]?.createdAt || target.lastEvidenceAt || 0;
+    const latestEvidenceAt =
+      (this.latestEvidenceByTarget.get(target.key) || [])[0]?.createdAt ||
+      target.lastEvidenceAt ||
+      0;
     if (!latestEvidenceAt) return false;
-    const freshnessWindowMs = Math.max(this.getSettings().cadenceMinutes * 60 * 1000, 12 * 60 * 60 * 1000);
+    const freshnessWindowMs = Math.max(
+      this.getSettings().cadenceMinutes * 60 * 1000,
+      12 * 60 * 60 * 1000,
+    );
     return now() - latestEvidenceAt <= freshnessWindowMs;
   }
 
@@ -1102,10 +1134,7 @@ export class SubconsciousLoopService {
     return latestEvidenceAt + 30 * 24 * 60 * 60 * 1000;
   }
 
-  private completeSleepRun(
-    run: SubconsciousRun,
-    reason: string,
-  ): SubconsciousRun {
+  private completeSleepRun(run: SubconsciousRun, reason: string): SubconsciousRun {
     this.runRepo.update(run.id, {
       stage: "completed",
       outcome: "sleep",
@@ -1140,7 +1169,9 @@ export class SubconsciousLoopService {
     }
   }
 
-  private async appendJournal(input: Omit<SubconsciousJournalEntry, "id" | "createdAt"> & { createdAt?: number }): Promise<void> {
+  private async appendJournal(
+    input: Omit<SubconsciousJournalEntry, "id" | "createdAt"> & { createdAt?: number },
+  ): Promise<void> {
     if (!this.getSettings().journalingEnabled) return;
     await this.artifactStore.appendJournalEntry({
       id: randomUUID(),
@@ -1156,7 +1187,10 @@ export class SubconsciousLoopService {
     dispatchKind?: SubconsciousDispatchKind,
   ): ReflectionPolicyEvaluation {
     const settings = this.getSettings();
-    const evidenceSources = uniqueBy(evidence.map((item) => item.type), (value) => value);
+    const evidenceSources = uniqueBy(
+      evidence.map((item) => item.type),
+      (value) => value,
+    );
     const newestEvidenceAt = Math.max(...evidence.map((item) => item.createdAt), 0);
     const ageHours = newestEvidenceAt ? (now() - newestEvidenceAt) / (60 * 60 * 1000) : 999;
     const evidenceFreshness = clamp(1 - ageHours / 72, 0, 1);
@@ -1177,7 +1211,9 @@ export class SubconsciousLoopService {
     } else if (!settings.dispatchDefaults.autoDispatch) {
       permissionDecision = "escalated";
     } else if (riskLevel === "high") {
-      permissionDecision = settings.trustedTargetKeys.includes(target.key) ? "allowed" : "escalated";
+      permissionDecision = settings.trustedTargetKeys.includes(target.key)
+        ? "allowed"
+        : "escalated";
     } else if (riskLevel === "medium" && settings.autonomyMode === "recommendation_first") {
       permissionDecision = "escalated";
     } else if (usefulness < 0.45) {
@@ -1249,7 +1285,13 @@ export class SubconsciousLoopService {
 
   private async countAcceptedSuggestionPatterns(workspaceId: string): Promise<number> {
     try {
-      return (await MemoryService.searchByContentMarkerAsync(workspaceId, "[suggestion-feedback:acted_on]", 2)).length;
+      return (
+        await MemoryService.searchByContentMarkerAsync(
+          workspaceId,
+          "[suggestion-feedback:acted_on]",
+          2,
+        )
+      ).length;
     } catch {
       return 0;
     }
@@ -1387,7 +1429,9 @@ export class SubconsciousLoopService {
     await this.appendJournal({
       targetKey: target?.key,
       kind: "dream",
-      summary: target ? `Reflection distilled ${target.label}.` : "Reflection distilled workflow intelligence.",
+      summary: target
+        ? `Reflection distilled ${target.label}.`
+        : "Reflection distilled workflow intelligence.",
       details: digest.join(" | "),
     });
     this.lastDreamAt = artifact.createdAt;
@@ -1482,7 +1526,9 @@ export class SubconsciousLoopService {
     const targetsByWorkspaceId = new Map<string, SubconsciousTargetRef>();
     for (const candidates of grouped.values()) {
       const primary = this.choosePrimaryCodeWorkspace(candidates);
-      const canonicalRepoRoot = primary.workspaceAtRepoRoot ? primary.workspace.path : primary.repoRoot;
+      const canonicalRepoRoot = primary.workspaceAtRepoRoot
+        ? primary.workspace.path
+        : primary.repoRoot;
       const targetKey = buildCodeTargetKey(primary);
       const label = isCoworkRepoIdentity(primary.repoIdentity)
         ? "CoWork OS source code"
@@ -1528,18 +1574,23 @@ export class SubconsciousLoopService {
           : current?.health === "watch" || legacy?.health === "watch"
             ? "watch"
             : current?.health || legacy?.health || "healthy",
-      state: current?.state === "active" || legacy?.state === "active" ? "active" : current?.state || legacy?.state || "idle",
+      state:
+        current?.state === "active" || legacy?.state === "active"
+          ? "active"
+          : current?.state || legacy?.state || "idle",
       persistence: current?.persistence || legacy?.persistence || "durable",
       missedRunPolicy: current?.missedRunPolicy || legacy?.missedRunPolicy || "catchUp",
       nextEligibleAt: current?.nextEligibleAt || legacy?.nextEligibleAt,
-      lastObservedAt: Math.max(current?.lastObservedAt || 0, legacy?.lastObservedAt || 0) || undefined,
+      lastObservedAt:
+        Math.max(current?.lastObservedAt || 0, legacy?.lastObservedAt || 0) || undefined,
       lastActionAt: Math.max(current?.lastActionAt || 0, legacy?.lastActionAt || 0) || undefined,
       expiresAt: Math.max(current?.expiresAt || 0, legacy?.expiresAt || 0) || undefined,
       jitterMs: current?.jitterMs || legacy?.jitterMs,
       lastMeaningfulOutcome: current?.lastMeaningfulOutcome || legacy?.lastMeaningfulOutcome,
       lastWinner: current?.lastWinner || legacy?.lastWinner,
       lastRunAt: Math.max(current?.lastRunAt || 0, legacy?.lastRunAt || 0) || undefined,
-      lastEvidenceAt: Math.max(current?.lastEvidenceAt || 0, legacy?.lastEvidenceAt || 0) || undefined,
+      lastEvidenceAt:
+        Math.max(current?.lastEvidenceAt || 0, legacy?.lastEvidenceAt || 0) || undefined,
       backlogCount: Math.max(current?.backlogCount || 0, legacy?.backlogCount || 0),
       evidenceFingerprint: current?.evidenceFingerprint || legacy?.evidenceFingerprint,
       lastDispatchKind: current?.lastDispatchKind || legacy?.lastDispatchKind,
@@ -1584,7 +1635,10 @@ export class SubconsciousLoopService {
   }
 
   private async collectTargets(enabledKinds: SubconsciousTargetKind[]) {
-    const collected = new Map<string, { target: SubconsciousTargetRef; evidence: SubconsciousEvidence[] }>();
+    const collected = new Map<
+      string,
+      { target: SubconsciousTargetRef; evidence: SubconsciousEvidence[] }
+    >();
     const ensure = (target: SubconsciousTargetRef) => {
       if (!enabledKinds.includes(target.kind)) return null;
       if (!collected.has(target.key)) {
@@ -1592,7 +1646,10 @@ export class SubconsciousLoopService {
       }
       return collected.get(target.key)!;
     };
-    const pushEvidence = (target: SubconsciousTargetRef, evidence: Omit<SubconsciousEvidence, "id" | "targetKey">) => {
+    const pushEvidence = (
+      target: SubconsciousTargetRef,
+      evidence: Omit<SubconsciousEvidence, "id" | "targetKey">,
+    ) => {
       const entry = ensure(target);
       if (!entry) return;
       entry.evidence.push({
@@ -1769,7 +1826,13 @@ export class SubconsciousLoopService {
             type: "heartbeat_signal",
             summary: `Heartbeat ${heartbeatStatus} for ${label}`,
             details: typeof pulseResult === "string" ? pulseResult : undefined,
-            fingerprint: stableHash(["heartbeat", row.id, row.last_heartbeat_at, row.heartbeat_status, pulseResult]),
+            fingerprint: stableHash([
+              "heartbeat",
+              row.id,
+              row.last_heartbeat_at,
+              row.heartbeat_status,
+              pulseResult,
+            ]),
             createdAt: Number(row.last_heartbeat_at || now()),
           });
         }
@@ -1789,7 +1852,9 @@ export class SubconsciousLoopService {
         if (!isActionableHeartbeatRun(row)) {
           continue;
         }
-        const key = row.agent_role_id ? `agent_role:${row.agent_role_id}` : `workspace:${row.workspace_id}`;
+        const key = row.agent_role_id
+          ? `agent_role:${row.agent_role_id}`
+          : `workspace:${row.workspace_id}`;
         const target = collected.get(key)?.target;
         if (!target) continue;
         pushEvidence(target, {
@@ -1879,7 +1944,13 @@ export class SubconsciousLoopService {
         pushEvidence(target, {
           type: "briefing",
           summary: `${row.enabled ? "Enabled" : "Paused"} briefing at ${row.schedule_time || "08:00"}`,
-          fingerprint: stableHash(["briefing", row.workspace_id, row.schedule_time, row.updated_at, row.enabled]),
+          fingerprint: stableHash([
+            "briefing",
+            row.workspace_id,
+            row.schedule_time,
+            row.updated_at,
+            row.enabled,
+          ]),
           createdAt: Number(row.updated_at || now()),
         });
       }
@@ -1919,7 +1990,14 @@ export class SubconsciousLoopService {
           type: "pull_request_activity",
           summary: `${signals.join(", ") || "pull request activity"}: ${target.label}`,
           details: pullRequest?.url || row.promotion_error || undefined,
-          fingerprint: stableHash(["pull_request", prNumber, row.status, row.review_status, row.promotion_status, row.promotion_error]),
+          fingerprint: stableHash([
+            "pull_request",
+            prNumber,
+            row.status,
+            row.review_status,
+            row.promotion_status,
+            row.promotion_error,
+          ]),
           createdAt: Number(row.completed_at || row.created_at || now()),
         });
       }
@@ -1951,7 +2029,9 @@ export class SubconsciousLoopService {
     const lastDispatch = pick(this.dispatchRepo.listByTarget(target.key, 1));
     const lastEvidenceAt = pick(evidence)?.createdAt || current?.lastEvidenceAt;
     const settings = this.getSettings();
-    const persistence = settings.durableTargetKinds.includes(target.kind) ? "durable" : "sessionOnly";
+    const persistence = settings.durableTargetKinds.includes(target.kind)
+      ? "durable"
+      : "sessionOnly";
     const jitterMs = current?.jitterMs ?? this.computeJitterMs(target.key, settings.cadenceMinutes);
     let health: SubconsciousHealth = "healthy";
     if (evidence.some((item) => item.type === "code_failure")) {
@@ -2016,7 +2096,10 @@ export class SubconsciousLoopService {
     return this.targetRepo
       .list()
       .filter((target) => target.key !== "global:brain")
-      .filter((target) => !workspaceId || !target.target.workspaceId || target.target.workspaceId === workspaceId)
+      .filter(
+        (target) =>
+          !workspaceId || !target.target.workspaceId || target.target.workspaceId === workspaceId,
+      )
       .filter((target) => !target.expiresAt || target.expiresAt > currentTime)
       .filter((target) => !target.nextEligibleAt || target.nextEligibleAt <= currentTime)
       .filter((target) => this.isTargetActionable(target))
@@ -2037,8 +2120,13 @@ export class SubconsciousLoopService {
     evidence: SubconsciousEvidence[],
     maxHypotheses: number,
   ): SubconsciousHypothesis[] {
-    const seed = evidence.map((item) => item.summary).slice(0, 3).join("; ");
-    const base: Array<Pick<SubconsciousHypothesis, "title" | "summary" | "rationale" | "confidence">> = [
+    const seed = evidence
+      .map((item) => item.summary)
+      .slice(0, 3)
+      .join("; ");
+    const base: Array<
+      Pick<SubconsciousHypothesis, "title" | "summary" | "rationale" | "confidence">
+    > = [
       {
         title: `Respond directly to ${target.label}`,
         summary: `Turn the dominant signal into a concrete ${humanizeDispatchKind(this.resolveDispatchKind(target, evidence))}.`,
@@ -2048,18 +2136,22 @@ export class SubconsciousLoopService {
       {
         title: `Add a durable guardrail for ${target.label}`,
         summary: "Prevent the same failure or drift from resurfacing on the next run.",
-        rationale: "A broader fix is justified when signals repeat or the blast radius spans multiple tasks.",
+        rationale:
+          "A broader fix is justified when signals repeat or the blast radius spans multiple tasks.",
         confidence: 0.73,
       },
       {
         title: `Refine the operator backlog for ${target.label}`,
-        summary: "Capture the lesson in backlog form even if direct dispatch is not the best immediate move.",
-        rationale: "A namespaced backlog makes the next run start with explicit context instead of rediscovering the same lesson.",
+        summary:
+          "Capture the lesson in backlog form even if direct dispatch is not the best immediate move.",
+        rationale:
+          "A namespaced backlog makes the next run start with explicit context instead of rediscovering the same lesson.",
         confidence: 0.67,
       },
       {
         title: `Tune workflow routing around ${target.label}`,
-        summary: "Adjust cadence, executor choice, or automation shape so the workflow stops wasting turns.",
+        summary:
+          "Adjust cadence, executor choice, or automation shape so the workflow stops wasting turns.",
         rationale: "Some failures are orchestration mismatches rather than missing work.",
         confidence: 0.62,
       },
@@ -2148,7 +2240,8 @@ export class SubconsciousLoopService {
         .map((item) => item.summary)
         .join(" | ")}`,
       rejectedHypothesisIds: rejected,
-      rationale: critiques.find((item) => item.hypothesisId === winner.id)?.response || winner.rationale,
+      rationale:
+        critiques.find((item) => item.hypothesisId === winner.id)?.response || winner.rationale,
       nextBacklog,
       outcome: executor ? "dispatch" : "suggest",
       createdAt: now(),
@@ -2194,7 +2287,9 @@ export class SubconsciousLoopService {
     return configured;
   }
 
-  private async resolveDispatchWorkspace(target: SubconsciousTargetRef): Promise<Workspace | undefined> {
+  private async resolveDispatchWorkspace(
+    target: SubconsciousTargetRef,
+  ): Promise<Workspace | undefined> {
     if (target.kind !== "code_workspace") {
       return target.workspaceId
         ? this.workspaceRepo.findById(target.workspaceId)
@@ -2209,10 +2304,7 @@ export class SubconsciousLoopService {
     const workspaceIds = Array.isArray(target.metadata?.workspaceIds)
       ? target.metadata.workspaceIds.filter((value): value is string => typeof value === "string")
       : [];
-    const candidates = [
-      ...(target.workspaceId ? [target.workspaceId] : []),
-      ...workspaceIds,
-    ];
+    const candidates = [...(target.workspaceId ? [target.workspaceId] : []), ...workspaceIds];
     for (const workspaceId of candidates) {
       const workspace = this.workspaceRepo.findById(workspaceId);
       if (!workspace || workspace.isTemp || !workspace.path) continue;
@@ -2254,7 +2346,12 @@ export class SubconsciousLoopService {
     const workspace = await this.resolveDispatchWorkspace(target);
     const workspaceId = workspace?.id || target.workspaceId || this.resolveDefaultWorkspace()?.id;
     if (!workspaceId) {
-      return this.skippedDispatch(decision, target, "suggestion", "Suggestion dispatch needs a workspace.");
+      return this.skippedDispatch(
+        decision,
+        target,
+        "suggestion",
+        "Suggestion dispatch needs a workspace.",
+      );
     }
     const suggestion = await ProactiveSuggestionsService.createCompanionSuggestion(workspaceId, {
       title: `Workflow Intelligence: ${target.label}`,
@@ -2268,7 +2365,12 @@ export class SubconsciousLoopService {
       companionStyle: "note",
     });
     if (!suggestion) {
-      return this.skippedDispatch(decision, target, "suggestion", "Suggestion deduplicated or unavailable.");
+      return this.skippedDispatch(
+        decision,
+        target,
+        "suggestion",
+        "Suggestion deduplicated or unavailable.",
+      );
     }
     return this.completedDispatch(decision, target, "suggestion", {
       externalRefId: suggestion.id,
@@ -2286,7 +2388,10 @@ export class SubconsciousLoopService {
       return null;
     }
     const policyKey = toDispatchPolicyKey(dispatchKind);
-    const policy = this.getSettings().perExecutorPolicy[policyKey as keyof SubconsciousSettings["perExecutorPolicy"]];
+    const policy =
+      this.getSettings().perExecutorPolicy[
+        policyKey as keyof SubconsciousSettings["perExecutorPolicy"]
+      ];
     if (policy && "enabled" in policy && policy.enabled === false) {
       return {
         id: randomUUID(),
@@ -2309,7 +2414,12 @@ export class SubconsciousLoopService {
       switch (dispatchKind) {
         case "task": {
           if (!this.agentDaemon || !workspaceId) {
-            return this.skippedDispatch(decision, target, dispatchKind, "Task dispatch is unavailable.");
+            return this.skippedDispatch(
+              decision,
+              target,
+              dispatchKind,
+              "Task dispatch is unavailable.",
+            );
           }
           const task = await this.agentDaemon.createTask({
             title: `Workflow Intelligence: ${target.label}`,
@@ -2325,21 +2435,34 @@ export class SubconsciousLoopService {
         }
         case "suggestion": {
           if (!workspaceId) {
-            return this.skippedDispatch(decision, target, dispatchKind, "Suggestion dispatch needs a workspace.");
+            return this.skippedDispatch(
+              decision,
+              target,
+              dispatchKind,
+              "Suggestion dispatch needs a workspace.",
+            );
           }
-          const suggestion = await ProactiveSuggestionsService.createCompanionSuggestion(workspaceId, {
-            title: `Workflow Intelligence: ${target.label}`,
-            description: decision.winnerSummary,
-            actionPrompt: decision.recommendation,
-            confidence: 0.78,
-            suggestionClass: "general",
-            sourceEntity: target.key,
-            sourceSignals: Array.from(new Set(evidence.map((item) => item.type))).slice(0, 5),
-            recommendedDelivery: "inbox",
-            companionStyle: "note",
-          });
+          const suggestion = await ProactiveSuggestionsService.createCompanionSuggestion(
+            workspaceId,
+            {
+              title: `Workflow Intelligence: ${target.label}`,
+              description: decision.winnerSummary,
+              actionPrompt: decision.recommendation,
+              confidence: 0.78,
+              suggestionClass: "general",
+              sourceEntity: target.key,
+              sourceSignals: Array.from(new Set(evidence.map((item) => item.type))).slice(0, 5),
+              recommendedDelivery: "inbox",
+              companionStyle: "note",
+            },
+          );
           if (!suggestion) {
-            return this.skippedDispatch(decision, target, dispatchKind, "Suggestion deduplicated or unavailable.");
+            return this.skippedDispatch(
+              decision,
+              target,
+              dispatchKind,
+              "Suggestion deduplicated or unavailable.",
+            );
           }
           return this.completedDispatch(decision, target, dispatchKind, {
             externalRefId: suggestion.id,
@@ -2359,11 +2482,22 @@ export class SubconsciousLoopService {
         }
         case "code_change_task": {
           if (!this.agentDaemon || !workspaceId) {
-            return this.skippedDispatch(decision, target, dispatchKind, "Code dispatch is unavailable.");
+            return this.skippedDispatch(
+              decision,
+              target,
+              dispatchKind,
+              "Code dispatch is unavailable.",
+            );
           }
-          const requireWorktree = this.getSettings().perExecutorPolicy.codeChangeTask.requireWorktree;
+          const requireWorktree =
+            this.getSettings().perExecutorPolicy.codeChangeTask.requireWorktree;
           if (!workspace) {
-            return this.skippedDispatch(decision, target, dispatchKind, "Code workspace is unavailable.");
+            return this.skippedDispatch(
+              decision,
+              target,
+              dispatchKind,
+              "Code workspace is unavailable.",
+            );
           }
           if (requireWorktree) {
             const canUseWorktree = await this.agentDaemon
@@ -2389,7 +2523,8 @@ export class SubconsciousLoopService {
             agentConfig: buildCoreAutomationAgentConfig(undefined, {
               llmProfile: "strong",
               requireWorktree: this.getSettings().perExecutorPolicy.codeChangeTask.requireWorktree,
-              verificationAgent: this.getSettings().perExecutorPolicy.codeChangeTask.verificationRequired,
+              verificationAgent:
+                this.getSettings().perExecutorPolicy.codeChangeTask.verificationRequired,
               reviewPolicy: this.getSettings().perExecutorPolicy.codeChangeTask.strictReview
                 ? "strict"
                 : "balanced",
@@ -2454,7 +2589,10 @@ export class SubconsciousLoopService {
     };
   }
 
-  private async advanceRun(id: string, updates: Partial<SubconsciousRun>): Promise<SubconsciousRun> {
+  private async advanceRun(
+    id: string,
+    updates: Partial<SubconsciousRun>,
+  ): Promise<SubconsciousRun> {
     this.runRepo.update(id, updates);
     return this.runRepo.findById(id)!;
   }

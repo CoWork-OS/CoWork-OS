@@ -33,6 +33,7 @@ Supporting line:
 | Access promise | Supported subscriptions/accounts, APIs, gateways, cloud credentials, and local models | What users can bring |
 | Continuity promise | Keep tools, skills, memory, approvals, agents, artifacts, and workflows when routes change | The practical advantage |
 | Trust | Local-first state, visible execution, policies, approvals, and source access | Why users can rely on it |
+| Governed task access | Named profiles for sandbox, approvals, command tools, filesystem, network, and domain scope | How operators control what each task may do |
 
 The relationship should always be explained in this order:
 

@@ -284,8 +284,16 @@ describeWithSqlite("ContactIdentityService", () => {
 
   describe("listIdentities", () => {
     it("lists all identities for a workspace", () => {
-      service.resolveMailboxContact({ workspaceId: "ws-list", email: "d@example.com", displayName: "D" });
-      service.resolveMailboxContact({ workspaceId: "ws-list", email: "e@example.com", displayName: "E" });
+      service.resolveMailboxContact({
+        workspaceId: "ws-list",
+        email: "d@example.com",
+        displayName: "D",
+      });
+      service.resolveMailboxContact({
+        workspaceId: "ws-list",
+        email: "e@example.com",
+        displayName: "E",
+      });
 
       const list = service.listIdentities("ws-list");
       expect(list.length).toBe(2);
@@ -295,8 +303,16 @@ describeWithSqlite("ContactIdentityService", () => {
     });
 
     it("isolates identities between workspaces", () => {
-      service.resolveMailboxContact({ workspaceId: "ws-a", email: "a@example.com", displayName: "A" });
-      service.resolveMailboxContact({ workspaceId: "ws-b", email: "b@example.com", displayName: "B" });
+      service.resolveMailboxContact({
+        workspaceId: "ws-a",
+        email: "a@example.com",
+        displayName: "A",
+      });
+      service.resolveMailboxContact({
+        workspaceId: "ws-b",
+        email: "b@example.com",
+        displayName: "B",
+      });
 
       expect(service.listIdentities("ws-a")).toHaveLength(1);
       expect(service.listIdentities("ws-b")).toHaveLength(1);

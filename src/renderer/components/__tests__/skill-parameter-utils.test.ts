@@ -2,10 +2,7 @@ import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import {
-  SkillParameterModal,
-  collectSkillParameterValues,
-} from "../SkillParameterModal";
+import { SkillParameterModal, collectSkillParameterValues } from "../SkillParameterModal";
 import { buildSlashSkillPrompt } from "../skill-parameter-utils";
 import type { CustomSkill } from "../../../shared/types";
 
@@ -62,9 +59,9 @@ describe("skill parameter renderer utilities", () => {
 
   it("serializes slash prompts with structured parameter JSON", () => {
     expect(buildSlashSkillPrompt("novelist")).toBe("/novelist");
-    expect(buildSlashSkillPrompt("novelist", { seed: "A locked-room mystery", genre: "thriller" })).toBe(
-      '/novelist {"seed":"A locked-room mystery","genre":"thriller"}',
-    );
+    expect(
+      buildSlashSkillPrompt("novelist", { seed: "A locked-room mystery", genre: "thriller" }),
+    ).toBe('/novelist {"seed":"A locked-room mystery","genre":"thriller"}');
   });
 
   it("preserves entered values and silent defaults for ask-in-chat handoff", () => {

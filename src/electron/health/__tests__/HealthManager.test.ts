@@ -156,12 +156,7 @@ describe("HealthManager", () => {
     const filePath = path.join(os.tmpdir(), `health-import-${Date.now()}.txt`);
     fs.writeFileSync(
       filePath,
-      [
-        "A1C: 5.9",
-        "Glucose: 118",
-        "LDL: 104",
-        "Symptom score: 7",
-      ].join("\n"),
+      ["A1C: 5.9", "Glucose: 118", "LDL: 104", "Symptom score: 7"].join("\n"),
     );
 
     try {
@@ -270,7 +265,9 @@ describe("HealthManager", () => {
       permissions: { read: true, write: true },
       readableTypes: ["steps", "sleep", "heart_rate", "hrv", "weight", "glucose", "workout"],
       writableTypes: ["steps", "sleep", "heart_rate", "hrv", "weight", "glucose", "workout"],
-      metrics: [{ key: "steps", value: 12500, unit: "steps", label: "Steps", recordedAt: Date.now() }],
+      metrics: [
+        { key: "steps", value: 12500, unit: "steps", label: "Steps", recordedAt: Date.now() },
+      ],
       records: [
         {
           title: "Steps Snapshot",

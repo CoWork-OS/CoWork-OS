@@ -12,6 +12,8 @@
 
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
+import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 import { CanvasManager } from "../../canvas/canvas-manager";
 import { LLMTool } from "../llm/types";
 import * as fs from "fs/promises";
@@ -86,9 +88,7 @@ export class CanvasTools {
     const fallback = this.getLatestActiveSessionForTask(normalizedSessionId);
     if (fallback) {
       if (fallback.id !== normalizedSessionId) {
-        log.warn(
-          `Falling back to latest active session ${fallback.id} for canvas_push.`,
-        );
+        log.warn(`Falling back to latest active session ${fallback.id} for canvas_push.`);
       }
       return fallback.id;
     }
@@ -205,10 +205,7 @@ export class CanvasTools {
             `canvas_push missing content; reusing existing ${sanitizeFilename} from session ${resolvedSessionId}`,
           );
         } catch (error) {
-          log.error(
-            `Failed to read existing canvas content from ${filePath}:`,
-            error,
-          );
+          log.error(`Failed to read existing canvas content from ${filePath}:`, error);
         }
       }
     }
@@ -303,7 +300,9 @@ export class CanvasTools {
   }
 
   private isExternalCanvasAssetRef(ref: string): boolean {
-    const value = String(ref || "").trim().toLowerCase();
+    const value = String(ref || "")
+      .trim()
+      .toLowerCase();
     if (!value) return true;
     if (value.startsWith("#")) return true;
     if (value.startsWith("//")) return true;
@@ -335,11 +334,19 @@ export class CanvasTools {
 
     const normalizedRef = withoutQuery.startsWith("/") ? withoutQuery.slice(1) : withoutQuery;
     const absolutePath = path.resolve(workspaceRoot, normalizedRef);
-    const workspacePrefix = workspaceRoot.endsWith(path.sep) ? workspaceRoot : `${workspaceRoot}${path.sep}`;
+    const workspacePrefix = workspaceRoot.endsWith(path.sep)
+      ? workspaceRoot
+      : `${workspaceRoot}${path.sep}`;
     if (absolutePath !== workspaceRoot && !absolutePath.startsWith(workspacePrefix)) {
       return null;
     }
-    return absolutePath;
+
+    // The lexical workspace check above is only an input-shape guard. A local
+    // stylesheet may still be a symlink that escapes the workspace, so route
+    // the actual file read through the same canonical profile evaluator used
+    // by the other filesystem tools.
+    const access = evaluateWorkspaceFilesystemAccess(this.workspace, absolutePath, "read");
+    return access.decision === "allow" ? access.path : null;
   }
 
   private async inlineWorkspaceStylesheetsForCanvas(
@@ -377,10 +384,7 @@ export class CanvasTools {
         transformed = transformed.replace(tag, inlineStyle);
         inlinedCount += 1;
       } catch (error) {
-        log.warn(
-          `Failed to inline stylesheet "${href}" for session ${sessionId}:`,
-          error,
-        );
+        log.warn(`Failed to inline stylesheet "${href}" for session ${sessionId}:`, error);
       }
     }
 
@@ -442,6 +446,28 @@ export class CanvasTools {
     show: boolean = true,
   ): Promise<{ success: boolean; url: string }> {
     this.enforceSessionCutoff(sessionId, "canvas_open_url");
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw new Error("Invalid canvas URL");
+    }
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      throw new Error("Canvas URLs must use http or https");
+    }
+    const networkDecision = evaluateNetworkPolicy({
+      url: parsedUrl.toString(),
+      toolName: "canvas_open_url",
+      networkEnabled: this.workspace.permissions?.network,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions?.accessDomainRules,
+    });
+    this.daemon.logEvent(this.taskId, "network_policy_decision", networkDecision);
+    if (networkDecision.action === "deny") {
+      throw new Error(
+        `Network access denied for "${parsedUrl.toString()}": ${networkDecision.reason}`,
+      );
+    }
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "canvas_open_url",
       sessionId,

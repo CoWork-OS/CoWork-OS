@@ -3,10 +3,7 @@ import type { MoaPreset } from "../../../../shared/types";
 import { MoaProvider } from "../moa-provider";
 import type { LLMProvider, LLMRequest, LLMResponse } from "../types";
 
-function textResponse(
-  text: string,
-  usage?: LLMResponse["usage"],
-): LLMResponse {
+function textResponse(text: string, usage?: LLMResponse["usage"]): LLMResponse {
   return {
     content: [{ type: "text", text }],
     stopReason: "end_turn",
@@ -14,9 +11,7 @@ function textResponse(
   };
 }
 
-function makeProvider(
-  createMessage = vi.fn<LLMProvider["createMessage"]>(),
-): LLMProvider {
+function makeProvider(createMessage = vi.fn<LLMProvider["createMessage"]>()): LLMProvider {
   return {
     type: "openai",
     createMessage,
@@ -147,9 +142,7 @@ describe("MoaProvider", () => {
     expect(aggregatorRequest.messages.at(-1)).toMatchObject({
       role: "user",
     });
-    expect(String(aggregatorRequest.messages.at(-1)?.content)).toContain(
-      "cowork_moa_advisory",
-    );
+    expect(String(aggregatorRequest.messages.at(-1)?.content)).toContain("cowork_moa_advisory");
   });
 
   it("continues to the aggregator when a reference model fails", async () => {
@@ -179,9 +172,7 @@ describe("MoaProvider", () => {
 
   it("tries aggregator fallback candidates before failing the MoA call", async () => {
     const advisor = makeProvider(vi.fn().mockResolvedValue(textResponse("advisor")));
-    const failingAggregator = makeProvider(
-      vi.fn().mockRejectedValue(new Error("fetch failed")),
-    );
+    const failingAggregator = makeProvider(vi.fn().mockRejectedValue(new Error("fetch failed")));
     const fallbackAggregator = makeProvider(
       vi.fn().mockResolvedValue(textResponse("fallback final")),
     );
@@ -206,9 +197,7 @@ describe("MoaProvider", () => {
 
     const response = await provider.createMessage(makeRequest());
 
-    expect(response.content).toEqual([
-      { type: "text", text: "fallback final" },
-    ]);
+    expect(response.content).toEqual([{ type: "text", text: "fallback final" }]);
     expect(failingAggregator.createMessage).toHaveBeenCalledWith(
       expect.objectContaining({ model: "openai:primary" }),
     );

@@ -36,7 +36,7 @@ Side Chat is a first-class session type with a stricter contract than a normal t
 |-----------|----------|
 | **Non-steering** | Side questions do not append instructions to the parent task, change the parent plan, cancel work, approve tools, or alter the active queue. |
 | **Parent keeps running** | The active parent session continues independently while the side response is generated. |
-| **Read-only chat** | Side Chat runs in chat execution mode with shell access off, autonomous mode off, worktree creation off, and mutating tools denied. |
+| **Read-only chat** | Side Chat runs in chat execution mode with command tools unavailable, autonomous mode off, worktree creation off, and mutating tools denied. |
 | **Hidden inherited context** | The side task can receive read-only parent transcript and runtime context, but cloned parent events are hidden from the visible Side Chat transcript. |
 | **Visible side-only transcript** | The panel shows only messages asked and answered directly in Side Chat. It does not replay the original parent prompt or parent answers at the top of the panel. |
 | **Fresh status checks** | Status/progress questions inject a live parent-status snapshot for that turn. The assistant must prefer that snapshot over older side-chat history. |
@@ -89,9 +89,12 @@ The side composer accepts text questions only. Attachments and task-steering con
 
 Side Chat should be safe to use while sensitive work is running because it is not an execution lane.
 
+Side Chat is intentionally narrower than the parent [access profile](access-profiles.md). Selecting
+Full access on the parent does not turn Side Chat into a command or filesystem execution surface.
+
 - `source` is marked as `side_chat`
 - `conversationMode` and `executionMode` are set to `chat`
-- `shellAccess` is disabled
+- command tools are unavailable and the side session cannot widen its inherited access profile
 - `requireWorktree` is disabled
 - `autonomousMode` is disabled
 - `toolRestrictions` contains the deny-all marker

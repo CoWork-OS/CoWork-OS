@@ -20,7 +20,9 @@ import type { NormalizerInputEvent } from "../../../../shared/timeline-events";
 // ---------------------------------------------------------------------------
 
 let seq = 0;
-function resetSeq() { seq = 0; }
+function resetSeq() {
+  seq = 0;
+}
 
 function makeEvent(
   type: string,
@@ -54,17 +56,13 @@ function makeToolCall(
 describe("summary card projection", () => {
   it("produces kind=summary for file-read events", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeToolCall("read_file", { path: "src/index.ts" }),
-    ]);
+    const result = normalizeTaskEvents([makeToolCall("read_file", { path: "src/index.ts" })]);
     expect(result[0].kind).toBe("summary");
   });
 
   it("summary card has required fields", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeToolCall("read_file", { path: "src/index.ts" }),
-    ]);
+    const result = normalizeTaskEvents([makeToolCall("read_file", { path: "src/index.ts" })]);
     const card = result[0];
     expect(card.id).toBeTruthy();
     expect(card.summary).toBeTruthy();
@@ -75,9 +73,7 @@ describe("summary card projection", () => {
 
   it("summary card sets actionKind for icon selection", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeToolCall("edit_file", { path: "src/app.ts" }),
-    ]);
+    const result = normalizeTaskEvents([makeToolCall("edit_file", { path: "src/app.ts" })]);
     if (result[0].kind === "summary") {
       expect(result[0].actionKind).toBe("file.edit");
     }
@@ -85,9 +81,7 @@ describe("summary card projection", () => {
 
   it("summary card includes phase chip", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeToolCall("read_file", { path: "src/index.ts" }),
-    ]);
+    const result = normalizeTaskEvents([makeToolCall("read_file", { path: "src/index.ts" })]);
     if (result[0].kind === "summary") {
       expect(result[0].phase).toBeTruthy();
     }
@@ -147,9 +141,7 @@ describe("approval card projection", () => {
 
   it("approval card has expandable=true", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeEvent("approval_requested", { reason: "x" }),
-    ]);
+    const result = normalizeTaskEvents([makeEvent("approval_requested", { reason: "x" })]);
     expect(result[0].expandable).toBe(true);
   });
 });
@@ -161,9 +153,7 @@ describe("approval card projection", () => {
 describe("agent card projection", () => {
   it("produces kind=agent for agent lifecycle events", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeEvent("agent_start", { actor: "Explore" }),
-    ]);
+    const result = normalizeTaskEvents([makeEvent("agent_start", { actor: "Explore" })]);
     expect(result[0].kind).toBe("agent");
   });
 
@@ -179,9 +169,7 @@ describe("agent card projection", () => {
 
   it("agent card has expandable=true", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeEvent("agent_start", { actor: "Explore" }),
-    ]);
+    const result = normalizeTaskEvents([makeEvent("agent_start", { actor: "Explore" })]);
     expect(result[0].expandable).toBe(true);
   });
 });
@@ -225,7 +213,14 @@ describe("backward compatibility", () => {
     resetSeq();
     expect(() =>
       normalizeTaskEvents([
-        { id: "e1", taskId: "t1", timestamp: 1000, type: "tool_call", payload: undefined as unknown as null, schemaVersion: 2 },
+        {
+          id: "e1",
+          taskId: "t1",
+          timestamp: 1000,
+          type: "tool_call",
+          payload: undefined as unknown as null,
+          schemaVersion: 2,
+        },
       ]),
     ).not.toThrow();
   });
@@ -234,7 +229,14 @@ describe("backward compatibility", () => {
     resetSeq();
     expect(() =>
       normalizeTaskEvents([
-        { id: "e1", taskId: "t1", timestamp: 1000, type: "tool_call", payload: "raw string" as unknown as null, schemaVersion: 2 },
+        {
+          id: "e1",
+          taskId: "t1",
+          timestamp: 1000,
+          type: "tool_call",
+          payload: "raw string" as unknown as null,
+          schemaVersion: 2,
+        },
       ]),
     ).not.toThrow();
   });
@@ -250,18 +252,14 @@ describe("backward compatibility", () => {
 
   it("normalises unknown event types to generic kind without crashing", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeEvent("some_future_event_type_v99", { data: 42 }),
-    ]);
+    const result = normalizeTaskEvents([makeEvent("some_future_event_type_v99", { data: 42 })]);
     expect(result).toHaveLength(1);
     expect(result[0].kind).toBe("summary");
   });
 
   it("always emits approval card even for approval events with no fields", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeEvent("approval_requested", {}),
-    ]);
+    const result = normalizeTaskEvents([makeEvent("approval_requested", {})]);
     expect(result[0].kind).toBe("approval");
     expect(result[0].expandable).toBe(true);
   });

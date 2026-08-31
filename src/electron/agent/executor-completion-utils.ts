@@ -1,6 +1,7 @@
+import * as path from "path";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import type { CompletionContract } from "./executor-helpers";
-import { extractArtifactExtensionsFromText } from "./step-contract";
+import { CANONICAL_ARTIFACT_PATH_REGEX, extractArtifactExtensionsFromText } from "./step-contract";
 
 const ARTIFACT_CREATION_VERB_REGEX =
   /\b(create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize|combine|merge|join|stitch|concatenate|concat|transcode|remux)\b/;
@@ -23,6 +24,10 @@ const VERIFICATION_TOOL_EVIDENCE = new Set([
   "http_request",
   "read_file",
   "list_directory",
+  // The bounded document pipeline performs a policy-checked, checksum-backed
+  // source extraction internally rather than through a model tool call. Treat
+  // that extraction as verification evidence for its completed review step.
+  "bounded_document_extract",
 ]);
 
 export function normalizePromptForContracts(taskPrompt: string): string {
@@ -62,8 +67,7 @@ export function promptRequestsArtifactOutput(taskTitle: string, taskPrompt: stri
   const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
   if (promptRequestsPresentationArtifactOutput(taskTitle, taskPrompt)) return true;
 
-  const artifactNoun =
-    String.raw`(?:files?(?!\s*(?:paths?|names?|areas?|refs?|references?|changes?|diffs?|statuses?|state|tree|lists?|involved)\b)|document|report|pdf|docx|markdown|md|spreadsheet|csv|xlsx|json|txt|pptx|slide|slides|video|videos|clip|clips|movie|footage)`;
+  const artifactNoun = String.raw`(?:files?(?!\s*(?:paths?|names?|areas?|refs?|references?|changes?|diffs?|statuses?|state|tree|lists?|involved)\b)|document|report|pdf|docx|markdown|md|spreadsheet|csv|xlsx|json|txt|pptx|slide|slides|video|videos|clip|clips|movie|footage)`;
   const createVerb = String.raw`(?:create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize|combine|merge|join|stitch|concatenate|concat|transcode|remux)`;
   const directObjectModifier = String.raw`(?:(?!(?:in|with|from|for|to|as|about|including|include|that|which)\b)[a-z0-9][a-z0-9-]*\s+)`;
   const directArtifactCreation = new RegExp(
@@ -74,19 +78,17 @@ export function promptRequestsArtifactOutput(taskTitle: string, taskPrompt: stri
     String.raw`\b(?:compile|synthesize|combine|merge|turn|convert|transform)\b[^.!?\n]{0,120}\binto\s+(?:a\s+|an\s+|the\s+)?(?:final\s+|comprehensive\s+|concise\s+)?${artifactNoun}\b`,
     "i",
   ).test(prompt);
-  const explicitOutputPath = /\b(?:save|export|write|output)\b[\s\S]{0,80}\b(?:to|as)\b[\s\S]{0,80}\.(?:pdf|docx|txt|md|csv|xlsx|pptx|json)\b/i.test(
-    prompt,
-  );
+  const explicitOutputPath =
+    /\b(?:save|export|write|output)\b[\s\S]{0,80}\b(?:to|as)\b[\s\S]{0,80}\.(?:pdf|docx|txt|md|csv|xlsx|pptx|json)\b/i.test(
+      prompt,
+    );
   const explicitArtifactFormat = new RegExp(
     String.raw`\b(?:save|export|write|output)\b[^.!?\n]{0,80}\b(?:to|as)\b[^.!?\n]{0,80}\b(?:a\s+|an\s+|the\s+)?(?:new\s+|final\s+)?${artifactNoun}\s+(?:file|document|report|spreadsheet|deck|slides?|video|clip)\b`,
     "i",
   ).test(prompt);
 
   return (
-    directArtifactCreation ||
-    transformIntoArtifact ||
-    explicitOutputPath ||
-    explicitArtifactFormat
+    directArtifactCreation || transformIntoArtifact || explicitOutputPath || explicitArtifactFormat
   );
 }
 
@@ -124,6 +126,80 @@ export function promptRequestsPresentationArtifactOutput(
     ) && /\bpptx\b|\.pptx\b/.test(prompt);
 
   return directCreation || createNounImmediately || transformIntoPresentation || explicitPptxOutput;
+}
+
+/**
+ * Returns true when the user explicitly asks for a success/failure status.
+ * These prompts are asking for an operational confirmation, not a substantive
+ * recommendation or analysis. A concise status should therefore be accepted
+ * as a direct answer after the requested work is evidenced.
+ */
+export function promptAllowsOperationalStatus(taskTitle: string, taskPrompt: string): boolean {
+  const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
+  if (!prompt.trim()) return false;
+
+  const requestCue = String.raw`(?:report|tell|let\s+me\s+know|confirm|state|say)`;
+  const statusCue = String.raw`(?:whether|if)\b[^.!?\n]{0,100}\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|work(?:ed)?|complete(?:d)?|finish(?:ed)?|pass(?:ed)?|fail(?:ed)?|block(?:ed)?)\b`;
+  const resultCue = String.raw`(?:success|failure|pass/fail|status|result)\b`;
+
+  return (
+    new RegExp(`\\b${requestCue}\\b[^.!?\\n]{0,80}\\b${statusCue}`, "i").test(prompt) ||
+    new RegExp(`\\b${requestCue}\\b[^.!?\\n]{0,80}\\b${resultCue}`, "i").test(prompt)
+  );
+}
+
+/**
+ * Returns true when the current step has accumulated a tool failure that has
+ * not been recovered by a later successful tool result or by a permitted
+ * useful-partial-progress fallback. Assistant text emitted in this state must
+ * stay internal until the step's terminal status is known; otherwise a model
+ * can surface a fabricated-looking answer (for example, "200") immediately
+ * before the executor marks the step failed.
+ */
+export function hasUnrecoveredToolFailureForAssistantOutput(opts: {
+  hadAnyToolSuccess: boolean;
+  hadToolError: boolean;
+  hadToolSuccessAfterError: boolean;
+  allToolErrorsInputDependent: boolean;
+  toolErrors: Iterable<string>;
+  visionFallbackRecovered?: boolean;
+}): boolean {
+  if (!opts.hadToolError || opts.hadToolSuccessAfterError) return false;
+
+  const nonCriticalErrorTools = new Set(["web_search", "web_fetch"]);
+  const toolErrors = Array.from(opts.toolErrors);
+  const onlyNonCriticalErrors =
+    toolErrors.length > 0 && toolErrors.every((tool) => nonCriticalErrorTools.has(tool));
+  const recoveredByUsefulPartialProgress =
+    opts.hadAnyToolSuccess &&
+    (onlyNonCriticalErrors ||
+      opts.allToolErrorsInputDependent ||
+      opts.visionFallbackRecovered === true);
+
+  return !recoveredByUsefulPartialProgress;
+}
+
+/**
+ * Returns true when an assistant response belongs to a plan step that follows
+ * an unrecovered, blocking step failure. Downstream text can otherwise turn a
+ * failed prerequisite into a plausible-looking answer (for example, a model
+ * inventing the output of a denied shell command after a metadata lookup).
+ */
+export function hasUnrecoveredBlockingPlanFailureForAssistantOutput(opts: {
+  currentStepIndex: number;
+  planSteps: ReadonlyArray<{
+    status?: string;
+    recovered?: boolean;
+    optional?: boolean;
+  }>;
+}): boolean {
+  const currentStepIndex = Number.isFinite(opts.currentStepIndex)
+    ? Math.max(0, Math.floor(opts.currentStepIndex))
+    : 0;
+
+  return opts.planSteps
+    .slice(0, currentStepIndex)
+    .some((step) => step.status === "failed" && !step.recovered && !step.optional);
 }
 
 export function promptRequestsCanvasArtifactOutput(taskTitle: string, taskPrompt: string): boolean {
@@ -191,8 +267,19 @@ export function inferRequiredArtifactExtensions(taskTitle: string, taskPrompt: s
 }
 
 const EXPLICIT_OUTPUT_EXTENSION_SET = new Set([
-  "pdf", "docx", "md", "csv", "xlsx", "json", "jsonl",
-  "txt", "pptx", "mp4", "mov", "webm", "html",
+  "pdf",
+  "docx",
+  "md",
+  "csv",
+  "xlsx",
+  "json",
+  "jsonl",
+  "txt",
+  "pptx",
+  "mp4",
+  "mov",
+  "webm",
+  "html",
 ]);
 
 /**
@@ -202,10 +289,7 @@ const EXPLICIT_OUTPUT_EXTENSION_SET = new Set([
  * this function does NOT pick up extensions from input-context references
  * like "read PRIORITIES.md".
  */
-export function extractExplicitOutputExtensions(
-  taskTitle: string,
-  taskPrompt: string,
-): string[] {
+export function extractExplicitOutputExtensions(taskTitle: string, taskPrompt: string): string[] {
   const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
   const extensions = new Set<string>();
 
@@ -241,13 +325,59 @@ export function extractExplicitOutputExtensions(
     match = writeAsFormatPattern.exec(prompt);
   }
 
-  // Pattern 4: Semantic format nouns in output-intent context
+  // Pattern 4: an explicit output path after a creation verb, e.g.
+  // "read notes.txt and create reports/action-items.md". Keep only the
+  // path in the output clause so input references are not promoted to
+  // required output types.
+  // Keep periods that belong to a filename extension (for example
+  // `action-items.md`) while still stopping at the end of the sentence. A
+  // sentence boundary has a period followed by whitespace/end-of-string;
+  // extension dots are followed by an alphanumeric character.
+  const creationClausePattern =
+    /\b(?:create|make|generate|produce|write|save|export|draft|build)\b(?:[^.!?\n]|\.(?=[A-Za-z0-9])){0,160}/gi;
+  match = creationClausePattern.exec(prompt);
+  while (match) {
+    const clause = match[0] || "";
+    const pathPattern = new RegExp(CANONICAL_ARTIFACT_PATH_REGEX.source, "gi");
+    let pathMatch = pathPattern.exec(clause);
+    while (pathMatch) {
+      const prefix = clause.slice(0, pathMatch.index);
+      // A path after an input/source cue belongs to the source material, not
+      // the requested deliverable ("create report from notes.txt").
+      if (
+        !/\b(?:read|from|based\s+on|using|input|source|original|prior|previous|include|including)\b[^.!?\n]{0,60}$/i.test(
+          prefix,
+        )
+      ) {
+        const ext = path.extname(pathMatch[0]).toLowerCase();
+        if (EXPLICIT_OUTPUT_EXTENSION_SET.has(ext.slice(1))) {
+          extensions.add(ext);
+        }
+      }
+      pathMatch = pathPattern.exec(clause);
+    }
+    match = creationClausePattern.exec(prompt);
+  }
+
+  // Pattern 5: Semantic format nouns in output-intent context
   // "create a spreadsheet" → .xlsx, "generate a PDF" → .pdf, etc.
   const semanticFormats: Array<[RegExp, string]> = [
-    [/\b(?:create|generate|build|produce)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}spreadsheet\b/i, ".xlsx"],
-    [/\b(?:create|generate|build|produce)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}excel\s+(?:file|workbook|spreadsheet|document)\b/i, ".xlsx"],
-    [/\b(?:create|generate|build|produce|export)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}pdf\b/i, ".pdf"],
-    [/\b(?:create|generate|build|produce|export)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}docx?\b/i, ".docx"],
+    [
+      /\b(?:create|generate|build|produce)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}spreadsheet\b/i,
+      ".xlsx",
+    ],
+    [
+      /\b(?:create|generate|build|produce)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}excel\s+(?:file|workbook|spreadsheet|document)\b/i,
+      ".xlsx",
+    ],
+    [
+      /\b(?:create|generate|build|produce|export)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}pdf\b/i,
+      ".pdf",
+    ],
+    [
+      /\b(?:create|generate|build|produce|export)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+){0,3}docx?\b/i,
+      ".docx",
+    ],
   ];
   for (const [pattern, ext] of semanticFormats) {
     if (pattern.test(prompt)) extensions.add(ext);
@@ -348,9 +478,13 @@ export function buildCompletionContract(opts: {
 }): CompletionContract {
   const fullPrompt = `${opts.taskTitle}\n${normalizePromptForContracts(opts.taskPrompt)}`;
   const hasReadOnlyConstraint = detectReadOnlyConstraint(fullPrompt);
+  const allowsOperationalStatus = promptAllowsOperationalStatus(opts.taskTitle, opts.taskPrompt);
 
   const requiresExecutionEvidence = shouldRequireExecutionEvidence(opts.taskTitle, opts.taskPrompt);
-  const requiresCanvasArtifact = promptRequestsCanvasArtifactOutput(opts.taskTitle, opts.taskPrompt);
+  const requiresCanvasArtifact = promptRequestsCanvasArtifactOutput(
+    opts.taskTitle,
+    opts.taskPrompt,
+  );
   // Use explicit-only extraction: only picks up extensions from output-intent
   // patterns (e.g. "save as .pdf"), not from input references (e.g. "read PRIORITIES.md").
   const requiredArtifactExtensions = hasReadOnlyConstraint
@@ -368,14 +502,13 @@ export function buildCompletionContract(opts: {
     requiresCanvasArtifact &&
     !opts.isWatchSkipRecommendationTask &&
     (hasExplicitCanvasCue || requiredArtifactExtensions.length === 0);
-  const artifactKind: CompletionContract["artifactKind"] =
-    hasReadOnlyConstraint
-      ? "none"
-      : shouldTreatAsCanvasArtifact
-        ? "canvas"
-        : requiresArtifactEvidence
-          ? "file"
-          : "none";
+  const artifactKind: CompletionContract["artifactKind"] = hasReadOnlyConstraint
+    ? "none"
+    : shouldTreatAsCanvasArtifact
+      ? "canvas"
+      : requiresArtifactEvidence
+        ? "file"
+        : "none";
 
   // Only require canvas_push evidence when the prompt explicitly mentions "canvas".
   // Tasks detected as canvas via promptIsMultiFileWebAppCreation (e.g. "Create a website")
@@ -406,7 +539,8 @@ export function buildCompletionContract(opts: {
   return {
     requiresExecutionEvidence,
     requiresDirectAnswer: opts.requiresDirectAnswer,
-    requiresDecisionSignal: opts.requiresDecisionSignal,
+    requiresDecisionSignal: opts.requiresDecisionSignal && !allowsOperationalStatus,
+    allowsOperationalStatus,
     requiresArtifactEvidence,
     requiredArtifactExtensions,
     requiresVerificationEvidence,
@@ -515,8 +649,9 @@ export function responseHasReviewReportEvidenceSignal(text: string): boolean {
     /\b(?:suggested\s+(?:documentation|doc)\s+(?:change|update)|documentation\s+change|doc\s+update|update\s+(?:the\s+)?docs?|add\s+(?:to\s+)?docs?)\b/.test(
       normalized,
     );
-  const hasPriority =
-    /\b(?:priority|must\s+fix\s+before\s+release|should\s+fix|optional)\b/.test(normalized);
+  const hasPriority = /\b(?:priority|must\s+fix\s+before\s+release|should\s+fix|optional)\b/.test(
+    normalized,
+  );
   const hasReviewFraming =
     /\b(?:documentation\s+drift|drift\s+(?:check|assessment|report)|review-backed|review\s+report|inspected|reviewed|checked)\b/.test(
       normalized,
@@ -531,12 +666,7 @@ export function responseHasReviewReportEvidenceSignal(text: string): boolean {
     hasReviewFraming,
   ].filter(Boolean).length;
 
-  return (
-    matchedFieldCount >= 4 &&
-    hasMismatchOrFinding &&
-    hasSuggestedDocChange &&
-    hasPriority
-  );
+  return matchedFieldCount >= 4 && hasMismatchOrFinding && hasSuggestedDocChange && hasPriority;
 }
 
 export function hasVerificationToolEvidence(
@@ -544,7 +674,11 @@ export function hasVerificationToolEvidence(
 ): boolean {
   if (!Array.isArray(toolResultMemory) || toolResultMemory.length === 0) return false;
   return toolResultMemory.some((entry) =>
-    VERIFICATION_TOOL_EVIDENCE.has(String(entry.tool || "").trim().toLowerCase()),
+    VERIFICATION_TOOL_EVIDENCE.has(
+      String(entry.tool || "")
+        .trim()
+        .toLowerCase(),
+    ),
   );
 }
 
@@ -667,10 +801,13 @@ export function responseDirectlyAddressesPrompt(opts: {
   const normalized = String(opts.text || "").trim();
   if (!normalized) return false;
   if (!opts.contract.requiresDirectAnswer) return true;
-  if (responseLooksOperationalOnly(normalized)) return false;
+  if (responseLooksOperationalOnly(normalized) && !opts.contract.allowsOperationalStatus) {
+    return false;
+  }
   if (opts.contract.requiresDecisionSignal && !responseHasDecisionSignal(normalized)) return false;
   const needsDetailedAnswer =
-    opts.contract.requiresExecutionEvidence || opts.contract.requiresDecisionSignal;
+    !opts.contract.allowsOperationalStatus &&
+    (opts.contract.requiresExecutionEvidence || opts.contract.requiresDecisionSignal);
   if (needsDetailedAnswer && normalized.length < opts.minResultSummaryLength) return false;
   return true;
 }
@@ -707,7 +844,9 @@ export function hasArtifactEvidence(opts: {
 }): boolean {
   if (!opts.contract.requiresArtifactEvidence) return true;
   const evidenceFiles =
-    opts.createdFiles.length > 0 ? opts.createdFiles : (opts.modifiedFiles || []).map((file) => String(file));
+    opts.createdFiles.length > 0
+      ? opts.createdFiles
+      : (opts.modifiedFiles || []).map((file) => String(file));
   if (evidenceFiles.length === 0) return false;
   if (!opts.contract.requiredArtifactExtensions.length) return true;
 

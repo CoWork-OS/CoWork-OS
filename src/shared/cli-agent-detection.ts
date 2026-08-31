@@ -61,7 +61,11 @@ export function detectCliAgentFromEvents(events: TaskEvent[]): CliAgentType | nu
 
     const eventType = event.type;
     // Check step_started events
-    if (eventType === "step_started" || eventType === "timeline_step_started" || eventType === "timeline_group_started") {
+    if (
+      eventType === "step_started" ||
+      eventType === "timeline_step_started" ||
+      eventType === "timeline_group_started"
+    ) {
       const step = payload?.step as Record<string, unknown> | undefined;
       const command = String(step?.command || step?.tool || "");
       if (CODEX_COMMAND_PATTERN.test(command)) return "codex-cli";
@@ -71,7 +75,9 @@ export function detectCliAgentFromEvents(events: TaskEvent[]): CliAgentType | nu
     if (eventType === "tool_call") {
       const tool = String(payload?.tool || payload?.toolName || "");
       if (tool === "run_command" || tool === "bash") {
-        const cmd = String(payload?.command || (payload?.input as Record<string, unknown>)?.command || "");
+        const cmd = String(
+          payload?.command || (payload?.input as Record<string, unknown>)?.command || "",
+        );
         if (CODEX_COMMAND_PATTERN.test(cmd)) return "codex-cli";
         if (CLAUDE_COMMAND_PATTERN.test(cmd)) return "claude-cli";
       }

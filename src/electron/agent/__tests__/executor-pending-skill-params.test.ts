@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  CustomSkill,
-  PendingSkillParameterCollection,
-} from "../../../shared/types";
+import type { CustomSkill, PendingSkillParameterCollection } from "../../../shared/types";
 
 const mockGetSkill = vi.fn();
 
@@ -34,9 +31,7 @@ function createRuntimeState(initialPending: PendingSkillParameterCollection | nu
   };
 }
 
-function createExecutorHarness(
-  pending: PendingSkillParameterCollection,
-): TaskExecutor & {
+function createExecutorHarness(pending: PendingSkillParameterCollection): TaskExecutor & {
   emitEvent: ReturnType<typeof vi.fn>;
   appendConversationHistory: ReturnType<typeof vi.fn>;
   saveConversationSnapshot: ReturnType<typeof vi.fn>;

@@ -10,8 +10,8 @@ type TaskPauseBannerProps = {
   reasonCode?: string | null;
   markdownComponents?: Any;
   onStopTask?: (() => void) | undefined;
-  onEnableShell?: (() => void | Promise<void>) | undefined;
-  onContinueWithoutShell?: (() => void | Promise<void>) | undefined;
+  onOpenAccessProfilePicker?: (() => void | Promise<void>) | undefined;
+  onContinueWithoutCommands?: (() => void | Promise<void>) | undefined;
 };
 
 const LOW_SIGNAL_REASON_CODES = new Set([
@@ -61,9 +61,9 @@ function getPauseBannerCopy(
     reasonCode === "shell_permission_still_disabled"
   ) {
     return {
-      title: "Shell access is needed to continue.",
+      title: "This task needs command tools to continue.",
       instruction:
-        "Enable shell to let me run commands, or continue without it and I’ll use a limited path.",
+        "Choose an access profile that permits command tools, or continue without commands using a limited path.",
     };
   }
   if (reasonCode === "skill_parameters") {
@@ -140,13 +140,13 @@ export function TaskPauseBanner({
   reasonCode,
   markdownComponents,
   onStopTask,
-  onEnableShell,
-  onContinueWithoutShell,
+  onOpenAccessProfilePicker,
+  onContinueWithoutCommands,
 }: TaskPauseBannerProps) {
   const [showDetails, setShowDetails] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"enable_shell" | "continue_without_shell" | null>(
-    null,
-  );
+  const [pendingAction, setPendingAction] = useState<
+    "switch_access_profile" | "continue_without_commands" | null
+  >(null);
   const detailsTitleId = useId();
   const normalizedMessage = typeof message === "string" ? message.trim() : "";
   const displayMessage = isLowSignalPauseMessage(normalizedMessage, reasonCode)
@@ -191,7 +191,7 @@ export function TaskPauseBanner({
   }, [showDetails]);
 
   const runBannerAction = async (
-    action: "enable_shell" | "continue_without_shell",
+    action: "switch_access_profile" | "continue_without_commands",
     handler?: (() => void | Promise<void>) | undefined,
   ) => {
     if (!handler || pendingAction) return;
@@ -219,28 +219,32 @@ export function TaskPauseBanner({
         </div>
         {(waitingForShellPermission || preview.showDetails || onStopTask) && (
           <div className="task-status-banner-actions">
-            {waitingForShellPermission && onEnableShell && (
+            {waitingForShellPermission && onOpenAccessProfilePicker && (
               <button
                 type="button"
                 className="task-status-banner-primary-btn"
-                onClick={() => void runBannerAction("enable_shell", onEnableShell)}
+                onClick={() =>
+                  void runBannerAction("switch_access_profile", onOpenAccessProfilePicker)
+                }
                 disabled={pendingAction !== null}
               >
-                {pendingAction === "enable_shell" ? "Enabling shell..." : "Enable shell"}
+                {pendingAction === "switch_access_profile"
+                  ? "Opening access profiles..."
+                  : "Switch access profile"}
               </button>
             )}
-            {waitingForShellPermission && onContinueWithoutShell && (
+            {waitingForShellPermission && onContinueWithoutCommands && (
               <button
                 type="button"
                 className="task-status-banner-secondary-btn"
                 onClick={() =>
-                  void runBannerAction("continue_without_shell", onContinueWithoutShell)
+                  void runBannerAction("continue_without_commands", onContinueWithoutCommands)
                 }
                 disabled={pendingAction !== null}
               >
-                {pendingAction === "continue_without_shell"
+                {pendingAction === "continue_without_commands"
                   ? "Continuing..."
-                  : "Continue without shell"}
+                  : "Continue without commands"}
               </button>
             )}
             {preview.showDetails && (

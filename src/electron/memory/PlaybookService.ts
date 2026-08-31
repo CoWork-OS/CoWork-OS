@@ -23,14 +23,17 @@ export interface PlaybookEntry {
   capturedAt: number;
 }
 
+export interface PlaybookCaptureOptions {
+  /** Prevent automatic external-memory mirroring when the task profile gates network access. */
+  allowExternalMirror?: boolean;
+}
+
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 const PLAYBOOK_MARKER = "[PLAYBOOK]";
 
 function scorePromptOverlap(prompt: string, text: string): number {
-  const tokens = prompt
-    .toLowerCase()
-    .match(/[a-z0-9]{3,}/g);
+  const tokens = prompt.toLowerCase().match(/[a-z0-9]{3,}/g);
   if (!tokens || tokens.length === 0) return 0;
   const haystack = text.toLowerCase();
   let score = 0;
@@ -102,6 +105,7 @@ export class PlaybookService {
     toolsUsed: string[],
     errorMessage?: string,
     destinationHints: string[] = [],
+    options: PlaybookCaptureOptions = {},
   ): Promise<void> {
     const toolsList = toolsUsed.length > 0 ? toolsUsed.slice(0, 10).join(", ") : "none";
     const destinationsLine =
@@ -139,6 +143,7 @@ export class PlaybookService {
       await MemoryService.capture(workspaceId, taskId, "insight", content, false, {
         origin: "playbook",
         batchable: false,
+        allowExternalMirror: options.allowExternalMirror,
       });
     } catch (err) {
       logger.warn("Failed to capture playbook entry:", err);
@@ -201,6 +206,7 @@ export class PlaybookService {
     taskPrompt: string,
     toolsUsed: string[],
     destinationHints: string[] = [],
+    options: PlaybookCaptureOptions = {},
   ): Promise<void> {
     try {
       const results = MemoryService.searchByContentMarker(workspaceId, PLAYBOOK_MARKER, 40);
@@ -208,8 +214,7 @@ export class PlaybookService {
         .filter((r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]"))
         .sort(
           (a, b) =>
-            scorePromptOverlap(taskPrompt, b.snippet) -
-            scorePromptOverlap(taskPrompt, a.snippet),
+            scorePromptOverlap(taskPrompt, b.snippet) - scorePromptOverlap(taskPrompt, a.snippet),
         )
         .slice(0, 2);
 
@@ -232,7 +237,11 @@ export class PlaybookService {
         ]
           .filter((line): line is string => Boolean(line))
           .join("\n");
-        await MemoryService.capture(workspaceId, undefined, "insight", reinforcement);
+        await MemoryService.capture(workspaceId, undefined, "insight", reinforcement, false, {
+          origin: "playbook",
+          batchable: false,
+          allowExternalMirror: options.allowExternalMirror,
+        });
       }
       // Emit event for PlaybookSkillPromoter to pick up
       this.events.emit("pattern-reinforced", {

@@ -35,11 +35,12 @@ describe("McpTunnelForwarder", () => {
 
   beforeEach(() => {
     mcpHostServerMock.getHttpAuthToken.mockReturnValue("host-token");
-    globalThis.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
     ) as typeof fetch;
   });
 

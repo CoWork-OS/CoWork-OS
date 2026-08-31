@@ -64,7 +64,10 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
       ]);
       setUsers(channelUsers);
 
-      const policyMap: Record<ContextType, ContextPolicy> = {} as Record<ContextType, ContextPolicy>;
+      const policyMap: Record<ContextType, ContextPolicy> = {} as Record<
+        ContextType,
+        ContextPolicy
+      >;
       for (const policy of policies) {
         policyMap[policy.contextType as ContextType] = policy;
       }
@@ -233,27 +236,48 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
 
           <div className="settings-field">
             <label>Bot Name</label>
-            <input className="settings-input" value={channelName} onChange={(e) => setChannelName(e.target.value)} />
+            <input
+              className="settings-input"
+              value={channelName}
+              onChange={(e) => setChannelName(e.target.value)}
+            />
           </div>
 
           <div className="settings-field">
             <label>Corp ID</label>
-            <input className="settings-input" value={corpId} onChange={(e) => setCorpId(e.target.value)} />
+            <input
+              className="settings-input"
+              value={corpId}
+              onChange={(e) => setCorpId(e.target.value)}
+            />
           </div>
 
           <div className="settings-field">
             <label>Agent ID</label>
-            <input className="settings-input" value={agentId} onChange={(e) => setAgentId(e.target.value)} />
+            <input
+              className="settings-input"
+              value={agentId}
+              onChange={(e) => setAgentId(e.target.value)}
+            />
           </div>
 
           <div className="settings-field">
             <label>Secret</label>
-            <input type="password" className="settings-input" value={secret} onChange={(e) => setSecret(e.target.value)} />
+            <input
+              type="password"
+              className="settings-input"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+            />
           </div>
 
           <div className="settings-field">
             <label>Token</label>
-            <input className="settings-input" value={token} onChange={(e) => setToken(e.target.value)} />
+            <input
+              className="settings-input"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
           </div>
 
           <div className="settings-field">
@@ -263,7 +287,9 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
               value={encodingAESKey}
               onChange={(e) => setEncodingAESKey(e.target.value)}
             />
-            <p className="settings-hint">Use the 43-character callback key if encrypted callbacks are enabled.</p>
+            <p className="settings-hint">
+              Use the 43-character callback key if encrypted callbacks are enabled.
+            </p>
           </div>
 
           <div className="settings-field">
@@ -278,7 +304,11 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
 
           <div className="settings-field">
             <label>Webhook Path</label>
-            <input className="settings-input" value={webhookPath} onChange={(e) => setWebhookPath(e.target.value)} />
+            <input
+              className="settings-input"
+              value={webhookPath}
+              onChange={(e) => setWebhookPath(e.target.value)}
+            />
           </div>
 
           <div className="settings-field">
@@ -294,13 +324,19 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
             </select>
           </div>
 
-          <button className="settings-button settings-button-primary" onClick={handleAddChannel} disabled={saving}>
+          <button
+            className="settings-button settings-button-primary"
+            onClick={handleAddChannel}
+            disabled={saving}
+          >
             {saving ? "Connecting..." : "Add WeCom Channel"}
           </button>
 
           {testResult && (
             <div className={`settings-status ${testResult.success ? "success" : "error"}`}>
-              {testResult.success ? `Connected as ${testResult.botUsername || "bot"}` : testResult.error}
+              {testResult.success
+                ? `Connected as ${testResult.botUsername || "bot"}`
+                : testResult.error}
             </div>
           )}
         </div>
@@ -323,13 +359,19 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
           <button className="settings-button" onClick={handleToggleEnabled} disabled={saving}>
             {channel.enabled ? "Disable" : "Enable"}
           </button>
-          <button className="settings-button settings-button-danger" onClick={handleRemoveChannel} disabled={saving}>
+          <button
+            className="settings-button settings-button-danger"
+            onClick={handleRemoveChannel}
+            disabled={saving}
+          >
             Remove
           </button>
         </div>
         {testResult && (
           <div className={`settings-status ${testResult.success ? "success" : "error"}`}>
-            {testResult.success ? `Connected as ${testResult.botUsername || "bot"}` : testResult.error}
+            {testResult.success
+              ? `Connected as ${testResult.botUsername || "bot"}`
+              : testResult.error}
           </div>
         )}
       </div>
@@ -351,7 +393,11 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
 
         {securityMode === "pairing" && (
           <div className="settings-field">
-            <button className="settings-button" onClick={handleGeneratePairingCode} disabled={generatingCode}>
+            <button
+              className="settings-button"
+              onClick={handleGeneratePairingCode}
+              disabled={generatingCode}
+            >
               {generatingCode ? "Generating..." : "Generate pairing code"}
             </button>
             {pairingCode && (
@@ -392,7 +438,10 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
                   <strong>{user.displayName || user.channelUserId}</strong>
                   <div className="settings-hint">{user.channelUserId}</div>
                 </div>
-                <button className="settings-button settings-button-danger" onClick={() => handleRevokeAccess(user.channelUserId)}>
+                <button
+                  className="settings-button settings-button-danger"
+                  onClick={() => handleRevokeAccess(user.channelUserId)}
+                >
                   Revoke
                 </button>
               </div>

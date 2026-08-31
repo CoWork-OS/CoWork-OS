@@ -25,10 +25,7 @@ function cleanupObjective(value: string): string {
   return String(value || "")
     .replace(/^[`"'([{<\s]+/, "")
     .replace(/[`"')\]}>.,!?;:\s]+$/, "")
-    .replace(
-      /\s+(?:in|inside|within)\s+(?:this|the)\s+workspace(?:\s+please)?$/i,
-      "",
-    )
+    .replace(/\s+(?:in|inside|within)\s+(?:this|the)\s+workspace(?:\s+please)?$/i, "")
     .replace(
       /\s+(?:and|while)\s+(?:keep|preserve|create|cross[- ]link|maintain|update|refresh)\b.*$/i,
       "",
@@ -71,9 +68,7 @@ function inferObsidian(prompt: string): NaturalLlmWikiPromptRoutingResult["obsid
   return "auto";
 }
 
-export function parseNaturalLlmWikiPrompt(
-  value: string,
-): NaturalLlmWikiPromptRoutingResult {
+export function parseNaturalLlmWikiPrompt(value: string): NaturalLlmWikiPromptRoutingResult {
   const prompt = normalizePrompt(value);
   if (!prompt || prompt.startsWith("/")) {
     return { matched: false };
@@ -97,8 +92,7 @@ export function parseNaturalLlmWikiPrompt(
   const hasLaunchIntent =
     /^(?:please\s+)?(?:help me\s+)?(?:build|create|make|start|spin up|set up|setup|maintain|refresh|update|lint|audit|check|query|use|answer)\b/i.test(
       lower,
-    ) ||
-    /^(?:please\s+)?i\s+(?:want|need)(?:\s+you)?\s+to\b/i.test(lower);
+    ) || /^(?:please\s+)?i\s+(?:want|need)(?:\s+you)?\s+to\b/i.test(lower);
 
   if (!isDirectSkillPrompt && !(hasVaultPhrase && hasLaunchIntent)) {
     return { matched: false };
@@ -109,7 +103,9 @@ export function parseNaturalLlmWikiPrompt(
     /\bif\s+i\s+(?:have not|haven't)\s+given\b.*\b(?:topic|subject|research area|question)\b/i.test(
       prompt,
     ) ||
-    /\bask\s+me\s+for\s+(?:the\s+)?(?:topic|subject|research area|question)\s+first\b/i.test(prompt);
+    /\bask\s+me\s+for\s+(?:the\s+)?(?:topic|subject|research area|question)\s+first\b/i.test(
+      prompt,
+    );
   const asksForMissingInputFirst = /\bask\s+me\s+for\s+it\s+first\b/i.test(prompt);
 
   const seedMode = inferMode(prompt, "");

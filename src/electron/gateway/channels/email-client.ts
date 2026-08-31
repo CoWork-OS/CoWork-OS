@@ -273,18 +273,14 @@ function decodeLegacyFallback(
 
   const candidates = ["windows-1254", "iso-8859-9", "windows-1252", "iso-8859-1"];
   let best = previousText;
-  let bestScore =
-    previousReplacementCount * 10 +
-    countUtf8MojibakeHints(previousText) * 2;
+  let bestScore = previousReplacementCount * 10 + countUtf8MojibakeHints(previousText) * 2;
 
   for (const charset of candidates) {
     const decoded = decodeWithTextDecoder(buffer, charset);
     if (!decoded) continue;
 
     const repaired = repairUtf8Mojibake(decoded);
-    const score =
-      countReplacementCharacters(repaired) * 10 +
-      countUtf8MojibakeHints(repaired) * 2;
+    const score = countReplacementCharacters(repaired) * 10 + countUtf8MojibakeHints(repaired) * 2;
     if (score < bestScore) {
       best = repaired;
       bestScore = score;
@@ -334,7 +330,9 @@ function extractImapLiteral(response: string, section: "HEADER" | "TEXT"): strin
   const startIndex = response.indexOf(marker);
   if (startIndex === -1) return "";
 
-  const literalMatch = response.slice(startIndex).match(/^BODY\[(?:HEADER|TEXT)\]\s*\{(\d+)\}\r\n/i);
+  const literalMatch = response
+    .slice(startIndex)
+    .match(/^BODY\[(?:HEADER|TEXT)\]\s*\{(\d+)\}\r\n/i);
   if (!literalMatch) return "";
 
   const literalLength = Number.parseInt(literalMatch[1] || "0", 10);
@@ -781,7 +779,7 @@ export class EmailClient extends EventEmitter {
           }
         }
       }
-    } catch  {
+    } catch {
       // Reconnect if needed
       if (!this.imapSocket || this.imapSocket.destroyed) {
         try {
@@ -1033,8 +1031,11 @@ export class EmailClient extends EventEmitter {
     const contentType = parseContentTypeHeader(
       entityHeaders.get("content-type") || contentTypeHeader || "text/plain",
     );
-    const transferEncoding =
-      (entityHeaders.get("content-transfer-encoding") || transferEncodingHeader || "").toLowerCase();
+    const transferEncoding = (
+      entityHeaders.get("content-transfer-encoding") ||
+      transferEncodingHeader ||
+      ""
+    ).toLowerCase();
 
     if (contentType.mimeType.startsWith("multipart/") && contentType.boundary) {
       const parts = splitMultipartBody(body, contentType.boundary);
@@ -1138,17 +1139,11 @@ export class EmailClient extends EventEmitter {
       const toAddresses = (Array.isArray(options.to) ? options.to : [options.to]).map(
         sanitizeHeaderValue,
       );
-      const ccAddresses = (options.cc
-        ? Array.isArray(options.cc)
-          ? options.cc
-          : [options.cc]
-        : []
+      const ccAddresses = (
+        options.cc ? (Array.isArray(options.cc) ? options.cc : [options.cc]) : []
       ).map(sanitizeHeaderValue);
-      const bccAddresses = (options.bcc
-        ? Array.isArray(options.bcc)
-          ? options.bcc
-          : [options.bcc]
-        : []
+      const bccAddresses = (
+        options.bcc ? (Array.isArray(options.bcc) ? options.bcc : [options.bcc]) : []
       ).map(sanitizeHeaderValue);
       const envelopeRecipients = [...toAddresses, ...ccAddresses, ...bccAddresses].filter(Boolean);
       if (envelopeRecipients.length === 0) {
@@ -1162,7 +1157,9 @@ export class EmailClient extends EventEmitter {
         ? sanitizeHeaderValue(this.options.displayName)
         : "";
       const fromAddress = sanitizeHeaderValue(this.options.email);
-      const attachments = (options.attachments || []).filter((attachment) => attachment.content?.length);
+      const attachments = (options.attachments || []).filter(
+        (attachment) => attachment.content?.length,
+      );
       const boundary = `cowork-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const headers = [
         `From: ${displayName ? `"${displayName}" ` : ""}<${fromAddress}>`,
@@ -1204,7 +1201,9 @@ export class EmailClient extends EventEmitter {
                 "Content-Transfer-Encoding: base64",
                 `Content-Disposition: attachment; filename="${sanitizeHeaderValue(attachment.filename)}"`,
                 "",
-                (attachment.content || Buffer.alloc(0)).toString("base64").replace(/(.{76})/g, "$1\r\n"),
+                (attachment.content || Buffer.alloc(0))
+                  .toString("base64")
+                  .replace(/(.{76})/g, "$1\r\n"),
               ]),
               `--${boundary}--`,
               "",
@@ -1383,7 +1382,9 @@ export class EmailClient extends EventEmitter {
     const normalizedMessageId = messageId.trim();
     if (!normalizedMessageId) return null;
     return this.withSelectedMailbox(async () => {
-      const response = await this.imapCommand(`UID SEARCH HEADER Message-ID ${quoteImapString(normalizedMessageId)}`);
+      const response = await this.imapCommand(
+        `UID SEARCH HEADER Message-ID ${quoteImapString(normalizedMessageId)}`,
+      );
       const uid = parseSearchUids(response).slice(-1)[0];
       if (!Number.isFinite(uid)) return null;
       await this.imapCommand(`UID STORE ${uid} ${read ? "+" : "-"}FLAGS (\\Seen)`);

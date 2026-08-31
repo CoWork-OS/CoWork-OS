@@ -34,7 +34,9 @@ describe("kit-status", () => {
     expect(status.missingCount).toBeGreaterThan(0);
     expect(status.lintWarningCount).toBe(0);
     expect(status.lintErrorCount).toBe(0);
-    expect(status.files.some((entry) => entry.relPath === path.join(".cowork", "AGENTS.md"))).toBe(true);
+    expect(status.files.some((entry) => entry.relPath === path.join(".cowork", "AGENTS.md"))).toBe(
+      true,
+    );
     expect(status.onboarding?.bootstrapPresent).toBe(false);
   });
 
@@ -141,9 +143,15 @@ describe("kit-status", () => {
 
     const status = await computeWorkspaceKitStatus(tmpDir, "workspace-2");
     const tools = status.files.find((entry) => entry.relPath === path.join(".cowork", "TOOLS.md"));
-    const agents = status.files.find((entry) => entry.relPath === path.join(".cowork", "AGENTS.md"));
-    const bootstrap = status.files.find((entry) => entry.relPath === path.join(".cowork", "BOOTSTRAP.md"));
-    const design = status.files.find((entry) => entry.relPath === path.join(".cowork", "DESIGN.md"));
+    const agents = status.files.find(
+      (entry) => entry.relPath === path.join(".cowork", "AGENTS.md"),
+    );
+    const bootstrap = status.files.find(
+      (entry) => entry.relPath === path.join(".cowork", "BOOTSTRAP.md"),
+    );
+    const design = status.files.find(
+      (entry) => entry.relPath === path.join(".cowork", "DESIGN.md"),
+    );
 
     expect(tools?.exists).toBe(true);
     expect(tools?.stale).toBe(true);

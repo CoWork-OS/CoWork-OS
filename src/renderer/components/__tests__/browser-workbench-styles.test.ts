@@ -32,9 +32,7 @@ describe("Browser workbench styles", () => {
   it("renders header button icons with the current theme color", () => {
     const source = readFileSync(stylesPath, "utf8");
 
-    expect(source).toMatch(
-      /\.browser-workbench-icon-btn svg\s*\{[^}]*stroke:\s*currentColor;/s,
-    );
+    expect(source).toMatch(/\.browser-workbench-icon-btn svg\s*\{[^}]*stroke:\s*currentColor;/s);
   });
 
   it("renders the new tab icon with explicit SVG styling", () => {

@@ -70,8 +70,10 @@ export function resolveConnection(options: {
 }): ResolvedConnection {
   const config = options.config ?? loadCliConfig();
   const profileName = options.profile || config.defaultProfile || "local";
-  const profile = config.profiles[profileName] || config.profiles.local || { url: DEFAULT_CONTROL_PLANE_URL };
-  const url = options.url || process.env.COWORK_CONTROL_PLANE_URL || profile.url || DEFAULT_CONTROL_PLANE_URL;
+  const profile = config.profiles[profileName] ||
+    config.profiles.local || { url: DEFAULT_CONTROL_PLANE_URL };
+  const url =
+    options.url || process.env.COWORK_CONTROL_PLANE_URL || profile.url || DEFAULT_CONTROL_PLANE_URL;
   const token = options.token || process.env.COWORK_CONTROL_PLANE_TOKEN || profile.token || "";
   return { profileName, url, token };
 }
@@ -120,12 +122,19 @@ function normalizeConfig(input: unknown): CliConfig {
     if (!value || typeof value !== "object") continue;
     const profile = value as Partial<CliProfile>;
     profiles[name] = {
-      url: typeof profile.url === "string" && profile.url.trim() ? profile.url.trim() : DEFAULT_CONTROL_PLANE_URL,
-      ...(typeof profile.token === "string" && profile.token.trim() ? { token: profile.token.trim() } : {}),
+      url:
+        typeof profile.url === "string" && profile.url.trim()
+          ? profile.url.trim()
+          : DEFAULT_CONTROL_PLANE_URL,
+      ...(typeof profile.token === "string" && profile.token.trim()
+        ? { token: profile.token.trim() }
+        : {}),
     };
   }
   if (!profiles.local) profiles.local = { url: DEFAULT_CONTROL_PLANE_URL };
   const defaultProfile =
-    typeof raw.defaultProfile === "string" && profiles[raw.defaultProfile] ? raw.defaultProfile : "local";
+    typeof raw.defaultProfile === "string" && profiles[raw.defaultProfile]
+      ? raw.defaultProfile
+      : "local";
   return { defaultProfile, profiles };
 }

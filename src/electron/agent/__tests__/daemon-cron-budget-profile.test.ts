@@ -8,17 +8,20 @@ function resolveCronBudgetProfile(params: {
   intent: string;
   complexity?: "low" | "medium" | "high";
 }): "balanced" | "strict" | "aggressive" | undefined {
-  return (AgentDaemon.prototype as Any).resolveCronBudgetProfile.call({}, {
-    title: params.title,
-    prompt: params.prompt,
-    route: {
-      intent: params.intent,
-      confidence: 0.95,
-      complexity: params.complexity ?? "high",
-      domain: "general",
-      signals: [],
+  return (AgentDaemon.prototype as Any).resolveCronBudgetProfile.call(
+    {},
+    {
+      title: params.title,
+      prompt: params.prompt,
+      route: {
+        intent: params.intent,
+        confidence: 0.95,
+        complexity: params.complexity ?? "high",
+        domain: "general",
+        signals: [],
+      },
     },
-  });
+  );
 }
 
 describe("AgentDaemon cron budget profile selection", () => {

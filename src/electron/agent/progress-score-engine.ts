@@ -106,7 +106,12 @@ export class ProgressScoreEngine {
         }
       }
 
-      if (type === "tool_error" || type === "error" || type === "llm_error" || type === "step_failed") {
+      if (
+        type === "tool_error" ||
+        type === "error" ||
+        type === "llm_error" ||
+        type === "step_failed"
+      ) {
         unresolvedErrorSeen = true;
       }
 

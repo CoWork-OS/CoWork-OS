@@ -64,6 +64,13 @@ import type {
   SecurityMode,
   Workspace,
 } from "../../shared/types";
+import {
+  BUILTIN_ACCESS_PROFILE_IDS,
+  BUILTIN_ACCESS_PROFILES,
+  getAccessProfileLabel,
+  type AccessProfileDefinition,
+  type AccessProfileId,
+} from "../../shared/access-profiles";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 
 type SkillLite = {
@@ -132,6 +139,8 @@ type AgentDraft = {
   approvalPolicy: ManagedAgentApprovalPolicy;
   deployment: ManagedAgentDeploymentConfig;
   workspaceId: string;
+  accessProfileId?: AccessProfileId;
+  /** @deprecated Kept only to rehydrate old drafts; the UI no longer writes it. */
   enableShell: boolean;
   enableBrowser: boolean;
   enableComputerUse: boolean;
@@ -168,7 +177,6 @@ const TOOL_FAMILY_OPTIONS: Array<{ id: ManagedAgentToolFamily; label: string }> 
   { id: "files", label: "Files" },
   { id: "documents", label: "Documents" },
   { id: "memory", label: "Memory" },
-  { id: "shell", label: "Shell" },
   { id: "browser", label: "Browser" },
   { id: "computer-use", label: "Computer Use" },
   { id: "images", label: "Images" },
@@ -182,22 +190,22 @@ const APPROVAL_ACTION_OPTIONS = [
   "file external ticket",
 ] as const;
 
-const APPROVAL_ACTION_RUNTIME_TYPE: Record<
-  (typeof APPROVAL_ACTION_OPTIONS)[number],
-  ApprovalType
-> = {
-  "send email": "external_service",
-  "post message": "external_service",
-  "edit spreadsheet": "data_export",
-  "create calendar event": "external_service",
-  "file external ticket": "external_service",
-};
+const APPROVAL_ACTION_RUNTIME_TYPE: Record<(typeof APPROVAL_ACTION_OPTIONS)[number], ApprovalType> =
+  {
+    "send email": "external_service",
+    "post message": "external_service",
+    "edit spreadsheet": "data_export",
+    "create calendar event": "external_service",
+    "file external ticket": "external_service",
+  };
 
 const APPROVAL_TYPE_LABELS: Record<ApprovalType, string> = {
+  workspace_write: "Workspace write",
   delete_file: "Delete file",
   delete_multiple: "Delete multiple",
   bulk_rename: "Bulk rename",
   network_access: "Network access",
+  external_file_access: "External file access",
   data_export: "Data export",
   external_service: "External service",
   run_command: "Run command",
@@ -217,7 +225,10 @@ const TOOL_APPROVAL_BEHAVIOR_ORDER: Record<
 };
 
 function normalizeWorkflowText(value: string): string {
-  return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return value
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function titleizeWorkflowName(value: string): string {
@@ -314,7 +325,9 @@ function parseNumberedInstructionList(
       const start = (match.index || 0) + markerOffset + match[1].length + 2;
       const next = matches[index + 1];
       const end =
-        next && next.index !== undefined ? next.index + (next[0].startsWith(" ") ? 1 : 0) : paragraph.length;
+        next && next.index !== undefined
+          ? next.index + (next[0].startsWith(" ") ? 1 : 0)
+          : paragraph.length;
       return paragraph.slice(start, end).trim();
     })
     .filter(Boolean);
@@ -340,7 +353,9 @@ function uniqueValues<T>(values: T[]): T[] {
 }
 
 function optionConnectionKeys(option: AgentBuilderSelectionOption): Set<string> {
-  return new Set((option.missingConnections || []).map((connection) => `${connection.kind}:${connection.id}`));
+  return new Set(
+    (option.missingConnections || []).map((connection) => `${connection.kind}:${connection.id}`),
+  );
 }
 
 export function getUnresolvedBuilderSelectionRequirements(
@@ -356,15 +371,21 @@ export function applyBuilderSelectionRequirement(
   requirementId: string,
   optionId: string,
 ): AgentBuilderPlan {
-  const requirement = (plan.selectionRequirements || []).find((entry) => entry.id === requirementId);
+  const requirement = (plan.selectionRequirements || []).find(
+    (entry) => entry.id === requirementId,
+  );
   const option = requirement?.options.find((entry) => entry.id === optionId);
   if (!requirement || !option) return plan;
 
   const requirementToolFamilies = new Set(
     requirement.options.flatMap((entry) => entry.selectedToolFamilies || []),
   );
-  const requirementMcpServers = new Set(requirement.options.flatMap((entry) => entry.selectedMcpServers || []));
-  const requirementSkills = new Set(requirement.options.flatMap((entry) => entry.selectedSkills || []));
+  const requirementMcpServers = new Set(
+    requirement.options.flatMap((entry) => entry.selectedMcpServers || []),
+  );
+  const requirementSkills = new Set(
+    requirement.options.flatMap((entry) => entry.selectedSkills || []),
+  );
   const requirementConnectionKeys = new Set(
     requirement.options.flatMap((entry) => Array.from(optionConnectionKeys(entry))),
   );
@@ -387,7 +408,9 @@ export function applyBuilderSelectionRequirement(
       ...(option.selectedMcpServers || []),
     ]),
     connectedMcpServers: uniqueValues([
-      ...(plan.connectedMcpServers || []).filter((serverId) => !requirementMcpServers.has(serverId)),
+      ...(plan.connectedMcpServers || []).filter(
+        (serverId) => !requirementMcpServers.has(serverId),
+      ),
       ...(option.selectedMcpServers || []),
     ]),
     selectedSkills: uniqueValues([
@@ -420,13 +443,12 @@ function parseAgentRoleSoul(soul?: string): Record<string, unknown> | null {
 
 function isManagedAgentMirrorRole(role: Pick<AgentsHubAgentRole, "soul">): boolean {
   const metadata = parseAgentRoleSoul(role.soul);
-  return (
-    typeof metadata?.managedAgentId === "string" ||
-    metadata?.managedAgentMigrated === true
-  );
+  return typeof metadata?.managedAgentId === "string" || metadata?.managedAgentMigrated === true;
 }
 
-export function getMissionControlActiveAgentRoles<T extends AgentsHubAgentRole>(agentRoles: T[]): T[] {
+export function getMissionControlActiveAgentRoles<T extends AgentsHubAgentRole>(
+  agentRoles: T[],
+): T[] {
   return agentRoles.filter(
     (role) =>
       role.isActive &&
@@ -461,10 +483,21 @@ export function getManagedSessionEventText(event: ManagedSessionEvent): string {
   const fromName = typeof payload?.name === "string" ? payload.name : undefined;
   const fromStatus = typeof payload?.status === "string" ? payload.status : undefined;
   const fromError = typeof payload?.error === "string" ? payload.error : undefined;
-  return fromMessage || fromContent || fromSummary || fromError || fromName || fromStatus || event.type.replace(/\./g, " ");
+  return (
+    fromMessage ||
+    fromContent ||
+    fromSummary ||
+    fromError ||
+    fromName ||
+    fromStatus ||
+    event.type.replace(/\./g, " ")
+  );
 }
 
-export function buildDraftFromTemplate(template: AgentTemplate, workspaces: Workspace[]): AgentDraft {
+export function buildDraftFromTemplate(
+  template: AgentTemplate,
+  workspaces: Workspace[],
+): AgentDraft {
   const defaultWorkspaceId = workspaces[0]?.id || "";
   return {
     templateId: template.id,
@@ -491,23 +524,22 @@ export function buildDraftFromTemplate(template: AgentTemplate, workspaces: Work
     selectedToolFamilies: template.studio?.apps?.allowedToolFamilies || [],
     fileRefs: template.studio?.fileRefs || [],
     memoryConfig: template.studio?.memoryConfig || { mode: "default", sources: ["workspace"] },
-    scheduleConfig:
-      template.studio?.scheduleConfig || {
-        enabled: false,
-        mode: "manual",
-      },
+    scheduleConfig: template.studio?.scheduleConfig || {
+      enabled: false,
+      mode: "manual",
+    },
     channelTargets: template.studio?.channelTargets || [],
     audioSummaryEnabled: template.studio?.audioSummaryConfig?.enabled || false,
     audioSummaryStyle: template.studio?.audioSummaryConfig?.style || "executive-briefing",
     imageGenProfileId: template.studio?.imageGenProfileId,
     sharing: template.studio?.sharing || { visibility: "team" },
-    approvalPolicy:
-      template.studio?.approvalPolicy || {
-        autoApproveReadOnly: true,
-        requireApprovalFor: [],
-      },
+    approvalPolicy: template.studio?.approvalPolicy || {
+      autoApproveReadOnly: true,
+      requireApprovalFor: [],
+    },
     deployment: template.studio?.deployment || { surfaces: ["chatgpt"] },
     workspaceId: defaultWorkspaceId,
+    accessProfileId: template.environmentConfig?.accessProfileId,
     enableShell: !!template.environmentConfig?.enableShell,
     enableBrowser: template.environmentConfig?.enableBrowser !== false,
     enableComputerUse: !!template.environmentConfig?.enableComputerUse,
@@ -558,25 +590,24 @@ export function buildDraftFromAgent(
     selectedToolFamilies: studio?.apps?.allowedToolFamilies || [],
     fileRefs: studio?.fileRefs || [],
     memoryConfig: studio?.memoryConfig || { mode: "default", sources: ["workspace"] },
-    scheduleConfig:
-      studio?.scheduleConfig || {
-        enabled: false,
-        mode: "manual",
-      },
+    scheduleConfig: studio?.scheduleConfig || {
+      enabled: false,
+      mode: "manual",
+    },
     channelTargets: studio?.channelTargets || [],
     audioSummaryEnabled: studio?.audioSummaryConfig?.enabled || false,
     audioSummaryStyle: studio?.audioSummaryConfig?.style || "executive-briefing",
     imageGenProfileId: studio?.imageGenProfileId,
     sharing: studio?.sharing || { visibility: "team" },
-    approvalPolicy:
-      studio?.approvalPolicy || {
-        autoApproveReadOnly: true,
-        requireApprovalFor: [],
-      },
+    approvalPolicy: studio?.approvalPolicy || {
+      autoApproveReadOnly: true,
+      requireApprovalFor: [],
+    },
     deployment: studio?.deployment || {
       surfaces: (studio?.channelTargets?.length || 0) > 0 ? ["chatgpt", "slack"] : ["chatgpt"],
     },
     workspaceId: environment?.config.workspaceId || workspaces[0]?.id || "",
+    accessProfileId: environment?.config.accessProfileId,
     enableShell: !!environment?.config.enableShell,
     enableBrowser: environment?.config.enableBrowser !== false,
     enableComputerUse: !!environment?.config.enableComputerUse,
@@ -624,6 +655,7 @@ export function makeBlankDraft(workspaces: Workspace[]): AgentDraft {
     },
     deployment: { surfaces: ["chatgpt"] },
     workspaceId: workspaces[0]?.id || "",
+    accessProfileId: undefined,
     enableShell: false,
     enableBrowser: true,
     enableComputerUse: false,
@@ -700,21 +732,27 @@ export function buildDraftFromBuilderPlan(
     },
     deployment: { surfaces: ["chatgpt"] },
     workspaceId: workspaces[0]?.id || "",
+    accessProfileId: plan.accessProfileId,
     enableShell: plan.enableShell,
     enableBrowser: plan.enableBrowser !== false,
     enableComputerUse: plan.enableComputerUse,
-    routines: (plan.routines || [
-      {
-        name: `${plan.name} manual run`,
-        enabled: true,
-        trigger: { type: "manual" as const, enabled: true },
-      },
-    ]).filter((routine) => routine.trigger.type !== "schedule" || plan.scheduleConfig.enabled),
+    routines: (
+      plan.routines || [
+        {
+          name: `${plan.name} manual run`,
+          enabled: true,
+          trigger: { type: "manual" as const, enabled: true },
+        },
+      ]
+    ).filter((routine) => routine.trigger.type !== "schedule" || plan.scheduleConfig.enabled),
   };
 }
 
 function normalizeRoleKey(value?: string): string {
-  return (value || "").toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return (value || "")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function buildTeamTemplateFromRoleNames(
@@ -787,9 +825,7 @@ export function getEffectiveApprovalPreview(
   };
 }
 
-export function getApprovalRuntimeMatrix(
-  approvalPolicy?: ManagedAgentApprovalPolicy,
-): Array<{
+export function getApprovalRuntimeMatrix(approvalPolicy?: ManagedAgentApprovalPolicy): Array<{
   semanticAction: string;
   runtimeType: ApprovalType;
   runtimeLabel: string;
@@ -976,25 +1012,35 @@ export function AgentsHubPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agents, setAgents] = useState<ManagedAgent[]>([]);
-  const [agentDetails, setAgentDetails] = useState<Record<string, ManagedAgentVersion | undefined>>({});
+  const [agentDetails, setAgentDetails] = useState<Record<string, ManagedAgentVersion | undefined>>(
+    {},
+  );
   const [sessions, setSessions] = useState<ManagedSession[]>([]);
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [skills, setSkills] = useState<SkillLite[]>([]);
   const [pluginPacks, setPluginPacks] = useState<PluginPackLite[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [environments, setEnvironments] = useState<ManagedEnvironment[]>([]);
+  const [accessProfiles, setAccessProfiles] = useState<AccessProfileDefinition[]>([]);
+  const [defaultAccessProfileId, setDefaultAccessProfileId] = useState<AccessProfileId>(
+    BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+  );
   const [slackChannels, setSlackChannels] = useState<ChannelData[]>([]);
   const [mcpServerIds, setMcpServerIds] = useState<Array<{ id: string; name: string }>>([]);
   const [imageProfiles, setImageProfiles] = useState<ImageGenProfile[]>([]);
   const [studioDraft, setStudioDraft] = useState<AgentDraft | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [agentRoutines, setAgentRoutines] = useState<Record<string, ManagedAgentRoutineRecord[]>>({});
-  const [agentInsights, setAgentInsights] = useState<Record<string, ManagedAgentInsights>>({});
-  const [agentAudit, setAgentAudit] = useState<Record<string, ManagedAgentAuditEntry[]>>({});
-  const [slackHealth, setSlackHealth] = useState<Record<string, ManagedAgentSlackDeploymentHealth>>({});
-  const [sessionWorkpapers, setSessionWorkpapers] = useState<Record<string, ManagedSessionWorkpaper>>(
+  const [agentRoutines, setAgentRoutines] = useState<Record<string, ManagedAgentRoutineRecord[]>>(
     {},
   );
+  const [agentInsights, setAgentInsights] = useState<Record<string, ManagedAgentInsights>>({});
+  const [agentAudit, setAgentAudit] = useState<Record<string, ManagedAgentAuditEntry[]>>({});
+  const [slackHealth, setSlackHealth] = useState<Record<string, ManagedAgentSlackDeploymentHealth>>(
+    {},
+  );
+  const [sessionWorkpapers, setSessionWorkpapers] = useState<
+    Record<string, ManagedSessionWorkpaper>
+  >({});
   const [runtimeCatalogs, setRuntimeCatalogs] = useState<
     Record<string, ManagedAgentRuntimeToolCatalog | null | undefined>
   >({});
@@ -1014,13 +1060,15 @@ export function AgentsHubPanel({
   const [showcaseIndex, setShowcaseIndex] = useState(0);
   const [isCreateComposerOpen, setIsCreateComposerOpen] = useState(false);
   const [builderPlan, setBuilderPlan] = useState<AgentBuilderPlan | null>(null);
-  const [builderStage, setBuilderStage] = useState<"idle" | "thinking" | "plan" | "creating" | "created">(
-    "idle",
-  );
+  const [builderStage, setBuilderStage] = useState<
+    "idle" | "thinking" | "plan" | "creating" | "created"
+  >("idle");
   const [builderError, setBuilderError] = useState<string | null>(null);
   const [studioTestPrompt, setStudioTestPrompt] = useState("");
   const [studioTestSessionId, setStudioTestSessionId] = useState<string | null>(null);
-  const [studioSessionEvents, setStudioSessionEvents] = useState<Record<string, ManagedSessionEvent[]>>({});
+  const [studioSessionEvents, setStudioSessionEvents] = useState<
+    Record<string, ManagedSessionEvent[]>
+  >({});
   const [studioTestRunning, setStudioTestRunning] = useState(false);
   const [studioTestError, setStudioTestError] = useState<string | null>(null);
   const [agentRunSubmitting, setAgentRunSubmitting] = useState(false);
@@ -1058,6 +1106,7 @@ export function AgentsHubPanel({
         gatewayChannels,
         imageGenProfiles,
         managedEnvironments,
+        permissionSettings,
         mcpSettings,
         legacyAgentRoles,
         legacyAutomationProfiles,
@@ -1071,6 +1120,7 @@ export function AgentsHubPanel({
         window.electronAPI.getGatewayChannels(),
         window.electronAPI.listImageGenProfiles(),
         window.electronAPI.listManagedEnvironments(),
+        window.electronAPI.getPermissionSettings(),
         window.electronAPI.getMCPSettings(),
         window.electronAPI.getAgentRoles(true),
         window.electronAPI.listAutomationProfiles(),
@@ -1104,14 +1154,20 @@ export function AgentsHubPanel({
       setPluginPacks((availablePluginPacks || []) as PluginPackLite[]);
       setWorkspaces(availableWorkspaces);
       setEnvironments(managedEnvironments);
+      setAccessProfiles(
+        Array.isArray(permissionSettings?.accessProfiles) ? permissionSettings.accessProfiles : [],
+      );
+      setDefaultAccessProfileId(
+        permissionSettings?.defaultAccessProfileId || BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+      );
       setSlackChannels((gatewayChannels || []).filter((channel) => channel.type === "slack"));
       setImageProfiles(imageGenProfiles);
       setAgentDetails(Object.fromEntries(detailEntries));
       setAgentRoutines(Object.fromEntries(routineEntries));
       setAgentInsights(
         Object.fromEntries(
-          insightEntries.filter(
-            (entry): entry is readonly [string, ManagedAgentInsights] => Boolean(entry[1]),
+          insightEntries.filter((entry): entry is readonly [string, ManagedAgentInsights] =>
+            Boolean(entry[1]),
           ),
         ),
       );
@@ -1137,8 +1193,12 @@ export function AgentsHubPanel({
 
       if (studioDraft?.agentId) {
         const existing = managedAgents.find((agent) => agent.id === studioDraft.agentId);
-        const version = existing ? detailEntries.find(([id]) => id === existing.id)?.[1] : undefined;
-        const routines = existing ? routineEntries.find(([id]) => id === existing.id)?.[1] || [] : [];
+        const version = existing
+          ? detailEntries.find(([id]) => id === existing.id)?.[1]
+          : undefined;
+        const routines = existing
+          ? routineEntries.find(([id]) => id === existing.id)?.[1] || []
+          : [];
         if (existing) {
           setStudioDraft(
             buildDraftFromAgent(
@@ -1297,7 +1357,8 @@ export function AgentsHubPanel({
           ...current,
           [studioTestSessionId]: workpaper,
         }));
-        const currentSession = session || sessions.find((entry) => entry.id === studioTestSessionId);
+        const currentSession =
+          session || sessions.find((entry) => entry.id === studioTestSessionId);
         if (!currentSession || isTerminalManagedSessionStatus(currentSession.status)) {
           setStudioTestRunning(false);
           return;
@@ -1371,7 +1432,8 @@ export function AgentsHubPanel({
     }
   }, [agents, libraryTab, recentlyUsedAgents, scheduledAgents]);
   const slackChannelTargetCount = agents.reduce(
-    (count, agent) => count + (getStudioConfig(agentDetails[agent.id])?.channelTargets?.length || 0),
+    (count, agent) =>
+      count + (getStudioConfig(agentDetails[agent.id])?.channelTargets?.length || 0),
     0,
   );
   const visibleLibraryAgents = libraryAgents.slice(0, 6);
@@ -1522,7 +1584,9 @@ export function AgentsHubPanel({
       setBuilderPlan(plan);
       setBuilderStage("plan");
     } catch (planError) {
-      setBuilderError(planError instanceof Error ? planError.message : "Failed to generate agent plan");
+      setBuilderError(
+        planError instanceof Error ? planError.message : "Failed to generate agent plan",
+      );
       setBuilderStage("idle");
     }
   };
@@ -1544,7 +1608,9 @@ export function AgentsHubPanel({
       setWorkflowComposer("");
       setBuilderPlan(null);
     } catch (createError) {
-      setBuilderError(createError instanceof Error ? createError.message : "Failed to create agent");
+      setBuilderError(
+        createError instanceof Error ? createError.message : "Failed to create agent",
+      );
       setBuilderStage("plan");
     }
   };
@@ -1568,7 +1634,10 @@ export function AgentsHubPanel({
       name: `${studioDraft.name} Environment`,
       config: {
         workspaceId: studioDraft.workspaceId,
-        enableShell: studioDraft.enableShell,
+        accessProfileId:
+          studioDraft.accessProfileId ||
+          defaultAccessProfileId ||
+          BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
         enableBrowser: studioDraft.enableBrowser,
         enableComputerUse: studioDraft.enableComputerUse,
         allowedMcpServerIds: studioDraft.selectedMcpServers,
@@ -1630,8 +1699,7 @@ export function AgentsHubPanel({
         description: studioDraft.description,
         systemPrompt: studioDraft.systemPrompt,
         executionMode: studioDraft.executionMode,
-        teamTemplate:
-          studioDraft.executionMode === "team" ? studioDraft.teamTemplate : undefined,
+        teamTemplate: studioDraft.executionMode === "team" ? studioDraft.teamTemplate : undefined,
         skills: studioDraft.selectedSkills,
         mcpServers: studioDraft.selectedMcpServers,
         runtimeDefaults: {
@@ -1647,8 +1715,7 @@ export function AgentsHubPanel({
         description: studioDraft.description,
         systemPrompt: studioDraft.systemPrompt,
         executionMode: studioDraft.executionMode,
-        teamTemplate:
-          studioDraft.executionMode === "team" ? studioDraft.teamTemplate : undefined,
+        teamTemplate: studioDraft.executionMode === "team" ? studioDraft.teamTemplate : undefined,
         skills: studioDraft.selectedSkills,
         mcpServers: studioDraft.selectedMcpServers,
         runtimeDefaults: {
@@ -1695,12 +1762,13 @@ export function AgentsHubPanel({
       throw new Error("Failed to save managed agent");
     }
 
-    const [detail, refreshedRoutines, refreshedEnvironments, refreshedWorkspaces] = await Promise.all([
-      window.electronAPI.getManagedAgent(savedAgentId),
-      window.electronAPI.listManagedAgentRoutines(savedAgentId),
-      window.electronAPI.listManagedEnvironments(),
-      window.electronAPI.listWorkspaces(),
-    ]);
+    const [detail, refreshedRoutines, refreshedEnvironments, refreshedWorkspaces] =
+      await Promise.all([
+        window.electronAPI.getManagedAgent(savedAgentId),
+        window.electronAPI.listManagedAgentRoutines(savedAgentId),
+        window.electronAPI.listManagedEnvironments(),
+        window.electronAPI.listWorkspaces(),
+      ]);
     const refreshedDraft = buildDraftFromAgent(
       detail?.agent || {
         id: savedAgentId,
@@ -1736,7 +1804,8 @@ export function AgentsHubPanel({
 
   const handleTestDraft = async () => {
     if (!studioDraft) return;
-    const prompt = studioTestPrompt.trim() || `Run the configured workflow for ${studioDraft.name}.`;
+    const prompt =
+      studioTestPrompt.trim() || `Run the configured workflow for ${studioDraft.name}.`;
     try {
       setSaving(true);
       setStudioTestRunning(true);
@@ -1771,11 +1840,7 @@ export function AgentsHubPanel({
     }
   };
 
-  const handleRunAgentInMainTask = async (
-    agent: ManagedAgent,
-    prompt: string,
-    title: string,
-  ) => {
+  const handleRunAgentInMainTask = async (agent: ManagedAgent, prompt: string, title: string) => {
     const trimmedPrompt = prompt.trim();
     if (!trimmedPrompt) return;
     if (agent.status === "suspended") {
@@ -1789,7 +1854,9 @@ export function AgentsHubPanel({
       const studio = getStudioConfig(agentDetails[agent.id]);
       const environmentId = studio?.defaultEnvironmentId;
       if (!environmentId) {
-        throw new Error("This agent does not have a default environment yet. Edit it and save first.");
+        throw new Error(
+          "This agent does not have a default environment yet. Edit it and save first.",
+        );
       }
 
       const session = await window.electronAPI.createManagedSession({
@@ -1813,7 +1880,9 @@ export function AgentsHubPanel({
         setAgentRunError("The agent run started, but no backing task was returned.");
       }
     } catch (panelError) {
-      setAgentRunError(panelError instanceof Error ? panelError.message : "Failed to run this agent");
+      setAgentRunError(
+        panelError instanceof Error ? panelError.message : "Failed to run this agent",
+      );
     } finally {
       setAgentRunSubmitting(false);
     }
@@ -1871,6 +1940,15 @@ export function AgentsHubPanel({
       studioDraft.deployment,
     );
     const approvalRuntimeMatrix = getApprovalRuntimeMatrix(studioDraft.approvalPolicy);
+    const selectableAccessProfiles = Array.from(
+      new Map(
+        [...BUILTIN_ACCESS_PROFILES, ...accessProfiles].map((profile) => [profile.id, profile]),
+      ).values(),
+    );
+    const selectedAccessProfileId =
+      studioDraft.accessProfileId ||
+      defaultAccessProfileId ||
+      BUILTIN_ACCESS_PROFILE_IDS.askForApproval;
     const draftPermissions = studioDraft.workspaceId
       ? workspacePermissions[studioDraft.workspaceId]
       : undefined;
@@ -1884,10 +1962,14 @@ export function AgentsHubPanel({
       : null;
     const studioTestTranscript = studioTestSessionId
       ? (studioSessionEvents[studioTestSessionId] || []).filter((event) =>
-          ["user.message", "assistant.message", "status.changed", "input.requested"].includes(event.type),
+          ["user.message", "assistant.message", "status.changed", "input.requested"].includes(
+            event.type,
+          ),
         )
       : [];
-    const studioTestWorkpaper = studioTestSessionId ? sessionWorkpapers[studioTestSessionId] : undefined;
+    const studioTestWorkpaper = studioTestSessionId
+      ? sessionWorkpapers[studioTestSessionId]
+      : undefined;
     return (
       <div className="agents-studio">
         <div className="agents-toolbar">
@@ -1916,7 +1998,8 @@ export function AgentsHubPanel({
               </div>
               {studioTestSession ? (
                 <span>
-                  {sessionStatusLabel(studioTestSession)} · {formatRelative(studioTestSession.updatedAt)}
+                  {sessionStatusLabel(studioTestSession)} ·{" "}
+                  {formatRelative(studioTestSession.updatedAt)}
                 </span>
               ) : (
                 <span>Save-once preview from the current draft</span>
@@ -1956,7 +2039,11 @@ export function AgentsHubPanel({
                           }`}
                         >
                           <span className="agents-studio-test-bubble-role">
-                            {isAssistant ? "Agent" : isUser ? "You" : event.type.replace(/\./g, " ")}
+                            {isAssistant
+                              ? "Agent"
+                              : isUser
+                                ? "You"
+                                : event.type.replace(/\./g, " ")}
                           </span>
                           <p>{getManagedSessionEventText(event)}</p>
                         </div>
@@ -1966,8 +2053,8 @@ export function AgentsHubPanel({
                     <div className="agents-studio-test-empty">
                       <strong>Test the current draft</strong>
                       <p>
-                        Save the agent and run a prompt here to verify instructions, tools, approvals,
-                        and deployment posture before publishing.
+                        Save the agent and run a prompt here to verify instructions, tools,
+                        approvals, and deployment posture before publishing.
                       </p>
                     </div>
                   )}
@@ -1988,7 +2075,9 @@ export function AgentsHubPanel({
                     {studioTestRunning ? "Running..." : "Run preview"}
                   </button>
                 </div>
-                {studioTestError ? <div className="agents-error-banner">{studioTestError}</div> : null}
+                {studioTestError ? (
+                  <div className="agents-error-banner">{studioTestError}</div>
+                ) : null}
               </div>
               <div className="agents-studio-test-summary">
                 <div className="agents-studio-test-summary-card">
@@ -2007,7 +2096,8 @@ export function AgentsHubPanel({
                 <div className="agents-studio-test-summary-card">
                   <span>Tools & skills</span>
                   <strong>
-                    {studioDraft.selectedToolFamilies.length} tool families · {studioDraft.selectedSkills.length} skills
+                    {studioDraft.selectedToolFamilies.length} tool families ·{" "}
+                    {studioDraft.selectedSkills.length} skills
                   </strong>
                   <p>
                     {studioDraft.selectedToolFamilies.length > 0
@@ -2022,7 +2112,10 @@ export function AgentsHubPanel({
                   </strong>
                   <p>
                     {studioDraft.fileRefs.length > 0
-                      ? studioDraft.fileRefs.map((file) => file.name).slice(0, 3).join(", ")
+                      ? studioDraft.fileRefs
+                          .map((file) => file.name)
+                          .slice(0, 3)
+                          .join(", ")
                       : "No reference files attached yet."}
                   </p>
                 </div>
@@ -2210,7 +2303,9 @@ export function AgentsHubPanel({
                   </button>
                 </div>
               ))}
-              {studioDraft.fileRefs.length === 0 && <span className="agents-empty-note">No files attached yet.</span>}
+              {studioDraft.fileRefs.length === 0 && (
+                <span className="agents-empty-note">No files attached yet.</span>
+              )}
             </div>
           </section>
 
@@ -2287,7 +2382,10 @@ export function AgentsHubPanel({
             </div>
             <div className="agents-list">
               {studioDraft.routines.map((routine, index) => (
-                <div key={routine.id || `${routine.trigger.type}-${index}`} className="agents-routine-card">
+                <div
+                  key={routine.id || `${routine.trigger.type}-${index}`}
+                  className="agents-routine-card"
+                >
                   <div className="agents-field-grid">
                     <label>
                       <span>Name</span>
@@ -2314,7 +2412,8 @@ export function AgentsHubPanel({
                               entryIndex === index
                                 ? {
                                     ...makeBlankRoutine(
-                                      event.target.value as ManagedAgentRoutineTriggerConfig["type"],
+                                      event.target
+                                        .value as ManagedAgentRoutineTriggerConfig["type"],
                                     ),
                                     id: entry.id,
                                     name: entry.name,
@@ -2394,7 +2493,10 @@ export function AgentsHubPanel({
                                 entryIndex === index
                                   ? {
                                       ...entry,
-                                      trigger: { ...entry.trigger, channelType: event.target.value },
+                                      trigger: {
+                                        ...entry.trigger,
+                                        channelType: event.target.value,
+                                      },
                                     }
                                   : entry,
                               ),
@@ -2460,7 +2562,10 @@ export function AgentsHubPanel({
                                 entryIndex === index
                                   ? {
                                       ...entry,
-                                      trigger: { ...entry.trigger, connectorId: event.target.value },
+                                      trigger: {
+                                        ...entry.trigger,
+                                        connectorId: event.target.value,
+                                      },
                                     }
                                   : entry,
                               ),
@@ -2497,7 +2602,9 @@ export function AgentsHubPanel({
                       onClick={() =>
                         setStudioDraft({
                           ...studioDraft,
-                          routines: studioDraft.routines.filter((_, entryIndex) => entryIndex !== index),
+                          routines: studioDraft.routines.filter(
+                            (_, entryIndex) => entryIndex !== index,
+                          ),
                         })
                       }
                     >
@@ -2536,7 +2643,10 @@ export function AgentsHubPanel({
                           ? (studioDraft.deployment.surfaces || []).filter(
                               (entry) => entry !== surface.id,
                             )
-                          : [...(studioDraft.deployment.surfaces || []), surface.id as "chatgpt" | "slack"],
+                          : [
+                              ...(studioDraft.deployment.surfaces || []),
+                              surface.id as "chatgpt" | "slack",
+                            ],
                       },
                     })
                   }
@@ -2618,7 +2728,9 @@ export function AgentsHubPanel({
                     onClick={() =>
                       setStudioDraft({
                         ...studioDraft,
-                        channelTargets: studioDraft.channelTargets.filter((entry) => entry.id !== target.id),
+                        channelTargets: studioDraft.channelTargets.filter(
+                          (entry) => entry.id !== target.id,
+                        ),
                       })
                     }
                   >
@@ -2673,9 +2785,9 @@ export function AgentsHubPanel({
                       ...studioDraft,
                       approvalPolicy: {
                         ...studioDraft.approvalPolicy,
-                        requireApprovalFor: (studioDraft.approvalPolicy.requireApprovalFor || []).includes(
-                          action,
-                        )
+                        requireApprovalFor: (
+                          studioDraft.approvalPolicy.requireApprovalFor || []
+                        ).includes(action)
                           ? (studioDraft.approvalPolicy.requireApprovalFor || []).filter(
                               (entry) => entry !== action,
                             )
@@ -2758,7 +2870,9 @@ export function AgentsHubPanel({
                             row.behavior === "require_approval" ? "danger" : "safe"
                           }`}
                         >
-                          {row.behavior === "require_approval" ? "Requires approval" : "Auto-approves"}
+                          {row.behavior === "require_approval"
+                            ? "Requires approval"
+                            : "Auto-approves"}
                         </span>
                       </div>
                     </div>
@@ -2912,17 +3026,28 @@ export function AgentsHubPanel({
                 ))}
               </select>
             </label>
+            <label>
+              <span>Access profile</span>
+              <select
+                value={selectedAccessProfileId}
+                onChange={(event) =>
+                  setStudioDraft({
+                    ...studioDraft,
+                    accessProfileId: event.target.value as AccessProfileId,
+                  })
+                }
+              >
+                {selectableAccessProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.label || getAccessProfileLabel(profile.id)}
+                  </option>
+                ))}
+              </select>
+              <small className="agents-inline-permission-note">
+                Command tools, filesystem access, network access, and approvals follow this profile.
+              </small>
+            </label>
             <div className="agents-checkbox-row">
-              <label className="agents-checkbox">
-                <input
-                  type="checkbox"
-                  checked={studioDraft.enableShell}
-                  onChange={(event) =>
-                    setStudioDraft({ ...studioDraft, enableShell: event.target.checked })
-                  }
-                />
-                <span>Shell</span>
-              </label>
               <label className="agents-checkbox">
                 <input
                   type="checkbox"
@@ -3012,7 +3137,11 @@ export function AgentsHubPanel({
             <button
               className="agents-create-screen-submit"
               onClick={() => void handleGenerateBuilderPlan()}
-              disabled={!workflowComposer.trim() || builderStage === "thinking" || builderStage === "creating"}
+              disabled={
+                !workflowComposer.trim() ||
+                builderStage === "thinking" ||
+                builderStage === "creating"
+              }
               aria-label="Generate agent plan"
             >
               <ArrowUp size={18} />
@@ -3033,7 +3162,9 @@ export function AgentsHubPanel({
                 "Reading the request",
                 "Checking available tools, skills, and integrations",
                 "Choosing approval and privacy defaults",
-                builderStage === "creating" ? "Saving the runnable agent" : "Preparing the build plan",
+                builderStage === "creating"
+                  ? "Saving the runnable agent"
+                  : "Preparing the build plan",
               ].map((step, index) => (
                 <div key={step} className="agents-builder-progress-row">
                   {builderStage === "creating" || index < 3 ? (
@@ -3065,7 +3196,9 @@ export function AgentsHubPanel({
 
               <div className="agents-builder-plan-pills">
                 {builderPlan.selectedToolFamilies.slice(0, 8).map((family) => (
-                  <span key={family}>{TOOL_FAMILY_OPTIONS.find((option) => option.id === family)?.label || family}</span>
+                  <span key={family}>
+                    {TOOL_FAMILY_OPTIONS.find((option) => option.id === family)?.label || family}
+                  </span>
                 ))}
                 {builderPlan.selectedMcpServers.map((serverId) => (
                   <span key={serverId}>Connected: {serverId}</span>
@@ -3117,7 +3250,11 @@ export function AgentsHubPanel({
                             className={requirement.selectedOptionId === option.id ? "active" : ""}
                             onClick={() =>
                               setBuilderPlan(
-                                applyBuilderSelectionRequirement(builderPlan, requirement.id, option.id),
+                                applyBuilderSelectionRequirement(
+                                  builderPlan,
+                                  requirement.id,
+                                  option.id,
+                                ),
                               )
                             }
                           >
@@ -3135,7 +3272,10 @@ export function AgentsHubPanel({
                 <section className="agents-builder-connect-list">
                   <h3>Connect next</h3>
                   {builderPlan.missingConnections.map((connection) => (
-                    <div key={`${connection.kind}:${connection.id}`} className="agents-builder-connect-row">
+                    <div
+                      key={`${connection.kind}:${connection.id}`}
+                      className="agents-builder-connect-row"
+                    >
                       <div>
                         <strong>{connection.label}</strong>
                         <span>{connection.reason}</span>
@@ -3237,10 +3377,9 @@ export function AgentsHubPanel({
     const runtimeCatalog = runtimeCatalogs[selectedAgent.id];
     const runtimeCatalogError = runtimeCatalogErrors[selectedAgent.id];
     const missingConnectionMap = new Map(
-      [
-        ...(studio?.missingConnections || []),
-        ...(runtimeCatalog?.missingConnections || []),
-      ].map((connection) => [`${connection.kind}:${connection.id}`, connection]),
+      [...(studio?.missingConnections || []), ...(runtimeCatalog?.missingConnections || [])].map(
+        (connection) => [`${connection.kind}:${connection.id}`, connection],
+      ),
     );
     const missingConnections = Array.from(missingConnectionMap.values());
     const runtimeToolLabels = sortRuntimeToolCatalogEntries(runtimeCatalog?.chatgpt || [])
@@ -3265,10 +3404,11 @@ export function AgentsHubPanel({
     const auditEntries = agentAudit[selectedAgent.id] || [];
     const fileRefs = studio?.fileRefs || [];
     const memoryMode = studio?.memoryConfig?.mode;
-    const instructionParagraphs = version?.systemPrompt
-      .split(/\n{2,}/)
-      .map((paragraph) => paragraph.trim())
-      .filter(Boolean) || [];
+    const instructionParagraphs =
+      version?.systemPrompt
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.trim())
+        .filter(Boolean) || [];
     const runAgentPrompt = `Run the configured workflow for ${selectedAgent.name}.`;
     const canRunSelectedAgent =
       selectedAgent.status !== "suspended" && !(permissions ? !permissions.canRunAgents : false);
@@ -3305,7 +3445,8 @@ export function AgentsHubPanel({
               <button
                 onClick={() => void handlePublishAgent(selectedAgent.id)}
                 disabled={
-                  selectedAgent.status === "active" || (permissions ? !permissions.canPublishAgents : false)
+                  selectedAgent.status === "active" ||
+                  (permissions ? !permissions.canPublishAgents : false)
                 }
               >
                 Publish
@@ -3313,7 +3454,8 @@ export function AgentsHubPanel({
               <button
                 onClick={() => void handleSuspendAgent(selectedAgent.id)}
                 disabled={
-                  selectedAgent.status === "suspended" || (permissions ? !permissions.canPublishAgents : false)
+                  selectedAgent.status === "suspended" ||
+                  (permissions ? !permissions.canPublishAgents : false)
                 }
               >
                 Suspend
@@ -3398,13 +3540,19 @@ export function AgentsHubPanel({
                 <button className="agents-agent-channel-card">
                   <Slack size={20} />
                   <strong>{slackTargets[0].channelName}</strong>
-                  <span>{slackTargets[0].misconfigured ? "Needs attention" : "Responds to messages"}</span>
+                  <span>
+                    {slackTargets[0].misconfigured ? "Needs attention" : "Responds to messages"}
+                  </span>
                 </button>
               ) : (
                 <button className="agents-agent-channel-card">
                   <Slack size={20} />
                   <strong>Slack</strong>
-                  <span>{(studio?.deployment?.surfaces || []).includes("slack") ? "No channel selected" : "Deployment off"}</span>
+                  <span>
+                    {(studio?.deployment?.surfaces || []).includes("slack")
+                      ? "No channel selected"
+                      : "Deployment off"}
+                  </span>
                 </button>
               )}
               <button className="agents-agent-channel-card">
@@ -3445,7 +3593,10 @@ export function AgentsHubPanel({
               <h2>Connect next</h2>
               <div className="agents-agent-connect-list">
                 {missingConnections.map((connection) => (
-                  <div key={`${connection.kind}:${connection.id}`} className="agents-agent-connect-row">
+                  <div
+                    key={`${connection.kind}:${connection.id}`}
+                    className="agents-agent-connect-row"
+                  >
                     <div>
                       <strong>{connection.label}</strong>
                       <span>{connection.reason}</span>
@@ -3463,19 +3614,21 @@ export function AgentsHubPanel({
             <div className="agents-agent-resource-row">
               <span>Tools</span>
               <div>
-                {toolLabels.length > 0 ? (
-                  toolLabels.map((tool) => (
-                    <button key={tool.key} className="agents-agent-pill">
-                      <Wrench size={15} />
-                      {tool.label}
-                    </button>
-                  ))
-                ) : null}
+                {toolLabels.length > 0
+                  ? toolLabels.map((tool) => (
+                      <button key={tool.key} className="agents-agent-pill">
+                        <Wrench size={15} />
+                        {tool.label}
+                      </button>
+                    ))
+                  : null}
                 <button className="agents-agent-add">
                   <Plus size={15} />
                   Add tool
                 </button>
-                {toolStatusNote ? <span className="agents-agent-inline-note">{toolStatusNote}</span> : null}
+                {toolStatusNote ? (
+                  <span className="agents-agent-inline-note">{toolStatusNote}</span>
+                ) : null}
               </div>
             </div>
             <div className="agents-agent-resource-row">
@@ -3601,7 +3754,9 @@ export function AgentsHubPanel({
             ) : null}
           </div>
           <div className="agents-showcase-visual">
-            <div className="agents-showcase-message">{activeShowcaseTemplate.systemPrompt.split(".")[0]}</div>
+            <div className="agents-showcase-message">
+              {activeShowcaseTemplate.systemPrompt.split(".")[0]}
+            </div>
             <div className="agents-showcase-core-card">
               {(() => {
                 const TemplateGlyph = getTemplateGlyph(activeShowcaseTemplate);
@@ -3618,28 +3773,31 @@ export function AgentsHubPanel({
                 );
               })()}
             </div>
-            {showcaseSideTemplates[0] && (() => {
-              const template = showcaseSideTemplates[0];
-              const TemplateGlyph = getTemplateGlyph(template);
-              return (
-                <button
-                  key={template.id}
-                  className="agents-showcase-side-card"
-                  onClick={() =>
-                    setStudioDraft(buildDraftFromTemplateWithRoles(template, workspaces, agentRoles))
-                  }
-                >
-                  <div className="agents-showcase-side-icon">
-                    <TemplateGlyph size={18} />
-                  </div>
-                  <div>
-                    <strong>{template.name}</strong>
-                    <span>{template.description}</span>
-                  </div>
-                </button>
-              );
-            })()}
-          <div className="agents-showcase-status">
+            {showcaseSideTemplates[0] &&
+              (() => {
+                const template = showcaseSideTemplates[0];
+                const TemplateGlyph = getTemplateGlyph(template);
+                return (
+                  <button
+                    key={template.id}
+                    className="agents-showcase-side-card"
+                    onClick={() =>
+                      setStudioDraft(
+                        buildDraftFromTemplateWithRoles(template, workspaces, agentRoles),
+                      )
+                    }
+                  >
+                    <div className="agents-showcase-side-icon">
+                      <TemplateGlyph size={18} />
+                    </div>
+                    <div>
+                      <strong>{template.name}</strong>
+                      <span>{template.description}</span>
+                    </div>
+                  </button>
+                );
+              })()}
+            <div className="agents-showcase-status">
               {(
                 activeShowcaseTemplate.requiredConnectorIds ||
                 activeShowcaseTemplate.studio?.requiredConnectorIds ||
@@ -3656,7 +3814,9 @@ export function AgentsHubPanel({
               ).length === 0 ? (
                 <span>No connector required</span>
               ) : null}
-              <span>{activeShowcaseTemplate.studio?.scheduleConfig?.enabled ? "Scheduled" : "On demand"}</span>
+              <span>
+                {activeShowcaseTemplate.studio?.scheduleConfig?.enabled ? "Scheduled" : "On demand"}
+              </span>
             </div>
           </div>
         </section>
@@ -3670,7 +3830,9 @@ export function AgentsHubPanel({
                 ? "Convert Agent Persona"
                 : "Convert automation/profile"}
             </h2>
-            <span>Bring legacy assets into the managed-agent model without deleting the originals.</span>
+            <span>
+              Bring legacy assets into the managed-agent model without deleting the originals.
+            </span>
           </div>
           <div className="agents-list">
             {(conversionPanel === "agent-role" ? agentRoles : automationProfiles)
@@ -3679,7 +3841,9 @@ export function AgentsHubPanel({
                 <div key={entry.id} className="agents-list-row">
                   <div>
                     <strong>{entry.displayName || entry.id}</strong>
-                    <span>{entry.description || entry.profile || "No description configured."}</span>
+                    <span>
+                      {entry.description || entry.profile || "No description configured."}
+                    </span>
                   </div>
                   <button
                     className="agents-link-btn"
@@ -3775,7 +3939,9 @@ export function AgentsHubPanel({
                   className="agents-template-card"
                   style={{ ["--template-accent" as string]: template.color }}
                   onClick={() =>
-                    setStudioDraft(buildDraftFromTemplateWithRoles(template, workspaces, agentRoles))
+                    setStudioDraft(
+                      buildDraftFromTemplateWithRoles(template, workspaces, agentRoles),
+                    )
                   }
                 >
                   <span className="agents-template-icon">
@@ -3829,10 +3995,7 @@ export function AgentsHubPanel({
                   onClick={() => setSelectedAgentId(agent.id)}
                 >
                   <div className="agents-library-card-top">
-                    <span
-                      className="agents-library-card-icon"
-                      style={{ color: cardColor }}
-                    >
+                    <span className="agents-library-card-icon" style={{ color: cardColor }}>
                       <TemplateGlyph size={28} />
                     </span>
                   </div>
@@ -3856,7 +4019,8 @@ export function AgentsHubPanel({
             })}
             {visibleMissionControlAgentRoles.map((agentRole) => {
               const Icon = getEmojiIcon(agentRole.icon || "🤖");
-              const cadence = agentRole.heartbeatPolicy?.cadenceMinutes || agentRole.pulseEveryMinutes;
+              const cadence =
+                agentRole.heartbeatPolicy?.cadenceMinutes || agentRole.pulseEveryMinutes;
               return (
                 <button
                   key={`mission-control-${agentRole.id}`}

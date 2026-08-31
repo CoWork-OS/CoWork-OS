@@ -48,26 +48,50 @@ interface TaggedPlaceholder {
 
 const POOL: TaggedPlaceholder[] = [
   // ── Universal (shown to everyone, especially cold-start) ──────────────
-  { text: "Summarize this PDF, extract action items, and draft the follow-up", personas: ["universal"] },
-  { text: "Turn these bullet points into a slide deck with a clear story", personas: ["universal"] },
+  {
+    text: "Summarize this PDF, extract action items, and draft the follow-up",
+    personas: ["universal"],
+  },
+  {
+    text: "Turn these bullet points into a slide deck with a clear story",
+    personas: ["universal"],
+  },
   { text: "Compare these two approaches and recommend one", personas: ["universal"] },
   { text: "Translate this document and preserve the formatting", personas: ["universal"] },
   { text: "Review tomorrow's calendar and tell me what needs prep", personas: ["universal"] },
   { text: "Research the latest on this topic and cite the best sources", personas: ["universal"] },
   { text: "Organize this folder and rename files consistently", personas: ["universal"] },
-  { text: "Generate my daily briefing from inbox, calendar, and commitments", personas: ["universal"] },
-  { text: "Review my goals for this quarter and suggest the next best step", personas: ["universal"] },
+  {
+    text: "Generate my daily briefing from inbox, calendar, and commitments",
+    personas: ["universal"],
+  },
+  {
+    text: "Review my goals for this quarter and suggest the next best step",
+    personas: ["universal"],
+  },
   { text: "Show my open commitments and flag anything at risk this week", personas: ["universal"] },
-  { text: "Dispatch agents to research this and synthesize one recommendation", personas: ["universal"] },
+  {
+    text: "Dispatch agents to research this and synthesize one recommendation",
+    personas: ["universal"],
+  },
   { text: "Run this task autonomously and report back with outcomes", personas: ["universal"] },
   { text: "Tell me what I finished this week and what is still blocked", personas: ["universal"] },
-  { text: "Build a spreadsheet from this data and surface the main trends", personas: ["universal"] },
+  {
+    text: "Build a spreadsheet from this data and surface the main trends",
+    personas: ["universal"],
+  },
   { text: "Proofread this and tighten the writing", personas: ["universal"] },
   { text: "Convert this report into an exec-ready one-pager", personas: ["universal"] },
-  { text: "Summarize this thread, extract decisions, and list next steps", personas: ["universal"] },
+  {
+    text: "Summarize this thread, extract decisions, and list next steps",
+    personas: ["universal"],
+  },
   { text: "Review my inbox, highlight urgent threads, and draft replies", personas: ["universal"] },
   { text: "Turn this into a recurring automation or reminder", personas: ["universal"] },
-  { text: "Turn this conversation into a Mission Control issue and suggest an owner", personas: ["universal"] },
+  {
+    text: "Turn this conversation into a Mission Control issue and suggest an owner",
+    personas: ["universal"],
+  },
   { text: "Plan my week around deadlines, meetings, and follow-ups", personas: ["universal"] },
 
   // ── Engineering ───────────────────────────────────────────────────────
@@ -75,11 +99,23 @@ const POOL: TaggedPlaceholder[] = [
   { text: "Compare these two implementations and recommend one", personas: ["engineering"] },
   { text: "Refactor this function without changing behavior", personas: ["engineering"] },
   { text: "Audit this codebase for security and reliability risks", personas: ["engineering"] },
-  { text: "Design the API contract and sample payloads for this feature", personas: ["engineering"] },
+  {
+    text: "Design the API contract and sample payloads for this feature",
+    personas: ["engineering"],
+  },
   { text: "Find recent code changes that still lack test coverage", personas: ["engineering"] },
-  { text: "Generate the migration and rollout plan for this schema change", personas: ["engineering"] },
-  { text: "Run the test suite, group the failures, and identify the root cause", personas: ["engineering"] },
-  { text: "Summarize the last week of git activity and notable changes", personas: ["engineering"] },
+  {
+    text: "Generate the migration and rollout plan for this schema change",
+    personas: ["engineering"],
+  },
+  {
+    text: "Run the test suite, group the failures, and identify the root cause",
+    personas: ["engineering"],
+  },
+  {
+    text: "Summarize the last week of git activity and notable changes",
+    personas: ["engineering"],
+  },
   { text: "Open a GitHub issue with repro steps and impacted files", personas: ["engineering"] },
   { text: "Review this PR for bugs, regressions, and missing tests", personas: ["engineering"] },
   { text: "Set up CI checks for build, test, and lint", personas: ["engineering"] },
@@ -91,14 +127,20 @@ const POOL: TaggedPlaceholder[] = [
   { text: "Analyze the latest AAPL earnings and flag the key takeaways", personas: ["trading"] },
   { text: "Compare my portfolio allocation against the S&P 500", personas: ["trading"] },
   { text: "Summarize the latest Fed signals and likely market impact", personas: ["trading"] },
-  { text: "Backtest this moving-average crossover strategy and show the tradeoffs", personas: ["trading"] },
+  {
+    text: "Backtest this moving-average crossover strategy and show the tradeoffs",
+    personas: ["trading"],
+  },
   { text: "Pull the latest 10-K and highlight the major risk factors", personas: ["trading"] },
   { text: "Review TSLA options flow this week and flag unusual activity", personas: ["trading"] },
   {
     text: "Build a DCF model from these financials and stress-test the assumptions",
     personas: ["trading"],
   },
-  { text: "Track my open positions and flag stop-loss or take-profit triggers", personas: ["trading"] },
+  {
+    text: "Track my open positions and flag stop-loss or take-profit triggers",
+    personas: ["trading"],
+  },
   { text: "Summarize the macro outlook for emerging markets this week", personas: ["trading"] },
   { text: "Calculate Sharpe, drawdown, and volatility for this portfolio", personas: ["trading"] },
   { text: "Screen for stocks with low P/E and accelerating revenue", personas: ["trading"] },
@@ -106,7 +148,10 @@ const POOL: TaggedPlaceholder[] = [
 
   // ── Education ─────────────────────────────────────────────────────────
   { text: "Create a lesson plan for intro to probability", personas: ["education"] },
-  { text: "Generate 20 practice problems on quadratic equations with solutions", personas: ["education"] },
+  {
+    text: "Generate 20 practice problems on quadratic equations with solutions",
+    personas: ["education"],
+  },
   { text: "Explain quantum entanglement like I'm 15", personas: ["education"] },
   { text: "Turn these lecture notes into a study guide", personas: ["education"] },
   { text: "Create a grading rubric for this essay assignment", personas: ["education"] },
@@ -122,7 +167,10 @@ const POOL: TaggedPlaceholder[] = [
   { text: "Draft five ad variations and pick the strongest angle", personas: ["marketing"] },
   { text: "Audit this landing page for conversion issues and quick wins", personas: ["marketing"] },
   { text: "Create a four-week content calendar with themes and owners", personas: ["marketing"] },
-  { text: "Analyze our email performance and suggest the next experiments", personas: ["marketing"] },
+  {
+    text: "Analyze our email performance and suggest the next experiments",
+    personas: ["marketing"],
+  },
   { text: "Write launch posts for LinkedIn, X, and email", personas: ["marketing"] },
   { text: "Compare our SEO position against these competitors", personas: ["marketing"] },
   { text: "Build a customer persona from this survey data", personas: ["marketing", "data"] },
@@ -147,7 +195,10 @@ const POOL: TaggedPlaceholder[] = [
   // ── Product management ────────────────────────────────────────────────
   { text: "Write a PRD for this feature and define the open questions", personas: ["product"] },
   { text: "Prioritize this backlog using RICE and explain the tradeoffs", personas: ["product"] },
-  { text: "Draft user stories and acceptance criteria for the checkout redesign", personas: ["product"] },
+  {
+    text: "Draft user stories and acceptance criteria for the checkout redesign",
+    personas: ["product"],
+  },
   { text: "Build a competitive feature matrix for this market", personas: ["product", "founder"] },
   {
     text: "Create a go-to-market checklist for the beta launch",
@@ -155,13 +206,19 @@ const POOL: TaggedPlaceholder[] = [
   },
   { text: "Summarize last week's user feedback into clear themes", personas: ["product"] },
   { text: "Define success metrics, guardrails, and launch criteria", personas: ["product"] },
-  { text: "Write release notes and a rollout summary for this version", personas: ["product", "engineering"] },
+  {
+    text: "Write release notes and a rollout summary for this version",
+    personas: ["product", "engineering"],
+  },
 
   // ── Founders & startups ───────────────────────────────────────────────
   { text: "Draft this month's investor update with key metrics and asks", personas: ["founder"] },
   { text: "Estimate TAM/SAM/SOM for this market opportunity", personas: ["founder"] },
   { text: "Write the executive summary for our pitch deck", personas: ["founder"] },
-  { text: "Build a three-year financial model with best and worst cases", personas: ["founder", "trading"] },
+  {
+    text: "Build a three-year financial model with best and worst cases",
+    personas: ["founder", "trading"],
+  },
   { text: "Analyze this term sheet and flag unusual clauses", personas: ["founder", "legal"] },
   { text: "Create a competitive landscape map for our space", personas: ["founder"] },
   { text: "Draft a board meeting agenda and talking points", personas: ["founder"] },
@@ -181,7 +238,10 @@ const POOL: TaggedPlaceholder[] = [
   { text: "Create interview questions and a scorecard for this PM role", personas: ["hr"] },
   { text: "Draft a performance review template with clear criteria", personas: ["hr"] },
   { text: "Build an onboarding checklist for new hires", personas: ["hr"] },
-  { text: "Summarize this employee engagement survey and highlight risks", personas: ["hr", "data"] },
+  {
+    text: "Summarize this employee engagement survey and highlight risks",
+    personas: ["hr", "data"],
+  },
   { text: "Draft a company-wide announcement about the new policy", personas: ["hr"] },
 
   // ── Legal & compliance ────────────────────────────────────────────────
@@ -189,7 +249,10 @@ const POOL: TaggedPlaceholder[] = [
   { text: "Summarize this privacy policy in plain English", personas: ["legal"] },
   { text: "Draft a data processing agreement template", personas: ["legal"] },
   { text: "Check this copy for regulatory or compliance issues", personas: ["legal"] },
-  { text: "Compare these two license options for our use case", personas: ["legal", "engineering"] },
+  {
+    text: "Compare these two license options for our use case",
+    personas: ["legal", "engineering"],
+  },
 
   // ── Data & analytics ──────────────────────────────────────────────────
   { text: "Analyze this CSV and surface the key insights", personas: ["data"] },
@@ -197,7 +260,10 @@ const POOL: TaggedPlaceholder[] = [
   { text: "Write SQL to answer these business questions", personas: ["data"] },
   { text: "Find anomalies in this time-series dataset", personas: ["data"] },
   { text: "Create a data dictionary for this schema", personas: ["data", "engineering"] },
-  { text: "Visualize the funnel drop-off and explain the likely causes", personas: ["data", "marketing"] },
+  {
+    text: "Visualize the funnel drop-off and explain the likely causes",
+    personas: ["data", "marketing"],
+  },
   { text: "Clean and normalize this spreadsheet", personas: ["data"] },
   { text: "Recommend the right chart for this dataset", personas: ["data"] },
 
@@ -218,7 +284,10 @@ const POOL: TaggedPlaceholder[] = [
   { text: "Map out the supply chain for this product", personas: ["operations"] },
   { text: "Create a vendor evaluation scorecard", personas: ["operations"] },
   { text: "Build a Q2 capacity planning sheet", personas: ["operations"] },
-  { text: "Turn this operational issue into an escalation plan with owners", personas: ["operations"] },
+  {
+    text: "Turn this operational issue into an escalation plan with owners",
+    personas: ["operations"],
+  },
   { text: "Create a risk register for this project", personas: ["operations", "product"] },
 
   // ── Customer support ──────────────────────────────────────────────────
@@ -232,7 +301,10 @@ const POOL: TaggedPlaceholder[] = [
   { text: "Plan a seven-day Tokyo itinerary with travel times and budget", personas: ["personal"] },
   { text: "Create a weekly meal plan with a grocery list", personas: ["personal"] },
   { text: "Build a monthly budget tracker from my expenses", personas: ["personal"] },
-  { text: "Help me learn Rust in 30 days with a weekly plan", personas: ["personal", "engineering"] },
+  {
+    text: "Help me learn Rust in 30 days with a weekly plan",
+    personas: ["personal", "engineering"],
+  },
   { text: "Organize my reading list by priority and topic", personas: ["personal"] },
   { text: "Make a pros-and-cons decision memo from these notes", personas: ["personal"] },
 
@@ -260,7 +332,10 @@ const POOL: TaggedPlaceholder[] = [
     personas: ["creative", "marketing"],
   },
   { text: "Create a podcast episode outline on remote work", personas: ["creative"] },
-  { text: "Draft a storyboard and shot list for this ad concept", personas: ["creative", "marketing"] },
+  {
+    text: "Draft a storyboard and shot list for this ad concept",
+    personas: ["creative", "marketing"],
+  },
   { text: "Generate tagline options for the rebrand", personas: ["creative", "marketing"] },
   { text: "Give me three short story prompts to get started", personas: ["creative"] },
   { text: "Create a mood board brief from these references", personas: ["creative", "design"] },

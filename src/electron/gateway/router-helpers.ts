@@ -13,7 +13,7 @@ import * as path from "path";
 export function getCoworkVersion(): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     const app = electron?.app;
     if (typeof app?.getVersion === "function") {

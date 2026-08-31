@@ -18,7 +18,9 @@ export interface MailboxProviderClient {
   listFolders?(): Promise<MailboxFolder[]>;
   listLabels?(): Promise<MailboxLabel[]>;
   searchProviderHistory?(query: string, limit: number): Promise<MailboxThreadDetail[]>;
-  sendDraft?(draft: MailboxComposeDraft): Promise<{ providerMessageId?: string; threadId?: string }>;
+  sendDraft?(
+    draft: MailboxComposeDraft,
+  ): Promise<{ providerMessageId?: string; threadId?: string }>;
   saveDraft?(draft: MailboxComposeDraft): Promise<{ providerDraftId?: string }>;
   deleteDraft?(draft: MailboxComposeDraft): Promise<void>;
   applyThreadAction?(
@@ -39,7 +41,9 @@ export function resolveMailboxProviderBackend(input: {
   return "imap_smtp";
 }
 
-export function getMailboxProviderCapabilities(backend: MailboxProviderBackend): MailboxProviderCapability[] {
+export function getMailboxProviderCapabilities(
+  backend: MailboxProviderBackend,
+): MailboxProviderCapability[] {
   switch (backend) {
     case "gmail_api":
       return [
@@ -79,15 +83,7 @@ export function getMailboxProviderCapabilities(backend: MailboxProviderBackend):
         "undo_send",
       ];
     case "imap_smtp":
-      return [
-        "sync",
-        "send",
-        "reply_all",
-        "forward",
-        "mark_read",
-        "mark_unread",
-        "folders",
-      ];
+      return ["sync", "send", "reply_all", "forward", "mark_read", "mark_unread", "folders"];
     case "agentmail":
       return [
         "sync",

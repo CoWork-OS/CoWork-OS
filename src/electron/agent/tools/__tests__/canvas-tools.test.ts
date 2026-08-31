@@ -73,20 +73,20 @@ describe("CanvasTools.pushContent", () => {
     });
 
     const html =
-      "<!DOCTYPE html><html><head><link rel=\"stylesheet\" href=\"css/win95.css\"></head><body>Win95</body></html>";
+      '<!DOCTYPE html><html><head><link rel="stylesheet" href="css/win95.css"></head><body>Win95</body></html>';
     await tools.pushContent("session-1", html, "index.html");
 
     expect(readFileMock).toHaveBeenCalledWith(cssPath, "utf-8");
     expect(manager.pushContent).toHaveBeenCalledTimes(1);
     const pushedHtml = String(manager.pushContent.mock.calls[0][1] || "");
-    expect(pushedHtml).toContain("<style data-canvas-inline-source=\"css/win95.css\">");
+    expect(pushedHtml).toContain('<style data-canvas-inline-source="css/win95.css">');
     expect(pushedHtml).toContain("body { color: red; }");
-    expect(pushedHtml).not.toContain("<link rel=\"stylesheet\"");
+    expect(pushedHtml).not.toContain('<link rel="stylesheet"');
   });
 
   it("does not inline external stylesheet links", async () => {
     const html =
-      "<!DOCTYPE html><html><head><link rel=\"stylesheet\" href=\"https://cdn.example.com/app.css\"></head><body>Win95</body></html>";
+      '<!DOCTYPE html><html><head><link rel="stylesheet" href="https://cdn.example.com/app.css"></head><body>Win95</body></html>';
 
     await tools.pushContent("session-1", html, "index.html");
 

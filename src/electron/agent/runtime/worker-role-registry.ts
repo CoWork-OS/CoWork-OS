@@ -36,9 +36,7 @@ const RESEARCHER_DENY_LIST = [
   "switch_workspace",
 ];
 
-const IMPLEMENTER_DENY_LIST = [
-  "group:meta",
-];
+const IMPLEMENTER_DENY_LIST = ["group:meta"];
 
 const SYNTHESIZER_DENY_LIST = [
   "delete_file",
@@ -141,8 +139,15 @@ export function getWorkerRoleSpec(kind: WorkerRoleKind): WorkerRoleSpec {
 }
 
 export function resolveWorkerRoleKind(value?: string | null): WorkerRoleKind | undefined {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "researcher" || normalized === "implementer" || normalized === "verifier" || normalized === "synthesizer") {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (
+    normalized === "researcher" ||
+    normalized === "implementer" ||
+    normalized === "verifier" ||
+    normalized === "synthesizer"
+  ) {
     return normalized;
   }
   return undefined;
@@ -151,7 +156,9 @@ export function resolveWorkerRoleKind(value?: string | null): WorkerRoleKind | u
 export function resolveDelegationWorkerRoleInput(
   value?: string | null,
 ): DelegationWorkerRole | undefined {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   if (normalized === "auto") return "auto";
   return resolveWorkerRoleKind(normalized);
 }
@@ -161,7 +168,9 @@ export function resolveDefaultWorkerRoleKind(): WorkerRoleKind {
 }
 
 export function inferWorkerRoleKindFromPrompt(prompt: string): WorkerRoleKind {
-  const normalized = String(prompt || "").trim().toLowerCase();
+  const normalized = String(prompt || "")
+    .trim()
+    .toLowerCase();
   if (!normalized) return resolveDefaultWorkerRoleKind();
 
   if (
@@ -230,7 +239,9 @@ export function resolveWorkerRoleAgentConfig(
     next.executionMode = spec.executionMode;
   }
 
-  const restrictions = new Set<string>(Array.isArray(next.toolRestrictions) ? next.toolRestrictions : []);
+  const restrictions = new Set<string>(
+    Array.isArray(next.toolRestrictions) ? next.toolRestrictions : [],
+  );
   for (const entry of spec.toolRestrictions) {
     restrictions.add(entry);
   }
@@ -277,8 +288,5 @@ export function parseVerificationVerdict(summary: string): VerificationVerdict {
 
 export function buildWorkerRoleInstructionPrefix(workerRole: WorkerRoleKind): string {
   const spec = getWorkerRoleSpec(workerRole);
-  return [
-    `You are acting as ${spec.displayName}.`,
-    spec.description,
-  ].join(" ");
+  return [`You are acting as ${spec.displayName}.`, spec.description].join(" ");
 }

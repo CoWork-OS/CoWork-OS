@@ -111,7 +111,10 @@ export function GuardrailSettings() {
     if (settings.webSearchAllowedDomains.includes(newWebSearchAllowedDomain.trim())) return;
     setSettings({
       ...settings,
-      webSearchAllowedDomains: [...settings.webSearchAllowedDomains, newWebSearchAllowedDomain.trim()],
+      webSearchAllowedDomains: [
+        ...settings.webSearchAllowedDomains,
+        newWebSearchAllowedDomain.trim(),
+      ],
     });
     setNewWebSearchAllowedDomain("");
   };
@@ -129,7 +132,10 @@ export function GuardrailSettings() {
     if (settings.webSearchBlockedDomains.includes(newWebSearchBlockedDomain.trim())) return;
     setSettings({
       ...settings,
-      webSearchBlockedDomains: [...settings.webSearchBlockedDomains, newWebSearchBlockedDomain.trim()],
+      webSearchBlockedDomains: [
+        ...settings.webSearchBlockedDomains,
+        newWebSearchBlockedDomain.trim(),
+      ],
     });
     setNewWebSearchBlockedDomain("");
   };
@@ -734,7 +740,8 @@ export function GuardrailSettings() {
         <div className="settings-subsection">
           <h4>Allowed Domains (optional)</h4>
           <p className="settings-description">
-            If set, only search results from these domains are returned after blocked-domain filtering.
+            If set, only search results from these domains are returned after blocked-domain
+            filtering.
           </p>
           <div className="settings-input-group">
             <input
@@ -769,7 +776,9 @@ export function GuardrailSettings() {
               ))}
             </div>
           ) : (
-            <p className="settings-hint">No allowlist configured. All domains are eligible unless blocked.</p>
+            <p className="settings-hint">
+              No allowlist configured. All domains are eligible unless blocked.
+            </p>
           )}
         </div>
         <div className="settings-subsection">
@@ -900,7 +909,9 @@ export function GuardrailSettings() {
               <input
                 type="checkbox"
                 checked={settings.adaptiveStyleEnabled}
-                onChange={(e) => setSettings({ ...settings, adaptiveStyleEnabled: e.target.checked })}
+                onChange={(e) =>
+                  setSettings({ ...settings, adaptiveStyleEnabled: e.target.checked })
+                }
               />
               <span className="toggle-slider" />
             </label>

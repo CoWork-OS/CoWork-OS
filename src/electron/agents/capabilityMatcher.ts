@@ -240,9 +240,7 @@ export async function selectAgentsForTask(
     if (maxAgents != null && maxAgents >= 1) {
       memberIds = memberIds.slice(0, maxAgents);
     }
-    const members = memberIds
-      .map((id) => roleMap.get(id))
-      .filter((r): r is AgentRole => r != null);
+    const members = memberIds.map((id) => roleMap.get(id)).filter((r): r is AgentRole => r != null);
     const leader = roleMap.get(llmResult.leaderId) || members[0];
     if (members.length >= 2) {
       return { members, leader };

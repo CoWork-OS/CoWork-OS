@@ -1,7 +1,4 @@
-export type ShellPermissionDecision =
-  | "enable_shell"
-  | "continue_without_shell"
-  | "unknown";
+export type ShellPermissionDecision = "enable_shell" | "continue_without_shell" | "unknown";
 
 export function classifyShellPermissionDecision(text: string): ShellPermissionDecision {
   const lower = String(text || "")
@@ -26,6 +23,8 @@ export function classifyShellPermissionDecision(text: string): ShellPermissionDe
       lower,
     ) ||
     /\bwithout shell\b/.test(lower) ||
+    /\bwithout command(?:s| tools)?\b/.test(lower) ||
+    /\bno command(?:s| tools)?\b/.test(lower) ||
     /\b(?:don['’]?t|do not)\s+enable\s+shell\b/.test(lower) ||
     /\blimited\s+best\s+effort\b/.test(lower)
   ) {

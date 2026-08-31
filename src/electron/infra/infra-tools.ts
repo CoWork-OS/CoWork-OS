@@ -279,8 +279,7 @@ export class InfraTools {
 
     const toolDefs: LLMTool[] = [];
     // Only offer cloud sandbox tools when E2B is fully configured (API key set)
-    const sandboxConfigured =
-      settings.enabledCategories.sandbox && !!settings.e2b?.apiKey?.trim();
+    const sandboxConfigured = settings.enabledCategories.sandbox && !!settings.e2b?.apiKey?.trim();
     if (sandboxConfigured) toolDefs.push(...sandboxTools);
     if (settings.enabledCategories.domains) toolDefs.push(...domainTools);
     if (settings.enabledCategories.payments) toolDefs.push(...paymentTools);
@@ -523,7 +522,10 @@ export class InfraTools {
     if (toolName.startsWith("domain_") && !settings.enabledCategories.domains) {
       return "Domain tools are disabled in Infrastructure settings.";
     }
-    if ((toolName.startsWith("wallet_") || toolName.startsWith("x402_")) && !settings.enabledCategories.payments) {
+    if (
+      (toolName.startsWith("wallet_") || toolName.startsWith("x402_")) &&
+      !settings.enabledCategories.payments
+    ) {
       return "Payments & wallet tools are disabled in Infrastructure settings.";
     }
     return null;
@@ -538,7 +540,8 @@ export class InfraTools {
 
   private resolveEffectiveHardLimit(settings: InfraSettings): number {
     const configuredLimit = Number(settings.payments.hardLimitUsd);
-    const safeConfiguredLimit = Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : 0;
+    const safeConfiguredLimit =
+      Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : 0;
     const envLimit = Number(process.env.COWORK_PAYMENT_LIMIT_USD);
     if (!Number.isFinite(envLimit) || envLimit <= 0) {
       return safeConfiguredLimit;
@@ -583,16 +586,26 @@ export class InfraTools {
     this.validateX402PaymentChallenge(challenge, settings, opts.effectiveHardLimit);
 
     if (opts.preflightPaymentDetails) {
-      const mismatch = this.getPaymentDetailsMismatch(opts.preflightPaymentDetails, challenge.paymentDetails);
+      const mismatch = this.getPaymentDetailsMismatch(
+        opts.preflightPaymentDetails,
+        challenge.paymentDetails,
+      );
       if (mismatch) {
-        throw new Error(`x402 payment requirement changed after preflight (${mismatch}); refusing to sign.`);
+        throw new Error(
+          `x402 payment requirement changed after preflight (${mismatch}); refusing to sign.`,
+        );
       }
     }
 
     if (opts.approvedPaymentDetails) {
-      const mismatch = this.getPaymentDetailsMismatch(opts.approvedPaymentDetails, challenge.paymentDetails);
+      const mismatch = this.getPaymentDetailsMismatch(
+        opts.approvedPaymentDetails,
+        challenge.paymentDetails,
+      );
       if (mismatch) {
-        throw new Error(`x402 payment requirement changed after approval (${mismatch}); refusing to sign.`);
+        throw new Error(
+          `x402 payment requirement changed after approval (${mismatch}); refusing to sign.`,
+        );
       }
       return true;
     }
@@ -619,7 +632,8 @@ export class InfraTools {
           method: challenge.method,
           paymentDetails: challenge.paymentDetails,
         },
-        reason: amount !== null ? `x402 payment operation (${amount} USDC)` : "x402 payment operation",
+        reason:
+          amount !== null ? `x402 payment operation (${amount} USDC)` : "x402 payment operation",
       },
       { allowAutoApprove: false },
     );
@@ -706,7 +720,10 @@ export class InfraTools {
     return null;
   }
 
-  private formatPaymentApprovalMessage(challenge: X402PaymentChallenge, amount: number | null): string {
+  private formatPaymentApprovalMessage(
+    challenge: X402PaymentChallenge,
+    amount: number | null,
+  ): string {
     const details = challenge.paymentDetails;
     const displayAmount = amount !== null ? `${amount} USDC` : "unknown amount";
     return (
@@ -758,7 +775,9 @@ export class InfraTools {
 
     try {
       const parsedResource = new URL(resource);
-      return parsedResource.origin === parsedRequest.origin && parsedResource.href === parsedRequest.href;
+      return (
+        parsedResource.origin === parsedRequest.origin && parsedResource.href === parsedRequest.href
+      );
     } catch {
       const pathWithSearch = `${parsedRequest.pathname}${parsedRequest.search}`;
       return resource === parsedRequest.pathname || resource === pathWithSearch;

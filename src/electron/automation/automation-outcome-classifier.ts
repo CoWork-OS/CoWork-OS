@@ -89,11 +89,13 @@ export function classifyStrategicPlannerOutcome(input: {
   suppressedOutputCount: number;
 }): CreateAutomationRunOutcomeInput {
   const actionableCount =
-    input.createdIssueIds.length +
-    input.updatedIssueIds.length +
-    input.dispatchedTaskIds.length;
+    input.createdIssueIds.length + input.updatedIssueIds.length + input.dispatchedTaskIds.length;
   const usefulness =
-    actionableCount > 0 ? "actionable" : input.suppressedOutputCount > 0 ? "low_value" : "informational";
+    actionableCount > 0
+      ? "actionable"
+      : input.suppressedOutputCount > 0
+        ? "low_value"
+        : "informational";
   return {
     source: "strategic_planner",
     sourceRunId: input.run.id,

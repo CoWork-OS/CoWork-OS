@@ -52,10 +52,7 @@ function resolveCommandFromPath(command: string): string | null {
     for (const extension of extensions) {
       const candidate = path.join(directory, `${command}${extension}`);
       try {
-        accessSync(
-          candidate,
-          process.platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK,
-        );
+        accessSync(candidate, process.platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK);
         return candidate;
       } catch {
         // Continue searching PATH.
@@ -158,12 +155,7 @@ export class NativeSystemVoiceRuntime implements SystemVoiceRuntime {
 
     try {
       await fs.writeFile(inputPath, text, "utf-8");
-      const args = this.buildSynthesisArgs(
-        capability.adapter,
-        inputPath,
-        outputPath,
-        options,
-      );
+      const args = this.buildSynthesisArgs(capability.adapter, inputPath, outputPath, options);
       await this.runCommand(command, args);
       const audio = await fs.readFile(outputPath);
       if (audio.length === 0) {
@@ -175,10 +167,7 @@ export class NativeSystemVoiceRuntime implements SystemVoiceRuntime {
     }
   }
 
-  async transcribe(
-    _audioData: Buffer,
-    _options: SystemVoiceTranscriptionOptions,
-  ): Promise<string> {
+  async transcribe(_audioData: Buffer, _options: SystemVoiceTranscriptionOptions): Promise<string> {
     throw new Error(SYSTEM_STT_UNAVAILABLE);
   }
 

@@ -52,7 +52,8 @@ export class TimelineEmitter {
       status: "in_progress",
       actor: options.actor || "system",
       legacyType: options.legacyType || "step_started",
-      message: options.message || (options.label ? `Starting ${options.label}` : `Starting ${stage}`),
+      message:
+        options.message || (options.label ? `Starting ${options.label}` : `Starting ${stage}`),
     });
   }
 
@@ -65,9 +66,9 @@ export class TimelineEmitter {
       groupLabel: options.label || stage,
       status,
       actor: options.actor || "system",
-      legacyType:
-        options.legacyType || (status === "failed" ? "step_failed" : "step_completed"),
-      message: options.message || (options.label ? `Completed ${options.label}` : `Completed ${stage}`),
+      legacyType: options.legacyType || (status === "failed" ? "step_failed" : "step_completed"),
+      message:
+        options.message || (options.label ? `Completed ${options.label}` : `Completed ${stage}`),
     });
   }
 
@@ -105,8 +106,7 @@ export class TimelineEmitter {
       semanticSummary: semanticSummary || undefined,
       status,
       actor: options.actor || "tool",
-      legacyType:
-        options.legacyType || (status === "failed" ? "step_failed" : "step_completed"),
+      legacyType: options.legacyType || (status === "failed" ? "step_failed" : "step_completed"),
       message:
         options.message ||
         (options.label ? `Completed ${options.label}` : `Completed ${normalizedGroupId}`),
@@ -169,7 +169,10 @@ export class TimelineEmitter {
     });
   }
 
-  attachEvidence(evidenceRefs: EvidenceRef[], options: { message?: string; stepId?: string } = {}): void {
+  attachEvidence(
+    evidenceRefs: EvidenceRef[],
+    options: { message?: string; stepId?: string } = {},
+  ): void {
     this.emit("timeline_evidence_attached", {
       evidenceRefs,
       stepId: options.stepId || `step:${this.taskId}`,
@@ -180,7 +183,10 @@ export class TimelineEmitter {
     });
   }
 
-  emitArtifact(path: string, options: { mimeType?: string; label?: string; stepId?: string } = {}): void {
+  emitArtifact(
+    path: string,
+    options: { mimeType?: string; label?: string; stepId?: string } = {},
+  ): void {
     this.emit("timeline_artifact_emitted", {
       path,
       mimeType: options.mimeType,

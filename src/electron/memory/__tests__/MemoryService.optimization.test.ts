@@ -61,7 +61,10 @@ function createMockRepos() {
       mockMemories.set(created.id, created);
       return created;
     },
-    update: (id: string, updates: Partial<Pick<Memory, "summary" | "tokens" | "isCompressed" | "content">>): void => {
+    update: (
+      id: string,
+      updates: Partial<Pick<Memory, "summary" | "tokens" | "isCompressed" | "content">>,
+    ): void => {
       const current = mockMemories.get(id);
       if (!current) return;
       mockMemories.set(id, {
@@ -71,8 +74,10 @@ function createMockRepos() {
       });
     },
     findById: (id: string): Memory | undefined => mockMemories.get(id),
-    findByIds: (ids: string[]): Memory[] => ids.map((id) => mockMemories.get(id)).filter(Boolean) as Memory[],
-    getFullDetails: (ids: string[]): Memory[] => ids.map((id) => mockMemories.get(id)).filter(Boolean) as Memory[],
+    findByIds: (ids: string[]): Memory[] =>
+      ids.map((id) => mockMemories.get(id)).filter(Boolean) as Memory[],
+    getFullDetails: (ids: string[]): Memory[] =>
+      ids.map((id) => mockMemories.get(id)).filter(Boolean) as Memory[],
     getRecentForWorkspace: (workspaceId: string, limit = 20): Memory[] =>
       Array.from(mockMemories.values())
         .filter((memory) => memory.workspaceId === workspaceId)
@@ -89,10 +94,13 @@ function createMockRepos() {
       return count;
     },
     getApproxStorageBytes: (_workspaceId: string): number => 0,
-    getOldestForWorkspace: (_workspaceId: string, _limit = 200) => [] as Array<{ id: string; createdAt: number; approxBytes: number }>,
+    getOldestForWorkspace: (_workspaceId: string, _limit = 200) =>
+      [] as Array<{ id: string; createdAt: number; approxBytes: number }>,
     deleteOlderThan: (_workspaceId: string, _cutoffTimestamp: number): number => 0,
     getStats: (workspaceId: string) => {
-      const memories = Array.from(mockMemories.values()).filter((memory) => memory.workspaceId === workspaceId);
+      const memories = Array.from(mockMemories.values()).filter(
+        (memory) => memory.workspaceId === workspaceId,
+      );
       const compressedCount = memories.filter((memory) => memory.isCompressed).length;
       return {
         count: memories.length,

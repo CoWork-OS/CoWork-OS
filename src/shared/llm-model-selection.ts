@@ -1,8 +1,4 @@
-import type {
-  LLMModelInfo,
-  LLMProviderType,
-  LLMReasoningEffort,
-} from "./types";
+import type { LLMModelInfo, LLMProviderType, LLMReasoningEffort } from "./types";
 
 export const LLM_REASONING_EFFORT_OPTIONS: Array<{
   value: LLMReasoningEffort;
@@ -17,19 +13,8 @@ export const LLM_REASONING_EFFORT_OPTIONS: Array<{
   { value: "extra_high", label: "Extra High" },
 ];
 
-const AZURE_REASONING_EFFORTS: LLMReasoningEffort[] = [
-  "low",
-  "medium",
-  "high",
-  "extra_high",
-];
-const GPT_5_6_REASONING_EFFORTS: LLMReasoningEffort[] = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-];
+const AZURE_REASONING_EFFORTS: LLMReasoningEffort[] = ["low", "medium", "high", "extra_high"];
+const GPT_5_6_REASONING_EFFORTS: LLMReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
 export function getLlmModelReasoningEfforts(
   providerType: LLMProviderType | string | undefined,
@@ -46,10 +31,7 @@ export function getLlmModelReasoningEfforts(
       .trim()
       .replace(/^(?:openai-codex|openai)\//, "")
       .split("@", 1)[0];
-    if (
-      normalizedModelKey === "gpt-5.6-sol" ||
-      normalizedModelKey === "gpt-5.6-terra"
-    ) {
+    if (normalizedModelKey === "gpt-5.6-sol" || normalizedModelKey === "gpt-5.6-terra") {
       return [...GPT_5_6_REASONING_EFFORTS, "ultra"];
     }
     if (normalizedModelKey === "gpt-5.6-luna") {
@@ -65,12 +47,7 @@ export function withLlmModelSelectionMetadata<T extends LLMModelInfo>(
   models: T[],
 ): Array<T & { reasoningEfforts?: LLMReasoningEffort[] }> {
   return models.map((model) => {
-    const reasoningEfforts = getLlmModelReasoningEfforts(
-      providerType,
-      model.key,
-    );
-    return reasoningEfforts.length > 0
-      ? { ...model, reasoningEfforts }
-      : model;
+    const reasoningEfforts = getLlmModelReasoningEfforts(providerType, model.key);
+    return reasoningEfforts.length > 0 ? { ...model, reasoningEfforts } : model;
   });
 }

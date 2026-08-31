@@ -13,7 +13,7 @@ CoWork OS implements a layered security model with multiple defense mechanisms.
 |  [Context Policies: DM vs Group]                                  |
 +------------------------------------------------------------------+
 |                    Policy Manager Layer                           |
-|  [Layered Permission Engine]                                     |
+|  [Access Profiles] [Layered Permission Engine]                   |
 |  [Tool Groups] [Blocked Patterns] [Mode Defaults] [Rule Sources] |
 +------------------------------------------------------------------+
 |                    Encrypted Storage Layer                        |
@@ -23,7 +23,8 @@ CoWork OS implements a layered security model with multiple defense mechanisms.
 |  [macOS sandbox-exec] [Docker Containers] [Process Isolation]    |
 +------------------------------------------------------------------+
 |                    Filesystem Layer                               |
-|  [Workspace Boundaries] [Protected Paths] [Allowed Paths]        |
+|  [Workspace Boundaries] [Protected Paths] [Profile Roots/Rules]   |
+|  [Legacy Allowed Paths for Unprofiled Tasks]                     |
 +------------------------------------------------------------------+
 ```
 
@@ -43,14 +44,23 @@ CoWork OS supports three security modes for external channels (Telegram, Discord
 
 Different security settings can apply to DMs vs group chats:
 
-- **DM (Direct Messages)**: Full capability by default
-- **Group Chats**: Memory tools (clipboard) restricted by default
+- **DM (Direct Messages)**: Capabilities allowed by the target workspace's access profile
+- **Group Chats**: The target profile plus additional memory/tool restrictions by default
 
 This treats group messages as higher risk than direct messages, where shared context could expose sensitive data.
 
 ## Policy Manager
 
-The policy manager implements a **layered permission engine** with hard-stop precedence:
+The policy manager implements a **layered permission engine** with hard-stop precedence. The
+task-level contract is documented in [Access Profiles](../access-profiles.md).
+
+### Access Profile Resolution
+
+Before an individual tool request is evaluated, CoWork resolves the explicit task profile or the
+configured default, validates inheritance, applies administrator constraints, and projects the
+effective profile onto the task workspace. A missing or invalid named profile becomes an
+unavailable read-only profile and fails closed. The later request-level layers cannot widen that
+profile boundary.
 
 ### Layer 1: Global Guardrails
 
@@ -66,7 +76,8 @@ Per-workspace controls:
 - **Read**: Allow reading files
 - **Write**: Allow creating/modifying files
 - **Delete**: Allow file deletion
-- **Shell**: Allow command execution
+- **Command tools**: Derived from the selected access profile; the legacy `shell` bit is consulted
+  only for unprofiled compatibility tasks
 - **Network**: Allow network-capable tools to run at all
 
 These remain coarse capability gates. They do not replace explicit rules, workspace policy files, or
@@ -83,13 +94,15 @@ Based on message context (private/group/public):
 
 Individual tool permissions and approval decisions:
 - Destructive tools usually prompt unless an explicit allow rule or mode applies
-- Shell commands usually prompt unless an explicit allow rule or mode applies
+- Command tools may prompt, auto-review, or run without a prompt according to the selected profile;
+  a separate shell toggle is not part of new-task configuration
 - Domain-scoped rules can allow or deny `web_fetch` / `http_request` per destination
 - Exact reasons and matched scopes are surfaced in the prompt when available
 
-### Layer 5: Permission Modes And Fallback
+### Layer 5: Legacy Permission Modes And Fallback
 
-The selected mode and the denial fallback tracker finalize the decision:
+After the access profile is applied, a legacy permission mode and the denial fallback tracker may
+provide compatibility defaults for the individual decision:
 
 - `default`, `plan`, `accept_edits`, `dangerous_only`, `dont_ask`, and `bypass_permissions` define baseline behavior
 - `dangerous_only` is the middle ground between `accept_edits` and full autonomy: it auto-allows safe reads, edits, and a conservative read/test shell subset, while still prompting for destructive actions, privacy-sensitive non-workspace access, MCP/external side effects, and ambiguous shell commands
@@ -114,6 +127,8 @@ CoWork now models outbound transfer separately from generic network reads.
 - workspace `network` permission is still the first gate
 - allowed-domain guardrails still apply to raw web requests
 - permission rules can now target a specific domain, optionally scoped to one tool
+- a profile `domainRules` allowlist/deny list is evaluated deny-first and cannot be widened by a
+  later permission rule or approval
 
 ### Approval Context
 
@@ -145,22 +160,30 @@ See [Automation Studio](../automation-studio.md#secrets-connector-policy-and-dat
 
 ## Sandboxing
 
+Sandboxing is a technical process boundary, not an approval mode. The task access profile selects
+both independently: the sandbox constrains spawned processes, while approval and reviewer settings
+decide when the agent must ask. The shared filesystem evaluator applies profile roots and deny
+rules before either backend runs. If a backend cannot represent a requested restriction, CoWork
+fails closed rather than silently widening access.
+
 ### macOS (Primary)
 
 Uses native `sandbox-exec` with generated profiles:
 - Deny-by-default policy
-- Explicit allows for workspace and system paths
-- Network isolation (localhost only by default)
+- Explicit allows for workspace, approved roots, and required system paths
+- Network isolation unless the active profile explicitly enables it
 - Mach service restrictions
+- Domain-scoped arbitrary-process egress is denied because `sandbox-exec` has no domain-aware proxy
 
 ### Docker (Cross-platform)
 
 For Linux and Windows systems:
 - Container isolation per command
-- Volume mounts for workspace access
+- Only centrally approved workspace and additional roots are mounted
 - CPU and memory limits
 - Network mode: none (default) or bridge
 - Read-only root filesystem
+- Domain-scoped arbitrary-process egress is denied unless a domain-aware proxy is available
 
 ### Fallback
 
@@ -168,6 +191,7 @@ When sandboxing unavailable:
 - Process isolation with timeout
 - Output size limits
 - Environment variable filtering
+- Restricted agent shell/code execution fails closed rather than falling back to an unsandboxed process
 
 ## Filesystem Protection
 
@@ -179,10 +203,15 @@ These paths can never be written to:
 
 ### Workspace Boundaries
 
-By default, tools can only access:
+By default, and subject to the effective access profile, tools can access:
 1. The active workspace directory
-2. Explicitly allowed paths in settings
-3. Temporary directories
+2. Profile-declared additional workspace roots and matching filesystem rules
+3. Legacy explicitly allowed paths for unprofiled compatibility tasks
+4. Temporary directories where the legacy temporary-workspace compatibility path applies
+
+Profile filesystem rules are evaluated separately for read, write, and delete. `write` grants do
+not grant delete, explicit deny rules win, and a finite profile scope cannot be widened by an
+external-file approval. Existing prefixes and symlinks are canonicalized before the decision.
 
 ### Path Traversal Prevention
 
@@ -190,6 +219,8 @@ Multiple validation layers prevent `../` escape:
 - Path normalization
 - Relative path detection
 - Workspace prefix checking
+- Symlink canonicalization
+- Deny-first profile rule evaluation with component-boundary checks
 
 ## Encrypted Settings Storage
 

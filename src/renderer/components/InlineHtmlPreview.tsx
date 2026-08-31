@@ -197,7 +197,9 @@ export function InlineHtmlSourcePreview({
       className={`inline-html-preview inline-html-preview-source ${isFrame ? "inline-html-preview-frame" : ""} ${className}`.trim()}
       style={style}
     >
-      {!hideChrome && <InlineHtmlHeader displayTitle={displayTitle} subtitle={isFrame ? "Frame" : "HTML form"} />}
+      {!hideChrome && (
+        <InlineHtmlHeader displayTitle={displayTitle} subtitle={isFrame ? "Frame" : "HTML form"} />
+      )}
       <div className="inline-html-frame-wrap">
         <iframe
           className="inline-html-frame"

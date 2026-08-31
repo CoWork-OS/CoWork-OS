@@ -42,7 +42,8 @@ const setResponseStyleMock = vi.fn((style: Record<string, string>) => {
 vi.mock("../../settings/personality-manager", () => ({
   PersonalityManager: {
     loadSettings: () => ({ responseStyle: mockResponseStyle }),
-    setResponseStyle: (...args: unknown[]) => setResponseStyleMock(...(args as [Record<string, string>])),
+    setResponseStyle: (...args: unknown[]) =>
+      setResponseStyleMock(...(args as [Record<string, string>])),
   },
 }));
 

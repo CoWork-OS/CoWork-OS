@@ -59,7 +59,9 @@ Example:
 - **Credential handling**:
   - Browser cookie extraction or manual `auth_token` + `ct0` are stored in secure settings.
   - Do not share tokens/cookies in logs or prompts.
-- **Workspace isolation**: mention-triggered tasks run in temporary workspaces by default.
+- **Workspace isolation**: mention-triggered tasks run in temporary workspaces by default and use
+  the target workspace's access profile. Profile and administrator boundaries still apply to every
+  command, file, network, and export operation.
 
 ## Troubleshooting
 

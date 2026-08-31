@@ -21,7 +21,8 @@ See also: [CoWork OS vs OpenClaw](comparisons/openclaw.md)
 
 1. Keep OpenClaw running in parallel for a short validation window.
 2. Start CoWork OS with one low-risk channel (for example, a private Telegram or Slack test channel).
-3. Enable strict security defaults in CoWork OS first: Pairing mode, approval workflows, and guardrail budgets.
+3. Enable strict security defaults in CoWork OS first: Pairing mode for channels, the **Ask for
+   approval** access profile for tasks, approval workflows, and guardrail budgets.
 4. Reconnect provider keys and channels one by one.
 5. Cut over production channels only after task quality and approval behavior match expectations.
 
@@ -42,12 +43,29 @@ See also: [CoWork OS vs OpenClaw](comparisons/openclaw.md)
 You do not need to remove Claude Code, Codex, Cursor, OpenCode, ChatGPT, or Claude Cowork to start using CoWork OS. A safer migration is to keep the specialist tool for the workflows where it is strongest, then move broader work into CoWork one lane at a time.
 
 1. Connect one supported model route and run a low-risk task in a test workspace.
-2. Recreate only the skills, MCP servers, instructions, and approvals needed for that workflow; configuration formats are not assumed to be portable.
+2. Recreate only the skills, MCP servers, instructions, access profiles, and approvals needed for
+   that workflow; configuration formats and credentials are not assumed to be portable.
 3. Compare output quality, tool behavior, cost, and approval boundaries against the existing app.
 4. Move adjacent browser, inbox, document, channel, or automation work into CoWork when keeping it in one harness is useful.
 5. Keep both systems where a specialist workflow remains the better fit.
 
 See [Compare CoWork OS](comparisons/index.md) for fit-based guides covering Claude Code, Codex, Cursor, OpenCode, ChatGPT, Claude Cowork, OpenClaw, and Hermes Agent.
+
+### Migrating task access
+
+CoWork uses a named [access profile](access-profiles.md) as the task-level authority. The closest
+starting points for common legacy setups are:
+
+| Previous setup | CoWork migration |
+|---|---|
+| Shell/command tools disabled | Select **Ask for approval** and keep command-tool use at the profile/approval boundary; do not add a shell toggle |
+| Shell enabled with prompts | Select **Ask for approval** or **Approve for me**, depending on whether automatic review is appropriate |
+| Unrestricted trusted local execution | Select **Full access** only for a trusted workspace and review admin, guardrail, export, and protected-path limits |
+| Custom config file | Recreate the policy as a validated Custom profile in **Settings → System & Security → Permissions**; CoWork stores it in encrypted settings |
+
+The CLI equivalent is `--access-profile <id>`. Existing CoWork tasks and managed environments may
+retain `shellAccess`, `enableShell`, or legacy permission modes for compatibility, but new and
+edited resources should set `accessProfileId`. See [Access Profiles](access-profiles.md#migration-from-the-shell-toggle).
 
 ---
 
@@ -95,6 +113,7 @@ Moving to CoWork OS provides several advantages:
 | **Configurable guardrails** | Set token/cost budgets, iteration limits |
 | **Dangerous command blocking** | Built-in + custom patterns to block risky commands |
 | **Approval workflows** | Human-in-the-loop for destructive operations |
+| **Access profiles** | One named policy for sandbox, approvals, reviewer behavior, command tools, filesystem, network, and domain scope |
 | **Brute-force protection** | Lockout after failed pairing attempts |
 | **Context-aware isolation** | Different tool access for local vs remote use |
 
@@ -128,7 +147,7 @@ Moving to CoWork OS provides several advantages:
 
 | Aspect | CoWork OS |
 |--------|-----------|
-| **Default mode** | Pairing (most restrictive) |
+| **Default task access** | Ask for approval profile; channel pairing remains a separate channel-security setting |
 | **Sandbox** | Workspace boundaries (VM planned) |
 | **Approval** | GUI dialogs |
 | **Guardrails** | Configurable in Settings UI |
@@ -175,6 +194,10 @@ For each channel you want to use:
    - Iteration limit (e.g., 50)
 3. Enable dangerous command blocking
 4. Add custom blocked patterns if needed
+
+Also open **Settings → System & Security → Permissions**, keep **Ask for approval** as the default
+access profile while validating the migration, and create narrower custom profiles only after the
+workspace roots, domain rules, and approval behavior are understood.
 
 ### 5. Add Workspaces
 

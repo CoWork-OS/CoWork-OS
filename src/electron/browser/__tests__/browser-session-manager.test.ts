@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BrowserSessionManager,
   normalizeBrowserUrl,
   redactBrowserStoragePayload,
   redactBrowserText,
@@ -45,5 +46,14 @@ describe("BrowserSessionManager helpers", () => {
     expect(serialized).not.toContain("hunter2");
     expect(serialized).not.toContain("key-123");
     expect(serialized).not.toContain("def456");
+  });
+
+  it("enforces disabled profile networking at the visible request boundary", () => {
+    const manager = new BrowserSessionManager();
+    const isAllowed = (manager as Any).isUrlAllowedWithPolicy.bind(manager);
+
+    expect(
+      isAllowed({ networkEnabled: true, accessNetworkMode: "disabled" }, "https://example.com"),
+    ).toBe(false);
   });
 });

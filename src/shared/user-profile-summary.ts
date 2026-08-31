@@ -46,9 +46,7 @@ export function inferUserFactCategory(value: string): UserFactCategory {
   if (/\b(name|call me|preferred name|pronouns)\b/.test(text)) {
     return "identity";
   }
-  if (
-    /\b(work|job|company|team|role|founder|engineer|designer|researcher|building)\b/.test(text)
-  ) {
+  if (/\b(work|job|company|team|role|founder|engineer|designer|researcher|building)\b/.test(text)) {
     return "work";
   }
   if (/\b(goal|aim|want to|need to|trying to|plan to|focus on)\b/.test(text)) {
@@ -68,9 +66,7 @@ export function inferUserFactCategory(value: string): UserFactCategory {
   ) {
     return "voice";
   }
-  if (
-    /\b(hold me accountable|keep me accountable|if i ignore|stalled|open loops?)\b/.test(text)
-  ) {
+  if (/\b(hold me accountable|keep me accountable|if i ignore|stalled|open loops?)\b/.test(text)) {
     return "accountability";
   }
   if (/\b(prefer|like|love|dislike|hate|style|tone|format|always|usually)\b/.test(text)) {

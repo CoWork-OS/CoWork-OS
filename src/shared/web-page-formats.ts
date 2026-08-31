@@ -1,9 +1,6 @@
 const WEB_PAGE_EXTENSIONS = new Set([".html", ".htm"]);
 
-const HTML_MIME_TYPES = new Set([
-  "text/html",
-  "application/xhtml+xml",
-]);
+const HTML_MIME_TYPES = new Set(["text/html", "application/xhtml+xml"]);
 
 export function getWebPageFileExtension(filePath: string): string {
   const fileName = filePath.split(/[\\/]/).pop() || filePath;

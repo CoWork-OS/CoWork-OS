@@ -338,8 +338,8 @@ export function CollaborativeThoughtsPanel({
               >
                 <span className="team-member-icon">
                   {(() => {
-                  const Icon = resolveTwinIcon(t.agentIcon);
-                  return <Icon size={16} strokeWidth={1.5} />;
+                    const Icon = resolveTwinIcon(t.agentIcon);
+                    return <Icon size={16} strokeWidth={1.5} />;
                   })()}
                 </span>
                 <span className="team-member-name" style={{ color: t.agentColor }}>
@@ -421,7 +421,10 @@ export function CollaborativeThoughtsPanel({
                         return <Icon size={14} strokeWidth={1.5} />;
                       })()}
                     </span>
-                    <span className="stream-agent-name-inline" style={{ color: thought.agentColor }}>
+                    <span
+                      className="stream-agent-name-inline"
+                      style={{ color: thought.agentColor }}
+                    >
                       {thought.agentDisplayName}
                     </span>
                     {thought.agentRoleId === leaderAgentRoleId && (

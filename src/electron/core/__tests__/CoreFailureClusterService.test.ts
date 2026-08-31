@@ -44,7 +44,11 @@ describe("CoreFailureClusterService", () => {
 
     expect(result).toBe(createdCluster);
     expect(clusterRepo.create).toHaveBeenCalled();
-    expect(clusterRepo.addMember).toHaveBeenCalledWith("cluster-1", "failure-1", expect.any(Number));
+    expect(clusterRepo.addMember).toHaveBeenCalledWith(
+      "cluster-1",
+      "failure-1",
+      expect.any(Number),
+    );
     expect(failureRepo.update).toHaveBeenCalledWith("failure-1", { status: "clustered" });
   });
 
@@ -106,7 +110,11 @@ describe("CoreFailureClusterService", () => {
         lastSeenAt: 120,
       }),
     );
-    expect(clusterRepo.addMember).toHaveBeenCalledWith("cluster-2", "failure-2", expect.any(Number));
+    expect(clusterRepo.addMember).toHaveBeenCalledWith(
+      "cluster-2",
+      "failure-2",
+      expect.any(Number),
+    );
     expect(failureRepo.update).toHaveBeenCalledWith("failure-2", { status: "clustered" });
   });
 });

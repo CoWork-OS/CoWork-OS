@@ -276,7 +276,9 @@ describe("WhatsAppAdapter certificate handling", () => {
     const adapter = new WhatsAppAdapter({
       authDir: "/tmp/test-cowork/wa-auth-retry",
     } as Any);
-    const reconnectSpy = vi.spyOn(adapter as Any, "attemptReconnection").mockResolvedValue(undefined);
+    const reconnectSpy = vi
+      .spyOn(adapter as Any, "attemptReconnection")
+      .mockResolvedValue(undefined);
 
     (adapter as Any).handleConnectionUpdate({
       connection: "close",

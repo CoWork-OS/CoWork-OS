@@ -45,11 +45,13 @@ export class ExperimentEvaluationService {
       (event) => event.legacyType === "verification_failed" || event.type === "verification_failed",
     );
     const reviewFailed = events.some(
-      (event) => event.legacyType === "review_quality_failed" || event.type === "review_quality_failed",
+      (event) =>
+        event.legacyType === "review_quality_failed" || event.type === "review_quality_failed",
     );
 
     const reproductionEvidenceFound = Boolean(artifactSummary.reproductionMethod);
-    const verificationEvidenceFound = artifactSummary.verificationCommands.length > 0 || verificationPassed;
+    const verificationEvidenceFound =
+      artifactSummary.verificationCommands.length > 0 || verificationPassed;
     const prReadinessEvidenceFound = artifactSummary.prReadiness === "ready";
 
     const targetedVerificationPassed =
@@ -63,7 +65,9 @@ export class ExperimentEvaluationService {
       verificationEvidenceFound;
     const promotable = targetedVerificationPassed && prReadinessEvidenceFound;
     const failureClassResolved =
-      !!task && task.failureClass !== "required_verification" && task.failureClass !== "contract_error";
+      !!task &&
+      task.failureClass !== "required_verification" &&
+      task.failureClass !== "contract_error";
     const regressionSignals = collectRegressionSignals(
       task,
       verificationFailed,
@@ -74,7 +78,11 @@ export class ExperimentEvaluationService {
     );
     const replayPassRate = computeReplayPassRate(params.replayCases, task, regressionSignals);
     const diffSizePenalty = estimateDiffSizePenalty(task);
-    const safetySignals = collectSafetySignals(artifactSummary, diffSizePenalty, params.maxPatchFiles || 8);
+    const safetySignals = collectSafetySignals(
+      artifactSummary,
+      diffSizePenalty,
+      params.maxPatchFiles || 8,
+    );
 
     let score = 0;
     if (targetedVerificationPassed) score += 0.45;
@@ -94,7 +102,8 @@ export class ExperimentEvaluationService {
       `Promotable: ${promotable ? "yes" : "no"}`,
       `Replay pass rate: ${Math.round(replayPassRate * 100)}%`,
     ];
-    if (artifactSummary.reproductionMethod) notes.push(`Reproduction method: ${artifactSummary.reproductionMethod}`);
+    if (artifactSummary.reproductionMethod)
+      notes.push(`Reproduction method: ${artifactSummary.reproductionMethod}`);
     if (artifactSummary.changedFiles.length > 0) {
       notes.push(`Changed files: ${artifactSummary.changedFiles.join(", ")}`);
     }
@@ -205,11 +214,14 @@ function collectRegressionSignals(
     return signals;
   }
   if (task.status !== "completed") signals.push("Task did not complete successfully.");
-  if (task.terminalStatus !== "ok") signals.push(`Task terminal status is ${task.terminalStatus || "missing"}.`);
+  if (task.terminalStatus !== "ok")
+    signals.push(`Task terminal status is ${task.terminalStatus || "missing"}.`);
   if (verificationFailed) signals.push("Verification failed event recorded.");
   if (reviewFailed) signals.push("Review quality failure recorded.");
-  if (!reproductionEvidenceFound) signals.push("Task did not report a concrete reproduction method.");
-  if (!verificationEvidenceFound) signals.push("Task did not report explicit verification evidence.");
+  if (!reproductionEvidenceFound)
+    signals.push("Task did not report a concrete reproduction method.");
+  if (!verificationEvidenceFound)
+    signals.push("Task did not report explicit verification evidence.");
   if (!prReadinessEvidenceFound) signals.push("Task did not report PR-readiness evidence.");
   if (/regress|broke|still failing|unable|cannot/i.test(String(task.resultSummary || ""))) {
     signals.push("Result summary suggests unresolved or regressed behavior.");
@@ -282,7 +294,9 @@ export function extractArtifactSummary(
     .filter((item) => /[./\\]/.test(item) || /\.(ts|tsx|js|jsx|json|md|css|scss)$/i.test(item))
     .slice(0, maxPatchFiles + 5);
 
-  const fallbackVerificationCommands = [...text.matchAll(/((?:npm|pnpm|yarn|bun)\s+(?:test|run\s+[\w:-]+))/gi)]
+  const fallbackVerificationCommands = [
+    ...text.matchAll(/((?:npm|pnpm|yarn|bun)\s+(?:test|run\s+[\w:-]+))/gi),
+  ]
     .map((match) => match[1]?.trim() || "")
     .filter(Boolean);
 
@@ -293,16 +307,19 @@ export function extractArtifactSummary(
         .filter(Boolean)
     : [...new Set(fallbackVerificationCommands)];
 
-  const prReadiness = /pr readiness\s*:\s*ready/i.test(text) || /ready\s*(for|to)\s*(pr|review)/i.test(text)
-    ? "ready"
-    : /pr readiness\s*:\s*not ready/i.test(text) || /not ready/i.test(text)
-      ? "not_ready"
-      : "unknown";
+  const prReadiness =
+    /pr readiness\s*:\s*ready/i.test(text) || /ready\s*(for|to)\s*(pr|review)/i.test(text)
+      ? "ready"
+      : /pr readiness\s*:\s*not ready/i.test(text) || /not ready/i.test(text)
+        ? "not_ready"
+        : "unknown";
 
   const summary: ImprovementVariantArtifactSummary = {
     reproductionMethod:
       reproductionMatch?.[1]?.trim() ||
-      (/reproduced\s+(the\s+)?(failure|issue|bug)/i.test(text) ? "Reproduced from task evidence." : undefined),
+      (/reproduced\s+(the\s+)?(failure|issue|bug)/i.test(text)
+        ? "Reproduced from task evidence."
+        : undefined),
     changedFiles,
     verificationCommands,
     prReadiness,
@@ -311,7 +328,8 @@ export function extractArtifactSummary(
   };
 
   if (!summary.reproductionMethod) summary.missingEvidence.push("reproduction_method");
-  if (summary.verificationCommands.length === 0) summary.missingEvidence.push("verification_commands");
+  if (summary.verificationCommands.length === 0)
+    summary.missingEvidence.push("verification_commands");
   if (summary.prReadiness === "unknown") summary.missingEvidence.push("pr_readiness");
 
   return summary;

@@ -48,7 +48,10 @@ export async function readWorkspaceKitState(workspacePath: string): Promise<KitW
   }
 }
 
-async function writeWorkspaceKitState(workspacePath: string, state: KitWorkspaceState): Promise<void> {
+async function writeWorkspaceKitState(
+  workspacePath: string,
+  state: KitWorkspaceState,
+): Promise<void> {
   const statePath = resolveWorkspaceStatePath(workspacePath);
   await fsp.mkdir(path.dirname(statePath), { recursive: true });
   await fsp.writeFile(statePath, JSON.stringify(state, null, 2), "utf8");

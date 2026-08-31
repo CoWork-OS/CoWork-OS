@@ -74,7 +74,10 @@ export function GoogleWorkspaceSettings() {
     try {
       const loaded = await window.electronAPI.getGoogleWorkspaceSettings();
       const inferred = inferGoogleWorkspaceConnectionMode(loaded.connectionMode, loaded.scopes);
-      const mode = inferred === "gmail" && !loaded.builtinOAuthClientAvailable && !loaded.clientId ? "workspace" : inferred;
+      const mode =
+        inferred === "gmail" && !loaded.builtinOAuthClientAvailable && !loaded.clientId
+          ? "workspace"
+          : inferred;
       setSettings({
         ...loaded,
         connectionMode: mode,
@@ -255,11 +258,11 @@ export function GoogleWorkspaceSettings() {
         loginHint: hasStoredOrLegacyConnection() ? undefined : settings.loginHint || undefined,
       });
 
-      const tokenExpiresAt = result.expiresIn
-        ? Date.now() + result.expiresIn * 1000
-        : undefined;
+      const tokenExpiresAt = result.expiresIn ? Date.now() + result.expiresIn * 1000 : undefined;
       const baseSettings = materializeLegacyConnectedAccount(settings);
-      const email = normalizeGoogleAccountEmail(result.email) || normalizeGoogleAccountEmail(settings.loginHint);
+      const email =
+        normalizeGoogleAccountEmail(result.email) ||
+        normalizeGoogleAccountEmail(settings.loginHint);
       const payload = email
         ? upsertGoogleWorkspaceAccount(baseSettings, {
             email,
@@ -322,12 +325,15 @@ export function GoogleWorkspaceSettings() {
           await loadSettings();
         }
       }, 2000);
-      setTimeout(() => {
-        if (linkPollRef.current !== null) {
-          clearInterval(linkPollRef.current);
-          linkPollRef.current = null;
-        }
-      }, 5 * 60 * 1000);
+      setTimeout(
+        () => {
+          if (linkPollRef.current !== null) {
+            clearInterval(linkPollRef.current);
+            linkPollRef.current = null;
+          }
+        },
+        5 * 60 * 1000,
+      );
     } catch (error: Any) {
       setOauthError(error.message || "Failed to generate OAuth link");
     } finally {
@@ -339,7 +345,9 @@ export function GoogleWorkspaceSettings() {
     return <div className="settings-loading">Loading Google settings...</div>;
   }
 
-  const connectedLabel = status?.connected ? `Connected${status.name ? ` as ${status.name}` : ""}` : "";
+  const connectedLabel = status?.connected
+    ? `Connected${status.name ? ` as ${status.name}` : ""}`
+    : "";
   const accounts = settings.accounts || [];
   const activeAccountEmail = normalizeGoogleAccountEmail(settings.activeAccountEmail);
   const legacyConnectedEmail = accounts.length === 0 ? getLegacyConnectedAccountEmail() : undefined;
@@ -448,12 +456,18 @@ export function GoogleWorkspaceSettings() {
               onClick={() => setConnectionMode("gmail")}
               type="button"
               disabled={!settings?.builtinOAuthClientAvailable && !settings?.clientId}
-              title={!settings?.builtinOAuthClientAvailable && !settings?.clientId ? "Gmail Only requires an OAuth client" : undefined}
+              title={
+                !settings?.builtinOAuthClientAvailable && !settings?.clientId
+                  ? "Gmail Only requires an OAuth client"
+                  : undefined
+              }
             >
               Gmail Only
             </button>
             <button
-              className={currentMode === "workspace" ? "btn-primary btn-sm" : "btn-secondary btn-sm"}
+              className={
+                currentMode === "workspace" ? "btn-primary btn-sm" : "btn-secondary btn-sm"
+              }
               onClick={() => setConnectionMode("workspace")}
               type="button"
             >
@@ -539,7 +553,10 @@ export function GoogleWorkspaceSettings() {
             <br />
             <code>http://127.0.0.1:18766/oauth/callback</code>
           </li>
-          <li>Paste the Client ID below. Client Secret is optional and should be left blank for desktop clients.</li>
+          <li>
+            Paste the Client ID below. Client Secret is optional and should be left blank for
+            desktop clients.
+          </li>
         </ol>
 
         <div className="settings-field">
@@ -585,7 +602,9 @@ export function GoogleWorkspaceSettings() {
             value={settings.loginHint || ""}
             onChange={(e) => updateSettings({ loginHint: e.target.value || undefined })}
           />
-          <p className="settings-hint">Optional. Pre-selects this account on Google's sign-in page.</p>
+          <p className="settings-hint">
+            Optional. Pre-selects this account on Google's sign-in page.
+          </p>
         </div>
 
         <div className="settings-field">

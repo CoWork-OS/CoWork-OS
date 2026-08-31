@@ -18,6 +18,13 @@ resources/plugin-packs/codex-security/
 
 Packaged desktop/server builds include the whole pack under Electron resources as `plugin-packs/codex-security`.
 
+Security scans use the active task [access profile](access-profiles.md) and
+the normal workspace policy. A scan skill or plugin-pack manifest can request
+tools, but it cannot widen command-tool, filesystem, network, domain, approval,
+or sandbox boundaries. In particular, scan artifacts stay under the resolved
+workspace scope; an unavailable or insufficient profile fails the scan closed
+instead of falling back to unrestricted repository access.
+
 ## Scan Modes
 
 | Mode | Slash command | Skill ID | Scope |

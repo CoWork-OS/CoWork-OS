@@ -106,15 +106,14 @@ describeWithSqlite("WorktreeManager", () => {
       status: "checksum_mismatch",
       error: "corrupted",
     });
-    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)")
-      .run(
-        "worktree_settings",
-        JSON.stringify({
-          enabled: false,
-          branchPrefix: "legacy/",
-          commitMessagePrefix: "[legacy] ",
-        }),
-      );
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(
+      "worktree_settings",
+      JSON.stringify({
+        enabled: false,
+        branchPrefix: "legacy/",
+        commitMessagePrefix: "[legacy] ",
+      }),
+    );
 
     const manager = new WorktreeManagerClass(db);
 

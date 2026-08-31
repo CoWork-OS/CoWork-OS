@@ -131,13 +131,7 @@ export class CustomSkillLoader {
   } as const;
 
   private static readonly ROUTING_INTENT_CUE_PATTERNS: Record<RoutingIntentCue, RegExp[]> = {
-    review: [
-      /\bpull request\b/i,
-      /\bpr\b/i,
-      /\breview\b/i,
-      /\bfeedback\b/i,
-      /\bmerge\b/i,
-    ],
+    review: [/\bpull request\b/i, /\bpr\b/i, /\breview\b/i, /\bfeedback\b/i, /\bmerge\b/i],
     fix: [
       /\bfix(?:ing)?\b/i,
       /\bbug\b/i,
@@ -286,7 +280,9 @@ export class CustomSkillLoader {
 
     try {
       const files = fs.readdirSync(dir);
-      const skillFiles = files.filter((f) => f.endsWith(SKILL_FILE_EXTENSION) && !this.isSecurityMetadataFile(f));
+      const skillFiles = files.filter(
+        (f) => f.endsWith(SKILL_FILE_EXTENSION) && !this.isSecurityMetadataFile(f),
+      );
 
       for (const file of skillFiles) {
         try {
@@ -574,8 +570,8 @@ export class CustomSkillLoader {
     // Validate and sanitize each guideline before injection
     return enabledGuidelines
       .map((skill) => {
-          const validation = InputSanitizer.validateSkillGuidelines(skill.prompt);
-          if (!validation.valid) {
+        const validation = InputSanitizer.validateSkillGuidelines(skill.prompt);
+        if (!validation.valid) {
           logger.warn(
             `Security: Skill "${skill.id}" guidelines contain suspicious patterns:`,
             validation.issues,
@@ -667,10 +663,7 @@ export class CustomSkillLoader {
       .replace(/`[^`\n]*`/g, " ")
       .replace(/https?:\/\/\S+/gi, " ")
       .replace(/(^|\n)\s*>\s.*$/gm, " ")
-      .replace(
-        /\b(?:[A-Za-z]:)?(?:\/|\.\/|\.\.\/)?[\w.-]+(?:\/[\w.-]+)+\b/g,
-        " ",
-      )
+      .replace(/\b(?:[A-Za-z]:)?(?:\/|\.\/|\.\.\/)?[\w.-]+(?:\/[\w.-]+)+\b/g, " ")
       .replace(
         /\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|txt|html|css|scss|py|rb|go|rs|java|c|cpp|h|hpp|docx?|pdf|xlsx?|pptx?|ya?ml)\b/gi,
         " ",
@@ -707,10 +700,8 @@ export class CustomSkillLoader {
   private matchesExplicitSkillInvocationTarget(query: string, phrase: string): boolean {
     const normalizedQuery = this.normalizeRoutingPhrase(this.sanitizeRoutingQuery(query));
     const normalizedPhrase = this.normalizeRoutingPhrase(phrase);
-    return matchesExplicitSkillInvocationPhrase(
-      normalizedQuery,
-      normalizedPhrase,
-      (segment) => this.escapeRegExp(segment),
+    return matchesExplicitSkillInvocationPhrase(normalizedQuery, normalizedPhrase, (segment) =>
+      this.escapeRegExp(segment),
     );
   }
 
@@ -760,10 +751,13 @@ export class CustomSkillLoader {
     if (!normalizedQuery) return false;
 
     const matched = keywords.some(
-      (keyword) => typeof keyword === "string" && this.queryContainsRoutingPhrase(normalizedQuery, keyword),
+      (keyword) =>
+        typeof keyword === "string" && this.queryContainsRoutingPhrase(normalizedQuery, keyword),
     );
     if (!matched) {
-      logger.debug(`Keyword gate BLOCKED skill "${skill.id}" for query "${query.slice(0, 80)}" (keywords: ${JSON.stringify(keywords)})`);
+      logger.debug(
+        `Keyword gate BLOCKED skill "${skill.id}" for query "${query.slice(0, 80)}" (keywords: ${JSON.stringify(keywords)})`,
+      );
     }
     return matched;
   }
@@ -802,7 +796,9 @@ export class CustomSkillLoader {
     const examples = skill.metadata?.routing?.examples;
     const raw = polarity === "positive" ? examples?.positive : examples?.negative;
     if (!Array.isArray(raw)) return [];
-    return raw.filter((example): example is string => typeof example === "string" && example.trim().length > 0);
+    return raw.filter(
+      (example): example is string => typeof example === "string" && example.trim().length > 0,
+    );
   }
 
   private getBestExampleOverlap(queryTokens: Set<string>, examples: string[]): number {
@@ -825,7 +821,10 @@ export class CustomSkillLoader {
     }
 
     return skills
-      .map((skill) => ({ skill, score: this.scoreSkillForQuery(skill, normalizedQuery, queryTokens) }))
+      .map((skill) => ({
+        skill,
+        score: this.scoreSkillForQuery(skill, normalizedQuery, queryTokens),
+      }))
       .sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id));
   }
 
@@ -860,8 +859,7 @@ export class CustomSkillLoader {
       skill.metadata?.routing?.outputs || "",
       skill.metadata?.routing?.successCriteria || "",
       ...positiveExamples,
-    ]
-      .filter((text) => typeof text === "string" && text.trim().length > 0);
+    ].filter((text) => typeof text === "string" && text.trim().length > 0);
     if (positiveTexts.length === 0) return 0;
 
     const overlapScore = this.scoreTextOverlap(queryTokens, positiveTexts);
@@ -885,7 +883,10 @@ export class CustomSkillLoader {
       } else {
         intentMismatchPenalty = 0.3;
       }
-    } else if (dominantQueryIntent && this.getIntentCueCount(positiveTexts, dominantQueryIntent) > 0) {
+    } else if (
+      dominantQueryIntent &&
+      this.getIntentCueCount(positiveTexts, dominantQueryIntent) > 0
+    ) {
       intentAlignmentBoost = 0.1;
     }
 
@@ -940,8 +941,12 @@ export class CustomSkillLoader {
     // Hard gate: skills with routing keywords are hidden from the model unless a keyword matches.
     // This prevents keyword-gated skills (e.g. codex-cli) from appearing in the
     // model's skill list for unrelated tasks.
-    const eligibleSkills = skills.filter((skill) => this.matchesSkillRoutingQuery(skill, normalizedQuery));
-    logger.info(`shortlistSkillsForQuery: ${skills.length} skills → ${eligibleSkills.length} after keyword gate (query="${normalizedQuery.slice(0, 80)}")`);
+    const eligibleSkills = skills.filter((skill) =>
+      this.matchesSkillRoutingQuery(skill, normalizedQuery),
+    );
+    logger.info(
+      `shortlistSkillsForQuery: ${skills.length} skills → ${eligibleSkills.length} after keyword gate (query="${normalizedQuery.slice(0, 80)}")`,
+    );
 
     const ranked = this.rankSkillsForQuery(eligibleSkills, normalizedQuery);
 
@@ -1006,7 +1011,9 @@ export class CustomSkillLoader {
       );
     }
     if (routed.confidence < lowConfidenceThreshold) {
-      lines.push("Routing confidence is low. Review the listed skills carefully before choosing one.");
+      lines.push(
+        "Routing confidence is low. Review the listed skills carefully before choosing one.",
+      );
     }
     for (const [category, categoryDescriptors] of Object.entries(byCategory).sort()) {
       lines.push(`\n${category}:`);
@@ -1051,11 +1058,15 @@ export class CustomSkillLoader {
     };
   }
 
-  listRuntimeSkillDescriptors(options: {
-    availableToolNames?: Set<string>;
-    includePrereqBlockedSkills?: boolean;
-  } = {}): RuntimeSkillDescriptor[] {
-    return this.listModelInvocableSkills(options).map((skill) => this.getRuntimeSkillDescriptor(skill));
+  listRuntimeSkillDescriptors(
+    options: {
+      availableToolNames?: Set<string>;
+      includePrereqBlockedSkills?: boolean;
+    } = {},
+  ): RuntimeSkillDescriptor[] {
+    return this.listModelInvocableSkills(options).map((skill) =>
+      this.getRuntimeSkillDescriptor(skill),
+    );
   }
 
   /**
@@ -1167,8 +1178,7 @@ export class CustomSkillLoader {
     const prompt = String(skill.prompt || "");
     const requiresScopedDir =
       prompt.includes("{baseDir}/SKILL.md") || prompt.includes("{baseDir}/references/");
-    const scopedHasScripts =
-      skillScopedDir && fs.existsSync(path.join(skillScopedDir, "scripts"));
+    const scopedHasScripts = skillScopedDir && fs.existsSync(path.join(skillScopedDir, "scripts"));
     const referencedRelativePaths = Array.from(
       prompt.matchAll(/\{baseDir\}\/([A-Za-z0-9._\-/]+)/g),
       (match) => match[1],
@@ -1254,10 +1264,12 @@ export class CustomSkillLoader {
    */
   async getSkillStatus(): Promise<SkillStatusReport> {
     const skills = this.listSkills();
-    const statusEntries = (await this.eligibilityChecker.buildStatusEntries(skills)).map((entry) => ({
-      ...entry,
-      securityReport: this.securityReports.get(entry.id),
-    }));
+    const statusEntries = (await this.eligibilityChecker.buildStatusEntries(skills)).map(
+      (entry) => ({
+        ...entry,
+        securityReport: this.securityReports.get(entry.id),
+      }),
+    );
 
     const summary = {
       total: statusEntries.length,

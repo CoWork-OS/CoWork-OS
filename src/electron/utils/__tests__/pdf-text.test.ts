@@ -78,8 +78,7 @@ describe("extractPdfText", () => {
     const result = await extractPdfText(pdfPath);
 
     expect(result).toEqual({
-      text:
-        "Premier paragraphe lisible.\n\nDeuxieme paragraphe lisible.\n\n[... 3 additional page(s) omitted from extraction ...]",
+      text: "Premier paragraphe lisible.\n\nDeuxieme paragraphe lisible.\n\n[... 3 additional page(s) omitted from extraction ...]",
       pageCount: 5,
       extractionMode: "native",
       usedFallback: true,
@@ -106,8 +105,18 @@ describe("extractPdfText", () => {
       extractionMode: "native",
       imageHeavy: false,
       pages: [
-        { pageIndex: 0, text: "Texte propre de la premiere page.", usedOcr: false, truncated: false },
-        { pageIndex: 1, text: "Texte propre de la deuxieme page.", usedOcr: false, truncated: false },
+        {
+          pageIndex: 0,
+          text: "Texte propre de la premiere page.",
+          usedOcr: false,
+          truncated: false,
+        },
+        {
+          pageIndex: 1,
+          text: "Texte propre de la deuxieme page.",
+          usedOcr: false,
+          truncated: false,
+        },
       ],
       fullText: "",
       content: "",

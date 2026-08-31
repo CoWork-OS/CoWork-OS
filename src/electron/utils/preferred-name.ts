@@ -55,7 +55,9 @@ const INFERRED_DISALLOWED_NAME_TOKENS = new Set([
 ]);
 
 function collapseWhitespace(value: string): string {
-  return String(value || "").trim().replace(/\s+/g, " ");
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function normalizeToken(token: string): string {

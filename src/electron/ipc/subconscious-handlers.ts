@@ -26,9 +26,12 @@ import {
 } from "../utils/validation";
 
 export function setupSubconsciousHandlers(service: SubconsciousLoopService): void {
-  ipcMain.handle(IPC_CHANNELS.SUBCONSCIOUS_GET_SETTINGS, async (): Promise<SubconsciousSettings> => {
-    return service.getSettings();
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.SUBCONSCIOUS_GET_SETTINGS,
+    async (): Promise<SubconsciousSettings> => {
+      return service.getSettings();
+    },
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.SUBCONSCIOUS_SAVE_SETTINGS,
@@ -90,9 +93,7 @@ export function setupSubconsciousHandlers(service: SubconsciousLoopService): voi
   });
   ipcMain.handle(IPC_CHANNELS.SUBCONSCIOUS_LIST_RUNS, async (_event, targetKey?: string) => {
     const validatedTargetKey =
-      targetKey === undefined
-        ? undefined
-        : validateInput(TargetKeySchema, targetKey, "target key");
+      targetKey === undefined ? undefined : validateInput(TargetKeySchema, targetKey, "target key");
     return service.listRuns(validatedTargetKey);
   });
   ipcMain.handle(IPC_CHANNELS.SUBCONSCIOUS_GET_TARGET_DETAIL, async (_event, targetKey: string) =>
@@ -101,9 +102,7 @@ export function setupSubconsciousHandlers(service: SubconsciousLoopService): voi
   ipcMain.handle(IPC_CHANNELS.SUBCONSCIOUS_REFRESH, async () => service.refreshTargets());
   ipcMain.handle(IPC_CHANNELS.SUBCONSCIOUS_RUN_NOW, async (_event, targetKey?: string) => {
     const validatedTargetKey =
-      targetKey === undefined
-        ? undefined
-        : validateInput(TargetKeySchema, targetKey, "target key");
+      targetKey === undefined ? undefined : validateInput(TargetKeySchema, targetKey, "target key");
     return service.runNow(validatedTargetKey);
   });
   ipcMain.handle(IPC_CHANNELS.SUBCONSCIOUS_RETRY_RUN, async (_event, runId: string) =>
@@ -194,29 +193,40 @@ export function setupImprovementHandlers(service: SubconsciousLoopService): void
   });
   ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_RUN_NEXT, async () => {
     const run = await service.runNow();
-    return run ? service.listImprovementCampaigns().find((item) => item.id === run.id) || null : null;
+    return run
+      ? service.listImprovementCampaigns().find((item) => item.id === run.id) || null
+      : null;
   });
   ipcMain.handle(
     IPC_CHANNELS.IMPROVEMENT_RESET_HISTORY,
-    async (): Promise<ImprovementHistoryResetResult> => service.resetImprovementCompatibilityHistory(),
+    async (): Promise<ImprovementHistoryResetResult> =>
+      service.resetImprovementCompatibilityHistory(),
   );
   ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_RETRY_RUN, async (_event, runId: string) => {
     const run = await service.retryRun(validateInput(UUIDSchema, runId, "run ID"));
-    return run ? service.listImprovementCampaigns().find((item) => item.id === run.id) || null : null;
+    return run
+      ? service.listImprovementCampaigns().find((item) => item.id === run.id) || null
+      : null;
   });
-  ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_DISMISS_CANDIDATE, async (_event, candidateId: string) => {
-    const validatedCandidateId = validateInput(TargetKeySchema, candidateId, "candidate ID");
-    const target = service.dismissTarget(validatedCandidateId);
-    return target ? service.listImprovementCandidates(target.target.workspaceId).find((item) => item.id === candidateId) : undefined;
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.IMPROVEMENT_DISMISS_CANDIDATE,
+    async (_event, candidateId: string) => {
+      const validatedCandidateId = validateInput(TargetKeySchema, candidateId, "candidate ID");
+      const target = service.dismissTarget(validatedCandidateId);
+      return target
+        ? service
+            .listImprovementCandidates(target.target.workspaceId)
+            .find((item) => item.id === candidateId)
+        : undefined;
+    },
+  );
   ipcMain.handle(
     IPC_CHANNELS.IMPROVEMENT_REVIEW_RUN,
     async (_event, runId: string, reviewStatus: "accepted" | "dismissed") => {
-      const run = await service.reviewRun(
-        validateInput(UUIDSchema, runId, "run ID"),
-        reviewStatus,
-      );
-      return run ? service.listImprovementCampaigns().find((item) => item.id === run.id) : undefined;
+      const run = await service.reviewRun(validateInput(UUIDSchema, runId, "run ID"), reviewStatus);
+      return run
+        ? service.listImprovementCampaigns().find((item) => item.id === run.id)
+        : undefined;
     },
   );
 }

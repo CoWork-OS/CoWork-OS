@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VideoGenerator } from "../video-generator";
+import { buildOutputPath, VideoGenerator } from "../video-generator";
 import { LLMProviderFactory } from "../../llm/provider-factory";
 
 const fetchMock = vi.fn();
@@ -27,6 +27,18 @@ afterEach(() => {
 });
 
 describe("VideoGenerator", () => {
+  it("rejects absolute and parent-directory output paths while preserving safe subdirectories", () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-video-"));
+
+    expect(() => buildOutputPath(tempDir, "../../outside.mp4")).toThrow(
+      /relative path|parent-directory traversal/i,
+    );
+    expect(() => buildOutputPath(tempDir, "/tmp/outside.mp4")).toThrow(/relative path/i);
+    expect(buildOutputPath(tempDir, "outputs/armadillo.mp4")).toBe(
+      path.join(tempDir, "outputs", "armadillo.mp4"),
+    );
+  });
+
   it("uses Azure Sora 2 videos API, ignores stray overrides, and writes the completed MP4 to the requested output path", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-video-"));
 

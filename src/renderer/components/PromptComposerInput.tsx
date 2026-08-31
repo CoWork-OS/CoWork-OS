@@ -11,7 +11,10 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import type { IntegrationMentionSelection } from "../../shared/types";
-import { IntegrationMentionIcon, renderIntegrationMentionIconContent } from "./IntegrationMentionIcon";
+import {
+  IntegrationMentionIcon,
+  renderIntegrationMentionIconContent,
+} from "./IntegrationMentionIcon";
 
 export type IntegrationMentionSpan = {
   spanId: string;
@@ -42,6 +45,7 @@ type PromptComposerInputProps = {
   onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   onPaste: (event: ReactClipboardEvent<HTMLDivElement>) => void | Promise<void>;
   onCursorChange: (cursor: number) => void;
+  onContentPresenceChange?: (hasContent: boolean) => void;
   onFocus?: () => void;
   onBlur?: () => void;
 };
@@ -95,11 +99,26 @@ export function formatPastedWebLinkAsMarkdown(text: string): string | null {
   return `[${formatComposerLinkLabel(url)}](${url.toString()})`;
 }
 
+export function getPastedText(clipboardData: Pick<DataTransfer, "getData">): string {
+  const plainText = clipboardData.getData("text/plain");
+  if (plainText) return plainText;
+
+  const html = clipboardData.getData("text/html");
+  if (!html || typeof document === "undefined") return "";
+
+  const container = document.createElement("div");
+  container.innerHTML = html;
+  return container.textContent ?? "";
+}
+
 function getFaviconUrl(domain: string): string {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
 }
 
-function sortedValidMentions(value: string, mentions: IntegrationMentionSpan[]): IntegrationMentionSpan[] {
+function sortedValidMentions(
+  value: string,
+  mentions: IntegrationMentionSpan[],
+): IntegrationMentionSpan[] {
   return mentions
     .filter((span) => {
       if (span.start < 0 || span.end <= span.start || span.end > value.length) return false;
@@ -156,7 +175,11 @@ function buildRenderParts(value: string, mentions: IntegrationMentionSpan[]): Re
   for (const token of tokens) {
     if (token.start < cursor) continue;
     if (token.start > cursor) {
-      parts.push({ type: "text", key: `text:${cursor}:${token.start}`, text: value.slice(cursor, token.start) });
+      parts.push({
+        type: "text",
+        key: `text:${cursor}:${token.start}`,
+        text: value.slice(cursor, token.start),
+      });
     }
     if (token.type === "mention") {
       parts.push({ type: "mention", key: token.span.spanId, span: token.span });
@@ -173,7 +196,7 @@ function buildRenderParts(value: string, mentions: IntegrationMentionSpan[]): Re
 
 function getTokenElement(node: Node | null): HTMLElement | null {
   let current: HTMLElement | null =
-    node instanceof HTMLElement ? node : node?.parentElement ?? null;
+    node instanceof HTMLElement ? node : (node?.parentElement ?? null);
   while (current) {
     if (current.dataset.integrationMentionId || current.dataset.composerLinkText) return current;
     current = current.parentElement;
@@ -253,7 +276,10 @@ function getIndexForDomPosition(
   return index;
 }
 
-function getSelectionIndex(root: HTMLElement, mentionsById: Map<string, IntegrationMentionSpan>): number {
+function getSelectionIndex(
+  root: HTMLElement,
+  mentionsById: Map<string, IntegrationMentionSpan>,
+): number {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0) return textLengthForNode(root, mentionsById);
   return getIndexForDomPosition(root, selection.anchorNode, selection.anchorOffset, mentionsById);
@@ -441,6 +467,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       onKeyDown,
       onPaste,
       onCursorChange,
+      onContentPresenceChange,
       onFocus,
       onBlur,
     },
@@ -449,6 +476,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
     const rootRef = useRef<HTMLDivElement>(null);
     const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
     const skipNextBeforeInputRef = useRef(false);
+    const pasteHandledRef = useRef(false);
     const validMentions = useMemo(() => sortedValidMentions(value, mentions), [mentions, value]);
     const mentionsById = useMemo(
       () => new Map(validMentions.map((span) => [span.spanId, span])),
@@ -491,12 +519,13 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
     useLayoutEffect(() => {
       const root = rootRef.current;
       if (root && typeof document !== "undefined") renderComposerDom(root, parts);
+      onContentPresenceChange?.(value.length > 0);
       resize();
       const pending = pendingSelectionRef.current;
       if (!pending) return;
       pendingSelectionRef.current = null;
       applySelection(pending.start, pending.end);
-    }, [applySelection, parts, resize]);
+    }, [applySelection, onContentPresenceChange, parts, resize, value.length]);
 
     const emitDomChange = useCallback(
       (shrink: boolean) => {
@@ -504,17 +533,15 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
         if (!root) return;
         const snapshot = readEditable(root, mentionsById);
         pendingSelectionRef.current = { start: snapshot.cursor, end: snapshot.cursor };
+        onContentPresenceChange?.(snapshot.value.length > 0);
         onChange(snapshot.value, snapshot.cursor, snapshot.mentions, shrink);
       },
-      [mentionsById, onChange],
+      [mentionsById, onChange, onContentPresenceChange],
     );
 
     const applyTextReplacement = useCallback(
       (start: number, end: number, replacement: string) => {
-        const protectedSpans = [
-          ...validMentions,
-          ...parseMarkdownLinks(value, validMentions),
-        ];
+        const protectedSpans = [...validMentions, ...parseMarkdownLinks(value, validMentions)];
         const expandedStart = Math.min(
           start,
           ...protectedSpans
@@ -529,9 +556,10 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
         );
         const next = replaceRange(value, validMentions, expandedStart, expandedEnd, replacement);
         pendingSelectionRef.current = { start: next.cursor, end: next.cursor };
+        onContentPresenceChange?.(next.value.length > 0);
         onChange(next.value, next.cursor, next.mentions, next.value.length < value.length);
       },
-      [onChange, validMentions, value],
+      [onChange, onContentPresenceChange, validMentions, value],
     );
 
     const getSelectionRange = useCallback(() => {
@@ -582,6 +610,13 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       }, 0);
     }, []);
 
+    const markPasteHandled = useCallback(() => {
+      pasteHandledRef.current = true;
+      window.setTimeout(() => {
+        pasteHandledRef.current = false;
+      }, 0);
+    }, []);
+
     const handleNativeBeforeInput = useCallback(
       (nativeEvent: InputEvent) => {
         if (nativeEvent.isComposing) return;
@@ -592,6 +627,25 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
         }
 
         const inputType = nativeEvent.inputType;
+
+        if (inputType === "insertFromPaste") {
+          if (pasteHandledRef.current) {
+            nativeEvent.preventDefault();
+            pasteHandledRef.current = false;
+            return;
+          }
+
+          const dataTransfer = nativeEvent.dataTransfer;
+          if (dataTransfer?.files.length) return;
+          const text = dataTransfer ? getPastedText(dataTransfer) : nativeEvent.data;
+          if (typeof text !== "string" || !text) return;
+
+          nativeEvent.preventDefault();
+          const range = getSelectionRange();
+          applyTextReplacement(range.start, range.end, formatPastedWebLinkAsMarkdown(text) || text);
+          markPasteHandled();
+          return;
+        }
 
         if (inputType === "insertText") {
           const text = nativeEvent.data;
@@ -620,7 +674,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
           deleteSelectionRange("forward");
         }
       },
-      [applyTextReplacement, deleteSelectionRange, getSelectionRange],
+      [applyTextReplacement, deleteSelectionRange, getSelectionRange, markPasteHandled],
     );
 
     useLayoutEffect(() => {
@@ -669,12 +723,21 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
 
     const handlePaste = (event: ReactClipboardEvent<HTMLDivElement>) => {
       void onPaste(event);
-      if (event.defaultPrevented) return;
-      const text = event.clipboardData.getData("text/plain");
+      if (event.defaultPrevented) {
+        pasteHandledRef.current = false;
+        return;
+      }
+      if (pasteHandledRef.current) {
+        event.preventDefault();
+        pasteHandledRef.current = false;
+        return;
+      }
+      const text = getPastedText(event.clipboardData);
       if (!text) return;
       event.preventDefault();
       const range = getSelectionRange();
       applyTextReplacement(range.start, range.end, formatPastedWebLinkAsMarkdown(text) || text);
+      markPasteHandled();
     };
 
     const handleCopy = (event: ReactClipboardEvent<HTMLDivElement>) => {
@@ -735,9 +798,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
                     label={part.span.mention.label}
                     size="xs"
                   />
-                  <span className="integration-mention-chip-label">
-                    {part.span.mention.label}
-                  </span>
+                  <span className="integration-mention-chip-label">{part.span.mention.label}</span>
                 </span>
               ) : (
                 <span

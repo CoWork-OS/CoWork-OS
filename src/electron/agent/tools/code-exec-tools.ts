@@ -44,14 +44,43 @@ export class CodeExecTools {
 
   private async getSandbox(): Promise<ISandbox> {
     if (!this.sandbox) {
-      this.sandbox = await createSandbox(this.workspace);
+      this.sandbox = await createSandbox(
+        this.workspace,
+        this.workspace.permissions?.sandboxType || "auto",
+      );
     }
     return this.sandbox;
   }
 
+  private assertNetworkExecutionAllowed(input: CodeExecInput): void {
+    if (input.allow_network !== true) return;
+
+    const permissions = this.workspace.permissions || ({} as Workspace["permissions"]);
+    if (permissions.network !== true) {
+      throw new Error("execute_code network access is disabled for this workspace.");
+    }
+    if (permissions.accessNetworkMode === "disabled") {
+      throw new Error("execute_code network access is disabled by the active access profile.");
+    }
+    // The process sandboxes currently expose a coarse network on/off switch;
+    // they cannot enforce per-domain egress for arbitrary user code. Refuse
+    // the combination instead of pretending the profile remains effective.
+    if ((permissions.accessDomainRules || []).length > 0) {
+      throw new Error(
+        "execute_code network access cannot be combined with domain-scoped network rules; use a profile without domain rules or keep network disabled.",
+      );
+    }
+  }
+
   async executeCode(input: CodeExecInput): Promise<CodeExecResult> {
+    this.assertNetworkExecutionAllowed(input);
     const sandbox = await this.getSandbox();
-    if (sandbox.type === "none") {
+    const permissions = this.workspace.permissions || ({} as Workspace["permissions"]);
+    const unrestrictedProfile =
+      permissions.accessSandboxMode === "danger-full-access" &&
+      permissions.accessApprovalPolicy === "never" &&
+      permissions.unrestrictedFileAccess === true;
+    if (sandbox.type === "none" && !unrestrictedProfile) {
       throw new Error(
         "execute_code requires an OS-level sandbox. Configure Docker or macOS sandboxing before using this tool.",
       );

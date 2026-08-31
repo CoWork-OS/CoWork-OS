@@ -111,7 +111,8 @@ export function MissionControlPanel({
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [plannerConfig, setPlannerConfig] = useState<StrategicPlannerConfig | null>(null);
   const [plannerRuns, setPlannerRuns] = useState<StrategicPlannerRun[]>([]);
-  const [commandCenterSummary, setCommandCenterSummary] = useState<CompanyCommandCenterSummary | null>(null);
+  const [commandCenterSummary, setCommandCenterSummary] =
+    useState<CompanyCommandCenterSummary | null>(null);
   const [plannerLoading, setPlannerLoading] = useState(false);
   const [plannerSaving, setPlannerSaving] = useState(false);
   const [plannerRunning, setPlannerRunning] = useState(false);
@@ -119,8 +120,7 @@ export function MissionControlPanel({
   const tasksRef = useRef<Task[]>([]);
   const workspaceIdRef = useRef<string | null>(null);
   const agentContext = useAgentContext();
-  const supportsWorkspaceReports =
-    !!selectedWorkspaceId && !isTempWorkspaceId(selectedWorkspaceId);
+  const supportsWorkspaceReports = !!selectedWorkspaceId && !isTempWorkspaceId(selectedWorkspaceId);
   const filterLabels: Record<typeof feedFilter, UiCopyKey> = {
     all: "mcFilterAll",
     tasks: "mcFilterTasks",
@@ -232,7 +232,9 @@ export function MissionControlPanel({
       setProjects(loadedProjects);
       setIssues(loadedIssues);
       setSelectedIssueId((prev) =>
-        prev && loadedIssues.some((issue) => issue.id === prev) ? prev : loadedIssues[0]?.id || null,
+        prev && loadedIssues.some((issue) => issue.id === prev)
+          ? prev
+          : loadedIssues[0]?.id || null,
       );
     } catch (err) {
       console.error("Failed to load company ops data:", err);
@@ -333,7 +335,13 @@ export function MissionControlPanel({
     } finally {
       setIsRefreshing(false);
     }
-  }, [loadCommandCenterSummary, loadCompanyOps, loadPlannerData, selectedCompanyId, selectedWorkspaceId]);
+  }, [
+    loadCommandCenterSummary,
+    loadCompanyOps,
+    loadPlannerData,
+    selectedCompanyId,
+    selectedWorkspaceId,
+  ]);
 
   useEffect(() => {
     loadWorkspaces();
@@ -746,14 +754,17 @@ export function MissionControlPanel({
     () =>
       plannerManagedIssues.filter((issue) => {
         if (selectedGoalFilter !== "all" && issue.goalId !== selectedGoalFilter) return false;
-        if (selectedProjectFilter !== "all" && issue.projectId !== selectedProjectFilter) return false;
+        if (selectedProjectFilter !== "all" && issue.projectId !== selectedProjectFilter)
+          return false;
         return true;
       }),
     [plannerManagedIssues, selectedGoalFilter, selectedProjectFilter],
   );
   useEffect(() => {
     setSelectedIssueId((prev) =>
-      prev && filteredIssues.some((issue) => issue.id === prev) ? prev : filteredIssues[0]?.id || null,
+      prev && filteredIssues.some((issue) => issue.id === prev)
+        ? prev
+        : filteredIssues[0]?.id || null,
     );
   }, [filteredIssues]);
   const plannerRunIssueIds = useMemo(() => {
@@ -887,7 +898,13 @@ export function MissionControlPanel({
     } finally {
       setPlannerRunning(false);
     }
-  }, [handleManualRefresh, loadCompanyOps, loadPlannerData, selectedCompanyId, selectedWorkspaceId]);
+  }, [
+    handleManualRefresh,
+    loadCompanyOps,
+    loadPlannerData,
+    selectedCompanyId,
+    selectedWorkspaceId,
+  ]);
 
   const handlePostComment = useCallback(async () => {
     if (!selectedWorkspaceId || !selectedTask) return;
@@ -1087,7 +1104,9 @@ export function MissionControlPanel({
           <div className="mc-planner-summary">
             <div className="mc-planner-title-row">
               <h2>Strategic Planner</h2>
-              <span className={`mc-planner-status ${plannerConfig?.enabled ? "enabled" : "disabled"}`}>
+              <span
+                className={`mc-planner-status ${plannerConfig?.enabled ? "enabled" : "disabled"}`}
+              >
                 {plannerConfig?.enabled ? "Enabled" : "Disabled"}
               </span>
               {plannerSaving && <span className="mc-planner-muted">Saving...</span>}
@@ -1109,12 +1128,18 @@ export function MissionControlPanel({
           </div>
           <div className="mc-planner-metrics">
             <div className="mc-planner-metric">
-              <span className="mc-planner-metric-value">{goals.filter((goal) => goal.status === "active").length}</span>
+              <span className="mc-planner-metric-value">
+                {goals.filter((goal) => goal.status === "active").length}
+              </span>
               <span className="mc-planner-metric-label">Active goals</span>
             </div>
             <div className="mc-planner-metric">
               <span className="mc-planner-metric-value">
-                {projects.filter((project) => project.status !== "completed" && project.status !== "archived").length}
+                {
+                  projects.filter(
+                    (project) => project.status !== "completed" && project.status !== "archived",
+                  ).length
+                }
               </span>
               <span className="mc-planner-metric-label">Open projects</span>
             </div>
@@ -1147,7 +1172,9 @@ export function MissionControlPanel({
                 <input
                   type="checkbox"
                   checked={plannerConfig.autoDispatch}
-                  onChange={(e) => void handlePlannerConfigChange({ autoDispatch: e.target.checked })}
+                  onChange={(e) =>
+                    void handlePlannerConfigChange({ autoDispatch: e.target.checked })
+                  }
                 />
                 <span>Auto-dispatch new issues</span>
               </label>
@@ -1244,7 +1271,8 @@ export function MissionControlPanel({
                           updatedIssueIds?: string[];
                         }
                       | undefined;
-                    const nextIssueId = metadata?.createdIssueIds?.[0] || metadata?.updatedIssueIds?.[0];
+                    const nextIssueId =
+                      metadata?.createdIssueIds?.[0] || metadata?.updatedIssueIds?.[0];
                     if (nextIssueId) {
                       setSelectedIssueId(nextIssueId);
                     }
@@ -1256,7 +1284,8 @@ export function MissionControlPanel({
                     <span className={`mc-planner-run-status ${run.status}`}>{run.status}</span>
                     <span className="mc-planner-run-trigger">{run.trigger}</span>
                     <span className="mc-planner-run-summary">
-                      {run.summary || `${run.createdIssueCount} created, ${run.dispatchedTaskCount} dispatched`}
+                      {run.summary ||
+                        `${run.createdIssueCount} created, ${run.dispatchedTaskCount} dispatched`}
                     </span>
                   </div>
                   <span className="mc-planner-run-time">
@@ -1538,7 +1567,17 @@ export function MissionControlPanel({
                             <span className="mc-feed-agent" style={{ color: agent.color }}>
                               {(() => {
                                 const Icon = getEmojiIcon(agent.icon || "🤖");
-                                return <Icon size={14} strokeWidth={2} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />;
+                                return (
+                                  <Icon
+                                    size={14}
+                                    strokeWidth={2}
+                                    style={{
+                                      display: "inline",
+                                      verticalAlign: "middle",
+                                      marginRight: 4,
+                                    }}
+                                  />
+                                );
                               })()}
                               {agent.displayName}
                             </span>
@@ -1567,23 +1606,33 @@ export function MissionControlPanel({
                     )}
                     <div className="mc-ops-stats">
                       <div className="mc-ops-stat-card">
-                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.activeGoalCount}</span>
+                        <span className="mc-ops-stat-value">
+                          {commandCenterSummary.overview.activeGoalCount}
+                        </span>
                         <span className="mc-ops-stat-label">Active goals</span>
                       </div>
                       <div className="mc-ops-stat-card">
-                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.activeProjectCount}</span>
+                        <span className="mc-ops-stat-value">
+                          {commandCenterSummary.overview.activeProjectCount}
+                        </span>
                         <span className="mc-ops-stat-label">Active projects</span>
                       </div>
                       <div className="mc-ops-stat-card">
-                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.openIssueCount}</span>
+                        <span className="mc-ops-stat-value">
+                          {commandCenterSummary.overview.openIssueCount}
+                        </span>
                         <span className="mc-ops-stat-label">Open issues</span>
                       </div>
                       <div className="mc-ops-stat-card">
-                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.pendingReviewCount}</span>
+                        <span className="mc-ops-stat-value">
+                          {commandCenterSummary.overview.pendingReviewCount}
+                        </span>
                         <span className="mc-ops-stat-label">Pending review</span>
                       </div>
                       <div className="mc-ops-stat-card">
-                        <span className="mc-ops-stat-value">{commandCenterSummary.overview.valuableOutputCount}</span>
+                        <span className="mc-ops-stat-value">
+                          {commandCenterSummary.overview.valuableOutputCount}
+                        </span>
                         <span className="mc-ops-stat-label">Valuable outputs</span>
                       </div>
                     </div>
@@ -1609,7 +1658,9 @@ export function MissionControlPanel({
                           </div>
                           <div className="mc-ops-row-subtitle">
                             {(operator.operatorMandate || "No mandate set") +
-                              (operator.currentBottleneck ? ` · Bottleneck: ${operator.currentBottleneck}` : "")}
+                              (operator.currentBottleneck
+                                ? ` · Bottleneck: ${operator.currentBottleneck}`
+                                : "")}
                           </div>
                           <div className="mc-ops-row-subtitle">
                             {`Last useful output ${operator.lastUsefulOutputAt ? formatRelativeTime(operator.lastUsefulOutputAt) : "never"} · heartbeat ${operator.heartbeatStatus || "idle"}`}
@@ -1681,7 +1732,9 @@ export function MissionControlPanel({
                           <div className="mc-ops-row-subtitle">
                             {`${item.reviewReason} · ${item.outputType || item.sourceType}`}
                           </div>
-                          {item.summary && <div className="mc-ops-row-subtitle">{item.summary}</div>}
+                          {item.summary && (
+                            <div className="mc-ops-row-subtitle">{item.summary}</div>
+                          )}
                         </div>
                         <span className="mc-ops-pill">{formatRelativeTime(item.createdAt)}</span>
                       </button>
@@ -1731,9 +1784,12 @@ export function MissionControlPanel({
                   <div className="mc-ops-run-card">
                     <div className="mc-ops-row">
                       <div>
-                        <div className="mc-ops-row-title">{selectedPlannerRun.summary || "Planner cycle"}</div>
+                        <div className="mc-ops-row-title">
+                          {selectedPlannerRun.summary || "Planner cycle"}
+                        </div>
                         <div className="mc-ops-row-subtitle">
-                          {selectedPlannerRun.trigger} · {formatRelativeTime(selectedPlannerRun.createdAt)}
+                          {selectedPlannerRun.trigger} ·{" "}
+                          {formatRelativeTime(selectedPlannerRun.createdAt)}
                         </div>
                       </div>
                       <span className={`mc-ops-pill status-${selectedPlannerRun.status}`}>
@@ -1747,7 +1803,9 @@ export function MissionControlPanel({
                     </div>
                     <div className="mc-ops-list">
                       {plannerRunIssues.length === 0 ? (
-                        <div className="mc-feed-empty">No issue details for this planner cycle.</div>
+                        <div className="mc-feed-empty">
+                          No issue details for this planner cycle.
+                        </div>
                       ) : (
                         plannerRunIssues.map((issue) => (
                           <button
@@ -1762,7 +1820,9 @@ export function MissionControlPanel({
                                 {issue.projectId ? "Project-linked" : "Goal-linked"}
                               </div>
                             </div>
-                            <span className={`mc-ops-pill status-${issue.status}`}>{issue.status}</span>
+                            <span className={`mc-ops-pill status-${issue.status}`}>
+                              {issue.status}
+                            </span>
                           </button>
                         ))
                       )}
@@ -1786,7 +1846,8 @@ export function MissionControlPanel({
                             : "No goal") || "No goal"}
                           {" · "}
                           {(selectedIssue.projectId
-                            ? projects.find((project) => project.id === selectedIssue.projectId)?.name
+                            ? projects.find((project) => project.id === selectedIssue.projectId)
+                                ?.name
                             : "No project") || "No project"}
                         </div>
                       </div>
@@ -1829,7 +1890,9 @@ export function MissionControlPanel({
                                   </div>
                                   <div className="mc-ops-row-subtitle">{comment.body}</div>
                                 </div>
-                                <span className="mc-ops-pill">{formatRelativeTime(comment.createdAt)}</span>
+                                <span className="mc-ops-pill">
+                                  {formatRelativeTime(comment.createdAt)}
+                                </span>
                               </div>
                             ))
                           )}
@@ -1857,7 +1920,9 @@ export function MissionControlPanel({
                                     {run.taskId ? " · task linked" : ""}
                                   </div>
                                 </div>
-                                <span className={`mc-ops-pill status-${run.status}`}>{run.status}</span>
+                                <span className={`mc-ops-pill status-${run.status}`}>
+                                  {run.status}
+                                </span>
                               </button>
                             ))
                           )}
@@ -1880,7 +1945,8 @@ export function MissionControlPanel({
                           {selectedIssueRun.summary || `Run ${selectedIssueRun.id.slice(0, 8)}`}
                         </div>
                         <div className="mc-ops-row-subtitle">
-                          {selectedIssueRun.status} · {formatRelativeTime(selectedIssueRun.createdAt)}
+                          {selectedIssueRun.status} ·{" "}
+                          {formatRelativeTime(selectedIssueRun.createdAt)}
                         </div>
                       </div>
                       <span className={`mc-ops-pill status-${selectedIssueRun.status}`}>
@@ -1909,7 +1975,9 @@ export function MissionControlPanel({
                                     .join(" · ")}
                                 </div>
                               </div>
-                              <span className="mc-ops-pill">{formatRelativeTime(event.timestamp)}</span>
+                              <span className="mc-ops-pill">
+                                {formatRelativeTime(event.timestamp)}
+                              </span>
                             </div>
                           ))
                         )}
@@ -1980,7 +2048,9 @@ export function MissionControlPanel({
                   </div>
 
                   <div className="mc-task-detail-section mc-task-detail-section-brief">
-                    <h4 className="mc-task-detail-brief-title">{agentContext.getUiCopy("mcTaskBriefTitle")}</h4>
+                    <h4 className="mc-task-detail-brief-title">
+                      {agentContext.getUiCopy("mcTaskBriefTitle")}
+                    </h4>
                     <div className="mc-task-detail-brief-scroll">
                       <p className="mc-task-detail-brief">{selectedTask.prompt}</p>
                     </div>
@@ -2082,7 +2152,6 @@ export function MissionControlPanel({
           </div>
         </div>
       )}
-
 
       <style>{styles}</style>
     </div>

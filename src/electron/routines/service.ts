@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import type { AgentConfig } from "../../shared/types";
+import type { AccessProfileId } from "../../shared/access-profiles";
 import type {
   RoutineWorkflowApprovalRequest,
   RoutineWorkflowDefinition,
@@ -14,7 +15,12 @@ import { generateHookToken } from "../hooks/settings";
 import type { HookMappingConfig, HooksConfig } from "../hooks/types";
 import type { CronDeliveryConfig, CronEvent } from "../cron/types";
 import { CHANNEL_TYPES, type ChannelType } from "../gateway/channels/types";
-import type { EventTrigger, TriggerCondition, TriggerEvent, TriggerHistoryEntry } from "../triggers/types";
+import type {
+  EventTrigger,
+  TriggerCondition,
+  TriggerEvent,
+  TriggerHistoryEntry,
+} from "../triggers/types";
 import type {
   Routine,
   RoutineApiTrigger,
@@ -41,7 +47,10 @@ import { generateRoutineWorkflowDraft } from "./workflow/generator";
 import { RoutineWorkflowRepository } from "./workflow/repository";
 import { validateRoutineWorkflow } from "./workflow/validation";
 import { GoogleWorkspaceSettingsManager } from "../settings/google-workspace-manager";
-import { getGoogleWorkspaceSettingsForAccount, hasGoogleWorkspaceTokens } from "../../shared/google-workspace";
+import {
+  getGoogleWorkspaceSettingsForAccount,
+  hasGoogleWorkspaceTokens,
+} from "../../shared/google-workspace";
 import { RoutineWorkflowSecretStore } from "./workflow/secret-store";
 import { createLogger } from "../utils/logger";
 
@@ -58,7 +67,12 @@ export class RoutineService {
   private readonly deps: Required<
     Pick<
       RoutineServiceDeps,
-      "db" | "getCronService" | "getEventTriggerService" | "loadHooksSettings" | "saveHooksSettings" | "now"
+      | "db"
+      | "getCronService"
+      | "getEventTriggerService"
+      | "loadHooksSettings"
+      | "saveHooksSettings"
+      | "now"
     >
   > &
     Pick<
@@ -103,9 +117,9 @@ export class RoutineService {
   }
 
   get(id: string): Routine | null {
-    const row = this.deps.db
-      .prepare("SELECT * FROM automation_routines WHERE id = ?")
-      .get(id) as Any | undefined;
+    const row = this.deps.db.prepare("SELECT * FROM automation_routines WHERE id = ?").get(id) as
+      | Any
+      | undefined;
     return row ? this.mapRow(row) : null;
   }
 
@@ -137,14 +151,21 @@ export class RoutineService {
     if (!routine) throw new Error(`Routine not found: ${routineId}`);
     const validation = validateRoutineWorkflow(workflow, { allowIncomplete: true });
     if (validation.issues.some((issue) => issue.severity === "error")) {
-      throw new Error(validation.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" "));
+      throw new Error(
+        validation.issues
+          .filter((issue) => issue.severity === "error")
+          .map((issue) => issue.message)
+          .join(" "),
+      );
     }
     const version = this.workflowRepository.createVersion(routineId, workflow, "draft");
-    this.persist(toCompatibilityRoutine({
-      ...routine,
-      workflow: structuredClone(workflow),
-      updatedAt: this.deps.now(),
-    }));
+    this.persist(
+      toCompatibilityRoutine({
+        ...routine,
+        workflow: structuredClone(workflow),
+        updatedAt: this.deps.now(),
+      }),
+    );
     return { version, validation };
   }
 
@@ -154,7 +175,12 @@ export class RoutineService {
     if (!routine || !version || version.routineId !== routineId) return null;
     const validation = validateRoutineWorkflow(version.definition);
     if (!validation.valid) {
-      throw new Error(validation.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" "));
+      throw new Error(
+        validation.issues
+          .filter((issue) => issue.severity === "error")
+          .map((issue) => issue.message)
+          .join(" "),
+      );
     }
     this.assertWorkflowSecretsReady(version.definition);
     this.assertWorkflowAccountReady(version.definition, validation.requiredScopes);
@@ -207,9 +233,9 @@ export class RoutineService {
         const workflow = this.getActiveWorkflowDefinition(routine.id);
         return Boolean(
           workflow &&
-            flattenWorkflowNodes(workflow.nodes).some(
-              (node) => node.operation === "custom.webhook" && node.config.secretRef === id,
-            ),
+          flattenWorkflowNodes(workflow.nodes).some(
+            (node) => node.operation === "custom.webhook" && node.config.secretRef === id,
+          ),
         );
       })
       .map((routine) => routine.name);
@@ -225,22 +251,24 @@ export class RoutineService {
     const routine = request.routineId ? this.get(request.routineId) : null;
     const workflow = request.workflow || routine?.workflow;
     if (!workflow) throw new Error("A workflow draft is required for testing.");
-    const testRoutine = routine || toCompatibilityRoutine({
-      id: `workflow-test:${randomUUID()}`,
-      name: "Workflow test",
-      enabled: false,
-      workspaceId: "workflow-test",
-      instructions: "Test a deterministic workflow draft.",
-      executionTarget: { kind: "workspace" },
-      contextBindings: {},
-      triggers: [{ id: "manual", type: "manual", enabled: true }],
-      outputs: [{ kind: "task_only" }],
-      approvalPolicy: { mode: "auto_safe" },
-      connectorPolicy: { mode: "prefer", connectorIds: [] },
-      workflow,
-      createdAt: this.deps.now(),
-      updatedAt: this.deps.now(),
-    });
+    const testRoutine =
+      routine ||
+      toCompatibilityRoutine({
+        id: `workflow-test:${randomUUID()}`,
+        name: "Workflow test",
+        enabled: false,
+        workspaceId: "workflow-test",
+        instructions: "Test a deterministic workflow draft.",
+        executionTarget: { kind: "workspace" },
+        contextBindings: {},
+        triggers: [{ id: "manual", type: "manual", enabled: true }],
+        outputs: [{ kind: "task_only" }],
+        approvalPolicy: { mode: "auto_safe" },
+        connectorPolicy: { mode: "prefer", connectorIds: [] },
+        workflow,
+        createdAt: this.deps.now(),
+        updatedAt: this.deps.now(),
+      });
     const run = await this.workflowEngine.start({
       routine: testRoutine,
       workflow,
@@ -268,7 +296,8 @@ export class RoutineService {
     if (!run) throw new Error(`Workflow run not found: ${request.runId}`);
     const routine = this.get(run.routineId);
     const version = this.workflowRepository.getVersion(run.workflowVersionId);
-    if (!routine || !version) throw new Error("The workflow definition for this run is unavailable.");
+    if (!routine || !version)
+      throw new Error("The workflow definition for this run is unavailable.");
     const updated = await this.workflowEngine.respondToApproval({
       routine,
       workflow: version.definition,
@@ -291,7 +320,8 @@ export class RoutineService {
     if (!previous) throw new Error(`Workflow run not found: ${runId}`);
     const routine = this.get(previous.routineId);
     const version = this.workflowRepository.getVersion(previous.workflowVersionId);
-    if (!routine || !version) throw new Error("The workflow definition for this run is unavailable.");
+    if (!routine || !version)
+      throw new Error("The workflow definition for this run is unavailable.");
     const context = previous.context as Record<string, Any>;
     return this.startDeterministicWorkflow(routine, version.definition, version.id, {
       trigger: isPlainRecord(context.trigger) ? context.trigger : {},
@@ -299,6 +329,9 @@ export class RoutineService {
       sourceSummary: `Retry of workflow run ${previous.id}`,
       triggerId: previous.triggerNodeId,
       triggerType: "manual",
+      ...(typeof context.accessProfileId === "string" && context.accessProfileId.trim()
+        ? { accessProfileId: context.accessProfileId.trim() as AccessProfileId }
+        : {}),
     });
   }
 
@@ -329,22 +362,24 @@ export class RoutineService {
 
   async listRuns(routineId?: string, limit = DEFAULT_RUN_LIST_LIMIT): Promise<RoutineRun[]> {
     await this.refreshRunStatuses(routineId);
-    const rows = (routineId
-      ? this.deps.db
-          .prepare(
-            `SELECT * FROM routine_runs
+    const rows = (
+      routineId
+        ? this.deps.db
+            .prepare(
+              `SELECT * FROM routine_runs
              WHERE routine_id = ?
              ORDER BY started_at DESC, created_at DESC
              LIMIT ?`,
-          )
-          .all(routineId, limit)
-      : this.deps.db
-          .prepare(
-            `SELECT * FROM routine_runs
+            )
+            .all(routineId, limit)
+        : this.deps.db
+            .prepare(
+              `SELECT * FROM routine_runs
              ORDER BY started_at DESC, created_at DESC
              LIMIT ?`,
-          )
-          .all(limit)) as Any[];
+            )
+            .all(limit)
+    ) as Any[];
     return dedupeRoutineRuns(rows.map((row) => this.mapRunRecord(row)));
   }
 
@@ -411,9 +446,16 @@ export class RoutineService {
     });
 
     if (routine.workflow) {
-      const validation = validateRoutineWorkflow(routine.workflow, { allowIncomplete: !routine.enabled });
+      const validation = validateRoutineWorkflow(routine.workflow, {
+        allowIncomplete: !routine.enabled,
+      });
       if (!validation.valid) {
-        throw new Error(validation.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" "));
+        throw new Error(
+          validation.issues
+            .filter((issue) => issue.severity === "error")
+            .map((issue) => issue.message)
+            .join(" "),
+        );
       }
       if (routine.enabled) {
         this.assertWorkflowSecretsReady(routine.workflow);
@@ -445,7 +487,8 @@ export class RoutineService {
       description:
         patch.description !== undefined ? clean(patch.description) : existing.description,
       enabled: patch.enabled ?? existing.enabled,
-      workspaceId: patch.workspaceId !== undefined ? patch.workspaceId.trim() : existing.workspaceId,
+      workspaceId:
+        patch.workspaceId !== undefined ? patch.workspaceId.trim() : existing.workspaceId,
       instructions:
         patch.instructions !== undefined || patch.prompt !== undefined
           ? normalizeInstructions(patch.instructions ?? patch.prompt)
@@ -474,9 +517,16 @@ export class RoutineService {
     });
 
     if (patch.workflow !== undefined) {
-      const validation = validateRoutineWorkflow(updated.workflow!, { allowIncomplete: !updated.enabled });
+      const validation = validateRoutineWorkflow(updated.workflow!, {
+        allowIncomplete: !updated.enabled,
+      });
       if (!validation.valid) {
-        throw new Error(validation.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" "));
+        throw new Error(
+          validation.issues
+            .filter((issue) => issue.severity === "error")
+            .map((issue) => issue.message)
+            .join(" "),
+        );
       }
       if (updated.enabled) {
         this.assertWorkflowSecretsReady(updated.workflow!);
@@ -489,7 +539,8 @@ export class RoutineService {
       );
       updated = toCompatibilityRoutine({
         ...updated,
-        activeWorkflowVersionId: version.status === "active" ? version.id : existing.activeWorkflowVersionId,
+        activeWorkflowVersionId:
+          version.status === "active" ? version.id : existing.activeWorkflowVersionId,
       });
     } else if (patch.enabled === true && !existing.enabled) {
       const activeVersion = this.resolveActiveWorkflowVersion(existing);
@@ -537,7 +588,10 @@ export class RoutineService {
     return true;
   }
 
-  async regenerateApiToken(routineId: string, triggerId: string): Promise<RoutineApiTrigger | null> {
+  async regenerateApiToken(
+    routineId: string,
+    triggerId: string,
+  ): Promise<RoutineApiTrigger | null> {
     const routine = this.get(routineId);
     if (!routine) return null;
 
@@ -563,7 +617,9 @@ export class RoutineService {
     if (!routine || !routine.enabled) return null;
 
     const manualTrigger =
-      routine.triggers.find((trigger): trigger is RoutineManualTrigger => trigger.type === "manual") ||
+      routine.triggers.find(
+        (trigger): trigger is RoutineManualTrigger => trigger.type === "manual",
+      ) ||
       ({
         id: `manual:${routine.id}`,
         type: "manual",
@@ -651,7 +707,11 @@ export class RoutineService {
       return;
     }
 
-    const status = mapCronStatus(event.status, Boolean(backingTaskId), Boolean(event.taskStillRunning));
+    const status = mapCronStatus(
+      event.status,
+      Boolean(backingTaskId),
+      Boolean(event.taskStillRunning),
+    );
     this.upsertRun({
       ...base,
       finishedAt: status === "queued" || status === "running" ? undefined : this.deps.now(),
@@ -660,7 +720,12 @@ export class RoutineService {
     });
   }
 
-  async runScheduledWorkflow(routineId: string, jobId: string, runAtMs: number) {
+  async runScheduledWorkflow(
+    routineId: string,
+    jobId: string,
+    runAtMs: number,
+    agentConfig?: AgentConfig,
+  ) {
     const routine = this.get(routineId);
     const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
     if (!routine || !routine.enabled || !version) {
@@ -681,6 +746,7 @@ export class RoutineService {
       sourceSummary: `Scheduled workflow run at ${new Date(runAtMs).toISOString()}`,
       triggerId: trigger?.id || version.definition.starterNodeId,
       triggerType: "schedule",
+      ...(agentConfig?.accessProfileId ? { accessProfileId: agentConfig.accessProfileId } : {}),
     });
     return {
       runId: run.workflowRunId || run.id,
@@ -702,11 +768,11 @@ export class RoutineService {
     }
     const trigger = routine.triggers.find(
       (candidate): candidate is RoutineApiTrigger =>
-        candidate.type === "api" &&
-        (!metadata?.triggerId || candidate.id === metadata.triggerId),
+        candidate.type === "api" && (!metadata?.triggerId || candidate.id === metadata.triggerId),
     );
-    const externalId = [payload.id, payload.eventId, payload.event_id, payload.deliveryId]
-      .find((value): value is string | number => typeof value === "string" || typeof value === "number");
+    const externalId = [payload.id, payload.eventId, payload.event_id, payload.deliveryId].find(
+      (value): value is string | number => typeof value === "string" || typeof value === "number",
+    );
     const idempotencyKey = externalId
       ? `webhook:${routine.id}:${String(externalId)}`
       : `webhook:${routine.id}:${this.deps.now()}:${JSON.stringify(payload)}`;
@@ -797,9 +863,7 @@ export class RoutineService {
       startedAt: this.deps.now(),
       sourceEventSummary: payload.path ? `API request: ${payload.path}` : "API request",
       backingTaskId: payload.taskId,
-      outputStatus: routineHasWebhookResponse(routineMatch.routine)
-        ? "responded"
-        : "none",
+      outputStatus: routineHasWebhookResponse(routineMatch.routine) ? "responded" : "none",
       artifactsSummary: payload.response?.message,
     });
   }
@@ -960,7 +1024,9 @@ export class RoutineService {
   }
 
   private async syncRoutine(routine: Routine, previous: Routine | null): Promise<Routine> {
-    const previousById = new Map((previous?.triggers || []).map((trigger) => [trigger.id, trigger]));
+    const previousById = new Map(
+      (previous?.triggers || []).map((trigger) => [trigger.id, trigger]),
+    );
     let hooksTouched = false;
     let eventTriggersTouched = false;
 
@@ -1037,15 +1103,16 @@ export class RoutineService {
           : ("new_task" as const),
       workflowRoutineId: workflowMode ? routine.id : undefined,
       targetTaskId: workflowMode ? undefined : targetTaskId,
-      threadAutomation: !workflowMode && targetTaskId
-        ? {
-            sourceTaskId: targetTaskId,
-            sourceTaskTitle: routine.contextBindings.metadata?.sourceTaskTitle,
-            sourceLink: routine.contextBindings.metadata?.sourceLink,
-            wakeObjective: routine.instructions,
-            includeContextBrief: true,
-          }
-        : undefined,
+      threadAutomation:
+        !workflowMode && targetTaskId
+          ? {
+              sourceTaskId: targetTaskId,
+              sourceTaskTitle: routine.contextBindings.metadata?.sourceTaskTitle,
+              sourceLink: routine.contextBindings.metadata?.sourceLink,
+              wakeObjective: routine.instructions,
+              includeContextBrief: true,
+            }
+          : undefined,
       allowUserInput: agentConfig?.allowUserInput ?? false,
       taskAgentConfig: agentConfig,
       chatContext: routine.contextBindings.chatContext,
@@ -1234,7 +1301,10 @@ export class RoutineService {
   private buildRoutineAgentConfig(routine: Routine): AgentConfig | undefined {
     const config: AgentConfig = {};
 
-    if (routine.connectorPolicy.mode === "allowlist" && routine.connectorPolicy.connectorIds.length > 0) {
+    if (
+      routine.connectorPolicy.mode === "allowlist" &&
+      routine.connectorPolicy.connectorIds.length > 0
+    ) {
       config.allowedTools = resolveConnectorAllowedTools(routine.connectorPolicy.connectorIds);
     }
 
@@ -1302,7 +1372,8 @@ export class RoutineService {
   private assertWorkflowSecretsReady(workflow: RoutineWorkflowDefinition): void {
     for (const node of flattenWorkflowNodes(workflow.nodes)) {
       if (node.operation !== "custom.webhook") continue;
-      const secretRef = typeof node.config.secretRef === "string" ? node.config.secretRef.trim() : "";
+      const secretRef =
+        typeof node.config.secretRef === "string" ? node.config.secretRef.trim() : "";
       if (!secretRef) throw new Error(`Select a signing secret for ${node.name}.`);
       this.workflowSecretStore.resolve(secretRef);
     }
@@ -1320,6 +1391,7 @@ export class RoutineService {
       triggerId: string;
       triggerType: RoutineTrigger["type"];
       dryRun?: boolean;
+      accessProfileId?: AccessProfileId;
     },
   ): Promise<RoutineRun> {
     const workflowRun = await this.workflowEngine.start({
@@ -1330,6 +1402,7 @@ export class RoutineService {
       eventId: params.eventId,
       idempotencyKey: params.idempotencyKey,
       dryRun: params.dryRun,
+      accessProfileId: params.accessProfileId,
     });
     const run = this.upsertRun({
       runKey: `workflow:${workflowRun.id}`,
@@ -1343,7 +1416,10 @@ export class RoutineService {
       workflowRunId: workflowRun.id,
       outputStatus: "none",
       errorSummary: workflowRun.error,
-      artifactsSummary: summarizeWorkflowRun(workflowRun, this.workflowRepository.listSteps(workflowRun.id)),
+      artifactsSummary: summarizeWorkflowRun(
+        workflowRun,
+        this.workflowRepository.listSteps(workflowRun.id),
+      ),
     });
     return run;
   }
@@ -1361,7 +1437,9 @@ export class RoutineService {
     }
   }
 
-  private async processWorkflowEvent(event: ReturnType<RoutineWorkflowRepository["enqueueEvent"]>): Promise<void> {
+  private async processWorkflowEvent(
+    event: ReturnType<RoutineWorkflowRepository["enqueueEvent"]>,
+  ): Promise<void> {
     try {
       const routine = this.get(event.routineId);
       const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
@@ -1443,7 +1521,9 @@ export class RoutineService {
     const workflowRun = this.workflowRepository.getRun(workflowRunId);
     if (!workflowRun) return;
     const row = this.deps.db
-      .prepare("SELECT * FROM routine_runs WHERE workflow_run_id = ? ORDER BY updated_at DESC LIMIT 1")
+      .prepare(
+        "SELECT * FROM routine_runs WHERE workflow_run_id = ? ORDER BY updated_at DESC LIMIT 1",
+      )
       .get(workflowRunId) as Any | undefined;
     if (!row) return;
     const existing = this.mapRunRecord(row);
@@ -1453,7 +1533,10 @@ export class RoutineService {
       status: mapWorkflowRunStatus(workflowRun.status),
       finishedAt: workflowRun.finishedAt,
       errorSummary: workflowRun.error,
-      artifactsSummary: summarizeWorkflowRun(workflowRun, this.workflowRepository.listSteps(workflowRunId)),
+      artifactsSummary: summarizeWorkflowRun(
+        workflowRun,
+        this.workflowRepository.listSteps(workflowRunId),
+      ),
     });
   }
 
@@ -1560,26 +1643,28 @@ export class RoutineService {
   }
 
   private async refreshRunStatuses(routineId?: string): Promise<void> {
-    const rows = (routineId
-      ? this.deps.db
-          .prepare(
-            `SELECT * FROM routine_runs
+    const rows = (
+      routineId
+        ? this.deps.db
+            .prepare(
+              `SELECT * FROM routine_runs
              WHERE routine_id = ?
                AND (
                  status IN ('queued', 'running')
                  OR (status = 'failed' AND backing_task_id IS NOT NULL AND error_summary LIKE 'Timed out after %')
                )
              ORDER BY updated_at DESC`,
-          )
-          .all(routineId)
-      : this.deps.db
-          .prepare(
-            `SELECT * FROM routine_runs
+            )
+            .all(routineId)
+        : this.deps.db
+            .prepare(
+              `SELECT * FROM routine_runs
              WHERE status IN ('queued', 'running')
                 OR (status = 'failed' AND backing_task_id IS NOT NULL AND error_summary LIKE 'Timed out after %')
              ORDER BY updated_at DESC`,
-          )
-          .all()) as Any[];
+            )
+            .all()
+    ) as Any[];
 
     for (const row of rows) {
       const run = this.mapRunRecord(row);
@@ -1587,7 +1672,11 @@ export class RoutineService {
         this.refreshRoutineRunFromWorkflow(run.workflowRunId);
         continue;
       }
-      if (run.backingTaskId && this.deps.getTaskSnapshot && isCronTimeoutSummary(run.errorSummary)) {
+      if (
+        run.backingTaskId &&
+        this.deps.getTaskSnapshot &&
+        isCronTimeoutSummary(run.errorSummary)
+      ) {
         await this.refreshTaskBackedRun(run);
         continue;
       }
@@ -1605,7 +1694,9 @@ export class RoutineService {
           ...run,
           status,
           finishedAt:
-            status === "running" ? run.finishedAt : snapshot.completedAt || run.finishedAt || this.deps.now(),
+            status === "running"
+              ? run.finishedAt
+              : snapshot.completedAt || run.finishedAt || this.deps.now(),
           backingTaskId: run.backingTaskId || snapshot.backingTaskId || undefined,
           artifactsSummary: snapshot.latestSummary || run.artifactsSummary,
         });
@@ -1629,7 +1720,9 @@ export class RoutineService {
     this.upsertRun({
       ...run,
       status,
-      finishedAt: isNonTerminal ? undefined : snapshot.completedAt || run.finishedAt || this.deps.now(),
+      finishedAt: isNonTerminal
+        ? undefined
+        : snapshot.completedAt || run.finishedAt || this.deps.now(),
       outputStatus: mapTaskBackedOutputStatus(run.outputStatus, status, routine),
       errorSummary: isFailed
         ? snapshot.error || run.errorSummary
@@ -1839,13 +1932,16 @@ export class RoutineService {
     return null;
   }
 
-  private findRoutineByApiPath(path?: string): { routine: Routine; trigger: RoutineApiTrigger } | null {
+  private findRoutineByApiPath(
+    path?: string,
+  ): { routine: Routine; trigger: RoutineApiTrigger } | null {
     if (!path) return null;
     const normalized = path.replace(/^\/+/, "").replace(/\/+$/, "");
     for (const routine of this.list()) {
       const trigger = routine.triggers.find(
         (candidate): candidate is RoutineApiTrigger =>
-          candidate.type === "api" && candidate.path?.replace(/^\/+/, "").replace(/\/+$/, "") === normalized,
+          candidate.type === "api" &&
+          candidate.path?.replace(/^\/+/, "").replace(/\/+$/, "") === normalized,
       );
       if (trigger) return { routine, trigger };
     }
@@ -1891,7 +1987,9 @@ function normalizeRoutineDefinition(input: RoutineDefinition): RoutineDefinition
   };
 }
 
-function normalizeExecutionTarget(target?: RoutineDefinition["executionTarget"]): RoutineDefinition["executionTarget"] {
+function normalizeExecutionTarget(
+  target?: RoutineDefinition["executionTarget"],
+): RoutineDefinition["executionTarget"] {
   return {
     kind: target?.kind || "workspace",
     deviceId: clean(target?.deviceId),
@@ -1903,9 +2001,10 @@ function normalizeContextBindings(
   bindings?: RoutineDefinition["contextBindings"],
 ): RoutineDefinition["contextBindings"] {
   const rawChannelType = bindings?.chatContext?.channelType?.trim();
-  const normalizedChannelType = rawChannelType && CHANNEL_TYPES.includes(rawChannelType as ChannelType)
-    ? (rawChannelType as ChannelType)
-    : undefined;
+  const normalizedChannelType =
+    rawChannelType && CHANNEL_TYPES.includes(rawChannelType as ChannelType)
+      ? (rawChannelType as ChannelType)
+      : undefined;
   const chatContext =
     normalizedChannelType && bindings?.chatContext?.channelId
       ? {
@@ -1976,51 +2075,50 @@ function normalizeApprovalPolicy(
 
 function normalizeOutputs(outputs: RoutineOutput[]): RoutineOutput[] {
   const normalized = outputs.map((output): RoutineOutput => {
-      switch (output.kind) {
-        case "channel_message":
-          return {
-            kind: "channel_message",
-            channelType: clean(output.channelType),
-            channelDbId: clean(output.channelDbId),
-            channelId: clean(output.channelId),
-            deliverOnSuccess: output.deliverOnSuccess ?? true,
-            deliverOnError: output.deliverOnError ?? true,
-            summaryOnly: output.summaryOnly ?? false,
-          };
-        case "webhook_response":
-          return {
-            kind: "webhook_response",
-            statusCode: output.statusCode ?? 202,
-            message: clean(output.message),
-            includeTaskId: output.includeTaskId ?? true,
-          };
-        case "email":
-          return {
-            kind: "email",
-            to: clean(output.to),
-            subject: clean(output.subject),
-          };
-        case "github_comment":
-          return {
-            kind: "github_comment",
-            repository: clean(output.repository),
-            issueNumber: output.issueNumber,
-          };
-        case "issue_or_pr":
-          {
-            const mode: "issue" | "pr" | undefined =
-              output.mode === "pr" ? "pr" : output.mode === "issue" ? "issue" : undefined;
-          return {
-            kind: "issue_or_pr",
-            repository: clean(output.repository),
-            mode,
-          };
-          }
-        case "task_only":
-        default:
-          return { kind: "task_only" } satisfies RoutineOutput;
+    switch (output.kind) {
+      case "channel_message":
+        return {
+          kind: "channel_message",
+          channelType: clean(output.channelType),
+          channelDbId: clean(output.channelDbId),
+          channelId: clean(output.channelId),
+          deliverOnSuccess: output.deliverOnSuccess ?? true,
+          deliverOnError: output.deliverOnError ?? true,
+          summaryOnly: output.summaryOnly ?? false,
+        };
+      case "webhook_response":
+        return {
+          kind: "webhook_response",
+          statusCode: output.statusCode ?? 202,
+          message: clean(output.message),
+          includeTaskId: output.includeTaskId ?? true,
+        };
+      case "email":
+        return {
+          kind: "email",
+          to: clean(output.to),
+          subject: clean(output.subject),
+        };
+      case "github_comment":
+        return {
+          kind: "github_comment",
+          repository: clean(output.repository),
+          issueNumber: output.issueNumber,
+        };
+      case "issue_or_pr": {
+        const mode: "issue" | "pr" | undefined =
+          output.mode === "pr" ? "pr" : output.mode === "issue" ? "issue" : undefined;
+        return {
+          kind: "issue_or_pr",
+          repository: clean(output.repository),
+          mode,
+        };
       }
-    });
+      case "task_only":
+      default:
+        return { kind: "task_only" } satisfies RoutineOutput;
+    }
+  });
   return normalized.length > 0 ? normalized : [{ kind: "task_only" }];
 }
 
@@ -2100,7 +2198,9 @@ function normalizeTriggers(triggers: RoutineTrigger[]): RoutineTrigger[] {
 }
 
 function deriveRoutineTriggersFromWorkflow(workflow: RoutineWorkflowDefinition): RoutineTrigger[] {
-  const starter = workflow.nodes.find((node) => node.id === workflow.starterNodeId && node.kind === "starter");
+  const starter = workflow.nodes.find(
+    (node) => node.id === workflow.starterNodeId && node.kind === "starter",
+  );
   if (!starter) return [];
   const config = starter.config;
   const value = (key: string): string | undefined => {
@@ -2116,57 +2216,79 @@ function deriveRoutineTriggersFromWorkflow(workflow: RoutineWorkflowDefinition):
       const kind = value("scheduleKind") || "cron";
       const expression = value("expression") || "0 9 * * 1-5";
       if (kind === "every") {
-        return [{ ...base, type: "schedule", schedule: { kind: "every", everyMs: Math.max(60_000, Number(expression) * 60_000) } }];
+        return [
+          {
+            ...base,
+            type: "schedule",
+            schedule: { kind: "every", everyMs: Math.max(60_000, Number(expression) * 60_000) },
+          },
+        ];
       }
       if (kind === "at") {
-        const atMs = Number.isFinite(Number(expression)) ? Number(expression) : Date.parse(expression);
+        const atMs = Number.isFinite(Number(expression))
+          ? Number(expression)
+          : Date.parse(expression);
         return [{ ...base, type: "schedule", schedule: { kind: "at", atMs } }];
       }
-      return [{ ...base, type: "schedule", schedule: { kind: "cron", expr: expression, tz: value("timezone") } }];
+      return [
+        {
+          ...base,
+          type: "schedule",
+          schedule: { kind: "cron", expr: expression, tz: value("timezone") },
+        },
+      ];
     }
     case "starter.gmail_message":
-      return [{
-        ...base,
-        type: "mailbox_event",
-        provider: "gmail",
-        eventType: "message_received",
-        subjectContains: value("subjectContains"),
-        labelContains: value("label"),
-      }];
+      return [
+        {
+          ...base,
+          type: "mailbox_event",
+          provider: "gmail",
+          eventType: "message_received",
+          subjectContains: value("subjectContains"),
+          labelContains: value("label"),
+        },
+      ];
     case "starter.chat_message":
     case "starter.chat_mention":
     case "starter.chat_reaction":
     case "starter.chat_member_joined":
-      return [{
-        ...base,
-        type: "channel_event",
-        channelType: "google_chat",
-        chatId: value("spaceName"),
-        textContains: value("textPattern"),
-        senderContains: value("sender"),
-      }];
+      return [
+        {
+          ...base,
+          type: "channel_event",
+          channelType: "google_chat",
+          chatId: value("spaceName"),
+          textContains: value("textPattern"),
+          senderContains: value("sender"),
+        },
+      ];
     case "starter.sheet_changed":
-      return [{
-        ...base,
-        type: "connector_event",
-        connectorId: "google-workspace",
-        changeType: "sheet_changed",
-        resourceUriContains: value("spreadsheetId"),
-      }];
+      return [
+        {
+          ...base,
+          type: "connector_event",
+          connectorId: "google-workspace",
+          changeType: "sheet_changed",
+          resourceUriContains: value("spreadsheetId"),
+        },
+      ];
     case "starter.drive_item_added":
     case "starter.drive_file_edited":
     case "starter.drive_folder_item_edited":
     case "starter.meeting_relative":
     case "starter.meeting_outputs_ready":
     case "starter.form_response":
-      return [{
-        ...base,
-        type: "connector_event",
-        connectorId: "google-workspace",
-        changeType: starter.operation.replace(/^starter\./, ""),
-        resourceUriContains:
-          value("folderId") || value("fileId") || value("formId") || value("calendarId"),
-      }];
+      return [
+        {
+          ...base,
+          type: "connector_event",
+          connectorId: "google-workspace",
+          changeType: starter.operation.replace(/^starter\./, ""),
+          resourceUriContains:
+            value("folderId") || value("fileId") || value("formId") || value("calendarId"),
+        },
+      ];
     case "starter.manual":
     default:
       return [{ ...base, type: "manual" }];
@@ -2193,7 +2315,11 @@ function cloneHooksSettings(settings: HooksConfig): HooksConfig {
   };
 }
 
-function buildRoutinePrompt(routine: Routine, triggerLabel: string, extraLines: string[] = []): string {
+function buildRoutinePrompt(
+  routine: Routine,
+  triggerLabel: string,
+  extraLines: string[] = [],
+): string {
   const sections = [
     "You are running a saved CoWork Routine.",
     `Routine: ${routine.name}`,
@@ -2208,11 +2334,16 @@ function buildRoutinePrompt(routine: Routine, triggerLabel: string, extraLines: 
     routine.instructions,
   ];
 
-  if (routine.contextBindings.metadata && Object.keys(routine.contextBindings.metadata).length > 0) {
+  if (
+    routine.contextBindings.metadata &&
+    Object.keys(routine.contextBindings.metadata).length > 0
+  ) {
     sections.push(
       "",
       "Context bindings:",
-      ...Object.entries(routine.contextBindings.metadata).map(([key, value]) => `- ${key}: ${value}`),
+      ...Object.entries(routine.contextBindings.metadata).map(
+        ([key, value]) => `- ${key}: ${value}`,
+      ),
     );
   }
 
@@ -2351,7 +2482,10 @@ function buildTriggerConditions(
 }
 
 function buildScheduleDelivery(outputs: RoutineOutput[]): CronDeliveryConfig | undefined {
-  const channel = outputs.find((output): output is Extract<RoutineOutput, { kind: "channel_message" }> => output.kind === "channel_message");
+  const channel = outputs.find(
+    (output): output is Extract<RoutineOutput, { kind: "channel_message" }> =>
+      output.kind === "channel_message",
+  );
   if (!channel?.channelType || !channel.channelId) return undefined;
   return {
     enabled: true,
@@ -2364,7 +2498,9 @@ function buildScheduleDelivery(outputs: RoutineOutput[]): CronDeliveryConfig | u
   };
 }
 
-function getWebhookResponseOutput(outputs: RoutineOutput[]): RoutineWebhookResponseOutput | undefined {
+function getWebhookResponseOutput(
+  outputs: RoutineOutput[],
+): RoutineWebhookResponseOutput | undefined {
   return outputs.find(
     (output): output is RoutineWebhookResponseOutput => output.kind === "webhook_response",
   );
@@ -2477,7 +2613,9 @@ function mapTaskBackedOutputStatus(
   return current;
 }
 
-function routineOutputStatusAfterTaskCompletion(routine?: Routine | null): RoutineRun["outputStatus"] {
+function routineOutputStatusAfterTaskCompletion(
+  routine?: Routine | null,
+): RoutineRun["outputStatus"] {
   if (!routine) return "queued";
   if (routineHasWebhookResponse(routine)) return "responded";
   return routine.outputs.some((output) => output.kind !== "task_only") ? "queued" : "none";
@@ -2509,10 +2647,7 @@ function summarizeTriggerEvent(event: TriggerEvent): string {
   }
 }
 
-function mapTaskSnapshotStatus(
-  status: string,
-  terminalStatus?: string | null,
-): RoutineRunStatus {
+function mapTaskSnapshotStatus(status: string, terminalStatus?: string | null): RoutineRunStatus {
   if (status === "pending" || status === "queued") return "queued";
   if (status === "planning" || status === "executing") return "running";
   if (status === "paused" || terminalStatus === "needs_user_action") return "needs_user_action";
@@ -2582,21 +2717,28 @@ function summarizeWorkflowRun(
     `${completed}/${steps.length} steps completed`,
     waiting > 0 ? `${waiting} approval${waiting === 1 ? "" : "s"} pending` : "",
     failed > 0 ? `${failed} failed` : "",
-  ].filter(Boolean).join(" · ");
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function flattenWorkflowNodes(nodes: RoutineWorkflowDefinition["nodes"]): RoutineWorkflowDefinition["nodes"] {
+function flattenWorkflowNodes(
+  nodes: RoutineWorkflowDefinition["nodes"],
+): RoutineWorkflowDefinition["nodes"] {
   return nodes.flatMap((node) => [node, ...flattenWorkflowNodes(node.children || [])]);
 }
 
 function googleScopeIsCovered(requiredScope: string, granted: Set<string>): boolean {
   const required = requiredScope.toLocaleLowerCase();
   if (granted.has(required)) return true;
-  if (required.endsWith("/gmail.readonly") && granted.has("https://www.googleapis.com/auth/gmail.modify")) {
+  if (
+    required.endsWith("/gmail.readonly") &&
+    granted.has("https://www.googleapis.com/auth/gmail.modify")
+  ) {
     return true;
   }
   if (required.includes("/drive.") && granted.has("https://www.googleapis.com/auth/drive")) {

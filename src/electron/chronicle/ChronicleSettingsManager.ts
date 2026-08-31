@@ -20,7 +20,9 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   return Math.min(max, Math.max(min, Math.round(parsed)));
 }
 
-function normalizeSettings(input: Partial<ChronicleSettings> | null | undefined): ChronicleSettings {
+function normalizeSettings(
+  input: Partial<ChronicleSettings> | null | undefined,
+): ChronicleSettings {
   return {
     enabled: Boolean(input?.enabled),
     mode: input?.mode === "hybrid" ? "hybrid" : "hybrid",

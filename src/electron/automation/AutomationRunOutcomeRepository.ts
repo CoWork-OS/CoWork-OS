@@ -112,7 +112,9 @@ export class AutomationRunOutcomeRepository {
     return rows.map((row) => this.mapRow(row));
   }
 
-  summarize(input: { from?: number; to?: number; companyId?: string; workspaceId?: string } = {}): AutomationRunOutcomeSummary {
+  summarize(
+    input: { from?: number; to?: number; companyId?: string; workspaceId?: string } = {},
+  ): AutomationRunOutcomeSummary {
     const clauses = ["1 = 1"];
     const args: unknown[] = [];
     if (typeof input.from === "number") {
@@ -214,9 +216,12 @@ export class AutomationRunOutcomeRepository {
       evidenceRefs: parseJson(row.evidence_refs_json, undefined),
       nextAction: typeof row.next_action === "string" ? row.next_action : undefined,
       notificationRecommended: row.notification_recommended === 1,
-      notificationReason: typeof row.notification_reason === "string" ? row.notification_reason : undefined,
+      notificationReason:
+        typeof row.notification_reason === "string" ? row.notification_reason : undefined,
       notificationDeliveredAt:
-        typeof row.notification_delivered_at === "number" ? row.notification_delivered_at : undefined,
+        typeof row.notification_delivered_at === "number"
+          ? row.notification_delivered_at
+          : undefined,
       createdAt: Number(row.created_at),
     };
   }

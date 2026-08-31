@@ -62,15 +62,21 @@ export function getSignalStrength(signals: HeartbeatSignal[]): number {
 
 export class HeartbeatPulseEngine {
   evaluate(input: HeartbeatPulseInput): HeartbeatPulseDecision {
-    const profile = input.agent.heartbeatPolicy?.profile || input.agent.heartbeatProfile || "observer";
+    const profile =
+      input.agent.heartbeatPolicy?.profile || input.agent.heartbeatProfile || "observer";
     const signalStrength = getSignalStrength(input.signals);
     const signalIds = input.signals.map((signal) => signal.id);
     const evidenceRefs = Array.from(
       new Set(input.signals.flatMap((signal) => signal.evidenceRefs || [])),
     );
-    const compressedSignalCount = input.signals.reduce((sum, signal) => sum + signal.mergedCount, 0);
+    const compressedSignalCount = input.signals.reduce(
+      (sum, signal) => sum + signal.mergedCount,
+      0,
+    );
     const workspaceId = input.signals.find((signal) => signal.workspaceId)?.workspaceId;
-    const topFamilies = Array.from(new Set(input.signals.map((signal) => signal.signalFamily))).slice(0, 3);
+    const topFamilies = Array.from(
+      new Set(input.signals.map((signal) => signal.signalFamily)),
+    ).slice(0, 3);
 
     if (
       input.hasActiveForegroundTask &&
@@ -165,8 +171,7 @@ export class HeartbeatPulseEngine {
     }
 
     if (input.pendingMentions > 0 || input.assignedTasks > 0 || input.manualOverride) {
-      const dispatchKind =
-        profile === "dispatcher" ? "task" : "suggestion";
+      const dispatchKind = profile === "dispatcher" ? "task" : "suggestion";
       return {
         kind: dispatchKind === "task" ? "dispatch_task" : "suggestion",
         dispatchKind,
@@ -204,8 +209,7 @@ export class HeartbeatPulseEngine {
       (input.dueChecklistItems.length > 0 ||
         input.dueProactiveTasks.some((task) => task.executionMode !== "pulse_only"))
     ) {
-      const dispatchKind =
-        profile === "dispatcher" ? "runbook" : "suggestion";
+      const dispatchKind = profile === "dispatcher" ? "runbook" : "suggestion";
       return {
         kind: dispatchKind === "runbook" ? "dispatch_runbook" : "suggestion",
         dispatchKind,
@@ -221,8 +225,7 @@ export class HeartbeatPulseEngine {
     }
 
     if (signalStrength >= 0.72) {
-      const dispatchKind =
-        profile === "dispatcher" ? "task" : "suggestion";
+      const dispatchKind = profile === "dispatcher" ? "task" : "suggestion";
       return {
         kind: dispatchKind === "task" ? "dispatch_task" : "suggestion",
         dispatchKind,

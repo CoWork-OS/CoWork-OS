@@ -9,7 +9,10 @@ import type {
   SubconsciousTargetDetail,
   SubconsciousTargetSummary,
 } from "../../shared/subconscious";
-import { DEFAULT_SUBCONSCIOUS_SETTINGS, SUBCONSCIOUS_TARGET_KINDS } from "../../shared/subconscious";
+import {
+  DEFAULT_SUBCONSCIOUS_SETTINGS,
+  SUBCONSCIOUS_TARGET_KINDS,
+} from "../../shared/subconscious";
 
 function formatTimestamp(value?: number): string {
   if (!value) return "Never";
@@ -44,7 +47,10 @@ const mdPlugins = [remarkGfm, remarkBreaks];
 
 function Md({ text }: { text: string }) {
   return (
-    <ReactMarkdown remarkPlugins={mdPlugins} components={{ p: ({ children }) => <span>{children}</span> }}>
+    <ReactMarkdown
+      remarkPlugins={mdPlugins}
+      components={{ p: ({ children }) => <span>{children}</span> }}
+    >
       {text}
     </ReactMarkdown>
   );
@@ -66,23 +72,27 @@ export function SubconsciousSettingsPanel(props?: {
   const activeRuns = useMemo(
     () =>
       detail?.recentRuns.filter((run) =>
-        [
-          "collecting_evidence",
-          "ideating",
-          "critiquing",
-          "synthesizing",
-          "dispatching",
-        ].includes(run.stage),
+        ["collecting_evidence", "ideating", "critiquing", "synthesizing", "dispatching"].includes(
+          run.stage,
+        ),
       ) || [],
     [detail],
   );
   const valueLedger = useMemo(() => {
     const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const recentTargets = targets.filter((target) => (target.lastRunAt || target.lastActionAt || 0) >= recentCutoff);
-    const dispatched = recentTargets.filter((target) => target.lastDispatchStatus === "dispatched").length;
-    const suggested = recentTargets.filter((target) => target.lastMeaningfulOutcome === "suggest").length;
+    const recentTargets = targets.filter(
+      (target) => (target.lastRunAt || target.lastActionAt || 0) >= recentCutoff,
+    );
+    const dispatched = recentTargets.filter(
+      (target) => target.lastDispatchStatus === "dispatched",
+    ).length;
+    const suggested = recentTargets.filter(
+      (target) => target.lastMeaningfulOutcome === "suggest",
+    ).length;
     const quiet = recentTargets.filter((target) => target.lastMeaningfulOutcome === "sleep").length;
-    const attention = targets.filter((target) => target.health === "blocked" || target.lastMeaningfulOutcome === "defer").length;
+    const attention = targets.filter(
+      (target) => target.health === "blocked" || target.lastMeaningfulOutcome === "defer",
+    ).length;
     return {
       dispatched,
       suggested,
@@ -127,7 +137,10 @@ export function SubconsciousSettingsPanel(props?: {
       setSettings(nextSettings);
       setBrain(nextBrain);
       setTargets(nextTargets);
-      const preferred = nextTargets.find((target) => target.key === selectedTargetKey)?.key || nextTargets[0]?.key || "";
+      const preferred =
+        nextTargets.find((target) => target.key === selectedTargetKey)?.key ||
+        nextTargets[0]?.key ||
+        "";
       setSelectedTargetKey(preferred);
       if (preferred) {
         await loadTargetDetail(preferred);
@@ -181,7 +194,9 @@ export function SubconsciousSettingsPanel(props?: {
     try {
       setBusy(true);
       const run = await window.electronAPI.runSubconsciousNow(targetKey);
-      setMessage(run ? `Run ${run.id} completed at stage ${run.stage}.` : "No eligible target was selected.");
+      setMessage(
+        run ? `Run ${run.id} completed at stage ${run.stage}.` : "No eligible target was selected.",
+      );
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -194,7 +209,9 @@ export function SubconsciousSettingsPanel(props?: {
     try {
       setBusy(true);
       const result = await window.electronAPI.refreshSubconsciousTargets();
-      setMessage(`Refreshed ${result.targetCount} targets from ${result.evidenceCount} evidence signal(s).`);
+      setMessage(
+        `Refreshed ${result.targetCount} targets from ${result.evidenceCount} evidence signal(s).`,
+      );
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -254,7 +271,8 @@ export function SubconsciousSettingsPanel(props?: {
           <h2 className="sc-title">Workflow Intelligence</h2>
         </div>
         <p className="sc-subtitle">
-          Memory, heartbeat, and reflection working together to surface useful next actions across workflows.
+          Memory, heartbeat, and reflection working together to surface useful next actions across
+          workflows.
         </p>
       </div>
 
@@ -276,7 +294,9 @@ export function SubconsciousSettingsPanel(props?: {
         </div>
         <div className="sc-status-card">
           <div className="sc-status-label">Latest Run / Reflection</div>
-          <div className="sc-status-value" style={{ fontSize: 16 }}>{formatTimestamp(brain?.lastRunAt)}</div>
+          <div className="sc-status-value" style={{ fontSize: 16 }}>
+            {formatTimestamp(brain?.lastRunAt)}
+          </div>
           <div className="sc-status-meta">Reflection: {formatTimestamp(brain?.lastDreamAt)}</div>
         </div>
       </div>
@@ -377,7 +397,10 @@ export function SubconsciousSettingsPanel(props?: {
               value={settings.cadenceMinutes}
               disabled={busy}
               onChange={(event) =>
-                setSettings((current) => ({ ...current, cadenceMinutes: Number(event.target.value || 15) }))
+                setSettings((current) => ({
+                  ...current,
+                  cadenceMinutes: Number(event.target.value || 15),
+                }))
               }
               onBlur={() => void saveSettings({ cadenceMinutes: settings.cadenceMinutes })}
             />
@@ -390,7 +413,10 @@ export function SubconsciousSettingsPanel(props?: {
               value={settings.dreamCadenceHours}
               disabled={busy}
               onChange={(event) =>
-                setSettings((current) => ({ ...current, dreamCadenceHours: Number(event.target.value || 24) }))
+                setSettings((current) => ({
+                  ...current,
+                  dreamCadenceHours: Number(event.target.value || 24),
+                }))
               }
               onBlur={() => void saveSettings({ dreamCadenceHours: settings.dreamCadenceHours })}
             />
@@ -404,9 +430,14 @@ export function SubconsciousSettingsPanel(props?: {
               value={settings.maxHypothesesPerRun}
               disabled={busy}
               onChange={(event) =>
-                setSettings((current) => ({ ...current, maxHypothesesPerRun: Number(event.target.value || 3) }))
+                setSettings((current) => ({
+                  ...current,
+                  maxHypothesesPerRun: Number(event.target.value || 3),
+                }))
               }
-              onBlur={() => void saveSettings({ maxHypothesesPerRun: settings.maxHypothesesPerRun })}
+              onBlur={() =>
+                void saveSettings({ maxHypothesesPerRun: settings.maxHypothesesPerRun })
+              }
             />
           </label>
           <label className="sc-input-group">
@@ -417,9 +448,14 @@ export function SubconsciousSettingsPanel(props?: {
               value={settings.artifactRetentionDays}
               disabled={busy}
               onChange={(event) =>
-                setSettings((current) => ({ ...current, artifactRetentionDays: Number(event.target.value || 1) }))
+                setSettings((current) => ({
+                  ...current,
+                  artifactRetentionDays: Number(event.target.value || 1),
+                }))
               }
-              onBlur={() => void saveSettings({ artifactRetentionDays: settings.artifactRetentionDays })}
+              onBlur={() =>
+                void saveSettings({ artifactRetentionDays: settings.artifactRetentionDays })
+              }
             />
           </label>
           <label className="sc-input-group">
@@ -427,7 +463,11 @@ export function SubconsciousSettingsPanel(props?: {
             <select
               value={settings.autonomyMode}
               disabled={busy}
-              onChange={(event) => void saveSettings({ autonomyMode: event.target.value as SubconsciousSettings["autonomyMode"] })}
+              onChange={(event) =>
+                void saveSettings({
+                  autonomyMode: event.target.value as SubconsciousSettings["autonomyMode"],
+                })
+              }
             >
               <option value="recommendation_first">recommendation first</option>
               <option value="balanced_autopilot">balanced autopilot</option>
@@ -467,7 +507,10 @@ export function SubconsciousSettingsPanel(props?: {
             {SUBCONSCIOUS_TARGET_KINDS.map((kind) => {
               const isActive = settings.durableTargetKinds.includes(kind);
               return (
-                <label key={`durable-${kind}`} className={`sc-kind-chip${isActive ? " active" : ""}`}>
+                <label
+                  key={`durable-${kind}`}
+                  className={`sc-kind-chip${isActive ? " active" : ""}`}
+                >
                   <input
                     type="checkbox"
                     checked={isActive}
@@ -496,7 +539,11 @@ export function SubconsciousSettingsPanel(props?: {
               <label key={key} className="sc-kind-chip active">
                 <input
                   type="checkbox"
-                  checked={settings.notificationPolicy[key as keyof SubconsciousSettings["notificationPolicy"]] as boolean}
+                  checked={
+                    settings.notificationPolicy[
+                      key as keyof SubconsciousSettings["notificationPolicy"]
+                    ] as boolean
+                  }
                   disabled={busy}
                   onChange={(event) =>
                     void saveSettings({
@@ -562,7 +609,8 @@ export function SubconsciousSettingsPanel(props?: {
                   </span>
                 </div>
                 <div className="sc-target-meta">
-                  {target.target.kind} | {target.persistence} | backlog {target.backlogCount} | outcome {formatOutcome(target.lastMeaningfulOutcome)}
+                  {target.target.kind} | {target.persistence} | backlog {target.backlogCount} |
+                  outcome {formatOutcome(target.lastMeaningfulOutcome)}
                 </div>
               </button>
             ))}
@@ -581,7 +629,9 @@ export function SubconsciousSettingsPanel(props?: {
                 <div className="sc-detail-header">
                   <div className="sc-detail-name">{detail.target.target.label}</div>
                   <div className="sc-detail-meta">
-                    {detail.target.target.kind} | {detail.target.persistence} | health {detail.target.health} | last run {formatTimestamp(detail.target.lastRunAt)} | outcome {formatOutcome(detail.target.lastMeaningfulOutcome)}
+                    {detail.target.target.kind} | {detail.target.persistence} | health{" "}
+                    {detail.target.health} | last run {formatTimestamp(detail.target.lastRunAt)} |
+                    outcome {formatOutcome(detail.target.lastMeaningfulOutcome)}
                   </div>
                 </div>
                 <label className="sc-checkbox">
@@ -605,7 +655,8 @@ export function SubconsciousSettingsPanel(props?: {
                       <Md text={`**${selectedValue.impact}**`} />
                     </div>
                     <div className="sc-detail-winner-rec">
-                      Confidence {selectedValue.confidence} | Freshness {selectedValue.evidenceFreshness} | Dispatch{" "}
+                      Confidence {selectedValue.confidence} | Freshness{" "}
+                      {selectedValue.evidenceFreshness} | Dispatch{" "}
                       {selectedValue.dispatch?.status || "none"}
                     </div>
                     {selectedValue.topEvidence.length ? (
@@ -617,7 +668,9 @@ export function SubconsciousSettingsPanel(props?: {
                         ))}
                       </ul>
                     ) : (
-                      <div className="sc-detail-empty">No actionable evidence currently selected.</div>
+                      <div className="sc-detail-empty">
+                        No actionable evidence currently selected.
+                      </div>
                     )}
                   </div>
                 </div>
@@ -655,9 +708,13 @@ export function SubconsciousSettingsPanel(props?: {
                   <div className="sc-detail-section-title">Winner</div>
                   {detail.latestDecision ? (
                     <div className="sc-detail-winner">
-                      <div className="sc-detail-winner-text"><Md text={detail.latestDecision.winnerSummary} /></div>
+                      <div className="sc-detail-winner-text">
+                        <Md text={detail.latestDecision.winnerSummary} />
+                      </div>
                       {detail.latestDecision.recommendation ? (
-                        <div className="sc-detail-winner-rec"><Md text={detail.latestDecision.recommendation} /></div>
+                        <div className="sc-detail-winner-rec">
+                          <Md text={detail.latestDecision.recommendation} />
+                        </div>
                       ) : null}
                     </div>
                   ) : (
@@ -682,7 +739,9 @@ export function SubconsciousSettingsPanel(props?: {
                 </div>
               </div>
             ) : (
-              <div className="sc-detail-empty">Select a target to inspect its reflective history.</div>
+              <div className="sc-detail-empty">
+                Select a target to inspect its reflective history.
+              </div>
             )}
           </div>
 
@@ -708,7 +767,9 @@ export function SubconsciousSettingsPanel(props?: {
                 <ul className="sc-detail-list">
                   {detail.memory.slice(0, 8).map((item) => (
                     <li key={item.id}>
-                      <Md text={`**${item.bucket}**: ${item.summary}${item.stale ? " _(stale)_" : ""}`} />
+                      <Md
+                        text={`**${item.bucket}**: ${item.summary}${item.stale ? " _(stale)_" : ""}`}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -752,7 +813,9 @@ export function SubconsciousSettingsPanel(props?: {
                 <ul className="sc-detail-list">
                   {detail.dreams.slice(0, 5).map((dream) => (
                     <li key={dream.id}>
-                      <Md text={`**${formatTimestamp(dream.createdAt)}**: ${dream.digest.join(" | ")}`} />
+                      <Md
+                        text={`**${formatTimestamp(dream.createdAt)}**: ${dream.digest.join(" | ")}`}
+                      />
                     </li>
                   ))}
                 </ul>

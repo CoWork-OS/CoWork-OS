@@ -19,6 +19,8 @@ export type CompileLatexParams = {
   sourcePath: string;
   outputPath?: string;
   engine?: LatexEngineInput;
+  /** Set only after the caller has separately approved each external path. */
+  allowExternalPaths?: boolean;
   execFileImpl?: ExecFileLike;
 };
 
@@ -43,7 +45,12 @@ function isPathInsideWorkspace(targetPath: string, workspacePath: string): boole
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function resolveWorkspacePath(workspacePath: string, requestedPath: string, label: string): string {
+function resolveWorkspacePath(
+  workspacePath: string,
+  requestedPath: string,
+  label: string,
+  allowExternalPaths = false,
+): string {
   const trimmed = String(requestedPath || "").trim();
   if (!trimmed) {
     throw new Error(`${label} is required`);
@@ -51,7 +58,7 @@ function resolveWorkspacePath(workspacePath: string, requestedPath: string, labe
   const resolved = path.isAbsolute(trimmed)
     ? path.resolve(trimmed)
     : path.resolve(workspacePath, trimmed);
-  if (!isPathInsideWorkspace(resolved, workspacePath)) {
+  if (!allowExternalPaths && !isPathInsideWorkspace(resolved, workspacePath)) {
     throw new Error(`${label} must be inside the workspace`);
   }
   return resolved;
@@ -69,7 +76,9 @@ function trimDiagnostic(value: string): string {
 }
 
 function createDiagnostic(stdout?: unknown, stderr?: unknown): string {
-  return trimDiagnostic([stringifyOutput(stdout), stringifyOutput(stderr)].filter(Boolean).join("\n"));
+  return trimDiagnostic(
+    [stringifyOutput(stdout), stringifyOutput(stderr)].filter(Boolean).join("\n"),
+  );
 }
 
 async function commandExists(command: string, execImpl: ExecFileLike): Promise<boolean> {
@@ -129,14 +138,27 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
   let logPath = "";
 
   try {
-    sourcePath = resolveWorkspacePath(workspacePath, params.sourcePath, "sourcePath");
+    sourcePath = resolveWorkspacePath(
+      workspacePath,
+      params.sourcePath,
+      "sourcePath",
+      params.allowExternalPaths,
+    );
     if (path.extname(sourcePath).toLowerCase() !== ".tex") {
       throw new Error("sourcePath must point to a .tex file");
     }
 
     const outputPath = params.outputPath
-      ? resolveWorkspacePath(workspacePath, params.outputPath, "outputPath")
-      : path.join(path.dirname(sourcePath), `${path.basename(sourcePath, path.extname(sourcePath))}.pdf`);
+      ? resolveWorkspacePath(
+          workspacePath,
+          params.outputPath,
+          "outputPath",
+          params.allowExternalPaths,
+        )
+      : path.join(
+          path.dirname(sourcePath),
+          `${path.basename(sourcePath, path.extname(sourcePath))}.pdf`,
+        );
     if (path.extname(outputPath).toLowerCase() !== ".pdf") {
       throw new Error("outputPath must point to a .pdf file");
     }
@@ -153,8 +175,7 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
     const engine = await findLatexEngine(params.engine || "auto", execImpl);
     if (!engine) {
       const requested = params.engine && params.engine !== "auto" ? ` "${params.engine}"` : "";
-      const error =
-        `No LaTeX engine${requested} found. Install tectonic, latexmk, xelatex, lualatex, or pdflatex and retry.`;
+      const error = `No LaTeX engine${requested} found. Install tectonic, latexmk, xelatex, lualatex, or pdflatex and retry.`;
       return {
         success: false,
         sourcePath,
@@ -167,15 +188,20 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
 
     let diagnostic = "";
     try {
-      const commandResult = await execImpl(engine, buildLatexCommand(engine, sourcePath, outputDir), {
-        cwd: path.dirname(sourcePath),
-        timeout: COMPILE_TIMEOUT_MS,
-        maxBuffer: COMPILE_MAX_BUFFER,
-      });
+      const commandResult = await execImpl(
+        engine,
+        buildLatexCommand(engine, sourcePath, outputDir),
+        {
+          cwd: path.dirname(sourcePath),
+          timeout: COMPILE_TIMEOUT_MS,
+          maxBuffer: COMPILE_MAX_BUFFER,
+        },
+      );
       diagnostic = createDiagnostic(commandResult.stdout, commandResult.stderr);
     } catch (compileError: unknown) {
       const error = compileError as { stdout?: unknown; stderr?: unknown; message?: string };
-      diagnostic = createDiagnostic(error.stdout, error.stderr) || String(error.message || compileError);
+      diagnostic =
+        createDiagnostic(error.stdout, error.stderr) || String(error.message || compileError);
       return {
         success: false,
         sourcePath,

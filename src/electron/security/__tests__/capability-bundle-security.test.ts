@@ -341,12 +341,11 @@ describe("CapabilityBundleSecurityService", () => {
       });
 
       expect(result.verdict).toBe("warning");
-      expect(result.findings.some((finding) => finding.code === "nvidia-skillevaluator-failed"))
-        .toBe(false);
       expect(
-        result.findings.some(
-          (finding) => finding.code === "nvidia-skillevaluator-advisory-failed",
-        ),
+        result.findings.some((finding) => finding.code === "nvidia-skillevaluator-failed"),
+      ).toBe(false);
+      expect(
+        result.findings.some((finding) => finding.code === "nvidia-skillevaluator-advisory-failed"),
       ).toBe(true);
     },
   );
@@ -406,8 +405,9 @@ describe("CapabilityBundleSecurityService", () => {
       });
 
       expect(result.verdict).toBe("quarantined");
-      expect(result.findings.some((finding) => finding.code === "nvidia-pii-email_detected"))
-        .toBe(true);
+      expect(result.findings.some((finding) => finding.code === "nvidia-pii-email_detected")).toBe(
+        true,
+      );
     },
   );
 
@@ -451,8 +451,9 @@ describe("CapabilityBundleSecurityService", () => {
       });
 
       expect(result.verdict).toBe("quarantined");
-      expect(result.findings.some((finding) => finding.code === "nvidia-skillevaluator-failed"))
-        .toBe(true);
+      expect(
+        result.findings.some((finding) => finding.code === "nvidia-skillevaluator-failed"),
+      ).toBe(true);
     },
   );
 

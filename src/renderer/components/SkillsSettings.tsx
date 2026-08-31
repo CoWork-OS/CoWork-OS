@@ -44,7 +44,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
       const reloadedSkills = await window.electronAPI.reloadCustomSkills();
       setSkills(reloadedSkills);
       setError(null);
-    } catch  {
+    } catch {
       setError("Failed to reload skills");
     }
   };
@@ -96,7 +96,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
     try {
       await window.electronAPI.deleteCustomSkill(id);
       setSkills((prev) => prev.filter((s) => s.id !== id));
-    } catch  {
+    } catch {
       setError("Failed to delete skill");
     }
   };
@@ -275,9 +275,7 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
                       <div className="skill-info">
                         <span className="skill-name">
                           {skill.name}
-                          {skill.source && (
-                            <span className="skill-type-badge">{skill.source}</span>
-                          )}
+                          {skill.source && <span className="skill-type-badge">{skill.source}</span>}
                           {skill.type === "guideline" && (
                             <span className="skill-type-badge">Behavior</span>
                           )}
@@ -287,27 +285,27 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
                       {skill.type === "guideline" &&
                         skill.source !== "bundled" &&
                         skill.source !== "external" && (
-                        <label className="settings-toggle">
-                          <input
-                            type="checkbox"
-                            checked={skill.enabled !== false}
-                            onChange={async (e) => {
-                              try {
-                                const updated = await window.electronAPI.updateCustomSkill(
-                                  skill.id,
-                                  { enabled: e.target.checked },
-                                );
-                                setSkills((prev) =>
-                                  prev.map((s) => (s.id === updated.id ? updated : s)),
-                                );
-                              } catch (err) {
-                                console.error("Failed to toggle skill:", err);
-                              }
-                            }}
-                          />
-                          <span className="toggle-slider"></span>
-                        </label>
-                      )}
+                          <label className="settings-toggle">
+                            <input
+                              type="checkbox"
+                              checked={skill.enabled !== false}
+                              onChange={async (e) => {
+                                try {
+                                  const updated = await window.electronAPI.updateCustomSkill(
+                                    skill.id,
+                                    { enabled: e.target.checked },
+                                  );
+                                  setSkills((prev) =>
+                                    prev.map((s) => (s.id === updated.id ? updated : s)),
+                                  );
+                                } catch (err) {
+                                  console.error("Failed to toggle skill:", err);
+                                }
+                              }}
+                            />
+                            <span className="toggle-slider"></span>
+                          </label>
+                        )}
                     </div>
                     <div className="skill-card-actions">
                       {onSkillSelect && skill.type !== "guideline" && (
@@ -321,7 +319,10 @@ export function SkillsSettings({ onSkillSelect }: SkillsSettingsProps) {
                         </button>
                       )}
                       {skill.source !== "bundled" && skill.source !== "external" && (
-                        <button className="btn-danger btn-xs" onClick={() => handleDelete(skill.id)}>
+                        <button
+                          className="btn-danger btn-xs"
+                          onClick={() => handleDelete(skill.id)}
+                        >
                           Delete
                         </button>
                       )}

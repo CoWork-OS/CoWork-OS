@@ -117,7 +117,8 @@ export class GitHubReviewService {
 
   static buildAddressPrompt(summary: GithubPullRequestReviewSummary, threadIds: string[]): string {
     const selected = summary.threads.filter((thread) => threadIds.includes(thread.id));
-    const targetThreads = selected.length > 0 ? selected : summary.threads.filter((thread) => thread.state === "open");
+    const targetThreads =
+      selected.length > 0 ? selected : summary.threads.filter((thread) => thread.state === "open");
     const lines = [
       `Address GitHub PR review comments for ${summary.repository}${summary.prNumber ? `#${summary.prNumber}` : ""}.`,
       summary.prUrl ? `PR URL: ${summary.prUrl}` : "",
@@ -136,7 +137,9 @@ export class GitHubReviewService {
 
     targetThreads.forEach((thread, index) => {
       lines.push("");
-      lines.push(`${index + 1}. ${thread.path || "General PR comment"}${thread.line ? `:${thread.line}` : ""}`);
+      lines.push(
+        `${index + 1}. ${thread.path || "General PR comment"}${thread.line ? `:${thread.line}` : ""}`,
+      );
       lines.push(`   Author: ${thread.author}`);
       lines.push(`   State: ${thread.state}`);
       lines.push(`   URL: ${thread.url}`);
@@ -145,7 +148,9 @@ export class GitHubReviewService {
         lines.push(indentBlock(thread.diffHunk, "   "));
       }
       lines.push("   Thread comments:");
-      for (const comment of thread.comments.length > 0 ? thread.comments : [{ author: thread.author, body: thread.body }]) {
+      for (const comment of thread.comments.length > 0
+        ? thread.comments
+        : [{ author: thread.author, body: thread.body }]) {
         lines.push(`   - ${comment.author}:`);
         lines.push(indentBlock(comment.body, "     "));
       }
@@ -163,15 +168,7 @@ export class GitHubReviewService {
 
   private static async getPrView(repoRoot: string): Promise<GhPrView> {
     const fields = ["number", "url", "headRefName", "baseRefName"].join(",");
-    const { stdout } = await execGh(
-      [
-        "pr",
-        "view",
-        "--json",
-        fields,
-      ],
-      repoRoot,
-    );
+    const { stdout } = await execGh(["pr", "view", "--json", fields], repoRoot);
     return JSON.parse(stdout || "{}") as GhPrView;
   }
 
@@ -205,7 +202,12 @@ export class GitHubReviewService {
       const { stdout } = await execGh(args, repoRoot);
       const parsed = JSON.parse(stdout || "{}") as GhReviewThreadsResponse;
       if (parsed.errors?.length) {
-        throw new Error(parsed.errors.map((error) => error.message).filter(Boolean).join("; "));
+        throw new Error(
+          parsed.errors
+            .map((error) => error.message)
+            .filter(Boolean)
+            .join("; "),
+        );
       }
       const pageData = parsed.data?.repository?.pullRequest?.reviewThreads;
       threads.push(...(pageData?.nodes || []));
@@ -238,7 +240,8 @@ export class GitHubReviewService {
         updatedAt: comment.updatedAt ? parseTimestamp(comment.updatedAt) : undefined,
       }));
       out.push({
-        id: thread.id || latest.id || `${latest.path || "comment"}:${latest.createdAt || out.length}`,
+        id:
+          thread.id || latest.id || `${latest.path || "comment"}:${latest.createdAt || out.length}`,
         prNumber: input.prNumber || 0,
         repository: input.repository,
         url: latest.url || input.prUrl || "",
@@ -283,12 +286,17 @@ function indentBlock(value: string, prefix: string): string {
 
 function execGh(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile("gh", args, { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 30_000 }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(stderr || error.message || "gh command failed"));
-      } else {
-        resolve({ stdout: stdout || "", stderr: stderr || "" });
-      }
-    });
+    execFile(
+      "gh",
+      args,
+      { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 30_000 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message || "gh command failed"));
+        } else {
+          resolve({ stdout: stdout || "", stderr: stderr || "" });
+        }
+      },
+    );
   });
 }

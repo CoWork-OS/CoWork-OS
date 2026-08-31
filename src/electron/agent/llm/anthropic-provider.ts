@@ -60,23 +60,16 @@ export class AnthropicProvider implements LLMProvider {
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
     const model = normalizeAnthropicModelId(request.model);
     const requestedPromptCache =
-      request.promptCache?.mode === "disabled"
-        ? undefined
-        : request.promptCache;
+      request.promptCache?.mode === "disabled" ? undefined : request.promptCache;
     const effectivePromptCache =
-      requestedPromptCache?.mode === "anthropic_auto" &&
-      !this.promptCacheAutoSupported
+      requestedPromptCache?.mode === "anthropic_auto" && !this.promptCacheAutoSupported
         ? { ...requestedPromptCache, mode: "anthropic_explicit" as const }
         : requestedPromptCache;
 
     try {
       logger.debug(`Calling API with model: ${model}`);
 
-      const response = await this.createWithPromptCache(
-        request,
-        effectivePromptCache,
-        tools,
-      );
+      const response = await this.createWithPromptCache(request, effectivePromptCache, tools);
 
       return this.convertResponse(response);
     } catch (error: Any) {
@@ -103,9 +96,7 @@ export class AnthropicProvider implements LLMProvider {
 
       if (
         typeof error?.message === "string" &&
-        error.message.includes(
-          AnthropicProvider.STREAMING_REQUIRED_ERROR_FRAGMENT,
-        )
+        error.message.includes(AnthropicProvider.STREAMING_REQUIRED_ERROR_FRAGMENT)
       ) {
         logger.warn(
           "Retrying request with streaming because the SDK rejected the non-streaming timeout budget.",
@@ -128,11 +119,13 @@ export class AnthropicProvider implements LLMProvider {
         throw new Error("Request cancelled");
       }
 
-      const REDACTED_HEADER_KEYS = /^(authorization|x-api-key|cookie|set-cookie|proxy-authorization)$/i;
+      const REDACTED_HEADER_KEYS =
+        /^(authorization|x-api-key|cookie|set-cookie|proxy-authorization)$/i;
       const safeHeaders = error.headers
         ? Object.fromEntries(
-            (Array.from(error.headers.entries()) as [string, string][]).map(([k, v]: [string, string]) =>
-              REDACTED_HEADER_KEYS.test(k) ? [k, "[REDACTED]"] : [k, v],
+            (Array.from(error.headers.entries()) as [string, string][]).map(
+              ([k, v]: [string, string]) =>
+                REDACTED_HEADER_KEYS.test(k) ? [k, "[REDACTED]"] : [k, v],
             ),
           )
         : undefined;
@@ -198,11 +191,7 @@ export class AnthropicProvider implements LLMProvider {
             type: "image" as const,
             source: {
               type: "base64" as const,
-              media_type: item.mimeType as
-                | "image/jpeg"
-                | "image/png"
-                | "image/gif"
-                | "image/webp",
+              media_type: item.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
               data: item.data,
             },
           };
@@ -284,19 +273,12 @@ export class AnthropicProvider implements LLMProvider {
       return request.system;
     }
 
-    const parts = convertSystemBlocksToTextParts(
-      request.system,
-      request.systemBlocks,
-    );
+    const parts = convertSystemBlocksToTextParts(request.system, request.systemBlocks);
     if (promptCache?.mode === "anthropic_explicit") {
       applyExplicitSystemBlockMarker(parts, blocks, promptCache.ttl);
     }
 
-    if (
-      !request.systemBlocks &&
-      parts.length === 1 &&
-      !parts[0].cache_control
-    ) {
+    if (!request.systemBlocks && parts.length === 1 && !parts[0].cache_control) {
       return parts[0].text;
     }
 
@@ -354,9 +336,7 @@ export class AnthropicProvider implements LLMProvider {
     };
   }
 
-  private mapStopReason(
-    reason: Anthropic.Message["stop_reason"],
-  ): LLMResponse["stopReason"] {
+  private mapStopReason(reason: Anthropic.Message["stop_reason"]): LLMResponse["stopReason"] {
     switch (reason) {
       case "end_turn":
         return "end_turn";

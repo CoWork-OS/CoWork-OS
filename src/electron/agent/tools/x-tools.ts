@@ -7,6 +7,10 @@ import { runBirdCommand } from "../../utils/x-cli";
 import { BrowserTools } from "./browser-tools";
 import { buildXComposeScript, buildXToggleFollowScript } from "./x-browser-scripts";
 import { notifyIntegrationAuthIssue } from "../../notifications/integration-auth";
+import {
+  assertWorkspaceReadableFileAccessWithApproval,
+  createWorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
 
 type XAction =
   | "whoami"
@@ -843,7 +847,7 @@ export class XTools {
         typeof writePageContent?.text === "string" ? writePageContent.text : undefined;
       writePageText = this.trimTextForPrompt(contentText);
       writePageLikelyBlocked = this.isLikelyBrowserBlocked(writePageText);
-    } catch  {
+    } catch {
       writePageText = undefined;
       writePageLikelyBlocked = false;
     }
@@ -1206,7 +1210,7 @@ export class XTools {
     return `@${bareHandle}`;
   }
 
-  private resolveMediaPaths(media?: string[]): string[] {
+  private async resolveMediaPaths(media?: string[]): Promise<string[]> {
     if (!media || media.length === 0) return [];
     if (!this.workspace.permissions.read) {
       throw new Error("Read permission not granted for media uploads");
@@ -1217,42 +1221,28 @@ export class XTools {
       .filter((item) => item.length > 0)
       .slice(0, MAX_MEDIA);
 
-    const workspaceRoot = path.resolve(this.workspace.path);
-    const allowedPaths = this.workspace.permissions.allowedPaths || [];
-    const canReadOutside =
-      this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess;
-
-    const isPathAllowed = (absolutePath: string): boolean => {
-      if (allowedPaths.length === 0) return false;
-      const normalizedPath = path.normalize(absolutePath);
-      return allowedPaths.some((allowed) => {
-        const normalizedAllowed = path.normalize(allowed);
-        return (
-          normalizedPath === normalizedAllowed ||
-          normalizedPath.startsWith(normalizedAllowed + path.sep)
+    const resolved: string[] = [];
+    for (const item of normalized) {
+      try {
+        resolved.push(
+          await assertWorkspaceReadableFileAccessWithApproval(
+            this.workspace,
+            item,
+            "Media file",
+            createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "x"),
+          ),
         );
-      });
-    };
-
-    const resolved = normalized.map((item) => {
-      const candidate = path.isAbsolute(item)
-        ? path.normalize(item)
-        : path.resolve(workspaceRoot, item);
-
-      const relative = path.relative(workspaceRoot, candidate);
-      const isInsideWorkspace = !(relative.startsWith("..") || path.isAbsolute(relative));
-      if (!isInsideWorkspace && !canReadOutside && !isPathAllowed(candidate)) {
-        throw new Error("Media path must be inside the workspace or in Allowed Paths");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("profile_filesystem_denied")) {
+          throw new Error(`Path is denied by the active access profile: ${item}`);
+        }
+        if (/does not exist/i.test(message)) {
+          throw new Error(`Media file not found: ${item}`);
+        }
+        throw new Error(`Media path must be inside the workspace or in Allowed Paths: ${item}`);
       }
-      if (!fs.existsSync(candidate)) {
-        throw new Error(`Media file not found: ${item}`);
-      }
-      const stats = fs.statSync(candidate);
-      if (!stats.isFile()) {
-        throw new Error(`Media path is not a file: ${item}`);
-      }
-      return candidate;
-    });
+    }
 
     return resolved;
   }
@@ -1347,7 +1337,7 @@ export class XTools {
       }
       case "tweet": {
         if (!input.text) throw new Error("Missing text for tweet");
-        const mediaPaths = this.resolveMediaPaths(input.media);
+        const mediaPaths = await this.resolveMediaPaths(input.media);
         const preview = input.text.length > 120 ? `${input.text.slice(0, 117)}...` : input.text;
         await this.requireApproval(`Post to X: "${preview}"`, {
           action: "tweet",
@@ -1366,7 +1356,7 @@ export class XTools {
       case "reply": {
         if (!input.id_or_url) throw new Error("Missing id_or_url for reply");
         if (!input.text) throw new Error("Missing text for reply");
-        const mediaPaths = this.resolveMediaPaths(input.media);
+        const mediaPaths = await this.resolveMediaPaths(input.media);
         const preview = input.text.length > 120 ? `${input.text.slice(0, 117)}...` : input.text;
         await this.requireApproval(`Reply on X: "${preview}"`, {
           action: "reply",

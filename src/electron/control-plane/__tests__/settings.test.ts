@@ -508,7 +508,6 @@ describe("ControlPlaneSettingsManager", () => {
       expect(((mockStoredSettings as Any).remote as Any).url).toBe("ws://new-host:18789");
       expect(((mockStoredSettings as Any).remote as Any).deviceName).toBe("New Name");
     });
-
   });
 });
 

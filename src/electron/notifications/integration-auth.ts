@@ -80,8 +80,15 @@ export function detectIntegrationAuthIssue(error: unknown): IntegrationAuthIssue
     };
   }
 
-  if (/\b(microsoft graph|microsoft outlook|outlook|hotmail|msn|live\.com|microsoft email)\b/.test(lower)) {
-    if (isLikelyIntegrationAuthError(error) || /\b(reconnect|mail\.readwrite|oauth|permission failed|refresh token)\b/i.test(message)) {
+  if (
+    /\b(microsoft graph|microsoft outlook|outlook|hotmail|msn|live\.com|microsoft email)\b/.test(
+      lower,
+    )
+  ) {
+    if (
+      isLikelyIntegrationAuthError(error) ||
+      /\b(reconnect|mail\.readwrite|oauth|permission failed|refresh token)\b/i.test(message)
+    ) {
       return {
         integrationId: "outlook-email",
         integrationName: "Outlook Email",
@@ -189,7 +196,9 @@ export async function notifyIntegrationAuthIssue(
       return (
         notification.type === "warning" &&
         notification.title === title &&
-        notification.message.includes(`${input.integrationName} needs attention in ${settingsPath}.`)
+        notification.message.includes(
+          `${input.integrationName} needs attention in ${settingsPath}.`,
+        )
       );
     });
     if (existing) return false;

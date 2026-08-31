@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import {
   discoverDocumentForAnalysis,
+  extractDocumentForAnalysis,
   splitDocumentForAnalysis,
 } from "../document-analysis-pipeline";
 
@@ -55,6 +56,24 @@ describe("document analysis pipeline", () => {
 
     expect(path.basename(selected || "")).toBe(
       "Yapay_Zeka_Yan_Koltukta_Baski_Hazir_v7_word_pass4.docx",
+    );
+  });
+
+  it("skips documents rejected by the access-profile read guard", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-document-analysis-"));
+    temporaryDirectories.push(directory);
+    const denied = path.join(directory, "secrets.txt");
+    const allowed = path.join(directory, "notes.txt");
+    await fs.writeFile(denied, "secret");
+    await fs.writeFile(allowed, "allowed");
+
+    const selected = await discoverDocumentForAnalysis(directory, "secrets", (candidate) => {
+      return path.basename(candidate) !== "secrets.txt";
+    });
+
+    expect(path.basename(selected || "")).toBe("notes.txt");
+    await expect(extractDocumentForAnalysis(directory, denied, () => false)).rejects.toThrow(
+      /access profile/i,
     );
   });
 });

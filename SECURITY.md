@@ -1,6 +1,6 @@
 # Security Policy
 
-> **For end users**: See [SECURITY_GUIDE.md](SECURITY_GUIDE.md) for a comprehensive guide on the app's security model, permissions, and best practices.
+> **For end users**: See [SECURITY_GUIDE.md](SECURITY_GUIDE.md) and the canonical [Access Profiles guide](docs/access-profiles.md) for the app's security model, task-level permissions, and best practices.
 
 ## Supported Versions
 
@@ -58,14 +58,14 @@ Please include as much of the following information as possible:
 
 ### File System Access
 
-- All file operations are sandboxed to the selected workspace
+- File operations are bounded by the selected task access profile, workspace, and protected-path rules
 - Path traversal attacks are prevented
-- Destructive operations (delete, bulk rename) require user approval
+- Destructive operations (delete, bulk rename) remain separately gated and may require user approval
 
 ### Network Security
 
-- Network access requires explicit permission
-- Future versions will include domain allowlisting
+- Network access follows the selected access profile, administrator policy, and domain rules
+- Export-sensitive requests remain a separate approval class even for high-autonomy profiles
 - All API calls use HTTPS
 
 ### Local Data Storage
@@ -78,9 +78,9 @@ Please include as much of the following information as possible:
 
 1. **Keep Updated**: Always use the latest version
 2. **Protect API Keys**: Never share your `.env` file
-3. **Review Permissions**: Be cautious when approving file operations
-4. **Workspace Selection**: Only grant access to necessary folders
-5. **Network Awareness**: Monitor any network permission requests
+3. **Choose the least-privileged access profile**: Start with Ask for approval and use Custom or Full access only when justified
+4. **Review approvals**: Check the exact action, destination, and profile scope before allowing sensitive work
+5. **Workspace selection**: Grant only the folders and domains the task needs
 
 ## Known Security Issues
 

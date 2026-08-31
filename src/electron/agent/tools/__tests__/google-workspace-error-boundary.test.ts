@@ -94,12 +94,17 @@ describe("GmailTools error boundary", () => {
     const tools = new GmailTools(workspace, daemon as Any, taskId);
     const gmailRequestMock = gmailRequest as unknown as ReturnType<typeof vi.fn>;
     gmailRequestMock.mockRejectedValueOnce(
-      Object.assign(new Error("Gmail API error 403: Request had insufficient authentication scopes."), {
-        status: 403,
-      }),
+      Object.assign(
+        new Error("Gmail API error 403: Request had insufficient authentication scopes."),
+        {
+          status: 403,
+        },
+      ),
     );
 
-    await expect(tools.executeAction({ action: "archive_thread", thread_id: "thread-1" })).rejects.toThrow(
+    await expect(
+      tools.executeAction({ action: "archive_thread", thread_id: "thread-1" }),
+    ).rejects.toThrow(
       "Google Workspace authorization failed (403): Gmail modify scope is missing.",
     );
 

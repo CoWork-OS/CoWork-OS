@@ -247,6 +247,12 @@ The default posture is:
 - hard guardrails still enforced
 - dangerous or unsupported actions still blocked or escalated
 
+This autonomy policy is separate from the task's [access profile](access-profiles.md).
+Core automation must receive an explicit profile, and its auto-approval allowlist
+can only reduce prompts for actions already exposed by that profile. Learning,
+trust, and promoted automation settings cannot add command tools or widen the
+profile's sandbox, filesystem, network, domain, or export boundary.
+
 So the system can compound on routine work without degenerating into unrestricted autopilot.
 
 ### 6. Learning stays visible to the operator

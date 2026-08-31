@@ -54,8 +54,8 @@ export function ComputerUsePermissionDialog({
           marginBottom: 16,
         }}
       >
-        Claude will take screenshots of your screen and control your mouse and keyboard.
-        You&apos;ll approve each app, but not confirm each step Claude performs.
+        Claude will take screenshots of your screen and control your mouse and keyboard. You&apos;ll
+        approve each app, but not confirm each step Claude performs.
       </p>
 
       <div
@@ -105,8 +105,7 @@ export function ComputerUsePermissionDialog({
                   app.requestedLevel === "full_control"
                     ? "rgba(224, 122, 58, 0.12)"
                     : "rgba(100, 160, 230, 0.12)",
-                color:
-                  app.requestedLevel === "full_control" ? "#c05a20" : "#3a7bbf",
+                color: app.requestedLevel === "full_control" ? "#c05a20" : "#3a7bbf",
               }}
             >
               {app.requestedLevel === "full_control" ? "Full control" : "View only"}

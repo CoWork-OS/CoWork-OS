@@ -260,7 +260,7 @@ export class SSETransport extends EventEmitter implements MCPTransport {
     try {
       const message = JSON.parse(data);
       this.handleJsonRpcResponse(message);
-    } catch  {
+    } catch {
       console.error(`[MCP SSETransport] Failed to parse message: ${data}`);
     }
   }

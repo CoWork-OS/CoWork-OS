@@ -46,7 +46,8 @@ describe("ImageGenerator Azure", () => {
         return new Promise((_resolve, reject) => {
           init?.signal?.addEventListener(
             "abort",
-            () => reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" })),
+            () =>
+              reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" })),
             { once: true },
           );
         });
@@ -60,7 +61,10 @@ describe("ImageGenerator Azure", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const generator = new ImageGenerator({ path: tempDir } as Any);
+    const generator = new ImageGenerator({
+      path: tempDir,
+      permissions: { read: true, write: true, delete: true, network: true, shell: false },
+    } as Any);
     const progress: Any[] = [];
     const resultPromise = generator.generate({
       prompt: "snow leopard avatar",
@@ -111,7 +115,10 @@ describe("ImageGenerator Azure", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const generator = new ImageGenerator({ path: tempDir } as Any);
+    const generator = new ImageGenerator({
+      path: tempDir,
+      permissions: { read: true, write: true, delete: true, network: true, shell: false },
+    } as Any);
     const progress: Any[] = [];
     const result = await generator.generate({
       prompt: "snow leopard avatar",
@@ -150,9 +157,7 @@ describe("ImageGenerator Azure", () => {
           capturedSignal?.addEventListener(
             "abort",
             () =>
-              reject(
-                Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
-              ),
+              reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" })),
             { once: true },
           );
         }),
@@ -160,7 +165,10 @@ describe("ImageGenerator Azure", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const controller = new AbortController();
-    const generator = new ImageGenerator({ path: tempDir } as Any);
+    const generator = new ImageGenerator({
+      path: tempDir,
+      permissions: { read: true, write: true, delete: true, network: true, shell: false },
+    } as Any);
     const promise = generator.generate({
       prompt: "snow leopard avatar",
       signal: controller.signal,

@@ -1,9 +1,5 @@
 import { useState } from "react";
-import type {
-  PersonalityConfigV2,
-  BehavioralRule,
-  ExpertiseArea,
-} from "../../../shared/types";
+import type { PersonalityConfigV2, BehavioralRule, ExpertiseArea } from "../../../shared/types";
 
 interface PersonalityInstructionsTabProps {
   config: PersonalityConfigV2;
@@ -48,9 +44,7 @@ export function PersonalityInstructionsTab({
 
   const toggleRule = (id: string) => {
     onUpdate({
-      rules: (config.rules ?? []).map((r) =>
-        r.id === id ? { ...r, enabled: !r.enabled } : r,
-      ),
+      rules: (config.rules ?? []).map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r)),
     });
     onSave();
   };
@@ -78,9 +72,7 @@ export function PersonalityInstructionsTab({
   return (
     <div className="personality-instructions-tab settings-section">
       <h3>Instructions</h3>
-      <p className="settings-description">
-        Custom instructions and behavioral rules.
-      </p>
+      <p className="settings-description">Custom instructions and behavioral rules.</p>
 
       <div className="form-group">
         <label htmlFor="about-user">About the user</label>
@@ -133,11 +125,7 @@ export function PersonalityInstructionsTab({
         <div className="rules-list">
           {(config.rules ?? []).map((r) => (
             <div key={r.id} className="rule-item">
-              <input
-                type="checkbox"
-                checked={r.enabled}
-                onChange={() => toggleRule(r.id)}
-              />
+              <input type="checkbox" checked={r.enabled} onChange={() => toggleRule(r.id)} />
               <span className="rule-type">{r.type.toUpperCase()}:</span>
               <span className="rule-text">{r.rule}</span>
               <button
@@ -186,11 +174,7 @@ export function PersonalityInstructionsTab({
           {(config.expertise ?? []).map((e) => (
             <span key={e.id} className="expertise-tag">
               {e.domain} ({e.level})
-              <button
-                type="button"
-                className="tag-remove"
-                onClick={() => removeExpertise(e.id)}
-              >
+              <button type="button" className="tag-remove" onClick={() => removeExpertise(e.id)}>
                 ×
               </button>
             </span>
@@ -207,9 +191,7 @@ export function PersonalityInstructionsTab({
           />
           <select
             value={newExpertiseLevel}
-            onChange={(e) =>
-              setNewExpertiseLevel(e.target.value as ExpertiseArea["level"])
-            }
+            onChange={(e) => setNewExpertiseLevel(e.target.value as ExpertiseArea["level"])}
           >
             <option value="familiar">Familiar</option>
             <option value="proficient">Proficient</option>

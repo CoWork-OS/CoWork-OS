@@ -224,7 +224,10 @@ export class TextTools {
       const includeTopCharacters = input?.include_top_characters === true;
       const topLimit = Math.max(
         1,
-        Math.min(100, Number.isFinite(input?.top_character_limit) ? Number(input.top_character_limit) : 10),
+        Math.min(
+          100,
+          Number.isFinite(input?.top_character_limit) ? Number(input.top_character_limit) : 10,
+        ),
       );
 
       const result: TextMetricsResult = {
@@ -306,7 +309,9 @@ export class TextTools {
     const lines = text.length === 0 ? 0 : text.split(/\r\n|\n|\r/).length;
     const trimmed = text.trim();
     const paragraphs =
-      trimmed.length === 0 ? 0 : trimmed.split(/(?:\r\n|\n|\r)\s*(?:\r\n|\n|\r)+/).filter(Boolean).length;
+      trimmed.length === 0
+        ? 0
+        : trimmed.split(/(?:\r\n|\n|\r)\s*(?:\r\n|\n|\r)+/).filter(Boolean).length;
     const sentences = this.countSentences(trimmed);
     return {
       characters: text.length,

@@ -119,7 +119,10 @@ describe("ImageGenerator OpenAI OAuth", () => {
       getModels: () => [{ id: "gpt-5.2" }],
     });
 
-    const generator = new ImageGenerator({ path: tempDir } as Any);
+    const generator = new ImageGenerator({
+      path: tempDir,
+      permissions: { read: true, write: true, delete: true, network: true, shell: false },
+    } as Any);
     const result = await generator.generate({
       prompt: "draw a poster of a lighthouse in fog",
       provider: "openai-codex",
@@ -192,7 +195,10 @@ describe("ImageGenerator OpenAI OAuth", () => {
       getModels: () => [{ id: "gpt-5.2" }],
     });
 
-    const generator = new ImageGenerator({ path: tempDir } as Any);
+    const generator = new ImageGenerator({
+      path: tempDir,
+      permissions: { read: true, write: true, delete: true, network: true, shell: false },
+    } as Any);
     const result = await generator.generate({
       prompt: "draw a poster of a lighthouse in fog",
       provider: "openai-codex",
@@ -240,7 +246,10 @@ describe("ImageGenerator OpenAI OAuth", () => {
       getModels: () => [{ id: "gpt-5.2" }],
     });
 
-    const generator = new ImageGenerator({ path: tempDir } as Any);
+    const generator = new ImageGenerator({
+      path: tempDir,
+      permissions: { read: true, write: true, delete: true, network: true, shell: false },
+    } as Any);
     const result = await generator.generate({
       prompt: "draw two posters",
       provider: "openai-codex",

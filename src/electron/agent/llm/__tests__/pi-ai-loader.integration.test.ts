@@ -32,10 +32,6 @@ describe("pi-ai package migration", () => {
   it("preserves the OpenAI Codex OAuth API", () => {
     const module = inspectPackageExports();
 
-    expect(module.oauth).toEqual([
-      "getOAuthApiKey",
-      "loginOpenAICodex",
-      "refreshOpenAICodexToken",
-    ]);
+    expect(module.oauth).toEqual(["getOAuthApiKey", "loginOpenAICodex", "refreshOpenAICodexToken"]);
   });
 });

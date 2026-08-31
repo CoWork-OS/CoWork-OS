@@ -267,7 +267,7 @@ describe("SecureSettingsRepository", () => {
     it("should decrypt and return settings with valid checksum", () => {
       const testData = { provider: "azure", endpoint: "https://test.api" };
       const jsonData = JSON.stringify(testData);
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+      // oxlint-disable-next-line typescript-eslint(no-require-imports)
       const crypto = require("crypto");
       const checksum = crypto.createHash("sha256").update(jsonData).digest("hex");
 
@@ -684,7 +684,7 @@ describe("SecureSettingsRepository", () => {
     it("should return success status with data on successful load", () => {
       const testData = { provider: "azure" };
       const jsonData = JSON.stringify(testData);
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+      // oxlint-disable-next-line typescript-eslint(no-require-imports)
       const crypto = require("crypto");
       const checksum = crypto.createHash("sha256").update(jsonData).digest("hex");
 

@@ -25,4 +25,19 @@ describe("enrichToolEventPayload", () => {
 
     expect(payload.envelope).toEqual({ toolName: "run_command", status: "error" });
   });
+
+  it("marks a tool_result with a failed structured result as an error", () => {
+    const payload = enrichToolEventPayload("tool_result", {
+      tool: "web_fetch",
+      result: { success: false, error: "Workspace network capability is disabled." },
+    });
+
+    expect(payload.envelope).toEqual(
+      expect.objectContaining({
+        toolName: "web_fetch",
+        status: "error",
+        userSummary: "web_fetch failed",
+      }),
+    );
+  });
 });

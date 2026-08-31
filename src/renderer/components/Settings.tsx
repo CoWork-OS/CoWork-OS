@@ -3003,11 +3003,7 @@ export function Settings({
         imageOpenRouterBaseUrl || openrouterBaseUrl || undefined,
       );
       setOpenrouterImageModels(models || []);
-      if (
-        models &&
-        models.length > 0 &&
-        !imageOpenRouterModel.trim()
-      ) {
+      if (models && models.length > 0 && !imageOpenRouterModel.trim()) {
         setImageOpenRouterModel(models[0].id);
       }
     } catch (error) {
@@ -4617,9 +4613,7 @@ export function Settings({
                 onChange={(value) => {
                   setImageOpenRouterModel(value);
                   setImageGenDefaultModel(
-                    value.toLowerCase().includes("nano-banana")
-                      ? "nano-banana-2"
-                      : "gpt-image-2",
+                    value.toLowerCase().includes("nano-banana") ? "nano-banana-2" : "gpt-image-2",
                   );
                 }}
                 placeholder="Select an image model..."

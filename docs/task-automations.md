@@ -76,15 +76,22 @@ Worktree execution is not compatible with `Continue thread`. The UI prevents tha
 
 ## Run Modes
 
-`Chat` is the default run mode. It creates the safest unattended automation:
+`Chat` is the default run mode. It creates the safest unattended automation. Modern automations
+select an access profile:
 
-- `shellAccess: false`
+- `accessProfileId: ask_for_approval` (or another explicitly selected profile)
 - `allowUserInput: false`
 
-`Local` runs in the current workspace and enables shell access:
+`Local` runs in the current workspace. Its command-tool, sandbox, network, and filesystem behavior
+is governed by the selected access profile. New jobs must not use a separate shell flag. Jobs
+created before access profiles were introduced may still contain a legacy `shellAccess` field; the
+runtime reads that field only for compatibility and does not expose it as a new-task setting. A
+missing or invalid named profile fails closed and leaves the run needing user action rather than
+silently switching to a broader default.
 
-- `shellAccess: true`
-- `allowUserInput: false`
+Routine-level approval or retry settings can reduce interruption for actions already permitted by
+the profile, but they cannot widen its filesystem, network, command-tool, or export boundary. See
+[Access Profiles](access-profiles.md) for inheritance and unattended-run behavior.
 
 `Worktree` is shown only for tasks with a worktree path. It is disabled for same-thread automations because a thread follow-up must run against the original task context, while a worktree automation needs an isolated run target.
 
@@ -196,7 +203,7 @@ The focused renderer test coverage lives in `src/renderer/components/__tests__/m
 - default `Every 30m` schedule payload
 - default same-thread target
 - template defaults
-- `Local` run mode enabling `shellAccess`
+- `Local` run mode preserving the selected access-profile command-tool boundary
 - worktree target protection
 
 When changing this flow, run:

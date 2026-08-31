@@ -31,16 +31,22 @@ function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest
 describe("BrowserUseApprovalDialog", () => {
   it("identifies only Browser Use domain approvals", () => {
     expect(isBrowserUseDomainApproval(makeApproval())).toBe(true);
-    expect(isBrowserUseDomainApproval(makeApproval({
-      details: { kind: "generic" },
-    }))).toBe(false);
+    expect(
+      isBrowserUseDomainApproval(
+        makeApproval({
+          details: { kind: "generic" },
+        }),
+      ),
+    ).toBe(false);
   });
 
   it("renders Codex-style Browser Use domain approval controls", () => {
-    const html = renderToStaticMarkup(React.createElement(BrowserUseApprovalDialog, {
-      approval: makeApproval(),
-      onRespond: vi.fn(),
-    }));
+    const html = renderToStaticMarkup(
+      React.createElement(BrowserUseApprovalDialog, {
+        approval: makeApproval(),
+        onRespond: vi.fn(),
+      }),
+    );
 
     expect(html).toContain("Browser Use");
     expect(html).toContain("Allow Browser Use to access https://github.com?");
@@ -64,11 +70,19 @@ describe("BrowserUseApprovalDialog", () => {
   });
 
   it("does not treat Enter inside dialog controls as a global allow shortcut", () => {
-    expect(shouldIgnoreBrowserUseApprovalKeyboardShortcut("Enter", { tagName: "button" })).toBe(true);
-    expect(shouldIgnoreBrowserUseApprovalKeyboardShortcut("Enter", { tagName: "input" })).toBe(true);
+    expect(shouldIgnoreBrowserUseApprovalKeyboardShortcut("Enter", { tagName: "button" })).toBe(
+      true,
+    );
+    expect(shouldIgnoreBrowserUseApprovalKeyboardShortcut("Enter", { tagName: "input" })).toBe(
+      true,
+    );
     expect(shouldIgnoreBrowserUseApprovalKeyboardShortcut("Enter", { role: "button" })).toBe(true);
-    expect(shouldIgnoreBrowserUseApprovalKeyboardShortcut("Enter", { hasInteractiveAncestor: true })).toBe(true);
+    expect(
+      shouldIgnoreBrowserUseApprovalKeyboardShortcut("Enter", { hasInteractiveAncestor: true }),
+    ).toBe(true);
     expect(getBrowserUseApprovalKeyboardAction("Enter", false, { tagName: "button" })).toBeNull();
-    expect(getBrowserUseApprovalKeyboardAction("Enter", false, { hasInteractiveAncestor: true })).toBeNull();
+    expect(
+      getBrowserUseApprovalKeyboardAction("Enter", false, { hasInteractiveAncestor: true }),
+    ).toBeNull();
   });
 });

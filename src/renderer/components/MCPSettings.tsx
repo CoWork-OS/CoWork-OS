@@ -5,7 +5,7 @@ import { ConnectorSetupModal, ConnectorProvider } from "./ConnectorSetupModal";
 import { useAgentContext } from "../hooks/useAgentContext";
 
 // Types (matching preload types)
-type MCPTransportType = "stdio" | "sse" | "websocket";
+type MCPTransportType = "stdio" | "sse" | "websocket" | "streamable-http";
 type MCPConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
 
 interface MCPServerConfig {
@@ -20,6 +20,20 @@ interface MCPServerConfig {
   cwd?: string;
   url?: string;
   headers?: Record<string, string>;
+  registryId?: string;
+  auth?: {
+    type: "none" | "bearer" | "api-key" | "basic";
+    token?: string;
+    apiKey?: string;
+    username?: string;
+    password?: string;
+    headerName?: string;
+    refreshToken?: string;
+    clientId?: string;
+    clientSecret?: string;
+    tokenUrl?: string;
+    expiresAt?: number;
+  };
   connectionTimeout?: number;
   requestTimeout?: number;
 }
@@ -201,13 +215,14 @@ export function MCPSettings() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [loadedSettings, statuses, tunnelSettings, tunnelStatuses, tunnelAudit] = await Promise.all([
-        window.electronAPI.getMCPSettings(),
-        window.electronAPI.getMCPStatus(),
-        window.electronAPI.getSecureMcpTunnelSettings(),
-        window.electronAPI.getSecureMcpTunnelStatus(),
-        window.electronAPI.getSecureMcpTunnelAudit(),
-      ]);
+      const [loadedSettings, statuses, tunnelSettings, tunnelStatuses, tunnelAudit] =
+        await Promise.all([
+          window.electronAPI.getMCPSettings(),
+          window.electronAPI.getMCPStatus(),
+          window.electronAPI.getSecureMcpTunnelSettings(),
+          window.electronAPI.getSecureMcpTunnelStatus(),
+          window.electronAPI.getSecureMcpTunnelAudit(),
+        ]);
       setSettings(loadedSettings);
       setServerStatuses(statuses);
       setSecureTunnels(tunnelSettings.tunnels || []);
@@ -807,6 +822,11 @@ export function MCPSettings() {
                               {config.command} {config.args?.join(" ")}
                             </span>
                           )}
+                          {config?.url && (
+                            <span className="mcp-server-command">
+                              {config.url} · {config.transport}
+                            </span>
+                          )}
                         </div>
                         <div className="mcp-server-toggle">
                           <label className="toggle-switch">
@@ -958,7 +978,11 @@ export function MCPSettings() {
               loadData();
               setActiveView("servers");
             }}
-            installedServerIds={settings?.servers.map((s) => s.name) || []}
+            installedServerIds={
+              settings?.servers.flatMap(
+                (s) => [s.name, s.registryId].filter(Boolean) as string[],
+              ) || []
+            }
           />
         </div>
       )}
@@ -1131,7 +1155,9 @@ export function MCPSettings() {
                     </div>
 
                     <div className="mcp-server-actions">
-                      {state === "connected" || state === "connecting" || state === "reconnecting" ? (
+                      {state === "connected" ||
+                      state === "connecting" ||
+                      state === "reconnecting" ? (
                         <button
                           className="button-small button-secondary"
                           onClick={() => handleStopTunnel(tunnel.id)}

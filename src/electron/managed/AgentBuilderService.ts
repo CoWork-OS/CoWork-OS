@@ -20,6 +20,7 @@ import { LLMProviderFactory } from "../agent/llm";
 import type { LLMProvider } from "../agent/llm/types";
 import type { LoadedPlugin } from "../extensions/types";
 import type { MCPServerConfig } from "../mcp/types";
+import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 
 type AgentBuilderChannelInventoryEntry = {
   id: string;
@@ -30,7 +31,6 @@ type AgentBuilderChannelInventoryEntry = {
 };
 
 const VALID_TOOL_FAMILIES = new Set<ManagedAgentToolFamily>([
-  "shell",
   "browser",
   "computer-use",
   "files",
@@ -57,14 +57,7 @@ const DEFAULT_MEMORY_CONFIG: ManagedAgentMemoryConfig = {
   sources: ["workspace"],
 };
 
-type IntegrationKey =
-  | "slack"
-  | "gmail"
-  | "calendar"
-  | "github"
-  | "linear"
-  | "notion"
-  | "drive";
+type IntegrationKey = "slack" | "gmail" | "calendar" | "github" | "linear" | "notion" | "drive";
 
 type IntegrationDescriptor = {
   key: IntegrationKey;
@@ -184,7 +177,12 @@ export interface CompressedAgentBuilderInventory {
   workspaces: Array<{ id: string; name: string; path: string }>;
   memoryModes: Array<ManagedAgentMemoryConfig["mode"]>;
   runtimeToolFamilies: ManagedAgentToolFamily[];
-  agentRoles: Array<{ id: string; displayName: string; description?: string; capabilities: string[] }>;
+  agentRoles: Array<{
+    id: string;
+    displayName: string;
+    description?: string;
+    capabilities: string[];
+  }>;
 }
 
 type AgentBuilderServiceOptions = {
@@ -223,7 +221,8 @@ function uniqueToolFamilies(values: Array<string | undefined | null>): ManagedAg
   const result: ManagedAgentToolFamily[] = [];
   for (const value of values) {
     if (!value || !VALID_TOOL_FAMILIES.has(value as ManagedAgentToolFamily)) continue;
-    if (!result.includes(value as ManagedAgentToolFamily)) result.push(value as ManagedAgentToolFamily);
+    if (!result.includes(value as ManagedAgentToolFamily))
+      result.push(value as ManagedAgentToolFamily);
   }
   return result;
 }
@@ -253,15 +252,22 @@ function keywordMatches(prompt: string, keyword: string): boolean {
   return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(prompt);
 }
 
-function explicitIntegrationPromptMatches(prompt: string, descriptor: IntegrationDescriptor): boolean {
+function explicitIntegrationPromptMatches(
+  prompt: string,
+  descriptor: IntegrationDescriptor,
+): boolean {
   return descriptor.explicitKeywords.some((keyword) => keywordMatches(prompt, keyword));
 }
 
-function genericIntegrationPromptMatches(prompt: string, descriptor: IntegrationDescriptor): boolean {
+function genericIntegrationPromptMatches(
+  prompt: string,
+  descriptor: IntegrationDescriptor,
+): boolean {
   const lower = prompt.toLowerCase();
   if (explicitIntegrationPromptMatches(prompt, descriptor)) return false;
   if (descriptor.genericKeywords.some((keyword) => keywordMatches(prompt, keyword))) return true;
-  if (descriptor.key === "linear" && /\bissues?\b/.test(lower) && !/\bgithub\b/.test(lower)) return true;
+  if (descriptor.key === "linear" && /\bissues?\b/.test(lower) && !/\bgithub\b/.test(lower))
+    return true;
   return false;
 }
 
@@ -334,14 +340,18 @@ function connectionOptionFromServer(
   return {
     id: server.id,
     label: server.name || descriptor.label,
-    description: server.description || `Use the enabled ${server.name || descriptor.label} integration.`,
+    description:
+      server.description || `Use the enabled ${server.name || descriptor.label} integration.`,
     status: "available",
     selectedMcpServers: [server.id],
     selectedToolFamilies: descriptor.toolFamilies,
   };
 }
 
-function inferIntegrations(prompt: string, inventory: AgentBuilderInventory): {
+function inferIntegrations(
+  prompt: string,
+  inventory: AgentBuilderInventory,
+): {
   selectedMcpServers: string[];
   missingConnections: AgentBuilderConnectionRequirement[];
   toolFamilies: ManagedAgentToolFamily[];
@@ -425,7 +435,10 @@ function templateScore(prompt: string, template: AgentTemplate): number {
     ...(template.skills || []),
     ...(template.mcpServers || []),
   ].join(" ");
-  return lowercaseWords(haystack).reduce((score, word) => score + (promptWords.has(word) ? 1 : 0), 0);
+  return lowercaseWords(haystack).reduce(
+    (score, word) => score + (promptWords.has(word) ? 1 : 0),
+    0,
+  );
 }
 
 function suggestTemplate(prompt: string, templates: AgentTemplate[]): AgentTemplate | undefined {
@@ -469,7 +482,11 @@ export function inferExplicitSchedule(prompt: string): ManagedAgentScheduleConfi
       activeHours: null,
     };
   }
-  if (/\b(daily|every day|each day|every morning|each morning|every weekday|weekday mornings)\b/.test(lower)) {
+  if (
+    /\b(daily|every day|each day|every morning|each morning|every weekday|weekday mornings)\b/.test(
+      lower,
+    )
+  ) {
     return {
       enabled: true,
       mode: "recurring",
@@ -498,7 +515,11 @@ function skillPromptMatchesExact(prompt: string, skill: CustomSkill): boolean {
     .some((value) => lower.includes(value));
 }
 
-function inferSkills(prompt: string, inventory: AgentBuilderInventory, template?: AgentTemplate): {
+function inferSkills(
+  prompt: string,
+  inventory: AgentBuilderInventory,
+  template?: AgentTemplate,
+): {
   selectedSkills: string[];
   selectionRequirements: AgentBuilderSelectionRequirement[];
 } {
@@ -507,7 +528,10 @@ function inferSkills(prompt: string, inventory: AgentBuilderInventory, template?
   const exact = enabledSkills.filter((skill) => skillPromptMatchesExact(prompt, skill));
   if (exact.length > 0) {
     return {
-      selectedSkills: uniqueStrings([...(template?.skills || []), ...exact.map((skill) => skill.id)], 8),
+      selectedSkills: uniqueStrings(
+        [...(template?.skills || []), ...exact.map((skill) => skill.id)],
+        8,
+      ),
       selectionRequirements: [],
     };
   }
@@ -625,7 +649,6 @@ export function buildFallbackAgentPlan(
     promptWords.includes("image") || promptWords.includes("design") ? "images" : undefined,
     promptWords.includes("file") || promptWords.includes("folder") ? "files" : undefined,
     promptWords.includes("doc") || promptWords.includes("report") ? "documents" : undefined,
-    promptWords.includes("code") || promptWords.includes("script") ? "shell" : undefined,
     "search",
     "files",
     "memory",
@@ -634,7 +657,9 @@ export function buildFallbackAgentPlan(
     ...(template?.mcpServers || []),
     ...(template?.studio?.apps?.mcpServers || []),
     ...inferred.selectedMcpServers,
-  ]).filter((serverId) => inventory.mcpServers.some((server) => server.id === serverId && server.enabled));
+  ]).filter((serverId) =>
+    inventory.mcpServers.some((server) => server.id === serverId && server.enabled),
+  );
   const name = titleizeAgentName(prompt, template?.name || "Personal Agent");
   const description = prompt || template?.description || "A private CoWork OS agent.";
   const missingConnections = inferred.missingConnections;
@@ -654,7 +679,9 @@ export function buildFallbackAgentPlan(
     ...(explicitSchedule.enabled
       ? [
           {
-            name: explicitSchedule.label ? `${name} ${explicitSchedule.label}` : `${name} scheduled run`,
+            name: explicitSchedule.label
+              ? `${name} ${explicitSchedule.label}`
+              : `${name} scheduled run`,
             description,
             enabled: true,
             trigger: {
@@ -680,9 +707,13 @@ export function buildFallbackAgentPlan(
     capabilities: uniqueStrings(
       [
         "Answer and act from your CoWork OS context",
-        selectedToolFamilies.includes("communication") ? "Draft communication for approval" : undefined,
+        selectedToolFamilies.includes("communication")
+          ? "Draft communication for approval"
+          : undefined,
         selectedToolFamilies.includes("documents") ? "Prepare documents and reports" : undefined,
-        selectedToolFamilies.includes("search") ? "Search and summarize current context" : undefined,
+        selectedToolFamilies.includes("search")
+          ? "Search and summarize current context"
+          : undefined,
         explicitSchedule.enabled ? "Run on an explicit recurring schedule" : "Run on demand",
       ],
       6,
@@ -709,10 +740,14 @@ export function buildFallbackAgentPlan(
     approvalPolicy: DEFAULT_APPROVAL_POLICY,
     sharing: { visibility: "private", ownerLabel: "You" },
     deployment: { surfaces: ["chatgpt"] },
-    enableShell: selectedToolFamilies.includes("shell") || !!template?.environmentConfig?.enableShell,
+    accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+    // Kept only so older consumers can deserialize the plan shape. Command
+    // tools are controlled by accessProfileId and are never inferred here.
+    enableShell: false,
     enableBrowser: template?.environmentConfig?.enableBrowser !== false,
     enableComputerUse:
-      selectedToolFamilies.includes("computer-use") || !!template?.environmentConfig?.enableComputerUse,
+      selectedToolFamilies.includes("computer-use") ||
+      !!template?.environmentConfig?.enableComputerUse,
     rationale: [
       template
         ? `Matched the prompt to the ${template.name} template.`
@@ -722,7 +757,7 @@ export function buildFallbackAgentPlan(
         ? "Kept disconnected integrations as Connect checklist items."
         : selectionRequirements.length > 0
           ? "Asked the user to choose between available tools, integrations, or skills before creation."
-        : "No missing integration was required to create this agent.",
+          : "No missing integration was required to create this agent.",
     ],
     checklist: [
       "Understand the requested workflow",
@@ -820,17 +855,18 @@ export function compressAgentBuilderInventory(
       path: workspace.path,
     })),
     memoryModes: ["default", "focused", "disabled"],
-    runtimeToolFamilies: inventory.runtimeToolFamilies || [
-      "communication",
-      "search",
-      "files",
-      "documents",
-      "memory",
-      "browser",
-      "shell",
-      "images",
-      "computer-use",
-    ],
+    runtimeToolFamilies: (
+      inventory.runtimeToolFamilies || [
+        "communication",
+        "search",
+        "files",
+        "documents",
+        "memory",
+        "browser",
+        "images",
+        "computer-use",
+      ]
+    ).filter((family) => family !== "shell"),
     agentRoles: inventory.agentRoles.slice(0, 30).map((role) => ({
       id: role.id,
       displayName: role.displayName,
@@ -854,7 +890,10 @@ function readPlanObject(value: unknown): Record<string, unknown> {
 
 function normalizeStringArray(value: unknown, limit = 20): string[] {
   if (!Array.isArray(value)) return [];
-  return uniqueStrings(value.map((entry) => (typeof entry === "string" ? entry : undefined)), limit);
+  return uniqueStrings(
+    value.map((entry) => (typeof entry === "string" ? entry : undefined)),
+    limit,
+  );
 }
 
 function normalizeConnections(value: unknown): AgentBuilderConnectionRequirement[] {
@@ -910,9 +949,11 @@ function normalizeSelectionRequirements(value: unknown): AgentBuilderSelectionRe
     const record = entry as Record<string, unknown>;
     const id = normalizeText(record.id);
     const rawKind = normalizeText(record.kind);
-    const kind: AgentBuilderSelectionRequirement["kind"] = ["integration", "tool", "skill"].includes(
-      rawKind,
-    )
+    const kind: AgentBuilderSelectionRequirement["kind"] = [
+      "integration",
+      "tool",
+      "skill",
+    ].includes(rawKind)
       ? (rawKind as AgentBuilderSelectionRequirement["kind"])
       : "integration";
     const rawOptions = Array.isArray(record.options) ? record.options : [];
@@ -937,7 +978,9 @@ function normalizeSelectionRequirements(value: unknown): AgentBuilderSelectionRe
           label,
           description: normalizeText(optionRecord.description) || undefined,
           status,
-          selectedToolFamilies: uniqueToolFamilies(normalizeStringArray(optionRecord.selectedToolFamilies)),
+          selectedToolFamilies: uniqueToolFamilies(
+            normalizeStringArray(optionRecord.selectedToolFamilies),
+          ),
           selectedMcpServers: normalizeStringArray(optionRecord.selectedMcpServers),
           selectedSkills: normalizeStringArray(optionRecord.selectedSkills),
           missingConnections: normalizeConnections(optionRecord.missingConnections),
@@ -991,11 +1034,21 @@ function normalizePlanFromJson(
   options: Pick<AgentBuilderServiceOptions, "now" | "randomId">,
 ): AgentBuilderPlan {
   const record = readPlanObject(parsed);
-  const enabledServers = new Set(inventory.mcpServers.filter((server) => server.enabled).map((server) => server.id));
-  const skillIds = new Set(inventory.skills.filter((skill) => skill.enabled !== false).map((skill) => skill.id));
+  const enabledServers = new Set(
+    inventory.mcpServers.filter((server) => server.enabled).map((server) => server.id),
+  );
+  const skillIds = new Set(
+    inventory.skills.filter((skill) => skill.enabled !== false).map((skill) => skill.id),
+  );
   const prompt = request.prompt.trim();
   const inferred = inferIntegrations(prompt, inventory);
-  const inferredSkills = inferSkills(prompt, inventory, fallback.templateId ? inventory.templates.find((template) => template.id === fallback.templateId) : undefined);
+  const inferredSkills = inferSkills(
+    prompt,
+    inventory,
+    fallback.templateId
+      ? inventory.templates.find((template) => template.id === fallback.templateId)
+      : undefined,
+  );
   const explicitSchedule = inferExplicitSchedule(prompt);
   const selectionRequirements = dedupeSelectionRequirements([
     ...normalizeSelectionRequirements(record.selectionRequirements),
@@ -1004,9 +1057,13 @@ function normalizePlanFromJson(
   ]);
   const unresolvedServerIds = unresolvedOptionServerIds(selectionRequirements);
   const unresolvedSkillIds = unresolvedOptionSkillIds(selectionRequirements);
-  const llmMcpServers = normalizeStringArray(record.selectedMcpServers || record.connectedMcpServers);
+  const llmMcpServers = normalizeStringArray(
+    record.selectedMcpServers || record.connectedMcpServers,
+  );
   const selectedMcpServers = uniqueStrings([
-    ...llmMcpServers.filter((serverId) => enabledServers.has(serverId) && !unresolvedServerIds.has(serverId)),
+    ...llmMcpServers.filter(
+      (serverId) => enabledServers.has(serverId) && !unresolvedServerIds.has(serverId),
+    ),
     ...inferred.selectedMcpServers,
   ]);
   const missingConnections = dedupeConnections([
@@ -1040,7 +1097,9 @@ function normalizePlanFromJson(
     ...(scheduleConfig.enabled
       ? [
           {
-            name: scheduleConfig.label ? `${name} ${scheduleConfig.label}` : `${name} scheduled run`,
+            name: scheduleConfig.label
+              ? `${name} ${scheduleConfig.label}`
+              : `${name} scheduled run`,
             description: prompt,
             enabled: true,
             trigger: {
@@ -1063,8 +1122,14 @@ function normalizePlanFromJson(
     icon: truncate(normalizeText(record.icon) || fallback.icon, 40),
     color: normalizeText(record.color) || fallback.color,
     templateId: normalizeText(record.templateId) || fallback.templateId,
-    workflowBrief: truncate(normalizeText(record.workflowBrief) || prompt || fallback.workflowBrief, 1000),
-    capabilities: uniqueStrings([...normalizeStringArray(record.capabilities, 8), ...fallback.capabilities], 8),
+    workflowBrief: truncate(
+      normalizeText(record.workflowBrief) || prompt || fallback.workflowBrief,
+      1000,
+    ),
+    capabilities: uniqueStrings(
+      [...normalizeStringArray(record.capabilities, 8), ...fallback.capabilities],
+      8,
+    ),
     selectedToolFamilies,
     selectedMcpServers,
     connectedMcpServers: selectedMcpServers,
@@ -1078,27 +1143,35 @@ function normalizePlanFromJson(
       buildInstructions(name, prompt, missingConnections.length),
     operatingNotes: normalizeText(record.operatingNotes) || fallback.operatingNotes,
     starterPrompts: fallback.starterPrompts,
-    scheduleSuggestion:
-      scheduleConfig.enabled
-        ? scheduleConfig.label || "Recurring schedule requested"
-        : normalizeText(record.scheduleSuggestion) || fallback.scheduleSuggestion,
+    scheduleSuggestion: scheduleConfig.enabled
+      ? scheduleConfig.label || "Recurring schedule requested"
+      : normalizeText(record.scheduleSuggestion) || fallback.scheduleSuggestion,
     scheduleConfig,
     routines,
     memoryConfig: fallback.memoryConfig,
     approvalPolicy: DEFAULT_APPROVAL_POLICY,
     sharing: { visibility: "private", ownerLabel: "You" },
     deployment: { surfaces: ["chatgpt"] },
-    enableShell: selectedToolFamilies.includes("shell"),
+    accessProfileId: fallback.accessProfileId || BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+    enableShell: false,
     enableBrowser: fallback.enableBrowser,
     enableComputerUse: selectedToolFamilies.includes("computer-use"),
-    rationale: uniqueStrings([...normalizeStringArray(record.rationale, 6), ...fallback.rationale], 6),
-    checklist: uniqueStrings([...normalizeStringArray(record.checklist, 6), ...fallback.checklist], 6),
+    rationale: uniqueStrings(
+      [...normalizeStringArray(record.rationale, 6), ...fallback.rationale],
+      6,
+    ),
+    checklist: uniqueStrings(
+      [...normalizeStringArray(record.checklist, 6), ...fallback.checklist],
+      6,
+    ),
     generatedAt: options.now?.() ?? Date.now(),
     fallbackUsed: false,
   };
 }
 
-function responseTextFromContent(content: Awaited<ReturnType<LLMProvider["createMessage"]>>["content"]): string {
+function responseTextFromContent(
+  content: Awaited<ReturnType<LLMProvider["createMessage"]>>["content"],
+): string {
   return content
     .map((entry) => (entry.type === "text" ? entry.text : ""))
     .join("\n")
@@ -1151,7 +1224,8 @@ export class AgentBuilderService {
                 selectedMcpServers: "enabled MCP server ids only",
                 missingConnections: "connection requirement[]",
                 selectedSkills: "enabled skill ids only",
-                selectionRequirements: "required choice groups for ambiguous integration/tool/skill choices",
+                selectionRequirements:
+                  "required choice groups for ambiguous integration/tool/skill choices",
                 instructions: "system prompt",
                 operatingNotes: "string",
                 scheduleSuggestion: "string optional",

@@ -1,12 +1,6 @@
 import * as crypto from "crypto";
 import type { MoaModelSlot, MoaPreset } from "../../../shared/types";
-import type {
-  LLMContent,
-  LLMMessage,
-  LLMProvider,
-  LLMRequest,
-  LLMResponse,
-} from "./types";
+import type { LLMContent, LLMMessage, LLMProvider, LLMRequest, LLMResponse } from "./types";
 
 const DEFAULT_REFERENCE_MAX_TOKENS = 1024;
 const DEFAULT_REFERENCE_MAX_CHARS_PER_MODEL = 12000;
@@ -58,19 +52,12 @@ export class MoaProvider implements LLMProvider {
     const preset = this.resolvePreset(request.model);
     this.validatePreset(preset);
     const cacheKey = this.buildReferenceCacheKey(preset, request);
-    const referenceResults = await this.getReferenceResults(
-      cacheKey,
-      preset,
-      request,
-    );
+    const referenceResults = await this.getReferenceResults(cacheKey, preset, request);
     const advisory = this.buildAdvisoryContext(preset, referenceResults);
-    const aggregatorResponse = await this.createMessageWithSlotFailover(
-      preset.aggregator,
-      {
-        ...request,
-        messages: this.withAdvisoryContext(request.messages, advisory),
-      },
-    );
+    const aggregatorResponse = await this.createMessageWithSlotFailover(preset.aggregator, {
+      ...request,
+      messages: this.withAdvisoryContext(request.messages, advisory),
+    });
 
     return {
       ...aggregatorResponse,
@@ -153,9 +140,7 @@ export class MoaProvider implements LLMProvider {
     const preset = id ? this.presets[id] : undefined;
     if (preset) return preset;
 
-    const fallback = Object.values(this.presets).find(
-      (candidate) => candidate.enabled !== false,
-    );
+    const fallback = Object.values(this.presets).find((candidate) => candidate.enabled !== false);
     if (fallback) return fallback;
 
     throw new Error("No enabled Mixture of Agents preset is configured.");
@@ -191,12 +176,7 @@ export class MoaProvider implements LLMProvider {
       return cached.results;
     }
 
-    const concurrency = this.clampInteger(
-      preset.concurrency,
-      1,
-      8,
-      DEFAULT_REFERENCE_CONCURRENCY,
-    );
+    const concurrency = this.clampInteger(preset.concurrency, 1, 8, DEFAULT_REFERENCE_CONCURRENCY);
     const results = await this.runWithConcurrency(
       preset.referenceModels,
       concurrency,
@@ -261,11 +241,7 @@ export class MoaProvider implements LLMProvider {
     }
   }
 
-  private buildReferencePrompt(
-    preset: MoaPreset,
-    request: LLMRequest,
-    slot: MoaModelSlot,
-  ): string {
+  private buildReferencePrompt(preset: MoaPreset, request: LLMRequest, slot: MoaModelSlot): string {
     const parts = [
       `Preset: ${preset.name}`,
       slot.roleInstruction?.trim()
@@ -322,10 +298,7 @@ export class MoaProvider implements LLMProvider {
       .join("\n");
   }
 
-  private buildAdvisoryContext(
-    preset: MoaPreset,
-    referenceResults: ReferenceResult[],
-  ): string {
+  private buildAdvisoryContext(preset: MoaPreset, referenceResults: ReferenceResult[]): string {
     const sections = referenceResults
       .sort((a, b) => a.index - b.index)
       .map((result) => {
@@ -348,10 +321,7 @@ export class MoaProvider implements LLMProvider {
     ].join("\n\n");
   }
 
-  private withAdvisoryContext(
-    messages: LLMMessage[],
-    advisory: string,
-  ): LLMMessage[] {
+  private withAdvisoryContext(messages: LLMMessage[], advisory: string): LLMMessage[] {
     const next = messages.map((message) => ({ ...message }));
     const last = next[next.length - 1];
     if (last?.role === "user" && typeof last.content === "string") {
@@ -363,10 +333,7 @@ export class MoaProvider implements LLMProvider {
       Array.isArray(last.content) &&
       last.content.every((item) => item.type !== "tool_result")
     ) {
-      last.content = [
-        ...(last.content as LLMContent[]),
-        { type: "text", text: advisory },
-      ];
+      last.content = [...(last.content as LLMContent[]), { type: "text", text: advisory }];
       return next;
     }
     return [...next, { role: "user", content: advisory }];
@@ -399,10 +366,7 @@ export class MoaProvider implements LLMProvider {
       systemBlocks: request.systemBlocks?.map((block) => block.text),
       messages: this.renderMessagesForReference(request.messages),
     };
-    return crypto
-      .createHash("sha256")
-      .update(JSON.stringify(material))
-      .digest("hex");
+    return crypto.createHash("sha256").update(JSON.stringify(material)).digest("hex");
   }
 
   private getReferenceMaxTokens(preset: MoaPreset, slot: MoaModelSlot): number {
@@ -424,8 +388,7 @@ export class MoaProvider implements LLMProvider {
         inputTokens: acc.inputTokens + usage.inputTokens,
         outputTokens: acc.outputTokens + usage.outputTokens,
         cachedTokens: (acc.cachedTokens || 0) + (usage.cachedTokens || 0),
-        cacheWriteTokens:
-          (acc.cacheWriteTokens || 0) + (usage.cacheWriteTokens || 0),
+        cacheWriteTokens: (acc.cacheWriteTokens || 0) + (usage.cacheWriteTokens || 0),
       }),
       { inputTokens: 0, outputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0 },
     );
@@ -438,16 +401,13 @@ export class MoaProvider implements LLMProvider {
   ): Promise<R[]> {
     const results: R[] = Array.from({ length: items.length });
     let nextIndex = 0;
-    const workers = Array.from(
-      { length: Math.min(concurrency, items.length) },
-      async () => {
-        while (nextIndex < items.length) {
-          const current = nextIndex;
-          nextIndex += 1;
-          results[current] = await worker(items[current], current);
-        }
-      },
-    );
+    const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (nextIndex < items.length) {
+        const current = nextIndex;
+        nextIndex += 1;
+        results[current] = await worker(items[current], current);
+      }
+    });
     await Promise.all(workers);
     return results;
   }

@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  getLlmModelReasoningEfforts,
-  withLlmModelSelectionMetadata,
-} from "../llm-model-selection";
+import { getLlmModelReasoningEfforts, withLlmModelSelectionMetadata } from "../llm-model-selection";
 
 describe("llm model selection metadata", () => {
   it("declares model-specific Intelligence controls for GPT-5.6 subscription models", () => {
@@ -49,12 +46,7 @@ describe("llm model selection metadata", () => {
       { key: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", description: "OpenAI" },
     ]);
 
-    expect(azureModels[0].reasoningEfforts).toEqual([
-      "low",
-      "medium",
-      "high",
-      "extra_high",
-    ]);
+    expect(azureModels[0].reasoningEfforts).toEqual(["low", "medium", "high", "extra_high"]);
     expect(openAiModels[0].reasoningEfforts).toEqual([
       "low",
       "medium",

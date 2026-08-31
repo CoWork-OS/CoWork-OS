@@ -37,21 +37,27 @@ describe("Browser Use approval context", () => {
 
   it("does not infer domain approvals for history navigation with unknown targets", () => {
     for (const toolName of ["browser_back", "browser_forward"]) {
-      expect(buildBrowserUseDomainApprovalDetails({
-        toolName,
-        currentUrl: "https://github.com/openai/codex/issues",
-      })).toBeNull();
+      expect(
+        buildBrowserUseDomainApprovalDetails({
+          toolName,
+          currentUrl: "https://github.com/openai/codex/issues",
+        }),
+      ).toBeNull();
     }
   });
 
   it("falls back when a browser action has no resolvable domain", () => {
-    expect(buildBrowserUseDomainApprovalDetails({
-      toolName: "browser_click",
-      input: { selector: "button" },
-    })).toBeNull();
-    expect(buildBrowserUseDomainApprovalDetails({
-      toolName: "browser_navigate",
-      input: { url: "file:///tmp/index.html" },
-    })).toBeNull();
+    expect(
+      buildBrowserUseDomainApprovalDetails({
+        toolName: "browser_click",
+        input: { selector: "button" },
+      }),
+    ).toBeNull();
+    expect(
+      buildBrowserUseDomainApprovalDetails({
+        toolName: "browser_navigate",
+        input: { url: "file:///tmp/index.html" },
+      }),
+    ).toBeNull();
   });
 });

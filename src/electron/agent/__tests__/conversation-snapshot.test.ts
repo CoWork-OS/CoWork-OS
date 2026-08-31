@@ -66,7 +66,7 @@ function restoreFromSnapshot(events: TaskEvent[]): {
       conversationHistory,
       systemPrompt: payload.systemPrompt || "",
     };
-  } catch  {
+  } catch {
     return { restored: false, conversationHistory: [], systemPrompt: "" };
   }
 }
@@ -821,7 +821,9 @@ describe("Size-limited serialization", () => {
 
     const serialized = serializeWithSizeLimit(history);
 
-    expect(serialized).toEqual([{ role: "assistant", content: [{ type: "text", text: "Recovered later" }] }]);
+    expect(serialized).toEqual([
+      { role: "assistant", content: [{ type: "text", text: "Recovered later" }] },
+    ]);
   });
 });
 

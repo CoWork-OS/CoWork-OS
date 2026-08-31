@@ -13,6 +13,7 @@ import {
   type MontyResourceLimits,
 } from "../../sandbox/monty-engine";
 import { FileTools } from "./file-tools";
+import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 
 type MontyRunInput = {
   code: string;
@@ -276,6 +277,9 @@ export class MontyTools {
 
   async listTransforms(_input?: MontyListTransformsInput): Promise<Any> {
     const dir = path.join(this.workspace.path, ".cowork", "transforms");
+    if (evaluateWorkspaceFilesystemAccess(this.workspace, dir, "read").decision !== "allow") {
+      return { success: true, transforms: [] };
+    }
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
       const out: Any[] = [];
@@ -284,6 +288,11 @@ export class MontyTools {
         if (!ent.name.toLowerCase().endsWith(".monty")) continue;
 
         const absPath = path.join(dir, ent.name);
+        if (
+          evaluateWorkspaceFilesystemAccess(this.workspace, absPath, "read").decision !== "allow"
+        ) {
+          continue;
+        }
         let stat: Any;
         try {
           stat = await fs.stat(absPath);
@@ -327,6 +336,9 @@ export class MontyTools {
     const safe = sanitizeTransformName(name);
     const file = safe.toLowerCase().endsWith(".monty") ? safe : `${safe}.monty`;
     const absPath = path.join(this.workspace.path, ".cowork", "transforms", file);
+    if (evaluateWorkspaceFilesystemAccess(this.workspace, absPath, "read").decision !== "allow") {
+      throw new Error(`Path is denied by the active access profile: ${absPath}`);
+    }
     const code = await fs.readFile(absPath, "utf8");
     const id = file.replace(/\.monty$/i, "");
     return { id, absPath, code };

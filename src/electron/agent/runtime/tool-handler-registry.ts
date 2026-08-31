@@ -55,10 +55,7 @@ export class ToolHandlerRegistry {
     return Array.from(this.handlers.keys()).sort();
   }
 
-  resolveSchedulerSpec(
-    name: string,
-    input: Any,
-  ): ReturnType<RuntimeToolSchedulerSpecResolver> {
+  resolveSchedulerSpec(name: string, input: Any): ReturnType<RuntimeToolSchedulerSpecResolver> {
     const normalized = String(name || "").trim();
     const direct = this.handlers.get(normalized);
     if (direct?.schedulerSpecResolver) {

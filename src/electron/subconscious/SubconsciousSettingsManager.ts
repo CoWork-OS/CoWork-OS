@@ -13,14 +13,16 @@ export class SubconsciousSettingsManager {
     let settings: SubconsciousSettings = { ...DEFAULT_SUBCONSCIOUS_SETTINGS };
     try {
       if (SecureSettingsRepository.isInitialized()) {
-        const stored = SecureSettingsRepository.getInstance().load<Partial<SubconsciousSettings>>(
-          "subconscious-loop",
-        );
+        const stored =
+          SecureSettingsRepository.getInstance().load<Partial<SubconsciousSettings>>(
+            "subconscious-loop",
+          );
         if (stored) {
           settings = {
             ...DEFAULT_SUBCONSCIOUS_SETTINGS,
             ...stored,
-            durableTargetKinds: stored.durableTargetKinds || DEFAULT_SUBCONSCIOUS_SETTINGS.durableTargetKinds,
+            durableTargetKinds:
+              stored.durableTargetKinds || DEFAULT_SUBCONSCIOUS_SETTINGS.durableTargetKinds,
             phaseModels: {
               ...DEFAULT_SUBCONSCIOUS_SETTINGS.phaseModels,
               ...stored.phaseModels,
@@ -72,19 +74,27 @@ export class SubconsciousSettingsManager {
     return {
       enabled: !!input.enabled,
       autoRun: input.autoRun !== false,
-      cadenceMinutes: Math.min(Math.max(Math.round(input.cadenceMinutes || 24 * 60), 15), 7 * 24 * 60),
+      cadenceMinutes: Math.min(
+        Math.max(Math.round(input.cadenceMinutes || 24 * 60), 15),
+        7 * 24 * 60,
+      ),
       enabledTargetKinds:
         Array.isArray(input.enabledTargetKinds) && input.enabledTargetKinds.length
-          ? input.enabledTargetKinds.filter((kind): kind is (typeof SUBCONSCIOUS_TARGET_KINDS)[number] =>
-              SUBCONSCIOUS_TARGET_KINDS.includes(kind as (typeof SUBCONSCIOUS_TARGET_KINDS)[number]),
+          ? input.enabledTargetKinds.filter(
+              (kind): kind is (typeof SUBCONSCIOUS_TARGET_KINDS)[number] =>
+                SUBCONSCIOUS_TARGET_KINDS.includes(
+                  kind as (typeof SUBCONSCIOUS_TARGET_KINDS)[number],
+                ),
             )
           : [...SUBCONSCIOUS_TARGET_KINDS],
-      durableTargetKinds:
-        Array.isArray(input.durableTargetKinds)
-          ? input.durableTargetKinds.filter((kind): kind is (typeof SUBCONSCIOUS_TARGET_KINDS)[number] =>
-              SUBCONSCIOUS_TARGET_KINDS.includes(kind as (typeof SUBCONSCIOUS_TARGET_KINDS)[number]),
-            )
-          : [...DEFAULT_SUBCONSCIOUS_SETTINGS.durableTargetKinds],
+      durableTargetKinds: Array.isArray(input.durableTargetKinds)
+        ? input.durableTargetKinds.filter(
+            (kind): kind is (typeof SUBCONSCIOUS_TARGET_KINDS)[number] =>
+              SUBCONSCIOUS_TARGET_KINDS.includes(
+                kind as (typeof SUBCONSCIOUS_TARGET_KINDS)[number],
+              ),
+          )
+        : [...DEFAULT_SUBCONSCIOUS_SETTINGS.durableTargetKinds],
       catchUpOnRestart: input.catchUpOnRestart === true,
       journalingEnabled: input.journalingEnabled !== false,
       dreamsEnabled: input.dreamsEnabled !== false,
@@ -96,7 +106,9 @@ export class SubconsciousSettingsManager {
             ? input.autonomyMode
             : "recommendation_first",
       trustedTargetKeys: Array.isArray(input.trustedTargetKeys)
-        ? input.trustedTargetKeys.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        ? input.trustedTargetKeys.filter(
+            (value): value is string => typeof value === "string" && value.trim().length > 0,
+          )
         : [],
       phaseModels: {
         collectingEvidence:
@@ -123,15 +135,27 @@ export class SubconsciousSettingsManager {
           ...input.dispatchDefaults?.defaultKinds,
         },
       },
-      artifactRetentionDays: Math.min(Math.max(Math.round(input.artifactRetentionDays || 30), 1), 365),
+      artifactRetentionDays: Math.min(
+        Math.max(Math.round(input.artifactRetentionDays || 30), 1),
+        365,
+      ),
       maxHypothesesPerRun: Math.min(Math.max(Math.round(input.maxHypothesesPerRun || 4), 3), 5),
       notificationPolicy: {
         inputNeeded: input.notificationPolicy?.inputNeeded !== false,
         importantActionTaken: input.notificationPolicy?.importantActionTaken !== false,
         completedWhileAway: input.notificationPolicy?.completedWhileAway !== false,
-        throttleMinutes: Math.min(Math.max(Math.round(input.notificationPolicy?.throttleMinutes || 30), 0), 24 * 60),
-        quietHoursStart: Math.min(Math.max(Math.round(input.notificationPolicy?.quietHoursStart ?? 22), 0), 23),
-        quietHoursEnd: Math.min(Math.max(Math.round(input.notificationPolicy?.quietHoursEnd ?? 8), 0), 23),
+        throttleMinutes: Math.min(
+          Math.max(Math.round(input.notificationPolicy?.throttleMinutes || 30), 0),
+          24 * 60,
+        ),
+        quietHoursStart: Math.min(
+          Math.max(Math.round(input.notificationPolicy?.quietHoursStart ?? 22), 0),
+          23,
+        ),
+        quietHoursEnd: Math.min(
+          Math.max(Math.round(input.notificationPolicy?.quietHoursEnd ?? 8), 0),
+          23,
+        ),
       },
       perExecutorPolicy: {
         task: { enabled: input.perExecutorPolicy?.task?.enabled !== false },
@@ -141,7 +165,8 @@ export class SubconsciousSettingsManager {
           enabled: input.perExecutorPolicy?.codeChangeTask?.enabled !== false,
           requireWorktree: input.perExecutorPolicy?.codeChangeTask?.requireWorktree !== false,
           strictReview: input.perExecutorPolicy?.codeChangeTask?.strictReview !== false,
-          verificationRequired: input.perExecutorPolicy?.codeChangeTask?.verificationRequired !== false,
+          verificationRequired:
+            input.perExecutorPolicy?.codeChangeTask?.verificationRequired !== false,
         },
       },
     };

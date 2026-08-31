@@ -9,7 +9,10 @@ import type {
   Workspace,
 } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
-import { buildParallelGroupProjection, type ParallelGroupProjectionResult } from "../components/timeline/parallel-group-projection";
+import {
+  buildParallelGroupProjection,
+  type ParallelGroupProjectionResult,
+} from "../components/timeline/parallel-group-projection";
 import {
   deriveTaskOutputSummaryFromEvents,
   hasTaskOutputs,
@@ -23,6 +26,7 @@ import {
   shouldShowTaskEventInSummaryMode,
 } from "./task-event-visibility";
 import { getEffectiveTaskEventType } from "./task-event-compat";
+import { formatUserFacingCompletionSummary } from "../../shared/task-completion";
 import { normalizeEventsForTimelineUi } from "./timeline-projection";
 import {
   classifyLiveTaskEvent,
@@ -84,7 +88,10 @@ export interface SharedTaskEventUiState {
   inspectOnlyEvents: TaskEvent[];
   debugOnlyEvents: TaskEvent[];
   parallelGroupProjection: ParallelGroupProjectionResult;
-  parallelGroupsByAnchorEventId: Map<string, ParallelGroupProjectionResult["groupsByAnchorEventId"] extends Map<string, infer T> ? T : never>;
+  parallelGroupsByAnchorEventId: Map<
+    string,
+    ParallelGroupProjectionResult["groupsByAnchorEventId"] extends Map<string, infer T> ? T : never
+  >;
   suppressedParallelEventIds: Set<string>;
   toolCallPairing: ToolCallPairing;
   baseTimelineItems: BaseTimelineItem[];
@@ -169,7 +176,11 @@ function liveAnchorKey(event: TaskEvent): string | null {
   if (effectiveType === "approval_requested") return "latest-approval";
   if (effectiveType === "input_request_created") return "latest-input";
   if (effectiveType === "task_completed" || effectiveType === "task_cancelled") return "terminal";
-  if (effectiveType === "error" || effectiveType === "timeline_error" || event.type === "timeline_error") {
+  if (
+    effectiveType === "error" ||
+    effectiveType === "timeline_error" ||
+    event.type === "timeline_error"
+  ) {
     return "latest-error";
   }
   if (effectiveType === "artifact_created" || event.type === "timeline_artifact_emitted") {
@@ -294,7 +305,10 @@ function classifyTaskEventForRenderer(
     return "live";
   }
 
-  if (shouldShowTaskEventInSummaryMode(event, params.taskStatus) && !isVerificationNoiseEvent(event)) {
+  if (
+    shouldShowTaskEventInSummaryMode(event, params.taskStatus) &&
+    !isVerificationNoiseEvent(event)
+  ) {
     return "live";
   }
 
@@ -306,31 +320,26 @@ function getCompletionSummaryText(event: TaskEvent): string {
   const payload = asObject(event.payload);
   const resultSummary =
     typeof payload.resultSummary === "string" ? payload.resultSummary.trim() : "";
-  const semanticSummary =
-    typeof payload.semanticSummary === "string" ? payload.semanticSummary.trim() : "";
-  const verificationVerdict =
-    typeof payload.verificationVerdict === "string" ? payload.verificationVerdict.trim() : "";
-  const verificationReport =
-    typeof payload.verificationReport === "string" ? payload.verificationReport.trim() : "";
-  const summary = [resultSummary, semanticSummary]
-    .filter((value) => value.length > 0)
-    .join("\n\n");
-  if (!verificationVerdict && !verificationReport) return summary;
-  const verification = [
-    verificationVerdict ? `Verification: ${verificationVerdict}` : "",
-    verificationReport,
-  ]
-    .filter((value) => value.length > 0)
-    .join("\n");
-  return [summary, verification].filter((value) => value.length > 0).join("\n\n");
+  return formatUserFacingCompletionSummary({
+    resultSummary,
+    verificationVerdict: payload.verificationVerdict,
+    verificationReport: payload.verificationReport,
+  });
 }
 
 function normalizeCompletionTextForComparison(value: string): string {
-  return value
-    .replace(/\r\n?/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return (
+    value
+      .replace(/\r\n?/g, "\n")
+      // Completion summaries are persisted after a separate LLM pass. Markdown
+      // renderers may re-indent fenced code blocks (for example, two spaces in
+      // the assistant event versus four in resultSummary) without changing the
+      // actual response. Collapse all whitespace for the duplicate check so the
+      // same answer is not rendered once as the assistant message and again as
+      // the persisted completion summary.
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 function getCompletionComparableTexts(event: TaskEvent): Set<string> {
@@ -338,12 +347,8 @@ function getCompletionComparableTexts(event: TaskEvent): Set<string> {
   const payload = asObject(event.payload);
   const resultSummary =
     typeof payload.resultSummary === "string" ? payload.resultSummary.trim() : "";
-  const semanticSummary =
-    typeof payload.semanticSummary === "string" ? payload.semanticSummary.trim() : "";
   const fullSummary = getCompletionSummaryText(event);
-  const comparableSummaries = resultSummary
-    ? [resultSummary, fullSummary]
-    : [semanticSummary, fullSummary];
+  const comparableSummaries = [resultSummary, fullSummary];
 
   return new Set(
     comparableSummaries
@@ -458,7 +463,10 @@ function normalizeWorkspacePathKey(workspacePath: string | undefined, candidate:
   return normalized;
 }
 
-function deriveOutputSummary(task: Task | null | undefined, events: TaskEvent[]): TaskOutputSummary | null {
+function deriveOutputSummary(
+  task: Task | null | undefined,
+  events: TaskEvent[],
+): TaskOutputSummary | null {
   const latestCompletionEvent = [...events]
     .reverse()
     .find((event) => getEffectiveTaskEventType(event) === "task_completed");
@@ -497,16 +505,24 @@ function deriveFiles(
       const rawPath =
         typeof payload.path === "string"
           ? payload.path
-          : typeof payload.from === "string"
-            ? payload.from
-            : "";
+          : typeof payload.to === "string"
+            ? payload.to
+            : typeof payload.from === "string"
+              ? payload.from
+              : "";
       if (!rawPath) continue;
+      if (payload.action === "rename" && typeof payload.from === "string") {
+        fileMap.delete(normalizeWorkspacePathKey(workspace?.path, payload.from));
+      }
       const key = normalizeWorkspacePathKey(workspace?.path, rawPath);
       fileMap.set(key, { path: key, action: "modified", timestamp: event.timestamp });
       continue;
     }
 
-    if ((effectiveType === "file_deleted" || effectiveType === "artifact_created") && typeof payload.path === "string") {
+    if (
+      (effectiveType === "file_deleted" || effectiveType === "artifact_created") &&
+      typeof payload.path === "string"
+    ) {
       const key = normalizeWorkspacePathKey(workspace?.path, payload.path);
       fileMap.set(key, {
         path: key,
@@ -713,26 +729,24 @@ function deriveBaseTimelineItems(filteredEvents: TaskEvent[]): BaseTimelineItem[
   const eventItems: BaseTimelineItem[] = [];
   let currentBlock: TaskEvent[] = [];
   let currentBlockIndices: number[] = [];
-  const lastCompletionSummaryByTask = new Map<
+  const completionSummariesByTask = new Map<
     string,
-    { comparableTexts: Set<string>; timestamp: number }
+    Array<{ comparableTexts: Set<string>; timestamp: number }>
   >();
 
   for (const event of filteredEvents) {
     const comparableTexts = getCompletionComparableTexts(event);
     if (comparableTexts.size === 0) continue;
-    lastCompletionSummaryByTask.set(event.taskId, {
-      comparableTexts,
-      timestamp: event.timestamp,
-    });
+    const summaries = completionSummariesByTask.get(event.taskId) || [];
+    summaries.push({ comparableTexts, timestamp: event.timestamp });
+    completionSummariesByTask.set(event.taskId, summaries);
   }
 
   const flushBlock = () => {
     if (currentBlock.length === 0) return;
     const firstBlockEvent = currentBlock[0];
     const firstBlockIndex = currentBlockIndices[0] ?? 0;
-    const stableEventId =
-      typeof firstBlockEvent?.id === "string" ? firstBlockEvent.id.trim() : "";
+    const stableEventId = typeof firstBlockEvent?.id === "string" ? firstBlockEvent.id.trim() : "";
     const blockId =
       stableEventId.length > 0
         ? `action-block:${stableEventId}`
@@ -768,12 +782,14 @@ function deriveBaseTimelineItems(filteredEvents: TaskEvent[]): BaseTimelineItem[
         const payload = asObject(event.payload);
         const message = typeof payload.message === "string" ? payload.message.trim() : "";
         const comparableMessage = normalizeCompletionTextForComparison(message);
-        const completion = lastCompletionSummaryByTask.get(event.taskId);
+        const completions = completionSummariesByTask.get(event.taskId) || [];
         if (
           comparableMessage &&
-          completion &&
-          completion.comparableTexts.has(comparableMessage) &&
-          event.timestamp <= completion.timestamp
+          completions.some(
+            (completion) =>
+              event.timestamp <= completion.timestamp &&
+              completion.comparableTexts.has(comparableMessage),
+          )
         ) {
           continue;
         }
@@ -839,9 +855,11 @@ export function deriveSharedTaskEventUiState(
       continue;
     }
 
+    const effectiveType = getEffectiveTaskEventType(event);
     const forceLive =
       projectionMode === "live" &&
-      LIVE_PROJECTION_FORCE_VISIBLE_TYPES.has(getEffectiveTaskEventType(event));
+      LIVE_PROJECTION_FORCE_VISIBLE_TYPES.has(effectiveType) &&
+      !(effectiveType === "assistant_message" && asObject(event.payload).internal === true);
     const visibility = forceLive
       ? "live"
       : classifyTaskEventForRenderer(event, {

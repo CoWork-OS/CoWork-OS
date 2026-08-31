@@ -4,6 +4,12 @@ CoWork treats generated PowerPoint decks as first-class presentation artifacts. 
 
 Presentation artifacts are one surface of the broader [Everything Workbench](everything-workbench.md): generated knowledge-work files open in-place, can be reviewed in context, and keep the follow-up composer beside the artifact.
 
+Presentation generation, local reads/writes, attachment access, preview
+rendering, and external-open actions remain subject to the task's [access
+profile](access-profiles.md) and normal approval/export rules. The slide viewer
+is a review surface, not an additional permission grant; it cannot widen
+filesystem, command-tool, network, or external-app access.
+
 ## Supported Formats
 
 In-app preview:

@@ -57,7 +57,10 @@ class FakeReplayDb {
 
     return this.rows
       .filter((row) => row.task_id === taskId)
-      .filter((row) => !requestedEventId || row.id === requestedEventId || row.event_id === requestedEventId)
+      .filter(
+        (row) =>
+          !requestedEventId || row.id === requestedEventId || row.event_id === requestedEventId,
+      )
       .filter(
         (row) =>
           !hasBoundary ||
@@ -140,12 +143,7 @@ describe("TaskEventRepository bounded replay queries", () => {
     expect(cursor).toEqual({ order: 10, timestamp: 10, id: "boundary" });
     expect(
       repo
-        .findReplayTailAfterCursor(
-          "task-1",
-          cursor!,
-          ["task_list_updated", "llm_usage"],
-          10,
-        )
+        .findReplayTailAfterCursor("task-1", cursor!, ["task_list_updated", "llm_usage"], 10)
         .map((event) => event.id),
     ).toEqual(["same-order-later-id", "later-seq"]);
   });
@@ -160,5 +158,4 @@ describe("TaskEventRepository bounded replay queries", () => {
     expect(events.map((event) => event.id)).toEqual(["file-2"]);
     expect(db.preparedSqls.at(-1)).toContain("LIMIT ?");
   });
-
 });

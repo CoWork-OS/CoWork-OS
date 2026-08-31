@@ -81,9 +81,8 @@ export class AppPermissionManager extends EventEmitter {
    * Callback that is set by the IPC layer to show the permission dialog
    * in the renderer and await the user's response.
    */
-  public onPermissionRequest:
-    | ((request: AppPermissionRequest) => Promise<AppAccessLevel>)
-    | null = null;
+  public onPermissionRequest: ((request: AppPermissionRequest) => Promise<AppAccessLevel>) | null =
+    null;
 
   constructor(sessionId?: string) {
     super();

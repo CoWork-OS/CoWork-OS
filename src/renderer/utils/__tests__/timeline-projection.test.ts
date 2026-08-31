@@ -63,4 +63,3 @@ describe("normalizeEventsForTimelineUi", () => {
     expect(second).toEqual(first);
   });
 });
-

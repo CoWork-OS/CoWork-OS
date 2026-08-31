@@ -4,7 +4,9 @@ import { ModelCapabilityRegistry } from "../llm/ModelCapabilityRegistry";
 describe("ModelCapabilityRegistry", () => {
   describe("inferCapabilities", () => {
     it("detects code capability from task text", () => {
-      const caps = ModelCapabilityRegistry.inferCapabilities("fix the bug in the TypeScript function");
+      const caps = ModelCapabilityRegistry.inferCapabilities(
+        "fix the bug in the TypeScript function",
+      );
       expect(caps).toContain("code");
     });
 

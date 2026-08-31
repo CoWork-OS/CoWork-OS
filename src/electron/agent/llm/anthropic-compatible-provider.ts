@@ -17,10 +17,7 @@ import {
   isPromptCacheAutoUnsupportedError,
   normalizeSystemBlocks,
 } from "./prompt-cache";
-import {
-  isOpenCodeGoBaseUrl,
-  normalizeOpenCodeGoModelId,
-} from "./opencode-go-routing";
+import { isOpenCodeGoBaseUrl, normalizeOpenCodeGoModelId } from "./opencode-go-routing";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -107,10 +104,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
 
   private normalizeModelForEndpoint(model: string): string {
     const trimmed = model.trim();
-    if (
-      isOpenCodeGoBaseUrl(this.baseUrl) &&
-      trimmed.toLowerCase().startsWith("opencode-go/")
-    ) {
+    if (isOpenCodeGoBaseUrl(this.baseUrl) && trimmed.toLowerCase().startsWith("opencode-go/")) {
       return normalizeOpenCodeGoModelId(trimmed);
     }
     return trimmed;
@@ -118,12 +112,9 @@ export class AnthropicCompatibleProvider implements LLMProvider {
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
-    const model = this.normalizeModelForEndpoint(
-      request.model || this.defaultModel,
-    );
-    const normalizedMessages = assertNormalizedTurnTranscript(
-      request.messages,
-      (message) => console.warn(`[${this.providerName}] ${message}`),
+    const model = this.normalizeModelForEndpoint(request.model || this.defaultModel);
+    const normalizedMessages = assertNormalizedTurnTranscript(request.messages, (message) =>
+      console.warn(`[${this.providerName}] ${message}`),
     );
     const requestedPromptCache =
       request.promptCache?.mode === "disabled" || !this.managedPromptCacheSupported
@@ -246,12 +237,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
           if (!id || typeof id !== "string") return null;
           return {
             id,
-            name:
-              model.display_name ||
-              model.displayName ||
-              model.model_name ||
-              model.name ||
-              id,
+            name: model.display_name || model.displayName || model.model_name || model.name || id,
           };
         })
         .filter((model): model is { id: string; name: string } => !!model);
@@ -377,7 +363,9 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   private buildSystemPayload(
     request: Pick<LLMRequest, "system" | "systemBlocks">,
     promptCache: LLMRequest["promptCache"] | undefined,
-  ): string | Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral"; ttl?: "1h" } }> {
+  ):
+    | string
+    | Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral"; ttl?: "1h" } }> {
     const blocks = normalizeSystemBlocks(request.system, request.systemBlocks);
     if (blocks.length === 0) {
       return request.system;

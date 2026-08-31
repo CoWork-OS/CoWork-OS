@@ -11,10 +11,14 @@ export function isTerminalTaskStatus(status: TaskStatus | undefined): boolean {
   return typeof status === "string" && TERMINAL_TASK_STATUSES.has(status);
 }
 
-export function deriveCanonicalTaskStatus(task: Pick<Task, "status" | "completedAt" | "terminalStatus">): TaskStatus {
+export function deriveCanonicalTaskStatus(
+  task: Pick<Task, "status" | "completedAt" | "terminalStatus">,
+): TaskStatus {
   const status = task.status;
   const completedAt =
-    typeof task.completedAt === "number" && Number.isFinite(task.completedAt) ? task.completedAt : undefined;
+    typeof task.completedAt === "number" && Number.isFinite(task.completedAt)
+      ? task.completedAt
+      : undefined;
 
   if (!isActiveTaskStatus(status)) {
     return status;
@@ -43,9 +47,9 @@ export function deriveCanonicalTaskStatus(task: Pick<Task, "status" | "completed
   return status;
 }
 
-export function normalizeTaskLifecycleState<T extends Pick<Task, "status" | "completedAt" | "terminalStatus">>(
-  task: T,
-): T {
+export function normalizeTaskLifecycleState<
+  T extends Pick<Task, "status" | "completedAt" | "terminalStatus">,
+>(task: T): T {
   const canonicalStatus = deriveCanonicalTaskStatus(task);
   if (canonicalStatus === task.status) {
     return task;

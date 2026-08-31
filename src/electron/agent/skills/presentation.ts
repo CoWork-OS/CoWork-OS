@@ -128,11 +128,11 @@ export class PresentationBuilder {
             ? "title"
             : slide.layout === "section"
               ? "section"
-            : slide.layout === "blank"
-              ? "blank"
-              : index === 0
-                ? "title"
-                : "content",
+              : slide.layout === "blank"
+                ? "blank"
+                : index === 0
+                  ? "title"
+                  : "content",
         image: slide.imagePath
           ? {
               path: path.isAbsolute(slide.imagePath)

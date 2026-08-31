@@ -6,6 +6,12 @@ This page documents the current spreadsheet concept for local spreadsheet output
 
 Spreadsheet artifacts are one surface of the broader [Everything Workbench](everything-workbench.md): generated knowledge-work files open in-place, can be reviewed or lightly edited, and keep the follow-up composer beside the artifact.
 
+Artifact creation, updates, attachment reads, and external-open actions remain
+subject to the task's [access profile](access-profiles.md) and the normal
+approval/export rules. The spreadsheet viewer's preview/edit surface does not
+grant filesystem or network access beyond the profile; opening a workbook in
+Excel, Numbers, or another external app is still an explicit action.
+
 ## User Experience
 
 When a task creates a spreadsheet, the task feed renders a compact artifact card:

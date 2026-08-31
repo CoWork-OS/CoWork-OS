@@ -435,7 +435,9 @@ describe("TaskExecutor provider refresh", () => {
       1000,
       "Test operation",
     );
-    expect((openaiChat.provider.createMessage as Any).mock.calls[0][0].onStreamProgress).toBeUndefined();
+    expect(
+      (openaiChat.provider.createMessage as Any).mock.calls[0][0].onStreamProgress,
+    ).toBeUndefined();
   });
 
   it("forwards Azure execute stream text into llm_streaming events", async () => {

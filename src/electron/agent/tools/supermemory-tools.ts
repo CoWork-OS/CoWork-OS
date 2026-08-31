@@ -30,7 +30,8 @@ export class SupermemoryTools {
           properties: {
             query: {
               type: "string",
-              description: "Optional search query to also return relevant memories for the current task.",
+              description:
+                "Optional search query to also return relevant memories for the current task.",
             },
             containerTag: {
               type: "string",
@@ -75,7 +76,8 @@ export class SupermemoryTools {
             searchMode: {
               type: "string",
               enum: ["hybrid", "memories"],
-              description: "Use 'hybrid' for memories plus document chunks, or 'memories' for memories only.",
+              description:
+                "Use 'hybrid' for memories plus document chunks, or 'memories' for memories only.",
             },
           },
           required: ["query"],
@@ -131,11 +133,7 @@ export class SupermemoryTools {
     ];
   }
 
-  async profile(input: {
-    query?: string;
-    containerTag?: string;
-    threshold?: number;
-  }): Promise<{
+  async profile(input: { query?: string; containerTag?: string; threshold?: number }): Promise<{
     containerTag: string;
     staticFacts: string[];
     dynamicFacts: string[];
@@ -214,10 +212,7 @@ export class SupermemoryTools {
     return result;
   }
 
-  async remember(input: {
-    content: string;
-    containerTag?: string;
-  }): Promise<{
+  async remember(input: { content: string; containerTag?: string }): Promise<{
     success: boolean;
     containerTag: string;
     memoryIds: string[];

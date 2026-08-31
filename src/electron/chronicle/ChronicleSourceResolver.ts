@@ -42,7 +42,7 @@ async function resolveFrontmostApp(): Promise<{
     "try",
     "set windowTitle to name of front window of frontProc",
     "end try",
-    'return appName & linefeed & bundleId & linefeed & windowTitle',
+    "return appName & linefeed & bundleId & linefeed & windowTitle",
     "end tell",
   ]);
   const [appName = "Desktop", bundleId = "", windowTitle = "Screen"] = output.split(/\r?\n/);
@@ -59,15 +59,13 @@ async function resolveBrowserSource(appName: string): Promise<ChronicleSourceRef
     const output = await runAppleScript([
       `tell application "${safeName}"`,
       'if (count of windows) is 0 then return ""',
-      'set tabUrl to URL of current tab of front window',
-      'set tabTitle to name of current tab of front window',
-      'return tabUrl & linefeed & tabTitle',
+      "set tabUrl to URL of current tab of front window",
+      "set tabTitle to name of current tab of front window",
+      "return tabUrl & linefeed & tabTitle",
       "end tell",
     ]).catch(() => "");
     const [url = "", title = ""] = output.split(/\r?\n/);
-    return url.trim()
-      ? { kind: "url", value: url.trim(), label: title.trim() || undefined }
-      : null;
+    return url.trim() ? { kind: "url", value: url.trim(), label: title.trim() || undefined } : null;
   }
   if (
     /^(google chrome|google chrome beta|google chrome canary|brave browser|arc|microsoft edge)$/i.test(
@@ -77,15 +75,13 @@ async function resolveBrowserSource(appName: string): Promise<ChronicleSourceRef
     const output = await runAppleScript([
       `tell application "${safeName}"`,
       'if (count of windows) is 0 then return ""',
-      'set tabUrl to URL of active tab of front window',
-      'set tabTitle to title of active tab of front window',
-      'return tabUrl & linefeed & tabTitle',
+      "set tabUrl to URL of active tab of front window",
+      "set tabTitle to title of active tab of front window",
+      "return tabUrl & linefeed & tabTitle",
       "end tell",
     ]).catch(() => "");
     const [url = "", title = ""] = output.split(/\r?\n/);
-    return url.trim()
-      ? { kind: "url", value: url.trim(), label: title.trim() || undefined }
-      : null;
+    return url.trim() ? { kind: "url", value: url.trim(), label: title.trim() || undefined } : null;
   }
   return null;
 }
@@ -94,8 +90,8 @@ async function resolveFinderSource(): Promise<ChronicleSourceReference | null> {
   const output = await runAppleScript([
     'tell application "Finder"',
     'if (count of windows) is 0 then return ""',
-    'set targetAlias to (target of front window) as alias',
-    'return POSIX path of targetAlias',
+    "set targetAlias to (target of front window) as alias",
+    "return POSIX path of targetAlias",
     "end tell",
   ]).catch(() => "");
   const targetPath = output.trim();

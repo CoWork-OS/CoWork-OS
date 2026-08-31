@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { BrowserTools } from "../browser-tools";
+import { BrowserService } from "../../browser/browser-service";
 import { GuardrailManager } from "../../../guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
 import { BrowserUseCloudClient } from "../../browser/browser-use-cloud-client";
@@ -98,6 +99,38 @@ describe("BrowserTools browser_navigate", () => {
 
     expect(result.success).toBe(true);
     expect(result.status).toBe(200);
+  });
+
+  it("does not treat WhatsApp's unsupported-browser page as usable access", async () => {
+    const { tools } = makeTools();
+
+    (tools as Any).browserService = {
+      navigate: vi.fn().mockResolvedValue({
+        url: "https://web.whatsapp.com/",
+        title: "WhatsApp",
+        status: 200,
+        isError: false,
+      }),
+      getContent: vi.fn().mockResolvedValue({
+        url: "https://web.whatsapp.com/",
+        title: "WhatsApp",
+        text: "WhatsApp works with Google Chrome 100+ To use WhatsApp, update Chrome.",
+        links: [],
+        forms: [],
+      }),
+      close: vi.fn(),
+    };
+
+    const result = await tools.executeTool("browser_navigate", {
+      url: "https://web.whatsapp.com",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.browserCompatibilityError).toBe(true);
+    expect(result.error).toContain("supported Chrome 100+");
+    expect(result.nextActions).toContain(
+      "Use channel_list_chats with channel=whatsapp, then channel_history for the selected chat.",
+    );
   });
 
   it("uses headless Playwright by default even when the visible workbench service is available", async () => {
@@ -628,8 +661,36 @@ describe("BrowserTools browser_navigate", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("Chrome is already running with that profile");
     expect(result.retryableWithVisibleWorkbench).toBe(true);
+    expect(result.nextActions).toEqual([
+      "Use the visible Browser Workbench for this URL",
+      "Attach to Chrome with browser_attach and debugger_url after enabling remote debugging",
+    ]);
     expect(browserWorkbenchService.navigate).not.toHaveBeenCalled();
     expect((tools as Any).browserService.navigate).not.toHaveBeenCalled();
+  });
+
+  it("resets the local browser state when a changed profile cannot start", async () => {
+    const { tools } = makeTools();
+    const initSpy = vi
+      .spyOn(BrowserService.prototype, "init")
+      .mockRejectedValueOnce(new Error("Failed to create /Users/test/Chrome/SingletonLock"));
+
+    const result = await tools.executeTool("browser_navigate", {
+      url: "https://example.com",
+      profile: "user",
+      browser_channel: "chrome",
+      confirm_real_browser_control: true,
+    });
+
+    expect(result.success).toBe(false);
+    expect((tools as Any).browserState).toEqual({
+      headless: true,
+      profile: null,
+      browserChannel: "chromium",
+      debuggerUrl: null,
+      browserProvider: "local",
+    });
+    expect(initSpy).toHaveBeenCalledTimes(1);
   });
 
   it("requires explicit consent before reusing the system Chrome profile", async () => {
@@ -758,11 +819,7 @@ describe("BrowserTools browser_navigate", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(browserWorkbenchService.clickRef).toHaveBeenCalledWith(
-      "task-1",
-      "b2:snap:1",
-      undefined,
-    );
+    expect(browserWorkbenchService.clickRef).toHaveBeenCalledWith("task-1", "b2:snap:1", undefined);
   });
 
   it("rejects browser_upload_file when a workspace path resolves outside through a symlink", async () => {

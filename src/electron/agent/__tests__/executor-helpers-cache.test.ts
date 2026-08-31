@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { FileOperationTracker, ToolCallDeduplicator, ToolFailureTracker } from "../executor-helpers";
+import {
+  FileOperationTracker,
+  ToolCallDeduplicator,
+  ToolFailureTracker,
+} from "../executor-helpers";
 import { TaskExecutor } from "../executor";
 
 describe("ToolCallDeduplicator read-history invalidation", () => {
@@ -111,16 +115,16 @@ describe("ToolCallDeduplicator read-history invalidation", () => {
     dedupe.recordCall("write_file", { path: "styles.css", content: "a" }, '{"success":true}');
 
     expect(dedupe.checkDuplicate("read_file", { path: "styles.css" }).isDuplicate).toBe(true);
-    expect(dedupe.checkDuplicate("write_file", { path: "styles.css", content: "a" }).isDuplicate).toBe(
-      true,
-    );
+    expect(
+      dedupe.checkDuplicate("write_file", { path: "styles.css", content: "a" }).isDuplicate,
+    ).toBe(true);
 
     dedupe.resetMutationHistoryForNewStep();
 
     expect(dedupe.checkDuplicate("read_file", { path: "styles.css" }).isDuplicate).toBe(true);
-    expect(dedupe.checkDuplicate("write_file", { path: "styles.css", content: "a" }).isDuplicate).toBe(
-      false,
-    );
+    expect(
+      dedupe.checkDuplicate("write_file", { path: "styles.css", content: "a" }).isDuplicate,
+    ).toBe(false);
   });
 });
 
@@ -171,6 +175,18 @@ describe("FileOperationTracker cache invalidation", () => {
     expect(tracker.checkFileCreation("deliverables/report.md")).toEqual(
       expect.objectContaining({ isDuplicate: false }),
     );
+  });
+
+  it("moves cached file knowledge to the rename destination", () => {
+    const tracker = new FileOperationTracker();
+    tracker.recordFileRead("inbox/invoice_final_FINAL.txt", "invoice");
+    tracker.recordFileCreation("inbox/invoice_final_FINAL.txt");
+
+    tracker.recordFileRename("inbox/invoice_final_FINAL.txt", "inbox/Invoices/invoice.txt");
+
+    expect(tracker.getKnowledgeSummary()).toContain("inbox/invoices/invoice.txt");
+    expect(tracker.getKnowledgeSummary()).not.toContain("invoice_final_final.txt");
+    expect(tracker.getCreatedFiles()).toEqual(["inbox/Invoices/invoice.txt"]);
   });
 
   it("blocks duplicate file creation within the same tool batch", () => {
@@ -240,9 +256,7 @@ describe("ToolFailureTracker browser HTTP status handling", () => {
     }
     expect(tracker.isDisabled("browser_navigate")).toBe(false);
 
-    expect(tracker.recordFailure("browser_navigate", "Navigation failed with HTTP 403")).toBe(
-      true,
-    );
+    expect(tracker.recordFailure("browser_navigate", "Navigation failed with HTTP 403")).toBe(true);
     expect(tracker.isDisabled("browser_navigate")).toBe(true);
   });
 
@@ -295,7 +309,8 @@ describe("ToolFailureTracker browser HTTP status handling", () => {
 
   it("treats sandbox aborts from run_command as low-threshold systemic failures", () => {
     const tracker = new ToolFailureTracker();
-    const message = "Shell sandbox failed before command completion: sandbox-exec aborted (exit 134)";
+    const message =
+      "Shell sandbox failed before command completion: sandbox-exec aborted (exit 134)";
 
     expect(tracker.recordFailure("run_command", message)).toBe(false);
     expect(tracker.isDisabled("run_command")).toBe(false);

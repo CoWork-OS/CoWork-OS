@@ -1,10 +1,4 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-} from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type {
   LLMModelInfo,
   LLMProviderInfo,
@@ -59,14 +53,9 @@ export function ModelDropdown({
 }: ModelDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [activeProviderMenu, setActiveProviderMenu] =
-    useState<LLMProviderType | null>(null);
-  const [providerModelCache, setProviderModelCache] = useState<
-    Record<string, LLMModelInfo[]>
-  >({});
-  const [loadingProviderModels, setLoadingProviderModels] = useState<
-    string | null
-  >(null);
+  const [activeProviderMenu, setActiveProviderMenu] = useState<LLMProviderType | null>(null);
+  const [providerModelCache, setProviderModelCache] = useState<Record<string, LLMModelInfo[]>>({});
+  const [loadingProviderModels, setLoadingProviderModels] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -117,8 +106,7 @@ export function ModelDropdown({
     selectedModelInfo?.reasoningEfforts ||
     getLlmModelReasoningEfforts(selectedProvider, selectedModel);
   const effectiveReasoningEffort =
-    selectedReasoningEffort &&
-    selectedReasoningEfforts.includes(selectedReasoningEffort)
+    selectedReasoningEffort && selectedReasoningEfforts.includes(selectedReasoningEffort)
       ? selectedReasoningEffort
       : undefined;
 
@@ -136,27 +124,28 @@ export function ModelDropdown({
     (provider) => provider.type !== selectedProvider,
   );
 
-  const loadProviderModels = useCallback(async (providerType: LLMProviderType) => {
-    if (providerModelCache[providerType]) return;
-    try {
-      setLoadingProviderModels(providerType);
-      const providerModels = await window.electronAPI.getProviderModels(providerType);
-      setProviderModelCache((prev) => ({
-        ...prev,
-        [providerType]: providerModels || [],
-      }));
-    } catch (error) {
-      console.error("Failed to load provider models:", error);
-      setProviderModelCache((prev) => ({
-        ...prev,
-        [providerType]: [],
-      }));
-    } finally {
-      setLoadingProviderModels((current) =>
-        current === providerType ? null : current,
-      );
-    }
-  }, [providerModelCache]);
+  const loadProviderModels = useCallback(
+    async (providerType: LLMProviderType) => {
+      if (providerModelCache[providerType]) return;
+      try {
+        setLoadingProviderModels(providerType);
+        const providerModels = await window.electronAPI.getProviderModels(providerType);
+        setProviderModelCache((prev) => ({
+          ...prev,
+          [providerType]: providerModels || [],
+        }));
+      } catch (error) {
+        console.error("Failed to load provider models:", error);
+        setProviderModelCache((prev) => ({
+          ...prev,
+          [providerType]: [],
+        }));
+      } finally {
+        setLoadingProviderModels((current) => (current === providerType ? null : current));
+      }
+    },
+    [providerModelCache],
+  );
 
   const selectModel = (
     providerType: LLMProviderType,
@@ -164,8 +153,7 @@ export function ModelDropdown({
     modelInfo?: LLMModelInfo,
   ) => {
     const reasoningEfforts =
-      modelInfo?.reasoningEfforts ||
-      getLlmModelReasoningEfforts(providerType, modelKey);
+      modelInfo?.reasoningEfforts || getLlmModelReasoningEfforts(providerType, modelKey);
     const reasoningEffort =
       selectedReasoningEffort && reasoningEfforts.includes(selectedReasoningEffort)
         ? selectedReasoningEffort
@@ -256,8 +244,6 @@ export function ModelDropdown({
             <path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
           </svg>
         )}
-        <span className="model-label-provider">{currentProviderLabel}</span>
-        <span className="model-label-separator" aria-hidden="true">·</span>
         <span className="model-label-text">{selectedModelLabel}</span>
         {effectiveReasoningEffort && (
           <span className="model-selector-effort">
@@ -299,9 +285,12 @@ export function ModelDropdown({
                 <strong>{selectedModelLabel}</strong>
                 {effectiveReasoningEffort && (
                   <span>
-                    {LLM_REASONING_EFFORT_OPTIONS.find(
-                      (option) => option.value === effectiveReasoningEffort,
-                    )?.label} intelligence
+                    {
+                      LLM_REASONING_EFFORT_OPTIONS.find(
+                        (option) => option.value === effectiveReasoningEffort,
+                      )?.label
+                    }{" "}
+                    intelligence
                   </span>
                 )}
               </div>
@@ -319,11 +308,16 @@ export function ModelDropdown({
               />
             </div>
             <div className="model-dropdown-content">
-              <section className="model-dropdown-models" onMouseEnter={() => setActiveProviderMenu(null)}>
+              <section
+                className="model-dropdown-models"
+                onMouseEnter={() => setActiveProviderMenu(null)}
+              >
                 <div className="model-dropdown-section-heading">
                   <div>
                     <span className="model-dropdown-section-label">Models</span>
-                    <span className="model-dropdown-section-caption">{currentProviderLabel} catalog</span>
+                    <span className="model-dropdown-section-caption">
+                      {currentProviderLabel} catalog
+                    </span>
                   </div>
                   <span className="model-dropdown-count">{filteredModels.length}</span>
                 </div>
@@ -351,7 +345,10 @@ export function ModelDropdown({
               </section>
               <aside className="model-dropdown-sidebar">
                 {selectedReasoningEfforts.length > 0 && (
-                  <section className="model-dropdown-sidebar-section" onMouseEnter={() => setActiveProviderMenu(null)}>
+                  <section
+                    className="model-dropdown-sidebar-section"
+                    onMouseEnter={() => setActiveProviderMenu(null)}
+                  >
                     <div className="model-dropdown-section-heading">
                       <div>
                         <span className="model-dropdown-section-label">Intelligence</span>
@@ -379,7 +376,9 @@ export function ModelDropdown({
                             <span className="model-dropdown-item-name">{option.label}</span>
                             <span>{REASONING_EFFORT_DESCRIPTIONS[option.value]}</span>
                           </span>
-                          {option.value === effectiveReasoningEffort && <Check size={15} aria-hidden="true" />}
+                          {option.value === effectiveReasoningEffort && (
+                            <Check size={15} aria-hidden="true" />
+                          )}
                         </button>
                       ))}
                     </div>
@@ -390,7 +389,9 @@ export function ModelDropdown({
                     <div className="model-dropdown-section-heading">
                       <div>
                         <span className="model-dropdown-section-label">Other sources</span>
-                        <span className="model-dropdown-section-caption">Browse configured providers</span>
+                        <span className="model-dropdown-section-caption">
+                          Browse configured providers
+                        </span>
                       </div>
                     </div>
                     <div className="model-dropdown-provider-list">

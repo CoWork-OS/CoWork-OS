@@ -5,19 +5,19 @@ import { describe, expect, it, vi } from "vitest";
 import { TaskPauseBanner, TaskPauseBannerDetailsContent } from "../TaskPauseBanner";
 
 describe("TaskPauseBanner", () => {
-  it("renders explicit shell action buttons for shell permission pauses", () => {
+  it("renders profile-first actions for command-tool pauses", () => {
     const markup = renderToStaticMarkup(
       React.createElement(TaskPauseBanner, {
         message: "Shell access is currently disabled for this workspace.",
         reasonCode: "shell_permission_required",
-        onEnableShell: vi.fn(),
-        onContinueWithoutShell: vi.fn(),
+        onOpenAccessProfilePicker: vi.fn(),
+        onContinueWithoutCommands: vi.fn(),
       }),
     );
 
-    expect(markup).toContain("Enable shell");
-    expect(markup).toContain("Continue without shell");
-    expect(markup).toContain("Shell access is needed to continue.");
+    expect(markup).toContain("Switch access profile");
+    expect(markup).toContain("Continue without commands");
+    expect(markup).toContain("This task needs command tools to continue.");
   });
 
   it("explains explicit required decisions as answerable choices", () => {
@@ -28,8 +28,8 @@ describe("TaskPauseBanner", () => {
       }),
     );
 
-    expect(markup).not.toContain("Enable shell");
-    expect(markup).not.toContain("Continue without shell");
+    expect(markup).not.toContain("Switch access profile");
+    expect(markup).not.toContain("Continue without commands");
     expect(markup).toContain("Decision needed to continue.");
     expect(markup).toContain("Reply with your choice or answer");
   });
@@ -104,7 +104,8 @@ describe("TaskPauseBanner", () => {
   it("renders markdown formatting in the details content", () => {
     const markup = renderToStaticMarkup(
       React.createElement(TaskPauseBannerDetailsContent, {
-        message: "Need your confirmation.\n\n## Recommended next step\n\n- Ship the fix\n- Re-test the modal",
+        message:
+          "Need your confirmation.\n\n## Recommended next step\n\n- Ship the fix\n- Re-test the modal",
         markdownComponents: {},
       }),
     );

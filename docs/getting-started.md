@@ -112,6 +112,19 @@ For LLM providers, retryable failures such as `429` rate limits immediately adva
 - `0` retries the primary on the next route refresh
 - higher values keep the working fallback route active longer before retrying the primary
 
+### Choose an access profile
+
+Before the first real task, choose the task's **Permission access mode** in the
+composer. Start with **Ask for approval**; use **Approve for me** for bounded
+workflows where eligible approvals may be reviewed automatically; choose
+**Full access** only for a trusted task that needs it; or create a validated
+**Custom** profile for repeatable filesystem and network boundaries.
+
+The selected profile combines sandbox, approvals, reviewer behavior, command-tool
+availability, filesystem rules, and network/domain scope. Command tools do not
+have a separate shell enable/disable control. See [Access Profiles](access-profiles.md)
+before enabling automations, channels, managed agents, or remote devices.
+
 ### Optional: Configure Memory Hub And Supermemory
 
 Before you start relying on long-term context, open **Settings > Memory Hub** and confirm how memory should behave for this profile.
@@ -181,7 +194,7 @@ Generated documents, spreadsheets, presentations, and web pages appear as artifa
 
 3. **Watch it Work**
    - The agent will create a plan
-   - Execute steps using available tools
+   - Execute steps using tools exposed by the selected access profile
    - Show real-time progress in the timeline
    - Request approval before destructive changes
 
@@ -409,7 +422,7 @@ CoWork samples the video into representative still frames for image-capable mode
 When the agent needs permission for:
 - Deleting files
 - Bulk operations
-- Shell commands
+- Command-tool calls
 
 You'll see a dialog with:
 - What it wants to do

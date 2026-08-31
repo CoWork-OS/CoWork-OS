@@ -63,10 +63,9 @@ describe("detectModeSuggestions", () => {
   });
 
   it("respects maxResults option", () => {
-    const result = detectModeSuggestions(
-      "Plan and build and review and deploy carefully",
-      { maxResults: 1 },
-    );
+    const result = detectModeSuggestions("Plan and build and review and deploy carefully", {
+      maxResults: 1,
+    });
     expect(result.length).toBe(1);
   });
 

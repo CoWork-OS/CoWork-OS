@@ -8,6 +8,13 @@ This is not a claim that the product removes human judgment from all business op
 - agents turn strategy into ongoing operational work
 - Mission Control provides visibility into planning, execution, and review
 
+Company autonomy is not the same as unrestricted access. Each operator and
+automated task must use an explicit [access profile](access-profiles.md), which
+is the ceiling for command tools, sandboxing, filesystem, network, domains, and
+approvals. An approval preset, `autonomyPolicy`, trust pattern, or auto-dispatch
+setting can reduce interruption only inside that ceiling; choose **Full access**
+explicitly when a trusted operator genuinely needs it.
+
 <p align="center">
   <img src="../resources/branding/images/cowork-os-2.webp" alt="Company operations dashboard" width="700">
   <br><em>Company workspaces track goals, operator agents, and autonomous operating loops.</em>
@@ -274,9 +281,14 @@ Operator roles can carry an `autonomyPolicy` that controls:
 - approval presets
 - allowed auto-approval types
 - whether user input is allowed
+- whether a worktree is required
 
 Core-created automated tasks now inherit a real autonomy policy instead of only disabling prompts. Routine operator work can auto-approve common safe actions, while hard guardrails and workspace capability denials still remain enforced.
-- whether a worktree is required
+
+The autonomy policy and the access profile are separate: `founder_edge` and
+other approval presets do not grant unrestricted command, filesystem, network,
+or domain access. The operator's profile is resolved first, and missing or
+invalid profiles fail closed.
 
 This is how "founder-edge" operation is modeled without making every task globally fully autonomous.
 

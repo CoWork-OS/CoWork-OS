@@ -31,7 +31,11 @@ It uses a deterministic Python engine at `resources/skills/unbroker/scripts/pdd.
 - a `next` queue that tells the agent what to do next
 - a final consolidated human-task digest for CAPTCHA, ID, phone, fax, or other human-only work
 
-CoWork adds the runtime mapping around that engine: shell commands run through CoWork's command tools, browser work uses the available browser automation tools, recurring checks can use CoWork scheduling, and large discovery phases can use CoWork multi-agent orchestration when appropriate.
+CoWork adds the runtime mapping around that engine: command tools are used
+only when exposed by the active [access profile](../access-profiles.md), browser
+work uses the available browser automation tools, recurring checks can use
+CoWork scheduling, and large discovery phases can use CoWork multi-agent
+orchestration when appropriate.
 
 ## How To Use It
 
@@ -79,11 +83,15 @@ The skill must record consent before scanning or removal work. The local engine 
 The autonomy contract is intentionally narrow:
 
 - use only the planned disclosure fields for each broker action
-- do not ask for per-submission permission when consent and `autonomy=full` are already recorded
+- do not ask for per-submission permission when consent and `autonomy=full` are already recorded; this is the skill's consent state, not CoWork's **Full access** profile
 - do not interrupt for human-only work; queue it and present one digest at the end
 - never mark `confirmed_removed` until a verifying re-scan shows the listing is gone
 - never use solver services, fingerprint spoofing, or anti-bot defeat techniques
 - do not represent public-record deletion or legal outcomes as guaranteed
+
+The skill's recorded consent and autonomy state cannot widen CoWork's access
+profile. File, browser, command, network, external-delivery, and scheduling
+actions remain subject to the selected profile and hard safety gates.
 
 ## Local Data Storage
 

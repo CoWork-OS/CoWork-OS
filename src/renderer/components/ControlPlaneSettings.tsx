@@ -635,11 +635,7 @@ export function ControlPlaneSettings() {
                 >
                   {showToken ? "Hide" : "Show"}
                 </button>
-                <button
-                  className="btn-icon"
-                  onClick={handleCopyLocalToken}
-                  title="Copy"
-                >
+                <button className="btn-icon" onClick={handleCopyLocalToken} title="Copy">
                   Copy
                 </button>
               </div>
@@ -658,11 +654,7 @@ export function ControlPlaneSettings() {
                 >
                   {showNodeToken ? "Hide" : "Show"}
                 </button>
-                <button
-                  className="btn-icon"
-                  onClick={handleCopyNodeToken}
-                  title="Copy"
-                >
+                <button className="btn-icon" onClick={handleCopyNodeToken} title="Copy">
                   Copy
                 </button>
               </div>

@@ -78,6 +78,13 @@ Current Windows limitation: `cmd.exe` does not have a clean zsh-style prompt hoo
 - **Close terminal**: dock close button hides the terminal dock without changing the rest of the task view.
 - **Stop**: stops the active terminal process when a tab is marked running.
 
+Opening a terminal tab is a user-facing work-surface action, not a permission escalation. Agent
+command tools must still be exposed by the active [access profile](access-profiles.md), and the
+profile's sandbox, workspace boundary, administrator policy, and guardrails apply to agent-run
+commands. There is no separate shell enable/disable switch for new tasks. If a task's profile is
+downgraded, new tabs and further use of the task's command lane are revalidated against the
+narrower profile.
+
 ## Reliability and packaging notes
 
 - `node-pty` native files are unpacked from Electron ASAR so PTY helpers can run in packaged builds.
@@ -85,13 +92,19 @@ Current Windows limitation: `cmd.exe` does not have a clean zsh-style prompt hoo
 - Output replay is sent only on first attach per renderer, avoiding duplicate prompt/output redraws while still preserving terminal history when the dock remounts.
 - xterm CSS is isolated from app-wide typography so letter spacing, word spacing, and text transforms do not leak into terminal rendering.
 
-## Relationship to shell tools
+## Relationship to command tools
 
-Terminal Tabs are for user-visible interactive terminal work. Existing shell tools still matter for agent execution:
+Terminal Tabs are for user-visible interactive terminal work. Command tools still matter for agent
+execution:
 
 - structured command tools can capture stdout/stderr, exit codes, approvals, and sandbox details
 - persistent shell sessions preserve operator state for agent-run commands
 - terminal tabs give the user a direct live terminal beside the task
+
+The two surfaces share the task workspace and policy context but are not interchangeable. A terminal
+tab does not grant an agent a command tool, and selecting an access profile does not automatically
+open a terminal tab. See [Access Profiles](access-profiles.md#network-and-command-behavior) for
+command availability and profile revalidation.
 
 The product direction is to keep both: reliable structured shell execution for agents and a real terminal surface for humans who need direct control.
 

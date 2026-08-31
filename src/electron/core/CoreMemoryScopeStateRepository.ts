@@ -8,9 +8,7 @@ export class CoreMemoryScopeStateRepository {
 
   get(scopeKind: CoreMemoryScopeKind, scopeRef: string): CoreMemoryScopeState | undefined {
     const row = this.db
-      .prepare(
-        "SELECT * FROM core_memory_scope_state WHERE scope_kind = ? AND scope_ref = ?",
-      )
+      .prepare("SELECT * FROM core_memory_scope_state WHERE scope_kind = ? AND scope_ref = ?")
       .get(scopeKind, scopeRef) as Any;
     return row ? this.mapRow(row) : undefined;
   }

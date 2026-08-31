@@ -1,6 +1,7 @@
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
+import { domainMatches } from "../../security/network-policy";
 import {
   SearchProviderFactory,
   SearchQuery,
@@ -84,6 +85,12 @@ export class SearchTools {
     };
   }
 
+  private getAccessProfileDomainRules() {
+    return Array.isArray(this.workspace.permissions?.accessDomainRules)
+      ? this.workspace.permissions.accessDomainRules
+      : [];
+  }
+
   private applyDomainPolicy(response: SearchResponse): {
     response: SearchResponse;
     originalCount: number;
@@ -93,10 +100,16 @@ export class SearchTools {
     const effectivePolicy = this.getEffectiveDomainPolicy();
     const blockedDomains = effectivePolicy.blockedDomains;
     const allowedDomains = effectivePolicy.allowedDomains;
+    const profileDomainRules = this.getAccessProfileDomainRules();
 
     const originalResults = Array.isArray(response.results) ? response.results : [];
     const originalCount = originalResults.length;
-    if (originalCount === 0 || (blockedDomains.length === 0 && allowedDomains.length === 0)) {
+    if (
+      originalCount === 0 ||
+      (blockedDomains.length === 0 &&
+        allowedDomains.length === 0 &&
+        profileDomainRules.length === 0)
+    ) {
       return {
         response,
         originalCount,
@@ -109,6 +122,17 @@ export class SearchTools {
     for (const result of originalResults) {
       const hostname = this.extractHostname(String(result.url || ""));
       if (!hostname) {
+        continue;
+      }
+      const profileDenied = profileDomainRules.some(
+        (rule) => rule.access === "deny" && domainMatches(hostname, rule.pattern),
+      );
+      if (profileDenied) continue;
+      const profileAllows = profileDomainRules.filter((rule) => rule.access === "allow");
+      if (
+        profileAllows.length > 0 &&
+        !profileAllows.some((rule) => domainMatches(hostname, rule.pattern))
+      ) {
         continue;
       }
       const blocked = blockedDomains.some((pattern) =>
@@ -181,6 +205,27 @@ export class SearchTools {
     safeSearch?: boolean;
     maxUses?: number;
   }): Promise<SearchResponse> {
+    if (
+      this.workspace.permissions?.network === false ||
+      this.workspace.permissions?.accessNetworkMode === "disabled"
+    ) {
+      const error = "Network access disabled by the active access profile.";
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "web_search",
+        error,
+        reason: "workspace_network_disabled",
+      });
+      return {
+        success: false,
+        error,
+        query: input.query,
+        searchType: input.searchType || "web",
+        results: [],
+        provider: "none",
+        metadata: { error, policyReason: "workspace_network_disabled" },
+      };
+    }
+
     const endpointDomainPolicy = this.getEffectiveDomainPolicy();
     const searchQuery: SearchQuery = {
       query: input.query,
@@ -192,6 +237,9 @@ export class SearchTools {
       safeSearch: input.safeSearch,
       provider: input.provider,
       endpointDomainPolicy,
+      profileDomainRules: this.getAccessProfileDomainRules(),
+      networkEnabled: this.workspace.permissions?.network,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
     };
 
     const settings = SearchProviderFactory.loadSettings();

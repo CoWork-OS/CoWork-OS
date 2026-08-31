@@ -1,13 +1,28 @@
 import type { TaskEvent } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { resolveTaskOutputSummaryFromCompletionEvent } from "../../utils/task-outputs";
-import { isSpreadsheetArtifactFile, isSpreadsheetMimeType } from "../../../shared/spreadsheet-formats";
-import { isWordDocumentArtifactFile, isWordDocumentMimeType } from "../../../shared/document-formats";
-import { isPresentationArtifactFile, isPresentationMimeType } from "../../../shared/presentation-formats";
+import {
+  isSpreadsheetArtifactFile,
+  isSpreadsheetMimeType,
+} from "../../../shared/spreadsheet-formats";
+import {
+  isWordDocumentArtifactFile,
+  isWordDocumentMimeType,
+} from "../../../shared/document-formats";
+import {
+  isPresentationArtifactFile,
+  isPresentationMimeType,
+} from "../../../shared/presentation-formats";
 import { isWebPageArtifactFile, isWebPageMimeType } from "../../../shared/web-page-formats";
 import { IMAGE_FILE_EXT_RE, VIDEO_FILE_EXT_RE, HTML_FILE_EXT_RE } from "./main-content-constants";
 
-export type GeneratedInlinePreviewKind = "image" | "video" | "html" | "spreadsheet" | "presentation" | "document";
+export type GeneratedInlinePreviewKind =
+  | "image"
+  | "video"
+  | "html"
+  | "spreadsheet"
+  | "presentation"
+  | "document";
 export const END_OF_TASK_ARTIFACT_KINDS = new Set<GeneratedInlinePreviewKind>([
   "html",
   "spreadsheet",
@@ -50,10 +65,7 @@ export function estimateEndOfTaskArtifactStackHeight(
   artifacts: EndOfTaskArtifactCard[],
   expanded: boolean,
 ): number {
-  const { visibleArtifacts, hiddenCount } = getVisibleEndOfTaskArtifactCards(
-    artifacts,
-    expanded,
-  );
+  const { visibleArtifacts, hiddenCount } = getVisibleEndOfTaskArtifactCards(artifacts, expanded);
   return (
     END_OF_TASK_ARTIFACT_STACK_CHROME_ESTIMATED_HEIGHT +
     visibleArtifacts.length * END_OF_TASK_ARTIFACT_CARD_ESTIMATED_HEIGHT +
@@ -202,7 +214,9 @@ export function extractGeneratedArtifactPathsFromText(text: string, limit = 8): 
   return paths;
 }
 
-export function getInlinePreviewKindForTaskEvent(event: TaskEvent): GeneratedInlinePreviewKind | null {
+export function getInlinePreviewKindForTaskEvent(
+  event: TaskEvent,
+): GeneratedInlinePreviewKind | null {
   const effectiveType = getEffectiveTaskEventType(event);
   if (
     effectiveType !== "file_created" &&
@@ -297,8 +311,9 @@ export function shouldRenderOpenArtifactCardAtEvent(args: {
     if (candidate === args.event || (candidate.id && candidate.id === args.event.id)) {
       currentIndex = index;
     }
-    const referencesTarget = getTaskEventArtifactPaths(candidate, eventStream)
-      .some((path) => normalizeArtifactCardKey(path) === targetKey);
+    const referencesTarget = getTaskEventArtifactPaths(candidate, eventStream).some(
+      (path) => normalizeArtifactCardKey(path) === targetKey,
+    );
     if (referencesTarget) {
       lastReferenceIndex = index;
     }

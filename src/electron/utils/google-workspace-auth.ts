@@ -14,8 +14,7 @@ import { getBundledGoogleWorkspaceOAuthClientId } from "./google-workspace-oauth
 
 const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const TOKEN_REFRESH_BUFFER_MS = 2 * 60 * 1000;
-const RECONNECT_HINT =
-  "Reconnect Google Workspace in Settings > Integrations > Google Workspace.";
+const RECONNECT_HINT = "Reconnect Google Workspace in Settings > Integrations > Google Workspace.";
 const inFlightRefreshes = new Map<string, Promise<string>>();
 const recentTokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
 
@@ -102,7 +101,9 @@ async function refreshGoogleWorkspaceAccessTokenUncached(
     const oauthError = typeof data?.error === "string" ? data.error : undefined;
     const message =
       data?.error_description || oauthError || response.statusText || "Token refresh failed";
-    const normalizedMessage = String(message).trim().replace(/[.\s]+$/u, "");
+    const normalizedMessage = String(message)
+      .trim()
+      .replace(/[.\s]+$/u, "");
     const shouldClearBrokenTokens =
       response.status === 400 &&
       (!oauthError ||

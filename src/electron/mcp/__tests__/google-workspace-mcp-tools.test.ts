@@ -58,10 +58,12 @@ describe("google-workspace MCP Workspace tools", () => {
   it("exposes confirmation schema on delete without adding it to task completion", async () => {
     const { listGoogleWorkspaceToolsForTest } = await loadConnector();
     const tools = listGoogleWorkspaceToolsForTest();
-    const completeSchema = tools.find((tool: Any) => tool.name === "google-workspace.tasks_complete")
-      ?.inputSchema;
-    const deleteSchema = tools.find((tool: Any) => tool.name === "google-workspace.tasks_delete")
-      ?.inputSchema;
+    const completeSchema = tools.find(
+      (tool: Any) => tool.name === "google-workspace.tasks_complete",
+    )?.inputSchema;
+    const deleteSchema = tools.find(
+      (tool: Any) => tool.name === "google-workspace.tasks_delete",
+    )?.inputSchema;
 
     expect(completeSchema?.required).toEqual(["tasklistId", "taskId"]);
     expect(deleteSchema?.required).toContain("confirm");
@@ -117,8 +119,9 @@ describe("google-workspace MCP Workspace tools", () => {
     const { listGoogleWorkspaceToolsForTest } = await loadConnector();
     const tools = listGoogleWorkspaceToolsForTest();
     const toolNames = tools.map((tool: Any) => tool.name);
-    const createSchema = tools.find((tool: Any) => tool.name === "google-workspace.calendar_event_create")
-      ?.inputSchema;
+    const createSchema = tools.find(
+      (tool: Any) => tool.name === "google-workspace.calendar_event_create",
+    )?.inputSchema;
 
     expect(toolNames).toEqual(
       expect.arrayContaining([
@@ -191,9 +194,12 @@ describe("google-workspace MCP Workspace tools", () => {
       .mockResolvedValueOnce(jsonResponse({ error: { message: "Not found" } }, 404) as Response);
     const { executeGoogleWorkspaceToolForTest } = await loadConnector();
 
-    const result = await executeGoogleWorkspaceToolForTest("google-workspace.calendar_events_batch_get", {
-      eventIds: ["event-1", "missing-event"],
-    });
+    const result = await executeGoogleWorkspaceToolForTest(
+      "google-workspace.calendar_events_batch_get",
+      {
+        eventIds: ["event-1", "missing-event"],
+      },
+    );
 
     expect(result.data.events).toEqual([
       { eventId: "event-1", data: { id: "event-1" } },

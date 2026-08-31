@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
-  FolderOpen,
-  ZoomIn,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, FolderOpen, ZoomIn } from "lucide-react";
 import type { FileViewerResult } from "../../electron/preload";
 import "./artifact-viewers.css";
 
@@ -186,7 +180,10 @@ export function PresentationViewer({
               style={{ width: `${slideWidthPercent}%` }}
             />
           ) : (
-            <div className="presentation-viewer-slide-text" style={{ width: `${slideWidthPercent}%` }}>
+            <div
+              className="presentation-viewer-slide-text"
+              style={{ width: `${slideWidthPercent}%` }}
+            >
               <div className="presentation-viewer-slide-text-kicker">
                 Slide {activeSlide?.index ?? 0}
               </div>
@@ -201,7 +198,9 @@ export function PresentationViewer({
           <pre>{activeSlide?.notes || "No speaker notes"}</pre>
         </div>
 
-        {preview.renderStatus !== "rendered" && preview.renderStatus !== "cached" && preview.renderMessage ? (
+        {preview.renderStatus !== "rendered" &&
+        preview.renderStatus !== "cached" &&
+        preview.renderMessage ? (
           <div className="presentation-viewer-render-note">{preview.renderMessage}</div>
         ) : null}
       </section>

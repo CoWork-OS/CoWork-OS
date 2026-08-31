@@ -26,6 +26,11 @@ Typical flow on a new VPS:
 5. Create a workspace (or bootstrap one at startup).
 6. Create a task and watch events.
 
+New headless tasks inherit the configured default [access profile](access-profiles.md), or can
+provide `agentConfig.accessProfileId` through the Control Plane. The target daemon enforces the
+profile locally; remote clients do not transfer credentials or widen filesystem, command-tool, or
+network access. Invalid profiles fail closed and require operator action.
+
 Where the “UI” lives:
 
 - The daemon serves a minimal Web UI at `http://127.0.0.1:18789/` (on the server).
@@ -153,7 +158,10 @@ Create a workspace (bootstrap or `workspace.create`), then `task.create`, then w
 In the encrypted settings store under the user data directory (see above). In headless mode you can set credentials via Control Plane (`llm.configure` / Web UI LLM Setup) or import from env vars at boot (`COWORK_IMPORT_ENV_SETTINGS=1`).
 
 **How do approvals work without a desktop UI?**  
-Approvals are visible and actionable over the Control Plane (Web UI + `approval.list` / `approval.respond`).
+Approvals are visible and actionable over the Control Plane (Web UI + `approval.list` /
+`approval.respond`). They operate within the task's access profile; an approval cannot widen a
+finite profile scope or repair an unavailable profile. See [Remote Access](remote-access.md) and
+[Access Profiles](access-profiles.md).
 
 **Can I expose Control Plane to the public internet?**  
 Not recommended. Prefer SSH tunnel or Tailscale. Headless/managed startup blocks direct public binds unless Tailscale, private container context, or `COWORK_CONTROL_PLANE_ALLOW_INSECURE_PUBLIC_BIND=1` is configured. If you must reverse proxy it, set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to the public HTTPS origin and treat it like a high-value admin API.

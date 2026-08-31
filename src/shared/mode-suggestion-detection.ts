@@ -139,10 +139,7 @@ export interface DetectOptions {
  * Detects which execution modes are most relevant for the given prompt text.
  * Returns suggestions sorted by confidence, filtered by threshold.
  */
-export function detectModeSuggestions(
-  text: string,
-  options?: DetectOptions,
-): ModeSuggestion[] {
+export function detectModeSuggestions(text: string, options?: DetectOptions): ModeSuggestion[] {
   if (!text || typeof text !== "string") return [];
   const trimmed = text.trim();
   if (!trimmed) return [];

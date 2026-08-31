@@ -17,11 +17,11 @@
 // ---------------------------------------------------------------------------
 
 export type TimelinePhase =
-  | "intake"    // Initial task intake, context loading
-  | "plan"      // Goal decomposition, planning
-  | "explore"   // Read-heavy codebase / web research
-  | "execute"   // Write / edit / shell / browser actions
-  | "verify"    // Tests, lint, validation
+  | "intake" // Initial task intake, context loading
+  | "plan" // Goal decomposition, planning
+  | "explore" // Read-heavy codebase / web research
+  | "execute" // Write / edit / shell / browser actions
+  | "verify" // Tests, lint, validation
   | "complete"; // Task finalization, artifact emission
 
 // ---------------------------------------------------------------------------
@@ -29,10 +29,10 @@ export type TimelinePhase =
 // ---------------------------------------------------------------------------
 
 export type SemanticTimelineStatus =
-  | "running"  // Currently in progress (spinner)
-  | "success"  // Finished without error
-  | "error"    // Finished with error
-  | "waiting"  // Waiting for approval or user input
+  | "running" // Currently in progress (spinner)
+  | "success" // Finished without error
+  | "error" // Finished with error
+  | "waiting" // Waiting for approval or user input
   | "blocked"; // Blocked (approval denied / hard limit hit)
 
 // ---------------------------------------------------------------------------

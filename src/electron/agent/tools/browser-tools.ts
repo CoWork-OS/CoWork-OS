@@ -20,11 +20,40 @@ import {
 } from "../../browser/browser-workbench-service";
 import { normalizeBrowserUrl } from "../../browser/browser-session-manager";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import {
+  assertWorkspaceFilesystemAccess,
+  assertWorkspaceReadableFileAccessWithApproval,
+  createWorkspaceFilesystemApprovalHandlers,
+  resolveWorkspaceFilesystemAccessWithApproval,
+} from "../../security/access-profile-paths";
 import { BuiltinToolsSettingsManager } from "./builtin-settings";
 
 // oxlint-disable-next-line typescript-eslint/no-explicit-any
 type Any = any;
 type BrowserProvider = "local" | "browser-use-cloud";
+
+function getWhatsAppCompatibilityIssue(content: { url?: string; title?: string; text?: string }) {
+  const url = typeof content.url === "string" ? content.url : "";
+  try {
+    if (new URL(url).hostname.toLowerCase() !== "web.whatsapp.com") return null;
+  } catch {
+    return null;
+  }
+
+  const pageText = `${content.title || ""} ${content.text || ""}`.replace(/\s+/g, " ").trim();
+  if (!/whatsapp works with google chrome\s*100\+/i.test(pageText)) return null;
+
+  return {
+    success: false,
+    error:
+      "WhatsApp rejected this browser because it is not a supported Chrome 100+ session. Use the connected channel message tools (channel_list_chats, then channel_history) for message history, or attach an already-running supported browser session with browser_attach.",
+    browserCompatibilityError: true,
+    nextActions: [
+      "Use channel_list_chats with channel=whatsapp, then channel_history for the selected chat.",
+      "If browser access is explicitly required, attach a supported signed-in Chrome session with browser_attach.",
+    ],
+  };
+}
 
 interface BrowserUseCloudSessionState {
   id: string;
@@ -91,6 +120,7 @@ export class BrowserTools {
       debuggerUrl: null,
       browserProvider: "local",
     };
+    this.syncVisibleAccessPolicy();
   }
 
   private getTimeoutMs(input: unknown): number | undefined {
@@ -109,6 +139,34 @@ export class BrowserTools {
       : undefined;
   }
 
+  private syncVisibleAccessPolicy(input?: unknown): void {
+    this.browserWorkbenchService.setAccessPolicy?.({
+      taskId: this.taskId,
+      sessionId: this.getSessionId(input),
+      networkEnabled: this.workspace.permissions?.network === true,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions?.accessDomainRules,
+    });
+  }
+
+  private validateDebuggerUrl(rawUrl: string): string {
+    const value = rawUrl.trim();
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new Error("debugger_url must be a valid loopback HTTP or WebSocket URL");
+    }
+    if (!["http:", "https:", "ws:", "wss:"].includes(parsed.protocol)) {
+      throw new Error("debugger_url must use http(s) or ws(s)");
+    }
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) {
+      throw new Error("browser_attach only permits a debugger endpoint on localhost or loopback");
+    }
+    return value;
+  }
+
   private ensureVisibleNavigationAllowed(rawUrl: unknown): string {
     const url = normalizeBrowserUrl(rawUrl);
     if (!url) {
@@ -117,7 +175,13 @@ export class BrowserTools {
     if (!this.workspace.permissions?.network) {
       throw new Error("Workspace does not have network permission for browser navigation");
     }
-    const decision = evaluateNetworkPolicy({ url, toolName: "browser_navigate" });
+    const decision = evaluateNetworkPolicy({
+      url,
+      toolName: "browser_navigate",
+      networkEnabled: this.workspace.permissions?.network,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions?.accessDomainRules,
+    });
     this.daemon.logEvent(this.taskId, "network_policy_decision", decision);
     if (decision.action !== "allow") {
       if (decision.reason === "legacy_guardrail_domain_denied") {
@@ -139,41 +203,46 @@ export class BrowserTools {
 
   private isSystemBrowserProfileRequest(input: unknown): boolean {
     const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-    return typeof toolInput.profile === "string" && toolInput.profile.trim().toLowerCase() === "user";
-  }
-
-  private async realpathIfExists(candidatePath: string): Promise<string | null> {
-    try {
-      return await fs.realpath(candidatePath);
-    } catch {
-      return null;
-    }
+    return (
+      typeof toolInput.profile === "string" && toolInput.profile.trim().toLowerCase() === "user"
+    );
   }
 
   private async resolveWorkspaceReadablePath(rawPath: unknown): Promise<string> {
     const value = typeof rawPath === "string" ? rawPath.trim() : "";
     if (!value) throw new Error("file_path is required");
-    const resolved = path.resolve(this.workspace.path, value);
-    const realResolved = await this.realpathIfExists(resolved);
-    if (!realResolved) {
-      throw new Error("Upload file not found");
+    try {
+      return await assertWorkspaceReadableFileAccessWithApproval(
+        this.workspace,
+        value,
+        "browser upload path",
+        createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "browser"),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/does not exist|not found/i.test(message)) throw new Error("Upload file not found");
+      throw new Error(`Read permission not granted: ${message}`);
     }
-    const allowedRootCandidates = [
-      this.workspace.path,
-      ...((this.workspace.permissions?.allowedPaths || []) as string[]),
-    ];
-    const allowedRoots = (
-      await Promise.all(
-        allowedRootCandidates.map((item) => this.realpathIfExists(path.resolve(item))),
-      )
-    ).filter((item): item is string => typeof item === "string" && item.length > 0);
-    const isAllowed =
-      this.workspace.permissions?.unrestrictedFileAccess === true ||
-      allowedRoots.some((root) => realResolved === root || realResolved.startsWith(`${root}${path.sep}`));
-    if (!this.workspace.permissions?.read || !isAllowed) {
-      throw new Error("Read permission not granted for this upload path");
+  }
+
+  private async resolveBrowserOutputPath(
+    filename: unknown,
+    fallbackName: string,
+    label: string,
+  ): Promise<{ path: string; externalApprovalGranted: boolean }> {
+    const requestedName =
+      typeof filename === "string" && filename.trim() ? filename.trim() : fallbackName;
+    const access = await resolveWorkspaceFilesystemAccessWithApproval(
+      this.workspace,
+      requestedName,
+      "write",
+      label,
+      createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "browser"),
+    );
+    if (access.decision !== "allow") {
+      throw new Error(`Access denied for ${label} "${requestedName}": ${access.reason}`);
     }
-    return realResolved;
+    return { path: access.path, externalApprovalGranted: access.externalApprovalGranted };
   }
 
   private shouldPreferVisibleWorkbench(input: unknown): boolean {
@@ -192,7 +261,8 @@ export class BrowserTools {
     if (automationMode === "background") return false;
     if (automationMode === "ask") return false;
     if (typeof toolInput.profile === "string" && toolInput.profile.trim()) return false;
-    if (typeof toolInput.browser_channel === "string" && toolInput.browser_channel.trim()) return false;
+    if (typeof toolInput.browser_channel === "string" && toolInput.browser_channel.trim())
+      return false;
     if (this.browserState.profile || this.browserState.debuggerUrl) return false;
     return automationMode === "visible";
   }
@@ -215,7 +285,8 @@ export class BrowserTools {
     }
     if (typeof toolInput.debugger_url === "string" && toolInput.debugger_url.trim()) return false;
     if (typeof toolInput.profile === "string" && toolInput.profile.trim()) return false;
-    if (typeof toolInput.browser_channel === "string" && toolInput.browser_channel.trim()) return false;
+    if (typeof toolInput.browser_channel === "string" && toolInput.browser_channel.trim())
+      return false;
     if (this.browserState.profile || this.browserState.debuggerUrl) return false;
     return true;
   }
@@ -255,20 +326,23 @@ export class BrowserTools {
     if (automationMode !== "ask") return false;
     if (!this.hasExplicitVisibleWorkbenchRequest(input)) return false;
     if (!this.canStartVisibleWorkbench(input)) return false;
-    const rawUrl = input && typeof input === "object" ? (input as Record<string, unknown>).url : undefined;
+    const rawUrl =
+      input && typeof input === "object" ? (input as Record<string, unknown>).url : undefined;
     const url = typeof rawUrl === "string" ? rawUrl : "";
     return await this.requestVisibleWorkbenchApproval(input, url);
   }
 
   private isBrowserUseCloudProviderRequested(input: unknown): boolean {
     const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-    const provider = typeof toolInput.browser_provider === "string" ? toolInput.browser_provider.trim() : "";
+    const provider =
+      typeof toolInput.browser_provider === "string" ? toolInput.browser_provider.trim() : "";
     return provider === "browser-use-cloud";
   }
 
   private isBrowserUseCloudConfigured(): boolean {
     return Boolean(
-      this.browserUseCloudClient || BrowserUseCloudClient.resolveApiKey(this.getBrowserUseCloudSettings()),
+      this.browserUseCloudClient ||
+      BrowserUseCloudClient.resolveApiKey(this.getBrowserUseCloudSettings()),
     );
   }
 
@@ -321,7 +395,10 @@ export class BrowserTools {
         : typeof toolInput.timeout_minutes === "number"
           ? toolInput.timeout_minutes
           : undefined;
-    const timeoutMinutes = normalizeBrowserUseTimeoutMinutes(rawTimeout, settings.defaultTimeoutMinutes);
+    const timeoutMinutes = normalizeBrowserUseTimeoutMinutes(
+      rawTimeout,
+      settings.defaultTimeoutMinutes,
+    );
     return {
       profileId: rawProfileId || undefined,
       proxyCountryCode: normalizeBrowserUseProxyCountryCode(rawProxy),
@@ -365,7 +442,9 @@ export class BrowserTools {
     );
   }
 
-  private async ensureBrowserUseCloudConfigured(input: unknown): Promise<BrowserUseCloudSessionState> {
+  private async ensureBrowserUseCloudConfigured(
+    input: unknown,
+  ): Promise<BrowserUseCloudSessionState> {
     const client = this.getBrowserUseCloudClient();
     if (!client) {
       throw new Error(
@@ -430,7 +509,9 @@ export class BrowserTools {
     if (!existing) return null;
     const client = this.getBrowserUseCloudClient();
     if (!client) {
-      throw new Error(`Cannot stop Browser Use Cloud session ${existing.id}: client is not configured`);
+      throw new Error(
+        `Cannot stop Browser Use Cloud session ${existing.id}: client is not configured`,
+      );
     }
     const stopped = await this.stopBrowserUseCloudSessionById(client, existing.id);
     if (this.browserUseCloudSession?.id === existing.id) {
@@ -458,10 +539,28 @@ export class BrowserTools {
     return {
       success: false,
       error:
-        "Chrome is already running with that profile, so I could not launch a separate profile-backed browser. Continue in the visible Browser Use session, or attach to an already-running Chrome instance with browser_attach and a debugger_url.",
+        "Chrome is already running with that profile, so I could not launch a separate profile-backed browser. Continue in the visible Browser Workbench, or attach to the already-running Chrome instance with browser_attach and a debugger_url.",
       details: message,
       browserMode: "external_profile",
       retryableWithVisibleWorkbench: true,
+      nextActions: [
+        "Use the visible Browser Workbench for this URL",
+        "Attach to Chrome with browser_attach and debugger_url after enabling remote debugging",
+      ],
+    };
+  }
+
+  private resetLocalBrowserToDefaults(): void {
+    this.browserService = new BrowserService(this.workspace, {
+      headless: true,
+      timeout: 90000,
+    });
+    this.browserState = {
+      headless: true,
+      profile: null,
+      browserChannel: "chromium",
+      debuggerUrl: null,
+      browserProvider: "local",
     };
   }
 
@@ -527,7 +626,7 @@ export class BrowserTools {
     const nextDebuggerUrl =
       requestedProfile !== undefined || requestedChannel !== undefined
         ? null
-        : debuggerUrlRaw ?? this.browserState.debuggerUrl;
+        : (debuggerUrlRaw ?? this.browserState.debuggerUrl);
 
     if (
       nextHeadless === this.browserState.headless &&
@@ -541,13 +640,25 @@ export class BrowserTools {
 
     await this.browserService.close();
     await this.stopBrowserUseCloudSession();
-    this.browserService = new BrowserService(this.workspace, {
+    const nextBrowserService = new BrowserService(this.workspace, {
       headless: nextHeadless,
       timeout: 90000,
       userDataDir: nextProfile ? this.getPersistentUserDataDir(nextProfile) : undefined,
       channel: nextChannel,
       debuggerUrl: nextDebuggerUrl ?? undefined,
     });
+    try {
+      // Validate a changed profile/channel/endpoint before committing it to
+      // browserState. A locked system Chrome profile must not leave later
+      // browser_get_content/browser_screenshot calls pointing at the same
+      // unusable persistent context.
+      await nextBrowserService.init();
+    } catch (error) {
+      await nextBrowserService.close().catch(() => {});
+      this.resetLocalBrowserToDefaults();
+      throw error;
+    }
+    this.browserService = nextBrowserService;
     this.browserState = {
       headless: nextHeadless,
       profile: nextProfile,
@@ -596,11 +707,13 @@ export class BrowserTools {
       },
       confirm_real_browser_control: {
         type: "boolean",
-        description: "Required only when profile='user' asks CoWork to control the system Chrome profile.",
+        description:
+          "Required only when profile='user' asks CoWork to control the system Chrome profile.",
       },
       session_id: {
         type: "string",
-        description: "Optional visible in-app browser workbench session id. Defaults to the active task browser session.",
+        description:
+          "Optional visible in-app browser workbench session id. Defaults to the active task browser session.",
       },
     };
     if (browserUseCloudConfigured) {
@@ -609,7 +722,7 @@ export class BrowserTools {
           type: "string",
           enum: ["browser-use-cloud"],
           description:
-            'Explicitly use a configured Browser Use Cloud stealth browser. Omit for local browser control.',
+            "Explicitly use a configured Browser Use Cloud stealth browser. Omit for local browser control.",
         },
         proxy_country_code: {
           type: "string",
@@ -618,7 +731,8 @@ export class BrowserTools {
         },
         browser_use_profile_id: {
           type: "string",
-          description: "Optional Browser Use profile id for persistent cloud browser cookies/state.",
+          description:
+            "Optional Browser Use profile id for persistent cloud browser cookies/state.",
         },
         browser_timeout_minutes: {
           type: "number",
@@ -1035,7 +1149,10 @@ export class BrowserTools {
           type: "object" as const,
           properties: {
             file_path: { type: "string", description: "Workspace file path to upload" },
-            ref: { type: "string", description: "Preferred Browser V2 ref for an input[type=file]" },
+            ref: {
+              type: "string",
+              description: "Preferred Browser V2 ref for an input[type=file]",
+            },
             selector: { type: "string", description: "CSS selector fallback for input[type=file]" },
             session_id: {
               type: "string",
@@ -1291,14 +1408,29 @@ export class BrowserTools {
    * Execute a browser tool
    */
   async executeTool(toolName: string, input: Any): Promise<Any> {
+    this.syncVisibleAccessPolicy(input);
     switch (toolName) {
       case "browser_attach": {
-        const debuggerUrl = typeof input?.debugger_url === "string" ? input.debugger_url.trim() : "";
+        const debuggerUrl =
+          typeof input?.debugger_url === "string" ? input.debugger_url.trim() : "";
         if (!debuggerUrl) {
           return {
             success: false,
-            error: "debugger_url is required. Use http://localhost:9222 or the WebSocket URL from chrome://inspect",
+            error:
+              "debugger_url is required. Use http://localhost:9222 or the WebSocket URL from chrome://inspect",
           };
+        }
+        if (this.workspace.permissions?.network !== true) {
+          return {
+            success: false,
+            error: "Workspace does not have network permission to attach to a browser debugger.",
+          };
+        }
+        let validatedDebuggerUrl: string;
+        try {
+          validatedDebuggerUrl = this.validateDebuggerUrl(debuggerUrl);
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) };
         }
         if (!this.hasExplicitRealBrowserConsent(input)) {
           return {
@@ -1312,11 +1444,11 @@ export class BrowserTools {
         this.browserService = new BrowserService(this.workspace, {
           headless: true,
           timeout: 90000,
-          debuggerUrl,
+          debuggerUrl: validatedDebuggerUrl,
         });
         this.browserState = {
           ...this.browserState,
-          debuggerUrl,
+          debuggerUrl: validatedDebuggerUrl,
         };
         await this.browserService.init();
         const url = this.browserService.getUrl();
@@ -1332,12 +1464,15 @@ export class BrowserTools {
       }
 
       case "browser_navigate": {
+        // Apply the same network/domain policy before choosing visible,
+        // headless, or Browser Use Cloud routing. This prevents a fallback
+        // backend from changing the error or bypassing the guardrail.
+        const navigationUrl = this.ensureVisibleNavigationAllowed(input?.url);
         if (await this.shouldUseVisibleWorkbenchForNavigation(input)) {
-          const visibleUrl = this.ensureVisibleNavigationAllowed(input?.url);
           const visibleResult = await this.browserWorkbenchService.navigate({
             taskId: this.taskId,
             sessionId: this.getSessionId(input),
-            url: visibleUrl,
+            url: navigationUrl,
             waitUntil: input?.wait_until || "load",
           });
           if (visibleResult) {
@@ -1359,7 +1494,7 @@ export class BrowserTools {
           });
         }
         if (this.shouldRouteToBrowserUseCloud(input)) {
-          const url = this.ensureVisibleNavigationAllowed(input?.url);
+          const url = navigationUrl;
           if (isPrivateOrLocalBrowserTarget(url)) {
             return {
               success: false,
@@ -1383,7 +1518,9 @@ export class BrowserTools {
               });
               if (result.isError) {
                 const statusText =
-                  typeof result.status === "number" ? `HTTP ${result.status}` : "unknown HTTP status";
+                  typeof result.status === "number"
+                    ? `HTTP ${result.status}`
+                    : "unknown HTTP status";
                 return {
                   success: false,
                   error: `Navigation failed with ${statusText}`,
@@ -1454,7 +1591,10 @@ export class BrowserTools {
         }
         let result;
         try {
-          if (this.isSystemBrowserProfileRequest(input) && !this.hasExplicitRealBrowserConsent(input)) {
+          if (
+            this.isSystemBrowserProfileRequest(input) &&
+            !this.hasExplicitRealBrowserConsent(input)
+          ) {
             return {
               success: false,
               error:
@@ -1499,6 +1639,21 @@ export class BrowserTools {
             error: `Navigation failed with ${statusText}`,
             ...result,
           };
+        }
+
+        let isWhatsAppUrl = false;
+        try {
+          isWhatsAppUrl = new URL(result.url).hostname.toLowerCase() === "web.whatsapp.com";
+        } catch {
+          // BrowserService normally returns an absolute URL, but leave the
+          // normal navigation result untouched if a provider returns an odd URL.
+        }
+        if (isWhatsAppUrl) {
+          const pageContent = await this.browserService.getContent().catch(() => null);
+          if (pageContent) {
+            const compatibilityIssue = getWhatsAppCompatibilityIssue(pageContent);
+            if (compatibilityIssue) return compatibilityIssue;
+          }
         }
 
         return {
@@ -1548,11 +1703,17 @@ export class BrowserTools {
             taskId: this.taskId,
             sessionId: this.getSessionId(input),
             workspacePath: this.workspace.path,
+            workspacePermissions: this.workspace.permissions,
             filename,
             fullPage: full_page === true,
           });
           if (result) {
-            const fullPath = path.join(this.workspace.path, result.path);
+            const fullPath = assertWorkspaceFilesystemAccess(
+              this.workspace,
+              result.path,
+              "write",
+              "browser screenshot path",
+            );
             this.daemon.logEvent(this.taskId, "file_created", {
               path: result.path,
               type: "screenshot",
@@ -1588,9 +1749,22 @@ export class BrowserTools {
           }
         }
 
-        const result = await this.browserService.screenshot(filename, full_page || false);
+        const output = await this.resolveBrowserOutputPath(
+          filename,
+          `screenshot-${Date.now()}.png`,
+          "browser screenshot path",
+        );
+        const result = await this.browserService.screenshot(output.path, full_page || false, {
+          externalApprovalGranted: output.externalApprovalGranted,
+        });
         // Construct full path for the screenshot
-        const fullPath = path.join(this.workspace.path, result.path);
+        const fullPath = assertWorkspaceFilesystemAccess(
+          this.workspace,
+          result.path,
+          "write",
+          "browser screenshot path",
+          { externalApprovalGranted: output.externalApprovalGranted },
+        );
 
         this.daemon.logEvent(this.taskId, "file_created", {
           path: result.path,
@@ -1669,7 +1843,8 @@ export class BrowserTools {
       case "browser_close_tab": {
         return {
           success: false,
-          error: "Closing the active Browser Workbench tab from tools is disabled to avoid hiding the shared user/agent surface. Use browser_close to close background browser state.",
+          error:
+            "Closing the active Browser Workbench tab from tools is disabled to avoid hiding the shared user/agent surface. Use browser_close to close background browser state.",
         };
       }
 
@@ -1693,7 +1868,7 @@ export class BrowserTools {
           action: "get_content",
           url: result.url,
         });
-        return result;
+        return getWhatsAppCompatibilityIssue(result) || result;
       }
 
       case "browser_click": {
@@ -1715,7 +1890,8 @@ export class BrowserTools {
           }
           return {
             success: false,
-            error: "browser_click ref requires an active visible Browser V2 snapshot. Call browser_snapshot and retry, or use selector.",
+            error:
+              "browser_click ref requires an active visible Browser V2 snapshot. Call browser_snapshot and retry, or use selector.",
           };
         }
         if (typeof input?.selector !== "string" || !input.selector.trim()) {
@@ -1808,7 +1984,8 @@ export class BrowserTools {
           }
           return {
             success: false,
-            error: "browser_fill ref requires an active visible Browser V2 snapshot. Call browser_snapshot and retry, or use selector.",
+            error:
+              "browser_fill ref requires an active visible Browser V2 snapshot. Call browser_snapshot and retry, or use selector.",
           };
         }
         if (typeof input?.selector !== "string" || !input.selector.trim()) {
@@ -1864,7 +2041,8 @@ export class BrowserTools {
           }
           return {
             success: false,
-            error: "browser_type ref requires an active visible Browser V2 snapshot. Call browser_snapshot and retry, or use selector.",
+            error:
+              "browser_type ref requires an active visible Browser V2 snapshot. Call browser_snapshot and retry, or use selector.",
           };
         }
         if (typeof input?.selector !== "string" || !input.selector.trim()) {
@@ -2018,7 +2196,8 @@ export class BrowserTools {
           }
           return {
             success: false,
-            error: "browser_get_text ref requires an active visible Browser V2 snapshot. Call browser_snapshot and retry, or use selector.",
+            error:
+              "browser_get_text ref requires an active visible Browser V2 snapshot. Call browser_snapshot and retry, or use selector.",
           };
         }
         if (typeof input?.selector !== "string" || !input.selector.trim()) {
@@ -2051,7 +2230,8 @@ export class BrowserTools {
         }
         return {
           success: false,
-          error: "browser_upload_file requires an active visible Browser V2 session and a file input ref or selector.",
+          error:
+            "browser_upload_file requires an active visible Browser V2 session and a file input ref or selector.",
         };
       }
 
@@ -2072,19 +2252,28 @@ export class BrowserTools {
       }
 
       case "browser_console": {
-        const result = this.browserWorkbenchService.getConsole(this.taskId, this.getSessionId(input));
+        const result = this.browserWorkbenchService.getConsole(
+          this.taskId,
+          this.getSessionId(input),
+        );
         if (result) return result;
         return { success: true, entries: [] };
       }
 
       case "browser_network": {
-        const result = this.browserWorkbenchService.getNetwork(this.taskId, this.getSessionId(input));
+        const result = this.browserWorkbenchService.getNetwork(
+          this.taskId,
+          this.getSessionId(input),
+        );
         if (result) return result;
         return { success: true, entries: [] };
       }
 
       case "browser_downloads": {
-        const result = this.browserWorkbenchService.getDownloads(this.taskId, this.getSessionId(input));
+        const result = this.browserWorkbenchService.getDownloads(
+          this.taskId,
+          this.getSessionId(input),
+        );
         if (result) return result;
         return { success: true, entries: [] };
       }
@@ -2111,7 +2300,9 @@ export class BrowserTools {
             width: typeof input?.width === "number" ? input.width : undefined,
             height: typeof input?.height === "number" ? input.height : undefined,
             deviceScaleFactor:
-              typeof input?.device_scale_factor === "number" ? input.device_scale_factor : undefined,
+              typeof input?.device_scale_factor === "number"
+                ? input.device_scale_factor
+                : undefined,
             mobile: input?.mobile === true,
           });
           if (result) {
@@ -2247,7 +2438,14 @@ export class BrowserTools {
       }
 
       case "browser_save_pdf": {
-        const result = await this.browserService.savePdf(input.filename);
+        const output = await this.resolveBrowserOutputPath(
+          input.filename,
+          `page-${Date.now()}.pdf`,
+          "browser PDF path",
+        );
+        const result = await this.browserService.savePdf(output.path, {
+          externalApprovalGranted: output.externalApprovalGranted,
+        });
         this.daemon.logEvent(this.taskId, "file_created", {
           path: result.path,
           type: "pdf",
@@ -2317,7 +2515,11 @@ export class BrowserTools {
                   this.getSessionId(input),
                 );
               } else {
-                results.push({ type: actType, success: false, error: `Unknown action type: ${actType}` });
+                results.push({
+                  type: actType,
+                  success: false,
+                  error: `Unknown action type: ${actType}`,
+                });
                 break;
               }
               results.push({
@@ -2409,7 +2611,11 @@ export class BrowserTools {
               );
               results.push({ type: "scroll", success: (r as Any).success });
             } else {
-              results.push({ type: actType, success: false, error: `Unknown action type: ${actType}` });
+              results.push({
+                type: actType,
+                success: false,
+                error: `Unknown action type: ${actType}`,
+              });
               break;
             }
           } catch (err) {
@@ -2450,10 +2656,9 @@ export class BrowserTools {
           });
           return {
             success: false,
-            error:
-              `Closed the local browser connection, but failed to stop Browser Use Cloud session ${
-                pendingCloudSessionId || "(unknown)"
-              }. Retry browser_close to stop the pending remote browser. ${error instanceof Error ? error.message : String(error)}`,
+            error: `Closed the local browser connection, but failed to stop Browser Use Cloud session ${
+              pendingCloudSessionId || "(unknown)"
+            }. Retry browser_close to stop the pending remote browser. ${error instanceof Error ? error.message : String(error)}`,
             browserProvider: "browser-use-cloud",
             browserUseSession: pendingCloudSessionId
               ? {

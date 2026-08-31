@@ -100,7 +100,10 @@ export class OrchestrationRepository {
     return run;
   }
 
-  update(id: string, updates: Partial<Pick<OrchestrationRun, "tasks" | "status" | "completedAt">>): void {
+  update(
+    id: string,
+    updates: Partial<Pick<OrchestrationRun, "tasks" | "status" | "completedAt">>,
+  ): void {
     const fields: string[] = [];
     const values: unknown[] = [];
 
@@ -119,19 +122,23 @@ export class OrchestrationRepository {
 
     if (fields.length === 0) return;
     values.push(id);
-    this.db.prepare(`UPDATE orchestration_runs SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    this.db
+      .prepare(`UPDATE orchestration_runs SET ${fields.join(", ")} WHERE id = ?`)
+      .run(...values);
   }
 
   findById(id: string): OrchestrationRun | undefined {
-    const row = this.db
-      .prepare("SELECT * FROM orchestration_runs WHERE id = ?")
-      .get(id) as RunRow | undefined;
+    const row = this.db.prepare("SELECT * FROM orchestration_runs WHERE id = ?").get(id) as
+      | RunRow
+      | undefined;
     return row ? rowToRun(row) : undefined;
   }
 
   findByRootTaskId(rootTaskId: string): OrchestrationRun | undefined {
     const row = this.db
-      .prepare("SELECT * FROM orchestration_runs WHERE root_task_id = ? ORDER BY created_at DESC LIMIT 1")
+      .prepare(
+        "SELECT * FROM orchestration_runs WHERE root_task_id = ? ORDER BY created_at DESC LIMIT 1",
+      )
       .get(rootTaskId) as RunRow | undefined;
     return row ? rowToRun(row) : undefined;
   }

@@ -3,6 +3,7 @@ import * as path from "path";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
+import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 
 /**
  * GlobTools provides fast pattern-based file search
@@ -109,23 +110,29 @@ export class GlobTools {
           : path.resolve(normalizedWorkspace, searchPath)
         : normalizedWorkspace;
 
-      const isInsideWorkspace = this.isWithinWorkspace(basePath, normalizedWorkspace);
-      if (!isInsideWorkspace && !this.isPathAllowedOutsideWorkspace(basePath)) {
+      const baseAccess = evaluateWorkspaceFilesystemAccess(this.workspace, basePath, "read");
+      if (baseAccess.decision !== "allow") {
         throw new Error("Search path must be within workspace");
       }
+      const checkedBasePath = baseAccess.path;
+      const isInsideWorkspace = this.isWithinWorkspace(checkedBasePath, normalizedWorkspace);
 
-      if (!fs.existsSync(basePath)) {
+      if (!fs.existsSync(checkedBasePath)) {
         throw new Error(`Path does not exist: ${searchPath || "."}`);
       }
       if (
-        basePath !== normalizedWorkspace &&
-        this.isGeneratedSearchRoot(basePath, normalizedWorkspace)
+        checkedBasePath !== normalizedWorkspace &&
+        this.isGeneratedSearchRoot(checkedBasePath, normalizedWorkspace)
       ) {
         throw new Error(`Search path is a generated or dependency directory: ${searchPath || "."}`);
       }
 
       // Parse the glob pattern
-      const { matches, scanTruncated } = await this.findMatches(basePath, pattern, maxResults);
+      const { matches, scanTruncated } = await this.findMatches(
+        checkedBasePath,
+        pattern,
+        maxResults,
+      );
 
       // Sort by modification time (newest first)
       matches.sort((a, b) => b.mtime - a.mtime);
@@ -179,25 +186,6 @@ export class GlobTools {
   private isWithinWorkspace(basePath: string, workspacePath: string): boolean {
     const relative = path.relative(workspacePath, basePath);
     return !relative.startsWith("..") && !path.isAbsolute(relative);
-  }
-
-  private isPathAllowedOutsideWorkspace(basePath: string): boolean {
-    if (this.workspace.isTemp) return true;
-    if (this.workspace.permissions.unrestrictedFileAccess) return true;
-
-    const allowedPaths = this.workspace.permissions.allowedPaths;
-    if (!allowedPaths || allowedPaths.length === 0) {
-      return false;
-    }
-
-    const normalizedPath = path.normalize(basePath);
-    return allowedPaths.some((allowed) => {
-      const normalizedAllowed = path.normalize(allowed);
-      return (
-        normalizedPath === normalizedAllowed ||
-        normalizedPath.startsWith(normalizedAllowed + path.sep)
-      );
-    });
   }
 
   /**
@@ -279,6 +267,12 @@ export class GlobTools {
         const fullPath = path.join(currentPath, entry.name);
         const relativePath = path.relative(basePath, fullPath);
 
+        if (
+          evaluateWorkspaceFilesystemAccess(this.workspace, fullPath, "read").decision !== "allow"
+        ) {
+          continue;
+        }
+
         if (entry.isDirectory()) {
           await this.walkDirectory(
             fullPath,
@@ -338,9 +332,7 @@ export class GlobTools {
     const normalizedRelative = relativePath.endsWith("/")
       ? relativePath.toLowerCase()
       : `${relativePath.toLowerCase()}/`;
-    return GlobTools.SKIP_RELATIVE_PREFIXES.some((prefix) =>
-      normalizedRelative.startsWith(prefix),
-    );
+    return GlobTools.SKIP_RELATIVE_PREFIXES.some((prefix) => normalizedRelative.startsWith(prefix));
   }
 
   private isGeneratedSearchRoot(basePath: string, workspacePath: string): boolean {

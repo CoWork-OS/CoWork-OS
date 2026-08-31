@@ -6,6 +6,13 @@ import type {
   PermissionSettingsData,
   PersistedPermissionRule,
 } from "../../shared/types";
+import {
+  BUILTIN_ACCESS_PROFILE_IDS,
+  BUILTIN_ACCESS_PROFILES,
+  type AccessProfileDefinition,
+  type AccessFilesystemRule,
+  type AccessProfileId,
+} from "../../shared/access-profiles";
 import type { BuiltinToolsSettings as BuiltinToolsSettingsData } from "../../electron/agent/tools/builtin-settings";
 
 type RuleDraft = {
@@ -25,6 +32,8 @@ const DEFAULT_SETTINGS: PermissionSettingsData = {
   defaultMode: "dangerous_only",
   defaultShellEnabled: false,
   defaultPermissionAccess: "default",
+  defaultAccessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+  accessProfiles: [],
   rules: [],
 };
 
@@ -37,6 +46,65 @@ const DEFAULT_RULE_DRAFT: RuleDraft = {
   prefix: "",
   serverName: "",
 };
+
+const DEFAULT_CUSTOM_PROFILE: AccessProfileDefinition = {
+  id: "custom_workspace",
+  label: "Custom workspace",
+  description: "A named CoWork access profile.",
+  sandbox: "workspace-write",
+  approval: "on-request",
+  reviewer: "user",
+  network: "on-request",
+};
+
+function updateProfileList(
+  profiles: AccessProfileDefinition[],
+  profileId: AccessProfileId,
+  patch: Partial<AccessProfileDefinition>,
+): AccessProfileDefinition[] {
+  return profiles.map((profile) =>
+    profile.id === profileId ? { ...profile, ...patch, id: profile.id } : profile,
+  );
+}
+
+function normalizeProfileList(value: string): string[] {
+  return value
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeFilesystemRules(value: string): AccessFilesystemRule[] {
+  const rules = value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const separator = item.indexOf(":");
+      const access = separator >= 0 ? item.slice(0, separator).trim() : "";
+      const rulePath = separator >= 0 ? item.slice(separator + 1).trim() : "";
+      if (!rulePath || !["read", "write", "deny"].includes(access)) return null;
+      return { access: access as AccessFilesystemRule["access"], path: rulePath };
+    })
+    .filter((rule): rule is AccessFilesystemRule => rule !== null);
+  return rules;
+}
+
+function normalizeDomainRules(value: string): NonNullable<AccessProfileDefinition["domainRules"]> {
+  const rules = value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const separator = item.indexOf(":");
+      const access = separator >= 0 ? item.slice(0, separator).trim() : "";
+      const pattern = separator >= 0 ? item.slice(separator + 1).trim() : "";
+      if (!pattern || !["allow", "deny"].includes(access)) return null;
+      return { access: access as "allow" | "deny", pattern };
+    })
+    .filter((rule): rule is { access: "allow" | "deny"; pattern: string } => rule !== null);
+  return rules;
+}
 
 interface PermissionSettingsPanelProps {
   workspaceId?: string;
@@ -55,9 +123,7 @@ export function scopeToLabel(scope: PermissionRuleScope): string {
       }
       return `Domain: ${scope.domain}`;
     case "path":
-      return scope.toolName
-        ? `Path: ${scope.path} (${scope.toolName})`
-        : `Path: ${scope.path}`;
+      return scope.toolName ? `Path: ${scope.path} (${scope.toolName})` : `Path: ${scope.path}`;
     case "command_prefix":
       return `Command prefix: ${scope.prefix}`;
     case "mcp_server":
@@ -103,6 +169,8 @@ export function applyFewerApprovalPromptsPreset<T extends BuiltinToolsSettingsDa
       ...DEFAULT_SETTINGS,
       ...permissionSettings,
       defaultMode: "dangerous_only",
+      defaultAccessProfileId: BUILTIN_ACCESS_PROFILE_IDS.approveForMe,
+      defaultPermissionAccess: "default",
     },
     builtinSettings: {
       ...builtinSettings,
@@ -123,6 +191,8 @@ export function applyStandardApprovalPromptsPreset<T extends BuiltinToolsSetting
       ...DEFAULT_SETTINGS,
       ...permissionSettings,
       defaultMode: "default",
+      defaultAccessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+      defaultPermissionAccess: "default",
     },
     builtinSettings: {
       ...builtinSettings,
@@ -136,13 +206,15 @@ export function detectApprovalExperiencePreset(
   builtinSettings: Pick<BuiltinToolsSettingsData, "runCommandApprovalMode">,
 ): ApprovalExperiencePreset {
   if (
-    permissionSettings.defaultMode === "dangerous_only" &&
+    (permissionSettings.defaultAccessProfileId === BUILTIN_ACCESS_PROFILE_IDS.approveForMe ||
+      permissionSettings.defaultMode === "dangerous_only") &&
     builtinSettings.runCommandApprovalMode === "single_bundle"
   ) {
     return "fewer_prompts";
   }
   if (
-    permissionSettings.defaultMode === "default" &&
+    (permissionSettings.defaultAccessProfileId === BUILTIN_ACCESS_PROFILE_IDS.askForApproval ||
+      permissionSettings.defaultMode === "default") &&
     builtinSettings.runCommandApprovalMode === "per_command"
   ) {
     return "standard";
@@ -160,6 +232,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
   const [workspaceRules, setWorkspaceRules] = useState<PersistedPermissionRule[]>([]);
   const [workspaceRulesLoading, setWorkspaceRulesLoading] = useState(false);
   const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
+  const [newProfile, setNewProfile] = useState<AccessProfileDefinition>(DEFAULT_CUSTOM_PROFILE);
 
   useEffect(() => {
     void loadSettings();
@@ -235,6 +308,11 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       ]);
       setSettings(next.permissionSettings);
       setBuiltinSettings(next.builtinSettings);
+      window.dispatchEvent(
+        new CustomEvent("cowork:permission-settings-updated", {
+          detail: next.permissionSettings,
+        }),
+      );
       setStatusMessage(
         preset === "fewer_prompts"
           ? "Fewer approval prompts enabled."
@@ -335,6 +413,45 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
     }
   }, [ruleDraft]);
 
+  const addCustomProfile = () => {
+    const id = newProfile.id.trim();
+    const label = newProfile.label.trim();
+    if (!id || !label || BUILTIN_ACCESS_PROFILES.some((profile) => profile.id === id)) {
+      setStatusMessage("Choose a unique custom profile ID and label.");
+      return;
+    }
+    if (settings.accessProfiles?.some((profile) => profile.id === id)) {
+      setStatusMessage("That custom profile ID is already in use.");
+      return;
+    }
+    setSettings({
+      ...settings,
+      accessProfiles: [...(settings.accessProfiles || []), { ...newProfile, id, label }],
+    });
+    setNewProfile({
+      ...DEFAULT_CUSTOM_PROFILE,
+      id: `custom_${(settings.accessProfiles?.length || 0) + 2}`,
+      label: "Custom profile",
+    });
+    setStatusMessage("Custom profile added locally. Save to persist it.");
+  };
+
+  const removeCustomProfile = (profileId: AccessProfileId) => {
+    const nextProfiles = (settings.accessProfiles || []).filter(
+      (profile) => profile.id !== profileId,
+    );
+    setSettings({
+      ...settings,
+      accessProfiles: nextProfiles,
+      ...(settings.defaultAccessProfileId === profileId
+        ? { defaultAccessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval }
+        : {}),
+    });
+    setStatusMessage("Custom profile removed locally. Save to persist it.");
+  };
+
+  const inheritanceOptions = [...BUILTIN_ACCESS_PROFILES, ...(settings.accessProfiles || [])];
+
   if (loading) {
     return <div className="settings-loading">Loading permission settings...</div>;
   }
@@ -345,14 +462,14 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
         <h3>Permissions</h3>
       </div>
       <p className="settings-description">
-        Configure the default permission mode, global profile rules, and browse or remove
+        Configure task access profiles, the legacy permission fallback, global profile rules, and
         workspace-local rules for the current workspace.
       </p>
 
       <div className="settings-subsection">
         <h4 style={{ margin: "0 0 8px" }}>Approval experience</h4>
         <p className="settings-hint">
-          Fewer prompts keeps approvals for deletes, risky shell commands, browser/system actions,
+          Fewer prompts keeps approvals for deletes, risky command tools, browser/system actions,
           and external side effects, while letting routine repo work proceed with less friction.
         </p>
         <p className="settings-hint" style={{ marginTop: "6px" }}>
@@ -382,7 +499,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       </div>
 
       <div className="settings-subsection">
-        <label className="settings-label">Default permission mode</label>
+        <label className="settings-label">Legacy fallback mode (advanced)</label>
         <select
           className="settings-select"
           value={settings.defaultMode}
@@ -401,50 +518,323 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
           <option value="bypass_permissions">Bypass permissions</option>
         </select>
         <p className="settings-hint">
-          This mode applies when no explicit permission rule matches. For everyday repo work,
-          `dangerous_only` is the lower-noise option.
+          Named access profiles control new tasks. This compatibility fallback is retained for older
+          tasks and API callers that do not select a profile.
         </p>
       </div>
 
       <div className="settings-subsection">
         <h4 style={{ margin: "0 0 8px" }}>Default access</h4>
-        <label className="settings-checkbox">
-          <input
-            type="checkbox"
-            checked={settings.defaultShellEnabled}
-            onChange={(e) =>
-              setSettings({
-                ...settings,
-                defaultShellEnabled: e.target.checked,
-              })
-            }
-          />
-          <span>Enable Shell for new workspaces</span>
-        </label>
-        <p className="settings-hint">
-          New workspaces will start with the Shell toggle on. Existing workspaces keep their
-          current Shell setting.
-        </p>
-
         <label className="settings-label" style={{ marginTop: "12px" }}>
           New task access
         </label>
         <select
           className="settings-select"
-          value={settings.defaultPermissionAccess}
+          value={
+            settings.defaultAccessProfileId ||
+            (settings.defaultPermissionAccess === "full"
+              ? BUILTIN_ACCESS_PROFILE_IDS.fullAccess
+              : BUILTIN_ACCESS_PROFILE_IDS.askForApproval)
+          }
           onChange={(e) =>
             setSettings({
               ...settings,
-              defaultPermissionAccess: e.target.value === "full" ? "full" : "default",
+              defaultAccessProfileId: e.target.value,
+              defaultPermissionAccess:
+                e.target.value === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? "full" : "default",
             })
           }
         >
-          <option value="default">Default permissions</option>
-          <option value="full">Full access</option>
+          {BUILTIN_ACCESS_PROFILES.map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.label}
+            </option>
+          ))}
+          {(settings.accessProfiles || []).map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.label}
+            </option>
+          ))}
         </select>
         <p className="settings-hint">
-          Full access starts new tasks with permission bypass and Shell access enabled.
+          Command tools are governed by this access profile. Ask and Approve for me use the
+          workspace-write boundary; Full access disables the local sandbox and approval prompts.
+          Custom profiles can narrow the command-tool surface further.
         </p>
+      </div>
+
+      <div className="settings-subsection">
+        <h4 style={{ margin: "0 0 8px" }}>Custom access profiles</h4>
+        <p className="settings-hint">
+          Named profiles are stored in encrypted settings and applied by the main process. Use
+          comma- or newline-separated paths and domains when a profile needs additional scope.
+        </p>
+        {(settings.accessProfiles || []).length === 0 ? (
+          <p className="settings-hint">No custom profiles yet.</p>
+        ) : (
+          <div style={{ display: "grid", gap: "12px" }}>
+            {(settings.accessProfiles || []).map((profile) => (
+              <div
+                key={profile.id}
+                className="settings-inline-input"
+                style={{ display: "grid", gap: "8px" }}
+              >
+                <div className="settings-label">{profile.id}</div>
+                <input
+                  className="settings-input"
+                  value={profile.label}
+                  aria-label={`${profile.id} label`}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
+                        label: e.target.value,
+                      }),
+                    })
+                  }
+                />
+                <input
+                  className="settings-input"
+                  value={profile.description}
+                  aria-label={`${profile.id} description`}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
+                        description: e.target.value,
+                      }),
+                    })
+                  }
+                />
+                <div className="settings-inline-input">
+                  <label htmlFor={`${profile.id}-extends`}>Inherit from</label>
+                  <select
+                    id={`${profile.id}-extends`}
+                    className="settings-select"
+                    value={profile.extends || ""}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        accessProfiles: updateProfileList(
+                          settings.accessProfiles || [],
+                          profile.id,
+                          {
+                            extends: e.target.value
+                              ? (e.target.value as AccessProfileId)
+                              : undefined,
+                          },
+                        ),
+                      })
+                    }
+                  >
+                    <option value="">None</option>
+                    {inheritanceOptions
+                      .filter((candidate) => candidate.id !== profile.id)
+                      .map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.label}
+                        </option>
+                      ))}
+                  </select>
+                  <span className="settings-hint">
+                    Inheritance can narrow access, but cannot widen the parent boundary.
+                  </span>
+                </div>
+                <div className="settings-inline-input">
+                  <label>Sandbox</label>
+                  <select
+                    className="settings-select"
+                    value={profile.sandbox}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        accessProfiles: updateProfileList(
+                          settings.accessProfiles || [],
+                          profile.id,
+                          {
+                            sandbox: e.target.value as AccessProfileDefinition["sandbox"],
+                          },
+                        ),
+                      })
+                    }
+                  >
+                    <option value="read-only">Read-only</option>
+                    <option value="workspace-write">Workspace-write</option>
+                    <option value="danger-full-access">Danger full access</option>
+                  </select>
+                </div>
+                <div className="settings-inline-input">
+                  <label>Approval</label>
+                  <select
+                    className="settings-select"
+                    value={profile.approval}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        accessProfiles: updateProfileList(
+                          settings.accessProfiles || [],
+                          profile.id,
+                          {
+                            approval: e.target.value as AccessProfileDefinition["approval"],
+                          },
+                        ),
+                      })
+                    }
+                  >
+                    <option value="untrusted">Untrusted</option>
+                    <option value="on-request">On request</option>
+                    <option value="never">Never</option>
+                  </select>
+                </div>
+                <div className="settings-inline-input">
+                  <label>Reviewer</label>
+                  <select
+                    className="settings-select"
+                    value={profile.reviewer}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        accessProfiles: updateProfileList(
+                          settings.accessProfiles || [],
+                          profile.id,
+                          {
+                            reviewer: e.target.value as AccessProfileDefinition["reviewer"],
+                          },
+                        ),
+                      })
+                    }
+                  >
+                    <option value="user">User</option>
+                    <option value="auto-review">Auto-review</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+                <div className="settings-inline-input">
+                  <label>Network</label>
+                  <select
+                    className="settings-select"
+                    value={profile.network}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        accessProfiles: updateProfileList(
+                          settings.accessProfiles || [],
+                          profile.id,
+                          {
+                            network: e.target.value as AccessProfileDefinition["network"],
+                          },
+                        ),
+                      })
+                    }
+                  >
+                    <option value="disabled">Disabled</option>
+                    <option value="on-request">On request</option>
+                    <option value="enabled">Enabled</option>
+                  </select>
+                </div>
+                <p className="settings-help">
+                  Command tools follow this profile&apos;s access mode. There is no separate shell
+                  switch.
+                </p>
+                <input
+                  className="settings-input"
+                  value={(profile.workspaceRoots || []).join(", ")}
+                  aria-label={`${profile.id} additional roots`}
+                  placeholder="Additional workspace roots"
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
+                        workspaceRoots: normalizeProfileList(e.target.value),
+                      }),
+                    })
+                  }
+                />
+                <input
+                  className="settings-input"
+                  value={(profile.filesystemRules || [])
+                    .map((rule) => `${rule.access}:${rule.path}`)
+                    .join(", ")}
+                  aria-label={`${profile.id} filesystem rules`}
+                  placeholder="Filesystem rules: read:/path, write:/path, deny:/path"
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
+                        filesystemRules: normalizeFilesystemRules(e.target.value),
+                      }),
+                    })
+                  }
+                />
+                <input
+                  className="settings-input"
+                  value={(profile.domainRules || [])
+                    .map((rule) => `${rule.access}:${rule.pattern}`)
+                    .join(", ")}
+                  aria-label={`${profile.id} domain rules`}
+                  placeholder="Domain rules: allow:example.com, deny:private.example.com"
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
+                        domainRules: normalizeDomainRules(e.target.value),
+                      }),
+                    })
+                  }
+                />
+                <button
+                  className="button-small button-secondary"
+                  onClick={() => removeCustomProfile(profile.id)}
+                >
+                  Remove profile
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div
+          className="settings-inline-input"
+          style={{ display: "grid", gap: "8px", marginTop: "12px" }}
+        >
+          <label>New profile ID</label>
+          <input
+            className="settings-input"
+            value={newProfile.id}
+            onChange={(e) => setNewProfile((profile) => ({ ...profile, id: e.target.value }))}
+            placeholder="custom_workspace"
+          />
+          <label>Display label</label>
+          <input
+            className="settings-input"
+            value={newProfile.label}
+            onChange={(e) => setNewProfile((profile) => ({ ...profile, label: e.target.value }))}
+            placeholder="Custom workspace"
+          />
+          <label htmlFor="new-access-profile-extends">Inherit from</label>
+          <select
+            id="new-access-profile-extends"
+            className="settings-select"
+            value={newProfile.extends || ""}
+            onChange={(e) =>
+              setNewProfile((profile) => ({
+                ...profile,
+                extends: e.target.value ? (e.target.value as AccessProfileId) : undefined,
+              }))
+            }
+          >
+            <option value="">None</option>
+            {inheritanceOptions
+              .filter((candidate) => candidate.id !== newProfile.id)
+              .map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.label}
+                </option>
+              ))}
+          </select>
+          <button className="button-secondary" onClick={addCustomProfile} disabled={saving}>
+            Add custom profile
+          </button>
+        </div>
       </div>
 
       <div className="settings-subsection">
@@ -647,7 +1037,11 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       </div>
 
       <div className="settings-actions" style={{ marginTop: "12px" }}>
-        <button className="button-primary" onClick={() => void saveSettings(settings)} disabled={saving}>
+        <button
+          className="button-primary"
+          onClick={() => void saveSettings(settings)}
+          disabled={saving}
+        >
           {saving ? "Saving..." : "Save Settings"}
         </button>
       </div>

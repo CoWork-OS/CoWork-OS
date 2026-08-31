@@ -119,8 +119,9 @@ export class CoreMemoryDistiller {
         }
       }
 
-      const workspacePath =
-        request.workspaceId ? this.workspaceRepo.findById(request.workspaceId)?.path : undefined;
+      const workspacePath = request.workspaceId
+        ? this.workspaceRepo.findById(request.workspaceId)?.path
+        : undefined;
       if (request.workspaceId && workspacePath) {
         await LayeredMemoryIndexService.refreshIndex({
           workspaceId: request.workspaceId,
@@ -174,17 +175,24 @@ export class CoreMemoryDistiller {
     if (!workspaceId) return null;
     const type = this.mapCandidateToMemoryType(candidate);
     const content = `[core-trace:${candidate.traceId}] [scope:${candidate.scopeKind}:${candidate.scopeRef}] ${candidate.summary}${candidate.details ? `\n${candidate.details}` : ""}`;
-    const archiveEntry = await MemoryService.captureCoreMemory(workspaceId, undefined, type, content, false, {
-      origin: "system",
-      batchKey: `core-memory:${candidate.scopeKind}:${candidate.scopeRef}`,
-      priority: "high",
-      batchable: false,
-      profileId: candidate.profileId,
-      coreTraceId: candidate.traceId,
-      candidateId: candidate.id,
-      scopeKind: candidate.scopeKind,
-      scopeRef: candidate.scopeRef,
-    });
+    const archiveEntry = await MemoryService.captureCoreMemory(
+      workspaceId,
+      undefined,
+      type,
+      content,
+      false,
+      {
+        origin: "system",
+        batchKey: `core-memory:${candidate.scopeKind}:${candidate.scopeRef}`,
+        priority: "high",
+        batchable: false,
+        profileId: candidate.profileId,
+        coreTraceId: candidate.traceId,
+        candidateId: candidate.id,
+        scopeKind: candidate.scopeKind,
+        scopeRef: candidate.scopeRef,
+      },
+    );
     const shouldPromoteToCurated =
       MemoryFeaturesManager.loadSettings().autoPromoteToCuratedMemoryEnabled === true &&
       (candidate.candidateType === "preference" ||

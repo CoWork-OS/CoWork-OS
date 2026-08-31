@@ -98,12 +98,14 @@ export function PDFDocumentSurface({
           const viewport = page.getViewport({ scale: 1.25 });
           nextPages.push({ width: viewport.width, height: viewport.height });
           const textContent = await page.getTextContent();
-          const typedTextItems = (textContent.items as Array<{
-            str?: unknown;
-            transform: number[];
-            width?: number;
-            height?: number;
-          }>)
+          const typedTextItems = (
+            textContent.items as Array<{
+              str?: unknown;
+              transform: number[];
+              width?: number;
+              height?: number;
+            }>
+          )
             .filter((item) => typeof item.str === "string" && item.str.trim().length > 0)
             .map((item) => {
               const text = item.str as string;
@@ -193,7 +195,11 @@ export function PDFDocumentSurface({
       );
     });
     selected.sort((a, b) => a.y - b.y || a.x - b.x);
-    return selected.map((item) => item.str).join(" ").replace(/\s+/g, " ").trim();
+    return selected
+      .map((item) => item.str)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
   };
 
   const updateDraft = (pageIndex: number, clientX: number, clientY: number) => {
@@ -274,7 +280,11 @@ export function PDFDocumentSurface({
                       updateDraft(pageIndex, event.clientX, event.clientY);
                     }
               }
-              onPointerMove={readOnly ? undefined : (event) => updateDraft(pageIndex, event.clientX, event.clientY)}
+              onPointerMove={
+                readOnly
+                  ? undefined
+                  : (event) => updateDraft(pageIndex, event.clientX, event.clientY)
+              }
               onPointerUp={
                 readOnly
                   ? undefined

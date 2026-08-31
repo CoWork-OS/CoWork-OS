@@ -27,7 +27,7 @@ That gives the product a stronger operating shape than a one-shot "improve yours
 | Coordination model | Global brain with namespaced target histories |
 | Dispatch behavior | Reviewable suggestion by default; guarded auto-create only when policy, trust, and risk allow it |
 | Code execution | Downstream executor with worktree isolation and verification |
-| Safety boundary | Existing executor approvals and policies, not a separate reflective gate |
+| Safety boundary | The task's [access profile](access-profiles.md), existing executor approvals, and policies; reflection is not a separate access grant |
 
 ## Why This Matters
 

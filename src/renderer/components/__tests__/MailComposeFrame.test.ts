@@ -6,7 +6,9 @@ import { extractAssistantMailDraft, formatRecipients, parseRecipients } from "..
 describe("MailComposeFrame recipient helpers", () => {
   it("parses plain, named, semicolon, and newline-separated recipients", () => {
     expect(
-      parseRecipients('alice@example.com; Bob Example <bob@example.com>\n"Carol" <carol@example.com>'),
+      parseRecipients(
+        'alice@example.com; Bob Example <bob@example.com>\n"Carol" <carol@example.com>',
+      ),
     ).toEqual([
       { email: "alice@example.com" },
       { name: "Bob Example", email: "bob@example.com" },

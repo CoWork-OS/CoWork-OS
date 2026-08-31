@@ -7,7 +7,13 @@ import {
 } from "../database/repositories";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { createLogger } from "../utils/logger";
-import type { CuratedMemoryKind, CuratedMemoryTarget, MemoryWriteApprovalItem } from "../../shared/types";
+import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
+import type {
+  CuratedMemoryKind,
+  CuratedMemoryTarget,
+  MemoryWriteApprovalItem,
+  Workspace,
+} from "../../shared/types";
 
 const logger = createLogger("MemoryWriteGate");
 
@@ -162,7 +168,10 @@ export class MemoryWriteGate {
     }
   }
 
-  static markApplied(id: string, resolution = "Applied approved memory write."): PendingMemoryWrite | undefined {
+  static markApplied(
+    id: string,
+    resolution = "Applied approved memory write.",
+  ): PendingMemoryWrite | undefined {
     this.ensureInitialized();
     return this.pendingRepo.updateStatusIfCurrent(id, "applying", "applied", { resolution });
   }
@@ -258,6 +267,7 @@ export class MemoryWriteGate {
       throw new Error("Pending archive memory payload is missing type or content.");
     }
     const options = this.asPlainObject(payload.options);
+    const workspace = this.getStoredWorkspace(pending.workspaceId);
     const memory = await MemoryService.capture(
       pending.workspaceId,
       pending.taskId,
@@ -267,6 +277,7 @@ export class MemoryWriteGate {
       {
         ...options,
         skipMemoryWriteGate: true,
+        allowExternalMirror: this.isExternalMemoryReplayAllowed(workspace),
       },
     );
     if (!memory) {
@@ -277,6 +288,9 @@ export class MemoryWriteGate {
   private static async replayCurated(pending: PendingMemoryWrite): Promise<void> {
     const { CuratedMemoryService } = await import("./CuratedMemoryService");
     const payload = pending.payload;
+    const filesystemGuards = this.getCuratedFilesystemGuards(
+      this.getStoredWorkspace(pending.workspaceId),
+    );
     const action = this.asString(payload.action);
     const target = this.asCuratedTarget(payload.target);
     if (action === "upsert") {
@@ -301,6 +315,7 @@ export class MemoryWriteGate {
         confidence: typeof payload.confidence === "number" ? payload.confidence : 0.8,
         source,
         skipMemoryWriteGate: true,
+        ...filesystemGuards,
       });
       if (!entry) {
         throw new Error("Approved curated upsert did not produce an entry.");
@@ -325,6 +340,7 @@ export class MemoryWriteGate {
       match: this.asString(payload.match),
       reason: this.asString(payload.reason) || pending.reason,
       skipMemoryWriteGate: true,
+      ...filesystemGuards,
     });
     if (!result.success) {
       throw new Error(result.error || "Approved curated memory write failed.");
@@ -334,6 +350,12 @@ export class MemoryWriteGate {
   private static async replayExternal(pending: PendingMemoryWrite): Promise<void> {
     const { SupermemoryService } = await import("./SupermemoryService");
     const payload = pending.payload;
+    const storedWorkspace = this.getStoredWorkspace(pending.workspaceId);
+    if (!this.isExternalMemoryReplayAllowed(storedWorkspace)) {
+      throw new Error(
+        "Approved external memory write was blocked because the workspace no longer permits automatic network access.",
+      );
+    }
     const workspace = this.getWorkspaceRef(pending.workspaceId);
     if (pending.action === "remember") {
       const content = this.asString(payload.content);
@@ -384,6 +406,38 @@ export class MemoryWriteGate {
     return { id: workspaceId, name: workspaceId };
   }
 
+  private static getStoredWorkspace(workspaceId: string): Workspace | undefined {
+    try {
+      if (!this.db) return undefined;
+      return new WorkspaceRepository(this.db).findById(workspaceId);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static getCuratedFilesystemGuards(workspace: Workspace | undefined): {
+    filesystemReadGuard?: (candidatePath: string) => boolean;
+    filesystemWriteGuard?: (candidatePath: string) => boolean;
+  } {
+    if (!workspace?.path) return {};
+    return {
+      filesystemReadGuard: (candidatePath) =>
+        evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "read").decision === "allow",
+      filesystemWriteGuard: (candidatePath) =>
+        evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "write").decision === "allow",
+    };
+  }
+
+  private static isExternalMemoryReplayAllowed(workspace: Workspace | undefined): boolean {
+    if (!workspace?.permissions) return true;
+    return (
+      workspace.permissions.network === true &&
+      workspace.permissions.accessProfileUnavailable !== true &&
+      workspace.permissions.accessNetworkMode !== "disabled" &&
+      workspace.permissions.accessNetworkMode !== "on-request"
+    );
+  }
+
   private static normalizeMode(value: unknown) {
     if (typeof value !== "string") return null;
     const normalized = value.trim();
@@ -397,7 +451,9 @@ export class MemoryWriteGate {
   }
 
   private static normalizeSummary(summary: string): string {
-    const normalized = String(summary || "").replace(/\s+/g, " ").trim();
+    const normalized = String(summary || "")
+      .replace(/\s+/g, " ")
+      .trim();
     return normalized.slice(0, 240) || "Pending memory write";
   }
 
@@ -459,7 +515,10 @@ export class MemoryWriteGate {
       .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
       .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, "sk-[redacted]")
       .replace(/\bgh[pousr]_[A-Za-z0-9_]{12,}\b/g, "gh_[redacted]")
-      .replace(/-----BEGIN [^-]+ PRIVATE KEY-----[\s\S]*?-----END [^-]+ PRIVATE KEY-----/g, "[redacted private key]");
+      .replace(
+        /-----BEGIN [^-]+ PRIVATE KEY-----[\s\S]*?-----END [^-]+ PRIVATE KEY-----/g,
+        "[redacted private key]",
+      );
   }
 
   private static isSensitiveKey(key: string): boolean {
@@ -468,13 +527,16 @@ export class MemoryWriteGate {
 
   private static containsSensitiveDisplayContent(value: unknown): boolean {
     if (typeof value === "string") {
-      return /\b(api[_-]?key|secret|password|token|credential)\s*[:=]\s*\S+/i.test(value) ||
+      return (
+        /\b(api[_-]?key|secret|password|token|credential)\s*[:=]\s*\S+/i.test(value) ||
         /\bBearer\s+[A-Za-z0-9._~+/-]+=*/i.test(value) ||
         /\bsk-[A-Za-z0-9_-]{12,}\b/.test(value) ||
         /\bgh[pousr]_[A-Za-z0-9_]{12,}\b/.test(value) ||
-        /-----BEGIN [^-]+ PRIVATE KEY-----/.test(value);
+        /-----BEGIN [^-]+ PRIVATE KEY-----/.test(value)
+      );
     }
-    if (Array.isArray(value)) return value.some((item) => this.containsSensitiveDisplayContent(item));
+    if (Array.isArray(value))
+      return value.some((item) => this.containsSensitiveDisplayContent(item));
     if (!value || typeof value !== "object") return false;
     return Object.entries(value).some(
       ([key, nested]) => this.isSensitiveKey(key) || this.containsSensitiveDisplayContent(nested),

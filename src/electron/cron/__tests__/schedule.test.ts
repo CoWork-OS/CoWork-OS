@@ -2,7 +2,16 @@
  * Tests for cron schedule computation
  */
 
-import { afterAll, beforeAll, describe, it, expect, beforeEach, vi as _vi, afterEach } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  it,
+  expect,
+  beforeEach,
+  vi as _vi,
+  afterEach,
+} from "vitest";
 import { computeNextRunAtMs } from "../schedule";
 import type { CronSchedule } from "../types";
 

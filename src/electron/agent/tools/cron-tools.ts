@@ -142,6 +142,28 @@ export class CronTools {
       return { success: false, error: (error as Error).message };
     }
 
+    const sourceTask =
+      typeof this.daemon.getTask === "function" ? this.daemon.getTask(this.taskId) : undefined;
+    const inheritedAccessProfileId =
+      typeof sourceTask?.agentConfig?.accessProfileId === "string" &&
+      sourceTask.agentConfig.accessProfileId.trim().length > 0
+        ? sourceTask.agentConfig.accessProfileId.trim()
+        : undefined;
+    const inheritedLegacyAgentConfig = inheritedAccessProfileId
+      ? undefined
+      : sourceTask?.agentConfig &&
+          (sourceTask.agentConfig.permissionMode !== undefined ||
+            sourceTask.agentConfig.shellAccess !== undefined)
+        ? {
+            ...(sourceTask.agentConfig.permissionMode
+              ? { permissionMode: sourceTask.agentConfig.permissionMode }
+              : {}),
+            ...(sourceTask.agentConfig.shellAccess !== undefined
+              ? { shellAccess: sourceTask.agentConfig.shellAccess }
+              : {}),
+          }
+        : undefined;
+
     // Create the job
     const jobCreate: CronJobCreate = {
       name: params.name,
@@ -152,6 +174,8 @@ export class CronTools {
       workspaceId: this.workspace.id,
       taskPrompt: params.prompt,
       taskTitle: params.name,
+      ...(inheritedAccessProfileId ? { accessProfileId: inheritedAccessProfileId } : {}),
+      ...(inheritedLegacyAgentConfig ? { taskAgentConfig: inheritedLegacyAgentConfig } : {}),
       runMode:
         params.target === "current_thread" || params.target === "task"
           ? "thread_follow_up"

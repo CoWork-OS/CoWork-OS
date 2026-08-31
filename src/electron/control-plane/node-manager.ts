@@ -9,7 +9,13 @@ import { EventEmitter } from "events";
 import type { ControlPlaneServer } from "./server";
 import type { ControlPlaneClient, NodeCapabilityType, NodePlatform } from "./client";
 import type { NodeInfo, NodeInvokeParams, NodeInvokeResult } from "../../shared/types";
-import { Events as _Events, Methods as _Methods, ErrorCodes, createRequestFrame as _createRequestFrame, createResponseFrame as _createResponseFrame } from "./protocol";
+import {
+  Events as _Events,
+  Methods as _Methods,
+  ErrorCodes,
+  createRequestFrame as _createRequestFrame,
+  createResponseFrame as _createResponseFrame,
+} from "./protocol";
 
 /**
  * Node Manager event types

@@ -1,7 +1,4 @@
-import type {
-  RuntimeToolConcurrencyClass,
-  RuntimeToolMetadata,
-} from "../../../shared/types";
+import type { RuntimeToolConcurrencyClass, RuntimeToolMetadata } from "../../../shared/types";
 import { isComputerUseToolName } from "../../../shared/computer-use-contract";
 import {
   canonicalizeToolName,
@@ -35,9 +32,7 @@ export interface RuntimeToolSchedulerSpec {
     input: Any;
     runtime?: RuntimeToolMetadata;
   }) => ToolExecutionScopeKey[];
-  postExecutionEffect?: (
-    args: RuntimeToolSchedulerPostExecutionEffectArgs,
-  ) => Promise<void> | void;
+  postExecutionEffect?: (args: RuntimeToolSchedulerPostExecutionEffectArgs) => Promise<void> | void;
 }
 
 export interface RuntimeToolSchedulerSpecContext {
@@ -46,9 +41,7 @@ export interface RuntimeToolSchedulerSpecContext {
   runtime?: RuntimeToolMetadata;
 }
 
-export type RuntimeToolSchedulerSpecOverride =
-  | Partial<RuntimeToolSchedulerSpec>
-  | undefined;
+export type RuntimeToolSchedulerSpecOverride = Partial<RuntimeToolSchedulerSpec> | undefined;
 
 export type RuntimeToolSchedulerSpecResolver = (
   args: RuntimeToolSchedulerSpecContext,
@@ -173,8 +166,7 @@ export function resolveRuntimeToolSchedulerSpec(
     ...resolved,
     ...override,
     resolveScopeKeys: override.resolveScopeKeys || resolved.resolveScopeKeys,
-    postExecutionEffect:
-      override.postExecutionEffect || resolved.postExecutionEffect,
+    postExecutionEffect: override.postExecutionEffect || resolved.postExecutionEffect,
   };
 }
 
@@ -200,9 +192,7 @@ export function resolveToolExecutionScopeKeys(args: {
   });
 }
 
-export function serializeToolExecutionScopeKey(
-  scopeKey: ToolExecutionScopeKey,
-): string {
+export function serializeToolExecutionScopeKey(scopeKey: ToolExecutionScopeKey): string {
   return `${scopeKey.kind}:${scopeKey.key}`;
 }
 
@@ -282,10 +272,7 @@ function inferSchedulerIdempotent(toolName: string, readOnly: boolean): boolean 
   );
 }
 
-function inferSchedulerScopeKeys(
-  toolName: string,
-  input: Any,
-): ToolExecutionScopeKey[] {
+function inferSchedulerScopeKeys(toolName: string, input: Any): ToolExecutionScopeKey[] {
   if (toolName.startsWith("browser_")) {
     return [
       {

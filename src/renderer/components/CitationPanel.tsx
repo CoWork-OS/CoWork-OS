@@ -193,12 +193,9 @@ export const CitationBadge: React.FC<{
         height: 18,
         padding: "0 4px",
         borderRadius: 4,
-        background: hovered && isClickable
-          ? "var(--accent-color, #60a5fa)"
-          : "var(--accent-bg, #2563eb22)",
-        color: hovered && isClickable
-          ? "#fff"
-          : "var(--accent-color, #60a5fa)",
+        background:
+          hovered && isClickable ? "var(--accent-color, #60a5fa)" : "var(--accent-bg, #2563eb22)",
+        color: hovered && isClickable ? "#fff" : "var(--accent-color, #60a5fa)",
         fontSize: 10,
         fontWeight: 600,
         cursor: isClickable ? "pointer" : "default",

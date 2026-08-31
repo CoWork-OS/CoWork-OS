@@ -25,9 +25,7 @@ function truncate(value: string, length = 240): string {
 }
 
 function humanizeToken(token: string): string {
-  return token
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  return token.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function getEffectiveEventType(event: TaskEvent): string {
@@ -138,14 +136,20 @@ function formatBadge(label: string, tone?: TaskTraceBadge["tone"]): TaskTraceBad
   return { label, ...(tone ? { tone } : {}) };
 }
 
-function buildInspectorFields(entries: Array<[string, string | undefined]>): TaskTraceInspectorField[] {
+function buildInspectorFields(
+  entries: Array<[string, string | undefined]>,
+): TaskTraceInspectorField[] {
   return entries
-    .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0)
+    .filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0,
+    )
     .map(([label, value]) => ({ label, value }));
 }
 
 function getSemanticEventDuration(event: UiTimelineEvent): number | undefined {
-  return "durationMs" in event && typeof event.durationMs === "number" ? event.durationMs : undefined;
+  return "durationMs" in event && typeof event.durationMs === "number"
+    ? event.durationMs
+    : undefined;
 }
 
 function getSemanticEventActionKind(event: UiTimelineEvent): string | undefined {
@@ -343,13 +347,17 @@ export function buildTaskTraceDebugRows(rawEvents: TaskEvent[]): TaskTraceRow[] 
       formatBadge(humanizeToken(effectiveType)),
       ...(status ? [formatBadge(humanizeToken(status), toStatusTone(status))] : []),
       ...(typeof event.seq === "number" ? [formatBadge(`seq ${event.seq}`)] : []),
-      ...(typeof durationMs === "number" ? [formatBadge(`${Math.max(1, Math.round(durationMs / 1000))}s`)] : []),
+      ...(typeof durationMs === "number"
+        ? [formatBadge(`${Math.max(1, Math.round(durationMs / 1000))}s`)]
+        : []),
     ];
 
     const delta = asObject(payload.delta);
     if (effectiveType === "llm_usage") {
-      if (typeof delta.inputTokens === "number") badges.push(formatBadge(`in ${delta.inputTokens}`));
-      if (typeof delta.outputTokens === "number") badges.push(formatBadge(`out ${delta.outputTokens}`));
+      if (typeof delta.inputTokens === "number")
+        badges.push(formatBadge(`in ${delta.inputTokens}`));
+      if (typeof delta.outputTokens === "number")
+        badges.push(formatBadge(`out ${delta.outputTokens}`));
     }
 
     return {

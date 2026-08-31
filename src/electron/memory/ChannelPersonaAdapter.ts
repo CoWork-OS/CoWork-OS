@@ -218,10 +218,7 @@ export class ChannelPersonaAdapter {
    * @param gatewayContext - Whether this is a private, group, or public conversation
    * @returns Channel-specific directive string (empty if disabled or desktop)
    */
-  static adaptForChannel(
-    channelType?: ChannelType,
-    gatewayContext?: GatewayContext,
-  ): string {
+  static adaptForChannel(channelType?: ChannelType, gatewayContext?: GatewayContext): string {
     // Check guardrail
     const settings = GuardrailManager.loadSettings();
     if (!settings.channelPersonaEnabled) {
@@ -247,7 +244,9 @@ export class ChannelPersonaAdapter {
         );
         break;
       case "longer":
-        lines.push("- Thorough responses are appropriate on this platform when the topic warrants it.");
+        lines.push(
+          "- Thorough responses are appropriate on this platform when the topic warrants it.",
+        );
         break;
     }
 

@@ -78,7 +78,12 @@ function normalizeEmail(value: unknown): string | undefined {
 function normalizeDomain(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const atIndex = value.lastIndexOf("@");
-  return atIndex === -1 ? undefined : value.slice(atIndex + 1).trim().toLowerCase() || undefined;
+  return atIndex === -1
+    ? undefined
+    : value
+        .slice(atIndex + 1)
+        .trim()
+        .toLowerCase() || undefined;
 }
 
 function formatGmailAfterDate(timestampMs: number): string {
@@ -349,8 +354,7 @@ export class MailboxForwardingService {
     let earliest: number | undefined;
     for (const automation of automations) {
       const nextRunAt =
-        automation.nextRunAt ??
-        computeNextRunAtMs(automation.forward!.schedule, now);
+        automation.nextRunAt ?? computeNextRunAtMs(automation.forward!.schedule, now);
       if (nextRunAt !== automation.nextRunAt) {
         MailboxAutomationRegistry.setForwardNextRun(automation.id, nextRunAt);
       }
@@ -433,7 +437,11 @@ export class MailboxForwardingService {
         ? computeNextRunAtMs(automation.forward.schedule, Date.now())
         : automation.nextRunAt;
       MailboxAutomationRegistry.markForwardRunFinished(automation.id, {
-        status: shouldRemainActive ? (nextRunAt === undefined ? "paused" : "error") : automation.status,
+        status: shouldRemainActive
+          ? nextRunAt === undefined
+            ? "paused"
+            : "error"
+          : automation.status,
         latestOutcome: "Forwarding run failed",
         latestError: error instanceof Error ? error.message : String(error),
         latestFireAt: runAtMs,
@@ -505,7 +513,7 @@ export class MailboxForwardingService {
         } else if (outcome.status === "already_sent") {
           alreadySentMessages += 1;
         } else if (outcome.status === "failed") {
-        failedMessages += 1;
+          failedMessages += 1;
         }
       }
 
@@ -704,7 +712,10 @@ export class MailboxForwardingService {
     };
   }
 
-  private async getOrCreateLabels(settings: Any, recipe: MailboxForwardRecipe): Promise<{
+  private async getOrCreateLabels(
+    settings: Any,
+    recipe: MailboxForwardRecipe,
+  ): Promise<{
     forwarded: string;
     rejected: string;
     candidate: string;

@@ -4,6 +4,12 @@ CoWork can accept uploaded videos in task and follow-up prompts, extract represe
 
 This feature is for analyzing a user-provided video. It is separate from video generation, YouTube transcript ingestion, Browser Workbench screenshots, and the `manim-video` skill.
 
+Video attachment reads, workspace copies, frame extraction, and image
+analysis remain subject to the task's [access profile](access-profiles.md),
+attachment validation, provider capability, and export rules. The generated
+frame preview is not a permission bypass: it cannot grant broader local-file,
+command-tool, network, or device access.
+
 ## User Experience
 
 Attach a local `.mp4`, `.mov`, or `.webm` file to a task and ask a visual question such as:

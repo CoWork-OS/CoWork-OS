@@ -102,7 +102,10 @@ class MockDb {
             if (!(session.workspace_id === legacyId || session.workspace_id.startsWith(prefix)))
               continue;
             const lastActivity = Number(session.last_activity_at ?? 0);
-            if (session.state === "idle" && !(Number.isFinite(lastActivity) && lastActivity >= cutoffMs))
+            if (
+              session.state === "idle" &&
+              !(Number.isFinite(lastActivity) && lastActivity >= cutoffMs)
+            )
               continue;
             if (seen.has(session.workspace_id)) continue;
             seen.add(session.workspace_id);
@@ -118,7 +121,8 @@ class MockDb {
         get: (workspaceId: string, ...statuses: string[]) => {
           const allowed = new Set(statuses.map((status) => String(status || "")));
           return this.tasks.find(
-            (task) => task.workspace_id === workspaceId && (allowed.size === 0 || allowed.has(task.status)),
+            (task) =>
+              task.workspace_id === workspaceId && (allowed.size === 0 || allowed.has(task.status)),
           );
         },
       };
@@ -417,7 +421,9 @@ describe("pruneTempWorkspaces", () => {
     expect(result.checkedRows).toBe(1);
     expect(result.checkedDirs).toBe(2);
     expect(result.candidateWorkspaceIds).toEqual([staleWorkspace.id]);
-    expect(result.candidateDirPaths).toEqual(expect.arrayContaining([staleWorkspace.dir, orphanDir]));
+    expect(result.candidateDirPaths).toEqual(
+      expect.arrayContaining([staleWorkspace.dir, orphanDir]),
+    );
     expect(fs.existsSync(staleWorkspace.dir)).toBe(true);
     expect(fs.existsSync(orphanDir)).toBe(true);
     expect(db.workspaces.some((workspace) => workspace.id === staleWorkspace.id)).toBe(true);

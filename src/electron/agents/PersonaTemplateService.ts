@@ -272,9 +272,7 @@ export class PersonaTemplateService {
   /**
    * Build the soul JSON data with template provenance only.
    */
-  private buildSoulData(
-    template: PersonaTemplate,
-  ): Record<string, unknown> {
+  private buildSoulData(template: PersonaTemplate): Record<string, unknown> {
     // Parse the template's base soul JSON
     let baseSoul: Record<string, unknown> = {};
     try {

@@ -22,9 +22,7 @@ describe("ToolBatchExecutor", () => {
     expect(messages).toEqual([
       {
         role: "assistant",
-        content: [
-          { type: "tool_use", id: "tool-1", name: "read_file", input: { path: "a.ts" } },
-        ],
+        content: [{ type: "tool_use", id: "tool-1", name: "read_file", input: { path: "a.ts" } }],
       },
       {
         role: "user",

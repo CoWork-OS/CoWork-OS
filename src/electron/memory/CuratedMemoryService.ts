@@ -34,6 +34,13 @@ type FileSnapshot = {
   mtimeMs: number;
 };
 
+export type CuratedMemoryFilesystemGuard = (candidatePath: string) => boolean;
+
+interface SyncWorkspaceFilesOptions {
+  readGuard?: CuratedMemoryFilesystemGuard;
+  writeGuard?: CuratedMemoryFilesystemGuard;
+}
+
 function normalizeMemoryKey(value: string): string {
   return String(value || "")
     .toLowerCase()
@@ -164,6 +171,8 @@ export class CuratedMemoryService {
     reason?: string;
     origin?: MemoryWriteOrigin;
     skipMemoryWriteGate?: boolean;
+    filesystemReadGuard?: CuratedMemoryFilesystemGuard;
+    filesystemWriteGuard?: CuratedMemoryFilesystemGuard;
   }): Promise<{
     success: boolean;
     entry?: CuratedMemoryEntry;
@@ -190,13 +199,25 @@ export class CuratedMemoryService {
       return { success: false, error: "remove requires either id or match" };
     }
 
+    const syncAccessError = this.validateSyncAccess(
+      params.workspaceId,
+      params.filesystemReadGuard,
+      params.filesystemWriteGuard,
+    );
+    if (syncAccessError) {
+      return { success: false, error: syncAccessError };
+    }
+
     let entry: CuratedMemoryEntryRecord | undefined;
     const existingById = hasStableId ? this.curatedRepo.findById(params.id!.trim()) : undefined;
     if (
       existingById &&
       (existingById.workspaceId !== params.workspaceId || existingById.target !== params.target)
     ) {
-      return { success: false, error: "Curated memory id does not belong to this workspace/target" };
+      return {
+        success: false,
+        error: "Curated memory id does not belong to this workspace/target",
+      };
     }
     const resolvedMatch =
       params.action === "add"
@@ -220,8 +241,7 @@ export class CuratedMemoryService {
     }
 
     if (!params.skipMemoryWriteGate) {
-      const oldValue =
-        params.action === "add" ? undefined : resolvedMatch?.entry?.content;
+      const oldValue = params.action === "add" ? undefined : resolvedMatch?.entry?.content;
       const gate = MemoryWriteGate.evaluate({
         workspaceId: params.workspaceId,
         taskId: params.taskId,
@@ -301,7 +321,10 @@ export class CuratedMemoryService {
       }
     }
 
-    await this.syncWorkspaceFiles(params.workspaceId);
+    await this.syncWorkspaceFiles(params.workspaceId, {
+      readGuard: params.filesystemReadGuard,
+      writeGuard: params.filesystemWriteGuard,
+    });
     return {
       success: !!entry,
       entry,
@@ -319,10 +342,22 @@ export class CuratedMemoryService {
     confidence: number;
     source?: CuratedMemoryEntry["source"];
     skipMemoryWriteGate?: boolean;
+    filesystemReadGuard?: CuratedMemoryFilesystemGuard;
+    filesystemWriteGuard?: CuratedMemoryFilesystemGuard;
   }): Promise<CuratedMemoryEntry | null> {
     this.ensureInitialized();
     const content = normalizeCuratedContent(params.content || "");
     if (!content) return null;
+
+    if (
+      this.validateSyncAccess(
+        params.workspaceId,
+        params.filesystemReadGuard,
+        params.filesystemWriteGuard,
+      )
+    ) {
+      return null;
+    }
 
     const normalizedKey = normalizeMemoryKey(content);
     if (!params.skipMemoryWriteGate) {
@@ -370,11 +405,17 @@ export class CuratedMemoryService {
           lastConfirmedAt: Date.now(),
         });
 
-    await this.syncWorkspaceFiles(params.workspaceId);
+    await this.syncWorkspaceFiles(params.workspaceId, {
+      readGuard: params.filesystemReadGuard,
+      writeGuard: params.filesystemWriteGuard,
+    });
     return entry || null;
   }
 
-  static async syncWorkspaceFiles(workspaceId: string): Promise<void> {
+  static async syncWorkspaceFiles(
+    workspaceId: string,
+    options: SyncWorkspaceFilesOptions = {},
+  ): Promise<void> {
     this.ensureInitialized();
     const previous = this.syncQueueByWorkspace.get(workspaceId) || Promise.resolve();
     const next = previous
@@ -386,6 +427,16 @@ export class CuratedMemoryService {
         const root = path.join(workspace.path, ".cowork");
         const userPath = path.join(root, "USER.md");
         const memoryPath = path.join(root, "MEMORY.md");
+        const canRead = (candidatePath: string): boolean =>
+          !options.readGuard || options.readGuard(candidatePath) === true;
+        const canWrite = (candidatePath: string): boolean =>
+          !options.writeGuard || options.writeGuard(candidatePath) === true;
+        if (!canRead(root) || !canRead(userPath) || !canRead(memoryPath)) {
+          throw new Error("Access denied while reading curated memory files.");
+        }
+        if (!canWrite(root) || !canWrite(userPath) || !canWrite(memoryPath)) {
+          throw new Error("Access denied while writing curated memory files.");
+        }
         const userEntries = this.curatedRepo.list({
           workspaceId,
           target: "user",
@@ -426,6 +477,26 @@ export class CuratedMemoryService {
     await next;
   }
 
+  private static validateSyncAccess(
+    workspaceId: string,
+    readGuard?: CuratedMemoryFilesystemGuard,
+    writeGuard?: CuratedMemoryFilesystemGuard,
+  ): string | undefined {
+    if (!readGuard && !writeGuard) return undefined;
+    const workspace = this.workspaceRepo.findById(workspaceId);
+    if (!workspace?.path) return "Workspace path is unavailable for curated memory sync.";
+
+    const root = path.join(workspace.path, ".cowork");
+    const paths = [root, path.join(root, "USER.md"), path.join(root, "MEMORY.md")];
+    if (readGuard && paths.some((candidatePath) => readGuard(candidatePath) !== true)) {
+      return "Active access profile does not allow reading curated memory files.";
+    }
+    if (writeGuard && paths.some((candidatePath) => writeGuard(candidatePath) !== true)) {
+      return "Active access profile does not allow writing curated memory files.";
+    }
+    return undefined;
+  }
+
   private static findMatchCandidate(
     workspaceId: string,
     target: CuratedMemoryTarget,
@@ -448,7 +519,9 @@ export class CuratedMemoryService {
       limit: 200,
     });
 
-    const exactMatches = entries.filter((entry) => normalizeMemoryKey(entry.content) === normalizedMatch);
+    const exactMatches = entries.filter(
+      (entry) => normalizeMemoryKey(entry.content) === normalizedMatch,
+    );
     if (exactMatches.length === 1) {
       return { entry: exactMatches[0] };
     }
@@ -501,7 +574,9 @@ export class CuratedMemoryService {
       await fs.writeFile(params.filePath, next, "utf8");
       return;
     }
-    throw new Error(`Concurrent update detected while syncing curated memory file: ${params.filePath}`);
+    throw new Error(
+      `Concurrent update detected while syncing curated memory file: ${params.filePath}`,
+    );
   }
 
   private static ensureInitialized(): void {

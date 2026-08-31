@@ -86,7 +86,7 @@ function buildZshPromptSetup(): string {
     "RPROMPT=''",
     "RPS1=''",
     "function __cowork_terminal_emit_cwd() {",
-    "  printf '\\e]7;file://%s%s\\a' \"$HOST\" \"${PWD// /%20}\"",
+    '  printf \'\\e]7;file://%s%s\\a\' "$HOST" "${PWD// /%20}"',
     "}",
     "autoload -Uz add-zsh-hook 2>/dev/null",
     "if (( $+functions[add-zsh-hook] )); then",
@@ -120,7 +120,12 @@ function ensureNodePtySpawnHelperExecutable(): void {
   nodePtyHelperChecked = true;
   try {
     const packageRoot = path.dirname(require.resolve("node-pty/package.json"));
-    const helperPath = path.join(packageRoot, "prebuilds", `darwin-${process.arch}`, "spawn-helper");
+    const helperPath = path.join(
+      packageRoot,
+      "prebuilds",
+      `darwin-${process.arch}`,
+      "spawn-helper",
+    );
     if (!fs.existsSync(helperPath)) return;
     const stat = fs.statSync(helperPath);
     if ((stat.mode & 0o111) !== 0) return;
@@ -166,9 +171,13 @@ export class TerminalPtyManager {
     cols?: number;
     rows?: number;
   }): ShellSessionInfo {
-    const existingTabs = this.listTabs(params.workspaceId).sort((a, b) => a.updatedAt - b.updatedAt);
+    const existingTabs = this.listTabs(params.workspaceId).sort(
+      (a, b) => a.updatedAt - b.updatedAt,
+    );
     if (existingTabs.length >= MAX_TERMINAL_TABS_PER_WORKSPACE) {
-      throw new Error(`Terminal tabs are limited to ${MAX_TERMINAL_TABS_PER_WORKSPACE} per workspace.`);
+      throw new Error(
+        `Terminal tabs are limited to ${MAX_TERMINAL_TABS_PER_WORKSPACE} per workspace.`,
+      );
     }
 
     const now = Date.now();
@@ -214,6 +223,26 @@ export class TerminalPtyManager {
       .map((runtime) => ({ ...runtime.info }));
   }
 
+  /** Stop every retained PTY in a workspace after shell capability revocation. */
+  stopTabsForWorkspace(workspaceId: string, reason = "Shell access revoked"): number {
+    let stopped = 0;
+    for (const runtime of this.tabs.values()) {
+      if (runtime.info.workspaceId !== workspaceId) continue;
+      if (runtime.process) {
+        runtime.closeRequested = false;
+        runtime.process.kill();
+        runtime.process = null;
+        stopped += 1;
+      }
+      this.updateInfo(runtime, {
+        status: "inactive",
+        lastTerminationReason: "user_stopped",
+        lastError: reason,
+      });
+    }
+    return stopped;
+  }
+
   attachTerminalTabOutput(
     tabId: string,
     listenerKey: string,
@@ -243,7 +272,8 @@ export class TerminalPtyManager {
       runtime.process?.write(input);
       this.updateInfo(runtime, {
         status: runtime.info.status === "running" ? "running" : "active",
-        commandCount: runtime.info.commandCount + (input.includes("\r") || input.includes("\n") ? 1 : 0),
+        commandCount:
+          runtime.info.commandCount + (input.includes("\r") || input.includes("\n") ? 1 : 0),
       });
     }
     return { ...runtime.info };
@@ -256,7 +286,9 @@ export class TerminalPtyManager {
     runtime.cols = nextCols;
     runtime.rows = nextRows;
     runtime.process?.resize(nextCols, nextRows);
-    this.updateInfo(runtime, { status: runtime.info.status === "inactive" ? "active" : runtime.info.status });
+    this.updateInfo(runtime, {
+      status: runtime.info.status === "inactive" ? "active" : runtime.info.status,
+    });
     return { ...runtime.info };
   }
 
@@ -332,7 +364,6 @@ export class TerminalPtyManager {
         lastExitCode: typeof exitCode === "number" ? exitCode : null,
       });
     });
-
   }
 
   private updateInfo(runtime: TerminalPtyRuntime, patch: Partial<ShellSessionInfo>): void {

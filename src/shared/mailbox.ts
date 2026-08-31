@@ -464,10 +464,18 @@ export interface RelationshipTimelineQuery {
 export interface ChannelPreferenceSummary {
   preferredChannel?: "email" | "slack" | "teams" | "whatsapp" | "signal" | "imessage";
   recommendedReason?: string;
-  responseLatencyHours: Partial<Record<"email" | "slack" | "teams" | "whatsapp" | "signal" | "imessage", number>>;
-  messageCountByChannel: Partial<Record<"email" | "slack" | "teams" | "whatsapp" | "signal" | "imessage", number>>;
-  lastInboundAtByChannel: Partial<Record<"email" | "slack" | "teams" | "whatsapp" | "signal" | "imessage", number>>;
-  lastOutboundAtByChannel: Partial<Record<"email" | "slack" | "teams" | "whatsapp" | "signal" | "imessage", number>>;
+  responseLatencyHours: Partial<
+    Record<"email" | "slack" | "teams" | "whatsapp" | "signal" | "imessage", number>
+  >;
+  messageCountByChannel: Partial<
+    Record<"email" | "slack" | "teams" | "whatsapp" | "signal" | "imessage", number>
+  >;
+  lastInboundAtByChannel: Partial<
+    Record<"email" | "slack" | "teams" | "whatsapp" | "signal" | "imessage", number>
+  >;
+  lastOutboundAtByChannel: Partial<
+    Record<"email" | "slack" | "teams" | "whatsapp" | "signal" | "imessage", number>
+  >;
 }
 
 export interface ContactIdentityCoverageStats {
@@ -955,10 +963,7 @@ export interface MailboxComposeDraft {
   updatedAt: number;
 }
 
-export type MailComposeInlineFrameOrigin =
-  | "assistant_generated"
-  | "mailbox_thread"
-  | "user_prompt";
+export type MailComposeInlineFrameOrigin = "assistant_generated" | "mailbox_thread" | "user_prompt";
 
 export interface MailComposeInlineFrame {
   kind: "mail_compose";
@@ -1074,10 +1079,16 @@ function extractPromptRequest(prompt: string): {
   const primarySource = afterRecipient || stripped || prompt;
   const includeMatches = Array.from(
     primarySource.matchAll(/\binclude\s+that\s+(.+?)(?=,\s*(?:and\s+)?ask\b|\s+and\s+ask\b|$)/gi),
-  ).map((match) => match[1]?.trim()).filter(Boolean) as string[];
+  )
+    .map((match) => match[1]?.trim())
+    .filter(Boolean) as string[];
   const askMatches = Array.from(
-    primarySource.matchAll(/\bask\s+(?:(?:him|her|them)\s+)?(.+?)(?=,\s*(?:and\s+)?(?:include|ask)\b|$)/gi),
-  ).map((match) => match[1]?.trim()).filter(Boolean) as string[];
+    primarySource.matchAll(
+      /\bask\s+(?:(?:him|her|them)\s+)?(.+?)(?=,\s*(?:and\s+)?(?:include|ask)\b|$)/gi,
+    ),
+  )
+    .map((match) => match[1]?.trim())
+    .filter(Boolean) as string[];
   const primary = primarySource
     .replace(/\binclude\s+that\s+.+?(?=,\s*(?:and\s+)?ask\b|\s+and\s+ask\b|$)/gi, "")
     .replace(/\b(?:and\s+)?ask\s+(?:him|her|them|for|to)?\s*.+$/i, "")
@@ -1091,7 +1102,10 @@ function extractPromptRequest(prompt: string): {
   };
 }
 
-function buildPromptSubject(prompt: string, request: ReturnType<typeof extractPromptRequest>): string {
+function buildPromptSubject(
+  prompt: string,
+  request: ReturnType<typeof extractPromptRequest>,
+): string {
   const lower = prompt.toLowerCase();
   if (lower.includes("dishwasher") && lower.includes("leak") && lower.includes("cabinet")) {
     return "Dishwasher Leaking Again and Cabinet Damage";
@@ -1133,14 +1147,16 @@ function buildPromptBody(prompt: string, recipientName: string | undefined): str
   if (asks.length > 0) {
     paragraphs.push("");
     paragraphs.push(
-      asks
-        .map((item) => `Could you please ${item.replace(/^\s*for\s+/i, "arrange ")}?`)
-        .join(" "),
+      asks.map((item) => `Could you please ${item.replace(/^\s*for\s+/i, "arrange ")}?`).join(" "),
     );
   }
 
   paragraphs.push("", "Thank you,");
-  return paragraphs.join("\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return paragraphs
+    .join("\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function buildMailboxComposeDraftInputFromPrompt(

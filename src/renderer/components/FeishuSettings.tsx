@@ -63,7 +63,10 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
       ]);
       setUsers(channelUsers);
 
-      const policyMap: Record<ContextType, ContextPolicy> = {} as Record<ContextType, ContextPolicy>;
+      const policyMap: Record<ContextType, ContextPolicy> = {} as Record<
+        ContextType,
+        ContextPolicy
+      >;
       for (const policy of policies) {
         policyMap[policy.contextType as ContextType] = policy;
       }
@@ -224,18 +227,26 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
         <div className="settings-section">
           <h3>Connect Feishu / Lark Bot</h3>
           <p className="settings-description">
-            Use a custom app with event subscriptions enabled. CoWork will host the callback
-            webhook locally and send replies through the IM API.
+            Use a custom app with event subscriptions enabled. CoWork will host the callback webhook
+            locally and send replies through the IM API.
           </p>
 
           <div className="settings-field">
             <label>Bot Name</label>
-            <input className="settings-input" value={channelName} onChange={(e) => setChannelName(e.target.value)} />
+            <input
+              className="settings-input"
+              value={channelName}
+              onChange={(e) => setChannelName(e.target.value)}
+            />
           </div>
 
           <div className="settings-field">
             <label>App ID</label>
-            <input className="settings-input" value={appId} onChange={(e) => setAppId(e.target.value)} />
+            <input
+              className="settings-input"
+              value={appId}
+              onChange={(e) => setAppId(e.target.value)}
+            />
           </div>
 
           <div className="settings-field">
@@ -265,7 +276,9 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
               value={encryptKey}
               onChange={(e) => setEncryptKey(e.target.value)}
             />
-            <p className="settings-hint">If set, CoWork validates Feishu signatures and decrypts callback bodies.</p>
+            <p className="settings-hint">
+              If set, CoWork validates Feishu signatures and decrypts callback bodies.
+            </p>
           </div>
 
           <div className="settings-field">
@@ -280,7 +293,11 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
 
           <div className="settings-field">
             <label>Webhook Path</label>
-            <input className="settings-input" value={webhookPath} onChange={(e) => setWebhookPath(e.target.value)} />
+            <input
+              className="settings-input"
+              value={webhookPath}
+              onChange={(e) => setWebhookPath(e.target.value)}
+            />
           </div>
 
           <div className="settings-field">
@@ -296,13 +313,19 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
             </select>
           </div>
 
-          <button className="settings-button settings-button-primary" onClick={handleAddChannel} disabled={saving}>
+          <button
+            className="settings-button settings-button-primary"
+            onClick={handleAddChannel}
+            disabled={saving}
+          >
             {saving ? "Connecting..." : "Add Feishu / Lark Channel"}
           </button>
 
           {testResult && (
             <div className={`settings-status ${testResult.success ? "success" : "error"}`}>
-              {testResult.success ? `Connected as ${testResult.botUsername || "bot"}` : testResult.error}
+              {testResult.success
+                ? `Connected as ${testResult.botUsername || "bot"}`
+                : testResult.error}
             </div>
           )}
         </div>
@@ -325,13 +348,19 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
           <button className="settings-button" onClick={handleToggleEnabled} disabled={saving}>
             {channel.enabled ? "Disable" : "Enable"}
           </button>
-          <button className="settings-button settings-button-danger" onClick={handleRemoveChannel} disabled={saving}>
+          <button
+            className="settings-button settings-button-danger"
+            onClick={handleRemoveChannel}
+            disabled={saving}
+          >
             Remove
           </button>
         </div>
         {testResult && (
           <div className={`settings-status ${testResult.success ? "success" : "error"}`}>
-            {testResult.success ? `Connected as ${testResult.botUsername || "bot"}` : testResult.error}
+            {testResult.success
+              ? `Connected as ${testResult.botUsername || "bot"}`
+              : testResult.error}
           </div>
         )}
       </div>
@@ -353,7 +382,11 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
 
         {securityMode === "pairing" && (
           <div className="settings-field">
-            <button className="settings-button" onClick={handleGeneratePairingCode} disabled={generatingCode}>
+            <button
+              className="settings-button"
+              onClick={handleGeneratePairingCode}
+              disabled={generatingCode}
+            >
               {generatingCode ? "Generating..." : "Generate pairing code"}
             </button>
             {pairingCode && (
@@ -394,7 +427,10 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
                   <strong>{user.displayName || user.channelUserId}</strong>
                   <div className="settings-hint">{user.channelUserId}</div>
                 </div>
-                <button className="settings-button settings-button-danger" onClick={() => handleRevokeAccess(user.channelUserId)}>
+                <button
+                  className="settings-button settings-button-danger"
+                  onClick={() => handleRevokeAccess(user.channelUserId)}
+                >
                   Revoke
                 </button>
               </div>

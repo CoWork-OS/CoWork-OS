@@ -138,12 +138,9 @@ describe("MontyTools", () => {
     await fs.mkdir(transformsDir, { recursive: true });
     await fs.writeFile(
       path.join(transformsDir, "upper.monty"),
-      [
-        "# name: Upper",
-        '# description: Uppercase input["text"]',
-        "",
-        'input["text"].upper()',
-      ].join("\n"),
+      ["# name: Upper", '# description: Uppercase input["text"]', "", 'input["text"].upper()'].join(
+        "\n",
+      ),
       "utf8",
     );
 

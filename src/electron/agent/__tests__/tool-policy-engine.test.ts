@@ -118,13 +118,14 @@ describe("evaluateToolAvailability computer_use", () => {
     expect(r.reason).toBe("computer_use_intent_missing");
   });
 
-  it("allows computer tools in operations domain", () => {
+  it("does not expose computer tools from the operations domain alone", () => {
     const r = evaluateToolAvailability("type_text", {
       ...baseCtx,
       taskText: "hello",
       taskDomain: "operations",
     });
-    expect(r.decision).toBe("allow");
+    expect(r.decision).toBe("defer");
+    expect(r.reason).toBe("computer_use_intent_missing");
   });
 
   it("allows click for native desktop app prompts like Calculator", () => {
@@ -249,6 +250,27 @@ describe("evaluateToolAvailability open_application", () => {
     const r = evaluateToolAvailability("open_application", baseCtx);
     expect(r.decision).toBe("allow");
   });
+
+  it("defers open_application for ordinary file organization work", () => {
+    const r = evaluateToolAvailability("open_application", {
+      ...baseCtx,
+      taskText: "Create category folders and organize the files in this workspace.",
+      taskDomain: "operations",
+    });
+    expect(r.decision).toBe("defer");
+    expect(r.reason).toBe("system_intent_missing");
+  });
+
+  it("defers open_application when use and create describe Python data work", () => {
+    const r = evaluateToolAvailability("open_application", {
+      ...baseCtx,
+      taskText:
+        "Use Python to parse expenses.csv and calculate totals, then create summary.md in the workspace.",
+      taskDomain: "general",
+    });
+    expect(r.decision).toBe("defer");
+    expect(r.reason).toBe("system_intent_missing");
+  });
 });
 
 describe("evaluateToolAvailability spawn_agent", () => {
@@ -285,7 +307,7 @@ describe("evaluateToolAvailability run_applescript", () => {
   it("allows run_applescript when the user explicitly asks for AppleScript", () => {
     const r = evaluateToolAvailability("run_applescript", {
       ...baseCtx,
-      taskText: 'Write an AppleScript that tells Finder to open the Downloads folder.',
+      taskText: "Write an AppleScript that tells Finder to open the Downloads folder.",
     });
     expect(r.decision).toBe("allow");
   });

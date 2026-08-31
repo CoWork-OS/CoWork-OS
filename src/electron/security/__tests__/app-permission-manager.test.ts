@@ -1,8 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import {
-  AppPermissionManager,
-  accessLevelSatisfies,
-} from "../app-permission-manager";
+import { AppPermissionManager, accessLevelSatisfies } from "../app-permission-manager";
 
 describe("accessLevelSatisfies", () => {
   it("ranks click_only above view_only", () => {
@@ -44,7 +41,10 @@ describe("AppPermissionManager", () => {
   });
 
   it("re-prompts when upgrading access level", async () => {
-    const handler = vi.fn().mockResolvedValueOnce("view_only").mockResolvedValueOnce("full_control");
+    const handler = vi
+      .fn()
+      .mockResolvedValueOnce("view_only")
+      .mockResolvedValueOnce("full_control");
     const pm = new AppPermissionManager("test-session");
     pm.onPermissionRequest = handler;
     await pm.requestPermission("App", "com.example.app", "view_only", "a");

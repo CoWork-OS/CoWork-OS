@@ -45,7 +45,8 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
 
           <div className="disclaimer-card-body">
             <p className="disclaimer-intro">
-              CoWork can help with real work, so it uses explicit workspace boundaries and approvals.
+              CoWork can help with real work, so it uses explicit workspace boundaries and
+              approvals.
             </p>
 
             <div className="disclaimer-section">
@@ -53,7 +54,7 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
               <ul>
                 <li>CoWork works inside selected workspaces and a private starter workspace.</li>
                 <li>Destructive actions and sensitive external actions ask first.</li>
-                <li>Shell commands are off by default for new workspaces.</li>
+                <li>Command tools are governed by the access profile selected for each task.</li>
                 <li>Connected apps require separate setup and approval.</li>
               </ul>
             </div>
@@ -61,10 +62,16 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
             <div className="disclaimer-section">
               <h4>Power-user capabilities</h4>
               <ul>
-                <li>Execute shell commands when enabled.</li>
+                <li>Run command tools when the selected access profile permits them.</li>
                 <li>Read, write, and delete files in allowed workspace paths.</li>
-                <li>Access the network, browser automation, skills, plugins, and connected services you enable.</li>
-                <li>Send or receive messages through configured channels such as WhatsApp, Telegram, Slack, or email.</li>
+                <li>
+                  Access the network, browser automation, skills, plugins, and connected services
+                  you enable.
+                </li>
+                <li>
+                  Send or receive messages through configured channels such as WhatsApp, Telegram,
+                  Slack, or email.
+                </li>
               </ul>
             </div>
 

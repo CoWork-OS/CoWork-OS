@@ -51,7 +51,9 @@ export function shouldUseManagedDeploymentModeFromEnv(): boolean {
 export type ControlPlaneBindContext = "host" | "container";
 
 export function getControlPlaneBindContextFromEnv(): ControlPlaneBindContext {
-  const raw = String(process.env.COWORK_CONTROL_PLANE_BIND_CONTEXT || "").trim().toLowerCase();
+  const raw = String(process.env.COWORK_CONTROL_PLANE_BIND_CONTEXT || "")
+    .trim()
+    .toLowerCase();
   return raw === "container" ? "container" : "host";
 }
 

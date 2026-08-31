@@ -122,13 +122,17 @@ function parseJsonArray<T>(value: string | null | undefined): T[] {
 }
 
 function compactText(value: string | null | undefined, max = 180): string {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!text) return "";
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 function normalizeEmail(value?: string | null): string | null {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   return normalized && normalized.includes("@") ? normalized : null;
 }
 
@@ -187,7 +191,10 @@ function mapChannelTypeToHandleType(channelType?: string | null): ContactIdentit
   }
 }
 
-function normalizeHandleValue(handleType: ContactIdentityHandleType, value?: string | null): string | null {
+function normalizeHandleValue(
+  handleType: ContactIdentityHandleType,
+  value?: string | null,
+): string | null {
   const raw = String(value || "").trim();
   if (!raw) return null;
   if (handleType === "email") {
@@ -254,11 +261,18 @@ export class ContactIdentityService {
     const email = normalizeEmail(input.email);
     const displayName = compactText(input.displayName, 120) || email || "Mailbox contact";
     const companyHint = compactText(input.companyHint, 120) || undefined;
-    const phoneHints = uniqueStrings((input.phoneHints || []).map((value) => normalizePhone(value))).filter(Boolean);
+    const phoneHints = uniqueStrings(
+      (input.phoneHints || []).map((value) => normalizePhone(value)),
+    ).filter(Boolean);
     const reasonCodes: string[] = [];
 
     if (!workspaceId || !email) {
-      return { identity: null, confidence: 0, reasonCodes: ["missing_primary_email"], candidates: [] };
+      return {
+        identity: null,
+        confidence: 0,
+        reasonCodes: ["missing_primary_email"],
+        candidates: [],
+      };
     }
 
     let identity = this.findIdentityByHandle(workspaceId, "email", email);
@@ -278,7 +292,8 @@ export class ContactIdentityService {
       });
     } else {
       this.touchIdentity(identity.id, {
-        displayName: identity.displayName === identity.primaryEmail && displayName ? displayName : undefined,
+        displayName:
+          identity.displayName === identity.primaryEmail && displayName ? displayName : undefined,
         primaryEmail: email,
         companyHint: companyHint || identity.companyHint,
       });
@@ -333,7 +348,9 @@ export class ContactIdentityService {
     });
 
     const nextIdentity = this.getIdentity(identity.id) || identity;
-    const linkedNonEmailHandles = nextIdentity.handles.filter((handle) => handle.handleType !== "email");
+    const linkedNonEmailHandles = nextIdentity.handles.filter(
+      (handle) => handle.handleType !== "email",
+    );
     const confidence = linkedNonEmailHandles.length > 0 ? 0.9 : 0.8;
     return {
       identity: nextIdentity,
@@ -375,7 +392,9 @@ export class ContactIdentityService {
          ORDER BY updated_at DESC, created_at DESC`,
       )
       .all(...(workspaceId ? [workspaceId] : [])) as Array<{ id: string }>;
-    return rows.map((row) => this.getIdentity(row.id)).filter((identity): identity is ContactIdentity => Boolean(identity));
+    return rows
+      .map((row) => this.getIdentity(row.id))
+      .filter((identity): identity is ContactIdentity => Boolean(identity));
   }
 
   findIdentityByCompanyHint(workspaceId: string, companyHint: string): ContactIdentity | null {
@@ -392,7 +411,10 @@ export class ContactIdentityService {
     return row ? this.getIdentity(row.id) : null;
   }
 
-  listCandidates(workspaceId?: string, status?: ContactIdentityCandidate["status"]): ContactIdentityCandidate[] {
+  listCandidates(
+    workspaceId?: string,
+    status?: ContactIdentityCandidate["status"],
+  ): ContactIdentityCandidate[] {
     const params: unknown[] = [];
     const where: string[] = [];
     if (workspaceId) {
@@ -415,7 +437,9 @@ export class ContactIdentityService {
   }
 
   searchLinkTargets(workspaceId: string, query: string, limit = 20): ContactIdentitySearchResult[] {
-    const normalizedQuery = String(query || "").trim().toLowerCase();
+    const normalizedQuery = String(query || "")
+      .trim()
+      .toLowerCase();
     if (!workspaceId || !normalizedQuery) return [];
 
     const max = Math.min(Math.max(limit, 1), 50);
@@ -468,18 +492,17 @@ export class ContactIdentityService {
     for (const row of channelRows) {
       const handleType = mapChannelTypeToHandleType(row.channel_type);
       if (!handleType) continue;
-      const normalizedValue = normalizeHandleValue(handleType, row.channel_user_id || row.username || row.display_name);
+      const normalizedValue = normalizeHandleValue(
+        handleType,
+        row.channel_user_id || row.username || row.display_name,
+      );
       if (!normalizedValue) continue;
-      const haystack = [
-        row.display_name,
-        row.username,
-        row.channel_user_id,
-        row.channel_type,
-      ]
+      const haystack = [row.display_name, row.username, row.channel_user_id, row.channel_type]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-      if (!haystack.includes(normalizedQuery) && !normalizedValue.includes(normalizedQuery)) continue;
+      if (!haystack.includes(normalizedQuery) && !normalizedValue.includes(normalizedQuery))
+        continue;
       const linkedIdentity = this.findIdentityByHandle(workspaceId, handleType, normalizedValue);
       addResult({
         id: row.id,
@@ -523,7 +546,9 @@ export class ContactIdentityService {
           normalized_value: handle.normalizedValue,
           display_value: handle.displayValue,
           source: handle.source,
-          source_label: handle.channelType ? toChannelLabel(handle.channelType as RelationshipTimelineSource) : "Manual",
+          source_label: handle.channelType
+            ? toChannelLabel(handle.channelType as RelationshipTimelineSource)
+            : "Manual",
           channel_id: handle.channelId || null,
           channel_type: handle.channelType || null,
           channel_user_id: handle.channelUserId || null,
@@ -535,7 +560,9 @@ export class ContactIdentityService {
       }
     }
 
-    return results.sort((a, b) => b.confidence - a.confidence || a.displayValue.localeCompare(b.displayValue)).slice(0, max);
+    return results
+      .sort((a, b) => b.confidence - a.confidence || a.displayValue.localeCompare(b.displayValue))
+      .slice(0, max);
   }
 
   linkManualHandle(input: {
@@ -549,7 +576,9 @@ export class ContactIdentityService {
     channelType?: string;
     channelUserId?: string;
   }): ContactIdentityHandle | null {
-    const normalizedValue = normalizeHandleValue(input.handleType, input.normalizedValue) || normalizeHandleValue(input.handleType, input.displayValue);
+    const normalizedValue =
+      normalizeHandleValue(input.handleType, input.normalizedValue) ||
+      normalizeHandleValue(input.handleType, input.displayValue);
     if (!normalizedValue) return null;
     const handle = this.ensureHandle({
       workspaceId: input.workspaceId,
@@ -586,7 +615,8 @@ export class ContactIdentityService {
     const targets: ContactIdentityReplyTarget[] = [];
     for (const handle of identity.handles) {
       if (!handle.channelType || !handle.channelId || !handle.channelUserId) continue;
-      if (!["slack", "teams", "whatsapp", "signal", "imessage"].includes(handle.channelType)) continue;
+      if (!["slack", "teams", "whatsapp", "signal", "imessage"].includes(handle.channelType))
+        continue;
       const handleType = handle.handleType;
       const userRow = this.db
         .prepare(
@@ -604,7 +634,9 @@ export class ContactIdentityService {
            ORDER BY last_activity_at DESC
            LIMIT 1`,
         )
-        .get(handle.channelId, userRow.id, identity.workspaceId) as { chat_id: string; last_activity_at: number } | undefined;
+        .get(handle.channelId, userRow.id, identity.workspaceId) as
+        | { chat_id: string; last_activity_at: number }
+        | undefined;
       const latestMessage = this.db
         .prepare(
           `SELECT chat_id, timestamp
@@ -653,7 +685,9 @@ export class ContactIdentityService {
       channelUserId: candidate.channel_user_id || undefined,
     });
     this.db
-      .prepare("UPDATE contact_identity_suggestions SET status = 'confirmed', updated_at = ? WHERE id = ?")
+      .prepare(
+        "UPDATE contact_identity_suggestions SET status = 'confirmed', updated_at = ? WHERE id = ?",
+      )
       .run(Date.now(), candidateId);
     this.insertAudit({
       workspaceId: candidate.workspace_id,
@@ -669,7 +703,9 @@ export class ContactIdentityService {
     const candidate = this.getCandidateRow(candidateId);
     if (!candidate) return null;
     this.db
-      .prepare("UPDATE contact_identity_suggestions SET status = 'rejected', updated_at = ? WHERE id = ?")
+      .prepare(
+        "UPDATE contact_identity_suggestions SET status = 'rejected', updated_at = ? WHERE id = ?",
+      )
       .run(Date.now(), candidateId);
     this.insertAudit({
       workspaceId: candidate.workspace_id,
@@ -714,21 +750,26 @@ export class ContactIdentityService {
 
   getCoverageStats(workspaceId?: string): ContactIdentityCoverageStats {
     const resolvedMailboxContacts =
-      (this.db
-        .prepare(
-          `SELECT COUNT(DISTINCT mc.email) AS count
+      (
+        this.db
+          .prepare(
+            `SELECT COUNT(DISTINCT mc.email) AS count
            FROM mailbox_contacts mc
            JOIN contact_identity_handles h
              ON h.handle_type = 'email'
             AND h.normalized_value = LOWER(mc.email)
            ${workspaceId ? "WHERE h.workspace_id = ?" : ""}`,
-        )
-        .get(...(workspaceId ? [workspaceId] : [])) as { count?: number } | undefined)?.count || 0;
+          )
+          .get(...(workspaceId ? [workspaceId] : [])) as { count?: number } | undefined
+      )?.count || 0;
 
-    const unresolvedByType = (channelType: "slack" | "teams" | "whatsapp" | "signal" | "imessage") =>
-      (this.db
-        .prepare(
-          `SELECT COUNT(*) AS count
+    const unresolvedByType = (
+      channelType: "slack" | "teams" | "whatsapp" | "signal" | "imessage",
+    ) =>
+      (
+        this.db
+          .prepare(
+            `SELECT COUNT(*) AS count
            FROM channel_users cu
            JOIN channels c ON c.id = cu.channel_id
            LEFT JOIN contact_identity_handles h
@@ -737,19 +778,25 @@ export class ContactIdentityService {
             ${workspaceId ? "AND h.workspace_id = ?" : ""}
            WHERE c.type = ?
              AND h.id IS NULL`,
-        )
-        .get(...(workspaceId ? [workspaceId, channelType] : [channelType])) as {
-        count?: number;
-      } | undefined)?.count || 0;
+          )
+          .get(...(workspaceId ? [workspaceId, channelType] : [channelType])) as
+          | {
+              count?: number;
+            }
+          | undefined
+      )?.count || 0;
 
-    const resolvedCrmContacts = (this.db
-      .prepare(
-        `SELECT COUNT(DISTINCT contact_identity_id) AS count
+    const resolvedCrmContacts =
+      (
+        this.db
+          .prepare(
+            `SELECT COUNT(DISTINCT contact_identity_id) AS count
          FROM contact_identity_handles
          WHERE handle_type = 'crm_contact_id'
            ${workspaceId ? "AND workspace_id = ?" : ""}`,
-      )
-      .get(...(workspaceId ? [workspaceId] : [])) as { count?: number } | undefined)?.count || 0;
+          )
+          .get(...(workspaceId ? [workspaceId] : [])) as { count?: number } | undefined
+      )?.count || 0;
 
     const suggestionCounts = this.db
       .prepare(
@@ -760,7 +807,8 @@ export class ContactIdentityService {
       )
       .all(...(workspaceId ? [workspaceId] : [])) as Array<{ status: string; count: number }>;
 
-    const countFor = (status: string) => suggestionCounts.find((row) => row.status === status)?.count || 0;
+    const countFor = (status: string) =>
+      suggestionCounts.find((row) => row.status === status)?.count || 0;
 
     return {
       resolvedMailboxContacts,
@@ -799,7 +847,9 @@ export class ContactIdentityService {
       const messageCount = acc.messageCountByChannel.get(channel) || 0;
       const lastInboundAt = acc.lastInboundAtByChannel.get(channel);
       const lastOutboundAt = acc.lastOutboundAtByChannel.get(channel);
-      const latency = samples.length ? samples.reduce((sum, value) => sum + value, 0) / samples.length : undefined;
+      const latency = samples.length
+        ? samples.reduce((sum, value) => sum + value, 0) / samples.length
+        : undefined;
 
       if (typeof latency === "number") {
         responseLatencyHours[channel] = Number(latency.toFixed(2));
@@ -963,7 +1013,10 @@ export class ContactIdentityService {
           direction: "outgoing",
           timestamp: commitment.due_at || Date.now(),
           title: commitment.title,
-          summary: compactText(`Commitment ${commitment.state}${commitment.due_at ? ` due ${new Date(commitment.due_at).toLocaleString()}` : ""}`, 160),
+          summary: compactText(
+            `Commitment ${commitment.state}${commitment.due_at ? ` due ${new Date(commitment.due_at).toLocaleString()}` : ""}`,
+            160,
+          ),
           rawRef: `mailbox_commitment:${commitment.id}`,
           threadId: commitment.thread_id,
           sensitive: false,
@@ -993,7 +1046,8 @@ export class ContactIdentityService {
           sourceLabel: source === "handoff" ? "Mission Control" : "Automation",
           direction: "outgoing",
           timestamp: event.created_at,
-          title: source === "handoff" ? "Mission Control handoff" : event.event_type.replace(/_/g, " "),
+          title:
+            source === "handoff" ? "Mission Control handoff" : event.event_type.replace(/_/g, " "),
           summary: compactText(event.summary_text || event.event_type, 180),
           rawRef: `mailbox_event:${event.id}`,
           threadId: event.thread_id || undefined,
@@ -1001,7 +1055,9 @@ export class ContactIdentityService {
         });
       }
 
-      for (const crmHandle of identity.handles.filter((handle) => handle.handleType === "crm_contact_id")) {
+      for (const crmHandle of identity.handles.filter(
+        (handle) => handle.handleType === "crm_contact_id",
+      )) {
         acc.events.push({
           id: `crm_handle:${crmHandle.id}`,
           contactIdentityId,
@@ -1010,7 +1066,10 @@ export class ContactIdentityService {
           direction: "outgoing",
           timestamp: crmHandle.createdAt,
           title: "CRM contact linked",
-          summary: compactText(`CRM record ${crmHandle.displayValue} is linked to this identity.`, 180),
+          summary: compactText(
+            `CRM record ${crmHandle.displayValue} is linked to this identity.`,
+            180,
+          ),
           rawRef: `contact_identity_handle:${crmHandle.id}`,
           sensitive: false,
         });
@@ -1052,7 +1111,9 @@ export class ContactIdentityService {
     }
 
     for (const row of rows) {
-      const sensitive = Boolean(parseJsonArray(row.sensitive_content_json).length || row.sensitive_content_json);
+      const sensitive = Boolean(
+        parseJsonArray(row.sensitive_content_json).length || row.sensitive_content_json,
+      );
       acc.events.push({
         id: `mailbox_message:${row.id}`,
         contactIdentityId,
@@ -1203,7 +1264,7 @@ export class ContactIdentityService {
   }): ContactIdentityCandidate[] {
     const rows = this.db
       .prepare(
-      `SELECT cu.channel_id, c.type AS channel_type, c.name AS channel_name, cu.channel_user_id, cu.display_name, cu.username, cu.allowed, cu.created_at, cu.last_seen_at
+        `SELECT cu.channel_id, c.type AS channel_type, c.name AS channel_name, cu.channel_user_id, cu.display_name, cu.username, cu.allowed, cu.created_at, cu.last_seen_at
          FROM channel_users cu
          JOIN channels c ON c.id = cu.channel_id
          WHERE c.type IN ('slack', 'teams', 'whatsapp', 'signal', 'imessage')`,
@@ -1283,7 +1344,8 @@ export class ContactIdentityService {
     }
     if (
       companyToken &&
-      (normalizeName(row.display_name).includes(companyToken) || normalizeName(row.username).includes(companyToken))
+      (normalizeName(row.display_name).includes(companyToken) ||
+        normalizeName(row.username).includes(companyToken))
     ) {
       confidence = Math.max(confidence, 0.64);
       reasonCodes.push("company_hint_match");
@@ -1319,7 +1381,8 @@ export class ContactIdentityService {
       normalizedValue,
       displayValue,
       source: "gateway",
-      sourceLabel: row.channel_name || toChannelLabel(row.channel_type as RelationshipTimelineSource),
+      sourceLabel:
+        row.channel_name || toChannelLabel(row.channel_type as RelationshipTimelineSource),
       channelId: row.channel_id,
       channelType: row.channel_type,
       channelUserId: row.channel_user_id,
@@ -1406,7 +1469,11 @@ export class ContactIdentityService {
       contactIdentityId: input.contactIdentityId,
       suggestionId: id,
       action: input.status === "auto_linked" ? "candidate_auto_linked" : "candidate_suggested",
-      detail: { handleType: input.handleType, normalizedValue: input.normalizedValue, reasonCodes: input.reasonCodes },
+      detail: {
+        handleType: input.handleType,
+        normalizedValue: input.normalizedValue,
+        reasonCodes: input.reasonCodes,
+      },
     });
     return this.mapSuggestionRow(this.getCandidateRow(id)!);
   }
@@ -1469,7 +1536,9 @@ export class ContactIdentityService {
     if (!fields.length) return;
     fields.push("updated_at = ?");
     values.push(Date.now(), identityId);
-    this.db.prepare(`UPDATE contact_identities SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    this.db
+      .prepare(`UPDATE contact_identities SET ${fields.join(", ")} WHERE id = ?`)
+      .run(...values);
   }
 
   private ensureHandle(input: {
@@ -1490,7 +1559,9 @@ export class ContactIdentityService {
          FROM contact_identity_handles
          WHERE workspace_id = ? AND handle_type = ? AND normalized_value = ?`,
       )
-      .get(input.workspaceId, input.handleType, input.normalizedValue) as ContactIdentityHandleRow | undefined;
+      .get(input.workspaceId, input.handleType, input.normalizedValue) as
+      | ContactIdentityHandleRow
+      | undefined;
     const now = Date.now();
     if (existing) {
       this.db
@@ -1680,12 +1751,14 @@ export class ContactIdentityService {
     if (!KnowledgeGraphService.isInitialized()) return undefined;
     const queries = uniqueStrings([input.email, input.displayName, input.companyHint]);
     for (const query of queries) {
-      const result = KnowledgeGraphService.search(input.workspaceId, query, 8).find(({ entity }) => {
-        if (entity.entityTypeName !== "person") return false;
-        const entityEmail = normalizeEmail(String(entity.properties?.email || ""));
-        if (entityEmail && entityEmail === input.email) return true;
-        return normalizeName(entity.name) === normalizeName(input.displayName);
-      });
+      const result = KnowledgeGraphService.search(input.workspaceId, query, 8).find(
+        ({ entity }) => {
+          if (entity.entityTypeName !== "person") return false;
+          const entityEmail = normalizeEmail(String(entity.properties?.email || ""));
+          if (entityEmail && entityEmail === input.email) return true;
+          return normalizeName(entity.name) === normalizeName(input.displayName);
+        },
+      );
       if (result?.entity?.id) return result.entity.id;
     }
     return undefined;

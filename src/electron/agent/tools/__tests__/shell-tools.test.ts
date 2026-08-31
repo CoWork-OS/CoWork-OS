@@ -16,8 +16,7 @@ const {
   buildSafeShellPath,
   isSandboxRuntimeFailure,
   buildEmptyCommandFailureMessage,
-} =
-  _testUtils;
+} = _testUtils;
 
 describe("ShellTools Security Functions", () => {
   describe("isValidPid", () => {
@@ -300,6 +299,12 @@ describe("ShellTools Integration", () => {
 
     it("maps dot cwd to the workspace path", () => {
       expect(resolveCommandCwd("/tmp/workspace", ".")).toBe("/tmp/workspace");
+    });
+
+    it("expands a home-directory cwd instead of treating it as workspace-relative", () => {
+      expect(resolveCommandCwd("/tmp/workspace", "~/projects")).toBe(
+        `${process.env.HOME || process.env.USERPROFILE}/projects`,
+      );
     });
   });
 

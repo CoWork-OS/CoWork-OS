@@ -35,4 +35,17 @@ describe("MemoryPressureService", () => {
     expect(memory?.duplicateLineCount).toBe(1);
     expect(MemoryPressureService.buildCompactionInstructions(report)).toContain(".cowork/USER.md");
   });
+
+  it("does not inspect memory files outside the supplied read boundary", async () => {
+    writeFile(path.join(tmpDir, ".cowork", "MEMORY.md"), "Private memory");
+    const readGuard = (candidatePath: string) => candidatePath.endsWith("/USER.md");
+
+    const report = await MemoryPressureService.analyze(tmpDir, readGuard);
+    const memory = report.files.find((file) => file.file === "MEMORY.md");
+
+    expect(memory).toMatchObject({ exists: false, charCount: 0, level: "ok" });
+    expect(memory?.recommendations).toContain(
+      "The active access profile does not allow reading this file.",
+    );
+  });
 });

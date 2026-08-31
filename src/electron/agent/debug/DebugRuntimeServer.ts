@@ -96,7 +96,8 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   const taskId = decodeURIComponent(parts[ingestIdx - 1] || "");
   const token =
     url.searchParams.get("token") ||
-    (typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ")
+    (typeof req.headers.authorization === "string" &&
+    req.headers.authorization.startsWith("Bearer ")
       ? req.headers.authorization.slice("Bearer ".length).trim()
       : "");
 

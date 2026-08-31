@@ -201,10 +201,9 @@ describe("EmailClient MIME parsing", () => {
   });
 
   it("preserves non-UTF8 IMAP literals until charset-aware body decoding", () => {
-    const encodedSubject = Buffer.from(
-      "E-Postanızın Güncelliğini Doğrulayınız",
-      "utf8",
-    ).toString("base64");
+    const encodedSubject = Buffer.from("E-Postanızın Güncelliğini Doğrulayınız", "utf8").toString(
+      "base64",
+    );
     const headerText =
       `From: Garanti BBVA <no-reply@example.com>\r\n` +
       `To: <user@msn.com>\r\n` +
@@ -306,17 +305,19 @@ describe("EmailClient MIME parsing", () => {
     const commandSpy = vi
       .spyOn(clientAccess, "imapCommand")
       .mockResolvedValue("* SEARCH 11 12 13 14\r\nA1 OK SEARCH completed.\r\n");
-    const fetchSpy = vi.spyOn(clientAccess, "fetchEmail").mockImplementation(async (uid: number) => ({
-      uid,
-      messageId: `msg-${uid}`,
-      from: { address: "sender@example.com" },
-      to: [{ address: "user@msn.com" }],
-      subject: `Message ${uid}`,
-      text: `Body ${uid}`,
-      date: new Date("2026-03-29T22:00:00Z"),
-      isRead: uid !== 14,
-      headers: new Map(),
-    }));
+    const fetchSpy = vi
+      .spyOn(clientAccess, "fetchEmail")
+      .mockImplementation(async (uid: number) => ({
+        uid,
+        messageId: `msg-${uid}`,
+        from: { address: "sender@example.com" },
+        to: [{ address: "user@msn.com" }],
+        subject: `Message ${uid}`,
+        text: `Body ${uid}`,
+        date: new Date("2026-03-29T22:00:00Z"),
+        isRead: uid !== 14,
+        headers: new Map(),
+      }));
 
     const messages = await client.fetchRecentEmails(3);
 
@@ -348,12 +349,14 @@ describe("EmailClient MIME parsing", () => {
     const connectSpy = vi.spyOn(clientAccess, "connectImap").mockResolvedValue(undefined);
     const selectSpy = vi.spyOn(clientAccess, "selectMailbox").mockResolvedValue(undefined);
     const disconnectSpy = vi.spyOn(clientAccess, "disconnectImap").mockResolvedValue(undefined);
-    const commandSpy = vi.spyOn(clientAccess, "imapCommand").mockImplementation(async (command: string) => {
-      if (command.startsWith("UID SEARCH")) {
-        return '* SEARCH 123\r\nA1 OK SEARCH completed.\r\n';
-      }
-      return "A2 OK STORE completed.\r\n";
-    });
+    const commandSpy = vi
+      .spyOn(clientAccess, "imapCommand")
+      .mockImplementation(async (command: string) => {
+        if (command.startsWith("UID SEARCH")) {
+          return "* SEARCH 123\r\nA1 OK SEARCH completed.\r\n";
+        }
+        return "A2 OK STORE completed.\r\n";
+      });
 
     await expect(client.markMessageIdAsRead('<legacy"message@example.com>')).resolves.toBe(123);
 
@@ -385,12 +388,14 @@ describe("EmailClient MIME parsing", () => {
     vi.spyOn(clientAccess, "connectImap").mockResolvedValue(undefined);
     vi.spyOn(clientAccess, "selectMailbox").mockResolvedValue(undefined);
     vi.spyOn(clientAccess, "disconnectImap").mockResolvedValue(undefined);
-    const commandSpy = vi.spyOn(clientAccess, "imapCommand").mockImplementation(async (command: string) => {
-      if (command.startsWith("UID SEARCH")) {
-        return "* SEARCH 124\r\nA1 OK SEARCH completed.\r\n";
-      }
-      return "A2 OK STORE completed.\r\n";
-    });
+    const commandSpy = vi
+      .spyOn(clientAccess, "imapCommand")
+      .mockImplementation(async (command: string) => {
+        if (command.startsWith("UID SEARCH")) {
+          return "* SEARCH 124\r\nA1 OK SEARCH completed.\r\n";
+        }
+        return "A2 OK STORE completed.\r\n";
+      });
 
     await expect(client.markMessageIdAsUnread("<legacy-message@example.com>")).resolves.toBe(124);
 

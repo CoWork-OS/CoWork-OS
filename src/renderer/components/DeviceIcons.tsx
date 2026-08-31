@@ -5,8 +5,7 @@ interface DeviceIconProps {
   size?: number | string;
 }
 
-const sizeStyle = (s: number | string) =>
-  typeof s === "number" ? `${s}px` : s;
+const sizeStyle = (s: number | string) => (typeof s === "number" ? `${s}px` : s);
 
 export function MacMiniIcon({ className = "", size = 48 }: DeviceIconProps) {
   const [imgError, setImgError] = useState(false);
@@ -21,15 +20,7 @@ export function MacMiniIcon({ className = "", size = 48 }: DeviceIconProps) {
         xmlns="http://www.w3.org/2000/svg"
         className={className}
       >
-        <rect
-          x="8"
-          y="24"
-          width="48"
-          height="16"
-          rx="4"
-          fill="currentColor"
-          fillOpacity="0.9"
-        />
+        <rect x="8" y="24" width="48" height="16" rx="4" fill="currentColor" fillOpacity="0.9" />
         <path
           d="M12 40 C12 44, 52 44, 52 40"
           stroke="currentColor"
@@ -90,10 +81,10 @@ export function CloudServerIcon({ className = "", size = 48 }: DeviceIconProps) 
     >
       <rect x="16" y="12" width="32" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
       <circle cx="42" cy="17" r="2" fill="currentColor" />
-      
+
       <rect x="16" y="27" width="32" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
       <circle cx="42" cy="32" r="2" fill="currentColor" />
-      
+
       <rect x="16" y="42" width="32" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
       <circle cx="42" cy="47" r="2" fill="currentColor" />
     </svg>
@@ -112,16 +103,29 @@ export function MobileIcon({ className = "", size = 48 }: DeviceIconProps) {
       className={className}
     >
       <rect x="20" y="8" width="24" height="48" rx="4" stroke="currentColor" strokeWidth="2" />
-      <line x1="28" y1="14" x2="36" y2="14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line
+        x1="28"
+        y1="14"
+        x2="36"
+        y2="14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
       <circle cx="32" cy="50" r="2" fill="currentColor" />
     </svg>
   );
 }
 
-export function getPlatformVisualIcon(platform: string, className?: string, size?: number, deviceName?: string) {
+export function getPlatformVisualIcon(
+  platform: string,
+  className?: string,
+  size?: number,
+  deviceName?: string,
+) {
   const p = platform.toLowerCase();
   const n = (deviceName || "").toLowerCase();
-  
+
   if (p.includes("mac") || p.includes("darwin") || n.includes("mac")) {
     return <MacMiniIcon className={className} size={size} />;
   }

@@ -216,7 +216,7 @@ export class AppearanceManager {
             homeNextActionsEnabled: settings.homeNextActionsEnabled,
           }),
         );
-      } catch  {
+      } catch {
         // Non-fatal: cache is correct, DB will catch up on next save
       }
     }
@@ -233,9 +233,9 @@ export class AppearanceManager {
     }
 
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.legacySettingsPath, "utf-8")) as Partial<
-        AppearanceSettings
-      >;
+      const parsed = JSON.parse(
+        fs.readFileSync(this.legacySettingsPath, "utf-8"),
+      ) as Partial<AppearanceSettings>;
       const nextSettings = { ...settings };
       let recovered = false;
 
@@ -295,8 +295,8 @@ export class AppearanceManager {
           : existingSettings.themeMode,
         visualTheme: normalizedVisualTheme,
         accentColor: isValidAccentColor(settings.accentColor)
-            ? settings.accentColor
-            : existingSettings.accentColor,
+          ? settings.accentColor
+          : existingSettings.accentColor,
         transparencyEffectsEnabled:
           typeof settings.transparencyEffectsEnabled === "boolean"
             ? settings.transparencyEffectsEnabled

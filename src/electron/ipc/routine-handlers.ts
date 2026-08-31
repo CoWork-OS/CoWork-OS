@@ -17,9 +17,12 @@ export function setupRoutineHandlers(routineService: RoutineService): void {
     return routineService.get(id);
   });
 
-  ipcMain.handle(IPC_CHANNELS.ROUTINE_LIST_RUNS, async (_, payload?: { routineId?: string; limit?: number }) => {
-    return routineService.listRuns(payload?.routineId, payload?.limit);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.ROUTINE_LIST_RUNS,
+    async (_, payload?: { routineId?: string; limit?: number }) => {
+      return routineService.listRuns(payload?.routineId, payload?.limit);
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.ROUTINE_CREATE, async (_, input) => {
     return routineService.create(input);
@@ -77,9 +80,12 @@ export function setupRoutineHandlers(routineService: RoutineService): void {
     },
   );
 
-  ipcMain.handle(IPC_CHANNELS.ROUTINE_WORKFLOW_TEST, async (_, request: RoutineWorkflowTestRequest) => {
-    return routineService.testWorkflow(request);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.ROUTINE_WORKFLOW_TEST,
+    async (_, request: RoutineWorkflowTestRequest) => {
+      return routineService.testWorkflow(request);
+    },
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.ROUTINE_WORKFLOW_LIST_RUNS,

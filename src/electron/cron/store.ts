@@ -85,7 +85,7 @@ export async function loadCronStore(storePath: string): Promise<CronStoreFile> {
           typeof (entry as Any).state === "string",
       ) as CronStoreFile["outbox"],
     };
-  } catch  {
+  } catch {
     // File doesn't exist or is invalid - return empty store
     return { version: 1, jobs: [], outbox: [] };
   }

@@ -127,7 +127,11 @@ export class RuntimeVisibilityService {
       },
       {
         stage: "playbook_reinforced",
-        status: input.playbookReinforced ? "done" : input.outcome === "failure" ? "skipped" : "pending",
+        status: input.playbookReinforced
+          ? "done"
+          : input.outcome === "failure"
+            ? "skipped"
+            : "pending",
         title: "Playbook reinforced",
         summary: input.playbookReinforced
           ? "Successful pattern was reinforced for future reuse."
@@ -238,7 +242,11 @@ export class RuntimeVisibilityService {
     };
 
     if (workspaceId && sourceAllowed("memory")) {
-      for (const mem of MemoryService.searchForPromptRecall(workspaceId, normalizedQuery, limit * 2)) {
+      for (const mem of MemoryService.searchForPromptRecall(
+        workspaceId,
+        normalizedQuery,
+        limit * 2,
+      )) {
         const snippet = truncate(mem.snippet || "", 260);
         if (!matchesQuery(snippet)) continue;
         let observation: ReturnType<typeof MemoryObservationService.details>[number] | undefined;
@@ -313,7 +321,10 @@ export class RuntimeVisibilityService {
           snippet,
           title: entity.entity.name,
           sourceLabel: "Knowledge graph",
-          metadata: { entityType: entity.entity.entityTypeName, confidence: entity.entity.confidence },
+          metadata: {
+            entityType: entity.entity.entityTypeName,
+            confidence: entity.entity.confidence,
+          },
         });
       }
     }
@@ -371,15 +382,17 @@ export class RuntimeVisibilityService {
 
     if (sourceAllowed("task") || sourceAllowed("message") || sourceAllowed("file")) {
       const taskIds = taskCandidates.map((task) => task.id);
-      const taskEvents =
-        taskIds.length > 0 ? deps.eventRepo.findByTaskIds(taskIds) : [];
-      const eventsByTask = new Map<string, Array<{
-        id: string;
-        taskId: string;
-        type: string;
-        payload: unknown;
-        timestamp?: number;
-      }>>();
+      const taskEvents = taskIds.length > 0 ? deps.eventRepo.findByTaskIds(taskIds) : [];
+      const eventsByTask = new Map<
+        string,
+        Array<{
+          id: string;
+          taskId: string;
+          type: string;
+          payload: unknown;
+          timestamp?: number;
+        }>
+      >();
       for (const event of taskEvents) {
         const list = eventsByTask.get(event.taskId) || [];
         list.push(event);
@@ -410,7 +423,10 @@ export class RuntimeVisibilityService {
           const message = getMessageText(payload);
           const filePath = normalizeText(payload.path || payload.filePath || payload.outputPath);
           const createdAt = event.timestamp || task.updatedAt || task.createdAt;
-          if (sourceAllowed("message") && (event.type === "assistant_message" || event.type === "user_message")) {
+          if (
+            sourceAllowed("message") &&
+            (event.type === "assistant_message" || event.type === "user_message")
+          ) {
             if (message && matchesQuery(message)) {
               addResult({
                 sourceType: "message",
@@ -484,7 +500,9 @@ export class RuntimeVisibilityService {
     const currentProvider = settings.providerType as LLMRoutingRuntimeState["currentProvider"];
     const modelStatus = LLMProviderFactory.getProviderModelStatus(settings);
     const selection = LLMProviderFactory.resolveTaskModelSelection(
-      options?.task?.agentConfig as Parameters<typeof LLMProviderFactory.resolveTaskModelSelection>[0],
+      options?.task?.agentConfig as Parameters<
+        typeof LLMProviderFactory.resolveTaskModelSelection
+      >[0],
       {
         isVerificationTask: options?.isVerificationTask,
       },

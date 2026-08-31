@@ -6,10 +6,7 @@ import {
   autolinkBareUrls,
   autolinkUrlsInBrackets,
 } from "../../utils/markdown-autolink";
-import {
-  buildMarkdownComponents,
-  normalizeCodeBlockTextForDisplay,
-} from "../markdown-components";
+import { buildMarkdownComponents, normalizeCodeBlockTextForDisplay } from "../markdown-components";
 import {
   createQuotedAssistantMessage,
   isXComLink,
@@ -88,7 +85,10 @@ describe("MainContent markdown normalization helpers", () => {
       children: "post",
     }) as ReactElement<{
       href: string;
-      onClick: (event: { preventDefault: () => void; stopPropagation: () => void }) => Promise<void>;
+      onClick: (event: {
+        preventDefault: () => void;
+        stopPropagation: () => void;
+      }) => Promise<void>;
     }>;
     const clickEvent = { preventDefault: vi.fn(), stopPropagation: vi.fn() };
 
@@ -132,7 +132,9 @@ describe("MainContent markdown normalization helpers", () => {
   });
 
   it("autolinks bracketed URLs without touching citation indices", () => {
-    expect(autolinkUrlsInBrackets("Use [learn.microsoft.com] and [https://example.com/path].")).toBe(
+    expect(
+      autolinkUrlsInBrackets("Use [learn.microsoft.com] and [https://example.com/path]."),
+    ).toBe(
       "Use [learn.microsoft.com](https://learn.microsoft.com) and [https://example.com/path](https://example.com/path).",
     );
     expect(autolinkUrlsInBrackets("Citations like [1] stay unchanged.")).toBe(
@@ -183,7 +185,11 @@ describe("MainContent markdown normalization helpers", () => {
 
   it("builds a quoted assistant payload from visible assistant text", () => {
     expect(
-      createQuotedAssistantMessage("**Result:** done", "event-1", "550e8400-e29b-41d4-a716-446655440000"),
+      createQuotedAssistantMessage(
+        "**Result:** done",
+        "event-1",
+        "550e8400-e29b-41d4-a716-446655440000",
+      ),
     ).toEqual({
       eventId: "event-1",
       taskId: "550e8400-e29b-41d4-a716-446655440000",
@@ -206,10 +212,10 @@ describe("MainContent markdown normalization helpers", () => {
       createElement(
         "div",
         { className: "markdown-content" },
-        createElement(
-          MarkdownRenderer,
-          { components: buildMarkdownComponents({}), children: preview },
-        ),
+        createElement(MarkdownRenderer, {
+          components: buildMarkdownComponents({}),
+          children: preview,
+        }),
       ),
     );
 
@@ -233,10 +239,10 @@ describe("MainContent markdown normalization helpers", () => {
       createElement(
         "div",
         { className: "markdown-content" },
-        createElement(
-          MarkdownRenderer,
-          { components: buildMarkdownComponents({}), children: preview },
-        ),
+        createElement(MarkdownRenderer, {
+          components: buildMarkdownComponents({}),
+          children: preview,
+        }),
       ),
     );
 

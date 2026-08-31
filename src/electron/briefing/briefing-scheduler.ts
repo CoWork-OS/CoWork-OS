@@ -1,6 +1,7 @@
 import type { CronService } from "../cron";
 import type { CronJobCreate, CronJobPatch } from "../cron/types";
 import type { BriefingConfig } from "./types";
+import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 
 export const DAILY_BRIEFING_MARKER = "cowork:briefing:v1";
 
@@ -36,7 +37,7 @@ export async function syncDailyBriefingCronJob(
     taskPrompt: `Managed daily briefing trigger. [${DAILY_BRIEFING_MARKER}]`,
     taskTitle: title,
     maxHistoryEntries: 25,
-    shellAccess: false,
+    accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
     allowUserInput: false,
   };
 
@@ -66,7 +67,7 @@ export async function syncDailyBriefingCronJob(
     taskPrompt: desiredJob.taskPrompt,
     taskTitle: desiredJob.taskTitle,
     maxHistoryEntries: desiredJob.maxHistoryEntries,
-    shellAccess: desiredJob.shellAccess,
+    accessProfileId: desiredJob.accessProfileId,
     allowUserInput: desiredJob.allowUserInput,
   };
 

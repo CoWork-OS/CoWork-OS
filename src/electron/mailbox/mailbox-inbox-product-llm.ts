@@ -43,7 +43,7 @@ export async function mailboxLlmQuickReplies(input: {
   const provider = LLMProviderFactory.createProvider();
   const system = [
     "You help write short email replies.",
-    "Return strict JSON only: { \"suggestions\": string[] }",
+    'Return strict JSON only: { "suggestions": string[] }',
     "Provide exactly 3 suggestions, each under 220 characters, professional and actionable.",
     "Do not include signatures or placeholder names; use neutral wording.",
   ].join(" ");
@@ -110,7 +110,10 @@ export async function mailboxLlmQuickReplies(input: {
       },
       error,
     );
-    return { suggestions: [], error: "Could not generate quick replies. Check your AI connection and try again." };
+    return {
+      suggestions: [],
+      error: "Could not generate quick replies. Check your AI connection and try again.",
+    };
   }
 }
 
@@ -204,7 +207,9 @@ export async function mailboxLlmSimilarThreadIds(input: {
     };
     const matches = Array.isArray(parsed.matches) ? parsed.matches : [];
     const ids = matches
-      .filter((m) => typeof m.threadId === "string" && typeof m.score === "number" && m.score >= 0.35)
+      .filter(
+        (m) => typeof m.threadId === "string" && typeof m.score === "number" && m.score >= 0.35,
+      )
       .filter((m) => m.threadId !== input.seedThreadId)
       .sort((a, b) => (b.score || 0) - (a.score || 0))
       .map((m) => m.threadId as string)

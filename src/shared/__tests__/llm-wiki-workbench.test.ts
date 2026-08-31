@@ -176,10 +176,7 @@ GRPO is a policy optimization method with variance reduction benefits.
     const slideBodyPath = path.join(workspace, "deck.md");
     const chartSpecPath = path.join(workspace, "chart.json");
 
-    writeFile(
-      slideBodyPath,
-      "## Signals\n\n- Connected work\n- Open questions\n",
-    );
+    writeFile(slideBodyPath, "## Signals\n\n- Connected work\n- Open questions\n");
     writeFile(
       chartSpecPath,
       JSON.stringify({

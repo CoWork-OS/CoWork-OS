@@ -3,7 +3,9 @@ import { SupermemoryTools } from "../supermemory-tools";
 
 describe("SupermemoryTools", () => {
   it("exposes an Azure-compatible schema for supermemory_forget", () => {
-    const tool = SupermemoryTools.getToolDefinitions().find((def) => def.name === "supermemory_forget");
+    const tool = SupermemoryTools.getToolDefinitions().find(
+      (def) => def.name === "supermemory_forget",
+    );
 
     expect(tool).toBeDefined();
     expect(tool?.input_schema.type).toBe("object");

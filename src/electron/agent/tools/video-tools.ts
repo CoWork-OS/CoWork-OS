@@ -1,7 +1,6 @@
-import fs from "fs";
-import path from "path";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
+import type { WorkspaceFilesystemApprovalHandlers } from "../../security/access-profile-paths";
 import {
   VideoGenerator,
   VideoProvider,
@@ -33,45 +32,48 @@ export class VideoTools {
     private daemon: AgentDaemon,
     private taskId: string,
   ) {
-    this.videoGenerator = new VideoGenerator(workspace);
+    this.videoGenerator = this.createVideoGenerator(workspace);
   }
 
   setWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
-    this.videoGenerator = new VideoGenerator(workspace);
+    this.videoGenerator = this.createVideoGenerator(workspace);
   }
 
-  private validateReferenceMediaPath(
-    filePath: string,
-    kind: "image" | "video",
-    maxBytes: number,
-  ): void {
-    if (!path.isAbsolute(filePath)) {
-      throw new Error(`Reference ${kind} path must be an absolute path`);
-    }
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`Reference ${kind} file does not exist: ${filePath}`);
-    }
-    const stats = fs.statSync(filePath);
-    if (!stats.isFile()) {
-      throw new Error(`Reference ${kind} path must point to a file`);
-    }
-    if (stats.size > maxBytes) {
-      throw new Error(
-        `Reference ${kind} file is too large (${stats.size} bytes). Max allowed is ${maxBytes} bytes.`,
-      );
-    }
-    const extension = path.extname(filePath).toLowerCase();
-    const allowedExtensions =
-      kind === "image"
-        ? new Set([".png", ".jpg", ".jpeg", ".webp"])
-        : new Set([".mp4", ".mov", ".m4v", ".webm"]);
-    if (!allowedExtensions.has(extension)) {
-      throw new Error(
-        `Reference ${kind} file type "${extension || "(none)"}" is not supported. ` +
-          `Allowed: ${Array.from(allowedExtensions.values()).join(", ")}`,
-      );
-    }
+  private createVideoGenerator(workspace: Workspace): VideoGenerator {
+    const daemon = this.daemon as unknown as {
+      requestApproval?: (
+        taskId: string,
+        type: "external_file_access",
+        description: string,
+        details: Record<string, unknown>,
+      ) => Promise<boolean>;
+      consumeExternalFileApproval?: (
+        taskId: string,
+        filePath: string,
+        operation: "read" | "write" | "delete",
+      ) => boolean;
+    };
+    const approvalHandlers: WorkspaceFilesystemApprovalHandlers = {
+      ...(typeof daemon.requestApproval === "function"
+        ? {
+            request: ({ path: approvedPath, operation, label }) =>
+              daemon.requestApproval!(
+                this.taskId,
+                "external_file_access",
+                `Allow ${operation} access to external ${label}: ${approvedPath}`,
+                { path: approvedPath, operation, tool: "generate_video" },
+              ),
+          }
+        : {}),
+      ...(typeof daemon.consumeExternalFileApproval === "function"
+        ? {
+            consume: (approvedPath: string, operation: "read" | "write" | "delete") =>
+              daemon.consumeExternalFileApproval!(this.taskId, approvedPath, operation),
+          }
+        : {}),
+    };
+    return new VideoGenerator(workspace, approvalHandlers);
   }
 
   /**
@@ -94,16 +96,12 @@ export class VideoTools {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted for video generation");
     }
-    if ((input.referenceImagePath || input.referenceVideoPath) && !this.workspace.permissions.read) {
+    if (
+      (input.referenceImagePath || input.referenceVideoPath) &&
+      !this.workspace.permissions.read
+    ) {
       throw new Error("Read permission not granted — required to read reference media files");
     }
-    if (input.referenceImagePath) {
-      this.validateReferenceMediaPath(input.referenceImagePath, "image", 25 * 1024 * 1024);
-    }
-    if (input.referenceVideoPath) {
-      this.validateReferenceMediaPath(input.referenceVideoPath, "video", 500 * 1024 * 1024);
-    }
-
     const result = await this.videoGenerator.generate(input);
 
     if (result.success) {
@@ -162,10 +160,7 @@ export class VideoTools {
   /**
    * Cancel an in-progress video generation job.
    */
-  async cancelVideoGenerationJob(input: {
-    jobId: string;
-    provider: VideoProvider;
-  }) {
+  async cancelVideoGenerationJob(input: { jobId: string; provider: VideoProvider }) {
     return this.videoGenerator.cancelJob(input.jobId, input.provider);
   }
 
@@ -211,7 +206,8 @@ Generated videos are saved to the workspace folder.`,
             provider: {
               type: "string",
               enum: ["auto", "openai", "azure", "gemini", "vertex", "kling"],
-              description: 'Provider override. "auto" uses the configured default with fallbacks (default: auto).',
+              description:
+                'Provider override. "auto" uses the configured default with fallbacks (default: auto).',
             },
             model: {
               type: "string",
@@ -230,7 +226,8 @@ Generated videos are saved to the workspace folder.`,
             resolution: {
               type: "string",
               enum: ["480p", "720p", "1080p"],
-              description: "Output resolution (if supported by provider). Default: provider default.",
+              description:
+                "Output resolution (if supported by provider). Default: provider default.",
             },
             referenceImagePath: {
               type: "string",
@@ -238,11 +235,13 @@ Generated videos are saved to the workspace folder.`,
             },
             referenceVideoPath: {
               type: "string",
-              description: "Absolute path to a reference video (for video_to_video / extend_video modes).",
+              description:
+                "Absolute path to a reference video (for video_to_video / extend_video modes).",
             },
             filename: {
               type: "string",
-              description: "Output filename without extension (optional, defaults to video_<timestamp>).",
+              description:
+                "Output filename without extension (optional, defaults to video_<timestamp>).",
             },
           },
           required: ["prompt"],

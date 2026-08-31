@@ -95,10 +95,16 @@ export const extractDomainFromUrl = (raw: string): string => {
   const trimmed = String(raw || "").trim();
   if (!trimmed) return "";
   try {
-    const parsed = new URL(trimmed.startsWith("http://") || trimmed.startsWith("https://") ? trimmed : `https://${trimmed}`);
+    const parsed = new URL(
+      trimmed.startsWith("http://") || trimmed.startsWith("https://")
+        ? trimmed
+        : `https://${trimmed}`,
+    );
     return parsed.hostname.replace(/^www\./i, "");
   } catch {
-    return stripHttpScheme(trimmed).split("/")[0].replace(/^www\./i, "");
+    return stripHttpScheme(trimmed)
+      .split("/")[0]
+      .replace(/^www\./i, "");
   }
 };
 
@@ -145,10 +151,8 @@ const GLOB_TOKEN_REGEX = /(?<![`\\])\*\*\/\*[^\s,;()]+/g;
 const FENCED_CODE_BLOCK_REGEX = /(```[\s\S]*?```)/g;
 const JSON_PATH_PAYLOAD_LINE_REGEX = /^(\s*)\{\s*"path"\s*:\s*"((?:\\.|[^"\\])*)"\s*\}(\s*)$/;
 const SOURCES_HEADING_REGEX = /(^|\n)(?:#{1,6}\s*)?sources\b[^\n]*(?:\n|$)/i;
-const SOURCE_ENTRY_INLINE_SPLIT_REGEX =
-  /\s+(\[\d+\]\s*(?:(?:\[[^\]]+\]\([^)]+\))|https?:\/\/))/gi;
-const SOURCE_ENTRY_DETECT_REGEX =
-  /\[\d+\]\s*(?:(?:\[[^\]]+\]\([^)]+\))|https?:\/\/\S+)/i;
+const SOURCE_ENTRY_INLINE_SPLIT_REGEX = /\s+(\[\d+\]\s*(?:(?:\[[^\]]+\]\([^)]+\))|https?:\/\/))/gi;
+const SOURCE_ENTRY_DETECT_REGEX = /\[\d+\]\s*(?:(?:\[[^\]]+\]\([^)]+\))|https?:\/\/\S+)/i;
 /** Split pipe-separated sources onto separate lines. */
 const SOURCE_PIPE_SEPARATOR_REGEX = /\s*\|\s*/g;
 /** Split inline sources: "[1] ... [2] ..." -> one per line (whitespace before [N]). */
@@ -159,7 +163,10 @@ function protectGlobTokens(text: string): string {
   return text.replace(GLOB_TOKEN_REGEX, (token) => `\`${token}\``);
 }
 
-function transformOutsideFencedCodeBlocks(text: string, transform: (segment: string) => string): string {
+function transformOutsideFencedCodeBlocks(
+  text: string,
+  transform: (segment: string) => string,
+): string {
   return text
     .split(FENCED_CODE_BLOCK_REGEX)
     .map((segment, index) => (index % 2 === 1 ? segment : transform(segment)))
@@ -265,8 +272,7 @@ export function normalizeTimelineTitleMarkdownForDisplay(text: string): string {
   // as <h1>. Allow ##, ###, etc. to render as headings.
   return normalized.replace(
     /^( {0,3})(#)(?=\s)/gm,
-    (_match: string, indent: string, hash: string) =>
-      `${indent}${hash.replace(/#/g, "\\#")}`,
+    (_match: string, indent: string, hash: string) => `${indent}${hash.replace(/#/g, "\\#")}`,
   );
 }
 
@@ -276,7 +282,5 @@ export function cleanAssistantMessageForDisplay(message: string): string {
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
     .replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, "")
     .trim();
-  return normalizeMarkdownForDisplay(
-    normalizeInlineLists(unwrapMarkdownCodeBlocks(sanitized)),
-  );
+  return normalizeMarkdownForDisplay(normalizeInlineLists(unwrapMarkdownCodeBlocks(sanitized)));
 }

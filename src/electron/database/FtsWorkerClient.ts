@@ -92,20 +92,54 @@ export class FtsWorkerClient {
     });
   }
 
-  async search(workspaceId: string, query: string, limit: number, includePrivate: boolean): Promise<MemorySearchResult[]> {
-    return (await this.request("search", [workspaceId, query, limit, includePrivate])) as MemorySearchResult[];
+  async search(
+    workspaceId: string,
+    query: string,
+    limit: number,
+    includePrivate: boolean,
+  ): Promise<MemorySearchResult[]> {
+    return (await this.request("search", [
+      workspaceId,
+      query,
+      limit,
+      includePrivate,
+    ])) as MemorySearchResult[];
   }
 
-  async searchImportedGlobal(query: string, limit: number, includePrivate: boolean): Promise<MemorySearchResult[]> {
-    return (await this.request("searchImportedGlobal", [query, limit, includePrivate])) as MemorySearchResult[];
+  async searchImportedGlobal(
+    query: string,
+    limit: number,
+    includePrivate: boolean,
+  ): Promise<MemorySearchResult[]> {
+    return (await this.request("searchImportedGlobal", [
+      query,
+      limit,
+      includePrivate,
+    ])) as MemorySearchResult[];
   }
 
-  async searchLocalForPromptRecall(workspaceId: string, query: string, limit: number): Promise<PromptRecallWorkerResult[]> {
-    return (await this.request("searchLocalForPromptRecall", [workspaceId, query, limit])) as PromptRecallWorkerResult[];
+  async searchLocalForPromptRecall(
+    workspaceId: string,
+    query: string,
+    limit: number,
+  ): Promise<PromptRecallWorkerResult[]> {
+    return (await this.request("searchLocalForPromptRecall", [
+      workspaceId,
+      query,
+      limit,
+    ])) as PromptRecallWorkerResult[];
   }
 
-  async searchByContentMarker(workspaceId: string, marker: string, limit: number): Promise<MemorySearchResult[]> {
-    return (await this.request("searchByContentMarker", [workspaceId, marker, limit])) as MemorySearchResult[];
+  async searchByContentMarker(
+    workspaceId: string,
+    marker: string,
+    limit: number,
+  ): Promise<MemorySearchResult[]> {
+    return (await this.request("searchByContentMarker", [
+      workspaceId,
+      marker,
+      limit,
+    ])) as MemorySearchResult[];
   }
 
   destroy(): void {

@@ -86,6 +86,14 @@ import {
 import { startConnectorOAuth, type ConnectorOAuthRequest } from "../../mcp/oauth/connector-oauth";
 import { isToolAllowedQuick } from "../../security/policy-manager";
 import { evaluateMontyToolPolicy } from "../../security/monty-tool-policy";
+import {
+  assertWorkspaceFilesystemAccess,
+  assertWorkspaceReadableFileAccessWithApproval,
+  createWorkspaceFilesystemApprovalHandlers,
+  evaluateWorkspaceFilesystemAccess,
+  resolveWorkspaceFilesystemAccessWithApproval,
+} from "../../security/access-profile-paths";
+import { evaluateNetworkPolicy } from "../../security/network-policy";
 import { BuiltinToolsSettingsManager } from "./builtin-settings";
 import { getCustomSkillLoader } from "../custom-skill-loader";
 import { SkillProposalService } from "../skills/SkillProposalService";
@@ -188,7 +196,7 @@ function guessExtFromMime(mimeType?: string): string {
 }
 
 const MCP_PAYMENT_TOOL_NAME = "x402_fetch";
-const NETWORK_READ_TOOL_NAMES = new Set(["web_search", "web_fetch", "x_search"]);
+const NETWORK_TOOL_NAMES = new Set<string>(TOOL_GROUPS["group:network"]);
 const MCP_PAYMENT_AMOUNT_PATHS = [
   ["amount"],
   ["maxAmount"],
@@ -196,6 +204,22 @@ const MCP_PAYMENT_AMOUNT_PATHS = [
   ["request", "maxAmount"],
 ];
 const MCP_PAYMENT_MAX_AMOUNT_USD = 100;
+const QA_NETWORK_TOOLS = new Set(["qa_run", "qa_navigate", "qa_interact", "qa_check"]);
+const EXTERNAL_SERVICE_BOUNDARY_TOOLS = new Set([
+  "supermemory_profile",
+  "supermemory_search",
+  "supermemory_remember",
+  "supermemory_forget",
+  "channel_fetch_discord_messages",
+  "channel_download_discord_attachment",
+  "email_imap_unread",
+]);
+const SKILL_MUTATION_TOOLS = new Set([
+  "skill_create",
+  "skill_duplicate",
+  "skill_update",
+  "skill_delete",
+]);
 
 function getApprovalTypeForRuntimeKind(
   approvalKind: RuntimeToolApprovalKind | undefined,
@@ -615,10 +639,15 @@ export class ToolRegistry {
     this.scrapingTools = new ScrapingTools(workspace, daemon, taskId);
     this.memoryTools = new MemoryTools(workspace, daemon, taskId);
     this.supermemoryTools = new SupermemoryTools(workspace, daemon, taskId);
-    this.documentTools = new DocumentTools(workspace.path, taskId, (tid, fp, mime, metadata = {}) =>
-      daemon.logEvent(tid, "artifact_created", { path: fp, mimeType: mime, ...metadata }),
+    this.documentTools = new DocumentTools(
+      workspace,
+      taskId,
+      (tid, fp, mime, metadata = {}) =>
+        daemon.logEvent(tid, "artifact_created", { path: fp, mimeType: mime, ...metadata }),
+      (tid, type, description, details) => daemon.requestApproval(tid, type, description, details),
+      (tid, filePath, operation) => daemon.consumeExternalFileApproval(tid, filePath, operation),
     );
-    this.scratchpadTools = new ScratchpadTools(taskId, workspace.path);
+    this.scratchpadTools = new ScratchpadTools(taskId, workspace);
     this.qaTools = new QATools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make channel history tools optional.
     const dbGetter = (daemon as Any)?.getDatabase;
@@ -862,6 +891,16 @@ export class ToolRegistry {
       sections.push(`Available tools:\n${lines.join("\n")}`);
     }
 
+    if (visibleToolSet.has("channel_list_chats") && visibleToolSet.has("channel_history")) {
+      sections.push(
+        [
+          "Messaging Channel Routing (CRITICAL):",
+          "- For requests to read or summarize WhatsApp or other channel messages, call channel_list_chats first, then channel_history.",
+          "- Prefer the connected local message log over browser automation; use a channel web app only when these tools report unavailable/empty or the user explicitly requests it.",
+        ].join("\n"),
+      );
+    }
+
     if (visibleToolSet.has("Skill")) {
       const skillLoader = getCustomSkillLoader();
       const availableToolNames = new Set(orderedVisibleTools.map((tool) => tool.name));
@@ -1003,6 +1042,31 @@ export class ToolRegistry {
     return this.workspace;
   }
 
+  private async assertMcpReadablePath(candidatePath: string): Promise<string> {
+    try {
+      return await assertWorkspaceReadableFileAccessWithApproval(
+        this.workspace,
+        candidatePath,
+        "MCP file input",
+        createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "mcp"),
+      );
+    } catch (error) {
+      if (error instanceof Error && /ENOENT|no such file/i.test(error.message)) {
+        throw new Error(`MCP file input does not exist: ${candidatePath}`);
+      }
+      throw error;
+    }
+  }
+
+  private assertMcpOutputPath(outputPath: string): string {
+    return assertWorkspaceFilesystemAccess(
+      this.workspace,
+      outputPath,
+      "write",
+      "MCP artifact output",
+    );
+  }
+
   /**
    * Update the workspace for all tools
    * Used when switching workspaces mid-task
@@ -1051,6 +1115,7 @@ export class ToolRegistry {
     this.memoryTools.setWorkspace(workspace);
     this.supermemoryTools.setWorkspace(workspace);
     this.documentTools.setWorkspace(workspace);
+    this.scratchpadTools.setWorkspace(workspace);
     this._codeExecTools = undefined;
     this.invalidateToolCaches();
   }
@@ -1511,6 +1576,41 @@ export class ToolRegistry {
     }
   }
 
+  private getMcpEndpointForTool(toolName: string): string | null {
+    const settings = MCPSettingsManager.loadSettings();
+    const prefix = settings.toolNamePrefix || "mcp_";
+    if (!toolName.startsWith(prefix)) return null;
+    const rawToolName = toolName.slice(prefix.length);
+    try {
+      const manager = MCPClientManager.getInstance();
+      const serverId = manager.getServerIdForTool(rawToolName);
+      if (!serverId) return null;
+      const server = MCPSettingsManager.getServer(serverId);
+      const endpoint = typeof server?.url === "string" ? server.url.trim() : "";
+      return endpoint || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private evaluateMcpEndpointNetworkPolicy(toolName: string) {
+    const endpoint = this.getMcpEndpointForTool(toolName);
+    if (!endpoint) return null;
+    const decision = evaluateNetworkPolicy({
+      url: endpoint,
+      toolName,
+      networkEnabled: this.workspace.permissions?.network,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions?.accessDomainRules,
+    });
+    this.daemon.logEvent(this.taskId, "network_policy_decision", {
+      ...decision,
+      source: "mcp_endpoint",
+      endpoint,
+    });
+    return decision;
+  }
+
   private isReadOnlyHttpRequestInput(input: Any): boolean {
     const method =
       typeof input?.method === "string" && input.method.trim().length > 0
@@ -1528,10 +1628,174 @@ export class ToolRegistry {
     return (method === "GET" || method === "HEAD") && !hasBody && customHeaders.length === 0;
   }
 
+  private getExternalFilesystemBoundary(
+    toolName: string,
+    input?: Any,
+  ): {
+    path: string;
+    paths: string[];
+    pathOperations: Array<{ path: string; operation: "read" | "write" | "delete" }>;
+    operation: "read" | "write" | "delete";
+  } | null {
+    const canonicalToolName = canonicalizeToolNameUtil(toolName);
+    if (
+      !["write_file", "edit_file", "copy_file", "rename_file", "create_directory"].includes(
+        canonicalToolName,
+      )
+    ) {
+      return null;
+    }
+    const candidates: Array<{ value: unknown; operation: "read" | "write" | "delete" }> = [];
+    if (canonicalToolName === "copy_file") {
+      candidates.push(
+        { value: input?.sourcePath, operation: "read" },
+        { value: input?.destPath, operation: "write" },
+      );
+    } else if (canonicalToolName === "rename_file") {
+      candidates.push(
+        { value: input?.oldPath, operation: "delete" },
+        { value: input?.newPath, operation: "write" },
+      );
+    } else {
+      candidates.push({ value: input?.file_path ?? input?.path, operation: "write" });
+    }
+    const external = candidates.filter(({ value, operation }) => {
+      if (typeof value !== "string" || !value.trim()) return false;
+      return (
+        evaluateWorkspaceFilesystemAccess(this.workspace, value, operation).reason ===
+        "outside_workspace"
+      );
+    });
+    if (external.length === 0) return null;
+    const pathOperations = external
+      .map(({ value, operation }) => ({
+        path: typeof value === "string" ? value.trim() : "",
+        operation,
+      }))
+      .filter((entry) => entry.path.length > 0);
+    const paths = pathOperations.map((entry) => entry.path);
+    return {
+      path: paths[0],
+      paths,
+      pathOperations,
+      operation: external.some(({ operation }) => operation === "delete") ? "delete" : "write",
+    };
+  }
+
+  /**
+   * Skill management writes to the app-managed skill directory when no
+   * workspace skill directory is active. That directory is outside the
+   * workspace, so it must use the same exact-path approval contract as the
+   * ordinary file tools. Keep this classification input-aware so a workspace
+   * skill mutation remains a normal workspace write.
+   */
+  private getSkillManagementFilesystemBoundary(
+    toolName: string,
+    input?: Any,
+  ): {
+    path: string;
+    paths: string[];
+    pathOperations: Array<{ path: string; operation: "read" | "write" | "delete" }>;
+    operation: "read" | "write" | "delete";
+  } | null {
+    if (!SKILL_MUTATION_TOOLS.has(toolName)) return null;
+
+    const skillLoader = getCustomSkillLoader();
+    const candidates: Array<{ value: unknown; operation: "read" | "write" | "delete" }> = [];
+    if (toolName === "skill_create") {
+      const id = typeof input?.id === "string" ? input.id.trim() : "";
+      const directory = skillLoader.getWorkspaceSkillsDir() || skillLoader.getManagedSkillsDir();
+      if (id && /^[a-z0-9-]+$/.test(id)) {
+        candidates.push({ value: path.join(directory, `${id}.json`), operation: "write" });
+      }
+    } else if (toolName === "skill_duplicate") {
+      const newId = typeof input?.new_id === "string" ? input.new_id.trim() : "";
+      const sourceId =
+        typeof input?.source_skill_id === "string" ? input.source_skill_id.trim() : "";
+      const sourceSkill = sourceId ? skillLoader.getSkill(sourceId) : undefined;
+      if (sourceSkill?.filePath && sourceSkill.source !== "bundled") {
+        candidates.push({ value: sourceSkill.filePath, operation: "read" });
+      }
+      const directory = skillLoader.getWorkspaceSkillsDir() || skillLoader.getManagedSkillsDir();
+      if (newId && /^[a-z0-9-]+$/.test(newId)) {
+        candidates.push({ value: path.join(directory, `${newId}.json`), operation: "write" });
+      }
+    } else {
+      const skillId = typeof input?.skill_id === "string" ? input.skill_id.trim() : "";
+      const skill = skillId ? skillLoader.getSkill(skillId) : undefined;
+      if (skill?.filePath && skill.source !== "bundled" && skill.source !== "external") {
+        candidates.push({
+          value: skill.filePath,
+          operation: toolName === "skill_delete" ? "delete" : "write",
+        });
+      }
+    }
+
+    const outside = candidates.filter(({ value, operation }) => {
+      if (typeof value !== "string" || !value.trim()) return false;
+      const decision = evaluateWorkspaceFilesystemAccess(this.workspace, value, operation);
+      return decision.reason !== "workspace_path" && decision.reason !== "profile_filesystem_allow";
+    });
+    if (outside.length === 0) return null;
+
+    const pathOperations = outside
+      .map(({ value, operation }) => ({
+        path: typeof value === "string" ? value.trim() : "",
+        operation,
+      }))
+      .filter((entry) => entry.path.length > 0);
+    if (pathOperations.length === 0) return null;
+    return {
+      path: pathOperations[0].path,
+      paths: pathOperations.map((entry) => entry.path),
+      pathOperations,
+      operation: pathOperations.some((entry) => entry.operation === "delete")
+        ? "delete"
+        : pathOperations.some((entry) => entry.operation === "write")
+          ? "write"
+          : "read",
+    };
+  }
+
+  private async assertSkillFilesystemAccess(
+    requestedPath: string,
+    operation: "read" | "write" | "delete",
+    label = "skill storage",
+  ): Promise<string> {
+    const access = await resolveWorkspaceFilesystemAccessWithApproval(
+      this.workspace,
+      requestedPath,
+      operation,
+      label,
+      createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "skill_management"),
+    );
+    if (access.decision !== "allow") {
+      throw new Error(`Access denied for ${label} "${requestedPath}": ${access.reason}`);
+    }
+    return access.path;
+  }
+
   private getApprovalTypeForTool(toolName: string, input?: Any): ApprovalType | null {
     const canonicalToolName = canonicalizeToolNameUtil(toolName);
     if (canonicalToolName === "Skill") return null;
+    if (
+      this.getExternalFilesystemBoundary(canonicalToolName, input) ||
+      this.getSkillManagementFilesystemBoundary(canonicalToolName, input)
+    ) {
+      return "external_file_access";
+    }
+    if (TOOL_GROUPS["group:write"].includes(canonicalToolName as Any)) {
+      return "workspace_write";
+    }
     if (canonicalToolName === "run_command") return "run_command";
+    if (
+      canonicalToolName === "execute_code" &&
+      input &&
+      typeof input === "object" &&
+      (input as Any).allow_network === true
+    ) {
+      return "network_access";
+    }
     if (canonicalToolName === "delete_file") return "delete_file";
     if (canonicalToolName === "get_current_location") return "location_access";
     if (canonicalToolName === "web_fetch") return "network_access";
@@ -1541,11 +1805,27 @@ export class ToolRegistry {
     if (canonicalToolName === "analyze_image" || canonicalToolName === "read_pdf_visual") {
       return "data_export";
     }
+    if (canonicalToolName === "git_commit" || canonicalToolName === "git_merge_to_base") {
+      return "risk_gate";
+    }
+    if (
+      canonicalToolName === "browser_navigate" ||
+      canonicalToolName === "browser_attach" ||
+      QA_NETWORK_TOOLS.has(canonicalToolName)
+    ) {
+      return "network_access";
+    }
+    if (canonicalToolName.startsWith("mcp_") && this.getMcpEndpointForTool(canonicalToolName)) {
+      return "network_access";
+    }
     if (canonicalToolName.startsWith("mcp_")) return "external_service";
+    if (EXTERNAL_SERVICE_BOUNDARY_TOOLS.has(canonicalToolName)) return "external_service";
     if (canonicalToolName.endsWith("_action") || canonicalToolName === "voice_call")
       return "external_service";
-    if (isComputerUseToolName(canonicalToolName)) return "computer_use";
-    if (NETWORK_READ_TOOL_NAMES.has(canonicalToolName)) return null;
+    if (canonicalToolName === "open_application" || isComputerUseToolName(canonicalToolName)) {
+      return "computer_use";
+    }
+    if (NETWORK_TOOL_NAMES.has(canonicalToolName)) return "network_access";
     return null;
   }
 
@@ -1554,6 +1834,9 @@ export class ToolRegistry {
       toolName === "run_command" ||
       toolName === "delete_file" ||
       toolName === "run_applescript" ||
+      toolName === "take_screenshot" ||
+      toolName === "open_path" ||
+      toolName === "show_in_folder" ||
       toolName === "mcp_x402_fetch" ||
       toolName.endsWith("_action") ||
       toolName === "voice_call" ||
@@ -1621,6 +1904,15 @@ export class ToolRegistry {
         context.request.runtime.toolUseId.trim()
           ? context.request.runtime.toolUseId.trim()
           : `${this.taskId}:${context.request.name}:${executionStartedAt}`;
+      const mcpEndpointDecision = this.evaluateMcpEndpointNetworkPolicy(context.request.name);
+      if (mcpEndpointDecision?.action === "deny") {
+        throw Object.assign(
+          new Error(
+            `MCP endpoint access denied for "${context.request.name}": ${mcpEndpointDecision.reason}`,
+          ),
+          { policyTrace: { source: "mcp_endpoint", decision: mcpEndpointDecision } },
+        );
+      }
       const approvalType = this.getApprovalTypeForTool(context.request.name, context.request.input);
       const browserUseApproval = this.buildBrowserUseApprovalDetails(
         context.request.name,
@@ -1634,11 +1926,17 @@ export class ToolRegistry {
         : (approvalType ?? runtimeApprovalType);
       const permissionEvaluation = (this.daemon as Any)?.evaluateToolPermission;
       const serverName = this.getMcpServerName(context.request.name);
+      const externalFilesystemBoundary =
+        this.getExternalFilesystemBoundary(context.request.name, context.request.input) ||
+        this.getSkillManagementFilesystemBoundary(context.request.name, context.request.input);
       const approvalDetails = {
         tool: context.request.name,
         params: context.request.input ?? null,
         ...(serverName ? { serverName } : {}),
         ...browserUseApproval,
+        ...(approvalType === "external_file_access" && externalFilesystemBoundary
+          ? { ...externalFilesystemBoundary }
+          : {}),
       };
       const runtimeApprovalRequired =
         runtime.approvalKind !== "none" && runtime.approvalKind !== "workspace_policy";
@@ -1717,7 +2015,13 @@ export class ToolRegistry {
               ...approvalDetails,
               reason: pipeline.reason || null,
             },
-            { allowAutoApprove: effectiveApprovalType !== "location_access" },
+            {
+              allowAutoApprove: effectiveApprovalType !== "location_access",
+              signal:
+                context.request.runtime?.signal instanceof AbortSignal
+                  ? context.request.runtime.signal
+                  : undefined,
+            },
           );
           if (approved !== true) {
             throw Object.assign(new Error(`Tool "${context.request.name}" approval denied`), {
@@ -2066,7 +2370,12 @@ export class ToolRegistry {
     register("voice_call", async ({ request }) => this.voiceCallTools.executeAction(request.input));
     register(
       "run_command",
-      async ({ request }) => this.shellTools.runCommand(request.input.command, request.input),
+      async ({ request }) =>
+        this.shellTools.runCommand(request.input.command, {
+          ...request.input,
+          signal:
+            request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        }),
       exclusiveSchedulerSpec,
     );
     register("git_status", async () => this.gitTools.gitStatus());
@@ -3313,6 +3622,11 @@ Cloud Storage Routing (CRITICAL):
   - Notion content discovery: notion_action { action: "search" }
 - Use local file tools (list_directory/glob/read_file) only for the local workspace filesystem.
 
+Messaging Channel Routing (CRITICAL):
+- For requests to read, search, or summarize WhatsApp, Telegram, Slack, iMessage, or other channel messages, use the local Channel Message Log tools first.
+- Start with channel_list_chats using the requested channel, then call channel_history for the relevant chat IDs. These tools preserve the connected gateway session and do not require browser sign-in.
+- Do not open web.whatsapp.com or another channel web app for message history when the local channel tools are available. Use browser automation only when the channel tools report that the channel is unavailable/empty or the user explicitly asks to use the web app.
+
 File Operations:
 - read_file: Read contents of a file (supports plain text, DOCX, PDF, and PPTX; supports chunked reads via startChar/maxChars)
 - read_files: Read multiple files matched by glob patterns (supports exclusion patterns with leading "!")
@@ -3952,7 +4266,11 @@ ${skillDescriptions}`;
     if (name === "voice_call") return await this.voiceCallTools.executeAction(input);
 
     // Shell tools
-    if (name === "run_command") return await this.shellTools.runCommand(input.command, input);
+    if (name === "run_command")
+      return await this.shellTools.runCommand(input.command, {
+        ...input,
+        signal: _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
+      });
 
     // Git tools
     if (name === "git_status") return await this.gitTools.gitStatus();
@@ -4503,6 +4821,10 @@ ${skillDescriptions}`;
     if (!mcpManager.hasTool(mcpToolName)) {
       return null;
     }
+    const endpointDecision = this.evaluateMcpEndpointNetworkPolicy(name);
+    if (endpointDecision?.action === "deny") {
+      throw new Error(`MCP endpoint access denied for "${name}": ${endpointDecision.reason}`);
+    }
     const mcpToolDefinition = mcpManager.getAllTools().find((tool) => tool.name === mcpToolName);
 
     if (mcpToolName === MCP_PAYMENT_TOOL_NAME) {
@@ -4609,12 +4931,12 @@ ${skillDescriptions}`;
             filename += ext;
           }
 
-          let outputPath = path.join(this.workspace.path, filename);
+          let outputPath = this.assertMcpOutputPath(path.join(this.workspace.path, filename));
           if (fs.existsSync(outputPath)) {
             const stem = path.basename(filename, path.extname(filename));
             const unique = `${stem}-${Date.now()}${path.extname(filename) || ext}`;
             filename = unique;
-            outputPath = path.join(this.workspace.path, filename);
+            outputPath = this.assertMcpOutputPath(path.join(this.workspace.path, filename));
           }
 
           try {
@@ -4678,7 +5000,7 @@ ${skillDescriptions}`;
     if (input?.filePath && typeof input.filePath === "string") {
       const providedPath = input.filePath;
       const filename = path.basename(providedPath);
-      const workspacePath = path.join(this.workspace.path, filename);
+      const workspacePath = this.assertMcpOutputPath(path.join(this.workspace.path, filename));
 
       // Check various possible locations for the file
       const possiblePaths = [
@@ -4691,11 +5013,12 @@ ${skillDescriptions}`;
       for (const sourcePath of possiblePaths) {
         try {
           if (fs.existsSync(sourcePath)) {
+            const resolvedSourcePath = await this.assertMcpReadablePath(sourcePath);
             // File found - copy to workspace if not already there
-            if (sourcePath !== workspacePath && !sourcePath.startsWith(this.workspace.path)) {
-              await fsPromises.copyFile(sourcePath, workspacePath);
+            if (resolvedSourcePath !== workspacePath) {
+              await fsPromises.copyFile(resolvedSourcePath, workspacePath);
               console.log(
-                `[ToolRegistry] Copied MCP file to workspace: ${sourcePath} -> ${workspacePath}`,
+                `[ToolRegistry] Copied MCP file to workspace: ${resolvedSourcePath} -> ${workspacePath}`,
               );
             }
 
@@ -5050,12 +5373,22 @@ ${skillDescriptions}`;
       skill_id,
     );
     const workspaceArtifactDir = path.join(this.workspace.path, "artifacts");
-    try {
-      if (!fs.existsSync(artifactDir)) {
-        await fsPromises.mkdir(artifactDir, { recursive: true });
+    const artifactDirectoryAccess = evaluateWorkspaceFilesystemAccess(
+      this.workspace,
+      artifactDir,
+      "write",
+    );
+    if (artifactDirectoryAccess.decision === "allow") {
+      try {
+        if (!fs.existsSync(artifactDir)) {
+          await fsPromises.mkdir(artifactDir, { recursive: true });
+        }
+      } catch (error) {
+        // A transient filesystem failure is not a policy grant. Keep skill
+        // discovery usable, but never attempt a write after the policy check
+        // denied this directory.
+        console.warn(`[ToolRegistry] Could not create skill artifact directory:`, error);
       }
-    } catch {
-      // Best-effort: keep tool usable even when the workspace path is restricted.
     }
 
     const missingParams: string[] = [];
@@ -5396,6 +5729,9 @@ ${skillDescriptions}`;
     }
 
     // Return full skill definition (useful for duplication/modification)
+    if (skill.filePath && skill.source !== "bundled") {
+      await this.assertSkillFilesystemAccess(skill.filePath, "read", "skill definition");
+    }
     const promptWithBaseDir = skillLoader.expandBaseDir(skill.prompt, skill);
     return {
       success: true,
@@ -5465,6 +5801,12 @@ ${skillDescriptions}`;
     }
 
     try {
+      const storageDirectory =
+        skillLoader.getWorkspaceSkillsDir() || skillLoader.getManagedSkillsDir();
+      await this.assertSkillFilesystemAccess(
+        path.join(storageDirectory, `${input.id}.json`),
+        "write",
+      );
       const newSkill = await skillLoader.createSkill({
         id: input.id,
         name: input.name,
@@ -5547,6 +5889,15 @@ ${skillDescriptions}`;
     }
 
     try {
+      if (sourceSkill.filePath && sourceSkill.source !== "bundled") {
+        await this.assertSkillFilesystemAccess(sourceSkill.filePath, "read", "source skill");
+      }
+      const storageDirectory =
+        skillLoader.getWorkspaceSkillsDir() || skillLoader.getManagedSkillsDir();
+      await this.assertSkillFilesystemAccess(
+        path.join(storageDirectory, `${new_id}.json`),
+        "write",
+      );
       // Create the duplicated skill with modifications
       const newSkill = await skillLoader.createSkill({
         id: new_id,
@@ -5627,6 +5978,9 @@ ${skillDescriptions}`;
     }
 
     try {
+      if (skill.filePath) {
+        await this.assertSkillFilesystemAccess(skill.filePath, "write");
+      }
       const updatedSkill = await skillLoader.updateSkill(skill_id, updates);
       if (!updatedSkill) {
         return {
@@ -5687,6 +6041,9 @@ ${skillDescriptions}`;
     }
 
     try {
+      if (skill.filePath) {
+        await this.assertSkillFilesystemAccess(skill.filePath, "delete");
+      }
       const deleted = await skillLoader.deleteSkill(skill_id);
       if (!deleted) {
         return {
@@ -5742,6 +6099,38 @@ ${skillDescriptions}`;
     rejection_reason?: string;
   }): Promise<Any> {
     const action = input.action || "list";
+    const proposalsPath = path.join(this.workspace.path, ".cowork", "skills", "proposals");
+    const evalsPath = path.join(this.workspace.path, ".cowork", "skills", "evals");
+    const workspaceSkillsPath = path.join(this.workspace.path, ".cowork", "skills");
+    const deniedStoragePath = (operation: "read" | "write", targets: string[]): Any | null => {
+      for (const target of targets) {
+        const decision = evaluateWorkspaceFilesystemAccess(this.workspace, target, operation);
+        if (decision.decision !== "allow") {
+          return {
+            success: false,
+            action,
+            message: `Skill proposal storage access denied: ${decision.reason}`,
+            path: target,
+          };
+        }
+      }
+      return null;
+    };
+
+    const storageGuard =
+      action === "list"
+        ? deniedStoragePath("read", [proposalsPath])
+        : action === "create" || action === "reject"
+          ? deniedStoragePath("read", [proposalsPath]) ||
+            deniedStoragePath("write", [proposalsPath])
+          : action === "approve"
+            ? deniedStoragePath("read", [proposalsPath]) ||
+              deniedStoragePath("write", [proposalsPath, workspaceSkillsPath])
+            : action === "eval"
+              ? deniedStoragePath("write", [evalsPath])
+              : null;
+    if (storageGuard) return storageGuard;
+
     const proposalService = new SkillProposalService(this.workspace.path);
 
     if (action === "list") {
@@ -5830,6 +6219,8 @@ ${skillDescriptions}`;
         };
       }
 
+      const proposalReadGuard = deniedStoragePath("read", [proposalsPath]);
+      if (proposalReadGuard) return proposalReadGuard;
       const proposal = await proposalService.get(proposalId);
       if (!proposal) {
         return {
@@ -5878,6 +6269,30 @@ ${skillDescriptions}`;
       // Enforce workspace-scoped materialization for approved proposals.
       skillLoader.setWorkspaceSkillsDir(this.workspace.path);
       const existing = skillLoader.getSkill(proposal.draftSkill.id);
+      const workspaceSkillsDirectory =
+        typeof (skillLoader as Any).getWorkspaceSkillsDir === "function"
+          ? skillLoader.getWorkspaceSkillsDir()
+          : null;
+      const materializationPath =
+        existing?.filePath ||
+        path.join(
+          workspaceSkillsDirectory || path.join(this.workspace.path, "skills"),
+          `${proposal.draftSkill.id}.json`,
+        );
+      try {
+        await this.assertSkillFilesystemAccess(
+          materializationPath,
+          "write",
+          "skill materialization",
+        );
+      } catch (error) {
+        return {
+          success: false,
+          action,
+          message: `Skill materialization access denied: ${String(error)}`,
+          path: materializationPath,
+        };
+      }
 
       let materializedSkill: Any;
       if (existing) {
@@ -5984,6 +6399,8 @@ ${skillDescriptions}`;
         };
       }
 
+      const proposalReadGuard = deniedStoragePath("read", [proposalsPath]);
+      if (proposalReadGuard) return proposalReadGuard;
       const proposal = await proposalService.get(proposalId);
       if (!proposal) {
         return {
@@ -9388,6 +9805,20 @@ ${skillDescriptions}`;
 
   // ============ Vibes & Lore Methods ============
 
+  private assertWorkspaceKitPathAccess(filePath: string, operation: "read" | "write"): string {
+    try {
+      return assertWorkspaceFilesystemAccess(
+        this.workspace,
+        filePath,
+        operation,
+        "workspace kit file",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Workspace kit ${operation} access denied: ${message}`);
+    }
+  }
+
   /**
    * Update workspace vibes/energy mode
    */
@@ -9424,11 +9855,14 @@ ${skillDescriptions}`;
     }
 
     const kitDir = path.join(workspacePath, ".cowork");
+    this.assertWorkspaceKitPathAccess(kitDir, "read");
     if (!fs.existsSync(kitDir) || !fs.statSync(kitDir).isDirectory()) {
       throw new Error("No .cowork/ directory found in workspace. Run the Memory Kit skill first.");
     }
 
     const vibesPath = path.join(kitDir, "VIBES.md");
+    this.assertWorkspaceKitPathAccess(vibesPath, "read");
+    this.assertWorkspaceKitPathAccess(vibesPath, "write");
     const AUTO_VIBES_START = "<!-- cowork:auto:vibes:start -->";
     const AUTO_VIBES_END = "<!-- cowork:auto:vibes:end -->";
 
@@ -9489,7 +9923,9 @@ ${skillDescriptions}`;
       }
     }
 
-    writeKitFileWithSnapshot(vibesPath, next, "agent", "tool:set_vibes");
+    writeKitFileWithSnapshot(vibesPath, next, "agent", "tool:set_vibes", (candidate, operation) =>
+      this.assertWorkspaceKitPathAccess(candidate, operation),
+    );
 
     console.log(`[ToolRegistry] Vibes updated: mode=${input.mode} energy=${energy}`);
 
@@ -9526,11 +9962,14 @@ ${skillDescriptions}`;
     }
 
     const kitDir = path.join(workspacePath, ".cowork");
+    this.assertWorkspaceKitPathAccess(kitDir, "read");
     if (!fs.existsSync(kitDir) || !fs.statSync(kitDir).isDirectory()) {
       throw new Error("No .cowork/ directory found in workspace. Run the Memory Kit skill first.");
     }
 
     const lorePath = path.join(kitDir, "LORE.md");
+    this.assertWorkspaceKitPathAccess(lorePath, "read");
+    this.assertWorkspaceKitPathAccess(lorePath, "write");
     const AUTO_LORE_START = "<!-- cowork:auto:lore:start -->";
     const AUTO_LORE_END = "<!-- cowork:auto:lore:end -->";
 
@@ -9623,7 +10062,13 @@ ${skillDescriptions}`;
       }
     }
 
-    writeKitFileWithSnapshot(lorePath, current, "agent", "tool:update_lore");
+    writeKitFileWithSnapshot(
+      lorePath,
+      current,
+      "agent",
+      "tool:update_lore",
+      (candidate, operation) => this.assertWorkspaceKitPathAccess(candidate, operation),
+    );
 
     console.log(`[ToolRegistry] Lore updated (${section}): ${sanitized.slice(0, 60)}`);
 

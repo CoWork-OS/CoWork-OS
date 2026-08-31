@@ -53,6 +53,22 @@ const TOOL_SEMANTICS_TABLE: ToolSemantics[] = [
     requiredInputSchemaKey: "destPath",
   },
   {
+    canonicalName: "rename_file",
+    aliases: ["rename_file"],
+    mutatesFile: true,
+    artifactKind: "file",
+    dedupeClass: "file_rename",
+    requiredInputSchemaKey: "newPath",
+  },
+  {
+    canonicalName: "delete_file",
+    aliases: ["delete_file"],
+    mutatesFile: true,
+    artifactKind: "file",
+    dedupeClass: "file_delete",
+    requiredInputSchemaKey: "path",
+  },
+  {
     canonicalName: "edit_file",
     aliases: ["edit_file"],
     mutatesFile: true,

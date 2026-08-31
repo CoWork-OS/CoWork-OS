@@ -105,12 +105,16 @@ const safeHighlight = (code: string, language: string): string => {
     // fall through
   }
   // escape HTML for raw fallback
-  return code.replace(/[&<>"]/g, (c) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-  })[c] as string);
+  return code.replace(
+    /[&<>"]/g,
+    (c) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+      })[c] as string,
+  );
 };
 
 // Minimal RFC 4180 parser supporting quoted fields with embedded commas/newlines
@@ -195,7 +199,8 @@ function JsonNode({ value, name, depth, defaultOpen }: JsonNodeProps) {
   const [open, setOpen] = useState(defaultOpen);
   const isObject = value !== null && typeof value === "object";
   const isArray = Array.isArray(value);
-  const keyLabel = name !== undefined ? <span className="json-node-key">{JSON.stringify(name)}:</span> : null;
+  const keyLabel =
+    name !== undefined ? <span className="json-node-key">{JSON.stringify(name)}:</span> : null;
 
   if (!isObject) {
     let valueClass = "json-node-value";
@@ -268,7 +273,9 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
   const [fileData, setFileData] = useState<FileViewerData | null>(null);
   const [videoPlaybackUrl, setVideoPlaybackUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(
+    null,
+  );
   const [imageActualSize, setImageActualSize] = useState(false);
   const [audioDurationSec, setAudioDurationSec] = useState<number | null>(null);
   const [jsonRaw, setJsonRaw] = useState(false);
@@ -537,12 +544,16 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
 
       case "code":
       case "latex": {
-        const lang = fileData.fileType === "latex" ? "plaintext" : detectLanguage(fileData.fileName);
+        const lang =
+          fileData.fileType === "latex" ? "plaintext" : detectLanguage(fileData.fileName);
         const html = safeHighlight(fileData.content || "", lang);
         return (
           <div className="file-viewer-code-block">
             <pre className="file-viewer-code">
-              <code className={`hljs language-${lang}`} dangerouslySetInnerHTML={{ __html: html }} />
+              <code
+                className={`hljs language-${lang}`}
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
             </pre>
           </div>
         );
@@ -902,7 +913,14 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
                 onClick={() => setImageActualSize((v) => !v)}
                 title={imageActualSize ? "Fit to window" : "Actual size"}
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
                   {imageActualSize ? (
                     <>
                       <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" strokeLinecap="round" />
@@ -930,7 +948,14 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
               title={copyFlash ? "Copied!" : "Copy file path"}
             >
               {copyFlash ? (
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M3 8l3.5 3.5L13 4.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               ) : (
@@ -981,7 +1006,10 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
               </span>
               <p>{error}</p>
               <div className="file-viewer-error-actions">
-                <button onClick={handleShowInFinder} className="file-viewer-open-btn file-viewer-open-btn-secondary">
+                <button
+                  onClick={handleShowInFinder}
+                  className="file-viewer-open-btn file-viewer-open-btn-secondary"
+                >
                   Show in Finder
                 </button>
                 <button onClick={handleOpenExternal} className="file-viewer-open-btn">

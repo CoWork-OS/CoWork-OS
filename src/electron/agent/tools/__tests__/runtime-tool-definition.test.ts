@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  getDefaultRuntimeToolMetadata,
-  withRuntimeToolMetadata,
-} from "../runtime-tool-definition";
+import { getDefaultRuntimeToolMetadata, withRuntimeToolMetadata } from "../runtime-tool-definition";
 
 describe("runtime tool definition metadata", () => {
   it("marks core read tools as parallel-safe and read-only", () => {

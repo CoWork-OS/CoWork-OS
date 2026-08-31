@@ -83,17 +83,9 @@ function formatTime(timestamp?: number): string {
 
 function workflowPrompt(workflow: HealthWorkflow): string {
   const sections = workflow.sections
-    .map(
-      (section) =>
-        `## ${section.title}\n${section.items.map((item) => `- ${item}`).join("\n")}`,
-    )
+    .map((section) => `## ${section.title}\n${section.items.map((item) => `- ${item}`).join("\n")}`)
     .join("\n\n");
-  return [
-    `${workflow.title}`,
-    workflow.summary,
-    sections,
-    workflow.disclaimer,
-  ]
+  return [`${workflow.title}`, workflow.summary, sections, workflow.disclaimer]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -434,7 +426,9 @@ export function HealthPanel({ compact = false, onOpenSettings, onCreateTask }: H
       {dashboard?.isDemo && (
         <div className="health-banner health-banner-info">
           <Sparkles size={14} />
-          <span>This view is seeded with demo data so the dashboard is useful on first launch.</span>
+          <span>
+            This view is seeded with demo data so the dashboard is useful on first launch.
+          </span>
         </div>
       )}
 
@@ -445,10 +439,15 @@ export function HealthPanel({ compact = false, onOpenSettings, onCreateTask }: H
         </div>
         <div className="health-metric-grid">
           {topMetrics.map((metric) => (
-            <article key={`${metric.sourceId}:${metric.key}`} className="dp-task-card health-metric-card">
+            <article
+              key={`${metric.sourceId}:${metric.key}`}
+              className="dp-task-card health-metric-card"
+            >
               <span className="health-metric-label">{metric.label}</span>
               <strong>
-                {Number.isFinite(metric.value) ? metric.value.toFixed(metric.value % 1 === 0 ? 0 : 1) : "—"}{" "}
+                {Number.isFinite(metric.value)
+                  ? metric.value.toFixed(metric.value % 1 === 0 ? 0 : 1)
+                  : "—"}{" "}
                 <span>{metric.unit}</span>
               </strong>
               <span className={`health-trend ${metric.trend || "stable"}`}>
@@ -483,12 +482,20 @@ export function HealthPanel({ compact = false, onOpenSettings, onCreateTask }: H
                   <div className="health-source-status">
                     <span
                       className={`dp-status-dot ${
-                        source.status === "connected" ? "online" : source.status === "syncing" ? "syncing" : "off"
+                        source.status === "connected"
+                          ? "online"
+                          : source.status === "syncing"
+                            ? "syncing"
+                            : "off"
                       }`}
                     />
                     <span
                       className={`health-source-status-label ${
-                        source.status === "connected" ? "online" : source.status === "syncing" ? "syncing" : "off"
+                        source.status === "connected"
+                          ? "online"
+                          : source.status === "syncing"
+                            ? "syncing"
+                            : "off"
                       }`}
                     >
                       {source.status === "connected"
@@ -524,7 +531,8 @@ export function HealthPanel({ compact = false, onOpenSettings, onCreateTask }: H
               <div className="health-source-actions">
                 {source.provider === "apple-health" && source.connectionMode === "native" ? (
                   <>
-                    {source.permissionState !== "authorized" && source.permissionState !== "import-only" ? (
+                    {source.permissionState !== "authorized" &&
+                    source.permissionState !== "import-only" ? (
                       <button
                         className="dp-secondary-btn"
                         onClick={() => handleConnectAppleHealth(source)}
@@ -536,7 +544,9 @@ export function HealthPanel({ compact = false, onOpenSettings, onCreateTask }: H
                     <button
                       className="dp-secondary-btn"
                       onClick={() => handlePreviewWriteback(source)}
-                      disabled={workingSourceId === source.id || source.permissionState !== "authorized"}
+                      disabled={
+                        workingSourceId === source.id || source.permissionState !== "authorized"
+                      }
                     >
                       <HeartPulse size={14} />
                       Writeback
@@ -544,7 +554,9 @@ export function HealthPanel({ compact = false, onOpenSettings, onCreateTask }: H
                     <button
                       className="dp-secondary-btn"
                       onClick={() => handleSyncSource(source.id)}
-                      disabled={workingSourceId === source.id || source.permissionState !== "authorized"}
+                      disabled={
+                        workingSourceId === source.id || source.permissionState !== "authorized"
+                      }
                     >
                       {workingSourceId === source.id ? "Working..." : "Sync"}
                     </button>
@@ -586,7 +598,9 @@ export function HealthPanel({ compact = false, onOpenSettings, onCreateTask }: H
       <div className="dp-section">
         <div className="dp-section-header">
           <span className="dp-section-label">Workflow studio</span>
-          <span className="health-section-desc">Generate an actionable summary from the current health state</span>
+          <span className="health-section-desc">
+            Generate an actionable summary from the current health state
+          </span>
         </div>
         <div className="health-workflow-grid">
           {WORKFLOW_ACTIONS.map((action) => (
@@ -702,7 +716,9 @@ export function HealthPanel({ compact = false, onOpenSettings, onCreateTask }: H
                 Source
                 <select
                   value={sourceForm.provider}
-                  onChange={(event) => handleTemplateSelect(event.target.value as HealthSourceInput["provider"])}
+                  onChange={(event) =>
+                    handleTemplateSelect(event.target.value as HealthSourceInput["provider"])
+                  }
                 >
                   {HEALTH_SOURCE_TEMPLATES.map((template) => (
                     <option key={template.provider} value={template.provider}>
@@ -812,7 +828,9 @@ export function HealthPanel({ compact = false, onOpenSettings, onCreateTask }: H
             <div className="health-writeback-preview">
               <div className="health-writeback-summary">
                 <span className={`health-pill ${writebackPreview.connectionMode}`}>
-                  {writebackPreview.connectionMode === "native" ? "HealthKit writeback" : "Import only"}
+                  {writebackPreview.connectionMode === "native"
+                    ? "HealthKit writeback"
+                    : "Import only"}
                 </span>
                 <p>{writebackPreview.items.length} item(s) prepared for Apple Health.</p>
               </div>

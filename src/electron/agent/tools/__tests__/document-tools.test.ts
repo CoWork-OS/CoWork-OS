@@ -150,8 +150,8 @@ describe("DocumentTools", () => {
     expect(result.path).toBe("/workspace/paper.pdf");
     expect(compileLatex).toHaveBeenCalledWith({
       workspacePath: "/workspace",
-      sourcePath: "paper.tex",
-      outputPath: "paper.pdf",
+      sourcePath: "/workspace/paper.tex",
+      outputPath: "/workspace/paper.pdf",
       engine: "auto",
     });
     expect(registerArtifact).toHaveBeenCalledWith(
@@ -273,6 +273,58 @@ describe("DocumentTools", () => {
         ]),
       }),
     );
+  });
+
+  it("enforces the active access profile for local presentation inputs", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-doc-presentation-"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-doc-presentation-outside-"));
+    const deniedImage = path.join(workspace, "private.png");
+    const allowedImage = path.join(outside, "approved.png");
+    fs.writeFileSync(deniedImage, "private");
+    fs.writeFileSync(allowedImage, "approved");
+
+    const permissions = {
+      read: true,
+      write: true,
+      delete: true,
+      network: false,
+      shell: false,
+      unrestrictedFileAccess: false,
+      allowedPaths: [],
+      accessFilesystemRules: [
+        { path: deniedImage, access: "deny" as const },
+        { path: outside, access: "read" as const },
+      ],
+    };
+
+    try {
+      const tools = new DocumentTools({ path: workspace, permissions } as Any, "task-1");
+
+      await expect(
+        tools.generatePresentation({
+          filename: "denied.pptx",
+          assets: [{ id: "private", path: deniedImage }],
+          slides: [{ title: "Private", image: { path: deniedImage } }],
+        }),
+      ).rejects.toThrow("denied by the active access profile");
+
+      await tools.generatePresentation({
+        filename: "approved.pptx",
+        assets: [{ id: "approved", path: allowedImage }],
+        slides: [{ title: "Approved", image: { path: allowedImage } }],
+      });
+
+      expect(generatePPTX).toHaveBeenLastCalledWith(
+        path.join(workspace, "approved.pptx"),
+        expect.objectContaining({
+          assets: [{ id: "approved", path: allowedImage }],
+          slides: [{ title: "Approved", image: { path: allowedImage } }],
+        }),
+      );
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   // ── generateSpreadsheet ───────────────────────────────────────

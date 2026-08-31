@@ -212,8 +212,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
   const onboarding = useOnboardingFlow({ onComplete, workspaceId });
   const isSensitiveInputState =
     onboarding.state === "llm_api_key" || onboarding.state === "llm_testing";
-  const isCompactRecapStep =
-    onboarding.state === "recap" || onboarding.state === "final_try";
+  const isCompactRecapStep = onboarding.state === "recap" || onboarding.state === "final_try";
 
   // Voice input integration
   const voiceInput = useVoiceInput({
@@ -859,37 +858,49 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
     return "breathing";
   };
 
-  const toggleAssistantTrait = useCallback((traitId: OnboardingAssistantTraitId) => {
-    const selected = onboarding.data.assistantTraits.includes(traitId);
-    const next = selected
-      ? onboarding.data.assistantTraits.filter((item) => item !== traitId)
-      : [...onboarding.data.assistantTraits, traitId];
-    onboarding.updateData({
-      assistantTraits: next.length > 0 ? next : ["adaptive"],
-    });
-  }, [onboarding]);
+  const toggleAssistantTrait = useCallback(
+    (traitId: OnboardingAssistantTraitId) => {
+      const selected = onboarding.data.assistantTraits.includes(traitId);
+      const next = selected
+        ? onboarding.data.assistantTraits.filter((item) => item !== traitId)
+        : [...onboarding.data.assistantTraits, traitId];
+      onboarding.updateData({
+        assistantTraits: next.length > 0 ? next : ["adaptive"],
+      });
+    },
+    [onboarding],
+  );
 
-  const toggleTimeDrain = useCallback((timeDrainId: OnboardingTimeDrainId) => {
-    const selected = onboarding.data.timeDrains.includes(timeDrainId);
-    onboarding.updateData({
-      timeDrains: selected
-        ? onboarding.data.timeDrains.filter((item) => item !== timeDrainId)
-        : [...onboarding.data.timeDrains, timeDrainId],
-    });
-  }, [onboarding]);
+  const toggleTimeDrain = useCallback(
+    (timeDrainId: OnboardingTimeDrainId) => {
+      const selected = onboarding.data.timeDrains.includes(timeDrainId);
+      onboarding.updateData({
+        timeDrains: selected
+          ? onboarding.data.timeDrains.filter((item) => item !== timeDrainId)
+          : [...onboarding.data.timeDrains, timeDrainId],
+      });
+    },
+    [onboarding],
+  );
 
-  const togglePriority = useCallback((priorityId: OnboardingPriorityId) => {
-    const selected = onboarding.data.priorities.includes(priorityId);
-    onboarding.updateData({
-      priorities: selected
-        ? onboarding.data.priorities.filter((item) => item !== priorityId)
-        : [...onboarding.data.priorities, priorityId],
-    });
-  }, [onboarding]);
+  const togglePriority = useCallback(
+    (priorityId: OnboardingPriorityId) => {
+      const selected = onboarding.data.priorities.includes(priorityId);
+      onboarding.updateData({
+        priorities: selected
+          ? onboarding.data.priorities.filter((item) => item !== priorityId)
+          : [...onboarding.data.priorities, priorityId],
+      });
+    },
+    [onboarding],
+  );
 
-  const selectResponseStyle = useCallback((styleId: OnboardingResponseStyleId) => {
-    onboarding.updateData({ responseStyle: styleId });
-  }, [onboarding]);
+  const selectResponseStyle = useCallback(
+    (styleId: OnboardingResponseStyleId) => {
+      onboarding.updateData({ responseStyle: styleId });
+    },
+    [onboarding],
+  );
 
   const renderSelectionCards = <T extends string>(
     options: Array<{ id: T; title: string; description: string }>,
@@ -987,10 +998,11 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         <div className="onboarding-actions">
           <button
             className="onboarding-btn onboarding-btn-primary"
-            onClick={() => onboarding.submitTimeDrains(onboarding.data.timeDrains, timeDrainsOtherDraft)}
+            onClick={() =>
+              onboarding.submitTimeDrains(onboarding.data.timeDrains, timeDrainsOtherDraft)
+            }
             disabled={
-              onboarding.data.timeDrains.length === 0 ||
-              (showOther && !timeDrainsOtherDraft.trim())
+              onboarding.data.timeDrains.length === 0 || (showOther && !timeDrainsOtherDraft.trim())
             }
           >
             Continue
@@ -1019,10 +1031,11 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         <div className="onboarding-actions">
           <button
             className="onboarding-btn onboarding-btn-primary"
-            onClick={() => onboarding.submitPriorities(onboarding.data.priorities, prioritiesOtherDraft)}
+            onClick={() =>
+              onboarding.submitPriorities(onboarding.data.priorities, prioritiesOtherDraft)
+            }
             disabled={
-              onboarding.data.priorities.length === 0 ||
-              (showOther && !prioritiesOtherDraft.trim())
+              onboarding.data.priorities.length === 0 || (showOther && !prioritiesOtherDraft.trim())
             }
           >
             Continue
@@ -1069,10 +1082,8 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
     const selected = onboarding.data.responseStyle || "depends";
     return (
       <div className="onboarding-step-panel">
-        {renderSelectionCards(
-          ONBOARDING_RESPONSE_STYLES,
-          [selected],
-          (styleId) => selectResponseStyle(styleId),
+        {renderSelectionCards(ONBOARDING_RESPONSE_STYLES, [selected], (styleId) =>
+          selectResponseStyle(styleId),
         )}
         {selected === "custom" && (
           <div className="onboarding-form-group">
@@ -1613,7 +1624,8 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         </div>
         <p className="onboarding-ollama-detection-model">{modelName}</p>
         <p className="onboarding-ollama-detection-note">
-          Local model — no API key needed. Inference runs on this machine for the detected local endpoint.
+          Local model — no API key needed. Inference runs on this machine for the detected local
+          endpoint.
         </p>
         <div className="onboarding-actions" style={{ marginTop: 20 }}>
           <button
@@ -1666,11 +1678,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
             </span>
           </button>
         ) : (
-          <button
-            type="button"
-            className="onboarding-ai-primary-card muted"
-            disabled
-          >
+          <button type="button" className="onboarding-ai-primary-card muted" disabled>
             <span className="onboarding-ai-primary-title">Use local Ollama</span>
             <span className="onboarding-ai-primary-copy">
               No local model detected. Install Ollama and pull a model, then run setup again.
@@ -2034,7 +2042,9 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
       </div>
 
       {/* Main content */}
-      <div className={`onboarding-content ${isCompactRecapStep ? "onboarding-content-compact" : ""}`}>
+      <div
+        className={`onboarding-content ${isCompactRecapStep ? "onboarding-content-compact" : ""}`}
+      >
         {/* Orb */}
         <AwakeningOrb
           state={getOrbState()}
@@ -2042,30 +2052,32 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         />
 
         {/* Text */}
-        {onboarding.currentText && onboarding.state !== "dormant" && onboarding.state !== "recap" && (
-          <TypewriterText
-            text={onboarding.currentText}
-            speed={40}
-            onComplete={onboarding.onTextComplete}
-            showCursor={
-              onboarding.state !== "ask_name" &&
-              onboarding.state !== "ask_assistant_traits" &&
-              onboarding.state !== "ask_user_profile" &&
-              onboarding.state !== "ask_time_drains" &&
-              onboarding.state !== "ask_priorities" &&
-              onboarding.state !== "ask_tools" &&
-              onboarding.state !== "ask_response_style" &&
-              onboarding.state !== "ask_additional_guidance" &&
-              onboarding.state !== "ask_voice" &&
-              onboarding.state !== "ask_work_style" &&
-              onboarding.state !== "ask_memory_trust" &&
-              onboarding.state !== "ollama_detected" &&
-              onboarding.state !== "llm_setup" &&
-              onboarding.state !== "llm_api_key" &&
-              onboarding.state !== "final_try"
-            }
-          />
-        )}
+        {onboarding.currentText &&
+          onboarding.state !== "dormant" &&
+          onboarding.state !== "recap" && (
+            <TypewriterText
+              text={onboarding.currentText}
+              speed={40}
+              onComplete={onboarding.onTextComplete}
+              showCursor={
+                onboarding.state !== "ask_name" &&
+                onboarding.state !== "ask_assistant_traits" &&
+                onboarding.state !== "ask_user_profile" &&
+                onboarding.state !== "ask_time_drains" &&
+                onboarding.state !== "ask_priorities" &&
+                onboarding.state !== "ask_tools" &&
+                onboarding.state !== "ask_response_style" &&
+                onboarding.state !== "ask_additional_guidance" &&
+                onboarding.state !== "ask_voice" &&
+                onboarding.state !== "ask_work_style" &&
+                onboarding.state !== "ask_memory_trust" &&
+                onboarding.state !== "ollama_detected" &&
+                onboarding.state !== "llm_setup" &&
+                onboarding.state !== "llm_api_key" &&
+                onboarding.state !== "final_try"
+              }
+            />
+          )}
 
         {/* Product positioning cue (intro only) */}
         {showCapabilityPillarsOnce && renderCapabilityPillars()}

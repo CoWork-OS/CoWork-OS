@@ -17,7 +17,10 @@ describe("output-token-policy", () => {
   it("infers tool follow-up turns from tool_result history", () => {
     expect(
       inferOutputBudgetRequestKind([
-        { role: "user", content: [{ type: "tool_result", tool_use_id: "1", content: "ok" }] as Any },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "1", content: "ok" }] as Any,
+        },
       ]),
     ).toBe("tool_followup");
   });
@@ -125,8 +128,6 @@ describe("output-token-policy", () => {
   });
 
   it("builds operator guidance for reasoning-only truncation", () => {
-    expect(buildReasoningExhaustedGuidance()).toContain(
-      "higher output budget",
-    );
+    expect(buildReasoningExhaustedGuidance()).toContain("higher output budget");
   });
 });

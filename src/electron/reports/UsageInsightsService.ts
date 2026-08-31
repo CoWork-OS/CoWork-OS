@@ -252,15 +252,14 @@ function mergeLlmScans(target: LlmUsageScanResult, source: LlmUsageScanResult): 
   }
 
   for (const [model, data] of source.byModel.entries()) {
-    const current =
-      target.byModel.get(model) ?? {
-        cost: 0,
-        calls: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cachedTokens: 0,
-        taskIds: new Set<string>(),
-      };
+    const current = target.byModel.get(model) ?? {
+      cost: 0,
+      calls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      taskIds: new Set<string>(),
+    };
     current.cost += data.cost;
     current.calls += data.calls;
     current.inputTokens += data.inputTokens;
@@ -273,14 +272,13 @@ function mergeLlmScans(target: LlmUsageScanResult, source: LlmUsageScanResult): 
   }
 
   for (const [dateKey, data] of source.byDay.entries()) {
-    const current =
-      target.byDay.get(dateKey) ?? {
-        llmCalls: 0,
-        cost: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cachedTokens: 0,
-      };
+    const current = target.byDay.get(dateKey) ?? {
+      llmCalls: 0,
+      cost: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    };
     current.llmCalls += data.llmCalls;
     current.cost += data.cost;
     current.inputTokens += data.inputTokens;
@@ -290,15 +288,14 @@ function mergeLlmScans(target: LlmUsageScanResult, source: LlmUsageScanResult): 
   }
 
   for (const [provider, data] of source.byProvider.entries()) {
-    const current =
-      target.byProvider.get(provider) ?? {
-        calls: 0,
-        cost: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cachedTokens: 0,
-        taskIds: new Set<string>(),
-      };
+    const current = target.byProvider.get(provider) ?? {
+      calls: 0,
+      cost: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      taskIds: new Set<string>(),
+    };
     current.calls += data.calls;
     current.cost += data.cost;
     current.inputTokens += data.inputTokens;
@@ -487,7 +484,10 @@ function mergeNumberMap(target: Map<string, number>, source: Map<string, number>
   }
 }
 
-function mergeNonLlmAccumulator(target: NonLlmAccumulator, source: NonLlmAccumulator): NonLlmAccumulator {
+function mergeNonLlmAccumulator(
+  target: NonLlmAccumulator,
+  source: NonLlmAccumulator,
+): NonLlmAccumulator {
   target.taskMetrics.totalCreated += source.taskMetrics.totalCreated;
   target.taskMetrics.completed += source.taskMetrics.completed;
   target.taskMetrics.failed += source.taskMetrics.failed;
@@ -510,20 +510,19 @@ function mergeNonLlmAccumulator(target: NonLlmAccumulator, source: NonLlmAccumul
   mergeNumberMap(target.topSkills, source.topSkills);
 
   for (const [personaId, entry] of source.persona.entries()) {
-    const current =
-      target.persona.get(personaId) ?? {
-        personaId,
-        personaName: entry.personaName,
-        total: 0,
-        completed: 0,
-        failed: 0,
-        cancelled: 0,
-        completionDurationMsSum: 0,
-        completionDurationCount: 0,
-        attemptsSum: 0,
-        attemptsCount: 0,
-        totalCost: 0,
-      };
+    const current = target.persona.get(personaId) ?? {
+      personaId,
+      personaName: entry.personaName,
+      total: 0,
+      completed: 0,
+      failed: 0,
+      cancelled: 0,
+      completionDurationMsSum: 0,
+      completionDurationCount: 0,
+      attemptsSum: 0,
+      attemptsCount: 0,
+      totalCost: 0,
+    };
     current.personaName = entry.personaName;
     current.total += entry.total;
     current.completed += entry.completed;
@@ -571,7 +570,9 @@ export class UsageInsightsService {
     const map = new Map<string, LlmPricingRow>();
     try {
       const rows = this.db
-        .prepare("SELECT model_key, input_cost_per_mtok, output_cost_per_mtok, cached_input_cost_per_mtok FROM llm_pricing")
+        .prepare(
+          "SELECT model_key, input_cost_per_mtok, output_cost_per_mtok, cached_input_cost_per_mtok FROM llm_pricing",
+        )
         .all() as LlmPricingRow[];
       for (const r of rows) {
         map.set(r.model_key, r);
@@ -593,7 +594,12 @@ export class UsageInsightsService {
     if (/^\d/.test(lc) && map.has(`gpt-${lc}`)) return map.get(`gpt-${lc}`);
     if (/^(sonnet|opus|haiku)-/.test(lc) && map.has(`claude-${lc}`)) return map.get(`claude-${lc}`);
     if (lc.includes(":free") || lc.includes("ollama") || lc.includes(":latest"))
-      return { model_key: modelKey, input_cost_per_mtok: 0, output_cost_per_mtok: 0, cached_input_cost_per_mtok: 0 };
+      return {
+        model_key: modelKey,
+        input_cost_per_mtok: 0,
+        output_cost_per_mtok: 0,
+        cached_input_cost_per_mtok: 0,
+      };
     for (const [k, v] of map) {
       if (lc.startsWith(k.toLowerCase()) || k.toLowerCase().startsWith(lc)) return v;
     }
@@ -690,11 +696,17 @@ export class UsageInsightsService {
     },
   ): void {
     const deltaInput =
-      typeof entry.inputTokens === "number" && Number.isFinite(entry.inputTokens) ? entry.inputTokens : 0;
+      typeof entry.inputTokens === "number" && Number.isFinite(entry.inputTokens)
+        ? entry.inputTokens
+        : 0;
     const deltaOutput =
-      typeof entry.outputTokens === "number" && Number.isFinite(entry.outputTokens) ? entry.outputTokens : 0;
+      typeof entry.outputTokens === "number" && Number.isFinite(entry.outputTokens)
+        ? entry.outputTokens
+        : 0;
     const deltaCached =
-      typeof entry.cachedTokens === "number" && Number.isFinite(entry.cachedTokens) ? entry.cachedTokens : 0;
+      typeof entry.cachedTokens === "number" && Number.isFinite(entry.cachedTokens)
+        ? entry.cachedTokens
+        : 0;
     const modelKey =
       (typeof entry.modelKey === "string" && entry.modelKey) ||
       (typeof entry.modelId === "string" && entry.modelId) ||
@@ -715,15 +727,14 @@ export class UsageInsightsService {
     if (deltaCost > 0) out.chargeableCalls += 1;
     if (entry.taskId) out.distinctTaskIds.add(entry.taskId);
 
-    const byModel =
-      out.byModel.get(modelKey) ?? {
-        cost: 0,
-        calls: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cachedTokens: 0,
-        taskIds: new Set<string>(),
-      };
+    const byModel = out.byModel.get(modelKey) ?? {
+      cost: 0,
+      calls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      taskIds: new Set<string>(),
+    };
     byModel.cost += deltaCost;
     byModel.calls += 1;
     byModel.inputTokens += deltaInput;
@@ -733,14 +744,13 @@ export class UsageInsightsService {
     out.byModel.set(modelKey, byModel);
 
     const dayKey = usageLocalDateKey(entry.timestamp);
-    const day =
-      out.byDay.get(dayKey) ?? {
-        llmCalls: 0,
-        cost: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cachedTokens: 0,
-      };
+    const day = out.byDay.get(dayKey) ?? {
+      llmCalls: 0,
+      cost: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    };
     day.llmCalls += 1;
     day.cost += deltaCost;
     day.inputTokens += deltaInput;
@@ -749,15 +759,14 @@ export class UsageInsightsService {
     out.byDay.set(dayKey, day);
 
     const provider = normalizeLlmProviderType(entry.providerType) || "unknown";
-    const byProvider =
-      out.byProvider.get(provider) ?? {
-        calls: 0,
-        cost: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cachedTokens: 0,
-        taskIds: new Set<string>(),
-      };
+    const byProvider = out.byProvider.get(provider) ?? {
+      calls: 0,
+      cost: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      taskIds: new Set<string>(),
+    };
     byProvider.calls += 1;
     byProvider.cost += deltaCost;
     byProvider.inputTokens += deltaInput;
@@ -812,9 +821,7 @@ export class UsageInsightsService {
     const periodEnd = now;
     const { taskWatermarkMs, eventWatermarkMs, llmWatermarkMs } = projector.getWatermarks();
     const nonLlmWatermarkMs =
-      taskWatermarkMs > 0 && eventWatermarkMs > 0
-        ? Math.min(taskWatermarkMs, eventWatermarkMs)
-        : 0;
+      taskWatermarkMs > 0 && eventWatermarkMs > 0 ? Math.min(taskWatermarkMs, eventWatermarkMs) : 0;
 
     if (llmWatermarkMs <= 0 && nonLlmWatermarkMs <= 0) {
       return this.generateRawWindow(workspaceId, periodDays);
@@ -829,7 +836,10 @@ export class UsageInsightsService {
     let llmErrorCount = 0;
     if (llmWatermarkMs > 0) {
       const llmProcessedEnd = Math.min(periodEnd, llmWatermarkMs);
-      mergeLlmScans(llmScan, this.collectCanonicalLlmUsageScan(workspaceId, periodStart, llmProcessedEnd));
+      mergeLlmScans(
+        llmScan,
+        this.collectCanonicalLlmUsageScan(workspaceId, periodStart, llmProcessedEnd),
+      );
       llmErrorCount += this.countCanonicalLlmErrors(workspaceId, periodStart, llmProcessedEnd);
       if (llmProcessedEnd < periodEnd) {
         mergeLlmScans(
@@ -839,7 +849,10 @@ export class UsageInsightsService {
         llmErrorCount += this.countLlmErrors(workspaceId, llmProcessedEnd + 1, periodEnd);
       }
     } else {
-      mergeLlmScans(llmScan, this.collectCanonicalLlmUsageScan(workspaceId, periodStart, periodEnd));
+      mergeLlmScans(
+        llmScan,
+        this.collectCanonicalLlmUsageScan(workspaceId, periodStart, periodEnd),
+      );
       llmErrorCount += this.countCanonicalLlmErrors(workspaceId, periodStart, periodEnd);
     }
     this.applyCanonicalPersonaCosts(nonLlm.persona, workspaceId, periodStart, periodEnd);
@@ -856,8 +869,15 @@ export class UsageInsightsService {
     const topSkills = this.buildTopSkillsFromAccumulator(nonLlm.topSkills);
     const personaMetrics = this.buildPersonaMetricsFromAccumulator(nonLlm.persona);
     const feedbackMetrics = this.buildFeedbackMetricsFromAccumulator(nonLlm.feedback);
-    const retryMetrics = this.buildRetryMetricsFromAccumulator(nonLlm.retry, taskMetrics.totalCreated);
-    const executionMetrics = this.buildExecutionMetricsFromAccumulator(nonLlm.tools, taskMetrics, llmScan);
+    const retryMetrics = this.buildRetryMetricsFromAccumulator(
+      nonLlm.retry,
+      taskMetrics.totalCreated,
+    );
+    const executionMetrics = this.buildExecutionMetricsFromAccumulator(
+      nonLlm.tools,
+      taskMetrics,
+      llmScan,
+    );
     const awuMetrics = this.buildAwuMetricsFromAccumulator(
       workspaceId,
       periodStart,
@@ -931,7 +951,12 @@ export class UsageInsightsService {
     const topSkills = this.getTopSkills(workspaceId, periodStart, periodEnd);
     const personaMetrics = this.getPersonaMetrics(workspaceId, periodStart, periodEnd);
     const feedbackMetrics = this.getFeedbackMetrics(workspaceId, periodStart, periodEnd);
-    const retryMetrics = this.getRetryMetrics(workspaceId, periodStart, periodEnd, taskMetrics.totalCreated);
+    const retryMetrics = this.getRetryMetrics(
+      workspaceId,
+      periodStart,
+      periodEnd,
+      taskMetrics.totalCreated,
+    );
     const executionMetrics = this.getExecutionMetrics(
       workspaceId,
       periodStart,
@@ -1002,8 +1027,15 @@ export class UsageInsightsService {
     const topSkills = this.buildTopSkillsFromAccumulator(nonLlm.topSkills);
     const personaMetrics = this.buildPersonaMetricsFromAccumulator(nonLlm.persona);
     const feedbackMetrics = this.buildFeedbackMetricsFromAccumulator(nonLlm.feedback);
-    const retryMetrics = this.buildRetryMetricsFromAccumulator(nonLlm.retry, taskMetrics.totalCreated);
-    const executionMetrics = this.buildExecutionMetricsFromAccumulator(nonLlm.tools, taskMetrics, llmScan);
+    const retryMetrics = this.buildRetryMetricsFromAccumulator(
+      nonLlm.retry,
+      taskMetrics.totalCreated,
+    );
+    const executionMetrics = this.buildExecutionMetricsFromAccumulator(
+      nonLlm.tools,
+      taskMetrics,
+      llmScan,
+    );
     const awuMetrics = this.buildAwuMetricsFromAccumulator(
       workspaceId,
       periodStart,
@@ -1094,7 +1126,9 @@ export class UsageInsightsService {
     endDateKey: string,
   ): NonLlmAccumulator {
     const acc = emptyNonLlmAccumulator();
-    const params = workspaceId ? [workspaceId, startDateKey, endDateKey] : [startDateKey, endDateKey];
+    const params = workspaceId
+      ? [workspaceId, startDateKey, endDateKey]
+      : [startDateKey, endDateKey];
     const dayWhere = workspaceId
       ? "workspace_id = ? AND date_key >= ? AND date_key <= ?"
       : "date_key >= ? AND date_key <= ?";
@@ -1135,7 +1169,10 @@ export class UsageInsightsService {
       acc.feedback.accepted += row.feedback_accepted || 0;
       acc.feedback.rejected += row.feedback_rejected || 0;
       acc.awu.awuCount += row.awu_completed_ok || 0;
-      acc.awu.byDay.set(row.date_key, (acc.awu.byDay.get(row.date_key) || 0) + (row.awu_completed_ok || 0));
+      acc.awu.byDay.set(
+        row.date_key,
+        (acc.awu.byDay.get(row.date_key) || 0) + (row.awu_completed_ok || 0),
+      );
     }
 
     const hourRows = this.db
@@ -1219,7 +1256,10 @@ export class UsageInsightsService {
       )
       .all(...params) as Array<{ reason: string; count: number }>;
     for (const row of reasonRows) {
-      acc.feedback.reasons.set(row.reason, (acc.feedback.reasons.get(row.reason) || 0) + (row.count || 0));
+      acc.feedback.reasons.set(
+        row.reason,
+        (acc.feedback.reasons.get(row.reason) || 0) + (row.count || 0),
+      );
     }
 
     const toolRows = this.db
@@ -1445,20 +1485,19 @@ export class UsageInsightsService {
           total_cost: number | null;
         }>);
     for (const row of personaCostRows) {
-      const current =
-        acc.persona.get(row.persona_id) ?? {
-          personaId: row.persona_id,
-          personaName: row.persona_name,
-          total: 0,
-          completed: 0,
-          failed: 0,
-          cancelled: 0,
-          completionDurationMsSum: 0,
-          completionDurationCount: 0,
-          attemptsSum: 0,
-          attemptsCount: 0,
-          totalCost: 0,
-        };
+      const current = acc.persona.get(row.persona_id) ?? {
+        personaId: row.persona_id,
+        personaName: row.persona_name,
+        total: 0,
+        completed: 0,
+        failed: 0,
+        cancelled: 0,
+        completionDurationMsSum: 0,
+        completionDurationCount: 0,
+        attemptsSum: 0,
+        attemptsCount: 0,
+        totalCost: 0,
+      };
       current.totalCost += row.total_cost || 0;
       acc.persona.set(row.persona_id, current);
     }
@@ -1531,7 +1570,11 @@ export class UsageInsightsService {
 
       let tool = "";
       try {
-        const payload = JSON.parse(row.payload) as { tool?: string; name?: string; toolName?: string };
+        const payload = JSON.parse(row.payload) as {
+          tool?: string;
+          name?: string;
+          toolName?: string;
+        };
         tool = payload.tool || payload.name || payload.toolName || "";
       } catch {
         // Ignore malformed tool rows.
@@ -1724,20 +1767,19 @@ export class UsageInsightsService {
       }
 
       for (const [personaId, entry] of totals.entries()) {
-        const current =
-          persona.get(personaId) ?? {
-            personaId,
-            personaName: entry.personaName,
-            total: 0,
-            completed: 0,
-            failed: 0,
-            cancelled: 0,
-            completionDurationMsSum: 0,
-            completionDurationCount: 0,
-            attemptsSum: 0,
-            attemptsCount: 0,
-            totalCost: 0,
-          };
+        const current = persona.get(personaId) ?? {
+          personaId,
+          personaName: entry.personaName,
+          total: 0,
+          completed: 0,
+          failed: 0,
+          cancelled: 0,
+          completionDurationMsSum: 0,
+          completionDurationCount: 0,
+          attemptsSum: 0,
+          attemptsCount: 0,
+          totalCost: 0,
+        };
         current.personaName = entry.personaName;
         current.totalCost = entry.totalCost;
         persona.set(personaId, current);
@@ -1777,7 +1819,9 @@ export class UsageInsightsService {
     }
   }
 
-  private buildTaskMetricsFromAccumulator(task: TaskMetricsAccumulator): UsageInsights["taskMetrics"] {
+  private buildTaskMetricsFromAccumulator(
+    task: TaskMetricsAccumulator,
+  ): UsageInsights["taskMetrics"] {
     return {
       totalCreated: task.totalCreated,
       completed: task.completed,
@@ -1805,7 +1849,9 @@ export class UsageInsightsService {
     };
   }
 
-  private buildTopSkillsFromAccumulator(topSkills: Map<string, number>): UsageInsights["topSkills"] {
+  private buildTopSkillsFromAccumulator(
+    topSkills: Map<string, number>,
+  ): UsageInsights["topSkills"] {
     return Array.from(topSkills.entries())
       .map(([skill, count]) => ({ skill, count }))
       .sort((a, b) => b.count - a.count)
@@ -1874,7 +1920,8 @@ export class UsageInsightsService {
     const avgTokensPerLlmCall = totalLlmCalls > 0 ? Math.round(totalTokens / totalLlmCalls) : null;
     const avgTokensPerTask =
       taskMetrics.totalCreated > 0 ? Math.round(totalTokens / taskMetrics.totalCreated) : null;
-    const outputInputRatio = totalPromptTokens > 0 ? totalCompletionTokens / totalPromptTokens : null;
+    const outputInputRatio =
+      totalPromptTokens > 0 ? totalCompletionTokens / totalPromptTokens : null;
     const topTools = Array.from(tools.toolMap.entries())
       .map(([tool, data]) => ({ tool, calls: data.calls, errors: data.errors }))
       .filter((tool) => tool.calls > 0 || tool.errors > 0)
@@ -1938,11 +1985,18 @@ export class UsageInsightsService {
 
     const previousPeriodStart = periodStart - (periodEnd - periodStart);
     const previousPeriodEnd = periodStart;
-    const previousAwu = this.readNonLlmAccumulatorFast(workspaceId, previousPeriodStart, previousPeriodEnd).awu;
-    const previousScan = this.collectCanonicalLlmUsageScan(workspaceId, previousPeriodStart, previousPeriodEnd);
+    const previousAwu = this.readNonLlmAccumulatorFast(
+      workspaceId,
+      previousPeriodStart,
+      previousPeriodEnd,
+    ).awu;
+    const previousScan = this.collectCanonicalLlmUsageScan(
+      workspaceId,
+      previousPeriodStart,
+      previousPeriodEnd,
+    );
     const previousAwuCount = previousAwu.awuCount;
-    const previousTokens =
-      previousScan.totalInputTokens + previousScan.totalOutputTokens;
+    const previousTokens = previousScan.totalInputTokens + previousScan.totalOutputTokens;
     const previousTokensPerAwu =
       previousAwuCount > 0 ? Math.round(previousTokens / previousAwuCount) : null;
     const previousCostPerAwu =
@@ -2496,7 +2550,10 @@ export class UsageInsightsService {
            WHERE ${ws.clause}(te.type = 'llm_usage' OR te.legacy_type = 'llm_usage')
              AND te.timestamp >= ? AND te.timestamp <= ?`,
         )
-        .all(...ws.params, periodStart, periodEnd) as Array<{ persona_id: string; payload: string }>;
+        .all(...ws.params, periodStart, periodEnd) as Array<{
+        persona_id: string;
+        payload: string;
+      }>;
       for (const row of costRows) {
         try {
           const payload = JSON.parse(row.payload) as {
@@ -2568,10 +2625,8 @@ export class UsageInsightsService {
             reason?: string;
             kind?: "message" | "task";
           };
-          const acceptedDecision =
-            payload.decision === "accepted" || payload.rating === "positive";
-          const rejectedDecision =
-            payload.decision === "rejected" || payload.rating === "negative";
+          const acceptedDecision = payload.decision === "accepted" || payload.rating === "positive";
+          const rejectedDecision = payload.decision === "rejected" || payload.rating === "negative";
           if (acceptedDecision) accepted += 1;
           if (rejectedDecision) rejected += 1;
           if (rejectedDecision && payload.reason) {
@@ -2657,7 +2712,8 @@ export class UsageInsightsService {
     const avgTokensPerLlmCall = totalLlmCalls > 0 ? Math.round(totalTokens / totalLlmCalls) : null;
     const avgTokensPerTask =
       taskMetrics.totalCreated > 0 ? Math.round(totalTokens / taskMetrics.totalCreated) : null;
-    const outputInputRatio = totalPromptTokens > 0 ? totalCompletionTokens / totalPromptTokens : null;
+    const outputInputRatio =
+      totalPromptTokens > 0 ? totalCompletionTokens / totalPromptTokens : null;
 
     let totalToolCalls = 0;
     let totalToolResults = 0;

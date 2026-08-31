@@ -131,7 +131,10 @@ export function SkillParameterModal({
           const value = values[param.name];
           if (value === undefined) return false;
           if (typeof value === "string" && value.trim() === "") return false;
-          if ((param.type === "number" || param.type === "boolean") && touched[param.name] !== true) {
+          if (
+            (param.type === "number" || param.type === "boolean") &&
+            touched[param.name] !== true
+          ) {
             return false;
           }
         }
@@ -239,11 +242,7 @@ export function SkillParameterModal({
               Cancel
             </button>
             {onAskInChat && (
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={handleAskInChat}
-              >
+              <button type="button" className="button-secondary" onClick={handleAskInChat}>
                 Ask In Chat
               </button>
             )}

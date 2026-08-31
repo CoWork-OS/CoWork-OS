@@ -34,10 +34,7 @@ vi.mock("../../improvement/ImprovementEligibilityService", () => ({
   clearOwnerEnrollment: mockClearOwnerEnrollment,
 }));
 
-import {
-  setupImprovementHandlers,
-  setupSubconsciousHandlers,
-} from "../subconscious-handlers";
+import { setupImprovementHandlers, setupSubconsciousHandlers } from "../subconscious-handlers";
 
 type ImprovementEligibilityOverrides = Omit<Partial<ImprovementEligibility>, "checks"> & {
   checks?: Partial<ImprovementEligibility["checks"]>;
@@ -111,9 +108,10 @@ describe("subconscious improvement IPC handlers", () => {
     const getHandler = registeredHandlers.get(
       IPC_CHANNELS.IMPROVEMENT_GET_ELIGIBILITY,
     ) as () => Promise<ImprovementEligibility>;
-    const saveHandler = registeredHandlers.get(
-      IPC_CHANNELS.IMPROVEMENT_SAVE_OWNER_ENROLLMENT,
-    ) as (_event: unknown, signature: string) => Promise<ImprovementEligibility>;
+    const saveHandler = registeredHandlers.get(IPC_CHANNELS.IMPROVEMENT_SAVE_OWNER_ENROLLMENT) as (
+      _event: unknown,
+      signature: string,
+    ) => Promise<ImprovementEligibility>;
     const clearHandler = registeredHandlers.get(
       IPC_CHANNELS.IMPROVEMENT_CLEAR_OWNER_ENROLLMENT,
     ) as () => Promise<ImprovementEligibility>;
@@ -135,9 +133,10 @@ describe("subconscious improvement IPC handlers", () => {
       saveSettings,
     } as Any);
 
-    const handler = registeredHandlers.get(
-      IPC_CHANNELS.SUBCONSCIOUS_SAVE_SETTINGS,
-    ) as (_event: unknown, settings: Any) => Promise<Any>;
+    const handler = registeredHandlers.get(IPC_CHANNELS.SUBCONSCIOUS_SAVE_SETTINGS) as (
+      _event: unknown,
+      settings: Any,
+    ) => Promise<Any>;
 
     await handler(null, {
       enabled: true,
@@ -200,9 +199,10 @@ describe("subconscious improvement IPC handlers", () => {
 
     setupImprovementHandlers(service as Any);
 
-    const handler = registeredHandlers.get(
-      IPC_CHANNELS.IMPROVEMENT_SAVE_SETTINGS,
-    ) as (_event: unknown, settings: Any) => Promise<Any>;
+    const handler = registeredHandlers.get(IPC_CHANNELS.IMPROVEMENT_SAVE_SETTINGS) as (
+      _event: unknown,
+      settings: Any,
+    ) => Promise<Any>;
 
     await expect(
       handler(null, {

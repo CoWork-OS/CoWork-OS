@@ -10,19 +10,12 @@ export function shouldHydrateTaskSummary(task: Task | undefined): boolean {
   if (!task) return false;
   if (hasFullTaskPrompt(task)) return false;
   return Boolean(
-    task.sidebarPromptPreview ||
-      task.title ||
-      task.resultSummary ||
-      task.semanticSummary,
+    task.sidebarPromptPreview || task.title || task.resultSummary || task.semanticSummary,
   );
 }
 
 export function getTaskHydrationAttemptKey(taskId: string, task: Task | undefined): string {
-  return [
-    taskId,
-    task?.updatedAt ?? "",
-    task?.sidebarPromptPreview ?? "",
-  ].join(":");
+  return [taskId, task?.updatedAt ?? "", task?.sidebarPromptPreview ?? ""].join(":");
 }
 
 export function getTaskIdFromHydrationAttemptKey(key: string): string {

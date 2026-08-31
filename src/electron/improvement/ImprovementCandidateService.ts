@@ -91,7 +91,11 @@ export class ImprovementCandidateService {
   dismissCandidate(candidateId: string): ImprovementCandidate | undefined {
     const existing = this.candidateRepo.findById(candidateId);
     if (!existing) return undefined;
-    const readiness = this.deriveReadiness({ ...existing, status: "dismissed", resolvedAt: Date.now() });
+    const readiness = this.deriveReadiness({
+      ...existing,
+      status: "dismissed",
+      resolvedAt: Date.now(),
+    });
     this.candidateRepo.update(candidateId, {
       status: "dismissed",
       readiness: readiness.readiness,
@@ -104,7 +108,12 @@ export class ImprovementCandidateService {
   markCandidateRunning(candidateId: string): void {
     const existing = this.candidateRepo.findById(candidateId);
     const readiness = existing
-      ? this.deriveReadiness({ ...existing, status: "running", lastExperimentAt: Date.now(), resolvedAt: undefined })
+      ? this.deriveReadiness({
+          ...existing,
+          status: "running",
+          lastExperimentAt: Date.now(),
+          resolvedAt: undefined,
+        })
       : undefined;
     this.candidateRepo.update(candidateId, {
       status: "running",
@@ -240,13 +249,13 @@ export class ImprovementCandidateService {
       readiness: readiness.readiness,
       readinessReason: readiness.reason,
       failureStreak,
-      cooldownUntil: shouldPark ? null as Any : now + cooldownMs,
-      parkReason: shouldPark ? params.reason || params.failureClass : null as Any,
-      parkedAt: shouldPark ? now : null as Any,
+      cooldownUntil: shouldPark ? (null as Any) : now + cooldownMs,
+      parkReason: shouldPark ? params.reason || params.failureClass : (null as Any),
+      parkedAt: shouldPark ? now : (null as Any),
       lastAttemptFingerprint: params.attemptFingerprint,
       lastFailureClass: params.failureClass,
       lastExperimentAt: now,
-      resolvedAt: shouldPark ? now : null as Any,
+      resolvedAt: shouldPark ? now : (null as Any),
     });
   }
 
@@ -380,7 +389,8 @@ export class ImprovementCandidateService {
     const evidence: ImprovementEvidence = {
       type: source,
       taskId: task.id,
-      eventType: source === "verification_failure" ? "verification_failed" : "safety_stop_triggered",
+      eventType:
+        source === "verification_failure" ? "verification_failed" : "safety_stop_triggered",
       eventId: typeof payload?.eventId === "string" ? payload.eventId : undefined,
       summary: this.truncate(summary),
       details:
@@ -492,15 +502,13 @@ export class ImprovementCandidateService {
     latestJsonlPath: string,
     latestTextPath: string,
     baseline: number,
-  ):
-    | {
-        logPath: string;
-        format: "jsonl" | "text";
-        lines: string[];
-        summary: string;
-        fingerprintKey: string;
-      }
-    | null {
+  ): {
+    logPath: string;
+    format: "jsonl" | "text";
+    lines: string[];
+    summary: string;
+    fingerprintKey: string;
+  } | null {
     const jsonl = this.readLatestJsonlDevLogFailure(latestJsonlPath, baseline);
     if (jsonl) return jsonl;
     return this.readLatestTextDevLogFailure(latestTextPath, baseline);
@@ -627,7 +635,9 @@ export class ImprovementCandidateService {
       const nextStatus =
         existing.status === "dismissed"
           ? "dismissed"
-          : existing.status === "running" || existing.status === "review" || existing.status === "parked"
+          : existing.status === "running" ||
+              existing.status === "review" ||
+              existing.status === "parked"
             ? existing.status
             : "open";
       const nextCandidate: ImprovementCandidate = {
@@ -660,7 +670,7 @@ export class ImprovementCandidateService {
         lastTaskId: input.lastTaskId || existing.lastTaskId,
         lastEventType: input.lastEventType || existing.lastEventType,
         lastSeenAt: input.evidence.createdAt,
-        resolvedAt: nextStatus === "open" ? null as Any : existing.resolvedAt,
+        resolvedAt: nextStatus === "open" ? (null as Any) : existing.resolvedAt,
       });
       return this.candidateRepo.findById(existing.id)!;
     }
@@ -710,14 +720,26 @@ export class ImprovementCandidateService {
     return crypto.createHash("sha1").update(`${source}:${normalized}`).digest("hex");
   }
 
-  private computePriorityScore(severity: number, recurrenceCount: number, fixabilityScore: number): number {
-    return Number((severity * 0.55 + Math.min(1, recurrenceCount / 5) * 0.25 + fixabilityScore * 0.2).toFixed(4));
+  private computePriorityScore(
+    severity: number,
+    recurrenceCount: number,
+    fixabilityScore: number,
+  ): number {
+    return Number(
+      (severity * 0.55 + Math.min(1, recurrenceCount / 5) * 0.25 + fixabilityScore * 0.2).toFixed(
+        4,
+      ),
+    );
   }
 
   private inferFixabilityScore(source: ImprovementCandidateSource, summary: string): number {
     const normalized = summary.toLowerCase();
     if (/provider quota|quota|429|rate limit|budget exhausted/.test(normalized)) return 0.35;
-    if (/timed out|timeout|request cancelled|fetch failed|server_error|application crashed/.test(normalized)) {
+    if (
+      /timed out|timeout|request cancelled|fetch failed|server_error|application crashed/.test(
+        normalized,
+      )
+    ) {
       return 0.5;
     }
     if (/test|repro|stack|trace|contract|verification|assert/.test(normalized)) return 0.95;
@@ -726,11 +748,10 @@ export class ImprovementCandidateService {
     return 0.85;
   }
 
-  private inferTaskSeverity(
-    failureClass?: string | null,
-    terminalStatus?: string,
-  ): number {
-    if (/required_verification|contract_error|required_contract/i.test(String(failureClass || ""))) {
+  private inferTaskSeverity(failureClass?: string | null, terminalStatus?: string): number {
+    if (
+      /required_verification|contract_error|required_contract/i.test(String(failureClass || ""))
+    ) {
       return 0.9;
     }
     if (terminalStatus === "failed") return 0.82;
@@ -796,7 +817,10 @@ export class ImprovementCandidateService {
       );
       if (normalizedFingerprint === candidate.fingerprint) continue;
 
-      const existing = this.candidateRepo.findByFingerprint(candidate.workspaceId, normalizedFingerprint);
+      const existing = this.candidateRepo.findByFingerprint(
+        candidate.workspaceId,
+        normalizedFingerprint,
+      );
       if (existing && existing.id !== candidate.id) {
         this.db.transaction(() => {
           this.runRepo.reassignCandidate(candidate.id, existing.id);
@@ -829,12 +853,16 @@ export class ImprovementCandidateService {
       if (candidate.lastFailureClass && this.isProviderFailure(candidate.lastFailureClass)) {
         return {
           readiness: "blocked_provider",
-          reason: overrideReason || candidate.parkReason || "Provider failures are parking this candidate.",
+          reason:
+            overrideReason ||
+            candidate.parkReason ||
+            "Provider failures are parking this candidate.",
         };
       }
       return {
         readiness: "parked",
-        reason: overrideReason || candidate.parkReason || "Candidate is parked after repeated failures.",
+        reason:
+          overrideReason || candidate.parkReason || "Candidate is parked after repeated failures.",
       };
     }
 
@@ -865,7 +893,9 @@ export class ImprovementCandidateService {
 
     return {
       readiness: "ready",
-      reason: overrideReason || "Candidate has sufficient evidence to run a bounded improvement campaign.",
+      reason:
+        overrideReason ||
+        "Candidate has sufficient evidence to run a bounded improvement campaign.",
     };
   }
 
@@ -874,7 +904,9 @@ export class ImprovementCandidateService {
     if (candidate.evidence.length === 0) return true;
     return candidate.evidence.every((evidence) => {
       const terminalStatus = String(evidence.metadata?.terminalStatus || "");
-      return terminalStatus === "partial_success" || this.looksLikeSuccessCheckpoint(evidence.summary);
+      return (
+        terminalStatus === "partial_success" || this.looksLikeSuccessCheckpoint(evidence.summary)
+      );
     });
   }
 

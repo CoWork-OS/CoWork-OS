@@ -111,7 +111,12 @@ export function RemoteFilePicker({
       >
         <div className="remote-file-picker-header">
           <h3>Select files from {deviceName}</h3>
-          <button type="button" className="remote-file-picker-close" onClick={onCancel} aria-label="Close">
+          <button
+            type="button"
+            className="remote-file-picker-close"
+            onClick={onCancel}
+            aria-label="Close"
+          >
             ×
           </button>
         </div>
@@ -197,11 +202,7 @@ export function RemoteFilePicker({
                         : handleToggleFile(relativePath)
                     }
                   >
-                    {entry.type === "directory" ? (
-                      <Folder size={18} />
-                    ) : (
-                      <File size={18} />
-                    )}
+                    {entry.type === "directory" ? <Folder size={18} /> : <File size={18} />}
                     <span className="remote-file-picker-row-name">{entry.name}</span>
                     {entry.type === "file" && entry.size > 0 && (
                       <span className="remote-file-picker-row-size">

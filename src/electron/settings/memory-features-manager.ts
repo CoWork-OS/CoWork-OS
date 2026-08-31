@@ -62,8 +62,7 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
   return {
     contextPackInjectionEnabled: !!settings.contextPackInjectionEnabled,
     heartbeatMaintenanceEnabled: !!settings.heartbeatMaintenanceEnabled,
-    checkpointCaptureEnabled:
-      durableContextEnabled || settings.checkpointCaptureEnabled !== false,
+    checkpointCaptureEnabled: durableContextEnabled || settings.checkpointCaptureEnabled !== false,
     verbatimRecallEnabled: settings.verbatimRecallEnabled !== false,
     wakeUpLayersEnabled: settings.wakeUpLayersEnabled !== false,
     temporalKnowledgeEnabled: settings.temporalKnowledgeEnabled !== false,

@@ -115,7 +115,9 @@ function getState(): RendererPerfState | null {
       longTaskObserverStarted: false,
       longTaskObserver: null,
     };
-  } else if (window.__coworkRendererPerfState__.schemaVersion !== RENDERER_PERF_STATE_SCHEMA_VERSION) {
+  } else if (
+    window.__coworkRendererPerfState__.schemaVersion !== RENDERER_PERF_STATE_SCHEMA_VERSION
+  ) {
     migrateRendererPerfState(window.__coworkRendererPerfState__);
   }
   return window.__coworkRendererPerfState__;
@@ -140,7 +142,10 @@ function cleanupTaskEventTraces(state: RendererPerfState, nowMs: number): void {
     const ageMs = nowMs - (trace.appendedAtMs ?? trace.receivedAtMs);
     if (ageMs > TASK_EVENT_TTL_MS) {
       if (trace.renderable && !trace.visibleRecorded) {
-        const bucket = state.counters.get("task-event.visible_trace_expired_count") ?? { value: 0, windowValue: 0 };
+        const bucket = state.counters.get("task-event.visible_trace_expired_count") ?? {
+          value: 0,
+          windowValue: 0,
+        };
         bucket.value += 1;
         bucket.windowValue += 1;
         state.counters.set("task-event.visible_trace_expired_count", bucket);
@@ -178,7 +183,7 @@ function resolveTaskEventTrace(
   if (direct) return direct;
   if (typeof event === "string") {
     const canonicalId = state.taskEventAliases.get(event);
-    return canonicalId ? state.taskEvents.get(canonicalId) ?? null : null;
+    return canonicalId ? (state.taskEvents.get(canonicalId) ?? null) : null;
   }
 
   const aliasCandidates = [event.id];
@@ -241,11 +246,7 @@ function formatStartupMark(mark: StartupMark): string {
   return `[Startup] ${mark.name} at ${mark.atMs.toFixed(1)}ms${details}`;
 }
 
-function formatPerfMark(
-  name: string,
-  atMs: number,
-  details?: Record<string, unknown>,
-): string {
+function formatPerfMark(name: string, atMs: number, details?: Record<string, unknown>): string {
   let suffix = "";
   if (details && Object.keys(details).length > 0) {
     try {
@@ -326,7 +327,11 @@ function flushRendererPerfReport(state: RendererPerfState): void {
     bucket.windowValue = 0;
   }
 
-  if (metricSummaries.length === 0 && renderSummaries.length === 0 && counterSummaries.length === 0) {
+  if (
+    metricSummaries.length === 0 &&
+    renderSummaries.length === 0 &&
+    counterSummaries.length === 0
+  ) {
     return;
   }
 
@@ -378,10 +383,7 @@ function startRendererPerfMonitors(state: RendererPerfState): void {
     scheduleNextFrame();
   }
 
-  if (
-    !state.longTaskObserverStarted &&
-    typeof PerformanceObserver !== "undefined"
-  ) {
+  if (!state.longTaskObserverStarted && typeof PerformanceObserver !== "undefined") {
     state.longTaskObserverStarted = true;
     try {
       const observer = new PerformanceObserver((list) => {
@@ -410,11 +412,7 @@ export function measureRendererPerf<T>(name: string, enabled: boolean | undefine
   }
 }
 
-export function recordRendererPerfSample(
-  name: string,
-  valueMs: number,
-  enabled?: boolean,
-): void {
+export function recordRendererPerfSample(name: string, valueMs: number, enabled?: boolean): void {
   if (!isRendererPerfEnabled(enabled) || !Number.isFinite(valueMs) || valueMs < 0) {
     return;
   }
@@ -478,11 +476,7 @@ export function flushRendererStartupMarks(enabled?: boolean): void {
   }
 }
 
-export function recordRendererRender(
-  name: string,
-  key: string,
-  enabled?: boolean,
-): void {
+export function recordRendererRender(name: string, key: string, enabled?: boolean): void {
   if (!isRendererPerfEnabled(enabled)) return;
   const state = getState();
   if (!state) return;
@@ -566,7 +560,11 @@ export function noteRendererTaskEventsAppended(
         enabled,
       );
     }
-    recordRendererPerfSample("task-event.received_to_append_ms", nowMs - trace.receivedAtMs, enabled);
+    recordRendererPerfSample(
+      "task-event.received_to_append_ms",
+      nowMs - trace.receivedAtMs,
+      enabled,
+    );
     recordRendererPerfSample(
       `task-event.${entry.event.type}.received_to_append_ms`,
       nowMs - trace.receivedAtMs,
@@ -625,11 +623,18 @@ function flushPendingVisibleEvents(state: RendererPerfState, enabled?: boolean):
       const trace = resolveTaskEventTrace(state, eventId);
       const nextAttempts = pendingVisible.attempts + 1;
       const ageMs = nowMs - pendingVisible.firstQueuedAtMs;
-      if (!trace && (nextAttempts >= MAX_PENDING_VISIBLE_ATTEMPTS || ageMs >= PENDING_VISIBLE_TTL_MS)) {
+      if (
+        !trace &&
+        (nextAttempts >= MAX_PENDING_VISIBLE_ATTEMPTS || ageMs >= PENDING_VISIBLE_TTL_MS)
+      ) {
         incrementRendererPerfCounter("task-event.visible_drop_no_trace_count", enabled);
         continue;
       }
-      if (trace && !trace.renderable && (nextAttempts >= MAX_PENDING_VISIBLE_ATTEMPTS || ageMs >= PENDING_VISIBLE_TTL_MS)) {
+      if (
+        trace &&
+        !trace.renderable &&
+        (nextAttempts >= MAX_PENDING_VISIBLE_ATTEMPTS || ageMs >= PENDING_VISIBLE_TTL_MS)
+      ) {
         incrementRendererPerfCounter("task-event.visible_drop_not_renderable_count", enabled);
         continue;
       }
@@ -667,7 +672,11 @@ function recordTaskEventVisibleFromTrace(
   const nowMs = performance.now();
   trace.visibleRecorded = true;
   incrementRendererPerfCounter("task-event.visible_recorded_count", enabled);
-  recordRendererPerfSample("task-event.received_to_visible_ms", nowMs - trace.receivedAtMs, enabled);
+  recordRendererPerfSample(
+    "task-event.received_to_visible_ms",
+    nowMs - trace.receivedAtMs,
+    enabled,
+  );
   recordRendererPerfSample(
     `task-event.${trace.type}.received_to_visible_ms`,
     nowMs - trace.receivedAtMs,

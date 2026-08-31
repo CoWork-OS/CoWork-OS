@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest";
-import {
-  rendererPerfLogLevel,
-  stringifyRendererPerfPayload,
-} from "../renderer-perf-log";
+import { rendererPerfLogLevel, stringifyRendererPerfPayload } from "../renderer-perf-log";
 
 describe("renderer perf logging", () => {
   it("keeps explicit startup readiness marks visible at info level", () => {
-    expect(rendererPerfLogLevel({ message: "[Startup] app_shell_ready at 8554.7ms" })).toBe(
-      "info",
-    );
+    expect(rendererPerfLogLevel({ message: "[Startup] app_shell_ready at 8554.7ms" })).toBe("info");
   });
 
   it("treats periodic renderer summaries as debug noise by default", () => {

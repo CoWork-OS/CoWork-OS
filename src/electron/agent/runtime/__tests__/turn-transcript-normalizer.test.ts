@@ -45,9 +45,9 @@ describe("normalizeTurnTranscript", () => {
         content: [{ type: "text", text: "follow-up question" }],
       },
     ]);
-    expect(
-      normalized.issues.some((issue) => issue.kind === "mixed_tool_result_user_message"),
-    ).toBe(true);
+    expect(normalized.issues.some((issue) => issue.kind === "mixed_tool_result_user_message")).toBe(
+      true,
+    );
   });
 
   it("removes incomplete tool rounds entirely", () => {
@@ -56,8 +56,18 @@ describe("normalizeTurnTranscript", () => {
         role: "assistant",
         content: [
           { type: "text", text: "Fetching sources." },
-          { type: "tool_use", id: "tool-1", name: "web_fetch", input: { url: "https://a.example" } },
-          { type: "tool_use", id: "tool-2", name: "web_fetch", input: { url: "https://b.example" } },
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "web_fetch",
+            input: { url: "https://a.example" },
+          },
+          {
+            type: "tool_use",
+            id: "tool-2",
+            name: "web_fetch",
+            input: { url: "https://b.example" },
+          },
         ],
       },
       {

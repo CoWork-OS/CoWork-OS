@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
-import { evaluateNetworkPolicy } from "../network-policy";
+import { domainMatches, evaluateNetworkPolicy } from "../network-policy";
 
 vi.mock("../../admin/policies", () => ({
   loadPolicies: vi.fn(() => ({
@@ -31,7 +31,12 @@ describe("evaluateNetworkPolicy", () => {
         allowedSandboxTypes: ["macos", "docker"],
         requireSandboxForShell: true,
         allowUnsandboxedShell: true,
-        network: { defaultAction: "allow", allowedDomains: [], blockedDomains: [], allowShellNetwork: false },
+        network: {
+          defaultAction: "allow",
+          allowedDomains: [],
+          blockedDomains: [],
+          allowShellNetwork: false,
+        },
         autoReview: { enabled: true },
         telemetry: { enabled: false },
       },
@@ -115,5 +120,68 @@ describe("evaluateNetworkPolicy", () => {
     expect(decision.url).not.toContain("secret");
     expect(decision.url).not.toContain("user:pass");
     expect(decision.url).not.toContain("#frag");
+  });
+
+  it("distinguishes apex and subdomain wildcard patterns", () => {
+    expect(domainMatches("example.com", "**.example.com")).toBe(true);
+    expect(domainMatches("api.example.com", "**.example.com")).toBe(true);
+    expect(domainMatches("example.com", "*.example.com")).toBe(false);
+    expect(domainMatches("api.example.com", "*.example.com")).toBe(true);
+    expect(domainMatches("API.EXAMPLE.COM.", "api.example.com")).toBe(true);
+    expect(domainMatches("anything.example.com", "*")).toBe(true);
+  });
+
+  it("enforces profile domain deny and allow rules before admin or legacy rules", () => {
+    const denied = evaluateNetworkPolicy({
+      url: "https://private.example.com/secret",
+      toolName: "web_fetch",
+      profileDomainRules: [{ access: "deny", pattern: "**.example.com" }],
+    });
+    const outsideAllowlist = evaluateNetworkPolicy({
+      url: "https://other.test/reference",
+      toolName: "web_fetch",
+      profileDomainRules: [{ access: "allow", pattern: "docs.example.com" }],
+    });
+
+    expect(denied).toMatchObject({
+      action: "deny",
+      reason: "profile_domain_denied",
+      ruleSource: "access_profile",
+      matchedRule: "**.example.com",
+    });
+    expect(outsideAllowlist).toMatchObject({
+      action: "deny",
+      reason: "profile_domain_not_allowed",
+      ruleSource: "access_profile",
+    });
+  });
+
+  it("denies network requests when the resolved workspace profile disables network", () => {
+    const decision = evaluateNetworkPolicy({
+      url: "https://docs.example.com/reference",
+      toolName: "web_fetch",
+      networkEnabled: false,
+    });
+
+    expect(decision).toMatchObject({
+      action: "deny",
+      reason: "workspace_network_disabled",
+      ruleSource: "workspace_permissions",
+    });
+  });
+
+  it("denies direct callers that only carry the disabled profile metadata", () => {
+    const decision = evaluateNetworkPolicy({
+      url: "https://docs.example.com/reference",
+      toolName: "web_fetch",
+      networkEnabled: true,
+      accessNetworkMode: "disabled",
+    });
+
+    expect(decision).toMatchObject({
+      action: "deny",
+      reason: "profile_network_disabled",
+      ruleSource: "access_profile",
+    });
   });
 });

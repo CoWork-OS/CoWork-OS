@@ -126,6 +126,14 @@ export function resolveTimelineIndicator(
   }
 
   if (event.type === "timeline_group_finished") {
+    const payload = asObject(event.payload);
+    const status = event.status ?? payload.status;
+    if (status === "cancelled") {
+      return { icon: AlertTriangle, tone: "error", label: "Group cancelled" };
+    }
+    if (status === "failed" || status === "blocked") {
+      return { icon: AlertTriangle, tone: "error", label: "Group failed" };
+    }
     return { icon: Check, tone: "success", label: "Group finished" };
   }
 
@@ -152,7 +160,10 @@ export function resolveTimelineIndicator(
     return { icon: Shield, tone: "success", label: "Verification passed" };
   }
 
-  if (effectiveType === "verification_failed" || effectiveType === "verification_pending_user_action") {
+  if (
+    effectiveType === "verification_failed" ||
+    effectiveType === "verification_pending_user_action"
+  ) {
     return { icon: Shield, tone: "warning", label: "Verification requires attention" };
   }
 
@@ -180,13 +191,17 @@ export function resolveTimelineIndicator(
     return { icon: AlertTriangle, tone: "error", label: "Step failed" };
   }
 
+  if (event.type === "timeline_step_finished" && event.status === "cancelled") {
+    return { icon: AlertTriangle, tone: "error", label: "Step cancelled" };
+  }
+
   if (effectiveType === "step_failed" || effectiveType === "error") {
     return { icon: AlertTriangle, tone: "error", label: "Error" };
   }
 
   if (
     event.type === "timeline_step_finished" &&
-    (event.status === "completed" || event.status === "skipped" || event.status === "cancelled")
+    (event.status === "completed" || event.status === "skipped")
   ) {
     return { icon: Check, tone: "success", label: "Step completed" };
   }

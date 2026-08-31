@@ -12,6 +12,7 @@ import type {
   PermissionMode,
   QuotedAssistantMessage,
 } from "../../shared/types";
+import type { AccessProfileId } from "../../shared/access-profiles";
 import { ErrorCodes } from "./protocol";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { z } from "zod";
@@ -31,6 +32,7 @@ export function sanitizeTaskMessageParams(params: unknown): {
   images?: ImageAttachment[];
   quotedAssistantMessage?: QuotedAssistantMessage;
   permissionMode?: PermissionMode;
+  accessProfileId?: AccessProfileId;
   shellAccess?: boolean;
   integrationMentions?: IntegrationMentionSelection[];
 } {
@@ -64,7 +66,10 @@ export function sanitizeTaskMessageParams(params: unknown): {
     const parsed = QuoteSchema.safeParse(p.quotedAssistantMessage);
     if (!parsed.success) {
       const msg = parsed.error.issues.map((issue: { message: string }) => issue.message).join("; ");
-      throw { code: ErrorCodes.INVALID_PARAMS, message: `Invalid quoted assistant message: ${msg}` };
+      throw {
+        code: ErrorCodes.INVALID_PARAMS,
+        message: `Invalid quoted assistant message: ${msg}`,
+      };
     }
     quotedAssistantMessage = parsed.data as QuotedAssistantMessage;
   }
@@ -87,6 +92,11 @@ export function sanitizeTaskMessageParams(params: unknown): {
   }
 
   const shellAccess = typeof p.shellAccess === "boolean" ? p.shellAccess : undefined;
+
+  const accessProfileId =
+    typeof p.accessProfileId === "string" && p.accessProfileId.trim().length > 0
+      ? (p.accessProfileId.trim() as AccessProfileId)
+      : undefined;
 
   let integrationMentions: IntegrationMentionSelection[] | undefined;
   if (Array.isArray(p.integrationMentions)) {
@@ -119,6 +129,7 @@ export function sanitizeTaskMessageParams(params: unknown): {
     images,
     quotedAssistantMessage,
     permissionMode,
+    accessProfileId,
     shellAccess,
     integrationMentions,
   };

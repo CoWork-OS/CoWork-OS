@@ -46,6 +46,17 @@ Core rules:
 
 See [Browser V2 Architecture](browser-v2-architecture.md) for backend adapters, tool contracts, safety invariants, and verification guidance.
 
+### Access profile and browser boundary
+
+Every browser tool is resolved through the task's effective [access
+profile](access-profiles.md) before the selected backend runs. The profile and
+administrator policy can constrain network destinations, domain rules, file
+uploads, downloads/exports, external browser attach, and available browser
+tools. Switching from the visible workbench to Playwright, external CDP, or
+Browser Use Cloud is a transport choice, not a permission escalation; the
+backend cannot widen the task profile. OS Screen Recording, browser login
+state, and external-browser consent remain separate prerequisites.
+
 ## Visible Automation
 
 Browser tools first route to the active Browser Workbench session for the selected task:
@@ -166,6 +177,7 @@ Browser V2 treats browser side effects as governed workspace actions:
 - JavaScript dialogs are handled with `browser_handle_dialog` and should be visible in diagnostics.
 - Camera, microphone, location, clipboard, notifications, downloads, uploads, and external real-browser attach should surface permission prompts instead of being silently granted.
 - Console, network, storage, and download metadata are redacted before entering agent context.
+- The active access profile is checked before these browser actions; a profile or domain deny cannot be widened by a backend switch or a one-shot approval.
 
 ## Relationship To Web Page Artifacts
 

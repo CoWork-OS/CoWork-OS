@@ -1,6 +1,7 @@
 import type { Workspace } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
+import { createYouTubeIngestionOptions, assertYouTubeIngestionAccess } from "../../youtube/access";
 import {
   YouTubeIngestionService,
   YouTubeQuestionService,
@@ -29,9 +30,12 @@ export class YouTubeTools {
   }
 
   async ingestVideo(input: { url: string; language?: string; force?: boolean }) {
-    const result = await new YouTubeIngestionService(this.workspaceId, this.workspacePath).ingest(
-      input,
-    );
+    assertYouTubeIngestionAccess(this.workspace, input.url, "youtube_ingest_video");
+    const result = await new YouTubeIngestionService(
+      this.workspaceId,
+      this.workspacePath,
+      createYouTubeIngestionOptions(this.workspace),
+    ).ingest(input);
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: "youtube_ingest_video",
       videoId: result.video?.videoId,
@@ -44,11 +48,7 @@ export class YouTubeTools {
     return result;
   }
 
-  async askVideo(input: {
-    question: string;
-    videoIds?: string[];
-    limit?: number;
-  }) {
+  async askVideo(input: { question: string; videoIds?: string[]; limit?: number }) {
     if (typeof (input as Any).url === "string" && (input as Any).url.trim()) {
       throw new Error(
         "youtube_ask_video only searches cached transcripts. Use youtube_ask_or_ingest_video for URLs.",
@@ -76,9 +76,12 @@ export class YouTubeTools {
     limit?: number;
     force?: boolean;
   }) {
-    const result = await new YouTubeQuestionService(this.workspaceId, this.workspacePath).ask(
-      input,
-    );
+    assertYouTubeIngestionAccess(this.workspace, input.url, "youtube_ask_or_ingest_video");
+    const result = await new YouTubeQuestionService(
+      this.workspaceId,
+      this.workspacePath,
+      createYouTubeIngestionOptions(this.workspace),
+    ).ask(input);
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: "youtube_ask_or_ingest_video",
       sourceCount: result.sources.length,

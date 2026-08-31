@@ -79,23 +79,23 @@ export class PptxPreviewService {
   private readonly renderTimeoutMs: number;
   private readonly maxRenderedSlides: number;
   private readonly imageUrlFactory?: (imagePath: string) => string | Promise<string>;
-  private readonly inFlightRenders = new Map<string, Promise<{ images: Map<number, PreviewImage>; message?: string }>>();
+  private readonly inFlightRenders = new Map<
+    string,
+    Promise<{ images: Map<number, PreviewImage>; message?: string }>
+  >();
 
   constructor(options: PptxPreviewServiceOptions = {}) {
-    this.cacheRoot =
-      options.cacheRoot ?? path.join(getUserDataDir(), "cache", "pptx-previews");
+    this.cacheRoot = options.cacheRoot ?? path.join(getUserDataDir(), "cache", "pptx-previews");
     this.commandRunner =
       options.commandRunner ??
-      ((command, args, execOptions) =>
-        execFileAsync(command, args, execOptions));
+      ((command, args, execOptions) => execFileAsync(command, args, execOptions));
     this.artifactToolRunner =
       options.artifactToolRunner === undefined
         ? (input, runnerOptions) =>
             runArtifactToolPptxRenderer(this.commandRunner, input, runnerOptions)
         : options.artifactToolRunner;
     this.renderTimeoutMs = options.renderTimeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
-    this.maxRenderedSlides =
-      options.maxRenderedSlides ?? DEFAULT_MAX_RENDERED_SLIDES;
+    this.maxRenderedSlides = options.maxRenderedSlides ?? DEFAULT_MAX_RENDERED_SLIDES;
     this.imageUrlFactory = options.imageUrlFactory;
   }
 
@@ -106,13 +106,9 @@ export class PptxPreviewService {
   }): Promise<PptxPresentationPreview> {
     const resolvedPath = await fs.realpath(path.resolve(input.filePath));
     if (input.workspaceRoot) {
-      const resolvedWorkspaceRoot = await fs.realpath(
-        path.resolve(input.workspaceRoot),
-      );
+      const resolvedWorkspaceRoot = await fs.realpath(path.resolve(input.workspaceRoot));
       if (!isPathInside(resolvedPath, resolvedWorkspaceRoot)) {
-        throw new Error(
-          "Access denied: PPTX preview path is outside the workspace",
-        );
+        throw new Error("Access denied: PPTX preview path is outside the workspace");
       }
     }
 
@@ -121,16 +117,15 @@ export class PptxPreviewService {
     const cachedImages = await this.readCachedImages(cacheDir, resolvedPath, stats);
     let structured = await this.extractStructuredContent(resolvedPath, cachedImages.size);
     if (cachedImages.size > 0) {
-      return this.toPreview(structured, cachedImages, input.renderMode === "fast" ? "cached" : "rendered");
+      return this.toPreview(
+        structured,
+        cachedImages,
+        input.renderMode === "fast" ? "cached" : "rendered",
+      );
     }
 
     if (input.renderMode === "fast") {
-      return this.toPreview(
-        structured,
-        new Map(),
-        "rendering",
-        "Rendering slide previews...",
-      );
+      return this.toPreview(structured, new Map(), "rendering", "Rendering slide previews...");
     }
 
     const renderResult = await this.renderSlideImages(resolvedPath, stats, cacheDir);
@@ -243,10 +238,11 @@ export class PptxPreviewService {
     const inFlight = this.inFlightRenders.get(cacheKey);
     if (inFlight) return inFlight;
 
-    const renderPromise = this.renderSlideImagesUncached(resolvedPath, stats, cacheDir)
-      .finally(() => {
+    const renderPromise = this.renderSlideImagesUncached(resolvedPath, stats, cacheDir).finally(
+      () => {
         this.inFlightRenders.delete(cacheKey);
-      });
+      },
+    );
     this.inFlightRenders.set(cacheKey, renderPromise);
     return renderPromise;
   }
@@ -343,14 +339,7 @@ export class PptxPreviewService {
 
       await this.commandRunner(
         "soffice",
-        [
-          "--headless",
-          "--convert-to",
-          "pdf",
-          "--outdir",
-          tempDir,
-          resolvedPath,
-        ],
+        ["--headless", "--convert-to", "pdf", "--outdir", tempDir, resolvedPath],
         { timeout: this.renderTimeoutMs, maxBuffer: 8 * 1024 * 1024 },
       );
 
@@ -365,15 +354,7 @@ export class PptxPreviewService {
       const outputPrefix = path.join(cacheDir, "slide");
       await this.commandRunner(
         "pdftoppm",
-        [
-          "-png",
-          "-scale-to-x",
-          "1280",
-          "-scale-to-y",
-          "-1",
-          pdfPath,
-          outputPrefix,
-        ],
+        ["-png", "-scale-to-x", "1280", "-scale-to-y", "-1", pdfPath, outputPrefix],
         { timeout: this.renderTimeoutMs, maxBuffer: 8 * 1024 * 1024 },
       );
 
@@ -481,21 +462,19 @@ for (let index = 0; index < slideCount; index += 1) {
 }
 `;
 
-  await commandRunner(
-    runtime.nodeBinary,
-    ["--input-type=module", "--eval", script],
-    {
-      timeout: options.timeout,
-      maxBuffer: 8 * 1024 * 1024,
-      cwd: runtime.nodeRoot,
-    },
-  );
+  await commandRunner(runtime.nodeBinary, ["--input-type=module", "--eval", script], {
+    timeout: options.timeout,
+    maxBuffer: 8 * 1024 * 1024,
+    cwd: runtime.nodeRoot,
+  });
 }
 
 function isPathInside(targetPath: string, rootPath: string): boolean {
   const normalizedRoot = path.resolve(rootPath);
   const relative = path.relative(normalizedRoot, targetPath);
-  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  return (
+    relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
+  );
 }
 
 async function findConvertedPdf(tempDir: string, sourcePath: string): Promise<string | null> {

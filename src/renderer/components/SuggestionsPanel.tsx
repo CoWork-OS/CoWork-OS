@@ -83,61 +83,64 @@ export function SuggestionsPanel({
     return names;
   }, [workspaces]);
 
-  const load = useCallback(async (refresh = false) => {
-    if (!isAllWorkspacesSelected && !isValidWorkspaceId(workspaceId)) {
-      setSuggestions([]);
-      return;
-    }
-    if (refresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setError(null);
-    try {
-      if (isAllWorkspacesSelected) {
-        if (workspaces.length === 0) {
-          setSuggestions([]);
-          return;
-        }
-        if (refresh) {
-          await window.electronAPI.refreshSuggestionsForWorkspaces(
-            workspaces.map((workspace) => workspace.id),
-          );
-        }
-        const result = await window.electronAPI.listSuggestionsForWorkspaces(
-          workspaces.map((workspace) => workspace.id),
-        );
-        const flattened = (result || [])
-          .flatMap((entry) =>
-            entry.suggestions.map((suggestion) => ({
-              ...suggestion,
-              workspaceId: suggestion.workspaceId || entry.workspaceId,
-            })),
-          )
-          .sort((a, b) => {
-            if (b.confidence !== a.confidence) return b.confidence - a.confidence;
-            return b.createdAt - a.createdAt;
-          });
-        setSuggestions(flattened);
+  const load = useCallback(
+    async (refresh = false) => {
+      if (!isAllWorkspacesSelected && !isValidWorkspaceId(workspaceId)) {
+        setSuggestions([]);
         return;
       }
-
       if (refresh) {
-        await window.electronAPI.refreshSuggestions(workspaceId);
-      }
-      const result = await window.electronAPI.listSuggestions(workspaceId);
-      setSuggestions(result || []);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load suggestions");
-    } finally {
-      if (refresh) {
-        setRefreshing(false);
+        setRefreshing(true);
       } else {
-        setLoading(false);
+        setLoading(true);
       }
-    }
-  }, [isAllWorkspacesSelected, workspaceId, workspaces]);
+      setError(null);
+      try {
+        if (isAllWorkspacesSelected) {
+          if (workspaces.length === 0) {
+            setSuggestions([]);
+            return;
+          }
+          if (refresh) {
+            await window.electronAPI.refreshSuggestionsForWorkspaces(
+              workspaces.map((workspace) => workspace.id),
+            );
+          }
+          const result = await window.electronAPI.listSuggestionsForWorkspaces(
+            workspaces.map((workspace) => workspace.id),
+          );
+          const flattened = (result || [])
+            .flatMap((entry) =>
+              entry.suggestions.map((suggestion) => ({
+                ...suggestion,
+                workspaceId: suggestion.workspaceId || entry.workspaceId,
+              })),
+            )
+            .sort((a, b) => {
+              if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+              return b.createdAt - a.createdAt;
+            });
+          setSuggestions(flattened);
+          return;
+        }
+
+        if (refresh) {
+          await window.electronAPI.refreshSuggestions(workspaceId);
+        }
+        const result = await window.electronAPI.listSuggestions(workspaceId);
+        setSuggestions(result || []);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to load suggestions");
+      } finally {
+        if (refresh) {
+          setRefreshing(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+    [isAllWorkspacesSelected, workspaceId, workspaces],
+  );
 
   useEffect(() => {
     void load();

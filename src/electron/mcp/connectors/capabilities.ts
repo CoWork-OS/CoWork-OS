@@ -89,7 +89,8 @@ const CAPABILITIES: Record<ConnectorCapabilityId, ConnectorCapability> = {
     healthTool: "salesforce.health",
     links: {
       dashboard: "https://login.salesforce.com",
-      oauth_docs: "https://help.salesforce.com/s/articleView?id=sf.remoteaccess_oauth_web_server_flow.htm",
+      oauth_docs:
+        "https://help.salesforce.com/s/articleView?id=sf.remoteaccess_oauth_web_server_flow.htm",
     },
     tier1: true,
   },
@@ -111,7 +112,8 @@ const CAPABILITIES: Record<ConnectorCapabilityId, ConnectorCapability> = {
     links: {
       dashboard: "https://admin.atlassian.com",
       create_api_key: "https://id.atlassian.com/manage-profile/security/api-tokens",
-      api_keys_docs: "https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/",
+      api_keys_docs:
+        "https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/",
       oauth_docs: "https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/",
     },
     inputHints: {
@@ -140,7 +142,8 @@ const CAPABILITIES: Record<ConnectorCapabilityId, ConnectorCapability> = {
       dashboard: "https://app.hubspot.com",
       create_api_key: "https://developers.hubspot.com/docs/guides/apps/private-apps/overview",
       api_keys_docs: "https://developers.hubspot.com/docs/guides/apps/private-apps/overview",
-      oauth_docs: "https://developers.hubspot.com/docs/guides/apps/authentication/oauth-quickstart-guide",
+      oauth_docs:
+        "https://developers.hubspot.com/docs/guides/apps/authentication/oauth-quickstart-guide",
     },
     tier1: true,
   },
@@ -178,7 +181,8 @@ const CAPABILITIES: Record<ConnectorCapabilityId, ConnectorCapability> = {
     healthTool: "servicenow.health",
     links: {
       dashboard: "https://www.servicenow.com",
-      api_keys_docs: "https://www.servicenow.com/docs/bundle/washingtondc-platform-security/page/integrate/authentication/task/t_CreateAnOAuthApiEndpointForExternalClients.html",
+      api_keys_docs:
+        "https://www.servicenow.com/docs/bundle/washingtondc-platform-security/page/integrate/authentication/task/t_CreateAnOAuthApiEndpointForExternalClients.html",
     },
     tier1: true,
   },
@@ -375,7 +379,8 @@ const CAPABILITIES: Record<ConnectorCapabilityId, ConnectorCapability> = {
       COWORK_ARCH_PROJECT_ROOT: {
         field: "COWORK_ARCH_PROJECT_ROOT",
         label: "Architecture project root",
-        prompt: "Provide the workspace folder where ComfyUI workflow files and outputs may be read and written.",
+        prompt:
+          "Provide the workspace folder where ComfyUI workflow files and outputs may be read and written.",
         docs_url: "https://github.com/comfyanonymous/ComfyUI",
       },
       COMFYUI_BASE_URL: {
@@ -400,7 +405,9 @@ export const TIER1_CONNECTOR_IDS: Tier1IntegrationProvider[] = [
 ];
 
 export function getConnectorCapability(id: string): ConnectorCapability | undefined {
-  const key = String(id || "").trim().toLowerCase() as ConnectorCapabilityId;
+  const key = String(id || "")
+    .trim()
+    .toLowerCase() as ConnectorCapabilityId;
   return CAPABILITIES[key];
 }
 
@@ -416,9 +423,9 @@ export function getKnownConnectorIds(): string[] {
   return Object.keys(CAPABILITIES);
 }
 
-export function detectConnectorCapabilityId(server: Pick<MCPServerConfig, "name" | "args">):
-  | ConnectorCapabilityId
-  | null {
+export function detectConnectorCapabilityId(
+  server: Pick<MCPServerConfig, "name" | "args">,
+): ConnectorCapabilityId | null {
   const args = server.args || [];
   for (const arg of args) {
     const match = String(arg).match(CONNECTOR_SCRIPT_PATH_REGEX);

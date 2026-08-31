@@ -11,12 +11,16 @@ import { startMicrosoftEmailOAuth } from "../../utils/microsoft-email-oauth";
 
 function sanitizeOAuthError(text: string): string {
   return text
-    .replace(/("(?:client_secret|code|access_token|refresh_token|code_verifier)":\s*")([^"]+)(")/gi, "$1[REDACTED]$3")
+    .replace(
+      /("(?:client_secret|code|access_token|refresh_token|code_verifier)":\s*")([^"]+)(")/gi,
+      "$1[REDACTED]$3",
+    )
     .replace(/[?&](code|client_secret|token)=[^&\s"]+/gi, (m, key) => `${m[0]}${key}=[REDACTED]`)
     .slice(0, 500);
 }
 
 export type ConnectorOAuthProvider =
+  | "box"
   | "salesforce"
   | "jira"
   | "hubspot"
@@ -67,7 +71,7 @@ const OAUTH_CALLBACK_PORT = 18765;
 function getElectronShell(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     const shell = electron?.shell;
     if (shell?.openExternal) return shell;
@@ -89,6 +93,8 @@ export async function startConnectorOAuth(
   request: ConnectorOAuthRequest,
 ): Promise<ConnectorOAuthResult> {
   switch (request.provider) {
+    case "box":
+      return startBoxOAuth(request);
     case "salesforce":
       return startSalesforceOAuth(request);
     case "jira":
@@ -315,6 +321,68 @@ async function startSalesforceOAuth(request: ConnectorOAuthRequest): Promise<Con
     refreshToken: tokenData.refresh_token,
     instanceUrl: tokenData.instance_url,
     tokenType: tokenData.token_type,
+  };
+}
+
+async function startBoxOAuth(request: ConnectorOAuthRequest): Promise<ConnectorOAuthResult> {
+  if (!request.clientId) {
+    throw new Error("Box OAuth requires a client ID");
+  }
+  if (!request.clientSecret) {
+    throw new Error("Box OAuth requires a client secret");
+  }
+
+  const requestedScopes =
+    request.scopes && request.scopes.length > 0
+      ? request.scopes
+      : ["root_readwrite", "ai.readwrite"];
+  const scope = requestedScopes.join(" ");
+  const { redirectUri, waitForCode, state } = await startOAuthCallbackServer();
+
+  const authUrl = new URL("https://account.box.com/api/oauth2/authorize");
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("client_id", request.clientId);
+  authUrl.searchParams.set("redirect_uri", redirectUri);
+  authUrl.searchParams.set("scope", scope);
+  authUrl.searchParams.set("state", state);
+
+  await openExternalUrl(authUrl.toString());
+
+  const { code } = await waitForCode();
+  const tokenResponse = await fetch("https://api.box.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      client_id: request.clientId,
+      client_secret: request.clientSecret,
+      redirect_uri: redirectUri,
+    }).toString(),
+  });
+
+  if (!tokenResponse.ok) {
+    const text = await tokenResponse.text();
+    throw new Error(`Box OAuth failed: ${sanitizeOAuthError(text)}`);
+  }
+
+  const tokenData = (await tokenResponse.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    token_type?: string;
+  };
+  if (!tokenData.access_token) {
+    throw new Error("Box OAuth did not return an access_token");
+  }
+
+  return {
+    provider: "box",
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token,
+    expiresIn: tokenData.expires_in,
+    tokenType: tokenData.token_type,
+    scopes: requestedScopes,
   };
 }
 
@@ -619,8 +687,14 @@ async function startGoogleOAuth(request: ConnectorOAuthRequest): Promise<Connect
   }
   const grantedScopes =
     typeof tokenData.scope === "string"
-      ? tokenData.scope.split(/\s+/).map((s) => s.trim()).filter(Boolean)
-      : scope.split(/\s+/).map((s) => s.trim()).filter(Boolean);
+      ? tokenData.scope
+          .split(/\s+/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : scope
+          .split(/\s+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
   if (request.provider === "google-workspace") {
     const missingScopes = getMissingGoogleWorkspaceScopes(grantedScopes);
     if (missingScopes.length > 0) {

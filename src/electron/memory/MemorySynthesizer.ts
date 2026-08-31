@@ -8,6 +8,9 @@ import { buildWorkspaceKitContext } from "./WorkspaceKitContext";
 import { DailyLogSummarizer } from "./DailyLogSummarizer";
 import { CuratedMemoryService } from "./CuratedMemoryService";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
+import { BoxSettingsManager } from "../settings/box-manager";
+import { BOX_BRAIN_IMPORT_HEADER } from "./BoxBrainService";
+import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
 import type {
   MemoryLayerPreview,
   MemoryLayerPreviewPayload,
@@ -22,7 +25,8 @@ export type MemorySourceKind =
   | "memory"
   | "knowledge_graph"
   | "workspace_kit"
-  | "daily_summary";
+  | "daily_summary"
+  | "box_brain";
 
 export interface MemoryFragment {
   key: string;
@@ -48,6 +52,7 @@ export interface SynthesizeOptions {
   includeWorkspaceKit?: boolean;
   includeKnowledgeGraph?: boolean;
   agentRoleId?: string | null;
+  filesystemReadGuard?: MarkdownMemoryReadGuard;
 }
 
 interface LayeredContextResult extends SynthesizedContext {
@@ -67,6 +72,7 @@ function emptySourceAttribution(): Record<MemorySourceKind, number> {
     knowledge_graph: 0,
     workspace_kit: 0,
     daily_summary: 0,
+    box_brain: 0,
   };
 }
 
@@ -84,11 +90,7 @@ function estimateTokens(text: string): number {
 }
 
 function fingerprint(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 160);
+  return text.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
 function recencyScore(updatedAt: number, now: number): number {
@@ -112,9 +114,7 @@ function extractBulletLines(raw: string | null | undefined): string[] {
   if (typeof raw !== "string" || !raw.trim()) {
     return [];
   }
-  return raw
-    .split("\n")
-    .filter((line) => line.startsWith("- "));
+  return raw.split("\n").filter((line) => line.startsWith("- "));
 }
 
 function categoryLabel(cat: string): string {
@@ -205,20 +205,19 @@ function extractRelationshipFragments(): MemoryFragment[] {
 function extractPlaybookFragments(workspaceId: string, taskPrompt: string): MemoryFragment[] {
   try {
     const raw = PlaybookService.getPlaybookForContext(workspaceId, taskPrompt, 5);
-    return extractBulletLines(raw)
-      .map((line) => {
-        const text = line.replace(/^-\s*/, "");
-        return {
-          key: fingerprint(`playbook:${text}`),
-          source: "playbook" as const,
-          text: `[Playbook] ${text}`,
-          relevance: 0.77,
-          confidence: 0.85,
-          updatedAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
-          estimatedTokens: estimateTokens(text) + 3,
-          category: "playbook",
-        };
-      });
+    return extractBulletLines(raw).map((line) => {
+      const text = line.replace(/^-\s*/, "");
+      return {
+        key: fingerprint(`playbook:${text}`),
+        source: "playbook" as const,
+        text: `[Playbook] ${text}`,
+        relevance: 0.77,
+        confidence: 0.85,
+        updatedAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
+        estimatedTokens: estimateTokens(text) + 3,
+        category: "playbook",
+      };
+    });
   } catch {
     return [];
   }
@@ -242,30 +241,66 @@ function extractArchiveFragments(workspaceId: string, taskPrompt: string): Memor
   }
 }
 
-function extractKnowledgeGraphFragments(workspaceId: string, taskPrompt: string): MemoryFragment[] {
+function extractBoxBrainFragments(workspaceId: string, taskPrompt: string): MemoryFragment[] {
   try {
-    return extractBulletLines(KnowledgeGraphService.buildContextForTask(workspaceId, taskPrompt))
-      .map((line) => {
-        const text = line.replace(/^-\s*/, "");
-        return {
-          key: fingerprint(`kg:${text}`),
-          source: "knowledge_graph" as const,
-          text: `[KG] ${text}`,
-          relevance: 0.6,
-          confidence: 0.84,
-          updatedAt: Date.now(),
-          estimatedTokens: estimateTokens(text) + 3,
-          category: "knowledge_graph",
-        };
-      });
+    const settings = BoxSettingsManager.loadSettings();
+    if (!settings.enabled || settings.brain?.enabled !== true || !taskPrompt.trim()) return [];
+
+    // MemoryService.search intentionally includes private local memories and
+    // imported-global memories. Box Brain entries are marked as imported so a
+    // single selected workspace can still serve company-wide recall without
+    // mirroring document bodies to an external memory provider.
+    return MemoryService.search(workspaceId, taskPrompt.slice(0, 2500), 8)
+      .filter((result) => result.snippet.trimStart().startsWith(BOX_BRAIN_IMPORT_HEADER))
+      .map((result) => ({
+        key: fingerprint(`box-brain:${result.id}`),
+        source: "box_brain" as const,
+        text: `[Box Brain] ${result.snippet}`,
+        relevance: Math.min(0.98, 0.72 + result.relevanceScore * 0.2),
+        confidence: 0.82,
+        updatedAt: result.createdAt,
+        estimatedTokens: estimateTokens(result.snippet) + 4,
+        category: "box_brain",
+      }));
   } catch {
     return [];
   }
 }
 
-function extractDailySummaryFragments(workspacePath: string, taskPrompt: string): MemoryFragment[] {
+function extractKnowledgeGraphFragments(workspaceId: string, taskPrompt: string): MemoryFragment[] {
   try {
-    return DailyLogSummarizer.getRecentSummaryFragments(workspacePath, taskPrompt, 5).map((fragment) => ({
+    return extractBulletLines(
+      KnowledgeGraphService.buildContextForTask(workspaceId, taskPrompt),
+    ).map((line) => {
+      const text = line.replace(/^-\s*/, "");
+      return {
+        key: fingerprint(`kg:${text}`),
+        source: "knowledge_graph" as const,
+        text: `[KG] ${text}`,
+        relevance: 0.6,
+        confidence: 0.84,
+        updatedAt: Date.now(),
+        estimatedTokens: estimateTokens(text) + 3,
+        category: "knowledge_graph",
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+function extractDailySummaryFragments(
+  workspacePath: string,
+  taskPrompt: string,
+  readGuard?: MarkdownMemoryReadGuard,
+): MemoryFragment[] {
+  try {
+    return DailyLogSummarizer.getRecentSummaryFragments(
+      workspacePath,
+      taskPrompt,
+      5,
+      readGuard,
+    ).map((fragment) => ({
       ...fragment,
       source: "daily_summary" as const,
     }));
@@ -317,6 +352,7 @@ function groupBySource(fragments: MemoryFragment[]): Record<MemorySourceKind, Me
     knowledge_graph: [],
     workspace_kit: [],
     daily_summary: [],
+    box_brain: [],
   };
   for (const fragment of fragments) {
     grouped[fragment.source].push(fragment);
@@ -375,6 +411,7 @@ export class MemorySynthesizer {
       knowledge_graph: 0,
       workspace_kit: 0,
       daily_summary: 0,
+      box_brain: grouped.box_brain.length,
     };
 
     const text = parts.length
@@ -393,12 +430,18 @@ export class MemorySynthesizer {
     workspaceId: string,
     workspacePath: string,
     taskPrompt: string,
-    options: { includeKnowledgeGraph?: boolean; includeArchive?: boolean; tokenBudget?: number } = {},
+    options: {
+      includeKnowledgeGraph?: boolean;
+      includeArchive?: boolean;
+      tokenBudget?: number;
+      filesystemReadGuard?: MarkdownMemoryReadGuard;
+    } = {},
   ): SynthesizedContext {
     const now = Date.now();
     const fragments = [
       ...extractPlaybookFragments(workspaceId, taskPrompt),
-      ...extractDailySummaryFragments(workspacePath, taskPrompt),
+      ...extractDailySummaryFragments(workspacePath, taskPrompt, options.filesystemReadGuard),
+      ...extractBoxBrainFragments(workspaceId, taskPrompt),
     ];
     if (options.includeKnowledgeGraph !== false) {
       fragments.push(...extractKnowledgeGraphFragments(workspaceId, taskPrompt));
@@ -435,6 +478,12 @@ export class MemorySynthesizer {
         parts.push(`- ${sanitize(fragment.text)}`);
       }
     }
+    if (grouped.box_brain.length) {
+      parts.push("\n## Box Brain (source-backed)");
+      for (const fragment of grouped.box_brain) {
+        parts.push(`- ${sanitize(fragment.text)}`);
+      }
+    }
 
     const sourceAttribution: Record<MemorySourceKind, number> = {
       curated_memory: 0,
@@ -445,6 +494,7 @@ export class MemorySynthesizer {
       knowledge_graph: grouped.knowledge_graph.length,
       workspace_kit: 0,
       daily_summary: grouped.daily_summary.length,
+      box_brain: grouped.box_brain.length,
     };
 
     const text = parts.length
@@ -463,7 +513,9 @@ export class MemorySynthesizer {
     const features = MemoryFeaturesManager.loadSettings();
     const hints: string[] = [];
     if (features.verbatimRecallEnabled !== false) {
-      hints.push("- Use `search_quotes` for exact wording across transcripts, imported memories, and workspace notes.");
+      hints.push(
+        "- Use `search_quotes` for exact wording across transcripts, imported memories, and workspace notes.",
+      );
     }
     if (features.sessionRecallEnabled !== false) {
       hints.push("- Use `search_sessions` for recent transcript/task history recall.");
@@ -479,7 +531,9 @@ export class MemorySynthesizer {
     }
     hints.push("- Use `search_memories` for broader archive and imported-history recall.");
     if (features.topicMemoryEnabled !== false) {
-      hints.push("- Use `memory_topics_load` when the task is topical and needs a focused L2 topic pack.");
+      hints.push(
+        "- Use `memory_topics_load` when the task is topical and needs a focused L2 topic pack.",
+      );
     }
     return hints.length
       ? `<cowork_recall_hints>\n## L2/L3 Recall Guidance\n${hints.join("\n")}\n</cowork_recall_hints>`
@@ -519,13 +573,15 @@ export class MemorySynthesizer {
       try {
         const rawKit = buildWorkspaceKitContext(workspacePath, taskPrompt, new Date(), {
           agentRoleId: options.agentRoleId ?? null,
+          readGuard: options.filesystemReadGuard,
         });
         if (rawKit) {
           const kitTokens = estimateTokens(rawKit);
           kitText =
             kitTokens <= kitBudget
               ? rawKit
-              : rawKit.slice(0, kitBudget * CHARS_PER_TOKEN) + "\n[... workspace context truncated]";
+              : rawKit.slice(0, kitBudget * CHARS_PER_TOKEN) +
+                "\n[... workspace context truncated]";
         }
       } catch {
         kitText = "";
@@ -552,6 +608,7 @@ export class MemorySynthesizer {
       includeKnowledgeGraph: false,
       includeArchive: false,
       tokenBudget: l1Budget,
+      filesystemReadGuard: options.filesystemReadGuard,
     });
     const l1: LayeredContextResult = {
       ...story,
@@ -590,7 +647,8 @@ export class MemorySynthesizer {
           {
             layer: "L0",
             title: "Legacy Combined Memory",
-            description: "Wake-up layers are disabled; the prompt uses the combined synthesized memory block.",
+            description:
+              "Wake-up layers are disabled; the prompt uses the combined synthesized memory block.",
             includedText: synthesized.text,
             budget: {
               usedTokens: synthesized.totalTokens,
@@ -603,7 +661,13 @@ export class MemorySynthesizer {
       };
     }
 
-    const wakeUp = this.buildWakeUpLayers(workspaceId, workspacePath, effectivePrompt, options, settings);
+    const wakeUp = this.buildWakeUpLayers(
+      workspaceId,
+      workspacePath,
+      effectivePrompt,
+      options,
+      settings,
+    );
     const l2Description =
       settings.topicMemoryEnabled !== false
         ? "Excluded from default injection. Load with `memory_topics_load` when the task needs a focused topical pack."
@@ -619,7 +683,10 @@ export class MemorySynthesizer {
         includedText: wakeUp.l0.text,
         budget: {
           usedTokens: wakeUp.l0.totalTokens,
-          budgetTokens: Math.max(wakeUp.l0.totalTokens, options.tokenBudget ?? DEFAULT_TOKEN_BUDGET),
+          budgetTokens: Math.max(
+            wakeUp.l0.totalTokens,
+            options.tokenBudget ?? DEFAULT_TOKEN_BUDGET,
+          ),
           excludedCount: wakeUp.l0.droppedCount,
         },
         injectedByDefault: true,
@@ -631,7 +698,10 @@ export class MemorySynthesizer {
         includedText: wakeUp.l1.text,
         budget: {
           usedTokens: wakeUp.l1.totalTokens,
-          budgetTokens: Math.max(wakeUp.l1.totalTokens, options.tokenBudget ?? DEFAULT_TOKEN_BUDGET),
+          budgetTokens: Math.max(
+            wakeUp.l1.totalTokens,
+            options.tokenBudget ?? DEFAULT_TOKEN_BUDGET,
+          ),
           excludedCount: wakeUp.l1.droppedCount,
         },
         injectedByDefault: true,
@@ -652,7 +722,8 @@ export class MemorySynthesizer {
       {
         layer: "L3",
         title: "L3 Deep Recall",
-        description: "Unified recall and verbatim quote search across transcripts, tasks, files, and memory.",
+        description:
+          "Unified recall and verbatim quote search across transcripts, tasks, files, and memory.",
         includedText: wakeUp.recallHints,
         excludedText: l3Description,
         budget: {
@@ -682,7 +753,13 @@ export class MemorySynthesizer {
   ): SynthesizedContext {
     const settings = MemoryFeaturesManager.loadSettings();
     if (settings.wakeUpLayersEnabled !== false) {
-      const layered = this.buildWakeUpLayers(workspaceId, workspacePath, taskPrompt, options, settings);
+      const layered = this.buildWakeUpLayers(
+        workspaceId,
+        workspacePath,
+        taskPrompt,
+        options,
+        settings,
+      );
       const finalParts = [layered.l0.text, layered.l1.text].filter(Boolean);
       const finalText = finalParts.join("\n\n");
       return {
@@ -698,6 +775,7 @@ export class MemorySynthesizer {
           knowledge_graph: 0,
           workspace_kit: layered.l0.sourceAttribution.workspace_kit,
           daily_summary: layered.l1.sourceAttribution.daily_summary,
+          box_brain: layered.l1.sourceAttribution.box_brain,
         },
         droppedCount: layered.l0.droppedCount + layered.l1.droppedCount,
       };
@@ -709,19 +787,21 @@ export class MemorySynthesizer {
     const hotBudget = Math.floor(remainingBudget * 0.5);
     const structuredBudget = remainingBudget - hotBudget;
 
-    const hot = settings.curatedMemoryEnabled === false
-      ? {
-          text: "",
-          totalTokens: 0,
-          fragmentCount: 0,
-          sourceAttribution: emptySourceAttribution(),
-          droppedCount: 0,
-        }
-      : this.buildHotMemoryContext(workspaceId, hotBudget);
+    const hot =
+      settings.curatedMemoryEnabled === false
+        ? {
+            text: "",
+            totalTokens: 0,
+            fragmentCount: 0,
+            sourceAttribution: emptySourceAttribution(),
+            droppedCount: 0,
+          }
+        : this.buildHotMemoryContext(workspaceId, hotBudget);
     const structured = this.buildStructuredMemoryContext(workspaceId, workspacePath, taskPrompt, {
       includeKnowledgeGraph: options.includeKnowledgeGraph !== false,
       includeArchive: settings.defaultArchiveInjectionEnabled === true,
       tokenBudget: structuredBudget,
+      filesystemReadGuard: options.filesystemReadGuard,
     });
 
     let kitText = "";
@@ -729,13 +809,15 @@ export class MemorySynthesizer {
       try {
         const rawKit = buildWorkspaceKitContext(workspacePath, taskPrompt, new Date(), {
           agentRoleId: options.agentRoleId ?? null,
+          readGuard: options.filesystemReadGuard,
         });
         if (rawKit) {
           const kitTokens = estimateTokens(rawKit);
           kitText =
             kitTokens <= kitBudget
               ? rawKit
-              : rawKit.slice(0, kitBudget * CHARS_PER_TOKEN) + "\n[... workspace context truncated]";
+              : rawKit.slice(0, kitBudget * CHARS_PER_TOKEN) +
+                "\n[... workspace context truncated]";
         }
       } catch {
         kitText = "";
@@ -754,13 +836,13 @@ export class MemorySynthesizer {
       knowledge_graph: structured.sourceAttribution.knowledge_graph,
       workspace_kit: kitText ? 1 : 0,
       daily_summary: structured.sourceAttribution.daily_summary,
+      box_brain: structured.sourceAttribution.box_brain,
     };
 
     return {
       text: finalText,
       totalTokens: estimateTokens(finalText),
-      fragmentCount:
-        hot.fragmentCount + structured.fragmentCount + (kitText ? 1 : 0),
+      fragmentCount: hot.fragmentCount + structured.fragmentCount + (kitText ? 1 : 0),
       sourceAttribution,
       droppedCount: hot.droppedCount + structured.droppedCount,
     };

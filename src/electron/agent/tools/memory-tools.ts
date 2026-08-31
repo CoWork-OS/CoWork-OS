@@ -5,6 +5,7 @@ import { MemoryService } from "../../memory/MemoryService";
 import { CuratedMemoryService } from "../../memory/CuratedMemoryService";
 import { MemoryWriteGate } from "../../memory/MemoryWriteGate";
 import type { MemoryType } from "../../database/repositories";
+import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 
 /**
  * MemoryTools provides explicit memory save operations for agents.
@@ -66,7 +67,8 @@ export class MemoryTools {
             action: {
               type: "string",
               enum: ["add", "replace", "remove"],
-              description: "Whether to add a new curated memory, replace a matching one, or remove one",
+              description:
+                "Whether to add a new curated memory, replace a matching one, or remove one",
             },
             target: {
               type: "string",
@@ -96,7 +98,8 @@ export class MemoryTools {
             },
             match: {
               type: "string",
-              description: "Substring used to find an existing curated memory when replacing or removing",
+              description:
+                "Substring used to find an existing curated memory when replacing or removing",
             },
             reason: {
               type: "string",
@@ -204,7 +207,11 @@ export class MemoryTools {
         input.type as MemoryType,
         input.content,
         false,
-        { origin: "tool", skipMemoryWriteGate: true },
+        {
+          origin: "tool",
+          skipMemoryWriteGate: true,
+          allowExternalMirror: this.isExternalMemoryMirrorAllowed(),
+        },
       );
 
       if (!memory) {
@@ -242,7 +249,13 @@ export class MemoryTools {
     action: "add" | "replace" | "remove";
     target: "user" | "workspace";
     id?: string;
-    kind?: "identity" | "preference" | "constraint" | "workflow_rule" | "project_fact" | "active_commitment";
+    kind?:
+      | "identity"
+      | "preference"
+      | "constraint"
+      | "workflow_rule"
+      | "project_fact"
+      | "active_commitment";
     content?: string;
     match?: string;
     reason?: string;
@@ -263,11 +276,19 @@ export class MemoryTools {
     });
 
     try {
+      const filesystemReadGuard = (candidatePath: string): boolean =>
+        evaluateWorkspaceFilesystemAccess(this.workspace, candidatePath, "read").decision ===
+        "allow";
+      const filesystemWriteGuard = (candidatePath: string): boolean =>
+        evaluateWorkspaceFilesystemAccess(this.workspace, candidatePath, "write").decision ===
+        "allow";
       const result = await CuratedMemoryService.curate({
         workspaceId: this.workspace.id,
         taskId: this.taskId,
         origin: "agent_tool",
         ...input,
+        filesystemReadGuard,
+        filesystemWriteGuard,
       });
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "memory_curate",
@@ -297,9 +318,24 @@ export class MemoryTools {
     }
   }
 
+  private isExternalMemoryMirrorAllowed(): boolean {
+    const permissions = this.workspace.permissions;
+    return (
+      permissions.network === true &&
+      permissions.accessNetworkMode !== "disabled" &&
+      permissions.accessNetworkMode !== "on-request"
+    );
+  }
+
   async readCurated(input: {
     target?: "user" | "workspace" | "all";
-    kind?: "identity" | "preference" | "constraint" | "workflow_rule" | "project_fact" | "active_commitment";
+    kind?:
+      | "identity"
+      | "preference"
+      | "constraint"
+      | "workflow_rule"
+      | "project_fact"
+      | "active_commitment";
     limit?: number;
   }): Promise<{
     entries: Array<{
@@ -341,15 +377,14 @@ export class MemoryTools {
       }
       if (!added) break;
     }
-    const mapped = entries
-      .map((entry) => ({
-        id: entry.id,
-        target: entry.target,
-        kind: entry.kind,
-        content: entry.content,
-        confidence: entry.confidence,
-        updatedAt: new Date(entry.updatedAt).toISOString(),
-      }));
+    const mapped = entries.map((entry) => ({
+      id: entry.id,
+      target: entry.target,
+      kind: entry.kind,
+      content: entry.content,
+      confidence: entry.confidence,
+      updatedAt: new Date(entry.updatedAt).toISOString(),
+    }));
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: "memory_curated_read",
       success: true,

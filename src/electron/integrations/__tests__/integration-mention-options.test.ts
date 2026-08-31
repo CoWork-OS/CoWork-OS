@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildIntegrationMentionOptionsFromState } from "../integration-mention-options";
-import { GMAIL_DEFAULT_SCOPES, GOOGLE_WORKSPACE_DEFAULT_SCOPES } from "../../../shared/google-workspace";
+import {
+  GMAIL_DEFAULT_SCOPES,
+  GOOGLE_WORKSPACE_DEFAULT_SCOPES,
+} from "../../../shared/google-workspace";
 
 describe("buildIntegrationMentionOptionsFromState", () => {
   it("always exposes Browser Use as an @mention option", () => {
@@ -226,10 +229,7 @@ describe("buildIntegrationMentionOptionsFromState", () => {
     const calendarOptions = options.filter((option) => option.label === "Google Calendar");
     expect(calendarOptions).toHaveLength(1);
     expect(calendarOptions[0].id).toBe("builtin:google-calendar");
-    expect(calendarOptions[0].tools).toEqual([
-      "calendar_action",
-      "mcp_calendar_availability_get",
-    ]);
+    expect(calendarOptions[0].tools).toEqual(["calendar_action", "mcp_calendar_availability_get"]);
     expect(calendarOptions[0].status).toBe("connected");
   });
 

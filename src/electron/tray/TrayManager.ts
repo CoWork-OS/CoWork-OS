@@ -43,12 +43,16 @@ import {
   pruneTempWorkspaces,
 } from "../utils/temp-workspace";
 import { isTempWorkspaceInScope } from "../utils/temp-workspace-scope";
-import { getActiveTempWorkspaceLeases, touchTempWorkspaceLease } from "../utils/temp-workspace-lease";
-import { ChronicleCaptureService, ChronicleMemoryService, ChronicleSettingsManager } from "../chronicle";
 import {
-  NativeNotificationCenter,
-  NotificationOverlayManager,
-} from "../notifications";
+  getActiveTempWorkspaceLeases,
+  touchTempWorkspaceLease,
+} from "../utils/temp-workspace-lease";
+import {
+  ChronicleCaptureService,
+  ChronicleMemoryService,
+  ChronicleSettingsManager,
+} from "../chronicle";
+import { NativeNotificationCenter, NotificationOverlayManager } from "../notifications";
 
 const LEGACY_SETTINGS_FILE = "tray-settings.json";
 
@@ -81,9 +85,7 @@ const DEFAULT_SETTINGS: TraySettings = {
  * (e.g. `null` from corrupted JSON) fall back to defaults so `enabled` does not
  * silently become falsy and hide the menu bar / system tray icon.
  */
-export function normalizeTraySettings(
-  raw: Partial<TraySettings> | null | undefined,
-): TraySettings {
+export function normalizeTraySettings(raw: Partial<TraySettings> | null | undefined): TraySettings {
   const merged = { ...DEFAULT_SETTINGS, ...raw };
   return {
     enabled: typeof merged.enabled === "boolean" ? merged.enabled : DEFAULT_SETTINGS.enabled,
@@ -673,8 +675,12 @@ export class TrayManager {
 
     // Draw stroked rounded rect
     const strokeRoundedRect = (
-      rx: number, ry: number, rw: number, rh: number,
-      radius: number, strokeWidth: number
+      rx: number,
+      ry: number,
+      rw: number,
+      rh: number,
+      radius: number,
+      strokeWidth: number,
     ) => {
       // Top and bottom edges
       drawHLine(rx + radius, rx + rw - radius, ry, strokeWidth);

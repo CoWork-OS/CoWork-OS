@@ -36,7 +36,16 @@ export function ReplayControlsBar({ controls }: ReplayControlsBarProps) {
             onClick={reset}
             title="Reset to beginning"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <polyline points="1 4 1 10 7 10" />
               <path d="M3.51 15a9 9 0 1 0 .49-4.65" />
             </svg>
@@ -48,30 +57,49 @@ export function ReplayControlsBar({ controls }: ReplayControlsBarProps) {
               onClick={startReplay}
               title="Replay again"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
               <span>Replay</span>
             </button>
           ) : isPlaying ? (
-            <button
-              className="replay-btn replay-btn-play"
-              onClick={pause}
-              title="Pause"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <button className="replay-btn replay-btn-play" onClick={pause} title="Pause">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <rect x="6" y="4" width="4" height="16" />
                 <rect x="14" y="4" width="4" height="16" />
               </svg>
               <span>Pause</span>
             </button>
           ) : (
-            <button
-              className="replay-btn replay-btn-play"
-              onClick={resume}
-              title="Play"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <button className="replay-btn replay-btn-play" onClick={resume} title="Play">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
               <span>Play</span>

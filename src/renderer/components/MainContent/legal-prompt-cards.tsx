@@ -12,15 +12,33 @@ import {
 
 const LEGAL_DEMAND_TYPE_OPTIONS = [
   { value: "payment", title: "Payment demand", description: "Overdue invoice / liquidated debt" },
-  { value: "breach-cure", title: "Breach / notice to cure", description: "Contract default with cure window" },
-  { value: "cease-desist", title: "Cease and desist", description: "Stop infringing or tortious activity" },
-  { value: "employment-separation", title: "Employment / separation", description: "Restrictive covenant, severance" },
+  {
+    value: "breach-cure",
+    title: "Breach / notice to cure",
+    description: "Contract default with cure window",
+  },
+  {
+    value: "cease-desist",
+    title: "Cease and desist",
+    description: "Stop infringing or tortious activity",
+  },
+  {
+    value: "employment-separation",
+    title: "Employment / separation",
+    description: "Restrictive covenant, severance",
+  },
   { value: "preservation", title: "Preservation", description: "Hold-evidence notice" },
   { value: "other", title: "Other", description: "Tell me more in the facts" },
 ];
 
 const LEGAL_DEMAND_TONE_OPTIONS = ["measured", "assertive", "aggressive"];
-const LEGAL_DEMAND_RESPONSE_WINDOWS = ["7 days", "14 days", "21 days", "30 days", "Per contract / other"];
+const LEGAL_DEMAND_RESPONSE_WINDOWS = [
+  "7 days",
+  "14 days",
+  "21 days",
+  "30 days",
+  "Per contract / other",
+];
 const LEGAL_DEMAND_MARKINGS = [
   "None",
   "Without prejudice",
@@ -45,18 +63,11 @@ export function LegalDemandIntakePromptCard({
     setValues(buildLegalDemandIntakeInitialValues(prompt));
   }, [prompt]);
 
-  const updateValue = useCallback(
-    (field: keyof LegalDemandIntakeFormValues, value: string) => {
-      setValues((prev) => ({ ...prev, [field]: value }));
-    },
-    [],
-  );
+  const updateValue = useCallback((field: keyof LegalDemandIntakeFormValues, value: string) => {
+    setValues((prev) => ({ ...prev, [field]: value }));
+  }, []);
 
-  const renderChip = (
-    field: keyof LegalDemandIntakeFormValues,
-    value: string,
-    label = value,
-  ) => (
+  const renderChip = (field: keyof LegalDemandIntakeFormValues, value: string, label = value) => (
     <button
       key={`${field}-${value}`}
       type="button"
@@ -90,7 +101,12 @@ export function LegalDemandIntakePromptCard({
           <FileText size={18} aria-hidden="true" />
           <span>Demand letter details</span>
         </div>
-        <button type="button" className="legal-intake-dismiss" onClick={onDismiss} aria-label="Dismiss demand intake form">
+        <button
+          type="button"
+          className="legal-intake-dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss demand intake form"
+        >
           <X size={16} aria-hidden="true" />
         </button>
       </header>
@@ -151,9 +167,15 @@ export function LegalDemandIntakePromptCard({
         <div className="legal-intake-field legal-intake-field-full">
           <span>What tone should the letter strike?</span>
           <div className="legal-intake-chip-row">
-            {LEGAL_DEMAND_TONE_OPTIONS.map((tone) => renderChip("tone", tone, tone[0].toUpperCase() + tone.slice(1)))}
+            {LEGAL_DEMAND_TONE_OPTIONS.map((tone) =>
+              renderChip("tone", tone, tone[0].toUpperCase() + tone.slice(1)),
+            )}
           </div>
-          {renderTextarea("toneRationale", "One-line rationale - relationship, amount, litigation likelihood", 2)}
+          {renderTextarea(
+            "toneRationale",
+            "One-line rationale - relationship, amount, litigation likelihood",
+            2,
+          )}
         </div>
 
         <div className="legal-intake-field legal-intake-field-full">
@@ -177,17 +199,29 @@ export function LegalDemandIntakePromptCard({
 
         <label className="legal-intake-field legal-intake-field-full">
           <span>Legal / contractual basis</span>
-          {renderTextarea("legalBasis", "Contract sections, governing law, statutes, rules, placeholders to verify", 3)}
+          {renderTextarea(
+            "legalBasis",
+            "Contract sections, governing law, statutes, rules, placeholders to verify",
+            3,
+          )}
         </label>
 
         <label className="legal-intake-field legal-intake-field-full">
           <span>Desired outcome</span>
-          {renderTextarea("desiredOutcome", "Payment of $X by date Y; cure within N days; stop activity Z", 3)}
+          {renderTextarea(
+            "desiredOutcome",
+            "Payment of $X by date Y; cure within N days; stop activity Z",
+            3,
+          )}
         </label>
 
         <label className="legal-intake-field legal-intake-field-full">
           <span>Prior outreach</span>
-          {renderTextarea("priorOutreach", "Informal asks, responses so far, why demand-letter escalation now", 3)}
+          {renderTextarea(
+            "priorOutreach",
+            "Informal asks, responses so far, why demand-letter escalation now",
+            3,
+          )}
         </label>
 
         <label className="legal-intake-field">
@@ -213,13 +247,23 @@ export function LegalDemandIntakePromptCard({
         <label className="legal-intake-field legal-intake-field-full">
           <span>Copies / seed documents / strategic notes</span>
           {renderTextarea("copies", "Internal stakeholders, insurance carrier, counsel", 2)}
-          {renderTextarea("seedDocs", "Paths or notes for contracts, correspondence, invoices, evidence", 2)}
-          {renderTextarea("strategicNotes", "Leverage, BATNA, downside tolerance, privilege filters, admissions risk", 3)}
+          {renderTextarea(
+            "seedDocs",
+            "Paths or notes for contracts, correspondence, invoices, evidence",
+            2,
+          )}
+          {renderTextarea(
+            "strategicNotes",
+            "Leverage, BATNA, downside tolerance, privilege filters, admissions risk",
+            3,
+          )}
         </label>
       </div>
 
       <footer className="legal-intake-card-footer">
-        <span className="legal-intake-footer-note">Blank fields will be flagged in the intake.</span>
+        <span className="legal-intake-footer-note">
+          Blank fields will be flagged in the intake.
+        </span>
         <button
           type="button"
           className="legal-intake-submit"
@@ -250,12 +294,9 @@ export function GenericLegalWorkflowPromptCard({
     setValues(buildGenericLegalWorkflowInitialValues(invocation));
   }, [invocation]);
 
-  const updateValue = useCallback(
-    (field: keyof GenericLegalWorkflowFormValues, value: string) => {
-      setValues((prev) => ({ ...prev, [field]: value }));
-    },
-    [],
-  );
+  const updateValue = useCallback((field: keyof GenericLegalWorkflowFormValues, value: string) => {
+    setValues((prev) => ({ ...prev, [field]: value }));
+  }, []);
 
   const renderTextarea = (
     field: keyof GenericLegalWorkflowFormValues,
@@ -282,7 +323,12 @@ export function GenericLegalWorkflowPromptCard({
           <span>Legal workflow details</span>
           <span className="legal-intake-command-pill">{commandLabel}</span>
         </div>
-        <button type="button" className="legal-intake-dismiss" onClick={onDismiss} aria-label="Dismiss legal workflow form">
+        <button
+          type="button"
+          className="legal-intake-dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss legal workflow form"
+        >
           <X size={16} aria-hidden="true" />
         </button>
       </header>
@@ -325,37 +371,63 @@ export function GenericLegalWorkflowPromptCard({
 
         <label className="legal-intake-field legal-intake-field-full">
           <span>Key facts / timeline</span>
-          {renderTextarea("keyFacts", "Events, dates, business context, disputed points, known unknowns", 4)}
+          {renderTextarea(
+            "keyFacts",
+            "Events, dates, business context, disputed points, known unknowns",
+            4,
+          )}
         </label>
 
         <label className="legal-intake-field legal-intake-field-full">
           <span>Documents / sources</span>
-          {renderTextarea("documents", "File paths, uploads, contract names, policies, correspondence, data sources", 3)}
+          {renderTextarea(
+            "documents",
+            "File paths, uploads, contract names, policies, correspondence, data sources",
+            3,
+          )}
         </label>
 
         <label className="legal-intake-field">
           <span>Deadlines / risk triggers</span>
-          {renderTextarea("deadlines", "Notice periods, filing dates, launch dates, board dates, regulator windows", 3)}
+          {renderTextarea(
+            "deadlines",
+            "Notice periods, filing dates, launch dates, board dates, regulator windows",
+            3,
+          )}
         </label>
 
         <label className="legal-intake-field">
           <span>Stakeholders / audience</span>
-          {renderTextarea("stakeholders", "Decision-maker, reviewer, business owner, client, outside counsel", 3)}
+          {renderTextarea(
+            "stakeholders",
+            "Decision-maker, reviewer, business owner, client, outside counsel",
+            3,
+          )}
         </label>
 
         <label className="legal-intake-field legal-intake-field-full">
           <span>Constraints / assumptions</span>
-          {renderTextarea("constraints", "Privilege filters, risk tolerance, deal posture, citation requirements, scope limits", 3)}
+          {renderTextarea(
+            "constraints",
+            "Privilege filters, risk tolerance, deal posture, citation requirements, scope limits",
+            3,
+          )}
         </label>
 
         <label className="legal-intake-field legal-intake-field-full">
           <span>Output preferences / review notes</span>
-          {renderTextarea("outputPreferences", "Table, memo, checklist, email draft, redlines, escalation flags, questions to ask", 3)}
+          {renderTextarea(
+            "outputPreferences",
+            "Table, memo, checklist, email draft, redlines, escalation flags, questions to ask",
+            3,
+          )}
         </label>
       </div>
 
       <footer className="legal-intake-card-footer">
-        <span className="legal-intake-footer-note">Blank fields will be flagged before the workflow relies on them.</span>
+        <span className="legal-intake-footer-note">
+          Blank fields will be flagged before the workflow relies on them.
+        </span>
         <button
           type="button"
           className="legal-intake-submit"

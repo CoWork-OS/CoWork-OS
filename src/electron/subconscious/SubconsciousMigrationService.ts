@@ -48,7 +48,10 @@ export class SubconsciousMigrationService {
   }
 
   runOnce(): void {
-    if (!hasTable(this.db, "improvement_candidates") || !hasTable(this.db, "improvement_campaigns")) {
+    if (
+      !hasTable(this.db, "improvement_candidates") ||
+      !hasTable(this.db, "improvement_campaigns")
+    ) {
       this.markComplete();
       return;
     }
@@ -90,15 +93,14 @@ export class SubconsciousMigrationService {
         backlogCount: 0,
       };
       this.targetRepo.upsert(targetSummary);
-      const backlogId = createHash("sha1")
-        .update(`legacy:${row.id}`)
-        .digest("hex");
+      const backlogId = createHash("sha1").update(`legacy:${row.id}`).digest("hex");
       this.backlogRepo.create({
         id: backlogId,
         targetKey: target.key,
         title: String(row.title || "Legacy improvement candidate"),
         summary: String(row.summary || ""),
-        status: row.status === "resolved" ? "done" : row.status === "dismissed" ? "rejected" : "open",
+        status:
+          row.status === "resolved" ? "done" : row.status === "dismissed" ? "rejected" : "open",
         priority: Number(row.priority_score || 0),
       });
       this.targetRepo.update(target.key, {
@@ -137,7 +139,9 @@ export class SubconsciousMigrationService {
         runId: run.id,
         targetKey: target.key,
         winningHypothesisId: "legacy",
-        winnerSummary: String(row.verdict_summary || row.promotion_error || "Legacy migrated recommendation."),
+        winnerSummary: String(
+          row.verdict_summary || row.promotion_error || "Legacy migrated recommendation.",
+        ),
         recommendation: String(row.verdict_summary || "Migrated legacy campaign recommendation."),
         rejectedHypothesisIds: [],
         rationale: "Imported from the legacy improvement campaign history.",

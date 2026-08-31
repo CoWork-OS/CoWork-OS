@@ -5,10 +5,8 @@ import type { CronService } from "../cron";
 import type { EventTriggerService } from "../triggers/EventTriggerService";
 import type { TriggerCondition } from "../triggers/types";
 import type { HooksConfig } from "../hooks/types";
-import type {
-  RoutineWorkflowDefinition,
-  RoutineWorkflowNode,
-} from "../../shared/routine-workflow";
+import type { RoutineWorkflowDefinition, RoutineWorkflowNode } from "../../shared/routine-workflow";
+import type { AccessProfileId } from "../../shared/access-profiles";
 
 export type RoutineExecutionTargetKind =
   | "workspace"
@@ -184,11 +182,10 @@ export interface Routine extends RoutineDefinition {
   connectors: string[];
 }
 
-export interface RoutineCreate
-  extends Omit<
-    RoutineDefinition,
-    "id" | "createdAt" | "updatedAt" | "instructions" | "connectorPolicy" | "triggers" | "outputs"
-  > {
+export interface RoutineCreate extends Omit<
+  RoutineDefinition,
+  "id" | "createdAt" | "updatedAt" | "instructions" | "connectorPolicy" | "triggers" | "outputs"
+> {
   triggers?: RoutineTrigger[];
   outputs?: RoutineOutput[];
   instructions?: string;
@@ -219,12 +216,7 @@ export type RoutineRunStatus =
   | "needs_user_action"
   | "failed";
 
-export type RoutineOutputStatus =
-  | "none"
-  | "queued"
-  | "sent"
-  | "responded"
-  | "failed";
+export type RoutineOutputStatus = "none" | "queued" | "sent" | "responded" | "failed";
 
 export interface RoutineRun {
   id: string;
@@ -281,7 +273,9 @@ export interface RoutineServiceDeps {
   onHooksConfigChanged?: (settings: HooksConfig) => void;
   onTriggerMutation?: () => Promise<void> | void;
   now?: () => number;
-  getTaskSnapshot?: (taskId: string) => Promise<RoutineTaskSnapshot | null> | RoutineTaskSnapshot | null;
+  getTaskSnapshot?: (
+    taskId: string,
+  ) => Promise<RoutineTaskSnapshot | null> | RoutineTaskSnapshot | null;
   createManagedSession?: (params: {
     agentId?: string;
     environmentId: string;
@@ -307,6 +301,7 @@ export interface RoutineServiceDeps {
     stepId: string;
     dryRun: boolean;
     signal: AbortSignal;
+    accessProfileId?: AccessProfileId;
   }) => Promise<Record<string, unknown>>;
 }
 

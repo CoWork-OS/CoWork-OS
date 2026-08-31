@@ -48,8 +48,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     apiKeyLabel: "API Key / Token",
     apiKeyPlaceholder: "Paste your OpenCode Zen API key",
     apiKeyUrl: "https://opencode.ai/auth",
-    description:
-      "Pay-as-you-go access to OpenCode's curated coding models.",
+    description: "Pay-as-you-go access to OpenCode's curated coding models.",
   },
   {
     id: "opencode-go",
@@ -81,8 +80,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     apiKeyLabel: "API Key / Subscription Token",
     apiKeyPlaceholder: "Paste your OpenCode Go API key",
     apiKeyUrl: "https://opencode.ai/workspace",
-    description:
-      "Use your OpenCode Go subscription with the curated model lineup.",
+    description: "Use your OpenCode Go subscription with the curated model lineup.",
   },
   {
     id: "google-vertex",
@@ -119,13 +117,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     name: "Z.AI",
     compatibility: "openai",
     defaultModel: "glm-4.7",
-    knownModels: [
-      "GLM-5.1",
-      "GLM-5-Turbo",
-      "GLM-5V-Turbo",
-      "glm-4.7",
-      "glm-4.5-air",
-    ],
+    knownModels: ["GLM-5.1", "GLM-5-Turbo", "GLM-5V-Turbo", "glm-4.7", "glm-4.5-air"],
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "zai-...",
     requiresBaseUrl: true,

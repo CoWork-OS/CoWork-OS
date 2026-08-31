@@ -314,7 +314,15 @@ export class CronService {
         name: input.name,
         description: input.description,
         enabled: input.enabled,
-        shellAccess: input.shellAccess ?? false,
+        // A missing profile is resolved from the task/workspace default at
+        // execution time. Persist the legacy shell field only when an older
+        // caller explicitly supplied it, so new jobs cannot accidentally opt
+        // out of the access-profile path.
+        accessProfileId:
+          typeof input.accessProfileId === "string" && input.accessProfileId.trim()
+            ? input.accessProfileId.trim()
+            : undefined,
+        ...(input.shellAccess !== undefined ? { shellAccess: input.shellAccess } : {}),
         allowUserInput: input.allowUserInput ?? false,
         deleteAfterRun: input.deleteAfterRun,
         createdAtMs: nowMs,
@@ -388,6 +396,7 @@ export class CronService {
       if (patch.name !== undefined) job.name = patch.name;
       if (patch.description !== undefined) job.description = patch.description;
       if (patch.enabled !== undefined) job.enabled = patch.enabled;
+      if (patch.accessProfileId !== undefined) job.accessProfileId = patch.accessProfileId;
       if (patch.shellAccess !== undefined) job.shellAccess = patch.shellAccess;
       if (patch.allowUserInput !== undefined) job.allowUserInput = patch.allowUserInput;
       if (patch.deleteAfterRun !== undefined) job.deleteAfterRun = patch.deleteAfterRun;
@@ -561,7 +570,9 @@ export class CronService {
     );
   }
 
-  private async findActivePersistedRun(job: CronJob): Promise<{ id: string; status: string } | null> {
+  private async findActivePersistedRun(
+    job: CronJob,
+  ): Promise<{ id: string; status: string } | null> {
     if (job.state.lastTaskId && this.state.deps.getTaskStatus) {
       const task = await this.state.deps.getTaskStatus(job.state.lastTaskId);
       if (task && this.isActiveTaskStatus(task.status)) {
@@ -649,8 +660,7 @@ export class CronService {
     const context = await resolver({ job, nowMs, phase });
     if (!context) return null;
 
-    const workspaceId =
-      typeof context.workspaceId === "string" ? context.workspaceId.trim() : "";
+    const workspaceId = typeof context.workspaceId === "string" ? context.workspaceId.trim() : "";
     if (!workspaceId) return null;
 
     return {
@@ -698,352 +708,357 @@ export class CronService {
     this.state.runningJobIds.add(job.id);
 
     try {
-    log.info(`Executing job: ${job.name} (${job.id})`);
-    this.emit({ jobId: job.id, action: "started", runAtMs: nowMs });
+      log.info(`Executing job: ${job.name} (${job.id})`);
+      this.emit({ jobId: job.id, action: "started", runAtMs: nowMs });
 
-    const prevRunAtMs = job.state.lastRunAtMs;
-    job.state.runningAtMs = nowMs;
-    job.state.lastRunAtMs = nowMs;
-    job.state.lastStatus = undefined;
-    job.state.lastError = undefined;
-    if (!job.deleteAfterRun) {
-      job.state.nextRunAtMs = job.enabled ? computeNextRunAtMs(job.schedule, nowMs) : undefined;
-    }
-    await this.persist();
-    this.armTimer();
-
-    const startTime = Date.now();
-    let taskId: string | undefined;
-    let status: "ok" | "partial_success" | "needs_user_action" | "error" | "timeout" = "ok";
-    let errorMsg: string | undefined;
-    let resultText: string | undefined;
-    let workspaceContext: CronWorkspaceContext | null = null;
-    let workspaceIdForRun = job.workspaceId;
-    let shouldPollTaskStatus = true;
-    let taskStillRunning = false;
-
-    try {
-      workspaceContext = await this.resolveWorkspaceContext(job, nowMs, "run");
-      if (workspaceContext?.workspaceId) {
-        workspaceIdForRun = workspaceContext.workspaceId;
+      const prevRunAtMs = job.state.lastRunAtMs;
+      job.state.runningAtMs = nowMs;
+      job.state.lastRunAtMs = nowMs;
+      job.state.lastStatus = undefined;
+      job.state.lastError = undefined;
+      if (!job.deleteAfterRun) {
+        job.state.nextRunAtMs = job.enabled ? computeNextRunAtMs(job.schedule, nowMs) : undefined;
       }
-      if (workspaceIdForRun !== job.workspaceId) {
-        job.workspaceId = workspaceIdForRun;
-        job.updatedAtMs = nowMs;
-      }
+      await this.persist();
+      this.armTimer();
 
-      const renderedPrompt = await this.renderTaskPrompt(
-        job,
-        nowMs,
-        prevRunAtMs,
-        workspaceContext,
-      );
+      const startTime = Date.now();
+      let taskId: string | undefined;
+      let status: "ok" | "partial_success" | "needs_user_action" | "error" | "timeout" = "ok";
+      let errorMsg: string | undefined;
+      let resultText: string | undefined;
+      let workspaceContext: CronWorkspaceContext | null = null;
+      let workspaceIdForRun = job.workspaceId;
+      let shouldPollTaskStatus = true;
+      let taskStillRunning = false;
 
-      const agentConfig = {
-        ...job.taskAgentConfig,
-        // Only restrict run_command when shellAccess is explicitly set to false.
-        // undefined (legacy jobs) means unrestricted, preserving prior behavior.
-        ...(job.shellAccess === false
-          ? {
-              toolRestrictions: Array.from(
-                new Set([...(job.taskAgentConfig?.toolRestrictions ?? []), "run_command"]),
-              ),
-            }
-          : {}),
-      };
-
-      if (job.runMode === "workflow") {
-        shouldPollTaskStatus = false;
-        const routineId = job.workflowRoutineId?.trim();
-        if (!routineId || !deps.executeWorkflow) {
-          status = "needs_user_action";
-          errorMsg = "Scheduled workflow execution is not available in this runtime";
-        } else {
-          const workflowResult = await deps.executeWorkflow({
-            routineId,
-            jobId: job.id,
-            runAtMs: nowMs,
-          });
-          resultText = workflowResult.resultText;
-          errorMsg = workflowResult.error;
-          status =
-            workflowResult.status === "completed"
-              ? "ok"
-              : workflowResult.status === "partial_success"
-                ? "partial_success"
-                : workflowResult.status === "needs_user_action"
-                  ? "needs_user_action"
-                  : workflowResult.status === "failed"
-                    ? "error"
-                    : "partial_success";
-          log.info(`Job ${job.name} executed Routine v2 run ${workflowResult.runId}`);
+      try {
+        workspaceContext = await this.resolveWorkspaceContext(job, nowMs, "run");
+        if (workspaceContext?.workspaceId) {
+          workspaceIdForRun = workspaceContext.workspaceId;
         }
-      } else if (job.runMode === "thread_follow_up") {
-        shouldPollTaskStatus = false;
-        taskId = job.targetTaskId?.trim();
-        if (!taskId) {
-          status = "needs_user_action";
-          errorMsg = "Thread follow-up scheduled task is missing a target task";
-        } else if (!deps.sendTaskMessage) {
-          status = "needs_user_action";
-          errorMsg = "Thread follow-up execution is not available in this runtime";
-        } else {
-          if (deps.getTaskStatus) {
-            const target = await deps.getTaskStatus(taskId);
-            if (!target) {
-              status = "needs_user_action";
-              errorMsg = `Target task not found: ${taskId}`;
-            }
-          }
+        if (workspaceIdForRun !== job.workspaceId) {
+          job.workspaceId = workspaceIdForRun;
+          job.updatedAtMs = nowMs;
+        }
 
-          if (status === "ok") {
-            await deps.sendTaskMessage({
-              taskId,
-              message: renderedPrompt,
-              allowUserInput: job.allowUserInput ?? false,
+        const renderedPrompt = await this.renderTaskPrompt(
+          job,
+          nowMs,
+          prevRunAtMs,
+          workspaceContext,
+        );
+
+        const agentConfig = {
+          ...job.taskAgentConfig,
+          ...(job.accessProfileId ? { accessProfileId: job.accessProfileId } : {}),
+          // Profile-selected jobs are governed by the profile resolver. Only
+          // legacy jobs without a named profile use the old shell override.
+          ...(job.accessProfileId === undefined &&
+          typeof job.taskAgentConfig?.accessProfileId !== "string" &&
+          job.shellAccess === false
+            ? {
+                toolRestrictions: Array.from(
+                  new Set([...(job.taskAgentConfig?.toolRestrictions ?? []), "run_command"]),
+                ),
+              }
+            : {}),
+        };
+
+        if (job.runMode === "workflow") {
+          shouldPollTaskStatus = false;
+          const routineId = job.workflowRoutineId?.trim();
+          if (!routineId || !deps.executeWorkflow) {
+            status = "needs_user_action";
+            errorMsg = "Scheduled workflow execution is not available in this runtime";
+          } else {
+            const workflowResult = await deps.executeWorkflow({
+              routineId,
+              jobId: job.id,
+              runAtMs: nowMs,
               agentConfig,
             });
-            job.state.lastTaskId = taskId;
-            await this.persist();
-            log.info(`Job ${job.name} sent scheduled follow-up to task ${taskId}`);
-          }
-        }
-      } else {
-        // Create a task with optional model override
-        const result = await deps.createTask({
-          jobId: job.id,
-          title: job.taskTitle || `Scheduled: ${job.name}`,
-          prompt: renderedPrompt,
-          workspaceId: workspaceIdForRun,
-          modelKey: job.modelKey,
-          allowUserInput: job.allowUserInput ?? false,
-          agentConfig: { ...agentConfig, scheduledJobId: job.id },
-        });
-
-        taskId = result.id;
-        job.state.lastTaskId = taskId;
-        await this.persist();
-        log.info(`Job ${job.name} created task ${taskId}`);
-      }
-
-      // If task status hooks are available, wait for completion and capture the final output.
-      if (status === "ok" && shouldPollTaskStatus && taskId && deps.getTaskStatus) {
-        const timeoutMs = Math.max(1, Math.floor(job.timeoutMs ?? deps.defaultTimeoutMs));
-        const deadlineMs = deps.nowMs() + timeoutMs;
-        const pollMs = 1500;
-
-        // Track the resultSummary from the last status poll so we can use it
-        // as a fallback if getTaskResultText returns nothing.
-        let pollResultSummary: string | undefined;
-
-        while (deps.nowMs() < deadlineMs) {
-          const task = await deps.getTaskStatus(taskId);
-          if (!task) {
-            status = "error";
-            errorMsg = "Task not found";
-            break;
-          }
-
-          const taskStatus = typeof task.status === "string" ? task.status : "";
-          if (taskStatus === "completed") {
+            resultText = workflowResult.resultText;
+            errorMsg = workflowResult.error;
             status =
-              task.terminalStatus === "awaiting_approval"
-                ? "needs_user_action"
-                : task.terminalStatus === "resume_available"
+              workflowResult.status === "completed"
+                ? "ok"
+                : workflowResult.status === "partial_success"
                   ? "partial_success"
-                  : task.terminalStatus === "needs_user_action"
-                ? "needs_user_action"
-                : task.terminalStatus === "partial_success"
-                  ? "partial_success"
-                  : "ok";
-            if (typeof task.resultSummary === "string" && task.resultSummary.trim()) {
-              pollResultSummary = task.resultSummary.trim();
-            }
-            break;
+                  : workflowResult.status === "needs_user_action"
+                    ? "needs_user_action"
+                    : workflowResult.status === "failed"
+                      ? "error"
+                      : "partial_success";
+            log.info(`Job ${job.name} executed Routine v2 run ${workflowResult.runId}`);
           }
-          if (taskStatus === "failed" || taskStatus === "cancelled") {
-            status = "error";
-            errorMsg = task.error || `Task ${taskStatus}`;
-            break;
-          }
-          if (taskStatus === "paused" || taskStatus === "blocked") {
+        } else if (job.runMode === "thread_follow_up") {
+          shouldPollTaskStatus = false;
+          taskId = job.targetTaskId?.trim();
+          if (!taskId) {
             status = "needs_user_action";
-            errorMsg = task.error || `Task ${taskStatus}`;
-            break;
-          }
-          if (taskStatus === "interrupted") {
-            status = task.terminalStatus === "resume_available" ? "partial_success" : "error";
-            errorMsg = task.error || "Task interrupted";
-            break;
-          }
-
-          // Sleep (bounded by remaining time)
-          const remaining = deadlineMs - deps.nowMs();
-          const sleepMs = Math.max(0, Math.min(pollMs, remaining));
-          if (sleepMs === 0) break;
-          await new Promise((r) => setTimeout(r, sleepMs));
-        }
-
-        if (status === "ok" && deps.nowMs() >= deadlineMs) {
-          // One last check to avoid misclassifying a completed task as a timeout.
-          const finalTask = await deps.getTaskStatus(taskId);
-          const finalStatus = typeof finalTask?.status === "string" ? finalTask.status : "";
-          if (finalStatus === "completed") {
-            status =
-              finalTask?.terminalStatus === "awaiting_approval"
-                ? "needs_user_action"
-                : finalTask?.terminalStatus === "resume_available"
-                  ? "partial_success"
-                  : finalTask?.terminalStatus === "needs_user_action"
-                ? "needs_user_action"
-                : finalTask?.terminalStatus === "partial_success"
-                  ? "partial_success"
-                  : "ok";
-            if (
-              !pollResultSummary &&
-              typeof finalTask?.resultSummary === "string" &&
-              finalTask.resultSummary.trim()
-            ) {
-              pollResultSummary = finalTask.resultSummary.trim();
-            }
-          } else if (finalStatus === "failed" || finalStatus === "cancelled") {
-            status = "error";
-            errorMsg = finalTask?.error || `Task ${finalStatus || "failed"}`;
-          } else if (finalStatus === "paused" || finalStatus === "blocked") {
+            errorMsg = "Thread follow-up scheduled task is missing a target task";
+          } else if (!deps.sendTaskMessage) {
             status = "needs_user_action";
-            errorMsg = finalTask?.error || `Task ${finalStatus}`;
-          } else if (finalStatus === "interrupted") {
-            status = finalTask?.terminalStatus === "resume_available" ? "partial_success" : "error";
-            errorMsg = finalTask?.error || "Task interrupted";
-          } else if (!finalTask) {
-            status = "error";
-            errorMsg = "Task not found";
+            errorMsg = "Thread follow-up execution is not available in this runtime";
           } else {
-            status = "timeout";
-            errorMsg = `Timed out after ${Math.round(timeoutMs / 1000)}s`;
-            taskStillRunning = Boolean(finalTask && taskId);
-          }
-        }
+            if (deps.getTaskStatus) {
+              const target = await deps.getTaskStatus(taskId);
+              if (!target) {
+                status = "needs_user_action";
+                errorMsg = `Target task not found: ${taskId}`;
+              }
+            }
 
-        if (status === "ok" || status === "partial_success" || status === "needs_user_action") {
-          if (deps.getTaskResultText) {
-            try {
-              resultText = await deps.getTaskResultText(taskId);
-            } catch (e) {
-              log.warn("Failed to load task result text", e);
+            if (status === "ok") {
+              await deps.sendTaskMessage({
+                taskId,
+                message: renderedPrompt,
+                allowUserInput: job.allowUserInput ?? false,
+                agentConfig,
+              });
+              job.state.lastTaskId = taskId;
+              await this.persist();
+              log.info(`Job ${job.name} sent scheduled follow-up to task ${taskId}`);
             }
           }
-          // Fall back to resultSummary from the status poll if getTaskResultText
-          // returned nothing (e.g. event scan missed the output).
-          if (!resultText && pollResultSummary) {
-            resultText = pollResultSummary;
+        } else {
+          // Create a task with optional model override
+          const result = await deps.createTask({
+            jobId: job.id,
+            title: job.taskTitle || `Scheduled: ${job.name}`,
+            prompt: renderedPrompt,
+            workspaceId: workspaceIdForRun,
+            modelKey: job.modelKey,
+            allowUserInput: job.allowUserInput ?? false,
+            agentConfig: { ...agentConfig, scheduledJobId: job.id },
+          });
+
+          taskId = result.id;
+          job.state.lastTaskId = taskId;
+          await this.persist();
+          log.info(`Job ${job.name} created task ${taskId}`);
+        }
+
+        // If task status hooks are available, wait for completion and capture the final output.
+        if (status === "ok" && shouldPollTaskStatus && taskId && deps.getTaskStatus) {
+          const timeoutMs = Math.max(1, Math.floor(job.timeoutMs ?? deps.defaultTimeoutMs));
+          const deadlineMs = deps.nowMs() + timeoutMs;
+          const pollMs = 1500;
+
+          // Track the resultSummary from the last status poll so we can use it
+          // as a fallback if getTaskResultText returns nothing.
+          let pollResultSummary: string | undefined;
+
+          while (deps.nowMs() < deadlineMs) {
+            const task = await deps.getTaskStatus(taskId);
+            if (!task) {
+              status = "error";
+              errorMsg = "Task not found";
+              break;
+            }
+
+            const taskStatus = typeof task.status === "string" ? task.status : "";
+            if (taskStatus === "completed") {
+              status =
+                task.terminalStatus === "awaiting_approval"
+                  ? "needs_user_action"
+                  : task.terminalStatus === "resume_available"
+                    ? "partial_success"
+                    : task.terminalStatus === "needs_user_action"
+                      ? "needs_user_action"
+                      : task.terminalStatus === "partial_success"
+                        ? "partial_success"
+                        : "ok";
+              if (typeof task.resultSummary === "string" && task.resultSummary.trim()) {
+                pollResultSummary = task.resultSummary.trim();
+              }
+              break;
+            }
+            if (taskStatus === "failed" || taskStatus === "cancelled") {
+              status = "error";
+              errorMsg = task.error || `Task ${taskStatus}`;
+              break;
+            }
+            if (taskStatus === "paused" || taskStatus === "blocked") {
+              status = "needs_user_action";
+              errorMsg = task.error || `Task ${taskStatus}`;
+              break;
+            }
+            if (taskStatus === "interrupted") {
+              status = task.terminalStatus === "resume_available" ? "partial_success" : "error";
+              errorMsg = task.error || "Task interrupted";
+              break;
+            }
+
+            // Sleep (bounded by remaining time)
+            const remaining = deadlineMs - deps.nowMs();
+            const sleepMs = Math.max(0, Math.min(pollMs, remaining));
+            if (sleepMs === 0) break;
+            await new Promise((r) => setTimeout(r, sleepMs));
+          }
+
+          if (status === "ok" && deps.nowMs() >= deadlineMs) {
+            // One last check to avoid misclassifying a completed task as a timeout.
+            const finalTask = await deps.getTaskStatus(taskId);
+            const finalStatus = typeof finalTask?.status === "string" ? finalTask.status : "";
+            if (finalStatus === "completed") {
+              status =
+                finalTask?.terminalStatus === "awaiting_approval"
+                  ? "needs_user_action"
+                  : finalTask?.terminalStatus === "resume_available"
+                    ? "partial_success"
+                    : finalTask?.terminalStatus === "needs_user_action"
+                      ? "needs_user_action"
+                      : finalTask?.terminalStatus === "partial_success"
+                        ? "partial_success"
+                        : "ok";
+              if (
+                !pollResultSummary &&
+                typeof finalTask?.resultSummary === "string" &&
+                finalTask.resultSummary.trim()
+              ) {
+                pollResultSummary = finalTask.resultSummary.trim();
+              }
+            } else if (finalStatus === "failed" || finalStatus === "cancelled") {
+              status = "error";
+              errorMsg = finalTask?.error || `Task ${finalStatus || "failed"}`;
+            } else if (finalStatus === "paused" || finalStatus === "blocked") {
+              status = "needs_user_action";
+              errorMsg = finalTask?.error || `Task ${finalStatus}`;
+            } else if (finalStatus === "interrupted") {
+              status =
+                finalTask?.terminalStatus === "resume_available" ? "partial_success" : "error";
+              errorMsg = finalTask?.error || "Task interrupted";
+            } else if (!finalTask) {
+              status = "error";
+              errorMsg = "Task not found";
+            } else {
+              status = "timeout";
+              errorMsg = `Timed out after ${Math.round(timeoutMs / 1000)}s`;
+              taskStillRunning = Boolean(finalTask && taskId);
+            }
+          }
+
+          if (status === "ok" || status === "partial_success" || status === "needs_user_action") {
+            if (deps.getTaskResultText) {
+              try {
+                resultText = await deps.getTaskResultText(taskId);
+              } catch (e) {
+                log.warn("Failed to load task result text", e);
+              }
+            }
+            // Fall back to resultSummary from the status poll if getTaskResultText
+            // returned nothing (e.g. event scan missed the output).
+            if (!resultText && pollResultSummary) {
+              resultText = pollResultSummary;
+            }
           }
         }
+      } catch (error) {
+        errorMsg = error instanceof Error ? error.message : String(error);
+        status = "error";
+        log.error(`Job ${job.name} failed: ${errorMsg}`);
       }
-    } catch (error) {
-      errorMsg = error instanceof Error ? error.message : String(error);
-      status = "error";
-      log.error(`Job ${job.name} failed: ${errorMsg}`);
-    }
 
-    const durationMs = Date.now() - startTime;
+      const durationMs = Date.now() - startTime;
 
-    // Update job state
-    job.state.lastDurationMs = durationMs;
-    job.state.runningAtMs = undefined;
-    job.state.lastStatus = status;
-    job.state.lastError = errorMsg;
+      // Update job state
+      job.state.lastDurationMs = durationMs;
+      job.state.runningAtMs = undefined;
+      job.state.lastStatus = status;
+      job.state.lastError = errorMsg;
 
-    // Update run statistics
-    job.state.totalRuns = (job.state.totalRuns ?? 0) + 1;
-    if (status === "ok" || status === "partial_success" || status === "needs_user_action") {
-      job.state.successfulRuns = (job.state.successfulRuns ?? 0) + 1;
-    } else {
-      job.state.failedRuns = (job.state.failedRuns ?? 0) + 1;
-    }
-
-    // Add to run history
-    const historyEntry: CronRunHistoryEntry = {
-      runAtMs: nowMs,
-      durationMs,
-      status,
-      error: errorMsg,
-      taskId,
-      taskStillRunning,
-      runMode: job.runMode ?? "new_task",
-      workspaceId: workspaceIdForRun,
-      runWorkspacePath: workspaceContext?.runWorkspacePath,
-      deliveryAttempts: 0,
-      deliverableStatus: "none",
-    };
-    job.state.runHistory = job.state.runHistory ?? [];
-    job.state.runHistory.unshift(historyEntry);
-
-    // Trim history to max entries
-    const maxEntries = job.maxHistoryEntries ?? deps.maxHistoryEntries;
-    if (job.state.runHistory.length > maxEntries) {
-      job.state.runHistory = job.state.runHistory.slice(0, maxEntries);
-    }
-
-    // Handle one-shot jobs
-    if (job.deleteAfterRun) {
-      const index = store.jobs.findIndex((j) => j.id === job.id);
-      if (index !== -1) {
-        store.jobs.splice(index, 1);
+      // Update run statistics
+      job.state.totalRuns = (job.state.totalRuns ?? 0) + 1;
+      if (status === "ok" || status === "partial_success" || status === "needs_user_action") {
+        job.state.successfulRuns = (job.state.successfulRuns ?? 0) + 1;
+      } else {
+        job.state.failedRuns = (job.state.failedRuns ?? 0) + 1;
       }
-      log.info(`Deleted one-shot job: ${job.name}`);
-    } else {
-      // Compute next run time
-      job.state.nextRunAtMs = job.enabled ? computeNextRunAtMs(job.schedule, nowMs) : undefined;
-    }
 
-    await this.persist();
-    this.armTimer();
-    this.armOutboxTimer();
+      // Add to run history
+      const historyEntry: CronRunHistoryEntry = {
+        runAtMs: nowMs,
+        durationMs,
+        status,
+        error: errorMsg,
+        taskId,
+        taskStillRunning,
+        runMode: job.runMode ?? "new_task",
+        workspaceId: workspaceIdForRun,
+        runWorkspacePath: workspaceContext?.runWorkspacePath,
+        deliveryAttempts: 0,
+        deliverableStatus: "none",
+      };
+      job.state.runHistory = job.state.runHistory ?? [];
+      job.state.runHistory.unshift(historyEntry);
 
-    // Deliver results to channel if configured
-    const deliveryResult = await this.deliverToChannel(
-      job,
-      status,
-      taskId,
-      errorMsg,
-      resultText,
-      nowMs,
-    );
-
-    // Update history entry with delivery status
-    if (deliveryResult.attempted && job.state.runHistory?.[0]) {
-      job.state.runHistory[0].deliveryStatus = deliveryResult.success
-        ? deliveryResult.deliverableStatus === "queued"
-          ? "skipped"
-          : "success"
-        : "failed";
-      if (deliveryResult.error) {
-        job.state.runHistory[0].deliveryError = deliveryResult.error;
+      // Trim history to max entries
+      const maxEntries = job.maxHistoryEntries ?? deps.maxHistoryEntries;
+      if (job.state.runHistory.length > maxEntries) {
+        job.state.runHistory = job.state.runHistory.slice(0, maxEntries);
       }
-      job.state.runHistory[0].deliveryMode = deliveryResult.mode;
-      job.state.runHistory[0].deliveryAttempts = deliveryResult.attempts;
-      job.state.runHistory[0].deliverableStatus = deliveryResult.deliverableStatus;
+
+      // Handle one-shot jobs
+      if (job.deleteAfterRun) {
+        const index = store.jobs.findIndex((j) => j.id === job.id);
+        if (index !== -1) {
+          store.jobs.splice(index, 1);
+        }
+        log.info(`Deleted one-shot job: ${job.name}`);
+      } else {
+        // Compute next run time
+        job.state.nextRunAtMs = job.enabled ? computeNextRunAtMs(job.schedule, nowMs) : undefined;
+      }
+
       await this.persist();
-    }
+      this.armTimer();
+      this.armOutboxTimer();
 
-    this.emit({
-      jobId: job.id,
-      action: "finished",
-      runAtMs: nowMs,
-      durationMs,
-      status,
-      error: errorMsg,
-      taskId,
-      taskStillRunning,
-      nextRunAtMs: job.state.nextRunAtMs,
-    });
+      // Deliver results to channel if configured
+      const deliveryResult = await this.deliverToChannel(
+        job,
+        status,
+        taskId,
+        errorMsg,
+        resultText,
+        nowMs,
+      );
 
-    if (taskId) {
-      return { ok: true, ran: true, taskId };
-    } else {
-      return { ok: false, error: errorMsg || "Unknown error" };
-    }
+      // Update history entry with delivery status
+      if (deliveryResult.attempted && job.state.runHistory?.[0]) {
+        job.state.runHistory[0].deliveryStatus = deliveryResult.success
+          ? deliveryResult.deliverableStatus === "queued"
+            ? "skipped"
+            : "success"
+          : "failed";
+        if (deliveryResult.error) {
+          job.state.runHistory[0].deliveryError = deliveryResult.error;
+        }
+        job.state.runHistory[0].deliveryMode = deliveryResult.mode;
+        job.state.runHistory[0].deliveryAttempts = deliveryResult.attempts;
+        job.state.runHistory[0].deliverableStatus = deliveryResult.deliverableStatus;
+        await this.persist();
+      }
+
+      this.emit({
+        jobId: job.id,
+        action: "finished",
+        runAtMs: nowMs,
+        durationMs,
+        status,
+        error: errorMsg,
+        taskId,
+        taskStillRunning,
+        nextRunAtMs: job.state.nextRunAtMs,
+      });
+
+      if (taskId) {
+        return { ok: true, ran: true, taskId };
+      } else {
+        return { ok: false, error: errorMsg || "Unknown error" };
+      }
     } finally {
       this.state.runningJobIds.delete(job.id);
     }
@@ -1085,7 +1100,8 @@ export class CronService {
     } = job.delivery;
 
     // Check if we should deliver based on status
-    const isSuccess = status === "ok" || status === "partial_success" || status === "needs_user_action";
+    const isSuccess =
+      status === "ok" || status === "partial_success" || status === "needs_user_action";
     const shouldDeliver =
       (isSuccess && deliverOnSuccess !== false) || (!isSuccess && deliverOnError !== false);
 
@@ -1103,7 +1119,9 @@ export class CronService {
       }
     }
 
-    const runKey = Number.isFinite(runAtMs) ? Math.trunc(runAtMs as number) : this.state.deps.nowMs();
+    const runKey = Number.isFinite(runAtMs)
+      ? Math.trunc(runAtMs as number)
+      : this.state.deps.nowMs();
     const idempotencyKey = `${job.id}:${runKey}:${taskId || "no-task"}:${channelType}:${channelId}`;
     const doDeliver = () =>
       deps.deliverToChannel!({

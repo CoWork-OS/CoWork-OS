@@ -92,7 +92,8 @@ vi.mock("../ImprovementRepositories", () => ({
 
     findByFingerprint(workspaceId: string, fingerprint: string) {
       return [...candidates.values()].find(
-        (candidate) => candidate.workspaceId === workspaceId && candidate.fingerprint === fingerprint,
+        (candidate) =>
+          candidate.workspaceId === workspaceId && candidate.fingerprint === fingerprint,
       );
     }
 
@@ -227,7 +228,11 @@ describe("ImprovementCandidateService", () => {
     const service = new ImprovementCandidateService(db);
     await service.refresh();
 
-    expect(service.listCandidates("workspace-1").filter((candidate) => candidate.source === "task_failure")).toHaveLength(0);
+    expect(
+      service
+        .listCandidates("workspace-1")
+        .filter((candidate) => candidate.source === "task_failure"),
+    ).toHaveLength(0);
   });
 
   it("ignores failure candidates produced by automated autonomy tasks", async () => {
@@ -258,7 +263,9 @@ describe("ImprovementCandidateService", () => {
     const service = new ImprovementCandidateService(db);
     await service.refresh();
 
-    expect(service.listCandidates("workspace-1").filter((candidate) => candidate.source !== "dev_log")).toHaveLength(0);
+    expect(
+      service.listCandidates("workspace-1").filter((candidate) => candidate.source !== "dev_log"),
+    ).toHaveLength(0);
   });
 
   it("lowers fixability for quota and timeout-driven failures", async () => {
@@ -270,7 +277,8 @@ describe("ImprovementCandidateService", () => {
       workspaceId: "workspace-1",
       terminalStatus: "failed",
       failureClass: "provider_quota",
-      resultSummary: "Azure OpenAI API error: 429 - The system is currently experiencing high demand.",
+      resultSummary:
+        "Azure OpenAI API error: 429 - The system is currently experiencing high demand.",
     });
     recentTaskRows = [{ id: "task-1" }];
 
@@ -308,7 +316,11 @@ describe("ImprovementCandidateService", () => {
     const service = new ImprovementCandidateService(db);
     await service.refresh();
 
-    expect(service.listCandidates("workspace-1").filter((candidate) => candidate.source === "task_failure")).toHaveLength(2);
+    expect(
+      service
+        .listCandidates("workspace-1")
+        .filter((candidate) => candidate.source === "task_failure"),
+    ).toHaveLength(2);
   });
 
   it("deduplicates recurring dev-log candidates across timestamp-only changes", async () => {
@@ -328,7 +340,9 @@ describe("ImprovementCandidateService", () => {
       "[2026-03-11T14:00:01.000Z] [0] at emitErrorNT (node:net:1976:8)";
     await service.refresh();
 
-    expect(service.listCandidates("workspace-1").filter((candidate) => candidate.source === "dev_log")).toHaveLength(1);
+    expect(
+      service.listCandidates("workspace-1").filter((candidate) => candidate.source === "dev_log"),
+    ).toHaveLength(1);
   });
 
   it("prefers structured JSONL dev logs over text fallback", async () => {
@@ -353,7 +367,9 @@ describe("ImprovementCandidateService", () => {
     const service = new ImprovementCandidateService(db);
     await service.refresh();
 
-    const [candidate] = service.listCandidates("workspace-1").filter((row) => row.source === "dev_log");
+    const [candidate] = service
+      .listCandidates("workspace-1")
+      .filter((row) => row.source === "dev_log");
     expect(candidate?.summary).toContain("Structured failure from JSONL");
     expect(candidate?.summary).not.toContain("text fallback");
     expect(candidate?.evidence[0]?.metadata).toMatchObject({
@@ -373,7 +389,9 @@ describe("ImprovementCandidateService", () => {
     const service = new ImprovementCandidateService(db);
     await service.refresh();
 
-    const [candidate] = service.listCandidates("workspace-1").filter((row) => row.source === "dev_log");
+    const [candidate] = service
+      .listCandidates("workspace-1")
+      .filter((row) => row.source === "dev_log");
     expect(candidate?.summary).toContain("text fallback is still supported");
     expect(candidate?.evidence[0]?.metadata).toMatchObject({
       format: "text",
@@ -492,7 +510,10 @@ describe("ImprovementCandidateService", () => {
     });
 
     const service = new ImprovementCandidateService(db);
-    service.recordCandidateSkip("candidate-1", "Skipped because no promotable worktree is available.");
+    service.recordCandidateSkip(
+      "candidate-1",
+      "Skipped because no promotable worktree is available.",
+    );
 
     expect(candidates.get("candidate-1")?.readiness).toBe("ready");
     expect(candidates.get("candidate-1")?.readinessReason).toBe(

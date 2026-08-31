@@ -27,9 +27,7 @@ describe("Gateway ambient mode logic", () => {
     channelType?: string;
   }): boolean {
     return (
-      opts.channelSilentUnauthorized === true ||
-      opts.ambientMode ||
-      opts.channelType === "email"
+      opts.channelSilentUnauthorized === true || opts.ambientMode || opts.channelType === "email"
     );
   }
 

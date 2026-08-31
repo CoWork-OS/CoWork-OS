@@ -90,11 +90,17 @@ export function MemoryHubSettings(props?: {
   const [newProjectId, setNewProjectId] = useState("");
   const [layerPreview, setLayerPreview] = useState<MemoryLayerPreviewPayload | null>(null);
   const [observationQuery, setObservationQuery] = useState("");
-  const [observationPrivacy, setObservationPrivacy] = useState<"all" | MemoryObservationPrivacyState>("all");
+  const [observationPrivacy, setObservationPrivacy] = useState<
+    "all" | MemoryObservationPrivacyState
+  >("all");
   const [observationResults, setObservationResults] = useState<MemoryObservationSearchResult[]>([]);
-  const [observationTimeline, setObservationTimeline] = useState<MemoryObservationTimelineEntry[]>([]);
+  const [observationTimeline, setObservationTimeline] = useState<MemoryObservationTimelineEntry[]>(
+    [],
+  );
   const [selectedObservationId, setSelectedObservationId] = useState<string>("");
-  const [selectedObservation, setSelectedObservation] = useState<MemoryObservationMetadata | null>(null);
+  const [selectedObservation, setSelectedObservation] = useState<MemoryObservationMetadata | null>(
+    null,
+  );
   const [observationEditTitle, setObservationEditTitle] = useState("");
   const [observationEditNarrative, setObservationEditNarrative] = useState("");
   const [observationLoading, setObservationLoading] = useState(false);
@@ -173,11 +179,7 @@ export function MemoryHubSettings(props?: {
   useEffect(() => {
     if (!selectedWorkspaceId) return;
     void refreshLayerPreview();
-  }, [
-    selectedWorkspaceId,
-    features?.wakeUpLayersEnabled,
-    features?.contextPackInjectionEnabled,
-  ]);
+  }, [selectedWorkspaceId, features?.wakeUpLayersEnabled, features?.contextPackInjectionEnabled]);
 
   const loadAll = async () => {
     try {
@@ -196,7 +198,9 @@ export function MemoryHubSettings(props?: {
         window.electronAPI.getTempWorkspace().catch(() => null as Workspace | null),
         window.electronAPI.getAwarenessConfig().catch(() => null as AwarenessConfig | null),
         window.electronAPI.getAutonomyConfig().catch(() => null as AutonomyConfig | null),
-        window.electronAPI.getSupermemoryStatus().catch(() => null as SupermemoryConfigStatus | null),
+        window.electronAPI
+          .getSupermemoryStatus()
+          .catch(() => null as SupermemoryConfigStatus | null),
       ]);
 
       const combined: Workspace[] = [
@@ -307,7 +311,10 @@ export function MemoryHubSettings(props?: {
 
   const rejectMemoryWrite = async (id: string) => {
     if (!selectedWorkspaceId || !id) return;
-    const reason = window.prompt("Reason for rejecting this memory write?", "Rejected from Memory Hub");
+    const reason = window.prompt(
+      "Reason for rejecting this memory write?",
+      "Rejected from Memory Hub",
+    );
     if (reason === null) return;
     try {
       setMemoryApprovalBusyId(id);
@@ -355,7 +362,10 @@ export function MemoryHubSettings(props?: {
     try {
       setSelectedObservationId(memoryId);
       const [details, timeline] = await Promise.all([
-        window.electronAPI.getMemoryObservationDetails({ workspaceId: selectedWorkspaceId, ids: [memoryId] }),
+        window.electronAPI.getMemoryObservationDetails({
+          workspaceId: selectedWorkspaceId,
+          ids: [memoryId],
+        }),
         window.electronAPI.getMemoryObservationTimeline({
           workspaceId: selectedWorkspaceId,
           memoryId,
@@ -485,8 +495,12 @@ export function MemoryHubSettings(props?: {
     if (!selectedWorkspaceId) return;
     try {
       const [beliefs, summary] = await Promise.all([
-        window.electronAPI.listAwarenessBeliefs(selectedWorkspaceId).catch(() => [] as AwarenessBelief[]),
-        window.electronAPI.getAwarenessSummary(selectedWorkspaceId).catch(() => null as AwarenessSummary | null),
+        window.electronAPI
+          .listAwarenessBeliefs(selectedWorkspaceId)
+          .catch(() => [] as AwarenessBelief[]),
+        window.electronAPI
+          .getAwarenessSummary(selectedWorkspaceId)
+          .catch(() => null as AwarenessSummary | null),
       ]);
       setAwarenessBeliefs(beliefs);
       setAwarenessSummary(summary);
@@ -499,9 +513,15 @@ export function MemoryHubSettings(props?: {
     if (!selectedWorkspaceId) return;
     try {
       const [worldModel, decisions, actions] = await Promise.all([
-        window.electronAPI.getAutonomyState(selectedWorkspaceId).catch(() => null as ChiefOfStaffWorldModel | null),
-        window.electronAPI.listAutonomyDecisions(selectedWorkspaceId).catch(() => [] as AutonomyDecision[]),
-        window.electronAPI.listAutonomyActions(selectedWorkspaceId).catch(() => [] as AutonomyAction[]),
+        window.electronAPI
+          .getAutonomyState(selectedWorkspaceId)
+          .catch(() => null as ChiefOfStaffWorldModel | null),
+        window.electronAPI
+          .listAutonomyDecisions(selectedWorkspaceId)
+          .catch(() => [] as AutonomyDecision[]),
+        window.electronAPI
+          .listAutonomyActions(selectedWorkspaceId)
+          .catch(() => [] as AutonomyAction[]),
       ]);
       setAutonomyState(worldModel);
       setAutonomyDecisions(decisions);
@@ -741,9 +761,7 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">
-                Enable Maintenance Heartbeats
-              </div>
+              <div className="memory-hub-primary-label">Enable Maintenance Heartbeats</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 When enabled, lead agents treat <code>.cowork/HEARTBEAT.md</code> as the recurring
                 checks contract for proactive maintenance, while staying silent unless they find
@@ -765,9 +783,7 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">
-                Enable Checkpoint Capture
-              </div>
+              <div className="memory-hub-primary-label">Enable Checkpoint Capture</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 Writes structured summaries plus verbatim evidence packets on snapshots, periodic
                 exchange checkpoints, and meaningful task completions.
@@ -788,9 +804,7 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">
-                Enable Verbatim Recall
-              </div>
+              <div className="memory-hub-primary-label">Enable Verbatim Recall</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 Exposes the quote-first recall lane so the agent can retrieve exact wording instead
                 of summarized memory when precision matters.
@@ -811,12 +825,10 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">
-                Enable Wake-Up Layers
-              </div>
+              <div className="memory-hub-primary-label">Enable Wake-Up Layers</div>
               <p className="settings-form-hint memory-hub-hint-tight">
-                Makes prompt-visible memory explicit: inject only L0 Identity and L1 Essential
-                Story by default, while keeping L2 Topic Packs and L3 Deep Recall tool-driven.
+                Makes prompt-visible memory explicit: inject only L0 Identity and L1 Essential Story
+                by default, while keeping L2 Topic Packs and L3 Deep Recall tool-driven.
               </p>
             </div>
             <label className="settings-toggle memory-hub-toggle">
@@ -834,9 +846,7 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">
-                Enable Temporal Knowledge
-              </div>
+              <div className="memory-hub-primary-label">Enable Temporal Knowledge</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 Tracks start and end validity on KG edges so current context ignores stale facts
                 while historical lookups can still recover past truths.
@@ -857,9 +867,7 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">
-                Enable Structured Memory Observations
-              </div>
+              <div className="memory-hub-primary-label">Enable Structured Memory Observations</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 Stores inspectable sidecar metadata for memories without replacing the local
                 archive.
@@ -880,9 +888,7 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">
-                Enable Progressive Recall Tools
-              </div>
+              <div className="memory-hub-primary-label">Enable Progressive Recall Tools</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 Adds index, timeline, and detail tools so agents retrieve memory in token-efficient
                 stages.
@@ -903,9 +909,7 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">
-                Enable Durable Runtime Context
-              </div>
+              <div className="memory-hub-primary-label">Enable Durable Runtime Context</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 Stores compacted task context with source links and exposes read-only context_grep
                 and context_describe tools.
@@ -937,9 +941,7 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">
-                Enable Memory Inspector
-              </div>
+              <div className="memory-hub-primary-label">Enable Memory Inspector</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 Shows searchable observation metadata, provenance, privacy controls, and timeline
                 context in Memory Hub.
@@ -963,7 +965,8 @@ export function MemoryHubSettings(props?: {
             value={features.memoryWriteApprovalMode || "off"}
             onChange={(e) =>
               saveFeatures({
-                memoryWriteApprovalMode: e.target.value as MemoryFeaturesSettings["memoryWriteApprovalMode"],
+                memoryWriteApprovalMode: e.target
+                  .value as MemoryFeaturesSettings["memoryWriteApprovalMode"],
               })
             }
             className="settings-select"
@@ -985,18 +988,16 @@ export function MemoryHubSettings(props?: {
       <div className="settings-subsection">
         <h3>Supermemory</h3>
         <p className="settings-form-hint">
-          External memory provider integration inspired by Hermes: workspace-scoped profile
-          fetches, explicit search/remember/forget tools, and optional background mirroring of
-          CoWork memory captures.
+          External memory provider integration inspired by Hermes: workspace-scoped profile fetches,
+          explicit search/remember/forget tools, and optional background mirroring of CoWork memory
+          captures.
         </p>
 
         <div className="settings-card">
           <div className="settings-form-group">
             <div className="memory-hub-toggle-row">
               <div className="memory-hub-grow">
-                <div className="memory-hub-primary-label">
-                  Enable Supermemory
-                </div>
+                <div className="memory-hub-primary-label">Enable Supermemory</div>
                 <p className="settings-form-hint memory-hub-hint-tight">
                   When enabled, CoWork can fetch scoped profile context from Supermemory and mirror
                   non-private memory captures into the configured container.
@@ -1019,19 +1020,13 @@ export function MemoryHubSettings(props?: {
             <input
               type="password"
               className="settings-input"
-              placeholder={
-                supermemoryStatus?.apiKeyConfigured ? "••••••••••••••••" : "sm_..."
-              }
+              placeholder={supermemoryStatus?.apiKeyConfigured ? "••••••••••••••••" : "sm_..."}
               value={supermemoryApiKey}
               onChange={(e) => setSupermemoryApiKey(e.target.value)}
             />
             <p className="settings-hint">
               Get your API key from{" "}
-              <a
-                href="https://console.supermemory.ai"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
+              <a href="https://console.supermemory.ai" target="_blank" rel="noopener noreferrer">
                 console.supermemory.ai
               </a>
             </p>
@@ -1057,7 +1052,8 @@ export function MemoryHubSettings(props?: {
             />
             <p className="settings-hint">
               Supports <code>{"{workspaceId}"}</code> and <code>{"{workspaceName}"}</code>. The
-              current workspace defaults to a scoped namespace like <code>cowork:&lt;workspace&gt;</code>.
+              current workspace defaults to a scoped namespace like{" "}
+              <code>cowork:&lt;workspace&gt;</code>.
             </p>
           </div>
 
@@ -1120,9 +1116,7 @@ export function MemoryHubSettings(props?: {
           <div className="settings-form-group">
             <div className="memory-hub-toggle-row">
               <div className="memory-hub-grow">
-                <div className="memory-hub-primary-label">
-                  Mirror Memory Writes
-                </div>
+                <div className="memory-hub-primary-label">Mirror Memory Writes</div>
                 <p className="settings-form-hint memory-hub-hint-tight">
                   Mirrors non-private CoWork memory captures into Supermemory as indexed documents.
                 </p>
@@ -1142,9 +1136,7 @@ export function MemoryHubSettings(props?: {
           <div className="settings-form-group">
             <div className="memory-hub-toggle-row">
               <div className="memory-hub-grow">
-                <div className="memory-hub-primary-label">
-                  Rerank Search Results
-                </div>
+                <div className="memory-hub-primary-label">Rerank Search Results</div>
                 <p className="settings-form-hint memory-hub-hint-tight">
                   Uses Supermemory reranking to improve relevance for explicit search tool calls.
                 </p>
@@ -1244,16 +1236,12 @@ export function MemoryHubSettings(props?: {
             {layerPreview.layers.map((layer) => (
               <div key={layer.layer} className="settings-card">
                 <div className="memory-hub-row">
-                  <div className="memory-hub-section-title">
-                    {layer.title}
-                  </div>
+                  <div className="memory-hub-section-title">{layer.title}</div>
                   <span className={badgeClass(layer.injectedByDefault ? "success" : "neutral")}>
                     {layer.injectedByDefault ? "Injected" : "Tool-driven"}
                   </span>
                 </div>
-                <p className="settings-form-hint memory-hub-hint">
-                  {layer.description}
-                </p>
+                <p className="settings-form-hint memory-hub-hint">{layer.description}</p>
                 <div className="memory-hub-caption">
                   {layer.budget.usedTokens} tokens used
                   {layer.budget.excludedCount > 0
@@ -1277,9 +1265,7 @@ export function MemoryHubSettings(props?: {
                     {layer.includedText}
                   </pre>
                 ) : (
-                  <div className="settings-empty memory-hub-top-gap">
-                    No inline payload.
-                  </div>
+                  <div className="settings-empty memory-hub-top-gap">No inline payload.</div>
                 )}
                 {layer.excludedText && (
                   <div
@@ -1308,10 +1294,10 @@ export function MemoryHubSettings(props?: {
 
           <div className="settings-card">
             <div className="memory-hub-row">
-              <div className="memory-hub-section-title">
-                Observation metadata
-              </div>
-              <span className={badgeClass(observationBackfillStatus?.running ? "warning" : "success")}>
+              <div className="memory-hub-section-title">Observation metadata</div>
+              <span
+                className={badgeClass(observationBackfillStatus?.running ? "warning" : "success")}
+              >
                 {observationBackfillStatus?.running ? "Backfilling" : "Ready"}
               </span>
             </div>
@@ -1385,7 +1371,11 @@ export function MemoryHubSettings(props?: {
                         <div className="memory-hub-primary-label memory-inspector-title">
                           {result.title}
                         </div>
-                        <span className={badgeClass(result.privacyState === "normal" ? "neutral" : "warning")}>
+                        <span
+                          className={badgeClass(
+                            result.privacyState === "normal" ? "neutral" : "warning",
+                          )}
+                        >
                           {result.privacyState}
                         </span>
                       </div>
@@ -1400,7 +1390,9 @@ export function MemoryHubSettings(props?: {
                       {result.concepts.length > 0 && (
                         <div className="memory-hub-chip-row memory-inspector-chip-row">
                           {result.concepts.slice(0, 4).map((concept) => (
-                            <span key={concept} className={badgeClass("neutral")}>{concept}</span>
+                            <span key={concept} className={badgeClass("neutral")}>
+                              {concept}
+                            </span>
                           ))}
                         </div>
                       )}
@@ -1422,7 +1414,11 @@ export function MemoryHubSettings(props?: {
                           {formatTimestamp(selectedObservation.memoryCreatedAt) || "unknown date"}
                         </div>
                       </div>
-                      <span className={badgeClass(selectedObservation.privacyState === "normal" ? "success" : "warning")}>
+                      <span
+                        className={badgeClass(
+                          selectedObservation.privacyState === "normal" ? "success" : "warning",
+                        )}
+                      >
                         {selectedObservation.privacyState}
                       </span>
                     </div>
@@ -1461,19 +1457,39 @@ export function MemoryHubSettings(props?: {
                       </div>
                     )}
                     <div className="memory-hub-chip-row">
-                      <button className="settings-button" disabled={observationBusy} onClick={() => void promoteObservation()}>
+                      <button
+                        className="settings-button"
+                        disabled={observationBusy}
+                        onClick={() => void promoteObservation()}
+                      >
                         Promote
                       </button>
-                      <button className="settings-button" disabled={observationBusy} onClick={() => void updateObservationPrivacy("private")}>
+                      <button
+                        className="settings-button"
+                        disabled={observationBusy}
+                        onClick={() => void updateObservationPrivacy("private")}
+                      >
                         Mark Private
                       </button>
-                      <button className="settings-button" disabled={observationBusy} onClick={() => void updateObservationPrivacy("suppressed")}>
+                      <button
+                        className="settings-button"
+                        disabled={observationBusy}
+                        onClick={() => void updateObservationPrivacy("suppressed")}
+                      >
                         Suppress Recall
                       </button>
-                      <button className="settings-button" disabled={observationBusy} onClick={() => void redactObservation()}>
+                      <button
+                        className="settings-button"
+                        disabled={observationBusy}
+                        onClick={() => void redactObservation()}
+                      >
                         Redact
                       </button>
-                      <button className="settings-button danger" disabled={observationBusy} onClick={() => void deleteObservation()}>
+                      <button
+                        className="settings-button danger"
+                        disabled={observationBusy}
+                        onClick={() => void deleteObservation()}
+                      >
                         Delete
                       </button>
                     </div>
@@ -1482,13 +1498,19 @@ export function MemoryHubSettings(props?: {
                       <div className="memory-hub-primary-label">Timeline</div>
                       <div className="memory-hub-column">
                         {observationTimeline.map((entry) => (
-                          <div key={entry.memoryId} className="settings-card memory-inspector-timeline-card">
+                          <div
+                            key={entry.memoryId}
+                            className="settings-card memory-inspector-timeline-card"
+                          >
                             <div className="memory-hub-row memory-inspector-item-header">
                               <span className="memory-inspector-title">{entry.title}</span>
-                              {entry.isAnchor && <span className={badgeClass("success")}>Anchor</span>}
+                              {entry.isAnchor && (
+                                <span className={badgeClass("success")}>Anchor</span>
+                              )}
                             </div>
                             <div className="memory-hub-caption">
-                              {formatTimestamp(entry.createdAt) || "unknown date"} • {entry.sourceLabel}
+                              {formatTimestamp(entry.createdAt) || "unknown date"} •{" "}
+                              {entry.sourceLabel}
                             </div>
                             <div className="memory-hub-text-block-primary memory-inspector-snippet">
                               {entry.snippet}
@@ -1518,9 +1540,7 @@ export function MemoryHubSettings(props?: {
           <div className="settings-form-group">
             <div className="memory-hub-toggle-row">
               <div className="memory-hub-grow">
-                <div className="memory-hub-primary-label">
-                  Private Mode
-                </div>
+                <div className="memory-hub-primary-label">Private Mode</div>
                 <p className="settings-form-hint memory-hub-hint-tight">
                   Suspends higher-sensitivity collectors like browser, clipboard, and notifications
                   while keeping task execution available.
@@ -1556,16 +1576,16 @@ export function MemoryHubSettings(props?: {
               <div key={source} className="awareness-grid-row">
                 <div>
                   <div className="memory-hub-section-title">{source}</div>
-                  <div className="memory-hub-inline-secondary-gap">
-                    TTL {policy.ttlMinutes} min
-                  </div>
+                  <div className="memory-hub-inline-secondary-gap">TTL {policy.ttlMinutes} min</div>
                 </div>
                 <label className="settings-toggle" title="Enabled">
                   <input
                     type="checkbox"
                     checked={policy.enabled}
                     onChange={(e) =>
-                      void updateAwarenessSource(source as AwarenessSource, { enabled: e.target.checked })
+                      void updateAwarenessSource(source as AwarenessSource, {
+                        enabled: e.target.checked,
+                      })
                     }
                     disabled={awarenessSaving}
                   />
@@ -1636,9 +1656,7 @@ export function MemoryHubSettings(props?: {
             }}
           >
             <div className="settings-card">
-              <div className="memory-hub-section-title">
-                What CoWork Currently Believes
-              </div>
+              <div className="memory-hub-section-title">What CoWork Currently Believes</div>
               <p className="settings-form-hint memory-hub-hint">
                 Stable beliefs promoted from conversation and local computer context.
               </p>
@@ -1647,10 +1665,7 @@ export function MemoryHubSettings(props?: {
               ) : (
                 <div className="memory-hub-column">
                   {awarenessBeliefs.slice(0, 12).map((belief) => (
-                    <div
-                      key={belief.id}
-                      className="settings-card"
-                    >
+                    <div key={belief.id} className="settings-card">
                       <div
                         style={{
                           display: "flex",
@@ -1659,16 +1674,16 @@ export function MemoryHubSettings(props?: {
                           alignItems: "center",
                         }}
                       >
-                        <div className="memory-hub-primary-label">
-                          {belief.subject}
-                        </div>
-                        <span className={badgeClass(belief.promotionStatus === "confirmed" ? "success" : "neutral")}>
+                        <div className="memory-hub-primary-label">{belief.subject}</div>
+                        <span
+                          className={badgeClass(
+                            belief.promotionStatus === "confirmed" ? "success" : "neutral",
+                          )}
+                        >
                           {belief.promotionStatus}
                         </span>
                       </div>
-                      <div className="memory-hub-text-block-primary">
-                        {belief.value}
-                      </div>
+                      <div className="memory-hub-text-block-primary">{belief.value}</div>
                       <div
                         style={{
                           marginTop: "6px",
@@ -1719,9 +1734,7 @@ export function MemoryHubSettings(props?: {
             </div>
 
             <div className="settings-card">
-              <div className="memory-hub-section-title">
-                Current Awareness Summary
-              </div>
+              <div className="memory-hub-section-title">Current Awareness Summary</div>
               <p className="settings-form-hint memory-hub-hint">
                 Live summary of focus, high-signal context changes, and due-soon items.
               </p>
@@ -1734,9 +1747,7 @@ export function MemoryHubSettings(props?: {
                   <div key={item.id} className="memory-hub-text-block">
                     <div className="memory-hub-text-primary">{item.title}</div>
                     {item.detail && (
-                      <div className="memory-hub-inline-secondary-top">
-                        {item.detail}
-                      </div>
+                      <div className="memory-hub-inline-secondary-top">{item.detail}</div>
                     )}
                   </div>
                 ))}
@@ -1750,9 +1761,7 @@ export function MemoryHubSettings(props?: {
                   <div key={item.id} className="memory-hub-text-block">
                     <div className="memory-hub-text-primary">{item.title}</div>
                     {item.detail && (
-                      <div className="memory-hub-inline-secondary-top">
-                        {item.detail}
-                      </div>
+                      <div className="memory-hub-inline-secondary-top">{item.detail}</div>
                     )}
                   </div>
                 ))}
@@ -1766,16 +1775,16 @@ export function MemoryHubSettings(props?: {
           {autonomyConfig && (
             <div className="memory-hub-top-gap-md">
               <div className="settings-card">
-                <div className="memory-hub-section-title">
-                  Chief of Staff Mode
-                </div>
+                <div className="memory-hub-section-title">Chief of Staff Mode</div>
                 <p className="settings-form-hint memory-hub-hint">
                   Controls goal-driven planning, intervention generation, and bounded local
                   execution.
                 </p>
                 <div className="memory-hub-grid">
                   <div className="memory-hub-row-center">
-                    <span className="memory-hub-inline-primary-sm">Enable chief-of-staff engine</span>
+                    <span className="memory-hub-inline-primary-sm">
+                      Enable chief-of-staff engine
+                    </span>
                     <label className="settings-toggle memory-hub-toggle-shrink">
                       <input
                         type="checkbox"
@@ -1792,7 +1801,9 @@ export function MemoryHubSettings(props?: {
                     </label>
                   </div>
                   <div className="memory-hub-row-center">
-                    <span className="memory-hub-inline-primary-sm">Auto-evaluate on ambient changes</span>
+                    <span className="memory-hub-inline-primary-sm">
+                      Auto-evaluate on ambient changes
+                    </span>
                     <label className="settings-toggle memory-hub-toggle-shrink">
                       <input
                         type="checkbox"
@@ -1817,9 +1828,7 @@ export function MemoryHubSettings(props?: {
                   >
                     {Object.entries(autonomyConfig.actionPolicies).map(([actionType, policy]) => (
                       <div key={actionType} className="settings-card">
-                        <div className="memory-hub-primary-label">
-                          {actionType}
-                        </div>
+                        <div className="memory-hub-primary-label">{actionType}</div>
                         <div className="memory-hub-top-gap-sm">
                           <select
                             className="settings-select"
@@ -1879,9 +1888,7 @@ export function MemoryHubSettings(props?: {
                 }}
               >
                 <div className="settings-card">
-                  <div className="memory-hub-section-title">
-                    World Model
-                  </div>
+                  <div className="memory-hub-section-title">World Model</div>
                   <p className="settings-form-hint memory-hub-hint">
                     What CoWork thinks is active right now.
                   </p>
@@ -1922,36 +1929,48 @@ export function MemoryHubSettings(props?: {
                 </div>
 
                 <div className="settings-card">
-                  <div className="memory-hub-section-title">
-                    Pending Interventions
-                  </div>
+                  <div className="memory-hub-section-title">Pending Interventions</div>
                   <p className="settings-form-hint memory-hub-hint">
                     What chief-of-staff mode wants to do next and why.
                   </p>
                   {(autonomyDecisions || []).slice(0, 8).map((decision) => (
                     <div key={decision.id} className="settings-card memory-hub-top-gap-sm">
                       <div className="memory-hub-row">
-                        <div className="memory-hub-primary-label">
-                          {decision.title}
-                        </div>
-                        <span className={badgeClass(decision.priority === "high" ? "warning" : "neutral")}>
+                        <div className="memory-hub-primary-label">{decision.title}</div>
+                        <span
+                          className={badgeClass(
+                            decision.priority === "high" ? "warning" : "neutral",
+                          )}
+                        >
                           {decision.status}
                         </span>
                       </div>
-                      <div className="memory-hub-text-block-primary">
-                        {decision.description}
-                      </div>
-                      <div style={{ marginTop: "6px", fontSize: "11px", color: "var(--color-text-secondary)" }}>
+                      <div className="memory-hub-text-block-primary">{decision.description}</div>
+                      <div
+                        style={{
+                          marginTop: "6px",
+                          fontSize: "11px",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
                         {decision.actionType} • {decision.policyLevel} • {decision.reason}
                       </div>
                       <div className="memory-hub-chip-row">
                         {decision.status !== "done" && (
-                          <button className="settings-button" onClick={() => void updateDecision(decision.id, { status: "done" })}>
+                          <button
+                            className="settings-button"
+                            onClick={() => void updateDecision(decision.id, { status: "done" })}
+                          >
                             Mark done
                           </button>
                         )}
                         {decision.status !== "dismissed" && (
-                          <button className="settings-button" onClick={() => void updateDecision(decision.id, { status: "dismissed" })}>
+                          <button
+                            className="settings-button"
+                            onClick={() =>
+                              void updateDecision(decision.id, { status: "dismissed" })
+                            }
+                          >
                             Dismiss
                           </button>
                         )}
@@ -1964,9 +1983,7 @@ export function MemoryHubSettings(props?: {
                 </div>
 
                 <div className="settings-card">
-                  <div className="memory-hub-section-title">
-                    Recent Actions
-                  </div>
+                  <div className="memory-hub-section-title">Recent Actions</div>
                   <p className="settings-form-hint memory-hub-hint">
                     Local actions the engine already attempted.
                   </p>
@@ -2045,9 +2062,7 @@ export function MemoryHubSettings(props?: {
               }}
             >
               <div>
-                <div className="memory-hub-primary-label">
-                  Workspace Kit
-                </div>
+                <div className="memory-hub-primary-label">Workspace Kit</div>
                 <p className="settings-form-hint" style={{ margin: 0 }}>
                   Creates recommended <code>.cowork/</code> files for shared, durable context.
                 </p>
@@ -2139,15 +2154,19 @@ export function MemoryHubSettings(props?: {
                     </summary>
                     <div className="memory-list" style={{ marginTop: "8px", maxHeight: "none" }}>
                       {kitStatus.files.map((f) => {
-                        const warningCount = f.issues?.filter((issue) => issue.level === "warning").length || 0;
-                        const errorCount = f.issues?.filter((issue) => issue.level === "error").length || 0;
+                        const warningCount =
+                          f.issues?.filter((issue) => issue.level === "warning").length || 0;
+                        const errorCount =
+                          f.issues?.filter((issue) => issue.level === "error").length || 0;
                         const modifiedAt = formatTimestamp(f.modifiedAt);
                         const sizeLabel = formatBytes(f.sizeBytes);
                         const metadata = [
                           f.title,
                           modifiedAt ? `updated ${modifiedAt}` : null,
                           sizeLabel,
-                          typeof f.revisionCount === "number" ? `${f.revisionCount} revision${f.revisionCount === 1 ? "" : "s"}` : null,
+                          typeof f.revisionCount === "number"
+                            ? `${f.revisionCount} revision${f.revisionCount === 1 ? "" : "s"}`
+                            : null,
                         ].filter(Boolean);
 
                         return (
@@ -2173,7 +2192,9 @@ export function MemoryHubSettings(props?: {
                                     flexWrap: "wrap",
                                   }}
                                 >
-                                  <code style={{ color: "var(--color-text-primary)" }}>{f.relPath}</code>
+                                  <code style={{ color: "var(--color-text-primary)" }}>
+                                    {f.relPath}
+                                  </code>
                                   {f.specialHandling === "heartbeat" && (
                                     <span className={badgeClass("warning")}>heartbeat</span>
                                   )}
@@ -2324,15 +2345,15 @@ export function MemoryHubSettings(props?: {
             <div className="settings-card memory-hub-top-gap">
               <div className="memory-hub-row-center">
                 <div className="memory-hub-grow">
-                  <div className="memory-hub-primary-label">
-                    Pending Memory Writes
-                  </div>
+                  <div className="memory-hub-primary-label">Pending Memory Writes</div>
                   <p className="settings-form-hint memory-hub-hint-tight">
                     Review staged archive, curated, and external memory writes for this workspace.
                   </p>
                 </div>
                 <div className="memory-hub-stack-gap">
-                  <span className={badgeClass(pendingMemoryWrites.length > 0 ? "warning" : "success")}>
+                  <span
+                    className={badgeClass(pendingMemoryWrites.length > 0 ? "warning" : "success")}
+                  >
                     {pendingMemoryWrites.length} pending
                   </span>
                   <button
@@ -2362,23 +2383,30 @@ export function MemoryHubSettings(props?: {
                                   {item.target}
                                 </span>
                                 <span className={badgeClass("neutral")}>{item.action}</span>
-                                <span className={badgeClass(item.origin === "agent_tool" ? "success" : "warning")}>
+                                <span
+                                  className={badgeClass(
+                                    item.origin === "agent_tool" ? "success" : "warning",
+                                  )}
+                                >
                                   {item.origin}
                                 </span>
-                                <span className={badgeClass(item.riskScore >= 0.7 ? "warning" : "neutral")}>
+                                <span
+                                  className={badgeClass(
+                                    item.riskScore >= 0.7 ? "warning" : "neutral",
+                                  )}
+                                >
                                   risk {Math.round(item.riskScore * 100)}%
                                 </span>
                               </div>
-                              <div className="memory-hub-text-block-primary">
-                                {item.summary}
-                              </div>
+                              <div className="memory-hub-text-block-primary">{item.summary}</div>
                               <div className="memory-hub-caption">
                                 {formatTimestamp(item.createdAt) || "Unknown time"}
                                 {item.taskId ? ` • task ${item.taskId}` : ""}
                               </div>
                               {isExternal && (
                                 <div className="memory-hub-caption memory-hub-top-gap-sm">
-                                  External write: approving this can send the shown content to the configured provider.
+                                  External write: approving this can send the shown content to the
+                                  configured provider.
                                 </div>
                               )}
                               <pre className="memory-approval-payload">

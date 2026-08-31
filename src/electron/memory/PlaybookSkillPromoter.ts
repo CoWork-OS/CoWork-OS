@@ -150,10 +150,7 @@ export class PlaybookSkillPromoter {
    * @param workspaceId - Workspace to check
    * @param workspacePath - Filesystem path for SkillProposalService
    */
-  static async maybePropose(
-    workspaceId: string,
-    workspacePath: string,
-  ): Promise<PromotionResult> {
+  static async maybePropose(workspaceId: string, workspacePath: string): Promise<PromotionResult> {
     // Cooldown check
     const lastCheck = lastCheckByWorkspace.get(workspaceId) ?? 0;
     if (Date.now() - lastCheck < PROMOTION_COOLDOWN_MS) {
@@ -195,7 +192,11 @@ export class PlaybookSkillPromoter {
   ): PromotionCandidate[] {
     try {
       // Search for all reinforcement entries
-      const results = MemoryService.searchByContentMarker(workspaceId, "[PLAYBOOK] Reinforced pattern", 100);
+      const results = MemoryService.searchByContentMarker(
+        workspaceId,
+        "[PLAYBOOK] Reinforced pattern",
+        100,
+      );
       const reinforcements = results.filter(
         (r) => r.type === "insight" && r.snippet.includes("Reinforced pattern"),
       );

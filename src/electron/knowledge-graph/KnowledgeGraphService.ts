@@ -158,7 +158,9 @@ export class KnowledgeGraphService {
 
     const now = Date.now();
     const normalizedValidFrom = normalizeEdgeTime(input.validFrom, now);
-    const normalizedValidTo = Number.isFinite(input.validTo) ? (input.validTo as number) : undefined;
+    const normalizedValidTo = Number.isFinite(input.validTo)
+      ? (input.validTo as number)
+      : undefined;
     if (normalizedValidTo !== undefined && normalizedValidFrom >= normalizedValidTo) {
       throw new Error("valid_to must be greater than valid_from");
     }
@@ -445,7 +447,8 @@ export class KnowledgeGraphService {
     if (!this.initialized) return "";
 
     try {
-      const temporalKnowledgeEnabled = MemoryFeaturesManager.loadSettings().temporalKnowledgeEnabled !== false;
+      const temporalKnowledgeEnabled =
+        MemoryFeaturesManager.loadSettings().temporalKnowledgeEnabled !== false;
       const asOf = temporalKnowledgeEnabled ? Date.now() : undefined;
       const results = this.getRepo().searchEntities(workspaceId, taskPrompt, MAX_CONTEXT_ENTITIES);
       if (results.length === 0) return "";

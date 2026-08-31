@@ -55,7 +55,10 @@ function createErrorResponse(statusCode: number, message: string): Response {
   });
 }
 
-function parseRangeHeader(rangeHeader: string, size: number): { start: number; end: number } | null {
+function parseRangeHeader(
+  rangeHeader: string,
+  size: number,
+): { start: number; end: number } | null {
   const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
   if (!match) return null;
 
@@ -75,7 +78,13 @@ function parseRangeHeader(rangeHeader: string, size: number): { start: number; e
     end = size - 1;
   }
 
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= size) {
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    start < 0 ||
+    end < start ||
+    start >= size
+  ) {
     return null;
   }
 

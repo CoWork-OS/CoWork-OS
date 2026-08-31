@@ -21,18 +21,20 @@ describe("parseLegalDemandIntakeSlashPrompt", () => {
   });
 
   it("does not match unrelated slash commands", () => {
-    expect(parseLegalDemandIntakeSlashPrompt("/litigation-legal-demand-draft payment-acme")).toEqual(
-      {
-        matched: false,
-        args: "",
-      },
-    );
+    expect(
+      parseLegalDemandIntakeSlashPrompt("/litigation-legal-demand-draft payment-acme"),
+    ).toEqual({
+      matched: false,
+      args: "",
+    });
   });
 });
 
 describe("parseLegalWorkflowSlashPrompt", () => {
   it("routes demand intake to the specialized form", () => {
-    expect(parseLegalWorkflowSlashPrompt("/litigation-legal-demand-intake unpaid invoices")).toEqual({
+    expect(
+      parseLegalWorkflowSlashPrompt("/litigation-legal-demand-intake unpaid invoices"),
+    ).toEqual({
       matched: true,
       commandName: "litigation-legal-demand-intake",
       args: "unpaid invoices",

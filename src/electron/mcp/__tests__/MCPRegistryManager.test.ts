@@ -80,6 +80,21 @@ describe("MCPRegistryManager install defaults", () => {
     verifySpy.mockRestore();
   });
 
+  it("installs the hosted Box MCP server as a Streamable HTTP config", async () => {
+    const config = await MCPRegistryManager.installServer("box");
+
+    expect(config).toMatchObject({
+      name: "Box",
+      enabled: false,
+      transport: "streamable-http",
+      url: "https://mcp.box.com",
+      registryId: "box",
+    });
+    expect(config.command).toBeUndefined();
+    expect(config.args).toBeUndefined();
+    expect(mockState.addServerMock).toHaveBeenCalledTimes(1);
+  });
+
   it("curates overlapping official MCP servers out of the built-in registry", async () => {
     const registry = await MCPRegistryManager.fetchRegistry();
     const ids = registry.servers.map((server) => server.id);
@@ -136,13 +151,29 @@ describe("MCPRegistryManager install defaults", () => {
   it("exposes only read-only tools for finance connector presets", async () => {
     const registry = await MCPRegistryManager.fetchRegistry();
     const financeServers = registry.servers.filter((server) =>
-      ["daloopa", "morningstar", "spglobal", "factset", "moodys", "mtnewswires", "aiera", "lseg", "pitchbook", "chronograph", "egnyte"].includes(server.id),
+      [
+        "daloopa",
+        "morningstar",
+        "spglobal",
+        "factset",
+        "moodys",
+        "mtnewswires",
+        "aiera",
+        "lseg",
+        "pitchbook",
+        "chronograph",
+        "egnyte",
+      ].includes(server.id),
     );
 
     expect(financeServers).toHaveLength(11);
     for (const server of financeServers) {
       expect(server.category).toBe("finance");
-      expect(server.tools.every((tool) => !/^(create|update|delete|post|send|approve|trade|execute)/i.test(tool.name))).toBe(true);
+      expect(
+        server.tools.every(
+          (tool) => !/^(create|update|delete|post|send|approve|trade|execute)/i.test(tool.name),
+        ),
+      ).toBe(true);
     }
   });
 
@@ -162,9 +193,7 @@ describe("MCPRegistryManager install defaults", () => {
   });
 
   it("rejects malicious npm package names before spawning npm", async () => {
-    const result = await MCPRegistryManager.verifyNpmPackage(
-      "--version; printf COWORK_INJECTED",
-    );
+    const result = await MCPRegistryManager.verifyNpmPackage("--version; printf COWORK_INJECTED");
 
     expect(result.exists).toBe(false);
     expect(result.error).toContain("Invalid npm package name");

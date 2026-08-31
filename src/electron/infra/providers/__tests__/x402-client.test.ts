@@ -70,7 +70,10 @@ describe("X402Client", () => {
       "0x0000000000000000000000000000000000000001",
     );
 
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("free", { status: 200 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("free", { status: 200 })),
+    );
 
     await expect(client.fetchWithPayment("https://trusted.example/free")).resolves.toMatchObject({
       paymentMade: false,
@@ -87,7 +90,8 @@ describe("X402Client", () => {
 
     const seenSignatures: string[] = [];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      const signature = init?.headers && (init.headers as Record<string, string>)["payment-signature"];
+      const signature =
+        init?.headers && (init.headers as Record<string, string>)["payment-signature"];
       if (!signature) {
         return new Response("", {
           status: 402,

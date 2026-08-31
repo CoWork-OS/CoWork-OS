@@ -43,10 +43,9 @@ export type PiAiOAuthModule = {
 
 // pi-ai is ESM-only via package exports. Use native import() so the
 // CommonJS Electron/daemon bundles can still load it at runtime.
-const nativeDynamicImport = new Function(
-  "specifier",
-  "return import(specifier);",
-) as (specifier: string) => Promise<Any>;
+const nativeDynamicImport = new Function("specifier", "return import(specifier);") as (
+  specifier: string,
+) => Promise<Any>;
 
 let piAiModulePromise: Promise<PiAiModule> | null = null;
 let piAiOAuthModulePromise: Promise<PiAiOAuthModule> | null = null;

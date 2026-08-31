@@ -18,7 +18,14 @@ interface ParallelGroupFeedProps {
 }
 
 function buildIndicatorForStatus(status: TimelineEventStatus): TimelineIndicatorSpec {
-  if (status === "failed" || status === "blocked" || status === "cancelled") {
+  if (status === "cancelled") {
+    return {
+      icon: AlertTriangle,
+      tone: "error",
+      label: "Parallel group cancelled",
+    };
+  }
+  if (status === "failed" || status === "blocked") {
     return {
       icon: AlertTriangle,
       tone: "error",

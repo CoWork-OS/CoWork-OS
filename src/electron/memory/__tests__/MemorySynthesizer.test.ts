@@ -6,6 +6,7 @@ import { MemoryService } from "../MemoryService";
 import { KnowledgeGraphService } from "../../knowledge-graph/KnowledgeGraphService";
 import { InputSanitizer } from "../../agent/security/input-sanitizer";
 import { UserProfileService } from "../UserProfileService";
+import { BoxSettingsManager } from "../../settings/box-manager";
 
 vi.mock("../CuratedMemoryService", () => ({
   CuratedMemoryService: {
@@ -65,9 +66,9 @@ vi.mock("../RelationshipMemoryService", () => ({
 
 vi.mock("../PlaybookService", () => ({
   PlaybookService: {
-    getPlaybookForContext: vi.fn().mockReturnValue(
-      'PLAYBOOK\n- Task succeeded: "Deploy service" — Used shell, git_commit',
-    ),
+    getPlaybookForContext: vi
+      .fn()
+      .mockReturnValue('PLAYBOOK\n- Task succeeded: "Deploy service" — Used shell, git_commit'),
   },
 }));
 
@@ -98,14 +99,15 @@ vi.mock("../MemoryService", () => ({
         createdAt: Date.now() - 90_000,
       },
     ]),
+    search: vi.fn().mockReturnValue([]),
   },
 }));
 
 vi.mock("../../knowledge-graph/KnowledgeGraphService", () => ({
   KnowledgeGraphService: {
-    buildContextForTask: vi.fn().mockReturnValue(
-      "KNOWLEDGE GRAPH\n- [technology] PostgreSQL: Primary database",
-    ),
+    buildContextForTask: vi
+      .fn()
+      .mockReturnValue("KNOWLEDGE GRAPH\n- [technology] PostgreSQL: Primary database"),
   },
 }));
 
@@ -168,11 +170,52 @@ describe("MemorySynthesizer", () => {
     expect(result.sourceAttribution.curated_memory).toBeGreaterThan(0);
   });
 
+  it("injects source-backed Box Brain recall with its Box URL", () => {
+    const settingsSpy = vi.spyOn(BoxSettingsManager, "loadSettings").mockReturnValue({
+      enabled: true,
+      mcpEnabled: true,
+      brain: {
+        enabled: true,
+        rootFolderId: "123",
+        syncIntervalMinutes: 60,
+        maxItemsPerRun: 20,
+        includeContent: true,
+        useBoxAiSummaries: false,
+        improvementEnabled: true,
+        maxContentChars: 10000,
+      },
+    });
+    vi.mocked(MemoryService.search).mockReturnValue([
+      {
+        id: "box-memory-1",
+        snippet:
+          "[Imported from Box Brain] File: Approval Policy.md | Box URL: https://app.box.com/file/123",
+        type: "observation",
+        relevanceScore: 0.9,
+        createdAt: Date.now() - 10_000,
+        source: "db",
+      },
+    ]);
+
+    const result = MemorySynthesizer.buildStructuredMemoryContext(
+      "ws1",
+      "/workspace",
+      "approval policy",
+    );
+
+    expect(result.text).toContain("## Box Brain (source-backed)");
+    expect(result.text).toContain("https://app.box.com/file/123");
+    expect(result.sourceAttribution.box_brain).toBe(1);
+    settingsSpy.mockRestore();
+  });
+
   it("renders operating-profile facts as a personal operating manual", () => {
     const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).toContain("Personal Operating Manual");
-    expect(result.text).toContain("[Operating style] Pushback: challenge weak ideas with evidence.");
+    expect(result.text).toContain(
+      "[Operating style] Pushback: challenge weak ideas with evidence.",
+    );
     expect(result.text).toContain("You & the User");
     expect(result.text).toContain("[Identity] Preferred name: Alice");
   });
@@ -313,8 +356,8 @@ describe("MemorySynthesizer", () => {
   });
 
   it("uses the sanitizer output when rendering memory fragments", () => {
-    vi.mocked(InputSanitizer.sanitizeMemoryContent).mockImplementation(
-      (text: string) => text.replace("<script>", "").replace("</script>", ""),
+    vi.mocked(InputSanitizer.sanitizeMemoryContent).mockImplementation((text: string) =>
+      text.replace("<script>", "").replace("</script>", ""),
     );
     vi.mocked(MemoryService.getRecentForPromptRecall).mockReturnValueOnce([
       {

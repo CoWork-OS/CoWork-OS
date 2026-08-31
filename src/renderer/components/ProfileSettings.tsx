@@ -110,7 +110,9 @@ export function ProfileSettings() {
       </p>
 
       <div className="settings-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}
+        >
           <div>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>
               Active profile: {activeProfile?.label || "default"}
@@ -137,7 +139,14 @@ export function ProfileSettings() {
             className={`settings-card ${profile.isActive ? "is-selected" : ""}`}
             style={{ display: "flex", flexDirection: "column", gap: 12 }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 8,
+                alignItems: "start",
+              }}
+            >
               <div>
                 <div style={{ fontWeight: 600 }}>{profile.label}</div>
                 <div className="settings-description" style={{ marginBottom: 0 }}>
@@ -196,7 +205,10 @@ export function ProfileSettings() {
           </p>
         ) : null}
         {error ? (
-          <p className="settings-description" style={{ marginTop: 12, marginBottom: 0, color: "var(--color-danger)" }}>
+          <p
+            className="settings-description"
+            style={{ marginTop: 12, marginBottom: 0, color: "var(--color-danger)" }}
+          >
             {error}
           </p>
         ) : null}
@@ -217,7 +229,12 @@ export function ProfileSettings() {
             disabled={busy}
             style={{ flex: "1 1 240px" }}
           />
-          <button type="button" className="button-secondary" onClick={() => void handleImport()} disabled={busy}>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => void handleImport()}
+            disabled={busy}
+          >
             Import
           </button>
         </div>

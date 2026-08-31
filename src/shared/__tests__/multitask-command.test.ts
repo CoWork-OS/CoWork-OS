@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  MULTITASK_DEFAULT_LANE_COUNT,
-  parseMultitaskCommand,
-} from "../multitask-command";
+import { MULTITASK_DEFAULT_LANE_COUNT, parseMultitaskCommand } from "../multitask-command";
 
 describe("parseMultitaskCommand", () => {
   it("returns non-multitask for ordinary prompts", () => {

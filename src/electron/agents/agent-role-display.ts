@@ -27,7 +27,9 @@ export function formatAgentRoleDisplay(
   },
 ): string {
   const name = normalizeNonEmptyString(displayName) || options?.fallbackDisplayName || "Agent";
-  const normalizedIcon = normalizeAgentRoleIcon(icon, options?.fallbackIcon ?? DEFAULT_AGENT_ROLE_ICON);
+  const normalizedIcon = normalizeAgentRoleIcon(
+    icon,
+    options?.fallbackIcon ?? DEFAULT_AGENT_ROLE_ICON,
+  );
   return `${normalizedIcon} ${name}`;
 }
-

@@ -39,8 +39,6 @@ export function resolveGoogleWorkspaceOAuthRequest(
   return {
     ...request,
     clientId,
-    clientSecret: usingBundledClient
-      ? undefined
-      : request.clientSecret ?? settings?.clientSecret,
+    clientSecret: usingBundledClient ? undefined : (request.clientSecret ?? settings?.clientSecret),
   };
 }

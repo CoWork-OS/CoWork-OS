@@ -667,7 +667,9 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
             </label>
             <select
               value={actionType}
-              onChange={(e) => setActionType(e.target.value === "wake_agent" ? "wake_agent" : "create_task")}
+              onChange={(e) =>
+                setActionType(e.target.value === "wake_agent" ? "wake_agent" : "create_task")
+              }
               className="event-triggers-select"
               style={{
                 width: "100%",
@@ -741,7 +743,10 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                 color: "#fff",
                 cursor: "pointer",
                 fontSize: 12,
-                opacity: name.trim() && (actionType !== "wake_agent" || actionAgentRoleId.trim()) ? 1 : 0.5,
+                opacity:
+                  name.trim() && (actionType !== "wake_agent" || actionAgentRoleId.trim())
+                    ? 1
+                    : 0.5,
               }}
             >
               Create Trigger
@@ -889,9 +894,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
               }}
             >
               {history.length === 0 ? (
-                <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                  No history yet
-                </div>
+                <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>No history yet</div>
               ) : (
                 history.slice(0, 10).map((h) => (
                   <div
@@ -908,9 +911,7 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
                       {new Date(h.firedAt).toLocaleString()}
                     </span>
                     <span>{h.actionResult || "fired"}</span>
-                    {h.taskId && (
-                      <span style={{ color: "var(--color-accent)" }}>→ task</span>
-                    )}
+                    {h.taskId && <span style={{ color: "var(--color-accent)" }}>→ task</span>}
                   </div>
                 ))
               )}

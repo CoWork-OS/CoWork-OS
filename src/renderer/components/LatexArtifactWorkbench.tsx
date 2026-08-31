@@ -132,7 +132,11 @@ export function LatexArtifactWorkbench({
           <button type="button" onClick={() => openPath(pdfPath)} className="latex-artifact-action">
             Open PDF
           </button>
-          <button type="button" onClick={() => showPath(pdfPath)} className="latex-artifact-action secondary">
+          <button
+            type="button"
+            onClick={() => showPath(pdfPath)}
+            className="latex-artifact-action secondary"
+          >
             Show
           </button>
         </div>
@@ -233,7 +237,8 @@ export function LatexArtifactWorkbench({
           )}
           {!loadingPdf && !pdfError && pdfData && !pdfData.pdfDataBase64 && (
             <div className="latex-artifact-error">
-              PDF is too large for inline rendering. Open it externally to inspect the full document.
+              PDF is too large for inline rendering. Open it externally to inspect the full
+              document.
             </div>
           )}
         </div>

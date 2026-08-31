@@ -217,7 +217,7 @@ class GoogleAuthManager {
             } else {
               resolve(parsed);
             }
-          } catch  {
+          } catch {
             reject(new Error(`Failed to parse token response: ${data}`));
           }
         });
@@ -457,7 +457,8 @@ export class GoogleChatAdapter implements ChannelAdapter {
     if (!secret) {
       return false;
     }
-    const provided = readWebhookSecret(req) || (typeof event.token === "string" ? event.token.trim() : "");
+    const provided =
+      readWebhookSecret(req) || (typeof event.token === "string" ? event.token.trim() : "");
     return Boolean(provided && timingSafeEqualString(provided, secret));
   }
 
@@ -762,7 +763,7 @@ export class GoogleChatAdapter implements ChannelAdapter {
             } else {
               resolve(parsed);
             }
-          } catch  {
+          } catch {
             if (res.statusCode && res.statusCode >= 400) {
               reject(new Error(`API error ${res.statusCode}: ${data}`));
             } else {

@@ -54,7 +54,16 @@ describe("CoreTraceService", () => {
       startedAt: 200,
       createdAt: 200,
     };
-    const events = [{ id: "event-1", traceId: "trace-2", phase: "collect", eventType: "started", summary: "Started", createdAt: 200 }];
+    const events = [
+      {
+        id: "event-1",
+        traceId: "trace-2",
+        phase: "collect",
+        eventType: "started",
+        summary: "Started",
+        createdAt: 200,
+      },
+    ];
     const candidates = [{ id: "candidate-1", traceId: "trace-2", profileId: "profile-2" }];
     const traceRepo = {
       findById: vi.fn(() => trace),

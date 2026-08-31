@@ -1,7 +1,4 @@
-import type {
-  CoreFailureCluster,
-  CoreFailureRecord,
-} from "../../shared/types";
+import type { CoreFailureCluster, CoreFailureRecord } from "../../shared/types";
 import { CoreFailureClusterRepository } from "./CoreFailureClusterRepository";
 import { CoreFailureRecordRepository } from "./CoreFailureRecordRepository";
 
@@ -27,7 +24,11 @@ export class CoreFailureClusterService {
 
   upsertClusterForRecord(record: CoreFailureRecord): CoreFailureCluster {
     const now = Date.now();
-    const existing = this.clusterRepo.findByFingerprint(record.profileId, record.workspaceId, record.fingerprint);
+    const existing = this.clusterRepo.findByFingerprint(
+      record.profileId,
+      record.workspaceId,
+      record.fingerprint,
+    );
     if (existing) {
       const nextRecurrence = existing.recurrenceCount + 1;
       const updated = this.clusterRepo.update(existing.id, {

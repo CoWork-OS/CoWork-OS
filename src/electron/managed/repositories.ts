@@ -87,11 +87,19 @@ export class ManagedAgentRepository {
     return row ? this.mapRow(row) : undefined;
   }
 
-  list(params?: { limit?: number; offset?: number; status?: ManagedAgent["status"] }): ManagedAgent[] {
+  list(params?: {
+    limit?: number;
+    offset?: number;
+    status?: ManagedAgent["status"];
+  }): ManagedAgent[] {
     const limit =
-      typeof params?.limit === "number" && Number.isFinite(params.limit) ? Math.max(1, Math.floor(params.limit)) : 100;
+      typeof params?.limit === "number" && Number.isFinite(params.limit)
+        ? Math.max(1, Math.floor(params.limit))
+        : 100;
     const offset =
-      typeof params?.offset === "number" && Number.isFinite(params.offset) ? Math.max(0, Math.floor(params.offset)) : 0;
+      typeof params?.offset === "number" && Number.isFinite(params.offset)
+        ? Math.max(0, Math.floor(params.offset))
+        : 0;
     if (params?.status) {
       const rows = this.db
         .prepare(
@@ -161,9 +169,7 @@ export class ManagedAgentVersionRepository {
 
   find(agentId: string, version: number): ManagedAgentVersion | undefined {
     const row = this.db
-      .prepare(
-        "SELECT * FROM managed_agent_versions WHERE agent_id = ? AND version = ?",
-      )
+      .prepare("SELECT * FROM managed_agent_versions WHERE agent_id = ? AND version = ?")
       .get(agentId, version) as Any;
     return row ? this.mapRow(row) : undefined;
   }
@@ -292,9 +298,13 @@ export class ManagedEnvironmentRepository {
     status?: ManagedEnvironment["status"];
   }): ManagedEnvironment[] {
     const limit =
-      typeof params?.limit === "number" && Number.isFinite(params.limit) ? Math.max(1, Math.floor(params.limit)) : 100;
+      typeof params?.limit === "number" && Number.isFinite(params.limit)
+        ? Math.max(1, Math.floor(params.limit))
+        : 100;
     const offset =
-      typeof params?.offset === "number" && Number.isFinite(params.offset) ? Math.max(0, Math.floor(params.offset)) : 0;
+      typeof params?.offset === "number" && Number.isFinite(params.offset)
+        ? Math.max(0, Math.floor(params.offset))
+        : 0;
     if (params?.status) {
       const rows = this.db
         .prepare(
@@ -417,7 +427,9 @@ export class ManagedSessionRepository {
 
   findByBackingTaskId(taskId: string): ManagedSession | undefined {
     const row = this.db
-      .prepare("SELECT * FROM managed_sessions WHERE backing_task_id = ? ORDER BY created_at DESC LIMIT 1")
+      .prepare(
+        "SELECT * FROM managed_sessions WHERE backing_task_id = ? ORDER BY created_at DESC LIMIT 1",
+      )
       .get(taskId) as Any;
     return row ? this.mapRow(row) : undefined;
   }
@@ -431,9 +443,13 @@ export class ManagedSessionRepository {
     surface?: ManagedSession["surface"];
   }): ManagedSession[] {
     const limit =
-      typeof params?.limit === "number" && Number.isFinite(params.limit) ? Math.max(1, Math.floor(params.limit)) : 100;
+      typeof params?.limit === "number" && Number.isFinite(params.limit)
+        ? Math.max(1, Math.floor(params.limit))
+        : 100;
     const offset =
-      typeof params?.offset === "number" && Number.isFinite(params.offset) ? Math.max(0, Math.floor(params.offset)) : 0;
+      typeof params?.offset === "number" && Number.isFinite(params.offset)
+        ? Math.max(0, Math.floor(params.offset))
+        : 0;
     const where: string[] = [];
     const values: Any[] = [];
     if (params?.agentId) {
@@ -474,7 +490,9 @@ export class ManagedSessionRepository {
       workspaceId: String(row.workspace_id ?? ""),
       backingTaskId: row.backing_task_id ? String(row.backing_task_id) : undefined,
       backingTeamRunId: row.backing_team_run_id ? String(row.backing_team_run_id) : undefined,
-      resumedFromSessionId: row.resumed_from_session_id ? String(row.resumed_from_session_id) : undefined,
+      resumedFromSessionId: row.resumed_from_session_id
+        ? String(row.resumed_from_session_id)
+        : undefined,
       latestSummary: row.latest_summary ? String(row.latest_summary) : undefined,
       createdAt: Number(row.created_at ?? 0),
       updatedAt: Number(row.updated_at ?? 0),
@@ -567,7 +585,9 @@ export class ManagedSessionEventRepository {
 
   private getNextSeq(sessionId: string): number {
     const row = this.db
-      .prepare("SELECT COALESCE(MAX(seq), 0) AS max_seq FROM managed_session_events WHERE session_id = ?")
+      .prepare(
+        "SELECT COALESCE(MAX(seq), 0) AS max_seq FROM managed_session_events WHERE session_id = ?",
+      )
       .get(sessionId) as Any;
     return Number(row?.max_seq ?? 0) + 1;
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   descriptionHasChecklistReportCue,
   descriptionHasDiscoveryIntent,
+  descriptionHasProtectiveConstraintIntent,
   descriptionHasReadOnlyIntent,
   descriptionHasStrongWriteIntent,
   descriptionHasWriteIntent,
@@ -104,5 +105,23 @@ describe("step-contract read-only intent", () => {
     expect(descriptionHasDiscoveryIntent(description)).toBe(true);
     expect(descriptionHasWriteIntent(description)).toBe(false);
     expect(extractArtifactPathCandidates(description)).toEqual(["README.md"]);
+  });
+
+  it("treats an exclusion-only filename mention as a protective constraint", () => {
+    const description =
+      "Explicitly exclude onboarding-checklist.md and all paths outside the workspace from consideration.";
+
+    expect(descriptionHasProtectiveConstraintIntent(description)).toBe(true);
+    expect(descriptionHasReadOnlyIntent(description)).toBe(true);
+    expect(descriptionHasWriteIntent(description)).toBe(false);
+  });
+
+  it("preserves mutation intent when a write step also contains a protective constraint", () => {
+    const description =
+      "Rename each inbox file, but do not touch onboarding-checklist.md or anything outside the workspace.";
+
+    expect(descriptionHasProtectiveConstraintIntent(description)).toBe(true);
+    expect(descriptionHasReadOnlyIntent(description)).toBe(true);
+    expect(descriptionHasWriteIntent(description)).toBe(true);
   });
 });

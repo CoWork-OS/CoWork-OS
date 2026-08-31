@@ -79,7 +79,9 @@ describe("ProfileManager", () => {
 
     const imported = await ProfileManager.importProfile(exported.bundlePath, "Imported Research");
     expect(imported.id).toBe("imported-research");
-    expect(fs.readFileSync(path.join(imported.userDataDir, "notes.txt"), "utf8")).toBe("hello profile");
+    expect(fs.readFileSync(path.join(imported.userDataDir, "notes.txt"), "utf8")).toBe(
+      "hello profile",
+    );
 
     fs.rmSync(exportRoot, { recursive: true, force: true });
   });

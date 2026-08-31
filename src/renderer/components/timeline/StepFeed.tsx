@@ -53,7 +53,9 @@ export function StepFeed({
   return (
     <div className="timeline-event step-feed-card">
       <div className="event-indicator">
-        {showConnectorAbove && <span className="event-connector event-connector-above" aria-hidden="true" />}
+        {showConnectorAbove && (
+          <span className="event-connector event-connector-above" aria-hidden="true" />
+        )}
         <span
           className={`event-indicator-icon tone-${indicator.tone} ${indicator.spin ? "spin" : ""}`}
           aria-hidden="true"
@@ -61,7 +63,9 @@ export function StepFeed({
         >
           <IndicatorIcon size={12} strokeWidth={2} />
         </span>
-        {showConnectorBelow && <span className="event-connector event-connector-below" aria-hidden="true" />}
+        {showConnectorBelow && (
+          <span className="event-connector event-connector-below" aria-hidden="true" />
+        )}
         {showBranchStub && <span className="event-branch-stub" aria-hidden="true" />}
       </div>
       <div className="event-content">

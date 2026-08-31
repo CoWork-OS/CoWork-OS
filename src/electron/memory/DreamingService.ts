@@ -11,7 +11,12 @@ import type {
 } from "../../shared/types";
 import { CuratedMemoryService } from "./CuratedMemoryService";
 import { MemoryObservationService } from "./MemoryObservationService";
-import { TranscriptSearchResult, TranscriptSpanRecord, TranscriptStore } from "./TranscriptStore";
+import {
+  TranscriptSearchResult,
+  TranscriptSpanRecord,
+  TranscriptStore,
+  type TranscriptReadGuard,
+} from "./TranscriptStore";
 import type { DreamingRepository } from "./DreamingRepository";
 
 interface DreamingEvidenceBundle {
@@ -32,11 +37,13 @@ export interface DreamingServiceDeps {
     query: string;
     taskId?: string;
     limit?: number;
+    readGuard?: TranscriptReadGuard;
   }) => Promise<TranscriptSearchResult[]>;
   loadRecentTranscriptSpans?: (
     workspacePath: string,
     taskId: string,
     limit?: number,
+    readGuard?: TranscriptReadGuard,
   ) => Promise<TranscriptSpanRecord[]>;
   listCuratedEntries?: (workspaceId: string) => CuratedMemoryEntry[];
   applyCuratedMemory?: typeof CuratedMemoryService.curate;
@@ -53,6 +60,7 @@ export interface RunDreamingRequest {
   sourceTaskId?: string;
   taskPrompt?: string;
   instructions?: string;
+  readGuard?: TranscriptReadGuard;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -60,7 +68,9 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function normalizeText(value: string): string {
-  return String(value || "").replace(/\s+/g, " ").trim();
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function truncate(value: string, max: number): string {
@@ -93,7 +103,9 @@ function evidenceFromTranscript(hit: TranscriptSearchResult | TranscriptSpanReco
 function combinedEvidenceText(bundle: DreamingEvidenceBundle): string {
   return [
     ...bundle.observations.map((entry) =>
-      [entry.title, entry.subtitle, entry.snippet, entry.concepts?.join(" ")].filter(Boolean).join(" "),
+      [entry.title, entry.subtitle, entry.snippet, entry.concepts?.join(" ")]
+        .filter(Boolean)
+        .join(" "),
     ),
     ...bundle.transcriptHits.map((entry) => entry.rawLine),
     ...bundle.recentSpans.map((entry) =>
@@ -136,7 +148,9 @@ export class DreamingService {
     private readonly deps: DreamingServiceDeps = {},
   ) {}
 
-  async run(request: RunDreamingRequest): Promise<{ run: DreamingRun; candidates: DreamingCandidate[] }> {
+  async run(
+    request: RunDreamingRequest,
+  ): Promise<{ run: DreamingRun; candidates: DreamingCandidate[] }> {
     const now = this.deps.now?.() ?? Date.now();
     const run = this.repo.createRun({
       workspaceId: request.workspaceId,
@@ -157,12 +171,17 @@ export class DreamingService {
       const candidateInputs = this.proposeCandidates(run, evidence);
       const candidates = this.repo.bulkCreateCandidates(candidateInputs);
       const completed = this.repo.updateRun(run.id, {
-        status: evidence.observations.length || evidence.transcriptHits.length || evidence.recentSpans.length
-          ? "completed"
-          : "skipped",
+        status:
+          evidence.observations.length ||
+          evidence.transcriptHits.length ||
+          evidence.recentSpans.length
+            ? "completed"
+            : "skipped",
         summary: this.buildRunSummary(evidence, candidates.length),
         evidenceCount:
-          evidence.observations.length + evidence.transcriptHits.length + evidence.recentSpans.length,
+          evidence.observations.length +
+          evidence.transcriptHits.length +
+          evidence.recentSpans.length,
         candidateCount: candidates.length,
         completedAt: this.deps.now?.() ?? Date.now(),
       });
@@ -177,7 +196,10 @@ export class DreamingService {
     }
   }
 
-  async applyAcceptedCandidate(candidateId: string, workspaceId: string): Promise<DreamingCandidate | undefined> {
+  async applyAcceptedCandidate(
+    candidateId: string,
+    workspaceId: string,
+  ): Promise<DreamingCandidate | undefined> {
     const candidate = this.repo.findCandidateById(candidateId);
     if (!candidate || candidate.workspaceId !== workspaceId || candidate.status !== "accepted") {
       return candidate;
@@ -189,7 +211,8 @@ export class DreamingService {
       return candidate;
     }
 
-    const applyCurated = this.deps.applyCuratedMemory || CuratedMemoryService.curate.bind(CuratedMemoryService);
+    const applyCurated =
+      this.deps.applyCuratedMemory || CuratedMemoryService.curate.bind(CuratedMemoryService);
     let stagedPendingId: string | undefined;
     if (candidate.action === "curated_add") {
       const result = await applyCurated({
@@ -240,34 +263,49 @@ export class DreamingService {
   }
 
   private async gatherEvidence(request: RunDreamingRequest): Promise<DreamingEvidenceBundle> {
-    const query = normalizeText(request.taskPrompt || request.instructions || "correction memory stale recurring open loop");
-    const searchMemoryObservations = this.deps.searchMemoryObservations || ((input) =>
-      MemoryObservationService.search({
-        workspaceId: input.workspaceId,
-        query: input.query || "",
-        limit: input.limit || 40,
-      }));
-    const searchTranscriptSpans = this.deps.searchTranscriptSpans || TranscriptStore.searchSpans.bind(TranscriptStore);
+    const query = normalizeText(
+      request.taskPrompt || request.instructions || "correction memory stale recurring open loop",
+    );
+    const searchMemoryObservations =
+      this.deps.searchMemoryObservations ||
+      ((input) =>
+        MemoryObservationService.search({
+          workspaceId: input.workspaceId,
+          query: input.query || "",
+          limit: input.limit || 40,
+        }));
+    const searchTranscriptSpans =
+      this.deps.searchTranscriptSpans || TranscriptStore.searchSpans.bind(TranscriptStore);
     const loadRecentTranscriptSpans =
       this.deps.loadRecentTranscriptSpans || TranscriptStore.loadRecentSpans.bind(TranscriptStore);
-    const listCuratedEntries = this.deps.listCuratedEntries || ((workspaceId) => {
-      try {
-        return CuratedMemoryService.list(workspaceId, { status: "active", limit: 100 });
-      } catch {
-        return [];
-      }
-    });
+    const listCuratedEntries =
+      this.deps.listCuratedEntries ||
+      ((workspaceId) => {
+        try {
+          return CuratedMemoryService.list(workspaceId, { status: "active", limit: 100 });
+        } catch {
+          return [];
+        }
+      });
 
     const [observations, transcriptHits, recentSpans] = await Promise.all([
-      Promise.resolve(searchMemoryObservations({ workspaceId: request.workspaceId, query, limit: 40 })),
+      Promise.resolve(
+        searchMemoryObservations({ workspaceId: request.workspaceId, query, limit: 40 }),
+      ),
       searchTranscriptSpans({
         workspacePath: request.workspacePath,
         taskId: request.sourceTaskId,
         query,
         limit: 20,
+        readGuard: request.readGuard,
       }),
       request.sourceTaskId
-        ? loadRecentTranscriptSpans(request.workspacePath, request.sourceTaskId, 30)
+        ? loadRecentTranscriptSpans(
+            request.workspacePath,
+            request.sourceTaskId,
+            30,
+            request.readGuard,
+          )
         : Promise.resolve([]),
     ]);
 
@@ -339,7 +377,11 @@ export class DreamingService {
       }
     }
 
-    if (/\b(correction|corrected|actually|instead|should have|wrong assumption|invalidated)\b/i.test(text)) {
+    if (
+      /\b(correction|corrected|actually|instead|should have|wrong assumption|invalidated)\b/i.test(
+        text,
+      )
+    ) {
       push(
         "correction",
         "A recent correction should be reviewed for durable memory promotion.",
@@ -348,7 +390,11 @@ export class DreamingService {
       );
     }
 
-    if (/\b(todo|follow up|follow-up|blocked|needs review|open loop|waiting on|next action)\b/i.test(text)) {
+    if (
+      /\b(todo|follow up|follow-up|blocked|needs review|open loop|waiting on|next action)\b/i.test(
+        text,
+      )
+    ) {
       push(
         "open_loop",
         "Recent work contains an unresolved open loop that may need tracking.",
@@ -411,7 +457,8 @@ export class DreamingService {
   }
 
   private buildRunSummary(evidence: DreamingEvidenceBundle, candidateCount: number): string {
-    const evidenceCount = evidence.observations.length + evidence.transcriptHits.length + evidence.recentSpans.length;
+    const evidenceCount =
+      evidence.observations.length + evidence.transcriptHits.length + evidence.recentSpans.length;
     if (!evidenceCount) {
       return "Dreaming found no recent memory/session evidence in scope.";
     }

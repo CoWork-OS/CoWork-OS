@@ -80,16 +80,17 @@ export interface ToolSchedulerExecuteBatchParams {
   summarizeBatch?: (
     batch: ScheduledToolBatch,
     reports: ToolScheduleCallReport[],
-  ) => Promise<{ semanticSummary: string; source?: "model" | "fallback" } | undefined> | { semanticSummary: string; source?: "model" | "fallback" } | undefined;
+  ) =>
+    | Promise<{ semanticSummary: string; source?: "model" | "fallback" } | undefined>
+    | { semanticSummary: string; source?: "model" | "fallback" }
+    | undefined;
   prepareCall: (
     call: SchedulableToolCall,
   ) => Promise<ToolSchedulerPrepareResult> | ToolSchedulerPrepareResult;
 }
 
 export class ToolScheduler {
-  async executeBatch(
-    params: ToolSchedulerExecuteBatchParams,
-  ): Promise<ToolScheduleOutcome> {
+  async executeBatch(params: ToolSchedulerExecuteBatchParams): Promise<ToolScheduleOutcome> {
     const entries: ToolSchedulerPrepareResult[] = [];
     for (const call of params.calls) {
       const prepared = await params.prepareCall(call);
@@ -110,8 +111,7 @@ export class ToolScheduler {
         toolResultSlots.set(current.call.index, current.outcome.toolResult);
         reports.push({
           call: current.call,
-          effectiveToolName:
-            current.effectiveToolName || current.call.toolUse.name,
+          effectiveToolName: current.effectiveToolName || current.call.toolUse.name,
           status: "immediate",
           toolResult: current.outcome.toolResult,
           metadata: current.outcome.metadata,
@@ -126,10 +126,7 @@ export class ToolScheduler {
       while (nextIndex < entries.length) {
         const candidate = entries[nextIndex]!;
         if (candidate.status !== "scheduled") break;
-        if (
-          batchMode !== "parallel" ||
-          !this.canShareParallelBatch(batchCalls, candidate.call)
-        ) {
+        if (batchMode !== "parallel" || !this.canShareParallelBatch(batchCalls, candidate.call)) {
           break;
         }
         batchCalls.push(candidate.call);
@@ -201,19 +198,11 @@ export class ToolScheduler {
     };
   }
 
-  private getBatchMode(
-    call: PreparedSchedulableToolCall,
-  ): "parallel" | "serial" {
-    if (
-      call.spec.concurrencyClass === "read_parallel" &&
-      call.spec.idempotent
-    ) {
+  private getBatchMode(call: PreparedSchedulableToolCall): "parallel" | "serial" {
+    if (call.spec.concurrencyClass === "read_parallel" && call.spec.idempotent) {
       return "parallel";
     }
-    if (
-      call.spec.concurrencyClass === "side_effect_parallel" &&
-      call.spec.idempotent
-    ) {
+    if (call.spec.concurrencyClass === "side_effect_parallel" && call.spec.idempotent) {
       return "parallel";
     }
     return "serial";
@@ -254,9 +243,7 @@ export class ToolScheduler {
     return true;
   }
 
-  private getScopeKeys(
-    call: PreparedSchedulableToolCall,
-  ): ToolExecutionScopeKey[] {
+  private getScopeKeys(call: PreparedSchedulableToolCall): ToolExecutionScopeKey[] {
     if (Array.isArray(call.scopeKeys)) {
       return call.scopeKeys;
     }
@@ -284,10 +271,7 @@ export class ToolScheduler {
     shouldContinue?: () => boolean,
   ): Promise<ToolScheduleRawExecutionOutcome[]> {
     const outcomes = new Array<ToolScheduleRawExecutionOutcome>(batch.calls.length);
-    const concurrency = Math.min(
-      Math.max(1, maxParallel || 1),
-      batch.calls.length,
-    );
+    const concurrency = Math.min(Math.max(1, maxParallel || 1), batch.calls.length);
     let cursor = 0;
 
     const worker = async () => {
@@ -297,10 +281,7 @@ export class ToolScheduler {
         if (nextIndex >= batch.calls.length) {
           break;
         }
-        outcomes[nextIndex] = await this.runCall(
-          batch.calls[nextIndex]!,
-          shouldContinue,
-        );
+        outcomes[nextIndex] = await this.runCall(batch.calls[nextIndex]!, shouldContinue);
       }
     };
 

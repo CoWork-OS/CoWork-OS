@@ -136,7 +136,13 @@ export function PresentationArtifactCard({
             fill="none"
             aria-hidden="true"
           >
-            <path d="M3.5 5.25L7 8.75L10.5 5.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d="M3.5 5.25L7 8.75L10.5 5.25"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         </button>
       </div>
@@ -147,9 +153,18 @@ export function PresentationArtifactCard({
             className="presentation-artifact-menu"
             ref={menuRef}
             role="menu"
-            style={{ position: "fixed", top: menuPosition.top, left: menuPosition.left, right: "auto" }}
+            style={{
+              position: "fixed",
+              top: menuPosition.top,
+              left: menuPosition.left,
+              right: "auto",
+            }}
           >
-            <button type="button" role="menuitem" onClick={() => handleOpenWithApp("Microsoft PowerPoint")}>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => handleOpenWithApp("Microsoft PowerPoint")}
+            >
               <span className="presentation-artifact-app-icon powerpoint">P</span>
               Microsoft PowerPoint
             </button>

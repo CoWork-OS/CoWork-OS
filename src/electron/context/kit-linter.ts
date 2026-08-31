@@ -28,7 +28,11 @@ export function isKitDocStale(doc: ParsedKitDoc, contract: KitContract, now = ne
   return ageDays > contract.freshnessDays;
 }
 
-export function lintKitDoc(doc: ParsedKitDoc, contract: KitContract, now = new Date()): KitLintIssue[] {
+export function lintKitDoc(
+  doc: ParsedKitDoc,
+  contract: KitContract,
+  now = new Date(),
+): KitLintIssue[] {
   const issues: KitLintIssue[] = [];
   const body = doc.body.toLowerCase();
 

@@ -33,10 +33,7 @@ describe("discord supervisor protocol parser", () => {
   });
 
   it("rejects messages without an allowed peer mention", () => {
-    const parsed = parseSupervisorProtocolMessage(
-      "<@333> [CW_STATUS_REQUEST]\nBad peer.",
-      config,
-    );
+    const parsed = parseSupervisorProtocolMessage("<@333> [CW_STATUS_REQUEST]\nBad peer.", config);
 
     expect(parsed).toBeNull();
   });

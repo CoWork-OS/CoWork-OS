@@ -6,11 +6,12 @@ export const MAX_QUOTED_ASSISTANT_MESSAGE_CHARS = 4000;
 export const MAX_QUOTED_ASSISTANT_PREVIEW_CHARS = 280;
 export const IMAGE_FILE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
 export const VIDEO_FILE_EXT_RE = /\.(mp4|webm)$/i;
-export type PermissionAccessMode = "default" | "full";
+export type PermissionAccessMode = import("../../../shared/access-profiles").AccessProfileId;
 export const HTML_FILE_EXT_RE = /\.html?$/i;
 export const SPREADSHEET_FILE_EXT_RE = /\.(xlsx?|xlsm|xlsb|csv|tsv|ods|numbers|gsheet)$/i;
 export const PRESENTATION_FILE_EXT_RE = /\.(pptx|ppt|pptm|potx|potm|ppsx|ppsm)$/i;
-export const DOCUMENT_PREVIEW_EXT_RE = /\.(pdf|docx|docm|dotx|dotm|doc|rtf|odt|ott|pages|md|markdown|tex|txt)$/i;
+export const DOCUMENT_PREVIEW_EXT_RE =
+  /\.(pdf|docx|docm|dotx|dotm|doc|rtf|odt|ott|pages|md|markdown|tex|txt)$/i;
 export const WELCOME_TASK_SUGGESTION_LIMIT = 5;
 export const WELCOME_SUGGESTION_TEXT_MAX = 96;
 export const TASK_FEED_MEASUREMENT_LAYOUT_VERSION = "diff-spacing-v2";

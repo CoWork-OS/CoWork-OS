@@ -111,9 +111,7 @@ export class MacOSCoreLocationProvider implements NativeLocationProvider {
     return this.platform === "darwin" && Boolean(this.resolveHelperTarget());
   }
 
-  async getCurrentLocation(
-    request: DesktopLocationRequest = {},
-  ): Promise<DesktopLocationSnapshot> {
+  async getCurrentLocation(request: DesktopLocationRequest = {}): Promise<DesktopLocationSnapshot> {
     if (this.platform !== "darwin") {
       throw new DesktopLocationError(
         "LOCATION_UNSUPPORTED_PLATFORM",
@@ -216,9 +214,7 @@ export class WindowsLocationProvider implements NativeLocationProvider {
     return this.platform === "win32" && Boolean(this.resolveHelperScript());
   }
 
-  async getCurrentLocation(
-    request: DesktopLocationRequest = {},
-  ): Promise<DesktopLocationSnapshot> {
+  async getCurrentLocation(request: DesktopLocationRequest = {}): Promise<DesktopLocationSnapshot> {
     if (this.platform !== "win32") {
       throw new DesktopLocationError(
         "LOCATION_UNSUPPORTED_PLATFORM",
@@ -285,9 +281,7 @@ export class WindowsLocationProvider implements NativeLocationProvider {
   }
 
   private resolveHelperScript(): string | null {
-    const candidates = this.helperPath
-      ? [this.helperPath]
-      : getWindowsLocationHelperCandidates();
+    const candidates = this.helperPath ? [this.helperPath] : getWindowsLocationHelperCandidates();
     for (const candidate of candidates) {
       if (this.existsSync(candidate)) return candidate;
     }
@@ -319,9 +313,7 @@ export class LinuxGeoClueProvider implements NativeLocationProvider {
     return this.platform === "linux" && Boolean(this.resolveHelperScript());
   }
 
-  async getCurrentLocation(
-    request: DesktopLocationRequest = {},
-  ): Promise<DesktopLocationSnapshot> {
+  async getCurrentLocation(request: DesktopLocationRequest = {}): Promise<DesktopLocationSnapshot> {
     if (this.platform !== "linux") {
       throw new DesktopLocationError(
         "LOCATION_UNSUPPORTED_PLATFORM",
@@ -383,9 +375,7 @@ export class LinuxGeoClueProvider implements NativeLocationProvider {
   }
 
   private resolveHelperScript(): string | null {
-    const candidates = this.helperPath
-      ? [this.helperPath]
-      : getLinuxLocationHelperCandidates();
+    const candidates = this.helperPath ? [this.helperPath] : getLinuxLocationHelperCandidates();
     for (const candidate of candidates) {
       if (this.existsSync(candidate)) return candidate;
     }
@@ -396,7 +386,9 @@ export class LinuxGeoClueProvider implements NativeLocationProvider {
 export class DesktopLocationService {
   private static instance: DesktopLocationService | null = null;
 
-  constructor(private readonly providers: NativeLocationProvider[] = createNativeLocationProviders()) {}
+  constructor(
+    private readonly providers: NativeLocationProvider[] = createNativeLocationProviders(),
+  ) {}
 
   static getInstance(): DesktopLocationService {
     if (!DesktopLocationService.instance) {
@@ -410,9 +402,7 @@ export class DesktopLocationService {
     // compatibility with the previous Electron geolocation implementation.
   }
 
-  async getCurrentLocation(
-    request: DesktopLocationRequest = {},
-  ): Promise<DesktopLocationSnapshot> {
+  async getCurrentLocation(request: DesktopLocationRequest = {}): Promise<DesktopLocationSnapshot> {
     for (const provider of this.providers) {
       if (!(await provider.isAvailable())) continue;
       return provider.getCurrentLocation(request);
@@ -449,9 +439,8 @@ function getNoProviderMessage(platform: NodeJS.Platform): string {
 }
 
 function getMacOSLocationHelperCandidates(): Array<{ kind: "app" | "executable"; path: string }> {
-  const resourcesPath = typeof (process as Any).resourcesPath === "string"
-    ? (process as Any).resourcesPath
-    : "";
+  const resourcesPath =
+    typeof (process as Any).resourcesPath === "string" ? (process as Any).resourcesPath : "";
   const relativeAppExecutable = path.join(
     LOCATION_HELPER_DIR,
     `${LOCATION_HELPER_EXECUTABLE}.app`,
@@ -472,17 +461,27 @@ function getMacOSLocationHelperCandidates(): Array<{ kind: "app" | "executable";
 
   candidates.push({
     kind: "app",
-    path: path.join(process.cwd(), "build", LOCATION_HELPER_DIR, `${LOCATION_HELPER_EXECUTABLE}.app`),
+    path: path.join(
+      process.cwd(),
+      "build",
+      LOCATION_HELPER_DIR,
+      `${LOCATION_HELPER_EXECUTABLE}.app`,
+    ),
   });
-  candidates.push({ kind: "executable", path: path.join(process.cwd(), "build", relativeExecutable) });
-  candidates.push({ kind: "executable", path: path.join(process.cwd(), "build", relativeAppExecutable) });
+  candidates.push({
+    kind: "executable",
+    path: path.join(process.cwd(), "build", relativeExecutable),
+  });
+  candidates.push({
+    kind: "executable",
+    path: path.join(process.cwd(), "build", relativeAppExecutable),
+  });
   return candidates;
 }
 
 function getWindowsLocationHelperCandidates(): string[] {
-  const resourcesPath = typeof (process as Any).resourcesPath === "string"
-    ? (process as Any).resourcesPath
-    : "";
+  const resourcesPath =
+    typeof (process as Any).resourcesPath === "string" ? (process as Any).resourcesPath : "";
   const dir = "location-helper-windows";
   const script = "Get-Location.ps1";
   const candidates: string[] = [];
@@ -494,9 +493,8 @@ function getWindowsLocationHelperCandidates(): string[] {
 }
 
 function getLinuxLocationHelperCandidates(): string[] {
-  const resourcesPath = typeof (process as Any).resourcesPath === "string"
-    ? (process as Any).resourcesPath
-    : "";
+  const resourcesPath =
+    typeof (process as Any).resourcesPath === "string" ? (process as Any).resourcesPath : "";
   const dir = "location-helper-linux";
   const script = "get-location.sh";
   const candidates: string[] = [];
@@ -543,7 +541,12 @@ function parseHelperSuccess(stdout: string, provider: string): DesktopLocationSn
 }
 
 function parseHelperError(error: unknown, provider: string): DesktopLocationError {
-  const maybeError = error as { stdout?: string; stderr?: string; killed?: boolean; signal?: string };
+  const maybeError = error as {
+    stdout?: string;
+    stderr?: string;
+    killed?: boolean;
+    signal?: string;
+  };
   if (maybeError?.stdout) {
     try {
       return helperEnvelopeError(parseHelperEnvelope(maybeError.stdout, provider), provider);
@@ -589,7 +592,10 @@ function parseHelperEnvelope(stdout: string, provider: string): LocationHelperEn
   }
 }
 
-function helperEnvelopeError(envelope: LocationHelperEnvelope, provider: string): DesktopLocationError {
+function helperEnvelopeError(
+  envelope: LocationHelperEnvelope,
+  provider: string,
+): DesktopLocationError {
   const code = normalizeLocationErrorCode(envelope.error?.code);
   return new DesktopLocationError(
     code,

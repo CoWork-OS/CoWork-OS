@@ -44,69 +44,63 @@ export function setupQAHandlers(mainWindow: BrowserWindow, agentDaemon: AgentDae
   });
 
   // Get a specific QA run by ID
-  ipcMain.handle(
-    IPC_CHANNELS.QA_GET_RUN,
-    async (_, runId: string): Promise<QARun | null> => {
-      // Check active services
-      for (const service of activeQAServices.values()) {
-        const run = service.getCurrentRun();
-        if (run?.id === runId) return run;
-      }
-      // Check completed runs
-      return completedRuns.find((r) => r.id === runId) || null;
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.QA_GET_RUN, async (_, runId: string): Promise<QARun | null> => {
+    // Check active services
+    for (const service of activeQAServices.values()) {
+      const run = service.getCurrentRun();
+      if (run?.id === runId) return run;
+    }
+    // Check completed runs
+    return completedRuns.find((r) => r.id === runId) || null;
+  });
 
   // Start a new QA run
-  ipcMain.handle(
-    IPC_CHANNELS.QA_START_RUN,
-    async (_, data: unknown): Promise<QARun> => {
-      checkRateLimit(IPC_CHANNELS.QA_START_RUN);
-      const validated = validateInput(QAStartRunSchema, data, "QA start run");
-      const workspace = (agentDaemon as Any).getWorkspaceById?.(validated.workspaceId);
-      if (!workspace) {
-        throw new Error(`Workspace ${validated.workspaceId} not found`);
-      }
+  ipcMain.handle(IPC_CHANNELS.QA_START_RUN, async (_, data: unknown): Promise<QARun> => {
+    checkRateLimit(IPC_CHANNELS.QA_START_RUN);
+    const validated = validateInput(QAStartRunSchema, data, "QA start run");
+    const workspace = (agentDaemon as Any).getWorkspaceById?.(validated.workspaceId);
+    if (!workspace) {
+      throw new Error(`Workspace ${validated.workspaceId} not found`);
+    }
 
-      // Clean up existing service for this task if any
-      const existing = activeQAServices.get(validated.taskId);
-      if (existing) {
-        await existing.cleanup();
-      }
+    // Clean up existing service for this task if any
+    const existing = activeQAServices.get(validated.taskId);
+    if (existing) {
+      await existing.cleanup();
+    }
 
-      const service = new PlaywrightQAService(workspace);
+    const service = new PlaywrightQAService(workspace);
 
-      // Forward events to renderer
-      service.onEvent((event: QAEvent) => {
-        try {
-          mainWindow.webContents.send(IPC_CHANNELS.QA_EVENT, event);
-        } catch {
-          // Window may be closed
-        }
-      });
-
-      activeQAServices.set(validated.taskId, service);
-
+    // Forward events to renderer
+    service.onEvent((event: QAEvent) => {
       try {
-        const runConfig = validated.config
-          ? {
-              ...validated.config,
-              enabledChecks: validated.config.enabledChecks as QACheckType[] | undefined,
-            }
-          : {};
-        const run = await service.run(validated.taskId, runConfig);
-        // Move to completed
-        completedRuns.unshift(run);
-        if (completedRuns.length > MAX_COMPLETED_RUNS) {
-          completedRuns.pop();
-        }
-        return run;
-      } finally {
-        await service.cleanup();
-        activeQAServices.delete(validated.taskId);
+        mainWindow.webContents.send(IPC_CHANNELS.QA_EVENT, event);
+      } catch {
+        // Window may be closed
       }
-    },
-  );
+    });
+
+    activeQAServices.set(validated.taskId, service);
+
+    try {
+      const runConfig = validated.config
+        ? {
+            ...validated.config,
+            enabledChecks: validated.config.enabledChecks as QACheckType[] | undefined,
+          }
+        : {};
+      const run = await service.run(validated.taskId, runConfig);
+      // Move to completed
+      completedRuns.unshift(run);
+      if (completedRuns.length > MAX_COMPLETED_RUNS) {
+        completedRuns.pop();
+      }
+      return run;
+    } finally {
+      await service.cleanup();
+      activeQAServices.delete(validated.taskId);
+    }
+  });
 
   // Stop a QA run
   ipcMain.handle(

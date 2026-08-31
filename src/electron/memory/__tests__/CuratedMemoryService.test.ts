@@ -13,7 +13,9 @@ async function createWorkspace(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(createdDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    createdDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
   (CuratedMemoryService as Any).initialized = false;
 });
 

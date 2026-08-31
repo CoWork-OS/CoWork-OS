@@ -6,6 +6,7 @@ import {
   SearchResult,
   SearchType,
 } from "./types";
+import { assertNetworkPolicyAllowed } from "../../security/network-policy";
 
 /**
  * Brave Search API provider
@@ -36,6 +37,14 @@ export class BraveProvider implements SearchProvider {
     }
 
     const endpoint = this.getEndpoint(searchType);
+    const endpointUrl = `${this.baseUrl}/${endpoint}`;
+    assertNetworkPolicyAllowed({
+      url: endpointUrl,
+      toolName: "web_search",
+      networkEnabled: query.networkEnabled,
+      accessNetworkMode: query.accessNetworkMode,
+      profileDomainRules: query.profileDomainRules,
+    });
     const params = new URLSearchParams({
       q: query.query,
       count: String(query.maxResults || 10),
@@ -47,7 +56,7 @@ export class BraveProvider implements SearchProvider {
       ...(query.dateRange && { freshness: this.mapDateRange(query.dateRange) }),
     });
 
-    const response = await fetch(`${this.baseUrl}/${endpoint}?${params}`, {
+    const response = await fetch(`${endpointUrl}?${params}`, {
       headers: {
         Accept: "application/json",
         "X-Subscription-Token": this.apiKey,

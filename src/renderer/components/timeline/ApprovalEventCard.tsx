@@ -61,7 +61,9 @@ export function ApprovalEventCard({
           onClick={() => setExpanded((v) => !v)}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded((v) => !v); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") setExpanded((v) => !v);
+          }}
         >
           <div className="event-header-left">
             <svg

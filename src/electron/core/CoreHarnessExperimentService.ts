@@ -58,7 +58,11 @@ export class CoreHarnessExperimentService {
   private buildProposal(
     cluster: CoreFailureCluster,
     profile: AutomationProfile,
-  ): { changeKind: CoreExperimentChangeKind; proposal: Record<string, unknown>; summary: string } | null {
+  ): {
+    changeKind: CoreExperimentChangeKind;
+    proposal: Record<string, unknown>;
+    summary: string;
+  } | null {
     switch (cluster.category) {
       case "wake_timing":
       case "cooldown_policy_mismatch":
@@ -97,7 +101,8 @@ export class CoreHarnessExperimentService {
             autonomyMode: "recommendation_first",
             maxHypothesesPerRun: Math.max(3, Math.min(settings.maxHypothesesPerRun, 3)),
           },
-          summary: "Bias subconscious decisions toward recommendation-first mode for lower-risk outputs.",
+          summary:
+            "Bias subconscious decisions toward recommendation-first mode for lower-risk outputs.",
         };
       }
       case "subconscious_duplication": {
@@ -111,7 +116,8 @@ export class CoreHarnessExperimentService {
               autoDispatch: false,
             },
           },
-          summary: "Reduce duplicate subconscious actions by lowering fan-out and preferring explicit review.",
+          summary:
+            "Reduce duplicate subconscious actions by lowering fan-out and preferring explicit review.",
         };
       }
       case "memory_noise":
@@ -122,7 +128,8 @@ export class CoreHarnessExperimentService {
             reviewOnly: true,
             category: cluster.category,
           },
-          summary: "Memory-policy issue detected; this requires review-only handling in the current phase.",
+          summary:
+            "Memory-policy issue detected; this requires review-only handling in the current phase.",
         };
       default:
         return null;

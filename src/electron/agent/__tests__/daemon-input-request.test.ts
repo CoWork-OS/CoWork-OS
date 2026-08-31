@@ -11,7 +11,9 @@ function createInMemoryInputRequestRepo(requestId: string) {
       return created;
     }),
     findPendingByTaskId: vi.fn((taskId: string) =>
-      Array.from(store.values()).filter((item) => item.taskId === taskId && item.status === "pending"),
+      Array.from(store.values()).filter(
+        (item) => item.taskId === taskId && item.status === "pending",
+      ),
     ),
     findById: vi.fn((id: string) => store.get(id)),
     resolve: vi.fn((id: string, status: "submitted" | "dismissed", answers?: Any) => {
@@ -33,9 +35,7 @@ describe("AgentDaemon structured input requests", () => {
   it("creates a pending input request and resolves it on submit", async () => {
     const repo = createInMemoryInputRequestRepo("req-submit-1");
     const taskRepo = {
-      findById: vi
-        .fn()
-        .mockReturnValue({ id: "task-1", status: "paused" } satisfies Partial<Task>),
+      findById: vi.fn().mockReturnValue({ id: "task-1", status: "paused" } satisfies Partial<Task>),
     };
     const daemonLike = {
       inputRequestRepo: repo,
@@ -60,7 +60,11 @@ describe("AgentDaemon structured input requests", () => {
       ],
     });
 
-    expect(daemonLike.updateTask).toHaveBeenCalledWith("task-1", { status: "paused", terminalStatus: "needs_user_action", failureClass: undefined });
+    expect(daemonLike.updateTask).toHaveBeenCalledWith("task-1", {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+      failureClass: undefined,
+    });
     expect(repo.create).toHaveBeenCalled();
 
     const response = await AgentDaemon.prototype.respondToInputRequest.call(daemonLike, {
@@ -92,9 +96,7 @@ describe("AgentDaemon structured input requests", () => {
   it("rejects the waiting promise when input request is dismissed", async () => {
     const repo = createInMemoryInputRequestRepo("req-dismiss-1");
     const taskRepo = {
-      findById: vi
-        .fn()
-        .mockReturnValue({ id: "task-2", status: "paused" } satisfies Partial<Task>),
+      findById: vi.fn().mockReturnValue({ id: "task-2", status: "paused" } satisfies Partial<Task>),
     };
     const daemonLike = {
       inputRequestRepo: repo,
@@ -174,7 +176,11 @@ describe("AgentDaemon structured input requests", () => {
       }),
     );
     expect(daemonLike.updateTask).toHaveBeenCalledTimes(1);
-    expect(daemonLike.updateTask).toHaveBeenCalledWith("task-3", { status: "paused", terminalStatus: "needs_user_action", failureClass: undefined });
+    expect(daemonLike.updateTask).toHaveBeenCalledWith("task-3", {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+      failureClass: undefined,
+    });
     expect(daemonLike.sendMessage).not.toHaveBeenCalled();
     await expect(requestPromise).rejects.toThrow(/already terminal/i);
   });

@@ -4,6 +4,11 @@ Digital Twin Personas are pre-built AI agent templates that create role-specific
 
 A persona template now bundles prompt/personality defaults, recommended skills, display metadata, and cognitive offload categories. Activating a template creates a fully configured role preset in one click, but it does not automatically enroll that role into the always-on core runtime.
 
+Persona templates are not permission grants. The role's task runs use the
+selected or inherited [access profile](access-profiles.md); recommended skills,
+autonomy labels, and template capabilities can narrow or describe work but
+cannot widen command-tool, filesystem, network, domain, or sandbox access.
+
 Access from **Settings** > **Digital Twins** or **Mission Control** > **Add Digital Twin**. For company-ops workflows, you can also open Digital Twins from **Settings** > **Companies** to create operators in company context. Digital twins can also be activated through [Plugin Packs](plugin-packs.md) when a pack links directly to a persona template.
 
 <p align="center">

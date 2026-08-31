@@ -1,4 +1,13 @@
-import { memo, useState, useEffect, useMemo, useRef, useCallback, useDeferredValue, type ComponentType } from "react";
+import {
+  memo,
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  useCallback,
+  useDeferredValue,
+  type ComponentType,
+} from "react";
 import {
   Task,
   Workspace,
@@ -80,6 +89,7 @@ import {
 } from "lucide-react";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { measureRendererPerf, recordRendererRender } from "../utils/renderer-perf";
+import { SessionProgressCard } from "./SessionProgressCard";
 import "./right-panel.css";
 
 /**
@@ -192,7 +202,18 @@ const TEXT_FILE_EXTENSIONS = new Set([
   "txt",
 ]);
 const SPREADSHEET_FILE_EXTENSIONS = new Set(["numbers", "ods", "tsv", "xls", "xlsm", "xlsx"]);
-const IMAGE_FILE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "ico", "jpg", "jpeg", "png", "svg", "webp"]);
+const IMAGE_FILE_EXTENSIONS = new Set([
+  "avif",
+  "bmp",
+  "gif",
+  "heic",
+  "ico",
+  "jpg",
+  "jpeg",
+  "png",
+  "svg",
+  "webp",
+]);
 const PRESENTATION_FILE_EXTENSIONS = new Set(["key", "odp", "potx", "ppsx", "ppt", "pptm", "pptx"]);
 const VIDEO_FILE_EXTENSIONS = new Set(["avi", "m4v", "mov", "mp4", "mpeg", "mpg", "webm"]);
 const AUDIO_FILE_EXTENSIONS = new Set(["aac", "flac", "m4a", "mp3", "ogg", "wav"]);
@@ -210,9 +231,11 @@ function getFileTypeIcon(path: string): { Icon: ComponentType<LucideProps>; labe
   if (path.endsWith("/") || path.endsWith("\\")) return { Icon: FolderOpen, label: "Folder" };
   const extension = getFileExtension(path);
   if (extension === "json" || extension === "jsonl") return { Icon: Braces, label: "JSON file" };
-  if (SPREADSHEET_FILE_EXTENSIONS.has(extension)) return { Icon: FileSpreadsheet, label: "Spreadsheet file" };
+  if (SPREADSHEET_FILE_EXTENSIONS.has(extension))
+    return { Icon: FileSpreadsheet, label: "Spreadsheet file" };
   if (IMAGE_FILE_EXTENSIONS.has(extension)) return { Icon: FileImage, label: "Image file" };
-  if (PRESENTATION_FILE_EXTENSIONS.has(extension)) return { Icon: Presentation, label: "Presentation file" };
+  if (PRESENTATION_FILE_EXTENSIONS.has(extension))
+    return { Icon: Presentation, label: "Presentation file" };
   if (VIDEO_FILE_EXTENSIONS.has(extension)) return { Icon: Film, label: "Video file" };
   if (AUDIO_FILE_EXTENSIONS.has(extension)) return { Icon: Music, label: "Audio file" };
   if (ARCHIVE_FILE_EXTENSIONS.has(extension)) return { Icon: Archive, label: "Archive file" };
@@ -235,13 +258,17 @@ function humanizeStepDescription(description: string): string {
   );
   if (useSkillMatch) {
     const skillId = useSkillMatch[1];
-    const skillName = skillId
-      .replace(/[-_]/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
+    const skillName = skillId.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
     // Append any meaningful context after the skill ID match
-    const rest = description.slice(description.indexOf(useSkillMatch[0]) + useSkillMatch[0].length).trim();
-    const suffix = rest.replace(/^[^a-zA-Z]*/, "").split(/[.]/)[0].trim();
-    const humanized = suffix.length > 4 ? `Run the ${skillName} skill — ${suffix}` : `Run the ${skillName} skill`;
+    const rest = description
+      .slice(description.indexOf(useSkillMatch[0]) + useSkillMatch[0].length)
+      .trim();
+    const suffix = rest
+      .replace(/^[^a-zA-Z]*/, "")
+      .split(/[.]/)[0]
+      .trim();
+    const humanized =
+      suffix.length > 4 ? `Run the ${skillName} skill — ${suffix}` : `Run the ${skillName} skill`;
     return stripInlineMarkdownFormatting(humanized);
   }
 
@@ -365,10 +392,7 @@ function getCollaborativeAgentStatusKind(task: Task): CollaborativeAgentStatusKi
   return "pending";
 }
 
-function getCollaborativeAgentStatusLabel(
-  kind: CollaborativeAgentStatusKind,
-  task: Task,
-): string {
+function getCollaborativeAgentStatusLabel(kind: CollaborativeAgentStatusKind, task: Task): string {
   if (kind === "completed") return "Done";
   if (kind === "failed") return task.status === "cancelled" ? "Cancelled" : "Failed";
   if (kind === "warning") return "Needs review";
@@ -420,8 +444,11 @@ function getCollaborativeAgentTotals(
         statusKind,
         statusLabel: getCollaborativeAgentStatusLabel(statusKind, task),
         eventCount: taskEvents.length,
-        toolCallCount: taskEvents.filter((event) => getEffectiveTaskEventType(event) === "tool_call").length,
-        llmCallCount: taskEvents.filter((event) => getEffectiveTaskEventType(event) === "llm_usage").length,
+        toolCallCount: taskEvents.filter(
+          (event) => getEffectiveTaskEventType(event) === "tool_call",
+        ).length,
+        llmCallCount: taskEvents.filter((event) => getEffectiveTaskEventType(event) === "llm_usage")
+          .length,
         usage,
         durationMs: Math.max(0, endMs - task.createdAt),
       };
@@ -706,7 +733,10 @@ function getConnectorsSignature(
   connectors: { id: string; name: string; icon: string; status: string; tools: string[] }[],
 ): string {
   return connectors
-    .map((connector) => `${connector.id}:${connector.status}:${connector.name}:${connector.tools.join(",")}`)
+    .map(
+      (connector) =>
+        `${connector.id}:${connector.status}:${connector.name}:${connector.tools.join(",")}`,
+    )
     .join("|");
 }
 
@@ -742,850 +772,895 @@ function useStableSnapshotBySignature<T>(value: T, signature: string): T {
   return snapshotRef.current.value;
 }
 
-const ProgressSectionContent = memo(function ProgressSectionContent({
-  expanded,
-  planSteps,
-  taskStatus,
-  taskTerminalStatus,
-  hasActiveChildren,
-  emptyHintText,
-  fallbackActivityText,
-  rendererPerfLoggingEnabled,
-  getStatusIndicator,
-}: {
-  expanded: boolean;
-  planSteps: PlanStep[];
-  taskStatus?: Task["status"];
-  taskTerminalStatus?: Task["terminalStatus"];
-  hasActiveChildren: boolean;
-  emptyHintText: string;
-  fallbackActivityText: string | null;
-  rendererPerfLoggingEnabled: boolean;
-  getStatusIndicator: (status: string) => React.ReactNode;
-}) {
-  recordRendererRender("RightPanel.section", "progress", rendererPerfLoggingEnabled);
-  if (!expanded) return null;
-  const visiblePlanSteps = getVisibleProgressSteps(planSteps);
-  return (
-    <div className="cli-section-content">
-      {planSteps.length > 0 ? (
-        <div className="cli-progress-list">
-          {visiblePlanSteps.map((step, index) => {
-            const displayDescription =
-              step.isOverflow
+const ProgressSectionContent = memo(
+  function ProgressSectionContent({
+    expanded,
+    planSteps,
+    taskStatus,
+    taskTerminalStatus,
+    hasActiveChildren,
+    emptyHintText,
+    fallbackActivityText,
+    rendererPerfLoggingEnabled,
+    getStatusIndicator,
+  }: {
+    expanded: boolean;
+    planSteps: PlanStep[];
+    taskStatus?: Task["status"];
+    taskTerminalStatus?: Task["terminalStatus"];
+    hasActiveChildren: boolean;
+    emptyHintText: string;
+    fallbackActivityText: string | null;
+    rendererPerfLoggingEnabled: boolean;
+    getStatusIndicator: (status: string) => React.ReactNode;
+  }) {
+    recordRendererRender("RightPanel.section", "progress", rendererPerfLoggingEnabled);
+    if (!expanded) return null;
+    const visiblePlanSteps = getVisibleProgressSteps(planSteps);
+    return (
+      <div className="cli-section-content">
+        {planSteps.length > 0 ? (
+          <div className="cli-progress-list">
+            {visiblePlanSteps.map((step, index) => {
+              const displayDescription = step.isOverflow
                 ? step.hiddenLabel || step.description
                 : humanizeStepDescription(step.description) || `Step ${index + 1}`;
-            return (
-              <div
-                key={step.id || index}
-                className={`cli-progress-item ${step.status}${step.isOverflow ? " compact-overflow" : ""}`}
-              >
-                <span className="cli-progress-num">
-                  {step.isOverflow ? "…" : String(index + 1).padStart(2, "0")}
-                </span>
-                <span className={`cli-progress-status ${step.status}`}>
-                  {step.isOverflow ? "…" : getStatusIndicator(step.status)}
-                </span>
-                <span className="cli-progress-text" title={displayDescription}>
-                  {displayDescription}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="cli-empty-state">
-          <div
-            className={`cli-status-badge ${(taskStatus === "executing" || (taskStatus === "completed" && hasActiveChildren)) ? "active" : taskStatus === "paused" ? "paused" : taskStatus === "blocked" ? "blocked" : taskStatus === "completed" ? "completed" : ""}`}
-          >
-            <span className="terminal-only">
-              {(taskStatus === "executing" || (taskStatus === "completed" && hasActiveChildren))
-                ? "◉ WORKING..."
-                : taskStatus === "paused"
-                  ? "⏸ WAITING"
-                  : taskStatus === "blocked"
-                    ? "! NEEDS YOUR GO-AHEAD"
-                    : taskStatus === "completed"
-                      ? taskTerminalStatus === "needs_user_action"
-                        ? "⚠ ACTION REQUIRED"
-                        : "✓ ALL DONE"
-                      : "○ READY"}
-            </span>
-            <span className="modern-only">
-              {(taskStatus === "executing" || (taskStatus === "completed" && hasActiveChildren))
-                ? "Working..."
-                : taskStatus === "paused"
-                  ? "Waiting for your cue"
-                  : taskStatus === "blocked"
-                    ? "Needs your go-ahead"
-                    : taskStatus === "completed"
-                      ? taskTerminalStatus === "needs_user_action"
-                        ? "Completed - action required"
-                        : "All done"
-                      : "Ready"}
-            </span>
-          </div>
-          <p className="cli-hint">
-            <span className="terminal-only">{fallbackActivityText || emptyHintText}</span>
-            <span className="modern-only">
-              {fallbackActivityText ||
-                (hasActiveChildren ? "Sub-task is still working..." : "Standing by when you are ready.")}
-            </span>
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}, (prev, next) =>
-  prev.expanded === next.expanded &&
-  getPlanStepsSignature(prev.planSteps) === getPlanStepsSignature(next.planSteps) &&
-  prev.taskStatus === next.taskStatus &&
-  prev.taskTerminalStatus === next.taskTerminalStatus &&
-  prev.hasActiveChildren === next.hasActiveChildren &&
-  prev.emptyHintText === next.emptyHintText &&
-  prev.fallbackActivityText === next.fallbackActivityText &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled
-);
-
-const QueueSectionContent = memo(function QueueSectionContent({
-  expanded,
-  runningTasks,
-  queuedTasks,
-  activeLabel,
-  nextLabel,
-  onSelectTask,
-  onCancelTask,
-  rendererPerfLoggingEnabled,
-}: {
-  expanded: boolean;
-  runningTasks: Task[];
-  queuedTasks: Task[];
-  activeLabel: string;
-  nextLabel: string;
-  onSelectTask?: (taskId: string) => void;
-  onCancelTask?: (taskId: string) => void;
-  rendererPerfLoggingEnabled: boolean;
-}) {
-  recordRendererRender("RightPanel.section", "queue", rendererPerfLoggingEnabled);
-  if (!expanded) return null;
-  return (
-    <div className="cli-section-content">
-      {runningTasks.length > 0 && (
-        <div className="cli-queue-group">
-          <div className="cli-context-label">
-            <span className="terminal-only">{activeLabel}</span>
-            <span className="modern-only">Active</span>
-          </div>
-          {runningTasks.map((t) => (
-            <div key={t.id} className="cli-queue-item running">
-              <span className="cli-queue-status">
-                <span className="terminal-only">[~]</span>
-                <span className="modern-only">
-                  <span className="queue-status-dot running" />
-                </span>
-              </span>
-              <span className="cli-queue-title" onClick={() => onSelectTask?.(t.id)}>
-                {t.title || t.prompt}
-              </span>
-              <button className="cli-queue-cancel" onClick={() => onCancelTask?.(t.id)} title="Cancel">
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      {queuedTasks.length > 0 && (
-        <div className="cli-queue-group">
-          <div className="cli-context-label">
-            <span className="terminal-only">{nextLabel}</span>
-            <span className="modern-only">Up next</span>
-          </div>
-          {queuedTasks.map((t, i) => (
-            <div key={t.id} className="cli-queue-item queued">
-              <span className="cli-queue-status">
-                <span className="terminal-only">[{i + 1}]</span>
-                <span className="modern-only">
-                  <span className="queue-status-pill">{i + 1}</span>
-                </span>
-              </span>
-              <span className="cli-queue-title" onClick={() => onSelectTask?.(t.id)}>
-                {t.title || t.prompt}
-              </span>
-              <button className="cli-queue-cancel" onClick={() => onCancelTask?.(t.id)} title="Cancel">
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}, (prev, next) =>
-  prev.expanded === next.expanded &&
-  getTaskListSignature(prev.runningTasks) === getTaskListSignature(next.runningTasks) &&
-  getTaskListSignature(prev.queuedTasks) === getTaskListSignature(next.queuedTasks) &&
-  prev.activeLabel === next.activeLabel &&
-  prev.nextLabel === next.nextLabel &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled
-);
-
-const ProgressSection = memo(function ProgressSection({
-  expanded,
-  planSteps,
-  taskStatus,
-  taskTerminalStatus,
-  hasActiveChildren,
-  progressTitleText,
-  emptyHintText,
-  fallbackActivityText,
-  toggleSection,
-  rendererPerfLoggingEnabled,
-  getStatusIndicator,
-}: {
-  expanded: boolean;
-  planSteps: PlanStep[];
-  taskStatus?: Task["status"];
-  taskTerminalStatus?: Task["terminalStatus"];
-  hasActiveChildren: boolean;
-  progressTitleText: string;
-  emptyHintText: string;
-  fallbackActivityText: string | null;
-  toggleSection: () => void;
-  rendererPerfLoggingEnabled: boolean;
-  getStatusIndicator: (status: string) => React.ReactNode;
-}) {
-  return (
-    <div className="right-panel-section cli-section">
-      <button
-        type="button"
-        className="cli-section-header"
-        onClick={toggleSection}
-        aria-expanded={expanded}
-      >
-        <span className="cli-section-prompt">&gt;</span>
-        <span className="cli-section-title">
-          <span className="terminal-only">{progressTitleText}</span>
-          <span className="modern-only">Progress</span>
-        </span>
-        <span className="cli-section-toggle">
-          <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-          <span className="modern-only">{expanded ? "−" : "+"}</span>
-        </span>
-      </button>
-      <ProgressSectionContent
-        expanded={expanded}
-        planSteps={planSteps}
-        taskStatus={taskStatus}
-        taskTerminalStatus={taskTerminalStatus}
-        hasActiveChildren={hasActiveChildren}
-        emptyHintText={emptyHintText}
-        fallbackActivityText={fallbackActivityText}
-        rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-        getStatusIndicator={getStatusIndicator}
-      />
-    </div>
-  );
-}, (prev, next) =>
-  getProgressSectionMaterialSignature({
-    expanded: prev.expanded,
-    planSteps: prev.planSteps,
-    taskStatus: prev.taskStatus,
-    taskTerminalStatus: prev.taskTerminalStatus,
-    hasActiveChildren: prev.hasActiveChildren,
-    emptyHintText: prev.emptyHintText,
-  }) ===
-    getProgressSectionMaterialSignature({
-      expanded: next.expanded,
-      planSteps: next.planSteps,
-      taskStatus: next.taskStatus,
-      taskTerminalStatus: next.taskTerminalStatus,
-      hasActiveChildren: next.hasActiveChildren,
-      emptyHintText: next.emptyHintText,
-    }) &&
-  prev.progressTitleText === next.progressTitleText &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled
-);
-
-const QueueSection = memo(function QueueSection({
-  visible,
-  expanded,
-  runningTasks,
-  queuedTasks,
-  queueBadgeText,
-  queueTitleText,
-  activeLabel,
-  nextLabel,
-  toggleSection,
-  onSelectTask,
-  onCancelTask,
-  rendererPerfLoggingEnabled,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  runningTasks: Task[];
-  queuedTasks: Task[];
-  queueBadgeText: string;
-  queueTitleText: string;
-  activeLabel: string;
-  nextLabel: string;
-  toggleSection: () => void;
-  onSelectTask?: (taskId: string) => void;
-  onCancelTask?: (taskId: string) => void;
-  rendererPerfLoggingEnabled: boolean;
-}) {
-  if (!visible) return null;
-  return (
-    <div className="right-panel-section cli-section">
-      <button
-        type="button"
-        className="cli-section-header"
-        onClick={toggleSection}
-        aria-expanded={expanded}
-      >
-        <span className="cli-section-prompt">&gt;</span>
-        <span className="cli-section-title">
-          <span className="terminal-only">{queueTitleText}</span>
-          <span className="modern-only">Queue</span>
-        </span>
-        <span className="cli-queue-badge">{queueBadgeText}</span>
-        <span className="cli-section-toggle">
-          <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-          <span className="modern-only">{expanded ? "−" : "+"}</span>
-        </span>
-      </button>
-      <QueueSectionContent
-        expanded={expanded}
-        runningTasks={runningTasks}
-        queuedTasks={queuedTasks}
-        activeLabel={activeLabel}
-        nextLabel={nextLabel}
-        onSelectTask={onSelectTask}
-        onCancelTask={onCancelTask}
-        rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-      />
-    </div>
-  );
-}, (prev, next) =>
-  prev.visible === next.visible &&
-  prev.queueBadgeText === next.queueBadgeText &&
-  prev.queueTitleText === next.queueTitleText &&
-  getQueueSectionMaterialSignature({
-    expanded: prev.expanded,
-    runningTasks: prev.runningTasks,
-    queuedTasks: prev.queuedTasks,
-    activeLabel: prev.activeLabel,
-    nextLabel: prev.nextLabel,
-  }) ===
-    getQueueSectionMaterialSignature({
-      expanded: next.expanded,
-      runningTasks: next.runningTasks,
-      queuedTasks: next.queuedTasks,
-      activeLabel: next.activeLabel,
-      nextLabel: next.nextLabel,
-    }) &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled
-);
-
-const ChecklistSection = memo(function ChecklistSection({
-  visible,
-  expanded,
-  checklistState,
-  toggleSection,
-  rendererPerfLoggingEnabled,
-  getStatusIndicator,
-  getChecklistStatusLabel,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  checklistState: SessionChecklistState | null;
-  toggleSection: () => void;
-  rendererPerfLoggingEnabled: boolean;
-  getStatusIndicator: (status: string) => React.ReactNode;
-  getChecklistStatusLabel: (status: string) => string;
-}) {
-  if (!visible || !checklistState) return null;
-  recordRendererRender("RightPanel.section", "checklist", rendererPerfLoggingEnabled);
-  return (
-    <div className="right-panel-section cli-section">
-      <button
-        type="button"
-        className="cli-section-header"
-        onClick={toggleSection}
-        aria-expanded={expanded}
-      >
-        <span className="cli-section-prompt">&gt;</span>
-        <span className="cli-section-title">
-          <span className="terminal-only">CHECKLIST</span>
-          <span className="modern-only">Checklist</span>
-        </span>
-        <span className="cli-section-toggle">
-          <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-          <span className="modern-only">{expanded ? "−" : "+"}</span>
-        </span>
-      </button>
-      {expanded && (
-        <div className="cli-section-content">
-          <div className="cli-progress-list">
-            {checklistState.items.map((item, index) => (
-              <div key={item.id} className={`cli-progress-item ${item.status}`}>
-                <span className="cli-progress-num">{String(index + 1).padStart(2, "0")}</span>
-                <span
-                  className={`cli-progress-status ${item.status === "blocked" ? "failed" : item.status}`}
-                >
-                  {getStatusIndicator(item.status === "blocked" ? "failed" : item.status)}
-                </span>
-                <span className="cli-progress-text" title={item.title}>
-                  {item.title}
-                  {item.kind === "verification" ? " [Verification]" : ""}
-                </span>
-                <span className="cli-context-key">{getChecklistStatusLabel(item.status)}</span>
-              </div>
-            ))}
-          </div>
-          {checklistState.verificationNudgeNeeded && (
-            <p className="cli-hint">
-              <span className="terminal-only">
-                {checklistState.nudgeReason || "Add and run a verification checklist item before finishing."}
-              </span>
-              <span className="modern-only">
-                {checklistState.nudgeReason || "Add and run a verification checklist item before finishing."}
-              </span>
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}, (prev, next) =>
-  prev.visible === next.visible &&
-  prev.expanded === next.expanded &&
-  getChecklistSignature(prev.checklistState) === getChecklistSignature(next.checklistState) &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled
-);
-
-const FolderSection = memo(function FolderSection({
-  visible,
-  expanded,
-  files,
-  outputSummary,
-  highlightedOutputPath,
-  workspace,
-  filesTitleText,
-  toggleSection,
-  fileItemRefs,
-  onOpenFile,
-  rendererPerfLoggingEnabled,
-  getFileActionSymbol,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  files: FileInfo[];
-  outputSummary: ReturnType<typeof deriveTaskOutputSummaryFromEvents> | null;
-  highlightedOutputPath: string | null;
-  workspace: Workspace | null;
-  filesTitleText: string;
-  toggleSection: () => void;
-  fileItemRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
-  onOpenFile: (path: string) => void;
-  rendererPerfLoggingEnabled: boolean;
-  getFileActionSymbol: (action: FileInfo["action"]) => string;
-}) {
-  if (!visible) return null;
-  recordRendererRender("RightPanel.section", "folder", rendererPerfLoggingEnabled);
-  const fileCount = files.length || outputSummary?.outputCount || 0;
-  const fileCountLabel = `${fileCount} file${fileCount === 1 ? "" : "s"}`;
-  return (
-    <div className="right-panel-section cli-section">
-      <button
-        type="button"
-        className="cli-section-header"
-        onClick={toggleSection}
-        aria-expanded={expanded}
-      >
-        <span className="cli-section-prompt">&gt;</span>
-        <span className="cli-section-title">
-          <span className="terminal-only">{filesTitleText}</span>
-          <span className="modern-only">Files</span>
-        </span>
-        {fileCount > 0 && (
-          <span
-            className="cli-output-count-badge cli-file-count-badge"
-            aria-label={fileCountLabel}
-            title={fileCountLabel}
-          >
-            <span className="cli-file-count-number">{fileCount}</span>
-          </span>
-        )}
-        <span className="cli-section-toggle">
-          <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-          <span className="modern-only">{expanded ? "−" : "+"}</span>
-        </span>
-      </button>
-      {expanded && (
-        <div className="cli-section-content">
-          <div className="cli-file-list">
-            {files.map((file, index) => {
-              const { Icon, label } = getFileTypeIcon(file.path);
               return (
                 <div
-                  key={`${file.path}-${index}`}
-                  ref={(el) => {
-                    fileItemRefs.current.set(file.path, el);
-                  }}
-                  className={`cli-file-item ${file.action} ${outputSummary?.primaryOutputPath === file.path ? "primary-output" : ""} ${highlightedOutputPath === file.path ? "highlight-output" : ""}`}
+                  key={step.id || index}
+                  className={`cli-progress-item ${step.status}${step.isOverflow ? " compact-overflow" : ""}`}
                 >
-                  <span className={`cli-file-action ${file.action}`}>
-                    <span className="terminal-only">{getFileActionSymbol(file.action)}</span>
-                    <span className="modern-only cli-file-type-icon" aria-label={label} title={label}>
-                      <Icon size={16} strokeWidth={2.15} aria-hidden="true" />
-                    </span>
+                  <span className="cli-progress-num">
+                    {step.isOverflow ? "…" : String(index + 1).padStart(2, "0")}
                   </span>
-                  <ClickableFilePath
-                    path={file.path}
-                    workspacePath={workspace?.path}
-                    className="cli-file-name"
-                    onOpenViewer={onOpenFile}
-                  />
+                  <span className={`cli-progress-status ${step.status}`}>
+                    {step.isOverflow ? "…" : getStatusIndicator(step.status)}
+                  </span>
+                  <span className="cli-progress-text" title={displayDescription}>
+                    {displayDescription}
+                  </span>
                 </div>
               );
             })}
           </div>
-          {workspace && (
+        ) : (
+          <div className="cli-empty-state">
             <div
-              className="cli-workspace-path"
-              style={{ cursor: "pointer" }}
-              onClick={() => window.electronAPI.openFile(workspace.path, workspace.path)}
-              title={workspace.path}
+              className={`cli-status-badge ${taskStatus === "executing" || (taskStatus === "completed" && hasActiveChildren) ? "active" : taskStatus === "paused" ? "paused" : taskStatus === "blocked" ? "blocked" : taskStatus === "completed" ? "completed" : ""}`}
             >
-              <span className="cli-label">
-                <span className="terminal-only">PWD:</span>
-                <span className="modern-only">Workspace</span>
+              <span className="terminal-only">
+                {taskStatus === "executing" || (taskStatus === "completed" && hasActiveChildren)
+                  ? "◉ WORKING..."
+                  : taskStatus === "paused"
+                    ? "⏸ WAITING"
+                    : taskStatus === "blocked"
+                      ? "! NEEDS YOUR GO-AHEAD"
+                      : taskStatus === "completed"
+                        ? taskTerminalStatus === "needs_user_action"
+                          ? "⚠ ACTION REQUIRED"
+                          : "✓ ALL DONE"
+                        : "○ READY"}
               </span>
-              <span className="cli-path">{workspace.name}/</span>
+              <span className="modern-only">
+                {taskStatus === "executing" || (taskStatus === "completed" && hasActiveChildren)
+                  ? "Working..."
+                  : taskStatus === "paused"
+                    ? "Waiting for your cue"
+                    : taskStatus === "blocked"
+                      ? "Needs your go-ahead"
+                      : taskStatus === "completed"
+                        ? taskTerminalStatus === "needs_user_action"
+                          ? "Completed - action required"
+                          : "All done"
+                        : "Ready"}
+              </span>
             </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}, (prev, next) =>
-  prev.visible === next.visible &&
-  prev.expanded === next.expanded &&
-  prev.highlightedOutputPath === next.highlightedOutputPath &&
-  prev.workspace?.path === next.workspace?.path &&
-  prev.filesTitleText === next.filesTitleText &&
-  prev.outputSummary?.primaryOutputPath === next.outputSummary?.primaryOutputPath &&
-  prev.outputSummary?.outputCount === next.outputSummary?.outputCount &&
-  getFilesSignature(prev.files) === getFilesSignature(next.files) &&
-  prev.onOpenFile === next.onOpenFile &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled
-);
-
-const ActiveContextSection = memo(function ActiveContextSection({
-  visible,
-  expanded,
-  connectedActiveConnectors,
-  toggleSection,
-  rendererPerfLoggingEnabled,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  connectedActiveConnectors: {
-    id: string;
-    name: string;
-    icon: string;
-    status: string;
-    tools: string[];
-  }[];
-  toggleSection: () => void;
-  rendererPerfLoggingEnabled: boolean;
-}) {
-  if (!visible || connectedActiveConnectors.length === 0) return null;
-  recordRendererRender("RightPanel.section", "activeContext", rendererPerfLoggingEnabled);
-  return (
-    <div className="right-panel-section cli-section">
-      <button
-        type="button"
-        className="cli-section-header"
-        onClick={toggleSection}
-        aria-expanded={expanded}
-      >
-        <span className="cli-section-prompt">&gt;</span>
-        <span className="cli-section-title">
-          <span className="terminal-only">ACTIVE</span>
-          <span className="modern-only">Active Context</span>
-        </span>
-        <span className="cli-active-context-badge">{connectedActiveConnectors.length}</span>
-        <span className="cli-section-toggle">
-          <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-          <span className="modern-only">{expanded ? "−" : "+"}</span>
-        </span>
-      </button>
-      {expanded && (
-        <div className="cli-section-content">
-          <div className="cli-context-list">
-            <div className="cli-context-group">
-              <div className="cli-context-label">
-                <span className="terminal-only"># connectors:</span>
-                <span className="modern-only">Connectors</span>
-              </div>
-              <div className="cli-active-context-scroll">
-                {connectedActiveConnectors.map((connector) => {
-                  const ConnectorIcon = resolveConnectorLucideIcon(connector.name, connector.icon);
-                  return (
-                    <div key={connector.id} className="cli-context-item">
-                      <span className="cli-active-context-icon">
-                        <ConnectorIcon size={14} />
-                      </span>
-                      <span className="cli-context-key">{connector.name}</span>
-                      <span className="cli-active-context-status connected" />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <p className="cli-hint">
+              <span className="terminal-only">{fallbackActivityText || emptyHintText}</span>
+              <span className="modern-only">
+                {fallbackActivityText ||
+                  (hasActiveChildren
+                    ? "Sub-task is still working..."
+                    : "Standing by when you are ready.")}
+              </span>
+            </p>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}, (prev, next) =>
-  prev.visible === next.visible &&
-  prev.expanded === next.expanded &&
-  getConnectorsSignature(prev.connectedActiveConnectors) ===
-    getConnectorsSignature(next.connectedActiveConnectors) &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.expanded === next.expanded &&
+    getPlanStepsSignature(prev.planSteps) === getPlanStepsSignature(next.planSteps) &&
+    prev.taskStatus === next.taskStatus &&
+    prev.taskTerminalStatus === next.taskTerminalStatus &&
+    prev.hasActiveChildren === next.hasActiveChildren &&
+    prev.emptyHintText === next.emptyHintText &&
+    prev.fallbackActivityText === next.fallbackActivityText &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
-const ContextSection = memo(function ContextSection({
-  visible,
-  expanded,
-  usedSkills,
-  toolUsage,
-  referencedFiles,
-  workspace,
-  contextTitleText,
-  toggleSection,
-  setViewerFilePath,
-  rendererPerfLoggingEnabled,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  usedSkills: string[];
-  toolUsage: ToolUsage[];
-  referencedFiles: string[];
-  workspace: Workspace | null;
-  contextTitleText: string;
-  toggleSection: () => void;
-  setViewerFilePath: React.Dispatch<React.SetStateAction<string | null>>;
-  rendererPerfLoggingEnabled: boolean;
-}) {
-  if (!visible) return null;
-  recordRendererRender("RightPanel.section", "context", rendererPerfLoggingEnabled);
-  return (
-    <div className="right-panel-section cli-section">
-      <button
-        type="button"
-        className="cli-section-header"
-        onClick={toggleSection}
-        aria-expanded={expanded}
-      >
-        <span className="cli-section-prompt">&gt;</span>
-        <span className="cli-section-title">
-          <span className="terminal-only">{contextTitleText}</span>
-          <span className="modern-only">Context</span>
-        </span>
-        <span className="cli-section-toggle">
-          <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-          <span className="modern-only">{expanded ? "−" : "+"}</span>
-        </span>
-      </button>
-      {expanded && (
-        <div className="cli-section-content">
-          <div className="cli-context-list">
-            {usedSkills.length > 0 && (
-              <div className="cli-context-group">
-                <div className="cli-context-label">
-                  <span className="terminal-only"># skills_used:</span>
-                  <span className="modern-only">Skills used</span>
-                </div>
-                {usedSkills.map((skill, index) => (
-                  <div key={`${skill}-${index}`} className="cli-context-item">
-                    <span className="cli-context-key">{skill}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {toolUsage.length > 0 && (
-              <div className="cli-context-group">
-                <div className="cli-context-label">
-                  <span className="terminal-only"># tools_used:</span>
-                  <span className="modern-only">Tools used</span>
-                </div>
-                <div className="cli-context-tool-usage-list">
-                  {toolUsage.map((tool, index) => (
-                    <div key={`${tool.name}-${index}`} className="cli-context-item">
-                      <span className="cli-context-key">{tool.name}</span>
-                      <span className="cli-context-sep">:</span>
-                      <span className="cli-context-val">{tool.count}x</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {referencedFiles.length > 0 && (
-              <div className="cli-context-group">
-                <div className="cli-context-label">
-                  <span className="terminal-only"># files_read:</span>
-                  <span className="modern-only">Files read</span>
-                </div>
-                {referencedFiles.map((file, index) => (
-                  <div key={`${file}-${index}`} className="cli-context-item">
-                    <ClickableFilePath
-                      path={file}
-                      workspacePath={workspace?.path}
-                      className="cli-context-file"
-                      onOpenViewer={setViewerFilePath}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}, (prev, next) =>
-  prev.visible === next.visible &&
-  prev.expanded === next.expanded &&
-  prev.workspace?.path === next.workspace?.path &&
-  prev.contextTitleText === next.contextTitleText &&
-  getStringListSignature(prev.usedSkills) === getStringListSignature(next.usedSkills) &&
-  getToolUsageSignature(prev.toolUsage) === getToolUsageSignature(next.toolUsage) &&
-  getStringListSignature(prev.referencedFiles) === getStringListSignature(next.referencedFiles) &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled
-);
-
-const CollaborativeAgentsSection = memo(function CollaborativeAgentsSection({
-  visible,
-  expanded,
-  totals,
-  toggleSection,
-  onSelectTask,
-  rendererPerfLoggingEnabled,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  totals: CollaborativeAgentTotals | null;
-  toggleSection: () => void;
-  onSelectTask?: (taskId: string) => void;
-  rendererPerfLoggingEnabled?: boolean;
-}) {
-  recordRendererRender(
-    "CollaborativeAgentsSection",
-    `visible:${visible}:expanded:${expanded}`,
+const QueueSectionContent = memo(
+  function QueueSectionContent({
+    expanded,
+    runningTasks,
+    queuedTasks,
+    activeLabel,
+    nextLabel,
+    onSelectTask,
+    onCancelTask,
     rendererPerfLoggingEnabled,
-  );
-  if (!visible || !totals) return null;
-
-  const totalTokens = totals.inputTokens + totals.outputTokens;
-  const statusSummary = [
-    totals.completed > 0 ? `${totals.completed} done` : null,
-    totals.warning > 0 ? `${totals.warning} warning` : null,
-    totals.failed > 0 ? `${totals.failed} failed` : null,
-    totals.running > 0 ? `${totals.running} running` : null,
-    totals.pending > 0 ? `${totals.pending} pending` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  return (
-    <div className="right-panel-section cli-section collaborative-agents-section">
-      <button type="button" className="cli-section-header" onClick={toggleSection} aria-expanded={expanded}>
-        <span className="cli-section-prompt">&gt;</span>
-        <span className="cli-section-title">
-          <span className="terminal-only">SUB_AGENTS</span>
-          <span className="modern-only">Sub Agents</span>
-        </span>
-        <span className="cli-active-context-badge">{totals.total}</span>
-        <span className="cli-section-toggle">
-          <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-          <span className="modern-only">{expanded ? "−" : "+"}</span>
-        </span>
-      </button>
-      {expanded && (
-        <div className="cli-section-content">
-          <div className="collab-agents-summary-card">
-            <div className="collab-agents-summary-head">
-              <strong>{totals.total} background agents</strong>
-              <span>{statusSummary || "No status yet"}</span>
+  }: {
+    expanded: boolean;
+    runningTasks: Task[];
+    queuedTasks: Task[];
+    activeLabel: string;
+    nextLabel: string;
+    onSelectTask?: (taskId: string) => void;
+    onCancelTask?: (taskId: string) => void;
+    rendererPerfLoggingEnabled: boolean;
+  }) {
+    recordRendererRender("RightPanel.section", "queue", rendererPerfLoggingEnabled);
+    if (!expanded) return null;
+    return (
+      <div className="cli-section-content">
+        {runningTasks.length > 0 && (
+          <div className="cli-queue-group">
+            <div className="cli-context-label">
+              <span className="terminal-only">{activeLabel}</span>
+              <span className="modern-only">Active</span>
             </div>
-            <div className="collab-agents-stat-grid" aria-label="Sub-agent totals">
-              <div>
-                <span>Runtime</span>
-                <strong>{formatRightPanelDuration(totals.wallDurationMs)}</strong>
-              </div>
-              <div>
-                <span>Events</span>
-                <strong>{formatCompactNumber(totals.eventCount)}</strong>
-              </div>
-              <div>
-                <span>Tools</span>
-                <strong>{formatCompactNumber(totals.toolCallCount)}</strong>
-              </div>
-              <div>
-                <span>LLM calls</span>
-                <strong>{formatCompactNumber(totals.llmCallCount)}</strong>
-              </div>
-              <div>
-                <span>Tokens</span>
-                <strong>{formatCompactNumber(totalTokens)}</strong>
-              </div>
-              <div>
-                <span>Cost</span>
-                <strong>{formatCost(totals.cost)}</strong>
-              </div>
-            </div>
-          </div>
-          <div className="collab-agents-list">
-            {totals.rows.map((row) => (
-              <div key={row.task.id} className={`collab-agent-summary-row ${row.statusKind}`}>
-                <div className="collab-agent-summary-main">
-                  <span className="collab-agent-summary-title" title={row.task.title}>
-                    {stripInlineMarkdownFormatting(row.task.title || row.task.prompt || "Sub agent")}
+            {runningTasks.map((t) => (
+              <div key={t.id} className="cli-queue-item running">
+                <span className="cli-queue-status">
+                  <span className="terminal-only">[~]</span>
+                  <span className="modern-only">
+                    <span className="queue-status-dot running" />
                   </span>
-                </div>
-                <div className="collab-agent-summary-meta">
-                  <span>{formatRightPanelDuration(row.durationMs)}</span>
-                  <span>{formatCompactNumber(row.toolCallCount)} tools</span>
-                  <span>{formatCompactNumber(row.usage.inputTokens + row.usage.outputTokens)} tok</span>
-                </div>
-                <span className={`collab-agent-summary-status ${row.statusKind}`}>
-                  {row.statusLabel}
                 </span>
-                {onSelectTask ? (
-                  <button
-                    type="button"
-                    className="collab-agent-open-task"
-                    onClick={() => onSelectTask(row.task.id)}
-                  >
-                    Open
-                  </button>
-                ) : null}
+                <span className="cli-queue-title" onClick={() => onSelectTask?.(t.id)}>
+                  {t.title || t.prompt}
+                </span>
+                <button
+                  className="cli-queue-cancel"
+                  onClick={() => onCancelTask?.(t.id)}
+                  title="Cancel"
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>
-        </div>
-      )}
-    </div>
-  );
-}, (prev, next) =>
-  prev.visible === next.visible &&
-  prev.expanded === next.expanded &&
-  prev.totals === next.totals &&
-  prev.onSelectTask === next.onSelectTask &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled
+        )}
+        {queuedTasks.length > 0 && (
+          <div className="cli-queue-group">
+            <div className="cli-context-label">
+              <span className="terminal-only">{nextLabel}</span>
+              <span className="modern-only">Up next</span>
+            </div>
+            {queuedTasks.map((t, i) => (
+              <div key={t.id} className="cli-queue-item queued">
+                <span className="cli-queue-status">
+                  <span className="terminal-only">[{i + 1}]</span>
+                  <span className="modern-only">
+                    <span className="queue-status-pill">{i + 1}</span>
+                  </span>
+                </span>
+                <span className="cli-queue-title" onClick={() => onSelectTask?.(t.id)}>
+                  {t.title || t.prompt}
+                </span>
+                <button
+                  className="cli-queue-cancel"
+                  onClick={() => onCancelTask?.(t.id)}
+                  title="Cancel"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.expanded === next.expanded &&
+    getTaskListSignature(prev.runningTasks) === getTaskListSignature(next.runningTasks) &&
+    getTaskListSignature(prev.queuedTasks) === getTaskListSignature(next.queuedTasks) &&
+    prev.activeLabel === next.activeLabel &&
+    prev.nextLabel === next.nextLabel &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
+);
+
+const ProgressSection = memo(
+  function ProgressSection({
+    expanded,
+    planSteps,
+    taskStatus,
+    taskTerminalStatus,
+    hasActiveChildren,
+    progressTitleText,
+    emptyHintText,
+    fallbackActivityText,
+    toggleSection,
+    rendererPerfLoggingEnabled,
+    getStatusIndicator,
+  }: {
+    expanded: boolean;
+    planSteps: PlanStep[];
+    taskStatus?: Task["status"];
+    taskTerminalStatus?: Task["terminalStatus"];
+    hasActiveChildren: boolean;
+    progressTitleText: string;
+    emptyHintText: string;
+    fallbackActivityText: string | null;
+    toggleSection: () => void;
+    rendererPerfLoggingEnabled: boolean;
+    getStatusIndicator: (status: string) => React.ReactNode;
+  }) {
+    return (
+      <div className="right-panel-section cli-section">
+        <button
+          type="button"
+          className="cli-section-header"
+          onClick={toggleSection}
+          aria-expanded={expanded}
+        >
+          <span className="cli-section-prompt">&gt;</span>
+          <span className="cli-section-title">
+            <span className="terminal-only">{progressTitleText}</span>
+            <span className="modern-only">Progress</span>
+          </span>
+          <span className="cli-section-toggle">
+            <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
+            <span className="modern-only">{expanded ? "−" : "+"}</span>
+          </span>
+        </button>
+        <ProgressSectionContent
+          expanded={expanded}
+          planSteps={planSteps}
+          taskStatus={taskStatus}
+          taskTerminalStatus={taskTerminalStatus}
+          hasActiveChildren={hasActiveChildren}
+          emptyHintText={emptyHintText}
+          fallbackActivityText={fallbackActivityText}
+          rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+          getStatusIndicator={getStatusIndicator}
+        />
+      </div>
+    );
+  },
+  (prev, next) =>
+    getProgressSectionMaterialSignature({
+      expanded: prev.expanded,
+      planSteps: prev.planSteps,
+      taskStatus: prev.taskStatus,
+      taskTerminalStatus: prev.taskTerminalStatus,
+      hasActiveChildren: prev.hasActiveChildren,
+      emptyHintText: prev.emptyHintText,
+    }) ===
+      getProgressSectionMaterialSignature({
+        expanded: next.expanded,
+        planSteps: next.planSteps,
+        taskStatus: next.taskStatus,
+        taskTerminalStatus: next.taskTerminalStatus,
+        hasActiveChildren: next.hasActiveChildren,
+        emptyHintText: next.emptyHintText,
+      }) &&
+    prev.progressTitleText === next.progressTitleText &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
+);
+
+const QueueSection = memo(
+  function QueueSection({
+    visible,
+    expanded,
+    runningTasks,
+    queuedTasks,
+    queueBadgeText,
+    queueTitleText,
+    activeLabel,
+    nextLabel,
+    toggleSection,
+    onSelectTask,
+    onCancelTask,
+    rendererPerfLoggingEnabled,
+  }: {
+    visible: boolean;
+    expanded: boolean;
+    runningTasks: Task[];
+    queuedTasks: Task[];
+    queueBadgeText: string;
+    queueTitleText: string;
+    activeLabel: string;
+    nextLabel: string;
+    toggleSection: () => void;
+    onSelectTask?: (taskId: string) => void;
+    onCancelTask?: (taskId: string) => void;
+    rendererPerfLoggingEnabled: boolean;
+  }) {
+    if (!visible) return null;
+    return (
+      <div className="right-panel-section cli-section">
+        <button
+          type="button"
+          className="cli-section-header"
+          onClick={toggleSection}
+          aria-expanded={expanded}
+        >
+          <span className="cli-section-prompt">&gt;</span>
+          <span className="cli-section-title">
+            <span className="terminal-only">{queueTitleText}</span>
+            <span className="modern-only">Queue</span>
+          </span>
+          <span className="cli-queue-badge">{queueBadgeText}</span>
+          <span className="cli-section-toggle">
+            <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
+            <span className="modern-only">{expanded ? "−" : "+"}</span>
+          </span>
+        </button>
+        <QueueSectionContent
+          expanded={expanded}
+          runningTasks={runningTasks}
+          queuedTasks={queuedTasks}
+          activeLabel={activeLabel}
+          nextLabel={nextLabel}
+          onSelectTask={onSelectTask}
+          onCancelTask={onCancelTask}
+          rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+        />
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.visible === next.visible &&
+    prev.queueBadgeText === next.queueBadgeText &&
+    prev.queueTitleText === next.queueTitleText &&
+    getQueueSectionMaterialSignature({
+      expanded: prev.expanded,
+      runningTasks: prev.runningTasks,
+      queuedTasks: prev.queuedTasks,
+      activeLabel: prev.activeLabel,
+      nextLabel: prev.nextLabel,
+    }) ===
+      getQueueSectionMaterialSignature({
+        expanded: next.expanded,
+        runningTasks: next.runningTasks,
+        queuedTasks: next.queuedTasks,
+        activeLabel: next.activeLabel,
+        nextLabel: next.nextLabel,
+      }) &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
+);
+
+const ChecklistSection = memo(
+  function ChecklistSection({
+    visible,
+    expanded,
+    checklistState,
+    toggleSection,
+    rendererPerfLoggingEnabled,
+    getStatusIndicator,
+    getChecklistStatusLabel,
+  }: {
+    visible: boolean;
+    expanded: boolean;
+    checklistState: SessionChecklistState | null;
+    toggleSection: () => void;
+    rendererPerfLoggingEnabled: boolean;
+    getStatusIndicator: (status: string) => React.ReactNode;
+    getChecklistStatusLabel: (status: string) => string;
+  }) {
+    if (!visible || !checklistState) return null;
+    recordRendererRender("RightPanel.section", "checklist", rendererPerfLoggingEnabled);
+    return (
+      <div className="right-panel-section cli-section">
+        <button
+          type="button"
+          className="cli-section-header"
+          onClick={toggleSection}
+          aria-expanded={expanded}
+        >
+          <span className="cli-section-prompt">&gt;</span>
+          <span className="cli-section-title">
+            <span className="terminal-only">CHECKLIST</span>
+            <span className="modern-only">Checklist</span>
+          </span>
+          <span className="cli-section-toggle">
+            <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
+            <span className="modern-only">{expanded ? "−" : "+"}</span>
+          </span>
+        </button>
+        {expanded && (
+          <div className="cli-section-content">
+            <div className="cli-progress-list">
+              {checklistState.items.map((item, index) => (
+                <div key={item.id} className={`cli-progress-item ${item.status}`}>
+                  <span className="cli-progress-num">{String(index + 1).padStart(2, "0")}</span>
+                  <span
+                    className={`cli-progress-status ${item.status === "blocked" ? "failed" : item.status}`}
+                  >
+                    {getStatusIndicator(item.status === "blocked" ? "failed" : item.status)}
+                  </span>
+                  <span className="cli-progress-text" title={item.title}>
+                    {item.title}
+                    {item.kind === "verification" ? " [Verification]" : ""}
+                  </span>
+                  <span className="cli-context-key">{getChecklistStatusLabel(item.status)}</span>
+                </div>
+              ))}
+            </div>
+            {checklistState.verificationNudgeNeeded && (
+              <p className="cli-hint">
+                <span className="terminal-only">
+                  {checklistState.nudgeReason ||
+                    "Add and run a verification checklist item before finishing."}
+                </span>
+                <span className="modern-only">
+                  {checklistState.nudgeReason ||
+                    "Add and run a verification checklist item before finishing."}
+                </span>
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.visible === next.visible &&
+    prev.expanded === next.expanded &&
+    getChecklistSignature(prev.checklistState) === getChecklistSignature(next.checklistState) &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
+);
+
+const FolderSection = memo(
+  function FolderSection({
+    visible,
+    expanded,
+    files,
+    outputSummary,
+    highlightedOutputPath,
+    workspace,
+    filesTitleText,
+    toggleSection,
+    fileItemRefs,
+    onOpenFile,
+    rendererPerfLoggingEnabled,
+    getFileActionSymbol,
+  }: {
+    visible: boolean;
+    expanded: boolean;
+    files: FileInfo[];
+    outputSummary: ReturnType<typeof deriveTaskOutputSummaryFromEvents> | null;
+    highlightedOutputPath: string | null;
+    workspace: Workspace | null;
+    filesTitleText: string;
+    toggleSection: () => void;
+    fileItemRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
+    onOpenFile: (path: string) => void;
+    rendererPerfLoggingEnabled: boolean;
+    getFileActionSymbol: (action: FileInfo["action"]) => string;
+  }) {
+    if (!visible) return null;
+    recordRendererRender("RightPanel.section", "folder", rendererPerfLoggingEnabled);
+    const fileCount = files.length || outputSummary?.outputCount || 0;
+    const fileCountLabel = `${fileCount} file${fileCount === 1 ? "" : "s"}`;
+    return (
+      <div className="right-panel-section cli-section">
+        <button
+          type="button"
+          className="cli-section-header"
+          onClick={toggleSection}
+          aria-expanded={expanded}
+        >
+          <span className="cli-section-prompt">&gt;</span>
+          <span className="cli-section-title">
+            <span className="terminal-only">{filesTitleText}</span>
+            <span className="modern-only">Files</span>
+          </span>
+          {fileCount > 0 && (
+            <span
+              className="cli-output-count-badge cli-file-count-badge"
+              aria-label={fileCountLabel}
+              title={fileCountLabel}
+            >
+              <span className="cli-file-count-number">{fileCount}</span>
+            </span>
+          )}
+          <span className="cli-section-toggle">
+            <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
+            <span className="modern-only">{expanded ? "−" : "+"}</span>
+          </span>
+        </button>
+        {expanded && (
+          <div className="cli-section-content">
+            <div className="cli-file-list">
+              {files.map((file, index) => {
+                const { Icon, label } = getFileTypeIcon(file.path);
+                return (
+                  <div
+                    key={`${file.path}-${index}`}
+                    ref={(el) => {
+                      fileItemRefs.current.set(file.path, el);
+                    }}
+                    className={`cli-file-item ${file.action} ${outputSummary?.primaryOutputPath === file.path ? "primary-output" : ""} ${highlightedOutputPath === file.path ? "highlight-output" : ""}`}
+                  >
+                    <span className={`cli-file-action ${file.action}`}>
+                      <span className="terminal-only">{getFileActionSymbol(file.action)}</span>
+                      <span
+                        className="modern-only cli-file-type-icon"
+                        aria-label={label}
+                        title={label}
+                      >
+                        <Icon size={16} strokeWidth={2.15} aria-hidden="true" />
+                      </span>
+                    </span>
+                    <ClickableFilePath
+                      path={file.path}
+                      workspacePath={workspace?.path}
+                      className="cli-file-name"
+                      onOpenViewer={onOpenFile}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            {workspace && (
+              <div
+                className="cli-workspace-path"
+                style={{ cursor: "pointer" }}
+                onClick={() => window.electronAPI.openFile(workspace.path, workspace.path)}
+                title={workspace.path}
+              >
+                <span className="cli-label">
+                  <span className="terminal-only">PWD:</span>
+                  <span className="modern-only">Workspace</span>
+                </span>
+                <span className="cli-path">{workspace.name}/</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.visible === next.visible &&
+    prev.expanded === next.expanded &&
+    prev.highlightedOutputPath === next.highlightedOutputPath &&
+    prev.workspace?.path === next.workspace?.path &&
+    prev.filesTitleText === next.filesTitleText &&
+    prev.outputSummary?.primaryOutputPath === next.outputSummary?.primaryOutputPath &&
+    prev.outputSummary?.outputCount === next.outputSummary?.outputCount &&
+    getFilesSignature(prev.files) === getFilesSignature(next.files) &&
+    prev.onOpenFile === next.onOpenFile &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
+);
+
+const ActiveContextSection = memo(
+  function ActiveContextSection({
+    visible,
+    expanded,
+    connectedActiveConnectors,
+    toggleSection,
+    rendererPerfLoggingEnabled,
+  }: {
+    visible: boolean;
+    expanded: boolean;
+    connectedActiveConnectors: {
+      id: string;
+      name: string;
+      icon: string;
+      status: string;
+      tools: string[];
+    }[];
+    toggleSection: () => void;
+    rendererPerfLoggingEnabled: boolean;
+  }) {
+    if (!visible || connectedActiveConnectors.length === 0) return null;
+    recordRendererRender("RightPanel.section", "activeContext", rendererPerfLoggingEnabled);
+    return (
+      <div className="right-panel-section cli-section">
+        <button
+          type="button"
+          className="cli-section-header"
+          onClick={toggleSection}
+          aria-expanded={expanded}
+        >
+          <span className="cli-section-prompt">&gt;</span>
+          <span className="cli-section-title">
+            <span className="terminal-only">ACTIVE</span>
+            <span className="modern-only">Active Context</span>
+          </span>
+          <span className="cli-active-context-badge">{connectedActiveConnectors.length}</span>
+          <span className="cli-section-toggle">
+            <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
+            <span className="modern-only">{expanded ? "−" : "+"}</span>
+          </span>
+        </button>
+        {expanded && (
+          <div className="cli-section-content">
+            <div className="cli-context-list">
+              <div className="cli-context-group">
+                <div className="cli-context-label">
+                  <span className="terminal-only"># connectors:</span>
+                  <span className="modern-only">Connectors</span>
+                </div>
+                <div className="cli-active-context-scroll">
+                  {connectedActiveConnectors.map((connector) => {
+                    const ConnectorIcon = resolveConnectorLucideIcon(
+                      connector.name,
+                      connector.icon,
+                    );
+                    return (
+                      <div key={connector.id} className="cli-context-item">
+                        <span className="cli-active-context-icon">
+                          <ConnectorIcon size={14} />
+                        </span>
+                        <span className="cli-context-key">{connector.name}</span>
+                        <span className="cli-active-context-status connected" />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.visible === next.visible &&
+    prev.expanded === next.expanded &&
+    getConnectorsSignature(prev.connectedActiveConnectors) ===
+      getConnectorsSignature(next.connectedActiveConnectors) &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
+);
+
+const ContextSection = memo(
+  function ContextSection({
+    visible,
+    expanded,
+    usedSkills,
+    toolUsage,
+    referencedFiles,
+    workspace,
+    contextTitleText,
+    toggleSection,
+    setViewerFilePath,
+    rendererPerfLoggingEnabled,
+  }: {
+    visible: boolean;
+    expanded: boolean;
+    usedSkills: string[];
+    toolUsage: ToolUsage[];
+    referencedFiles: string[];
+    workspace: Workspace | null;
+    contextTitleText: string;
+    toggleSection: () => void;
+    setViewerFilePath: React.Dispatch<React.SetStateAction<string | null>>;
+    rendererPerfLoggingEnabled: boolean;
+  }) {
+    if (!visible) return null;
+    recordRendererRender("RightPanel.section", "context", rendererPerfLoggingEnabled);
+    return (
+      <div className="right-panel-section cli-section">
+        <button
+          type="button"
+          className="cli-section-header"
+          onClick={toggleSection}
+          aria-expanded={expanded}
+        >
+          <span className="cli-section-prompt">&gt;</span>
+          <span className="cli-section-title">
+            <span className="terminal-only">{contextTitleText}</span>
+            <span className="modern-only">Context</span>
+          </span>
+          <span className="cli-section-toggle">
+            <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
+            <span className="modern-only">{expanded ? "−" : "+"}</span>
+          </span>
+        </button>
+        {expanded && (
+          <div className="cli-section-content">
+            <div className="cli-context-list">
+              {usedSkills.length > 0 && (
+                <div className="cli-context-group">
+                  <div className="cli-context-label">
+                    <span className="terminal-only"># skills_used:</span>
+                    <span className="modern-only">Skills used</span>
+                  </div>
+                  {usedSkills.map((skill, index) => (
+                    <div key={`${skill}-${index}`} className="cli-context-item">
+                      <span className="cli-context-key">{skill}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {toolUsage.length > 0 && (
+                <div className="cli-context-group">
+                  <div className="cli-context-label">
+                    <span className="terminal-only"># tools_used:</span>
+                    <span className="modern-only">Tools used</span>
+                  </div>
+                  <div className="cli-context-tool-usage-list">
+                    {toolUsage.map((tool, index) => (
+                      <div key={`${tool.name}-${index}`} className="cli-context-item">
+                        <span className="cli-context-key">{tool.name}</span>
+                        <span className="cli-context-sep">:</span>
+                        <span className="cli-context-val">{tool.count}x</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {referencedFiles.length > 0 && (
+                <div className="cli-context-group">
+                  <div className="cli-context-label">
+                    <span className="terminal-only"># files_read:</span>
+                    <span className="modern-only">Files read</span>
+                  </div>
+                  {referencedFiles.map((file, index) => (
+                    <div key={`${file}-${index}`} className="cli-context-item">
+                      <ClickableFilePath
+                        path={file}
+                        workspacePath={workspace?.path}
+                        className="cli-context-file"
+                        onOpenViewer={setViewerFilePath}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.visible === next.visible &&
+    prev.expanded === next.expanded &&
+    prev.workspace?.path === next.workspace?.path &&
+    prev.contextTitleText === next.contextTitleText &&
+    getStringListSignature(prev.usedSkills) === getStringListSignature(next.usedSkills) &&
+    getToolUsageSignature(prev.toolUsage) === getToolUsageSignature(next.toolUsage) &&
+    getStringListSignature(prev.referencedFiles) === getStringListSignature(next.referencedFiles) &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
+);
+
+const CollaborativeAgentsSection = memo(
+  function CollaborativeAgentsSection({
+    visible,
+    expanded,
+    totals,
+    toggleSection,
+    onSelectTask,
+    rendererPerfLoggingEnabled,
+  }: {
+    visible: boolean;
+    expanded: boolean;
+    totals: CollaborativeAgentTotals | null;
+    toggleSection: () => void;
+    onSelectTask?: (taskId: string) => void;
+    rendererPerfLoggingEnabled?: boolean;
+  }) {
+    recordRendererRender(
+      "CollaborativeAgentsSection",
+      `visible:${visible}:expanded:${expanded}`,
+      rendererPerfLoggingEnabled,
+    );
+    if (!visible || !totals) return null;
+
+    const totalTokens = totals.inputTokens + totals.outputTokens;
+    const statusSummary = [
+      totals.completed > 0 ? `${totals.completed} done` : null,
+      totals.warning > 0 ? `${totals.warning} warning` : null,
+      totals.failed > 0 ? `${totals.failed} failed` : null,
+      totals.running > 0 ? `${totals.running} running` : null,
+      totals.pending > 0 ? `${totals.pending} pending` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    return (
+      <div className="right-panel-section cli-section collaborative-agents-section">
+        <button
+          type="button"
+          className="cli-section-header"
+          onClick={toggleSection}
+          aria-expanded={expanded}
+        >
+          <span className="cli-section-prompt">&gt;</span>
+          <span className="cli-section-title">
+            <span className="terminal-only">SUB_AGENTS</span>
+            <span className="modern-only">Sub Agents</span>
+          </span>
+          <span className="cli-active-context-badge">{totals.total}</span>
+          <span className="cli-section-toggle">
+            <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
+            <span className="modern-only">{expanded ? "−" : "+"}</span>
+          </span>
+        </button>
+        {expanded && (
+          <div className="cli-section-content">
+            <div className="collab-agents-summary-card">
+              <div className="collab-agents-summary-head">
+                <strong>{totals.total} background agents</strong>
+                <span>{statusSummary || "No status yet"}</span>
+              </div>
+              <div className="collab-agents-stat-grid" aria-label="Sub-agent totals">
+                <div>
+                  <span>Runtime</span>
+                  <strong>{formatRightPanelDuration(totals.wallDurationMs)}</strong>
+                </div>
+                <div>
+                  <span>Events</span>
+                  <strong>{formatCompactNumber(totals.eventCount)}</strong>
+                </div>
+                <div>
+                  <span>Tools</span>
+                  <strong>{formatCompactNumber(totals.toolCallCount)}</strong>
+                </div>
+                <div>
+                  <span>LLM calls</span>
+                  <strong>{formatCompactNumber(totals.llmCallCount)}</strong>
+                </div>
+                <div>
+                  <span>Tokens</span>
+                  <strong>{formatCompactNumber(totalTokens)}</strong>
+                </div>
+                <div>
+                  <span>Cost</span>
+                  <strong>{formatCost(totals.cost)}</strong>
+                </div>
+              </div>
+            </div>
+            <div className="collab-agents-list">
+              {totals.rows.map((row) => (
+                <div key={row.task.id} className={`collab-agent-summary-row ${row.statusKind}`}>
+                  <div className="collab-agent-summary-main">
+                    <span className="collab-agent-summary-title" title={row.task.title}>
+                      {stripInlineMarkdownFormatting(
+                        row.task.title || row.task.prompt || "Sub agent",
+                      )}
+                    </span>
+                  </div>
+                  <div className="collab-agent-summary-meta">
+                    <span>{formatRightPanelDuration(row.durationMs)}</span>
+                    <span>{formatCompactNumber(row.toolCallCount)} tools</span>
+                    <span>
+                      {formatCompactNumber(row.usage.inputTokens + row.usage.outputTokens)} tok
+                    </span>
+                  </div>
+                  <span className={`collab-agent-summary-status ${row.statusKind}`}>
+                    {row.statusLabel}
+                  </span>
+                  {onSelectTask ? (
+                    <button
+                      type="button"
+                      className="collab-agent-open-task"
+                      onClick={() => onSelectTask(row.task.id)}
+                    >
+                      Open
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.visible === next.visible &&
+    prev.expanded === next.expanded &&
+    prev.totals === next.totals &&
+    prev.onSelectTask === next.onSelectTask &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
 function RightPanelComponent({
@@ -1614,17 +1689,14 @@ function RightPanelComponent({
     task?.id ? `task:${task.id}` : "task:none",
     rendererPerfLoggingEnabled,
   );
-  const events = useMemo(
-    () => {
-      if (sharedTaskEventUi) {
-        return sharedTaskEventUi.normalizedEvents;
-      }
-      return measureRendererPerf("RightPanel.normalizeEvents", rendererPerfLoggingEnabled, () =>
-        normalizeEventsForTimelineUi(rawEvents),
-      );
-    },
-    [rawEvents, rendererPerfLoggingEnabled, sharedTaskEventUi],
-  );
+  const events = useMemo(() => {
+    if (sharedTaskEventUi) {
+      return sharedTaskEventUi.normalizedEvents;
+    }
+    return measureRendererPerf("RightPanel.normalizeEvents", rendererPerfLoggingEnabled, () =>
+      normalizeEventsForTimelineUi(rawEvents),
+    );
+  }, [rawEvents, rendererPerfLoggingEnabled, sharedTaskEventUi]);
   const [expandedSections, setExpandedSections] = useState({
     progress: true,
     checklist: true,
@@ -1857,8 +1929,14 @@ function RightPanelComponent({
           timestamp: event.timestamp,
         });
       }
-      if (effectiveType === "file_modified" && (event.payload.path || event.payload.from)) {
-        const raw = event.payload.path || event.payload.from;
+      if (
+        effectiveType === "file_modified" &&
+        (event.payload.path || event.payload.to || event.payload.from)
+      ) {
+        const raw = event.payload.path || event.payload.to || event.payload.from;
+        if (event.payload.action === "rename" && event.payload.from) {
+          fileMap.delete(normalizePathKey(event.payload.from));
+        }
         const key = normalizePathKey(raw);
         fileMap.set(key, {
           path: key,
@@ -2123,32 +2201,37 @@ function RightPanelComponent({
     referencedFiles,
     isLiveExecutionMode ? deferredReferencedFilesSignature : referencedFilesSignature,
   );
-  const showChecklistSection =
-    !!stableChecklistState &&
-    stableChecklistState.items.length > 0;
+  const showChecklistSection = !!stableChecklistState && stableChecklistState.items.length > 0;
   const collaborativeAgentTotals = useMemo(
     () => getCollaborativeAgentTotals(childTasks, childEvents),
     [childTasks, childEvents],
   );
   const showCollaborativeAgentsSection = Boolean(
     collaborativeAgentTotals &&
-      (childTasks.length > 0 ||
-        task?.agentConfig?.collaborativeMode ||
-        task?.agentConfig?.multiLlmMode),
+    (childTasks.length > 0 ||
+      task?.agentConfig?.collaborativeMode ||
+      task?.agentConfig?.multiLlmMode),
   );
   const showQueueSection = totalQueueActive > 0;
   const showFolderSection = stableFiles.length > 0;
-  const showActiveContextSection = stableConnectedActiveConnectors.length > 0 && !isLiveExecutionMode;
+  const showActiveContextSection =
+    stableConnectedActiveConnectors.length > 0 && !isLiveExecutionMode;
   const showContextSection =
     stableUsedSkills.length > 0 || stableToolUsage.length > 0 || stableReferencedFiles.length > 0;
   const fallbackProgressText = useMemo(() => {
-    const activeChecklistItem = stableChecklistState?.items.find((item) => item.status === "in_progress");
+    const activeChecklistItem = stableChecklistState?.items.find(
+      (item) => item.status === "in_progress",
+    );
     if (activeChecklistItem) return activeChecklistItem.title;
 
-    const latestActivityText = getTaskEventActivityText(sharedTaskEventUi?.latestVisibleTaskEvent ?? null);
+    const latestActivityText = getTaskEventActivityText(
+      sharedTaskEventUi?.latestVisibleTaskEvent ?? null,
+    );
     if (latestActivityText) return latestActivityText;
 
-    const pendingChecklistItem = stableChecklistState?.items.find((item) => item.status === "pending");
+    const pendingChecklistItem = stableChecklistState?.items.find(
+      (item) => item.status === "pending",
+    );
     if (pendingChecklistItem) return `Up next: ${pendingChecklistItem.title}`;
 
     return null;
@@ -2162,17 +2245,17 @@ function RightPanelComponent({
         activeLabel: queueActiveLabel,
         nextLabel: queueNextLabel,
       }),
-    [
-      expandedSections.queue,
-      runningTasks,
-      queuedTasks,
-      queueActiveLabel,
-      queueNextLabel,
-    ],
+    [expandedSections.queue, runningTasks, queuedTasks, queueActiveLabel, queueNextLabel],
   );
   const deferredQueueMaterialSignature = useDeferredValue(queueMaterialSignature);
-  const stableRunningTasks = useStableSnapshotBySignature(runningTasks, deferredQueueMaterialSignature);
-  const stableQueuedTasks = useStableSnapshotBySignature(queuedTasks, deferredQueueMaterialSignature);
+  const stableRunningTasks = useStableSnapshotBySignature(
+    runningTasks,
+    deferredQueueMaterialSignature,
+  );
+  const stableQueuedTasks = useStableSnapshotBySignature(
+    queuedTasks,
+    deferredQueueMaterialSignature,
+  );
 
   // Get status indicator (terminal vs modern)
   const getStatusIndicator = (status: string) => {
@@ -2311,6 +2394,7 @@ function RightPanelComponent({
 
   return (
     <div className="right-panel cli-panel">
+      <SessionProgressCard task={task} onSelectTask={onSelectTask} refreshKey={events.length} />
       {/* Progress Section */}
       <ProgressSection
         expanded={expandedSections.progress}
@@ -2439,19 +2523,15 @@ function RightPanelComponent({
         </div>
       )}
 
-      {task?.status === "completed" && !hasActiveChildren && task?.terminalStatus === "partial_success" && (
-        <div
-          className="right-panel-preserved-line"
-          title={preservedOutputsTooltip}
-        >
-          Completed with preserved outputs
-        </div>
-      )}
+      {task?.status === "completed" &&
+        !hasActiveChildren &&
+        task?.terminalStatus === "partial_success" && (
+          <div className="right-panel-preserved-line" title={preservedOutputsTooltip}>
+            Completed with preserved outputs
+          </div>
+        )}
       {task?.status === "failed" && outputSummary && outputSummary.outputCount > 0 && (
-        <div
-          className="right-panel-preserved-line"
-          title={preservedOutputsTooltip}
-        >
+        <div className="right-panel-preserved-line" title={preservedOutputsTooltip}>
           Output created, final verification failed
         </div>
       )}
@@ -2481,9 +2561,10 @@ function RightPanelComponent({
 }
 
 function areRightPanelPropsEqual(prev: RightPanelProps, next: RightPanelProps): boolean {
-  const sharedEventsEqual = prev.sharedTaskEventUi || next.sharedTaskEventUi
-    ? prev.sharedTaskEventUi === next.sharedTaskEventUi
-    : prev.events === next.events;
+  const sharedEventsEqual =
+    prev.sharedTaskEventUi || next.sharedTaskEventUi
+      ? prev.sharedTaskEventUi === next.sharedTaskEventUi
+      : prev.events === next.events;
 
   return (
     getRightPanelTaskSignature(prev.task) === getRightPanelTaskSignature(next.task) &&
@@ -2492,7 +2573,8 @@ function areRightPanelPropsEqual(prev: RightPanelProps, next: RightPanelProps): 
     prev.hasActiveChildren === next.hasActiveChildren &&
     areChildTaskStatsEqual(prev.childTasks || [], next.childTasks || []) &&
     areTaskEventListsEqual(prev.childEvents || [], next.childEvents || []) &&
-    getTaskListSignature(prev.runningTasks || []) === getTaskListSignature(next.runningTasks || []) &&
+    getTaskListSignature(prev.runningTasks || []) ===
+      getTaskListSignature(next.runningTasks || []) &&
     getTaskListSignature(prev.queuedTasks || []) === getTaskListSignature(next.queuedTasks || []) &&
     getQueueStatusSignature(prev.queueStatus) === getQueueStatusSignature(next.queueStatus) &&
     prev.onOpenSpreadsheetArtifact === next.onOpenSpreadsheetArtifact &&

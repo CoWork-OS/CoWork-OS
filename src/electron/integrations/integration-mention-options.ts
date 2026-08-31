@@ -70,7 +70,8 @@ const BUILTIN_DEFS: Array<{
     aliases: ["notes", "docs", "workspace"],
     tools: ["notion_action"],
     promptHint: "Use notion_action for Notion search, reading, page creation, and updates.",
-    isConfigured: (settings) => Boolean(settings?.enabled && hasText((settings as NotionSettingsData).apiKey)),
+    isConfigured: (settings) =>
+      Boolean(settings?.enabled && hasText((settings as NotionSettingsData).apiKey)),
   },
   {
     key: "box",
@@ -82,7 +83,8 @@ const BUILTIN_DEFS: Array<{
     aliases: ["files", "storage"],
     tools: ["box_action"],
     promptHint: "Use box_action for Box folder and file access.",
-    isConfigured: (settings) => Boolean(settings?.enabled && hasText((settings as BoxSettingsData).accessToken)),
+    isConfigured: (settings) =>
+      Boolean(settings?.enabled && hasText((settings as BoxSettingsData).accessToken)),
   },
   {
     key: "oneDrive",
@@ -328,9 +330,7 @@ function hasText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function optionFromBuiltin(
-  def: (typeof BUILTIN_DEFS)[number],
-): IntegrationMentionOption {
+function optionFromBuiltin(def: (typeof BUILTIN_DEFS)[number]): IntegrationMentionOption {
   return {
     id: def.id,
     label: def.label,
@@ -364,7 +364,7 @@ function buildBuiltinOptions(settings: BuiltinIntegrationSettings): IntegrationM
     googleConnected ||
     Boolean(
       settings.agentMail?.enabled &&
-        hasText((settings.agentMail as AgentMailSettingsData | undefined)?.apiKey),
+      hasText((settings.agentMail as AgentMailSettingsData | undefined)?.apiKey),
     );
   if (inboxAgentAvailable) {
     options.push(INBOX_AGENT_OPTION);
@@ -487,7 +487,9 @@ function splitMcpServerOptions(input: {
   });
 
   const shouldSplitServices =
-    groups.size > 1 || (groups.size > 0 && (input.serverId === "google-workspace" || input.capabilityId === "google-workspace"));
+    groups.size > 1 ||
+    (groups.size > 0 &&
+      (input.serverId === "google-workspace" || input.capabilityId === "google-workspace"));
   if (shouldSplitServices) {
     return Array.from(groups.values()).map(({ def, exactTools }) => ({
       id: `mcp:${input.serverId}:${def.key}`,
@@ -533,7 +535,10 @@ function toTitle(value: string): string {
 }
 
 function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function dedupeOptions(options: IntegrationMentionOption[]): IntegrationMentionOption[] {
@@ -554,13 +559,20 @@ function dedupeOptions(options: IntegrationMentionOption[]): IntegrationMentionO
       const existing = deduped[existingIndex]!;
       deduped[existingIndex] = {
         ...existing,
-        aliases: Array.from(new Set([...existing.aliases, ...cleaned.aliases].filter(hasText) as string[])),
-        tools: Array.from(new Set([...existing.tools, ...cleaned.tools].filter(hasText) as string[])),
+        aliases: Array.from(
+          new Set([...existing.aliases, ...cleaned.aliases].filter(hasText) as string[]),
+        ),
+        tools: Array.from(
+          new Set([...existing.tools, ...cleaned.tools].filter(hasText) as string[]),
+        ),
         promptHint:
           existing.promptHint === cleaned.promptHint
             ? existing.promptHint
             : `${existing.promptHint} ${cleaned.promptHint}`,
-        status: existing.status === "connected" || cleaned.status === "connected" ? "connected" : "configured",
+        status:
+          existing.status === "connected" || cleaned.status === "connected"
+            ? "connected"
+            : "configured",
       };
       continue;
     }
@@ -585,7 +597,9 @@ export function buildIntegrationMentionOptionsFromState(
   ]);
 }
 
-export function listIntegrationMentionOptions(channels: ChannelData[] = []): IntegrationMentionOption[] {
+export function listIntegrationMentionOptions(
+  channels: ChannelData[] = [],
+): IntegrationMentionOption[] {
   const builtins: BuiltinIntegrationSettings = {
     notion: NotionSettingsManager.loadSettings(),
     box: BoxSettingsManager.loadSettings(),

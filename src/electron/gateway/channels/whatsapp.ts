@@ -338,8 +338,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
         Promise.resolve(saveCreds()).catch((error: unknown) => {
           const err = error instanceof Error ? error : new Error(String(error));
           if (this.isCredentialStateError(err)) {
-            log.warn("[WhatsApp] Stored credentials are unreadable; clearing session and requiring re-authentication.");
-            const authError = new Error("WhatsApp credentials became unreadable. Please re-authenticate.");
+            log.warn(
+              "[WhatsApp] Stored credentials are unreadable; clearing session and requiring re-authentication.",
+            );
+            const authError = new Error(
+              "WhatsApp credentials became unreadable. Please re-authenticate.",
+            );
             void notifyDetectedIntegrationAuthIssue(authError);
             void this.invalidateCredentials(authError);
             return;
@@ -438,9 +442,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       this._selfJid = this.sock?.user?.id;
       this._selfE164 = this._selfJid ? (this.jidToE164(this._selfJid) ?? undefined) : undefined;
 
-      log.info(
-        `WhatsApp connected as ${maskWhatsAppIdentity(this._selfE164 || this._selfJid)}`,
-      );
+      log.info(`WhatsApp connected as ${maskWhatsAppIdentity(this._selfE164 || this._selfJid)}`);
       this.setStatus("connected");
 
       // Only fully reset backoff if the previous connection was stable or this is the first connection.
@@ -478,9 +480,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
           log.error("WhatsApp reconnection failed:", error);
         });
       } else {
-        log.info(
-          `WhatsApp connection closed (status: ${statusCode}), attempting reconnection...`,
-        );
+        log.info(`WhatsApp connection closed (status: ${statusCode}), attempting reconnection...`);
         this.attemptReconnection().catch((error) => {
           log.error("WhatsApp reconnection failed:", error);
         });
@@ -1077,9 +1077,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
         }
 
         const delayMs = this.calculateSendRetryDelay(attempt);
-        log.warn(
-          `[WhatsApp] ${operationName} attempt ${attempt} failed, retrying in ${delayMs}ms`,
-        );
+        log.warn(`[WhatsApp] ${operationName} attempt ${attempt} failed, retrying in ${delayMs}ms`);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
@@ -1405,7 +1403,9 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
     if (this.backoffAttempt >= config.maxAttempts) {
       log.error(`WhatsApp: Max reconnection attempts (${config.maxAttempts}) reached`);
-      const authError = new Error("WhatsApp max reconnection attempts reached. Open Settings > WhatsApp to reconnect or resync.");
+      const authError = new Error(
+        "WhatsApp max reconnection attempts reached. Open Settings > WhatsApp to reconnect or resync.",
+      );
       void notifyDetectedIntegrationAuthIssue(authError);
       this.setStatus("error", authError);
       return;
@@ -2011,7 +2011,9 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
     const nestedError = (err as Any)?.error || (err as Any)?.cause || (err as Any)?.output?.payload;
     if (nestedError && this.isCertificateTrustError(nestedError)) {
-      return nestedError instanceof Error ? nestedError : new Error(this.stringifyError(nestedError));
+      return nestedError instanceof Error
+        ? nestedError
+        : new Error(this.stringifyError(nestedError));
     }
     return undefined;
   }

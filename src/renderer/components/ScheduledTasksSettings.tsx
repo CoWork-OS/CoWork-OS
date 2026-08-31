@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAgentContext } from "../hooks/useAgentContext";
 import { createRendererLogger } from "../utils/logger";
+import {
+  BUILTIN_ACCESS_PROFILE_IDS,
+  BUILTIN_ACCESS_PROFILES,
+  getAccessProfileLabel,
+  type AccessProfileDefinition,
+  type AccessProfileId,
+} from "../../shared/access-profiles";
 
 const logger = createRendererLogger("ScheduledTasks");
 
@@ -77,6 +84,7 @@ interface CronJob {
   name: string;
   description?: string;
   enabled: boolean;
+  accessProfileId?: AccessProfileId;
   shellAccess?: boolean;
   allowUserInput?: boolean;
   deleteAfterRun?: boolean;
@@ -425,7 +433,9 @@ function formatStatusLabel(status?: CronJobState["lastStatus"]): string {
   }
 }
 
-function getStatusTone(status?: CronJobState["lastStatus"]): "success" | "warning" | "error" | "muted" {
+function getStatusTone(
+  status?: CronJobState["lastStatus"],
+): "success" | "warning" | "error" | "muted" {
   if (!status || status === "skipped") return "muted";
   if (status === "ok") return "success";
   if (isWarningLikeLastStatus(status)) return "warning";
@@ -473,7 +483,10 @@ function getDeliveryLabel(job: CronJob, entry?: CronRunHistoryEntry): string {
   return "Delivery pending";
 }
 
-function getDeliveryTone(job: CronJob, entry?: CronRunHistoryEntry): "success" | "warning" | "error" | "muted" {
+function getDeliveryTone(
+  job: CronJob,
+  entry?: CronRunHistoryEntry,
+): "success" | "warning" | "error" | "muted" {
   if (!job.delivery?.enabled) return "muted";
   if (!entry) return "warning";
   if (entry.deliveryStatus === "success") return "success";
@@ -694,7 +707,8 @@ const styles = {
   } as React.CSSProperties,
   runHistoryRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(92px, 0.6fr) minmax(90px, 0.7fr) minmax(100px, 0.8fr) minmax(0, 1.2fr) auto",
+    gridTemplateColumns:
+      "minmax(92px, 0.6fr) minmax(90px, 0.7fr) minmax(100px, 0.8fr) minmax(0, 1.2fr) auto",
     alignItems: "center",
     gap: "10px",
     padding: "10px 14px",
@@ -788,7 +802,9 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingJob, setEditingJob] = useState<CronJob | null>(null);
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
-  const [runHistoryByJobId, setRunHistoryByJobId] = useState<Record<string, CronRunHistoryResult>>({});
+  const [runHistoryByJobId, setRunHistoryByJobId] = useState<Record<string, CronRunHistoryResult>>(
+    {},
+  );
   const [historyLoadingJobId, setHistoryLoadingJobId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
@@ -834,15 +850,14 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
         const history = await window.electronAPI.getCronRunHistory(job.id);
         setRunHistoryByJobId((prev) => ({
           ...prev,
-          [job.id]:
-            history ?? {
-              jobId: job.id,
-              jobName: job.name,
-              entries: job.state.runHistory ?? [],
-              totalRuns: job.state.totalRuns ?? 0,
-              successfulRuns: job.state.successfulRuns ?? 0,
-              failedRuns: job.state.failedRuns ?? 0,
-            },
+          [job.id]: history ?? {
+            jobId: job.id,
+            jobName: job.name,
+            entries: job.state.runHistory ?? [],
+            totalRuns: job.state.totalRuns ?? 0,
+            successfulRuns: job.state.successfulRuns ?? 0,
+            failedRuns: job.state.failedRuns ?? 0,
+          },
         }));
       } catch (err: Any) {
         setError(err.message || "Failed to load run history");
@@ -923,7 +938,11 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
   };
 
   const handleClearRunHistory = async (job: CronJob) => {
-    if (!confirm(`Clear run history for "${job.name}"?\n\nThis only clears the scheduled task history, not task sessions.`)) {
+    if (
+      !confirm(
+        `Clear run history for "${job.name}"?\n\nThis only clears the scheduled task history, not task sessions.`,
+      )
+    ) {
       return;
     }
     try {
@@ -1102,7 +1121,10 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
               failedRuns: job.state.failedRuns ?? 0,
             };
             const latestRun = runHistory.entries[0];
-            const successRate = calculateSuccessRate(runHistory.totalRuns, runHistory.successfulRuns);
+            const successRate = calculateSuccessRate(
+              runHistory.totalRuns,
+              runHistory.successfulRuns,
+            );
             const latestTone = getStatusTone(latestRun?.status ?? lastStatus);
             const latestToneColors = getToneColors(latestTone);
             const deliveryToneColors = getToneColors(getDeliveryTone(job, latestRun));
@@ -1117,10 +1139,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                 }}
               >
                 {/* Job Header */}
-                <div
-                  style={styles.jobHeader}
-                  onClick={() => handleExpandJob(job)}
-                >
+                <div style={styles.jobHeader} onClick={() => handleExpandJob(job)}>
                   {/* Status Indicator */}
                   <div
                     style={{
@@ -1133,7 +1152,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                             ? "var(--color-error)"
                             : isWarningLikeLastStatus(lastStatus)
                               ? "var(--color-warning)"
-                            : "var(--color-success)",
+                              : "var(--color-success)",
                       boxShadow:
                         job.enabled && !job.state.runningAtMs
                           ? `0 0 8px ${
@@ -1160,7 +1179,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                                 ? "var(--color-success-subtle)"
                                 : isWarningLikeLastStatus(lastStatus)
                                   ? "var(--color-warning-subtle)"
-                                : "var(--color-error-subtle)",
+                                  : "var(--color-error-subtle)",
                             color:
                               lastStatus === "ok"
                                 ? "var(--color-success)"
@@ -1369,7 +1388,8 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                               ...styles.inlineTextButton,
                               alignSelf: "flex-start",
                               color: "var(--color-accent)",
-                              borderColor: "color-mix(in srgb, var(--color-accent) 35%, transparent)",
+                              borderColor:
+                                "color-mix(in srgb, var(--color-accent) 35%, transparent)",
                             }}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -1489,7 +1509,12 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                                       Open
                                     </button>
                                   ) : (
-                                    <span style={{ ...styles.runHistoryCell, color: "var(--color-text-muted)" }}>
+                                    <span
+                                      style={{
+                                        ...styles.runHistoryCell,
+                                        color: "var(--color-text-muted)",
+                                      }}
+                                    >
                                       No task
                                     </span>
                                   )}
@@ -1697,7 +1722,10 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
   const [taskPrompt, setTaskPrompt] = useState(job?.taskPrompt || "");
   const [taskTitle, setTaskTitle] = useState(job?.taskTitle || "");
   const [enabled, setEnabled] = useState(job?.enabled ?? true);
-  const [shellAccess, setShellAccess] = useState(job?.shellAccess ?? false);
+  const [accessProfileSelection, setAccessProfileSelection] = useState<AccessProfileId | "legacy">(
+    job?.accessProfileId ?? (job ? "legacy" : BUILTIN_ACCESS_PROFILE_IDS.askForApproval),
+  );
+  const [accessProfiles, setAccessProfiles] = useState<AccessProfileDefinition[]>([]);
   const [allowUserInput, setAllowUserInput] = useState(job?.allowUserInput ?? false);
   const [deleteAfterRun, setDeleteAfterRun] = useState(job?.deleteAfterRun ?? false);
 
@@ -1724,6 +1752,23 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
     ok: boolean;
     message: string;
   } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.electronAPI
+      .getPermissionSettings()
+      .then((settings) => {
+        if (!cancelled && Array.isArray(settings?.accessProfiles)) {
+          setAccessProfiles(settings.accessProfiles);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAccessProfiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const loadChannels = async () => {
@@ -1837,7 +1882,9 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
           taskPrompt: taskPrompt.trim(),
           taskTitle: taskTitle.trim() || undefined,
           enabled,
-          shellAccess,
+          ...(accessProfileSelection === "legacy"
+            ? { shellAccess: job.shellAccess ?? false }
+            : { accessProfileId: accessProfileSelection }),
           allowUserInput,
           deleteAfterRun,
           schedule,
@@ -1855,7 +1902,9 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
           taskPrompt: taskPrompt.trim(),
           taskTitle: taskTitle.trim() || undefined,
           enabled,
-          shellAccess,
+          ...(accessProfileSelection === "legacy"
+            ? { shellAccess: false }
+            : { accessProfileId: accessProfileSelection }),
           allowUserInput,
           deleteAfterRun,
           schedule,
@@ -1952,6 +2001,11 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
       color: "var(--color-text-primary)",
       fontSize: "14px",
       outline: "none",
+    },
+    hint: {
+      fontSize: "12px",
+      lineHeight: 1.45,
+      color: "var(--color-text-muted)",
     },
     scheduleToggle: {
       display: "flex",
@@ -2194,6 +2248,32 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
 
         {/* Options */}
         <div style={modalStyles.field}>
+          <label style={modalStyles.label}>Access profile</label>
+          <select
+            value={accessProfileSelection}
+            onChange={(e) =>
+              setAccessProfileSelection(e.target.value as AccessProfileId | "legacy")
+            }
+            style={modalStyles.select}
+          >
+            {job && !job.accessProfileId && (
+              <option value="legacy">Legacy access (compatibility)</option>
+            )}
+            {BUILTIN_ACCESS_PROFILES.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.label}
+              </option>
+            ))}
+            {accessProfiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.label || getAccessProfileLabel(profile.id)}
+              </option>
+            ))}
+          </select>
+          <p style={{ ...modalStyles.hint, marginTop: "6px" }}>
+            The access profile controls command tools, filesystem boundaries, network access, and
+            approval behavior for each run.
+          </p>
           <label style={modalStyles.checkbox}>
             <input
               type="checkbox"
@@ -2201,14 +2281,6 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
               onChange={(e) => setEnabled(e.target.checked)}
             />
             Enable immediately after saving
-          </label>
-          <label style={{ ...modalStyles.checkbox, marginTop: "8px" }}>
-            <input
-              type="checkbox"
-              checked={shellAccess}
-              onChange={(e) => setShellAccess(e.target.checked)}
-            />
-            Allow shell access (run_command) for this scheduled task
           </label>
           <label style={{ ...modalStyles.checkbox, marginTop: "8px" }}>
             <input

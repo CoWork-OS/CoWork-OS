@@ -10,6 +10,11 @@ It is intentionally different from task execution modes:
 - **Same-session follow-ups** stay in the current conversation
 - **Explicit only**: chat mode is used only when `executionMode` is set to `"chat"`
 
+Selecting an access profile for the surrounding task does not turn tools on in Chat mode. Chat
+remains a no-tools conversation, while an execution task uses its [access profile](access-profiles.md)
+to determine sandbox, command-tool, filesystem, network, and approval behavior. The uploaded-PDF
+exception remains read-only.
+
 There is one narrow exception: if a chat turn includes uploaded PDF attachment metadata and the user asks for content that goes beyond the compact excerpt, CoWork promotes that turn to read-only analysis mode so the document parser can read the attached PDF. This does not enable mutating tools.
 
 Side Chat also uses chat execution mode internally, but it is a separate right-side session type with a parent-task boundary. See [Side Chat](side-chat.md).

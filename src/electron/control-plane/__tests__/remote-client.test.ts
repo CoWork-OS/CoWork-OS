@@ -7,7 +7,7 @@ import { EventEmitter as _EventEmitter } from "events";
 
 // Create mock WebSocket class inside the factory - avoid using vi inside factory
 vi.mock("ws", () => {
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+  // oxlint-disable-next-line typescript-eslint(no-require-imports)
   const { EventEmitter } = require("events");
 
   class MockWebSocket extends EventEmitter {

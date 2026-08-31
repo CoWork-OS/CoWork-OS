@@ -349,7 +349,7 @@ export class BedrockProvider implements LLMProvider {
 
       this.inferenceProfileCache = { fetchedAt: now, profiles: results };
       return results;
-    } catch  {
+    } catch {
       // If the caller doesn't have permissions to list inference profiles, we can't auto-resolve.
       this.inferenceProfileCache = { fetchedAt: now, profiles: [] };
       return [];

@@ -1,9 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
-import type {
-  CoreEvalCase,
-  ListCoreEvalCasesRequest,
-} from "../../shared/types";
+import type { CoreEvalCase, ListCoreEvalCasesRequest } from "../../shared/types";
 
 type Any = any;
 
@@ -24,25 +21,27 @@ export class CoreEvalCaseRepository {
       ...input,
       id: input.id || randomUUID(),
     };
-    this.db.prepare(
-      `INSERT OR REPLACE INTO core_eval_cases (
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO core_eval_cases (
         id, profile_id, workspace_id, cluster_id, title, spec_json, status,
         pass_count, fail_count, last_run_at, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      item.id,
-      item.profileId,
-      item.workspaceId || null,
-      item.clusterId,
-      item.title,
-      JSON.stringify(item.spec || {}),
-      item.status,
-      item.passCount,
-      item.failCount,
-      item.lastRunAt || null,
-      item.createdAt,
-      item.updatedAt,
-    );
+      )
+      .run(
+        item.id,
+        item.profileId,
+        item.workspaceId || null,
+        item.clusterId,
+        item.title,
+        JSON.stringify(item.spec || {}),
+        item.status,
+        item.passCount,
+        item.failCount,
+        item.lastRunAt || null,
+        item.createdAt,
+        item.updatedAt,
+      );
     return item;
   }
 
@@ -52,7 +51,9 @@ export class CoreEvalCaseRepository {
   }
 
   findByClusterId(clusterId: string): CoreEvalCase | undefined {
-    const row = this.db.prepare("SELECT * FROM core_eval_cases WHERE cluster_id = ? LIMIT 1").get(clusterId) as Any;
+    const row = this.db
+      .prepare("SELECT * FROM core_eval_cases WHERE cluster_id = ? LIMIT 1")
+      .get(clusterId) as Any;
     return row ? this.mapRow(row) : undefined;
   }
 
@@ -77,9 +78,9 @@ export class CoreEvalCaseRepository {
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = Math.max(1, Math.min(500, request.limit ?? 100));
-    const rows = this.db.prepare(
-      `SELECT * FROM core_eval_cases ${where} ORDER BY updated_at DESC LIMIT ?`,
-    ).all(...values, limit) as Any[];
+    const rows = this.db
+      .prepare(`SELECT * FROM core_eval_cases ${where} ORDER BY updated_at DESC LIMIT ?`)
+      .all(...values, limit) as Any[];
     return rows.map((row) => this.mapRow(row));
   }
 
@@ -104,7 +105,11 @@ export class CoreEvalCaseRepository {
     for (const [key, column] of Object.entries(mapped)) {
       if (!(key in updates)) continue;
       fields.push(`${column} = ?`);
-      values.push(key === "spec" ? JSON.stringify((updates as Any)[key] || {}) : (updates as Any)[key] ?? null);
+      values.push(
+        key === "spec"
+          ? JSON.stringify((updates as Any)[key] || {})
+          : ((updates as Any)[key] ?? null),
+      );
     }
     if (!fields.length) return existing;
     values.push(id);
@@ -112,27 +117,36 @@ export class CoreEvalCaseRepository {
     return this.findById(id);
   }
 
-  recordRun(caseId: string, params: { passed: boolean; summary: string; details?: Record<string, unknown> }): void {
+  recordRun(
+    caseId: string,
+    params: { passed: boolean; summary: string; details?: Record<string, unknown> },
+  ): void {
     const existing = this.findById(caseId);
     if (!existing) return;
     const now = Date.now();
-    this.db.prepare(
-      `INSERT INTO core_eval_case_runs (id, case_id, passed, summary, details_json, created_at)
+    this.db
+      .prepare(
+        `INSERT INTO core_eval_case_runs (id, case_id, passed, summary, details_json, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      randomUUID(),
-      caseId,
-      params.passed ? 1 : 0,
-      params.summary,
-      params.details ? JSON.stringify(params.details) : null,
-      now,
-    );
+      )
+      .run(
+        randomUUID(),
+        caseId,
+        params.passed ? 1 : 0,
+        params.summary,
+        params.details ? JSON.stringify(params.details) : null,
+        now,
+      );
     this.update(caseId, {
       passCount: existing.passCount + (params.passed ? 1 : 0),
       failCount: existing.failCount + (params.passed ? 0 : 1),
       lastRunAt: now,
       updatedAt: now,
-      status: params.passed ? (existing.status === "draft" ? "active" : existing.status) : "failing",
+      status: params.passed
+        ? existing.status === "draft"
+          ? "active"
+          : existing.status
+        : "failing",
     });
   }
 

@@ -289,6 +289,29 @@ describe("DocumentParserTools", () => {
     expect(result.window.end).toBeGreaterThan(0);
   });
 
+  it("rejects a document denied by the active access profile", async () => {
+    const deniedPath = path.join(tmpDir, "private.txt");
+    fs.writeFileSync(deniedPath, "do not read");
+    const tools = new DocumentParserTools({
+      id: "ws-1",
+      name: "Test Workspace",
+      path: tmpDir,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: false,
+        shell: false,
+        accessFilesystemRules: [{ path: deniedPath, access: "deny" }],
+      },
+    } as Any);
+
+    await expect(tools.parseDocument({ path: "private.txt" })).rejects.toThrow(
+      /denied by the active access profile/i,
+    );
+  });
+
   it("advances high-offset untrusted windows when an in-band note cannot fit", () => {
     const window = calculateDocumentWindow({
       total: 100_000_010,

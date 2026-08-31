@@ -78,16 +78,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private normalizeModelForEndpoint(model: string): string {
     const trimmed = model.trim();
     const lowerBase = this.normalizedBaseUrl.toLowerCase();
-    if (
-      lowerBase.includes("opencode.ai/zen/go/") &&
-      trimmed.startsWith("opencode-go/")
-    ) {
+    if (lowerBase.includes("opencode.ai/zen/go/") && trimmed.startsWith("opencode-go/")) {
       return trimmed.slice("opencode-go/".length);
     }
-    if (
-      lowerBase.includes("opencode.ai/zen/") &&
-      trimmed.startsWith("opencode/")
-    ) {
+    if (lowerBase.includes("opencode.ai/zen/") && trimmed.startsWith("opencode/")) {
       return trimmed.slice("opencode/".length);
     }
     return trimmed;
@@ -114,9 +108,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return this.normalizedBaseUrl.toLowerCase().includes("opencode.ai/zen/go/");
   }
 
-  private getOutputTokenField(
-    model: string,
-  ): "max_tokens" | "max_completion_tokens" {
+  private getOutputTokenField(model: string): "max_tokens" | "max_completion_tokens" {
     return this.isKimiK2Model(model) ? "max_completion_tokens" : "max_tokens";
   }
 
@@ -127,26 +119,18 @@ export class OpenAICompatibleProvider implements LLMProvider {
       Number.isFinite(requestedMaxTokens) &&
       requestedMaxTokens > 0
     ) {
-      return Math.min(
-        Math.floor(requestedMaxTokens),
-        OPENCODE_GO_KIMI_MAX_COMPLETION_TOKENS,
-      );
+      return Math.min(Math.floor(requestedMaxTokens), OPENCODE_GO_KIMI_MAX_COMPLETION_TOKENS);
     }
 
     return requestedMaxTokens;
   }
 
-  private getToolOptions(
-    model: string,
-  ): OpenAICompatibleToolOptions | undefined {
+  private getToolOptions(model: string): OpenAICompatibleToolOptions | undefined {
     if (!this.isKimiK2Model(model)) return undefined;
     return { functionStrict: false };
   }
 
-  private getToolRequestExtras(
-    model: string,
-    tools?: Any[],
-  ): Record<string, Any> {
+  private getToolRequestExtras(model: string, tools?: Any[]): Record<string, Any> {
     if (!tools?.length || !this.isKimiK2Model(model)) return {};
 
     // Kimi K2.5/K2.6 thinking-mode tool turns require provider-specific
@@ -172,9 +156,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     });
 
     try {
-      const model = this.normalizeModelForEndpoint(
-        request.model || this.defaultModel,
-      );
+      const model = this.normalizeModelForEndpoint(request.model || this.defaultModel);
       const tools = request.tools
         ? toOpenAICompatibleTools(request.tools, this.getToolOptions(model))
         : undefined;
@@ -261,8 +243,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         return {
           success: false,
           error:
-            this.getErrorMessage(errorData) ||
-            `HTTP ${response.status}: ${response.statusText}`,
+            this.getErrorMessage(errorData) || `HTTP ${response.status}: ${response.statusText}`,
         };
       }
 

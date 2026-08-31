@@ -10,6 +10,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import type { Workspace, WorkspacePermissions } from "../../../shared/types";
 import { LLMTool } from "../llm/types";
 import { generatePDF } from "../../utils/document-generators/pdf-generator";
 import { generatePPTX } from "../../utils/document-generators/pptx-generator";
@@ -18,6 +19,23 @@ import { generateEPUB } from "../../utils/document-generators/epub-generator";
 import { generateLandingPage } from "../../utils/document-generators/html-page-generator";
 import { compileLatex } from "../../utils/document-generators/latex-compiler";
 import { getVoiceService } from "../../voice";
+import {
+  resolveWorkspaceFilesystemAccessWithApproval,
+  type AccessFilesystemOperation,
+  type WorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
+
+type ExternalFileApprovalRequester = (
+  taskId: string,
+  type: "external_file_access",
+  description: string,
+  details: Record<string, unknown>,
+) => Promise<boolean>;
+type ExternalFileApprovalConsumer = (
+  taskId: string,
+  filePath: string,
+  operation: AccessFilesystemOperation,
+) => boolean;
 
 function sanitizeFilename(raw: string, maxLen = 80): string {
   const base = path.basename(String(raw || "").trim() || "document");
@@ -25,8 +43,11 @@ function sanitizeFilename(raw: string, maxLen = 80): string {
 }
 
 export class DocumentTools {
+  private workspacePermissions?: WorkspacePermissions;
+  private workspaceIsTemp = false;
+
   constructor(
-    private workspacePath: string,
+    workspace: string | Pick<Workspace, "path" | "permissions" | "isTemp">,
     private taskId: string,
     private registerArtifact?: (
       taskId: string,
@@ -34,10 +55,135 @@ export class DocumentTools {
       mimeType: string,
       metadata?: Record<string, unknown>,
     ) => void,
-  ) {}
+    private requestExternalFileApproval?: ExternalFileApprovalRequester,
+    private consumeExternalFileApproval?: ExternalFileApprovalConsumer,
+  ) {
+    if (typeof workspace === "string") {
+      this.workspacePath = workspace;
+    } else {
+      this.workspacePath = workspace.path;
+      this.workspacePermissions = workspace.permissions;
+      this.workspaceIsTemp = workspace.isTemp === true;
+    }
+  }
 
-  setWorkspace(workspace: { path: string }): void {
+  private workspacePath: string;
+
+  setWorkspace(workspace: {
+    path: string;
+    permissions?: WorkspacePermissions;
+    isTemp?: boolean;
+  }): void {
     this.workspacePath = workspace.path;
+    this.workspacePermissions = workspace.permissions;
+    this.workspaceIsTemp = workspace.isTemp === true;
+  }
+
+  private async assertPathAllowed(
+    requestedPath: string,
+    operation: "read" | "write",
+    label = "document file",
+  ): Promise<string> {
+    const resolved = path.isAbsolute(requestedPath)
+      ? path.resolve(requestedPath)
+      : path.resolve(this.workspacePath, requestedPath);
+    const permissions = this.workspacePermissions;
+    if (!permissions) return resolved;
+
+    if (operation === "read" && permissions.read === false) {
+      throw new Error("Read permission not granted");
+    }
+    if (operation === "write" && permissions.write === false) {
+      throw new Error("Write permission not granted");
+    }
+
+    const handlers: WorkspaceFilesystemApprovalHandlers = {
+      ...(this.consumeExternalFileApproval
+        ? {
+            consume: (candidate: string, requestedOperation: AccessFilesystemOperation) =>
+              this.consumeExternalFileApproval?.(this.taskId, candidate, requestedOperation) ===
+              true,
+          }
+        : {}),
+      ...(this.requestExternalFileApproval
+        ? {
+            request: ({ path: candidate, operation: requestedOperation, label: requestedLabel }) =>
+              this.requestExternalFileApproval!(
+                this.taskId,
+                "external_file_access",
+                `Allow ${requestedOperation} access to external ${requestedLabel}: ${candidate}`,
+                { path: candidate, operation: requestedOperation, tool: "document_tools" },
+              ),
+          }
+        : {}),
+    };
+    const access = await resolveWorkspaceFilesystemAccessWithApproval(
+      { path: this.workspacePath, permissions, isTemp: this.workspaceIsTemp },
+      resolved,
+      operation,
+      label,
+      handlers,
+    );
+    if (access.decision !== "allow") {
+      if (access.reason === "outside_workspace" && !this.requestExternalFileApproval) {
+        throw new Error(`External ${label} access requires the approval system.`);
+      }
+      if (access.reason === "outside_workspace") {
+        throw new Error(`External ${label} access was not approved.`);
+      }
+      if (access.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${resolved}`);
+      }
+      if (access.reason === "access_profile_unavailable") {
+        throw new Error("The selected access profile is unavailable.");
+      }
+      throw new Error(`Path is outside the active access profile boundary: ${resolved}`);
+    }
+
+    return access.path;
+  }
+
+  private async normalizePresentationAssets(assets: unknown): Promise<Any[]> {
+    if (!Array.isArray(assets)) return [];
+
+    return Promise.all(
+      assets.map(async (asset) => {
+        if (!asset || typeof asset !== "object" || Array.isArray(asset)) return asset;
+        const normalized = { ...(asset as Record<string, unknown>) };
+        if (typeof normalized.path === "string" && normalized.path.trim()) {
+          normalized.path = await this.assertPathAllowed(
+            normalized.path,
+            "read",
+            "presentation asset",
+          );
+        }
+        return normalized;
+      }),
+    );
+  }
+
+  private async normalizePresentationSlides(slides: unknown): Promise<Any[]> {
+    if (!Array.isArray(slides)) return [];
+
+    return Promise.all(
+      slides.map(async (slide) => {
+        if (!slide || typeof slide !== "object" || Array.isArray(slide)) return slide;
+        const normalized = { ...(slide as Record<string, unknown>) };
+        const image = normalized.image;
+        if (image && typeof image === "object" && !Array.isArray(image)) {
+          const normalizedImage = { ...(image as Record<string, unknown>) };
+          if (typeof normalizedImage.path === "string" && normalizedImage.path.trim()) {
+            normalizedImage.path = await this.assertPathAllowed(
+              normalizedImage.path,
+              "read",
+              "presentation asset",
+            );
+          }
+          normalized.image = normalizedImage;
+        }
+        return normalized;
+      }),
+    );
   }
 
   // ── Tool definitions ────────────────────────────────────────────
@@ -55,7 +201,8 @@ export class DocumentTools {
           properties: {
             sourcePath: {
               type: "string",
-              description: 'Workspace-relative or absolute path to the .tex file (e.g. "paper.tex")',
+              description:
+                'Workspace-relative or absolute path to the .tex file (e.g. "paper.tex")',
             },
             outputPath: {
               type: "string",
@@ -121,7 +268,11 @@ export class DocumentTools {
             title: { type: "string", description: "Presentation title" },
             author: { type: "string", description: "Author name (optional)" },
             audience: { type: "string", description: "Audience or viewing context" },
-            tone: { type: "string", description: "Tone for the deck, such as work, editorial, playful, premium, or technical" },
+            tone: {
+              type: "string",
+              description:
+                "Tone for the deck, such as work, editorial, playful, premium, or technical",
+            },
             visualMode: {
               type: "string",
               enum: ["work", "editorial", "playful", "premium", "technical"],
@@ -172,8 +323,14 @@ export class DocumentTools {
                 properties: {
                   title: { type: "string", description: "Slide title" },
                   subtitle: { type: "string", description: "Slide subtitle (title slides only)" },
-                  intent: { type: "string", description: "The single job this slide should perform" },
-                  visualBrief: { type: "string", description: "Slide-specific design or imagery guidance" },
+                  intent: {
+                    type: "string",
+                    description: "The single job this slide should perform",
+                  },
+                  visualBrief: {
+                    type: "string",
+                    description: "Slide-specific design or imagery guidance",
+                  },
                   slideType: {
                     type: "string",
                     enum: [
@@ -217,7 +374,8 @@ export class DocumentTools {
                   },
                   data: {
                     type: "object",
-                    description: "Structured data for editable chart, table, timeline, or metric slides",
+                    description:
+                      "Structured data for editable chart, table, timeline, or metric slides",
                     properties: {
                       categories: { type: "array", items: { type: "string" } },
                       series: {
@@ -428,11 +586,25 @@ export class DocumentTools {
   // ── Tool execution ──────────────────────────────────────────────
 
   async compileLatex(input: Any): Promise<Any> {
+    const sourcePath = await this.assertPathAllowed(
+      String(input.sourcePath || ""),
+      "read",
+      "LaTeX source",
+    );
+    const outputPath = input.outputPath
+      ? String(input.outputPath)
+      : path.join(
+          path.dirname(sourcePath),
+          `${path.basename(sourcePath, path.extname(sourcePath))}.pdf`,
+        );
+    const checkedOutputPath = await this.assertPathAllowed(outputPath, "write", "LaTeX output");
+
     const result = await compileLatex({
       workspacePath: this.workspacePath,
-      sourcePath: input.sourcePath,
-      outputPath: input.outputPath,
+      sourcePath,
+      outputPath: checkedOutputPath,
       engine: input.engine || "auto",
+      ...(this.requestExternalFileApproval ? { allowExternalPaths: true } : {}),
     });
 
     if (result.success && this.registerArtifact) {
@@ -464,6 +636,7 @@ export class DocumentTools {
   async generateDocument(input: Any): Promise<Any> {
     const filename = sanitizeFilename(input.filename || "document.pdf");
     const outputPath = path.join(this.workspacePath, filename);
+    await this.assertPathAllowed(outputPath, "write");
 
     const result = await generatePDF(outputPath, {
       title: input.title,
@@ -488,6 +661,7 @@ export class DocumentTools {
   async generatePresentation(input: Any): Promise<Any> {
     const filename = sanitizeFilename(input.filename || "presentation.pptx");
     const outputPath = path.join(this.workspacePath, filename);
+    await this.assertPathAllowed(outputPath, "write");
 
     const result = await generatePPTX(outputPath, {
       title: input.title,
@@ -498,8 +672,8 @@ export class DocumentTools {
       styleBrief: input.styleBrief,
       brand: input.brand,
       template: input.template,
-      assets: input.assets,
-      slides: input.slides || [],
+      assets: await this.normalizePresentationAssets(input.assets),
+      slides: await this.normalizePresentationSlides(input.slides),
       theme: input.theme,
     });
 
@@ -523,6 +697,7 @@ export class DocumentTools {
   async generateSpreadsheet(input: Any): Promise<Any> {
     const filename = sanitizeFilename(input.filename || "data.xlsx");
     const outputPath = path.join(this.workspacePath, filename);
+    await this.assertPathAllowed(outputPath, "write");
 
     const result = await generateXLSX(outputPath, {
       title: input.title,
@@ -549,6 +724,7 @@ export class DocumentTools {
   async generateEPUB(input: Any): Promise<Any> {
     const filename = sanitizeFilename(input.filename || "novel.epub");
     const outputPath = path.join(this.workspacePath, filename);
+    await this.assertPathAllowed(outputPath, "write");
 
     const result = await generateEPUB(outputPath, {
       title: String(input.title || "Untitled"),
@@ -560,11 +736,7 @@ export class DocumentTools {
     });
 
     if (result.success && this.registerArtifact) {
-      this.registerArtifact(
-        this.taskId,
-        result.path,
-        "application/epub+zip",
-      );
+      this.registerArtifact(this.taskId, result.path, "application/epub+zip");
     }
 
     return {
@@ -579,6 +751,7 @@ export class DocumentTools {
   async generateLandingPage(input: Any): Promise<Any> {
     const filename = sanitizeFilename(input.filename || "index.html");
     const outputPath = path.join(this.workspacePath, filename);
+    await this.assertPathAllowed(outputPath, "write");
 
     const result = await generateLandingPage(outputPath, {
       title: String(input.title || "Untitled"),
@@ -608,6 +781,7 @@ export class DocumentTools {
     const MAX_NARRATION_TEXT_LENGTH = 25_000; // TTS providers typically limit input
     const filename = sanitizeFilename(input.filename || "narration.mp3");
     const outputPath = path.join(this.workspacePath, filename);
+    await this.assertPathAllowed(outputPath, "write");
     const text = String(input.text || "").trim();
 
     if (!text) {

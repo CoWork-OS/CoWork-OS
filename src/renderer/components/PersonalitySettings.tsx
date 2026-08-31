@@ -20,7 +20,12 @@ export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsPr
   const saveQueuedRef = useRef(false);
   const reloadAfterSaveRef = useRef(false);
   const [personas, setPersonas] = useState<PersonaDefinition[]>([]);
-  const [presets, setPresets] = useState<Record<string, { name: string; description: string; icon: string; traits: Record<string, number> }>>({});
+  const [presets, setPresets] = useState<
+    Record<
+      string,
+      { name: string; description: string; icon: string; traits: Record<string, number> }
+    >
+  >({});
   const [relationshipStats, setRelationshipStats] = useState<{
     tasksCompleted: number;
     projectsCount: number;
@@ -62,7 +67,12 @@ export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsPr
       configRef.current = nextConfig;
       setConfig(nextConfig);
       setPersonas((loadedPersonas as PersonaDefinition[]) ?? []);
-      setPresets((loadedPresets as Record<string, { name: string; description: string; icon: string; traits: Record<string, number> }>) ?? {});
+      setPresets(
+        (loadedPresets as Record<
+          string,
+          { name: string; description: string; icon: string; traits: Record<string, number> }
+        >) ?? {},
+      );
       setRelationshipStats(stats as typeof relationshipStats);
     } catch (err) {
       console.error("Failed to load personality settings:", err);

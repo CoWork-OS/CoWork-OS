@@ -18,7 +18,10 @@ function createFakeDb() {
           if (sql.includes("WHERE i.fingerprint = ?")) {
             const item = items.find((entry) => entry.fingerprint === params[0]);
             return item
-              ? { ...item, evidence_count: evidence.filter((entry) => entry.item_id === item.id).length }
+              ? {
+                  ...item,
+                  evidence_count: evidence.filter((entry) => entry.item_id === item.id).length,
+                }
               : undefined;
           }
           return undefined;
@@ -94,8 +97,18 @@ function createFakeDb() {
             }
           }
           if (sql.includes("INSERT INTO mission_control_item_evidence")) {
-            const [id, item_id, source_type, source_id, title, summary, payload_json, timestamp] = params;
-            evidence.push({ id, item_id, source_type, source_id, title, summary, payload_json, timestamp });
+            const [id, item_id, source_type, source_id, title, summary, payload_json, timestamp] =
+              params;
+            evidence.push({
+              id,
+              item_id,
+              source_type,
+              source_id,
+              title,
+              summary,
+              payload_json,
+              timestamp,
+            });
           }
         },
       };

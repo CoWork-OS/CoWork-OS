@@ -5,6 +5,7 @@ This document describes the current execution concept for planning, step executi
 The model is built around four rules:
 
 - tool guidance should live with the tool definition instead of being duplicated across prompts
+- access boundaries should be resolved once at task start and carried through every execution surface
 - prompt assembly should be sectioned, budgeted, and cache-aware
 - delegated work should receive a structured brief instead of a raw prompt passthrough
 - verification guidance should appear before finalization, not only after a post-hoc gate fires
@@ -24,7 +25,8 @@ Internal tool definitions now carry prompt-render metadata before provider seria
 
 ### Render timing
 
-Tool prompts are rendered only after:
+Tool prompts are rendered only after the effective [access profile](access-profiles.md) has been
+resolved and applied, and then after:
 
 - policy filtering
 - mode filtering
@@ -42,13 +44,27 @@ This keeps hidden tools from consuming prompt budget.
 - execution mode
 - task domain
 - web-search mode
-- shell availability
+- profile id and effective command-tool availability
+- effective sandbox, network, and filesystem/domain scope
 - agent type
 - worker role
 - user-input allowance
 - visible tool names
 
 That makes the rendered tool array stable for repeated turns while still invalidating when visibility or execution context changes.
+
+### Access profile gate
+
+The daemon resolves a task's explicit profile or configured default before it constructs the
+available tool set. The profile determines whether command tools, network tools, filesystem
+operations, browser/connector actions, and interactive terminal capabilities can be exposed. The
+per-request permission engine still runs after tool visibility and applies hard guardrails,
+workspace capabilities, explicit rules, and approval decisions.
+
+Profile changes invalidate the tool-visibility and prompt-render caches. A child task, scheduled
+run, managed session, remote dispatch, or worktree may narrow the inherited profile but may not
+replace it with a broader one. If the profile cannot be resolved safely, tool rendering receives an
+unavailable read-only profile and the task pauses instead of falling back to unrestricted tools.
 
 ### Prompt-aware rollout tools
 
@@ -402,8 +418,12 @@ The post-hoc verification runtime still remains the final enforcement path. Thes
 The current split is:
 
 - `SessionRuntime` owns session-state buckets, checklist state, recovery state, tool visibility/render caching, and snapshot restore
-- `TaskExecutor` owns bootstrap, planning, finalization, completion policy, and the execution prompt section cache
+- `TaskExecutor` owns profile-aware bootstrap, planning, finalization, completion policy, and the execution prompt section cache
 - `TurnKernel` owns a single active turn
+
+Profile definition and path enforcement stay outside the turn kernel: shared profile contracts live
+in `src/shared/access-profiles.ts`, resolution in `src/electron/security/access-profile-resolver.ts`,
+and filesystem enforcement in `src/electron/security/access-profile-paths.ts`.
 
 That keeps state ownership explicit while still letting planning, execution, follow-up, delegation, and verification share the same runtime concepts.
 
@@ -413,4 +433,5 @@ That keeps state ownership explicit while still letting planning, execution, fol
 - [Architecture](architecture.md)
 - [Features](features.md)
 - [Project Status](project-status.md)
+- [Access Profiles](access-profiles.md)
 - [Reliability Flywheel](reliability-flywheel.md)

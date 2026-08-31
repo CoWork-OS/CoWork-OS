@@ -2,10 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import {
-  detectTaskRootPathRewrite,
-  shouldRewriteWorkspaceAliasPath,
-} from "../path-alias";
+import { detectTaskRootPathRewrite, shouldRewriteWorkspaceAliasPath } from "../path-alias";
 import type { WorkspacePathAliasMatch } from "../path-alias";
 
 function makeAliasMatch(sourceExists: boolean): WorkspacePathAliasMatch {

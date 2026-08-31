@@ -4,6 +4,13 @@ Plugin packs are composable bundles that group skills, agent roles, connectors, 
 
 Access from **Settings** > **Customize**.
 
+Plugin packs add discoverable skills, roles, connectors, and commands; they do
+not grant execution authority. When a pack is used, its skills and connector
+calls remain inside the task's effective [access profile](access-profiles.md),
+administrator policy, and tool restrictions. A pack can provide narrower
+runtime guidance, but it cannot enable command tools, widen filesystem or
+network scope, suppress a required approval, or repair an unavailable profile.
+
 ---
 
 ## Concepts

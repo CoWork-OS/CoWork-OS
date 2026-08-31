@@ -140,7 +140,9 @@ describeWithNativeDb("KnowledgeGraphRepository temporal edges", () => {
 
     const allEdges = repo.getEdgesBetween(alpha.id, beta.id);
     expect(allEdges).toHaveLength(2);
-    expect(allEdges.map((edge) => edge.id)).toEqual(expect.arrayContaining([oldEdge.id, newEdge.id]));
+    expect(allEdges.map((edge) => edge.id)).toEqual(
+      expect.arrayContaining([oldEdge.id, newEdge.id]),
+    );
   });
 
   it("rejects overlapping intervals for the same directed relation", () => {
@@ -150,7 +152,18 @@ describeWithNativeDb("KnowledgeGraphRepository temporal edges", () => {
     const alpha = repo.createEntity(workspaceId, entityType.id, "Alpha");
     const beta = repo.createEntity(workspaceId, entityType.id, "Beta");
 
-    repo.createEdge(workspaceId, alpha.id, beta.id, "depends_on", undefined, 1, "agent", "task-1", 1_000, 2_000);
+    repo.createEdge(
+      workspaceId,
+      alpha.id,
+      beta.id,
+      "depends_on",
+      undefined,
+      1,
+      "agent",
+      "task-1",
+      1_000,
+      2_000,
+    );
 
     expect(() =>
       repo.createEdge(
@@ -175,8 +188,20 @@ describeWithNativeDb("KnowledgeGraphRepository temporal edges", () => {
     const alpha = repo.createEntity(workspaceId, entityType.id, "Alpha");
     const beta = repo.createEntity(workspaceId, entityType.id, "Beta");
 
-    const edge = repo.createEdge(workspaceId, alpha.id, beta.id, "depends_on", undefined, 1, "agent", "task-1", 2_000);
+    const edge = repo.createEdge(
+      workspaceId,
+      alpha.id,
+      beta.id,
+      "depends_on",
+      undefined,
+      1,
+      "agent",
+      "task-1",
+      2_000,
+    );
 
-    expect(() => repo.invalidateEdge(edge.id, 2_000)).toThrow(/valid_to must be greater than the edge valid_from/i);
+    expect(() => repo.invalidateEdge(edge.id, 2_000)).toThrow(
+      /valid_to must be greater than the edge valid_from/i,
+    );
   });
 });

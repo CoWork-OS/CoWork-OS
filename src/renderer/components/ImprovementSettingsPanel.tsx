@@ -109,7 +109,10 @@ function getProviderHealthSummary(
       .map((campaign) => ({
         id: campaign.id,
         title: campaign.stopReason || "provider_failure",
-        detail: campaign.promotionError || campaign.verdictSummary || "Provider-related campaign failure.",
+        detail:
+          campaign.promotionError ||
+          campaign.verdictSummary ||
+          "Provider-related campaign failure.",
         at: campaign.completedAt || campaign.startedAt || campaign.createdAt,
       })),
     ...candidates
@@ -197,14 +200,18 @@ export function ImprovementSettingsPanel(props?: {
   const filteredCandidates = useMemo(
     () =>
       candidates.filter((candidate) => {
-        const statusMatches = candidateStatusFilter === "all" || candidate.status === candidateStatusFilter;
-        const sourceMatches = candidateSourceFilter === "all" || candidate.source === candidateSourceFilter;
+        const statusMatches =
+          candidateStatusFilter === "all" || candidate.status === candidateStatusFilter;
+        const sourceMatches =
+          candidateSourceFilter === "all" || candidate.source === candidateSourceFilter;
         return statusMatches && sourceMatches;
       }),
     [candidateStatusFilter, candidateSourceFilter, candidates],
   );
   const overviewMetrics = useMemo(() => {
-    const prOpened = campaigns.filter((campaign) => campaign.promotionStatus === "pr_opened").length;
+    const prOpened = campaigns.filter(
+      (campaign) => campaign.promotionStatus === "pr_opened",
+    ).length;
     const terminalCampaigns = campaigns.filter((campaign) =>
       ["pr_opened", "failed", "parked", "promoted"].includes(campaign.status),
     );
@@ -215,7 +222,8 @@ export function ImprovementSettingsPanel(props?: {
     ).length;
     const parkedCandidates = candidates.filter((candidate) => candidate.status === "parked").length;
     const coolingDownCandidates = candidates.filter(
-      (candidate) => typeof candidate.cooldownUntil === "number" && candidate.cooldownUntil > Date.now(),
+      (candidate) =>
+        typeof candidate.cooldownUntil === "number" && candidate.cooldownUntil > Date.now(),
     ).length;
     const prYield = terminalCampaigns.length > 0 ? prOpened / terminalCampaigns.length : 0;
     const stageCounts = campaigns.reduce<Record<string, number>>((acc, campaign) => {
@@ -252,7 +260,8 @@ export function ImprovementSettingsPanel(props?: {
     [candidates],
   );
   const eligibilityBlocked = !eligibility.eligible;
-  const ownerEnrollmentStored = eligibility.checks.ownerEnrollment || eligibility.checks.ownerProofPresent;
+  const ownerEnrollmentStored =
+    eligibility.checks.ownerEnrollment || eligibility.checks.ownerProofPresent;
   const worktreeForcedByVariants = settings.variantsPerCampaign > 1;
 
   useEffect(() => {
@@ -289,12 +298,16 @@ export function ImprovementSettingsPanel(props?: {
       setWorkspaces(combined);
 
       const defaultWorkspaceId =
-        combined.find((workspace) => workspace.id === ALL_WORKSPACES_VALUE)?.id || combined[0]?.id || "";
+        combined.find((workspace) => workspace.id === ALL_WORKSPACES_VALUE)?.id ||
+        combined[0]?.id ||
+        "";
       let workspaceToLoad = defaultWorkspaceId;
 
       setSelectedWorkspaceId((current) => {
         const nextSelected =
-          current && combined.some((workspace) => workspace.id === current) ? current : defaultWorkspaceId;
+          current && combined.some((workspace) => workspace.id === current)
+            ? current
+            : defaultWorkspaceId;
         workspaceToLoad = nextSelected;
         return nextSelected;
       });
@@ -330,7 +343,10 @@ export function ImprovementSettingsPanel(props?: {
         setActionMessage(eligibility.reason);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Unable to save self-improvement settings.");
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error || "Unable to save self-improvement settings.");
       setActionMessage(message);
       setSettings(await window.electronAPI.getImprovementSettings().catch(() => DEFAULT_SETTINGS));
     } finally {
@@ -346,13 +362,18 @@ export function ImprovementSettingsPanel(props?: {
 
     try {
       setBusy(true);
-      const nextEligibility = await window.electronAPI.saveImprovementOwnerEnrollment(ownerEnrollmentSignatureInput);
+      const nextEligibility = await window.electronAPI.saveImprovementOwnerEnrollment(
+        ownerEnrollmentSignatureInput,
+      );
       setEligibility(nextEligibility);
       setOwnerEnrollmentSignatureInput("");
       setSettings(await window.electronAPI.getImprovementSettings().catch(() => DEFAULT_SETTINGS));
       setActionMessage(nextEligibility.reason);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Unable to save owner enrollment signature.");
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error || "Unable to save owner enrollment signature.");
       setActionMessage(message);
     } finally {
       setBusy(false);
@@ -368,7 +389,10 @@ export function ImprovementSettingsPanel(props?: {
       setSettings(await window.electronAPI.getImprovementSettings().catch(() => DEFAULT_SETTINGS));
       setActionMessage("Owner enrollment cleared.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Unable to clear owner enrollment.");
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error || "Unable to clear owner enrollment.");
       setActionMessage(message);
     } finally {
       setBusy(false);
@@ -380,9 +404,14 @@ export function ImprovementSettingsPanel(props?: {
       setBusy(true);
       const result = await window.electronAPI.refreshImprovementCandidates();
       if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
-      setActionMessage(`Signals refreshed. ${result.candidateCount} candidate issue(s) currently in backlog.`);
+      setActionMessage(
+        `Signals refreshed. ${result.candidateCount} candidate issue(s) currently in backlog.`,
+      );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Unable to refresh self-improvement signals.");
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error || "Unable to refresh self-improvement signals.");
       setActionMessage(message);
     } finally {
       setBusy(false);
@@ -395,14 +424,19 @@ export function ImprovementSettingsPanel(props?: {
       const campaign = await window.electronAPI.runNextImprovementExperiment();
       if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
       if (campaign) {
-        setActionMessage(`Started campaign ${campaign.id.slice(0, 8)} with ${campaign.variants.length} variant lane(s).`);
+        setActionMessage(
+          `Started campaign ${campaign.id.slice(0, 8)} with ${campaign.variants.length} variant lane(s).`,
+        );
       } else {
         setActionMessage(
           "No eligible campaign was started. Check that the loop is enabled, no other campaign is active, and at least one open candidate is available.",
         );
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Unable to start a self-improvement campaign.");
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error || "Unable to start a self-improvement campaign.");
       setActionMessage(message);
     } finally {
       setBusy(false);
@@ -415,7 +449,8 @@ export function ImprovementSettingsPanel(props?: {
       await window.electronAPI.dismissImprovementCandidate(candidateId);
       if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Unable to dismiss candidate.");
+      const message =
+        error instanceof Error ? error.message : String(error || "Unable to dismiss candidate.");
       setActionMessage(message);
     } finally {
       setBusy(false);
@@ -428,7 +463,8 @@ export function ImprovementSettingsPanel(props?: {
       await window.electronAPI.reviewImprovementCampaign(campaignId, reviewStatus);
       if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Unable to review campaign.");
+      const message =
+        error instanceof Error ? error.message : String(error || "Unable to review campaign.");
       setActionMessage(message);
     } finally {
       setBusy(false);
@@ -441,12 +477,17 @@ export function ImprovementSettingsPanel(props?: {
       const campaign = await window.electronAPI.retryImprovementCampaign(campaignId);
       if (selectedWorkspaceId) await refreshWorkspaceData(selectedWorkspaceId);
       if (campaign) {
-        setActionMessage(`Retried campaign ${campaign.id.slice(0, 8)} with ${campaign.variants.length} variant lane(s).`);
+        setActionMessage(
+          `Retried campaign ${campaign.id.slice(0, 8)} with ${campaign.variants.length} variant lane(s).`,
+        );
       } else {
-        setActionMessage("Retry could not start. Check that no other campaign is active and the candidate still exists.");
+        setActionMessage(
+          "Retry could not start. Check that no other campaign is active and the candidate still exists.",
+        );
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Retry could not start.");
+      const message =
+        error instanceof Error ? error.message : String(error || "Retry could not start.");
       setActionMessage(message);
     } finally {
       setBusy(false);
@@ -473,7 +514,10 @@ export function ImprovementSettingsPanel(props?: {
         `Reset self-improvement history. Removed ${totalDeleted} record(s) (${result.deleted.candidates} candidates, ${result.deleted.campaigns} campaigns, ${result.deleted.variantRuns} variant runs, ${result.deleted.judgeVerdicts} judge verdicts, ${result.deleted.legacyRuns} legacy runs) and cancelled ${result.cancelledTaskIds.length} active improvement task(s).`,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Unable to reset self-improvement history.");
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error || "Unable to reset self-improvement history.");
       setActionMessage(message);
     } finally {
       setBusy(false);
@@ -492,7 +536,8 @@ export function ImprovementSettingsPanel(props?: {
     <div className="settings-section">
       <h2 className="settings-section-title">Self-Improvement</h2>
       <p className="settings-section-description">
-        Mine recurring failures, run a bounded scout-then-implement pipeline, and only succeed when a draft PR is opened.
+        Mine recurring failures, run a bounded scout-then-implement pipeline, and only succeed when
+        a draft PR is opened.
       </p>
 
       <div
@@ -510,13 +555,18 @@ export function ImprovementSettingsPanel(props?: {
             color: eligibility.eligible ? "#2f855a" : "#c53030",
           }}
         >
-          {eligibility.eligible ? "Owner-only self-improvement is enabled" : "Self-improvement is locked"}
+          {eligibility.eligible
+            ? "Owner-only self-improvement is enabled"
+            : "Self-improvement is locked"}
         </div>
         <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
           {eligibility.reason}
         </p>
         <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
-          App: <code>{eligibility.checks.unpackagedApp ? "unpackaged" : "packaged"}</code> | Canonical repo origin: <code>{eligibility.checks.canonicalRepo ? "matched" : "not matched"}</code> | Owner enrollment: <code>{eligibility.checks.ownerEnrollment ? "present" : "missing"}</code>
+          App: <code>{eligibility.checks.unpackagedApp ? "unpackaged" : "packaged"}</code> |
+          Canonical repo origin:{" "}
+          <code>{eligibility.checks.canonicalRepo ? "matched" : "not matched"}</code> | Owner
+          enrollment: <code>{eligibility.checks.ownerEnrollment ? "present" : "missing"}</code>
         </p>
         {eligibility.repoPath ? (
           <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
@@ -546,17 +596,28 @@ export function ImprovementSettingsPanel(props?: {
             disabled={busy}
           />
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="settings-button" onClick={() => void saveOwnerEnrollment()} disabled={busy || !ownerEnrollmentSignatureInput.trim()}>
+            <button
+              className="settings-button"
+              onClick={() => void saveOwnerEnrollment()}
+              disabled={busy || !ownerEnrollmentSignatureInput.trim()}
+            >
               Save Enrollment Signature
             </button>
-            <button className="settings-button settings-button-secondary" onClick={() => void clearOwnerEnrollment()} disabled={busy || !ownerEnrollmentStored}>
+            <button
+              className="settings-button settings-button-secondary"
+              onClick={() => void clearOwnerEnrollment()}
+              disabled={busy || !ownerEnrollmentStored}
+            >
               Clear Enrollment
             </button>
           </div>
           <p className="settings-form-hint" style={{ margin: 0 }}>
             {ownerEnrollmentStored
               ? "A local owner enrollment is stored for this machine."
-              : "No local owner enrollment is stored yet."} Only the repo maintainer can generate a valid signature because verification is pinned to the maintainer public key shipped in the app. No private key is stored in the repo or database.
+              : "No local owner enrollment is stored yet."}{" "}
+            Only the repo maintainer can generate a valid signature because verification is pinned
+            to the maintainer public key shipped in the app. No private key is stored in the repo or
+            database.
           </p>
         </div>
       </div>
@@ -564,16 +625,20 @@ export function ImprovementSettingsPanel(props?: {
       <div className="settings-subsection">
         <h3>How It Works</h3>
         <HintBlock title="1. Observation">
-          Cowork watches failed tasks, verification failures, user feedback, and optional dev logs to build a backlog of recurring issues.
+          Cowork watches failed tasks, verification failures, user feedback, and optional dev logs
+          to build a backlog of recurring issues.
         </HintBlock>
         <HintBlock title="2. Campaign">
-          For the top candidate, Cowork creates one campaign, runs a scout stage to reproduce the problem, then runs bounded implementation lanes and judges the most promotable result.
+          For the top candidate, Cowork creates one campaign, runs a scout stage to reproduce the
+          problem, then runs bounded implementation lanes and judges the most promotable result.
         </HintBlock>
         <HintBlock title="3. Judge">
-          Campaigns fail closed if reproduction, verification, or PR-readiness evidence is missing. Provider failures park the candidate with cooldown instead of retrying immediately.
+          Campaigns fail closed if reproduction, verification, or PR-readiness evidence is missing.
+          Provider failures park the candidate with cooldown instead of retrying immediately.
         </HintBlock>
         <HintBlock title="4. Promotion">
-          The only automated success outcome is a draft PR candidate with verification evidence and stored PR metadata.
+          The only automated success outcome is a draft PR candidate with verification evidence and
+          stored PR metadata.
         </HintBlock>
       </div>
 
@@ -647,7 +712,9 @@ export function ImprovementSettingsPanel(props?: {
             { value: "github_pr", label: "Open GitHub PR" },
             { value: "merge", label: "Merge to Base Branch" },
           ]}
-          onChange={(value) => void saveSettings({ promotionMode: value as ImprovementLoopSettings["promotionMode"] })}
+          onChange={(value) =>
+            void saveSettings({ promotionMode: value as ImprovementLoopSettings["promotionMode"] })
+          }
         />
         <NumberRow
           label="Run Interval (minutes)"
@@ -667,7 +734,8 @@ export function ImprovementSettingsPanel(props?: {
         />
         {worktreeForcedByVariants && (
           <p className="settings-form-hint" style={{ marginTop: -4 }}>
-            Multi-variant campaigns automatically force worktree isolation to keep each implementation lane in a separate checkout.
+            Multi-variant campaigns automatically force worktree isolation to keep each
+            implementation lane in a separate checkout.
           </p>
         )}
         <NumberRow
@@ -727,7 +795,9 @@ export function ImprovementSettingsPanel(props?: {
         >
           <MetricCard
             label="PR Yield"
-            value={overviewMetrics.totalCampaigns > 0 ? formatPercent(overviewMetrics.prYield) : "n/a"}
+            value={
+              overviewMetrics.totalCampaigns > 0 ? formatPercent(overviewMetrics.prYield) : "n/a"
+            }
             hint={`${overviewMetrics.prOpened} PR candidate(s) opened from ${overviewMetrics.totalCampaigns} campaign(s).`}
             tone={overviewMetrics.prOpened > 0 ? "#2f855a" : "#9b2c2c"}
           />
@@ -765,15 +835,21 @@ export function ImprovementSettingsPanel(props?: {
         </div>
 
         <div className="settings-form-group">
-          <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>PR Candidate Funnel</div>
+          <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
+            PR Candidate Funnel
+          </div>
           <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
-            Campaigns: <code>{overviewMetrics.totalCampaigns}</code> | PR opened: <code>{overviewMetrics.prOpened}</code> | Failed:{" "}
-            <code>{overviewMetrics.failedCampaigns}</code> | Parked: <code>{overviewMetrics.parkedCampaigns}</code>
+            Campaigns: <code>{overviewMetrics.totalCampaigns}</code> | PR opened:{" "}
+            <code>{overviewMetrics.prOpened}</code> | Failed:{" "}
+            <code>{overviewMetrics.failedCampaigns}</code> | Parked:{" "}
+            <code>{overviewMetrics.parkedCampaigns}</code>
           </p>
         </div>
 
         <div className="settings-form-group">
-          <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>Provider / Automation Health</div>
+          <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
+            Provider / Automation Health
+          </div>
           <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
             {providerHealth.details}
           </p>
@@ -805,7 +881,9 @@ export function ImprovementSettingsPanel(props?: {
         </div>
 
         <div className="settings-form-group">
-          <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>Top Parked Candidates</div>
+          <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
+            Top Parked Candidates
+          </div>
           {topParkedCandidates.length === 0 ? (
             <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
               No candidates are currently parked or cooling down.
@@ -822,9 +900,12 @@ export function ImprovementSettingsPanel(props?: {
                     background: "var(--color-bg-secondary)",
                   }}
                 >
-                  <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>{candidate.title}</div>
+                  <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
+                    {candidate.title}
+                  </div>
                   <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
-                    Status: <code>{candidate.status}</code> | Failure streak: <code>{candidate.failureStreak || 0}</code>
+                    Status: <code>{candidate.status}</code> | Failure streak:{" "}
+                    <code>{candidate.failureStreak || 0}</code>
                     {candidate.lastFailureClass ? (
                       <>
                         {" "}
@@ -846,21 +927,41 @@ export function ImprovementSettingsPanel(props?: {
       </div>
 
       <div className="settings-subsection">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
           <div>
             <h3 style={{ marginBottom: 4 }}>Workspace Candidates</h3>
             <p className="settings-form-hint" style={{ margin: 0 }}>
-              Refresh signals to update the backlog, then start the next campaign manually if you do not want to wait for auto-run.
+              Refresh signals to update the backlog, then start the next campaign manually if you do
+              not want to wait for auto-run.
             </p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="settings-button" onClick={() => void refreshCandidates()} disabled={busy}>
+            <button
+              className="settings-button"
+              onClick={() => void refreshCandidates()}
+              disabled={busy}
+            >
               Refresh Signals
             </button>
-            <button className="settings-button" onClick={() => void runNextExperiment()} disabled={busy || !settings.enabled || eligibilityBlocked}>
+            <button
+              className="settings-button"
+              onClick={() => void runNextExperiment()}
+              disabled={busy || !settings.enabled || eligibilityBlocked}
+            >
               Run Next Campaign
             </button>
-            <button className="settings-button settings-button-secondary" onClick={() => void resetHistory()} disabled={busy}>
+            <button
+              className="settings-button settings-button-secondary"
+              onClick={() => void resetHistory()}
+              disabled={busy}
+            >
               Reset History
             </button>
           </div>
@@ -874,14 +975,26 @@ export function ImprovementSettingsPanel(props?: {
         {workspaces.length > 0 ? (
           <div className="settings-form-group" style={{ maxWidth: 520 }}>
             <label className="settings-label">Workspace</label>
-            <select value={selectedWorkspaceId} onChange={(event) => setSelectedWorkspaceId(event.target.value)} className="settings-select">
+            <select
+              value={selectedWorkspaceId}
+              onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+              className="settings-select"
+            >
               {workspaces.map((workspace) => (
                 <option key={workspace.id} value={workspace.id}>
                   {workspace.name}
                 </option>
               ))}
             </select>
-            <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
               <span
                 style={{
                   display: "inline-flex",
@@ -904,10 +1017,17 @@ export function ImprovementSettingsPanel(props?: {
           </div>
         ) : null}
 
-        <div className="settings-form-group" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
+        <div
+          className="settings-form-group"
+          style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}
+        >
           <div style={{ width: 260, maxWidth: "100%" }}>
             <label className="settings-label">Issue Status</label>
-            <select value={candidateStatusFilter} onChange={(event) => setCandidateStatusFilter(event.target.value)} className="settings-select">
+            <select
+              value={candidateStatusFilter}
+              onChange={(event) => setCandidateStatusFilter(event.target.value)}
+              className="settings-select"
+            >
               <option value="all">All Statuses</option>
               <option value="open">Open</option>
               <option value="running">Running</option>
@@ -919,7 +1039,11 @@ export function ImprovementSettingsPanel(props?: {
           </div>
           <div style={{ width: 260, maxWidth: "100%" }}>
             <label className="settings-label">Issue Type</label>
-            <select value={candidateSourceFilter} onChange={(event) => setCandidateSourceFilter(event.target.value)} className="settings-select">
+            <select
+              value={candidateSourceFilter}
+              onChange={(event) => setCandidateSourceFilter(event.target.value)}
+              className="settings-select"
+            >
               <option value="all">All Types</option>
               <option value="task_failure">Task Failure</option>
               <option value="verification_failure">Verification Failure</option>
@@ -930,7 +1054,8 @@ export function ImprovementSettingsPanel(props?: {
         </div>
 
         <p className="settings-form-hint" style={{ marginTop: 0 }}>
-          Showing <code>{filteredCandidates.length}</code> of <code>{candidates.length}</code> candidate issue(s) for the current workspace filter.
+          Showing <code>{filteredCandidates.length}</code> of <code>{candidates.length}</code>{" "}
+          candidate issue(s) for the current workspace filter.
         </p>
 
         <div style={SCROLL_PANEL_STYLE}>
@@ -941,22 +1066,30 @@ export function ImprovementSettingsPanel(props?: {
               <div key={candidate.id} className="settings-form-group">
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>{candidate.title}</div>
+                    <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
+                      {candidate.title}
+                    </div>
                     <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
                       {candidate.summary}
                     </p>
                     <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
-                      Source: <code>{candidate.source}</code> | Status: <code>{candidate.status}</code> | Priority:{" "}
-                      <code>{candidate.priorityScore.toFixed(2)}</code> | Recurrence: <code>{candidate.recurrenceCount}</code>
+                      Source: <code>{candidate.source}</code> | Status:{" "}
+                      <code>{candidate.status}</code> | Priority:{" "}
+                      <code>{candidate.priorityScore.toFixed(2)}</code> | Recurrence:{" "}
+                      <code>{candidate.recurrenceCount}</code>
                       {candidate.readiness ? (
                         <>
-                          {" "}| Readiness: <code>{candidate.readiness}</code>
+                          {" "}
+                          | Readiness: <code>{candidate.readiness}</code>
                         </>
                       ) : null}
                       {selectedWorkspaceId === ALL_WORKSPACES_VALUE ? (
                         <>
                           {" "}
-                          | Workspace: <code>{workspaceNameById.get(candidate.workspaceId) || candidate.workspaceId}</code>
+                          | Workspace:{" "}
+                          <code>
+                            {workspaceNameById.get(candidate.workspaceId) || candidate.workspaceId}
+                          </code>
                         </>
                       ) : null}
                     </p>
@@ -967,7 +1100,11 @@ export function ImprovementSettingsPanel(props?: {
                     ) : null}
                   </div>
                   {candidate.status !== "dismissed" ? (
-                    <button className="settings-button settings-button-secondary" onClick={() => void dismissCandidate(candidate.id)} disabled={busy}>
+                    <button
+                      className="settings-button settings-button-secondary"
+                      onClick={() => void dismissCandidate(candidate.id)}
+                      disabled={busy}
+                    >
                       Dismiss
                     </button>
                   ) : null}
@@ -980,7 +1117,10 @@ export function ImprovementSettingsPanel(props?: {
         <div style={{ marginTop: 20 }}>
           <h3 style={{ marginTop: 0, marginBottom: 8 }}>Campaigns</h3>
           <div style={SCROLL_PANEL_STYLE}>
-            <SectionTitle title="Review Queue" hint="Judge-approved campaigns waiting for promotion or dismissal." />
+            <SectionTitle
+              title="Review Queue"
+              hint="Judge-approved campaigns waiting for promotion or dismissal."
+            />
             {pendingReviewCampaigns.length === 0 ? (
               <p className="settings-form-hint">No campaigns are waiting for review.</p>
             ) : (
@@ -1007,7 +1147,10 @@ export function ImprovementSettingsPanel(props?: {
               ))
             )}
 
-            <SectionTitle title="Recent Promotions" hint="Recent PRs, merges, and direct-apply campaign promotions." />
+            <SectionTitle
+              title="Recent Promotions"
+              hint="Recent PRs, merges, and direct-apply campaign promotions."
+            />
             {recentPromotedCampaigns.length === 0 ? (
               <p className="settings-form-hint">No campaign promotions have been recorded yet.</p>
             ) : (
@@ -1021,9 +1164,14 @@ export function ImprovementSettingsPanel(props?: {
               ))
             )}
 
-            <SectionTitle title="Campaign Activity" hint="Variant fan-out, current leader, and judge outcome for recent campaigns." />
+            <SectionTitle
+              title="Campaign Activity"
+              hint="Variant fan-out, current leader, and judge outcome for recent campaigns."
+            />
             {recentCampaigns.length === 0 ? (
-              <p className="settings-form-hint">No campaign activity has been recorded for this view yet.</p>
+              <p className="settings-form-hint">
+                No campaign activity has been recorded for this view yet.
+              </p>
             ) : (
               recentCampaigns.map((campaign) => (
                 <CampaignCard
@@ -1066,12 +1214,7 @@ function SectionTitle(props: { title: string; hint: string }) {
   );
 }
 
-function MetricCard(props: {
-  label: string;
-  value: string;
-  hint: string;
-  tone: string;
-}) {
+function MetricCard(props: { label: string; value: string; hint: string; tone: string }) {
   return (
     <div
       style={{
@@ -1084,7 +1227,9 @@ function MetricCard(props: {
       <div className="settings-form-hint" style={{ margin: 0 }}>
         {props.label}
       </div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: props.tone, marginTop: 4 }}>{props.value}</div>
+      <div style={{ fontSize: 24, fontWeight: 700, color: props.tone, marginTop: 4 }}>
+        {props.value}
+      </div>
       <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
         {props.hint}
       </p>
@@ -1104,7 +1249,9 @@ function CampaignCard(props: {
   onRetry?: () => void;
   busy?: boolean;
 }) {
-  const winner = props.campaign.variants.find((variant) => variant.id === props.campaign.winnerVariantId);
+  const winner = props.campaign.variants.find(
+    (variant) => variant.id === props.campaign.winnerVariantId,
+  );
   return (
     <div className="settings-form-group">
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -1113,7 +1260,8 @@ function CampaignCard(props: {
             {props.campaign.verdictSummary || "Improvement campaign"}
           </div>
           <p className="settings-form-hint" style={{ margin: "4px 0 0 0" }}>
-            Campaign: <code>{props.campaign.status}</code> | Review: <code>{props.campaign.reviewStatus}</code> | Promotion:{" "}
+            Campaign: <code>{props.campaign.status}</code> | Review:{" "}
+            <code>{props.campaign.reviewStatus}</code> | Promotion:{" "}
             <code>{props.campaign.promotionStatus || "idle"}</code>
             {props.campaign.stage ? (
               <>
@@ -1130,7 +1278,11 @@ function CampaignCard(props: {
             {props.showWorkspace ? (
               <>
                 {" "}
-                | Workspace: <code>{props.workspaceNameById.get(props.campaign.workspaceId) || props.campaign.workspaceId}</code>
+                | Workspace:{" "}
+                <code>
+                  {props.workspaceNameById.get(props.campaign.workspaceId) ||
+                    props.campaign.workspaceId}
+                </code>
               </>
             ) : null}
           </p>
@@ -1172,11 +1324,9 @@ function CampaignCard(props: {
             <p className="settings-form-hint" style={{ margin: "6px 0 0 0" }}>
               Latest stage note:{" "}
               <code>
-                {
-                  props.campaign.observability.stageTransitions[
-                    props.campaign.observability.stageTransitions.length - 1
-                  ]?.detail || "n/a"
-                }
+                {props.campaign.observability.stageTransitions[
+                  props.campaign.observability.stageTransitions.length - 1
+                ]?.detail || "n/a"}
               </code>
             </p>
           ) : null}
@@ -1194,17 +1344,29 @@ function CampaignCard(props: {
         {props.primaryActionLabel || props.showRetry ? (
           <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
             {props.primaryActionLabel && props.onPrimaryAction ? (
-              <button className="settings-button" onClick={props.onPrimaryAction} disabled={props.busy}>
+              <button
+                className="settings-button"
+                onClick={props.onPrimaryAction}
+                disabled={props.busy}
+              >
                 {props.primaryActionLabel}
               </button>
             ) : null}
             {props.onSecondaryAction ? (
-              <button className="settings-button settings-button-secondary" onClick={props.onSecondaryAction} disabled={props.busy}>
+              <button
+                className="settings-button settings-button-secondary"
+                onClick={props.onSecondaryAction}
+                disabled={props.busy}
+              >
                 Dismiss
               </button>
             ) : null}
             {props.showRetry && props.onRetry ? (
-              <button className="settings-button settings-button-secondary" onClick={props.onRetry} disabled={props.busy}>
+              <button
+                className="settings-button settings-button-secondary"
+                onClick={props.onRetry}
+                disabled={props.busy}
+              >
                 Retry Campaign
               </button>
             ) : null}
@@ -1213,7 +1375,10 @@ function CampaignCard(props: {
       </div>
       {props.onOpenTask && winner?.taskId ? (
         <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="settings-button settings-button-secondary" onClick={() => props.onOpenTask?.(winner.taskId!)}>
+          <button
+            className="settings-button settings-button-secondary"
+            onClick={() => props.onOpenTask?.(winner.taskId!)}
+          >
             Open Winner Task
           </button>
         </div>
@@ -1239,7 +1404,12 @@ function ToggleRow(props: {
           </p>
         </div>
         <label className="settings-toggle" style={{ flexShrink: 0, marginTop: 2 }}>
-          <input type="checkbox" checked={props.checked} disabled={props.disabled} onChange={(event) => props.onChange(event.target.checked)} />
+          <input
+            type="checkbox"
+            checked={props.checked}
+            disabled={props.disabled}
+            onChange={(event) => props.onChange(event.target.checked)}
+          />
           <span className="toggle-slider" />
         </label>
       </div>
@@ -1281,7 +1451,12 @@ function SelectRow(props: {
   return (
     <div className="settings-form-group">
       <label className="settings-label">{props.label}</label>
-      <select className="settings-select" value={props.value} disabled={props.disabled} onChange={(event) => props.onChange(event.target.value)}>
+      <select
+        className="settings-select"
+        value={props.value}
+        disabled={props.disabled}
+        onChange={(event) => props.onChange(event.target.value)}
+      >
         {props.options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}

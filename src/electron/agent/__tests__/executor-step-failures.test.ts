@@ -386,6 +386,83 @@ describe("TaskExecutor executeStep failure handling", () => {
     console.error = originalConsoleError;
   });
 
+  it("recognizes a missing future output probe without masking source or permission failures", () => {
+    executor = createExecutorWithStubs([], {});
+    const tempDir = fs.mkdtempSync("/tmp/cowork-future-artifact-");
+    const sourcePath = path.join(tempDir, "meeting-notes.txt");
+    const outputPath = path.join(tempDir, "action-items.md");
+    (executor as Any).workspace.path = tempDir;
+    (executor as Any).task = {
+      id: "task-future-artifact",
+      title: `Create ${outputPath}`,
+      prompt: `Read ${sourcePath} and create ${outputPath}. Leave ${sourcePath} unchanged.`,
+      createdAt: Date.now() - 1000,
+    };
+    (executor as Any).plan = {
+      steps: [
+        {
+          id: "future-artifact-step",
+          description: `Extract the action items from ${sourcePath}.`,
+          status: "pending",
+        },
+      ],
+    };
+
+    const contract = { mode: "analysis_only", requiresMutation: false };
+    try {
+      expect(
+        (executor as Any).getExpectedUnmaterializedArtifactProbe(
+          (executor as Any).plan.steps[0],
+          contract,
+          "get_file_info",
+          { path: outputPath },
+          `Failed to get file info: ENOENT: no such file or directory, stat '${outputPath}'`,
+        ),
+      ).toEqual({ path: outputPath, tool: "get_file_info" });
+
+      expect(
+        (executor as Any).getExpectedUnmaterializedArtifactProbe(
+          (executor as Any).plan.steps[0],
+          contract,
+          "get_file_info",
+          { path: sourcePath },
+          `Failed to get file info: ENOENT: no such file or directory, stat '${sourcePath}'`,
+        ),
+      ).toBeNull();
+
+      expect(
+        (executor as Any).getExpectedUnmaterializedArtifactProbe(
+          (executor as Any).plan.steps[0],
+          contract,
+          "get_file_info",
+          { path: outputPath },
+          `Failed to get file info: EACCES: permission denied, stat '${outputPath}'`,
+        ),
+      ).toBeNull();
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reconciles a no-file-changes summary when the requested output was created", () => {
+    executor = createExecutorWithStubs([], {});
+    const tempDir = fs.mkdtempSync("/tmp/cowork-summary-output-");
+    (executor as Any).workspace.path = tempDir;
+    (executor as Any).fileOperationTracker.getCreatedFiles = vi
+      .fn()
+      .mockReturnValue([path.join(tempDir, "action-items.md")]);
+
+    try {
+      expect(
+        (executor as Any).reconcileSummaryWithWorkspaceOutputs(
+          "No file changes were necessary; the source remains unchanged.",
+        ),
+      ).toBe("Created the output file `action-items.md`; the source remains unchanged.");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the step failed when run_command fails even if a direct completion text follows", async () => {
     executor = createExecutorWithStubs(
       [toolUseResponse("run_command", { command: "exit 1" }), textResponse("done")],
@@ -448,8 +525,16 @@ describe("TaskExecutor executeStep failure handling", () => {
       },
     );
 
-    const step1: Any = { id: "cmd-1", description: "Execute `echo hello world`.", status: "pending" };
-    const step2: Any = { id: "cmd-2", description: "Return the result directly.", status: "pending" };
+    const step1: Any = {
+      id: "cmd-1",
+      description: "Execute `echo hello world`.",
+      status: "pending",
+    };
+    const step2: Any = {
+      id: "cmd-2",
+      description: "Return the result directly.",
+      status: "pending",
+    };
     (executor as Any).plan = { description: "Plan", steps: [step1, step2] };
 
     await (executor as Any).executeStep(step1);
@@ -559,7 +644,11 @@ describe("TaskExecutor executeStep failure handling", () => {
     (executor as Any).crossStepToolFailures = new Map();
     (executor as Any).pendingFollowUps = [];
 
-    const step: Any = { id: "step-turn-budget", description: "Search for source links", status: "pending" };
+    const step: Any = {
+      id: "step-turn-budget",
+      description: "Search for source links",
+      status: "pending",
+    };
 
     await expect((executor as Any).executeStep(step)).resolves.toBeUndefined();
     expect(String(step.error || "")).not.toContain("followUpToolCallsLocked");
@@ -627,8 +716,16 @@ describe("TaskExecutor executeStep failure handling", () => {
       },
     );
     (executor as Any).getAvailableTools = vi.fn().mockReturnValue([
-      { name: "browser_navigate", description: "", input_schema: { type: "object", properties: {} } },
-      { name: "browser_get_content", description: "", input_schema: { type: "object", properties: {} } },
+      {
+        name: "browser_navigate",
+        description: "",
+        input_schema: { type: "object", properties: {} },
+      },
+      {
+        name: "browser_get_content",
+        description: "",
+        input_schema: { type: "object", properties: {} },
+      },
       { name: "read_file", description: "", input_schema: { type: "object", properties: {} } },
     ]);
 
@@ -661,6 +758,69 @@ describe("TaskExecutor executeStep failure handling", () => {
     expect(Array.from(contract.requiredTools)).not.toContain("create_directory");
   });
 
+  it("requires rename_file without an unrelated write_file for rename-and-move steps", () => {
+    executor = createExecutorWithStubs([], {});
+
+    const step: Any = {
+      id: "rename-files",
+      description:
+        "Rename each file to a clean, descriptive filename and move it into its appropriate category folder.",
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+    expect(contract.mode).toBe("mutation_required");
+    expect(Array.from(contract.requiredTools)).toContain("rename_file");
+    expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+    expect(contract.requiresArtifactEvidence).toBe(false);
+  });
+
+  it("completes a rename-and-move step after rename_file succeeds", async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("rename_file", {
+          oldPath: "inbox/meeting notes copy.txt",
+          newPath: "inbox/meetings/meeting-notes.txt",
+        }),
+        textResponse("Renamed and moved the file."),
+      ],
+      { rename_file: { success: true } },
+    );
+    (executor as Any).getAvailableTools = vi.fn().mockReturnValue([
+      {
+        name: "rename_file",
+        description: "",
+        input_schema: { type: "object", properties: {} },
+      },
+    ]);
+
+    const step: Any = {
+      id: "rename-and-move",
+      description: "Rename the file and move it into the meetings category folder.",
+      status: "pending",
+    };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status, String(step.error || "")).toBe("completed");
+    expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires create_directory for ordinary folder-creation steps", () => {
+    executor = createExecutorWithStubs([], {});
+
+    const step: Any = {
+      id: "create-category-folders",
+      description: "Create category folders inside inbox as needed.",
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+    expect(contract.mode).toBe("mutation_required");
+    expect(Array.from(contract.requiredTools)).toContain("create_directory");
+    expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+  });
+
   it("passes browser-session final verification via deterministic checklist even when text is not OK", async () => {
     executor = createExecutorWithStubs(
       [
@@ -680,8 +840,16 @@ describe("TaskExecutor executeStep failure handling", () => {
       },
     );
     (executor as Any).getAvailableTools = vi.fn().mockReturnValue([
-      { name: "browser_navigate", description: "", input_schema: { type: "object", properties: {} } },
-      { name: "browser_get_content", description: "", input_schema: { type: "object", properties: {} } },
+      {
+        name: "browser_navigate",
+        description: "",
+        input_schema: { type: "object", properties: {} },
+      },
+      {
+        name: "browser_get_content",
+        description: "",
+        input_schema: { type: "object", properties: {} },
+      },
     ]);
 
     const step: Any = {
@@ -919,7 +1087,8 @@ relationship_memory:
     const step: Any = {
       id: "diagram-verify",
       kind: "verification",
-      description: "Verify the Mermaid flowchart is displayed inline and includes the main CI/CD stages.",
+      description:
+        "Verify the Mermaid flowchart is displayed inline and includes the main CI/CD stages.",
       status: "pending",
     };
 
@@ -933,7 +1102,7 @@ relationship_memory:
     const step: Any = {
       id: "verify-command-output",
       kind: "verification",
-      description: 'Verify the output is exactly `hello world` and the exit code is `0`.',
+      description: "Verify the output is exactly `hello world` and the exit code is `0`.",
       status: "pending",
     };
 
@@ -947,7 +1116,7 @@ relationship_memory:
     const step: Any = {
       id: "verify-stdout-output",
       kind: "verification",
-      description: 'Verify that standard output is exactly `hello world`.',
+      description: "Verify that standard output is exactly `hello world`.",
       status: "pending",
     };
 
@@ -972,13 +1141,15 @@ relationship_memory:
       [
         toolUseResponse("create_diagram", {
           title: "CI/CD Pipeline",
-          diagram:
-            "flowchart TD\nA[Code] --> B[Build]\nB --> C[Test]\nC --> D[Deploy]",
+          diagram: "flowchart TD\nA[Code] --> B[Build]\nB --> C[Test]\nC --> D[Deploy]",
         }),
         textResponse("Displayed the CI/CD pipeline as a Mermaid flowchart."),
       ],
       {
-        create_diagram: { success: true, message: 'Diagram "CI/CD Pipeline" is now displayed in the UI.' },
+        create_diagram: {
+          success: true,
+          message: 'Diagram "CI/CD Pipeline" is now displayed in the UI.',
+        },
       },
     );
 
@@ -1222,6 +1393,30 @@ relationship_memory:
     );
   });
 
+  it("does not convert an in-flight cancellation into an incomplete-step failure", async () => {
+    executor = createExecutorWithStubs([textResponse("done")], {});
+    const step: Any = { id: "plan-cancel-2", description: "Run the command", status: "pending" };
+    (executor as Any).plan = { description: "Plan", steps: [step] };
+    (executor as Any).executeStep = vi.fn(async (target: Any) => {
+      target.status = "in_progress";
+      (executor as Any).cancelled = true;
+      (executor as Any).cancelReason = "user";
+    });
+
+    await expect((executor as Any).executePlan()).resolves.toBeUndefined();
+
+    expect((executor as Any).daemon.logEvent).not.toHaveBeenCalledWith(
+      "task-1",
+      "progress_update",
+      expect.objectContaining({ message: expect.stringContaining("Execution incomplete") }),
+    );
+    expect((executor as Any).daemon.logEvent).not.toHaveBeenCalledWith(
+      "task-1",
+      "progress_update",
+      expect.objectContaining({ message: expect.stringContaining("Step failed") }),
+    );
+  });
+
   it("still emits step_timeout when the abort came from an execution timeout", async () => {
     executor = createExecutorWithStubs([textResponse("done")], {});
     const step: Any = { id: "plan-timeout-1", description: "Keep working", status: "pending" };
@@ -1288,6 +1483,25 @@ relationship_memory:
 
     const guardError = (executor as Any).getFinalResponseGuardError();
     expect(guardError).toBeNull();
+  });
+
+  it("accepts a concise operational status when the prompt explicitly asks whether execution succeeded", () => {
+    executor = createExecutorWithStubs([textResponse("done")], {});
+    (executor as Any).task.title = "Create and verify a file";
+    (executor as Any).task.prompt =
+      "Create exactly one file at /tmp/result.txt containing ok. Report whether the operation succeeded.";
+    (executor as Any).fileOperationTracker.getCreatedFiles.mockReturnValue(["/tmp/result.txt"]);
+    (executor as Any).lastNonVerificationOutput = "The file was successfully created and verified.";
+    (executor as Any).plan = {
+      description: "Plan",
+      steps: [{ id: "1", description: "Create and verify the file", status: "completed" }],
+    };
+
+    const contract = (executor as Any).buildCompletionContract();
+
+    expect(contract.allowsOperationalStatus).toBe(true);
+    expect(contract.requiresDecisionSignal).toBe(false);
+    expect((executor as Any).getFinalResponseGuardError()).toBeNull();
   });
 
   it("requires direct answer for non-video advisory prompts too", () => {
@@ -1868,7 +2082,11 @@ relationship_memory:
     );
     executor = createExecutorWithStubs(responses, {});
     (executor as Any).getAvailableTools = vi.fn().mockReturnValue([
-      { name: "create_directory", description: "", input_schema: { type: "object", properties: {} } },
+      {
+        name: "create_directory",
+        description: "",
+        input_schema: { type: "object", properties: {} },
+      },
       { name: "write_file", description: "", input_schema: { type: "object", properties: {} } },
       { name: "list_directory", description: "", input_schema: { type: "object", properties: {} } },
       { name: "read_file", description: "", input_schema: { type: "object", properties: {} } },
@@ -1910,7 +2128,9 @@ relationship_memory:
           filename: "contract_negotiation_training.pptx",
           slides: [{ title: "Intro", bullets: ["A"] }],
         }),
-        ...Array.from({ length: 6 }, () => textResponse("Saved contract_negotiation_training.pptx")),
+        ...Array.from({ length: 6 }, () =>
+          textResponse("Saved contract_negotiation_training.pptx"),
+        ),
       ],
       {
         generate_presentation: {
@@ -1985,7 +2205,8 @@ relationship_memory:
 
     const step: Any = {
       id: "meta-output-step",
-      description: "Output should be a written Markdown report unless you want a different format later.",
+      description:
+        "Output should be a written Markdown report unless you want a different format later.",
       status: "pending",
     };
 
@@ -2014,7 +2235,8 @@ relationship_memory:
 
     const step: Any = {
       id: "inspection-step",
-      description: "Inspect the current landing page structure and review the existing files before changing anything.",
+      description:
+        "Inspect the current landing page structure and review the existing files before changing anything.",
       status: "pending",
     };
 
@@ -2022,7 +2244,9 @@ relationship_memory:
       expect((executor as Any).resolveStepExecutionContract(step).mode).toBe("analysis_only");
       await (executor as Any).executeStep(step);
       expect(step.status).toBe("failed");
-      expect(String(step.error || "")).toContain("Analysis/inspection step performed a workspace mutation");
+      expect(String(step.error || "")).toContain(
+        "Analysis/inspection step performed a workspace mutation",
+      );
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -2041,10 +2265,7 @@ relationship_memory:
     const tempDir = fs.mkdtempSync("/tmp/cowork-prior-mutation-");
     (executor as Any).workspace.path = tempDir;
     fs.writeFileSync(path.join(tempDir, "styles.css"), "/* previous */");
-    const normalizedTarget = path
-      .resolve(tempDir, "styles.css")
-      .replace(/\\/g, "/")
-      .toLowerCase();
+    const normalizedTarget = path.resolve(tempDir, "styles.css").replace(/\\/g, "/").toLowerCase();
     (executor as Any).artifactMutationLedger = {
       [normalizedTarget]: {
         stepId: "step-previous",
@@ -2096,10 +2317,7 @@ relationship_memory:
     const tempDir = fs.mkdtempSync("/tmp/cowork-prior-mutation-explicit-");
     (executor as Any).workspace.path = tempDir;
     fs.writeFileSync(path.join(tempDir, "styles.css"), "/* previous */");
-    const normalizedTarget = path
-      .resolve(tempDir, "styles.css")
-      .replace(/\\/g, "/")
-      .toLowerCase();
+    const normalizedTarget = path.resolve(tempDir, "styles.css").replace(/\\/g, "/").toLowerCase();
     (executor as Any).artifactMutationLedger = {
       [normalizedTarget]: {
         stepId: "step-previous",
@@ -2140,7 +2358,11 @@ relationship_memory:
     (executor as Any).workspace.path = tempDir;
     fs.writeFileSync(path.join(tempDir, "styles.css"), "body { color: red; }\n");
 
-    const step: Any = { id: "bootstrap-existing", description: "Style interactions", status: "pending" };
+    const step: Any = {
+      id: "bootstrap-existing",
+      description: "Style interactions",
+      status: "pending",
+    };
     const stepContract: Any = {
       requiredTools: new Set(["write_file"]),
       mode: "mutation_required",
@@ -2165,6 +2387,40 @@ relationship_memory:
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("does not bootstrap a future file while executing a structural folder step", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const step: Any = {
+      id: "create-folders",
+      description: "Create category folders inside `inbox` as needed.",
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+
+    expect(contract.requiresMutation).toBe(true);
+    expect(contract.requiresArtifactEvidence).toBe(false);
+    expect(contract.requiredTools.has("create_directory")).toBe(true);
+    expect((executor as Any).shouldPerformDeterministicArtifactBootstrap(contract)).toBe(false);
+  });
+
+  it("does not turn an exclusion-only filename mention into an artifact write", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const step: Any = {
+      id: "protect-existing-file",
+      description:
+        "Explicitly exclude onboarding-checklist.md and all paths outside the workspace from consideration.",
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+
+    expect(contract.mode).toBe("analysis_only");
+    expect(contract.requiresMutation).toBe(false);
+    expect(contract.requiresArtifactEvidence).toBe(false);
+    expect(contract.requiredTools.has("write_file")).toBe(false);
+    expect((executor as Any).shouldPerformDeterministicArtifactBootstrap(contract)).toBe(false);
   });
 
   it("bootstraps missing css artifacts and records prior-mutation ledger evidence", async () => {
@@ -2241,8 +2497,12 @@ relationship_memory:
       );
       expect(bootstrap.attempted).toBe(true);
       expect(bootstrap.succeeded).toBe(true);
-      expect(bootstrap.path).toBe(path.resolve(tempDir, "server/src/chokepoints/chokepointMonitor.ts"));
-      expect(fs.existsSync(path.join(tempDir, "server/src/chokepoints/chokepointMonitor.ts"))).toBe(true);
+      expect(bootstrap.path).toBe(
+        path.resolve(tempDir, "server/src/chokepoints/chokepointMonitor.ts"),
+      );
+      expect(fs.existsSync(path.join(tempDir, "server/src/chokepoints/chokepointMonitor.ts"))).toBe(
+        true,
+      );
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -2318,8 +2578,12 @@ relationship_memory:
       );
       expect(bootstrap.attempted).toBe(true);
       expect(bootstrap.succeeded).toBe(true);
-      expect(bootstrap.path).toBe(path.resolve(tempDir, "server/src/chokepoints/chokepointMonitor.ts"));
-      expect(fs.existsSync(path.join(tempDir, "server/src/chokepoints/chokepointMonitor.ts"))).toBe(true);
+      expect(bootstrap.path).toBe(
+        path.resolve(tempDir, "server/src/chokepoints/chokepointMonitor.ts"),
+      );
+      expect(fs.existsSync(path.join(tempDir, "server/src/chokepoints/chokepointMonitor.ts"))).toBe(
+        true,
+      );
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -2570,7 +2834,8 @@ relationship_memory:
 
     const step: Any = {
       id: "artifact-multi-write-1",
-      description: "Create `win95-ui/scripts/main.js` and `win95-ui/scripts/apps.js` with starter code.",
+      description:
+        "Create `win95-ui/scripts/main.js` and `win95-ui/scripts/apps.js` with starter code.",
       status: "pending",
     };
 
@@ -2696,7 +2961,10 @@ relationship_memory:
     expect(() => (executor as Any).enforceToolBudget("write_file")).toThrow("Tool-call budget");
     (executor as Any).totalToolCallCount = 0;
     expect(() => (executor as Any).enforceToolBudget("web_search")).not.toThrow();
-    const webSearchBudgetCheck = (executor as Any).evaluateWebSearchPolicyAndBudget({ query: "x" }, 0);
+    const webSearchBudgetCheck = (executor as Any).evaluateWebSearchPolicyAndBudget(
+      { query: "x" },
+      0,
+    );
     expect(webSearchBudgetCheck.blocked).toBe(true);
     expect(webSearchBudgetCheck.failureClass).toBe("budget_exhausted");
     expect(webSearchBudgetCheck.scope).toBe("task");
@@ -2798,7 +3066,8 @@ relationship_memory:
         },
         read_pdf_visual: {
           success: false,
-          error: "OpenAI API key not configured (OpenAI OAuth sign-in does not support image analysis here yet).",
+          error:
+            "OpenAI API key not configured (OpenAI OAuth sign-in does not support image analysis here yet).",
           nonBlocking: true,
           recoverableFallback: true,
           fallbackHint:
@@ -2868,7 +3137,9 @@ relationship_memory:
       [
         toolUseResponse("read_file", { path: "Sens_et_Dieu_finale.pdf" }),
         toolUseResponse("run_command", { command: "which pdftotext && which ocrmypdf" }),
-        textResponse("PDF metni zaten güvenilir biçimde çıkarıldı; değerlendirmeyi bu metne dayanarak tamamladım."),
+        textResponse(
+          "PDF metni zaten güvenilir biçimde çıkarıldı; değerlendirmeyi bu metne dayanarak tamamladım.",
+        ),
       ],
       {
         read_file: {
@@ -2932,9 +3203,7 @@ relationship_memory:
         checkpointType: "rewind",
       }),
     );
-    expect((executor as Any).blockingVerificationFailedStepIds.has("verify-rewind-1")).toBe(
-      false,
-    );
+    expect((executor as Any).blockingVerificationFailedStepIds.has("verify-rewind-1")).toBe(false);
   });
 
   it("rethrows abort-like errors without marking step as failed inside executeStep", async () => {
@@ -2996,7 +3265,11 @@ relationship_memory:
     (executor as Any).webSearchMaxUsesPerStep = 1;
     (executor as Any).webSearchToolCallCount = 1; // Exhaust before the requested call
 
-    const step: Any = { id: "budget-soft-1", description: "Research and summarize", status: "pending" };
+    const step: Any = {
+      id: "budget-soft-1",
+      description: "Research and summarize",
+      status: "pending",
+    };
 
     await (executor as Any).executeStep(step);
 
@@ -3004,7 +3277,10 @@ relationship_memory:
     expect((executor as Any).toolRegistry.executeTool).toHaveBeenCalledWith("list_directory", {
       path: ".",
     });
-    expect((executor as Any).toolRegistry.executeTool).not.toHaveBeenCalledWith("web_search", expect.anything());
+    expect((executor as Any).toolRegistry.executeTool).not.toHaveBeenCalledWith(
+      "web_search",
+      expect.anything(),
+    );
     expect(executor.daemon.logEvent).toHaveBeenCalledWith(
       "task-1",
       "log",
@@ -3029,7 +3305,11 @@ relationship_memory:
     (executor as Any).task.prompt = "Research the latest updates and summarize findings.";
     (executor as Any).lastUserMessage = "Research the latest updates and summarize findings.";
 
-    const step: Any = { id: "cached-fetch-1", description: "Research and summarize", status: "pending" };
+    const step: Any = {
+      id: "cached-fetch-1",
+      description: "Research and summarize",
+      status: "pending",
+    };
 
     await (executor as Any).executeStep(step);
 
@@ -3064,7 +3344,11 @@ relationship_memory:
     (executor as Any).task.prompt = `Read this exact URL and summarize it: ${targetUrl}`;
     (executor as Any).lastUserMessage = `Read this exact URL and summarize it: ${targetUrl}`;
 
-    const step: Any = { id: "cached-fetch-2", description: "Fetch requested page", status: "pending" };
+    const step: Any = {
+      id: "cached-fetch-2",
+      description: "Fetch requested page",
+      status: "pending",
+    };
 
     await (executor as Any).executeStep(step);
 
@@ -3176,6 +3460,60 @@ relationship_memory:
     expect(verifyContextHasFinalStep).toBe(true);
     expect(verifyContextHasDeliverable).toBe(true);
     expect(verifyContextIncludesSummary).toBe(true);
+  });
+
+  it("injects runtime mutation events into verification context for negative constraints", async () => {
+    let verifyContext = "";
+    const executor = createExecutorWithLLMHandler((messages) => {
+      verifyContext = String(messages?.[0]?.content || "");
+      return textResponse("OK");
+    });
+    (executor as Any).workspace.path = "/tmp/cowork-audit-workspace";
+    (executor as Any).daemon.getTaskEvents = vi.fn().mockReturnValue([
+      {
+        id: "event-directory",
+        taskId: "task-1",
+        timestamp: 1,
+        type: "file_created",
+        payload: { path: "inbox/Finance", type: "directory" },
+      },
+      {
+        id: "event-rename",
+        taskId: "task-1",
+        timestamp: 2,
+        type: "file_modified",
+        payload: {
+          action: "rename",
+          from: "inbox/invoice_final_FINAL.txt",
+          to: "inbox/Finance/invoice.txt",
+        },
+      },
+      {
+        id: "event-readme",
+        taskId: "task-1",
+        timestamp: 3,
+        type: "file_created",
+        payload: { path: "README.md" },
+      },
+    ]);
+    const verifyStep: Any = {
+      id: "verify",
+      kind: "verification",
+      description: "Check the organized files and confirm the protected file was untouched.",
+      status: "pending",
+    };
+    (executor as Any).plan = { description: "Plan", steps: [verifyStep] };
+
+    await (executor as Any).executeStep(verifyStep);
+
+    expect(verifyContext).toContain("RUNTIME MUTATION AUDIT");
+    expect(verifyContext).toContain(
+      "renamed inbox/invoice_final_FINAL.txt -> inbox/Finance/invoice.txt",
+    );
+    expect(verifyContext).toContain("created directory inbox/Finance");
+    expect(verifyContext).toContain("All 4 recorded mutation path(s) resolve inside the workspace");
+    expect(verifyContext).toContain("absence of X from the recorded mutation paths is evidence");
+    expect(verifyContext).toContain("Do not inspect parent directories");
   });
 
   it("detects recovery intent from user messaging in simple phrases", () => {
@@ -3402,7 +3740,8 @@ relationship_memory:
     executor.logTag = "[Executor:test]";
     const completedRecovery = {
       id: "recovery-1",
-      description: "Try an alternative toolchain or different input strategy for: Create the seed record",
+      description:
+        "Try an alternative toolchain or different input strategy for: Create the seed record",
       kind: "recovery",
       status: "completed",
     };
@@ -3431,10 +3770,7 @@ relationship_memory:
       completedRecovery,
     );
 
-    expect(executor.plan.steps.map((step: Any) => step.id)).toEqual([
-      "recovery-1",
-      "next-primary",
-    ]);
+    expect(executor.plan.steps.map((step: Any) => step.id)).toEqual(["recovery-1", "next-primary"]);
   });
 
   it("requires artifact_write_required for summary/report steps with a concrete target path and write intent", () => {
@@ -3485,8 +3821,7 @@ relationship_memory:
 
     const writeReportStep: Any = {
       id: "write-report-file",
-      description:
-        "Write a comprehensive markdown report to /tmp/output/trends-report.md.",
+      description: "Write a comprehensive markdown report to /tmp/output/trends-report.md.",
       status: "pending",
     };
 

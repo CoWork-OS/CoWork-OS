@@ -230,7 +230,9 @@ export function CommandOutput({
         <pre>
           {isRunning
             ? visibleOutput || "Waiting for output..."
-            : (visibleOutput || "") + (visibleOutput.endsWith("\n") ? "" : "\n") + `$ ${dirName ? dirName + " " : ""}%`}
+            : (visibleOutput || "") +
+              (visibleOutput.endsWith("\n") ? "" : "\n") +
+              `$ ${dirName ? dirName + " " : ""}%`}
         </pre>
       </div>
       {!autoScroll && isRunning && (

@@ -1,6 +1,6 @@
 # Operator Runtime Visibility
 
-Operator Runtime Visibility is the productized surface for the learning-loop, recall, shell, terminal, and router work that now ships in CoWork OS. The goal is not to add a second learning system. It is to make the existing memory, Dreaming, playbook, skill-promotion, shell, terminal, and routing subsystems visible after every task, while keeping CoWork OS centered on its core surfaces: desktop control plane, channels, inbox, devices, and governed automation.
+Operator Runtime Visibility is the productized surface for the learning-loop, recall, command-tool, terminal, and router work that now ships in CoWork OS. The goal is not to add a second learning system. It is to make the existing memory, Dreaming, playbook, skill-promotion, command-tool, terminal, and routing subsystems visible after every task, while keeping CoWork OS centered on its core surfaces: desktop control plane, channels, inbox, devices, and governed automation.
 
 ## What users see
 
@@ -34,7 +34,7 @@ Recall now behaves like one search surface instead of several separate searches.
 
 Results are normalized into one envelope with source type, object id, timestamp, rank, and snippet. The same ranking and dedup logic powers both the UI and prompt/context injection so operator search and runtime recall stay aligned.
 
-### 3. Shell and terminal sessions keep operator state
+### 3. Command-tool and terminal sessions keep operator state
 
 Persistent shell sessions and real terminal tabs are first-class operator workflows:
 
@@ -47,6 +47,11 @@ Persistent shell sessions and real terminal tabs are first-class operator workfl
 - terminal tabs support native shell editing, Tab completion, arrows, Ctrl+C, interactive prompts, resizing, and close controls
 
 This makes long-running terminal work feel like a real session instead of a chain of unrelated commands, and it keeps direct CLI operations inside the same super-app workspace as agent tasks, artifacts, browser testing, approvals, and memory.
+
+Agent command-tool calls and terminal tabs still use the active [access
+profile](access-profiles.md). The profile is visible in task/runtime metadata,
+and changing to a narrower profile prevents further agent command use without
+changing the human terminal's direct-control semantics.
 
 ### 4. Routing decisions are legible
 

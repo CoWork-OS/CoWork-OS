@@ -45,9 +45,7 @@ export function PersonalityStyleTab({
   return (
     <div className="personality-style-tab settings-section">
       <h3>Style</h3>
-      <p className="settings-description">
-        Communication style and persona overlay.
-      </p>
+      <p className="settings-description">Communication style and persona overlay.</p>
 
       <div className="style-controls">
         <div className="style-control">

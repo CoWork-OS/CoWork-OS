@@ -1,9 +1,6 @@
 import type { LLMSettingsData } from "../../shared/types";
 
-function mergeProviderSettings<T extends object>(
-  incoming?: T,
-  existing?: T,
-): T | undefined {
+function mergeProviderSettings<T extends object>(incoming?: T, existing?: T): T | undefined {
   if (!incoming && !existing) return undefined;
   if (!incoming) return existing;
   if (!existing) return incoming;
@@ -39,9 +36,7 @@ const PROVIDER_STRING_KEYS = [
   "profile",
 ] as const;
 
-function cleanProviderSettings<T extends object>(
-  settings?: T,
-): T | undefined {
+function cleanProviderSettings<T extends object>(settings?: T): T | undefined {
   if (!settings) return undefined;
   const cleaned = { ...settings };
   const mutableCleaned = cleaned as Record<string, unknown>;
@@ -121,13 +116,9 @@ export function buildSavedLLMSettings(
 ): LLMSettingsData {
   const existingOpenAISettings = existingSettings.openai;
   const incomingOpenAISettings = validated.openai;
-  let openaiSettings = mergeProviderSettings(
-    incomingOpenAISettings,
-    existingOpenAISettings,
-  );
+  let openaiSettings = mergeProviderSettings(incomingOpenAISettings, existingOpenAISettings);
   const shouldPreserveOpenAIOAuthTokens =
-    existingOpenAISettings?.authMethod === "oauth" &&
-    validated.openai?.authMethod !== "api_key";
+    existingOpenAISettings?.authMethod === "oauth" && validated.openai?.authMethod !== "api_key";
   if (validated.openai?.authMethod === "api_key" && openaiSettings) {
     delete openaiSettings.accessToken;
     delete openaiSettings.refreshToken;
@@ -143,8 +134,7 @@ export function buildSavedLLMSettings(
       tokenExpiresAt: existingOpenAISettings.tokenExpiresAt,
       accountId: existingOpenAISettings.accountId,
       email: existingOpenAISettings.email,
-      authMethod:
-        incomingOpenAISettings?.authMethod || existingOpenAISettings.authMethod,
+      authMethod: incomingOpenAISettings?.authMethod || existingOpenAISettings.authMethod,
     };
   }
 
@@ -152,8 +142,7 @@ export function buildSavedLLMSettings(
   const incomingXAISettings = validated.xai;
   let xaiSettings = mergeProviderSettings(incomingXAISettings, existingXAISettings);
   const shouldPreserveXAIOAuthTokens =
-    existingXAISettings?.authMethod === "oauth" &&
-    validated.xai?.authMethod !== "api_key";
+    existingXAISettings?.authMethod === "oauth" && validated.xai?.authMethod !== "api_key";
   if (validated.xai?.authMethod === "api_key" && xaiSettings) {
     delete xaiSettings.accessToken;
     delete xaiSettings.refreshToken;
@@ -169,18 +158,14 @@ export function buildSavedLLMSettings(
       tokenExpiresAt: existingXAISettings.tokenExpiresAt,
       tokenEndpoint: existingXAISettings.tokenEndpoint,
       idToken: existingXAISettings.idToken,
-      authMethod:
-        incomingXAISettings?.authMethod || existingXAISettings.authMethod,
+      authMethod: incomingXAISettings?.authMethod || existingXAISettings.authMethod,
     };
   }
 
   return {
     providerType: validated.providerType,
     modelKey: validated.modelKey,
-    fallbackProviders: Object.prototype.hasOwnProperty.call(
-      validated,
-      "fallbackProviders",
-    )
+    fallbackProviders: Object.prototype.hasOwnProperty.call(validated, "fallbackProviders")
       ? validated.fallbackProviders
       : existingSettings.fallbackProviders,
     failoverPrimaryRetryCooldownSeconds: Object.prototype.hasOwnProperty.call(
@@ -196,12 +181,8 @@ export function buildSavedLLMSettings(
     bedrock: cleanProviderSettings(
       mergeProviderSettings(validated.bedrock, existingSettings.bedrock),
     ),
-    ollama: cleanProviderSettings(
-      mergeProviderSettings(validated.ollama, existingSettings.ollama),
-    ),
-    gemini: cleanProviderSettings(
-      mergeProviderSettings(validated.gemini, existingSettings.gemini),
-    ),
+    ollama: cleanProviderSettings(mergeProviderSettings(validated.ollama, existingSettings.ollama)),
+    gemini: cleanProviderSettings(mergeProviderSettings(validated.gemini, existingSettings.gemini)),
     openrouter: cleanProviderSettings(
       mergeProviderSettings(validated.openrouter, existingSettings.openrouter),
     ),
@@ -214,22 +195,13 @@ export function buildSavedLLMSettings(
       validated.azureAnthropic,
       existingSettings.azureAnthropic,
     ),
-    groq: cleanProviderSettings(
-      mergeProviderSettings(validated.groq, existingSettings.groq),
-    ),
+    groq: cleanProviderSettings(mergeProviderSettings(validated.groq, existingSettings.groq)),
     xai: cleanProviderSettings(xaiSettings),
-    kimi: cleanProviderSettings(
-      mergeProviderSettings(validated.kimi, existingSettings.kimi),
-    ),
+    kimi: cleanProviderSettings(mergeProviderSettings(validated.kimi, existingSettings.kimi)),
     openaiCompatible: cleanProviderSettings(
-      mergeProviderSettings(
-        validated.openaiCompatible,
-        existingSettings.openaiCompatible,
-      ),
+      mergeProviderSettings(validated.openaiCompatible, existingSettings.openaiCompatible),
     ),
-    moa: cleanProviderSettings(
-      mergeProviderSettings(validated.moa, existingSettings.moa),
-    ),
+    moa: cleanProviderSettings(mergeProviderSettings(validated.moa, existingSettings.moa)),
     customProviders: cleanCustomProviders(
       validated.customProviders ?? existingSettings.customProviders,
     ),

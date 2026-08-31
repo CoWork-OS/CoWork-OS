@@ -6,6 +6,14 @@ import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import { Workspace, type VerbatimQuoteSourceType } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
+import {
+  resolveWorkspaceFilesystemAccessWithApproval,
+  evaluateWorkspaceFilesystemAccess,
+  isAccessPathWithin,
+  isProtectedFilesystemPath,
+  type WorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
+import { evaluateNetworkPolicy } from "../../security/network-policy";
 import { LLMTool } from "../llm/types";
 import { MemoryService } from "../../memory/MemoryService";
 import { MemoryObservationService } from "../../memory/MemoryObservationService";
@@ -76,7 +84,11 @@ function getCurrentLocationFailureMessage(error: unknown): string {
       "Check operating system Location Services permissions for CoWork OS.",
     ].join(" ");
   }
-  if (/desktop geolocation is not configured|macos core location helper is not built|location_not_configured/i.test(rawMessage)) {
+  if (
+    /desktop geolocation is not configured|macos core location helper is not built|location_not_configured/i.test(
+      rawMessage,
+    )
+  ) {
     return [
       "Native desktop geolocation is not configured.",
       "Do not retry get_current_location in this task; ask the user for a typed address, venue, or nearby landmark.",
@@ -89,39 +101,17 @@ function getCurrentLocationFailureMessage(error: unknown): string {
       "Do not retry get_current_location in this task; ask the user for a typed address, venue, or nearby landmark.",
     ].join(" ");
   }
-  if (/current location is unavailable|geolocation is not available|location_unavailable|not implemented yet|not supported/i.test(rawMessage)) {
+  if (
+    /current location is unavailable|geolocation is not available|location_unavailable|not implemented yet|not supported/i.test(
+      rawMessage,
+    )
+  ) {
     return [
       "Native desktop geolocation is unavailable.",
       "Do not retry get_current_location in this task; ask the user for a typed address, venue, or nearby landmark.",
     ].join(" ");
   }
   return rawMessage || "Unable to determine current location.";
-}
-
-const PROTECTED_SYSTEM_PATHS = [
-  "/System",
-  "/Library",
-  "/usr",
-  "/bin",
-  "/sbin",
-  "/etc",
-  "/var",
-  "/private",
-  "C:\\Windows",
-  "C:\\Program Files",
-  "C:\\Program Files (x86)",
-];
-
-function normalizeAllowedRoot(root: string): string {
-  try {
-    return fsSync.existsSync(root) ? fsSync.realpathSync(root) : path.resolve(root);
-  } catch {
-    return path.resolve(root);
-  }
-}
-
-function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
-  return targetPath === rootPath || targetPath.startsWith(`${rootPath}${path.sep}`);
 }
 
 function buildSessionRecallTool(description: string): LLMTool {
@@ -283,7 +273,7 @@ function buildDurableContextDescribeTool(description: string): LLMTool {
 function getElectronApis(): { clipboard?: Any; desktopCapturer?: Any; shell?: Any; app?: Any } {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     if (electron && typeof electron === "object") return electron;
   } catch {
@@ -297,12 +287,10 @@ function getElectronApis(): { clipboard?: Any; desktopCapturer?: Any; shell?: An
  * These tools enable more autonomous operation for general task completion
  */
 export class SystemTools {
-  private currentLocationFailure:
-    | {
-        at: number;
-        message: string;
-      }
-    | null = null;
+  private currentLocationFailure: {
+    at: number;
+    message: string;
+  } | null = null;
 
   constructor(
     private workspace: Workspace,
@@ -317,6 +305,41 @@ export class SystemTools {
     this.workspace = workspace;
   }
 
+  private getFileApprovalHandlers(): WorkspaceFilesystemApprovalHandlers {
+    const daemon = this.daemon as unknown as {
+      requestApproval?: (
+        taskId: string,
+        type: "external_file_access",
+        description: string,
+        details: Record<string, unknown>,
+      ) => Promise<boolean>;
+      consumeExternalFileApproval?: (
+        taskId: string,
+        filePath: string,
+        operation: "read" | "write" | "delete",
+      ) => boolean;
+    };
+    return {
+      ...(typeof daemon.requestApproval === "function"
+        ? {
+            request: ({ path: approvedPath, operation, label }) =>
+              daemon.requestApproval!(
+                this.taskId,
+                "external_file_access",
+                `Allow ${operation} access to external ${label}: ${approvedPath}`,
+                { path: approvedPath, operation, tool: "system_tools" },
+              ),
+          }
+        : {}),
+      ...(typeof daemon.consumeExternalFileApproval === "function"
+        ? {
+            consume: (approvedPath: string, operation: "read" | "write" | "delete") =>
+              daemon.consumeExternalFileApproval!(this.taskId, approvedPath, operation),
+          }
+        : {}),
+    };
+  }
+
   private requireShellPermission(toolName: string): void {
     if (this.workspace.permissions.shell) {
       return;
@@ -325,42 +348,54 @@ export class SystemTools {
   }
 
   private isProtectedPath(absolutePath: string): boolean {
-    const normalizedPath = path.normalize(absolutePath).toLowerCase();
-    return PROTECTED_SYSTEM_PATHS.some((protectedPath) =>
-      normalizedPath.startsWith(protectedPath.toLowerCase()),
-    );
+    return isProtectedFilesystemPath(absolutePath);
   }
 
-  private resolveAccessibleLocalPath(inputPath: string): string {
-    const workspaceRoot = normalizeAllowedRoot(this.workspace.path);
-    const candidatePath = path.isAbsolute(inputPath)
-      ? path.resolve(inputPath)
-      : path.resolve(workspaceRoot, inputPath);
-
-    let resolvedPath: string;
+  private canReadWorkspacePath(candidatePath: string): boolean {
     try {
-      resolvedPath = fsSync.realpathSync(candidatePath);
+      return (
+        evaluateWorkspaceFilesystemAccess(this.workspace, candidatePath, "read").decision ===
+        "allow"
+      );
     } catch {
-      resolvedPath = candidatePath;
+      return false;
+    }
+  }
+
+  private async resolveAccessibleLocalPath(
+    inputPath: string,
+    operation: "read" | "write" = "read",
+  ): Promise<string> {
+    if (operation === "read" && this.workspace.permissions.read === false) {
+      throw new Error("Read permission not granted for this path");
+    }
+    if (operation === "write" && this.workspace.permissions.write === false) {
+      throw new Error("Write permission not granted for this path");
     }
 
-    if (this.workspace.permissions.unrestrictedFileAccess) {
-      if (this.isProtectedPath(resolvedPath)) {
-        throw new Error("Access denied: path is inside a protected system location");
+    const access = await resolveWorkspaceFilesystemAccessWithApproval(
+      this.workspace,
+      inputPath,
+      operation,
+      "system file",
+      this.getFileApprovalHandlers(),
+    );
+    if (access.decision !== "allow") {
+      if (access.reason === "profile_filesystem_denied") {
+        throw new Error(`Access denied by the active access profile: ${inputPath}`);
       }
-      return resolvedPath;
+      if (access.reason === "access_profile_unavailable") {
+        throw new Error("The selected access profile is unavailable.");
+      }
+      throw new Error(
+        "Access denied: path must be inside the workspace or an approved Allowed Path (external access was not approved)",
+      );
     }
 
-    if (isPathWithinRoot(resolvedPath, workspaceRoot)) {
-      return resolvedPath;
+    if (this.isProtectedPath(access.path)) {
+      throw new Error("Access denied: path is inside a protected system location");
     }
-
-    const allowedRoots = (this.workspace.permissions.allowedPaths || []).map(normalizeAllowedRoot);
-    if (allowedRoots.some((root) => isPathWithinRoot(resolvedPath, root))) {
-      return resolvedPath;
-    }
-
-    throw new Error("Access denied: path must be inside the workspace or an approved Allowed Path");
+    return access.path;
   }
 
   private async enforceProjectAccess(absolutePath: string): Promise<void> {
@@ -564,7 +599,13 @@ export class SystemTools {
     height: number;
   }> {
     const filename = options?.filename || `screenshot-${Date.now()}.png`;
-    const outputPath = path.join(this.workspace.path, filename);
+    const requestedOutputPath = path.isAbsolute(filename)
+      ? filename
+      : path.resolve(this.workspace.path, filename);
+    if (this.workspace.permissions.write === false) {
+      throw new Error("Write permission not granted for screenshot capture");
+    }
+    const outputPath = await this.resolveAccessibleLocalPath(requestedOutputPath, "write");
 
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "take_screenshot",
@@ -694,6 +735,20 @@ export class SystemTools {
       throw new Error("Only http and https URLs are allowed");
     }
 
+    const networkDecision = evaluateNetworkPolicy({
+      url: parsedUrl.toString(),
+      toolName: "open_url",
+      networkEnabled: this.workspace.permissions?.network,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions?.accessDomainRules,
+    });
+    this.daemon.logEvent(this.taskId, "network_policy_decision", networkDecision);
+    if (networkDecision.action === "deny") {
+      throw new Error(
+        `Network access denied for "${parsedUrl.toString()}": ${networkDecision.reason}`,
+      );
+    }
+
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "open_url",
       url,
@@ -722,7 +777,7 @@ export class SystemTools {
       throw new Error("Invalid path: must be a non-empty string");
     }
 
-    const fullPath = this.resolveAccessibleLocalPath(filePath);
+    const fullPath = await this.resolveAccessibleLocalPath(filePath);
     await this.enforceProjectAccess(fullPath);
 
     this.daemon.logEvent(this.taskId, "tool_call", {
@@ -761,7 +816,7 @@ export class SystemTools {
       throw new Error("Invalid path: must be a non-empty string");
     }
 
-    const fullPath = this.resolveAccessibleLocalPath(filePath);
+    const fullPath = await this.resolveAccessibleLocalPath(filePath);
     await this.enforceProjectAccess(fullPath);
 
     this.daemon.logEvent(this.taskId, "tool_call", {
@@ -904,10 +959,7 @@ export class SystemTools {
     throw new Error(`Failed to resolve bundle identifier for "${query}": ${message}`);
   }
 
-  async findMacOSAppProcesses(input: {
-    query: string;
-    includeRelated?: boolean;
-  }): Promise<{
+  async findMacOSAppProcesses(input: { query: string; includeRelated?: boolean }): Promise<{
     success: boolean;
     query: string;
     processes: MacOSAppProcessRecord[];
@@ -964,7 +1016,9 @@ export class SystemTools {
       this.matchesAnySearchTerm(`${processRecord.command}\n${processRecord.args}`, terms),
     );
 
-    const ownPids = new Set([process.pid, process.ppid].filter((pid): pid is number => Number.isFinite(pid)));
+    const ownPids = new Set(
+      [process.pid, process.ppid].filter((pid): pid is number => Number.isFinite(pid)),
+    );
     const candidates = before.filter((record) => !ownPids.has(record.pid));
     const skipped = before
       .filter((record) => ownPids.has(record.pid))
@@ -1030,10 +1084,7 @@ export class SystemTools {
     };
   }
 
-  async listMacOSLaunchAgents(input?: {
-    query?: string;
-    includeSystem?: boolean;
-  }): Promise<{
+  async listMacOSLaunchAgents(input?: { query?: string; includeSystem?: boolean }): Promise<{
     success: boolean;
     query: string | null;
     agents: MacOSLaunchAgentRecord[];
@@ -1041,7 +1092,11 @@ export class SystemTools {
     if (os.platform() !== "darwin") {
       throw new Error("macOS LaunchAgent inspection is only available on macOS");
     }
-    const query = typeof input?.query === "string" && input.query.trim() ? input.query.trim() : null;
+    if (this.workspace.permissions.read === false) {
+      throw new Error("Read permission not granted for macOS LaunchAgent inspection");
+    }
+    const query =
+      typeof input?.query === "string" && input.query.trim() ? input.query.trim() : null;
     const terms = query ? this.buildMacOSAppSearchTerms(query, true) : [];
     const agents = this.readMacOSLaunchAgents(input?.includeSystem !== false, terms);
 
@@ -1074,8 +1129,12 @@ export class SystemTools {
     if (os.platform() !== "darwin") {
       throw new Error("macOS LaunchAgent disable is only available on macOS");
     }
+    if (this.workspace.permissions.write === false) {
+      throw new Error("Write permission not granted for macOS LaunchAgent changes");
+    }
     const dryRun = input?.dryRun === true;
-    const query = typeof input?.query === "string" && input.query.trim() ? input.query.trim() : null;
+    const query =
+      typeof input?.query === "string" && input.query.trim() ? input.query.trim() : null;
     const terms = query ? this.buildMacOSAppSearchTerms(query, true) : [];
     const labelSet = new Set((input?.labels || []).map((label) => label.trim()).filter(Boolean));
     const pathSet = new Set((input?.paths || []).map((agentPath) => path.resolve(agentPath)));
@@ -1109,20 +1168,53 @@ export class SystemTools {
       throw new Error("User denied disabling macOS LaunchAgents");
     }
 
-    const disabled: Array<MacOSLaunchAgentRecord & { disabledPath: string; bootoutStatus: string }> = [];
+    const disabled: Array<
+      MacOSLaunchAgentRecord & { disabledPath: string; bootoutStatus: string }
+    > = [];
     const skipped: Array<MacOSLaunchAgentRecord & { reason: string }> = [];
     const uid = typeof process.getuid === "function" ? process.getuid() : null;
-
-    if (!dryRun) {
-      fsSync.mkdirSync(disabledDirectory, { recursive: true });
-    }
+    const userLaunchAgentsDirectory = path.join(os.homedir(), "Library", "LaunchAgents");
+    const approvedMoves: Array<{
+      agent: MacOSLaunchAgentRecord;
+      disabledPath: string;
+    }> = [];
 
     for (const agent of selected) {
-      if (agent.domain !== "user" || !agent.path.startsWith(path.join(os.homedir(), "Library", "LaunchAgents") + path.sep)) {
+      if (
+        agent.domain !== "user" ||
+        !isAccessPathWithin(userLaunchAgentsDirectory, agent.path) ||
+        path.resolve(agent.path) === path.resolve(userLaunchAgentsDirectory)
+      ) {
         skipped.push({ ...agent, reason: "only_user_launch_agents_can_be_moved_by_this_tool" });
         continue;
       }
 
+      const disabledPath = this.nextAvailablePath(
+        path.join(disabledDirectory, path.basename(agent.path)),
+      );
+      const sourceDecision = evaluateWorkspaceFilesystemAccess(
+        this.workspace,
+        agent.path,
+        "delete",
+      );
+      const destinationDecision = evaluateWorkspaceFilesystemAccess(
+        this.workspace,
+        disabledPath,
+        "write",
+      );
+      if (sourceDecision.decision !== "allow" || destinationDecision.decision !== "allow") {
+        skipped.push({ ...agent, reason: "denied_by_access_profile" });
+        continue;
+      }
+
+      approvedMoves.push({ agent, disabledPath });
+    }
+
+    if (!dryRun && approvedMoves.length > 0) {
+      fsSync.mkdirSync(disabledDirectory, { recursive: true });
+    }
+
+    for (const { agent, disabledPath } of approvedMoves) {
       let bootoutStatus = "not_attempted";
       if (!dryRun && agent.label && uid !== null) {
         try {
@@ -1136,7 +1228,6 @@ export class SystemTools {
         }
       }
 
-      const disabledPath = this.nextAvailablePath(path.join(disabledDirectory, path.basename(agent.path)));
       if (!dryRun) {
         fsSync.renameSync(agent.path, disabledPath);
       }
@@ -1341,15 +1432,16 @@ export class SystemTools {
           args: match[4] || "",
         };
       })
-      .filter((record): record is MacOSAppProcessRecord => Boolean(record && Number.isFinite(record.pid)));
+      .filter((record): record is MacOSAppProcessRecord =>
+        Boolean(record && Number.isFinite(record.pid)),
+      );
   }
 
-  private readMacOSLaunchAgents(
-    includeSystem: boolean,
-    terms: string[],
-  ): MacOSLaunchAgentRecord[] {
+  private readMacOSLaunchAgents(includeSystem: boolean, terms: string[]): MacOSLaunchAgentRecord[] {
     const userDir = path.join(os.homedir(), "Library", "LaunchAgents");
-    const dirs: Array<{ dir: string; domain: "user" | "system" }> = [{ dir: userDir, domain: "user" }];
+    const dirs: Array<{ dir: string; domain: "user" | "system" }> = [
+      { dir: userDir, domain: "user" },
+    ];
     if (includeSystem) {
       dirs.push({ dir: "/Library/LaunchAgents", domain: "system" });
       dirs.push({ dir: "/Library/LaunchDaemons", domain: "system" });
@@ -1365,6 +1457,11 @@ export class SystemTools {
       }
       for (const entry of entries) {
         const agentPath = path.join(dir, entry);
+        if (
+          evaluateWorkspaceFilesystemAccess(this.workspace, agentPath, "read").decision !== "allow"
+        ) {
+          continue;
+        }
         let content = "";
         try {
           content = fsSync.readFileSync(agentPath, "utf8");
@@ -1374,7 +1471,9 @@ export class SystemTools {
         const label = this.extractPlistString(content, "Label");
         const program = this.extractPlistString(content, "Program");
         const programArguments = this.extractPlistStringArray(content, "ProgramArguments");
-        const searchable = [agentPath, label, program, ...programArguments, content].filter(Boolean).join("\n");
+        const searchable = [agentPath, label, program, ...programArguments, content]
+          .filter(Boolean)
+          .join("\n");
         agents.push({
           path: agentPath,
           label,
@@ -1390,13 +1489,17 @@ export class SystemTools {
 
   private extractPlistString(content: string, key: string): string | null {
     const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = content.match(new RegExp(`<key>\\s*${escapedKey}\\s*</key>\\s*<string>([\\s\\S]*?)</string>`, "i"));
+    const match = content.match(
+      new RegExp(`<key>\\s*${escapedKey}\\s*</key>\\s*<string>([\\s\\S]*?)</string>`, "i"),
+    );
     return match?.[1]?.trim() || null;
   }
 
   private extractPlistStringArray(content: string, key: string): string[] {
     const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const arrayMatch = content.match(new RegExp(`<key>\\s*${escapedKey}\\s*</key>\\s*<array>([\\s\\S]*?)</array>`, "i"));
+    const arrayMatch = content.match(
+      new RegExp(`<key>\\s*${escapedKey}\\s*</key>\\s*<array>([\\s\\S]*?)</array>`, "i"),
+    );
     if (!arrayMatch?.[1]) return [];
     return Array.from(arrayMatch[1].matchAll(/<string>([\s\S]*?)<\/string>/gi)).map((match) =>
       (match[1] || "").trim(),
@@ -1494,23 +1597,32 @@ export class SystemTools {
     try {
       const limit = Math.min(input.limit || 20, 50);
       const lane = input.lane || "all";
-      const typeFilter = new Set((input.types || []).map((item) => String(item || "").trim()).filter(Boolean));
+      const typeFilter = new Set(
+        (input.types || []).map((item) => String(item || "").trim()).filter(Boolean),
+      );
 
       // Search the memory database off the Electron main thread when possible.
       const dbResults =
-        lane === "kit" ? [] : await MemoryService.searchAsync(this.workspace.id, input.query, limit);
+        lane === "kit"
+          ? []
+          : await MemoryService.searchAsync(this.workspace.id, input.query, limit);
 
       // Also search workspace markdown (.cowork/ kit files)
       let mdResults: typeof dbResults = [];
       if (lane !== "archive") {
         try {
           const kitRoot = path.join(this.workspace.path, ".cowork");
-          if (fsSync.existsSync(kitRoot) && fsSync.statSync(kitRoot).isDirectory()) {
+          if (
+            this.canReadWorkspacePath(kitRoot) &&
+            fsSync.existsSync(kitRoot) &&
+            fsSync.statSync(kitRoot).isDirectory()
+          ) {
             mdResults = MemoryService.searchWorkspaceMarkdown(
               this.workspace.id,
               kitRoot,
               input.query,
               Math.max(5, Math.floor(limit / 3)),
+              (candidatePath) => this.canReadWorkspacePath(candidatePath),
             );
           }
         } catch {
@@ -1611,11 +1723,7 @@ export class SystemTools {
     return { results: mapped, totalFound: mapped.length };
   }
 
-  async memoryTimeline(input: {
-    memoryId?: string;
-    query?: string;
-    windowSize?: number;
-  }): Promise<{
+  async memoryTimeline(input: { memoryId?: string; query?: string; windowSize?: number }): Promise<{
     results: Array<{
       id: string;
       title: string;
@@ -1682,7 +1790,10 @@ export class SystemTools {
     if (!progressiveRecallEnabled()) {
       throw new Error("Progressive memory recall is disabled in Memory settings.");
     }
-    const details = MemoryObservationService.details((input.ids || []).slice(0, 10), this.workspace.id);
+    const details = MemoryObservationService.details(
+      (input.ids || []).slice(0, 10),
+      this.workspace.id,
+    );
     const mapped = details.map((detail) => ({
       id: detail.memoryId,
       title: detail.title,
@@ -1743,6 +1854,7 @@ export class SystemTools {
         taskId: input.taskId,
         limit: Math.min(input.limit || 10, 50),
         includeCheckpoints: input.includeCheckpoints === true,
+        readGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
       });
       const mapped = results.map((entry) => ({
         taskId: entry.taskId,
@@ -1818,6 +1930,7 @@ export class SystemTools {
         limit: Math.min(input.limit || 10, 50),
         sourceTypes: input.sourceTypes,
         includeWorkspaceNotes: input.includeWorkspaceNotes,
+        readGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
       });
       const mapped = results.map((entry) => ({
         id: entry.id,
@@ -1851,11 +1964,7 @@ export class SystemTools {
     }
   }
 
-  async loadMemoryTopics(input: {
-    query: string;
-    limit?: number;
-    refresh?: boolean;
-  }): Promise<{
+  async loadMemoryTopics(input: { query: string; limit?: number; refresh?: boolean }): Promise<{
     indexPath: string;
     topics: Array<{
       title: string;
@@ -1890,14 +1999,22 @@ export class SystemTools {
               workspacePath: this.workspace.path,
               taskPrompt: input.query,
               topicLimit,
+              readGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
+              writeGuard: (candidatePath) =>
+                evaluateWorkspaceFilesystemAccess(this.workspace, candidatePath, "write")
+                  .decision === "allow",
             })
           ).topics
-        : (await LayeredMemoryIndexService.loadRelevantTopicSnippets({
+        : await LayeredMemoryIndexService.loadRelevantTopicSnippets({
             workspaceId: this.workspace.id,
             workspacePath: this.workspace.path,
             query: input.query,
             limit: topicLimit,
-          }));
+            readGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
+            writeGuard: (candidatePath) =>
+              evaluateWorkspaceFilesystemAccess(this.workspace, candidatePath, "write").decision ===
+              "allow",
+          });
       const mapped = topics.map((topic) => ({
         title: topic.title,
         path: path.relative(this.workspace.path, topic.path),
@@ -1973,8 +2090,7 @@ export class SystemTools {
     try {
       const results = DurableContextService.search({
         workspaceId: this.workspace.id,
-        taskId:
-          input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
+        taskId: input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
         query: input.query,
         limit: Math.min(input.limit || 10, 50),
       });
@@ -2051,8 +2167,7 @@ export class SystemTools {
     try {
       const result = DurableContextService.describe({
         workspaceId: this.workspace.id,
-        taskId:
-          input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
+        taskId: input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
         id: input.id,
         sourceLimit: input.sourceLimit,
       });
@@ -2155,12 +2270,20 @@ export class SystemTools {
         ]
       : [];
     const conciseTopicMemoryTools: LLMTool[] = enableTopicMemory
-      ? [buildTopicMemoryTool("Load topical memory packs from `.cowork/memory/topics` for the current query.")]
+      ? [
+          buildTopicMemoryTool(
+            "Load topical memory packs from `.cowork/memory/topics` for the current query.",
+          ),
+        ]
       : [];
     const conciseDurableContextTools: LLMTool[] = enableDurableContext
       ? [
-          buildDurableContextGrepTool("Search durable compacted runtime context for the active task."),
-          buildDurableContextDescribeTool("Expand a durable context result returned by context_grep."),
+          buildDurableContextGrepTool(
+            "Search durable compacted runtime context for the active task.",
+          ),
+          buildDurableContextDescribeTool(
+            "Expand a durable context result returned by context_grep.",
+          ),
         ]
       : [];
     const progressiveMemoryTools: LLMTool[] = progressiveRecallEnabled()
@@ -2172,12 +2295,16 @@ export class SystemTools {
             input_schema: {
               type: "object",
               properties: {
-                query: { type: "string", description: "Keywords, topic, person, file, or decision to recall" },
+                query: {
+                  type: "string",
+                  description: "Keywords, topic, person, file, or decision to recall",
+                },
                 limit: { type: "number", description: "Maximum results (default 20, max 50)" },
                 observationTypes: {
                   type: "array",
                   items: { type: "string" },
-                  description: "Optional memory types to keep, such as decision, error, insight, screen_context",
+                  description:
+                    "Optional memory types to keep, such as decision, error, insight, screen_context",
                 },
                 privacyStates: {
                   type: "array",
@@ -2195,9 +2322,18 @@ export class SystemTools {
             input_schema: {
               type: "object",
               properties: {
-                memoryId: { type: "string", description: "Anchor memory ID from memory_search_index" },
-                query: { type: "string", description: "Fallback query when no anchor ID is available" },
-                windowSize: { type: "number", description: "Neighbor count on each side (default 5, max 20)" },
+                memoryId: {
+                  type: "string",
+                  description: "Anchor memory ID from memory_search_index",
+                },
+                query: {
+                  type: "string",
+                  description: "Fallback query when no anchor ID is available",
+                },
+                windowSize: {
+                  type: "number",
+                  description: "Neighbor count on each side (default 5, max 20)",
+                },
               },
               required: [],
             },
@@ -2285,7 +2421,8 @@ export class SystemTools {
               types: {
                 type: "array",
                 items: { type: "string" },
-                description: "Optional memory types to keep (for example decision, insight, constraint)",
+                description:
+                  "Optional memory types to keep (for example decision, insight, constraint)",
               },
             },
             required: ["query"],
@@ -2324,7 +2461,8 @@ export class SystemTools {
             },
             maxAgeMs: {
               type: "number",
-              description: "Maximum age in milliseconds for a cached native OS location, when supported.",
+              description:
+                "Maximum age in milliseconds for a cached native OS location, when supported.",
             },
           },
           required: [],
@@ -2490,7 +2628,11 @@ export class SystemTools {
           type: "object",
           properties: {
             query: { type: "string", description: 'App/process query, for example "Perplexity".' },
-            signal: { type: "string", enum: ["TERM", "KILL"], description: "TERM first, KILL for force quit." },
+            signal: {
+              type: "string",
+              enum: ["TERM", "KILL"],
+              description: "TERM first, KILL for force quit.",
+            },
             includeRelated: {
               type: "boolean",
               description: "Include known related helper terms for the app query when available.",
@@ -2510,7 +2652,8 @@ export class SystemTools {
             query: { type: "string", description: 'Optional app query, for example "Perplexity".' },
             includeSystem: {
               type: "boolean",
-              description: "Include /Library LaunchAgents and LaunchDaemons in addition to the user's LaunchAgents.",
+              description:
+                "Include /Library LaunchAgents and LaunchDaemons in addition to the user's LaunchAgents.",
             },
           },
           required: [],
@@ -2535,7 +2678,10 @@ export class SystemTools {
               items: { type: "string" },
               description: "Specific LaunchAgent plist paths to disable.",
             },
-            dryRun: { type: "boolean", description: "Preview matching agents without moving files." },
+            dryRun: {
+              type: "boolean",
+              description: "Preview matching agents without moving files.",
+            },
           },
           required: [],
         },
@@ -2587,7 +2733,8 @@ export class SystemTools {
             types: {
               type: "array",
               items: { type: "string" },
-              description: "Optional memory types to keep (for example decision, insight, constraint)",
+              description:
+                "Optional memory types to keep (for example decision, insight, constraint)",
             },
           },
           required: ["query"],

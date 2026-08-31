@@ -47,6 +47,8 @@ If you have already configured providers in the desktop app, `cowork` should pic
 cowork
 cowork run "who are you?"
 cowork run "inspect this repo and list the riskiest files" --workspace /path/to/repo
+cowork run "inspect this repo" --access-profile ask_for_approval
+cowork run "run the trusted local build" --access-profile full_access
 cowork run "return a compact status report" --json
 cowork providers list
 cowork providers configure openai --model gpt-5.5
@@ -90,6 +92,33 @@ Interactive mode accepts free-text tasks and slash commands:
 - `/workspace list` shows known local workspaces.
 - `/workspace use <path>` sets the working workspace for the session.
 - `/exit` leaves the CLI.
+
+### Access Profiles
+
+`cowork run` uses the same access-profile resolver as the desktop app. Select a built-in profile or
+an administrator/workspace-defined custom id with `--access-profile`:
+
+```bash
+cowork run "review the repository" --access-profile ask_for_approval
+cowork run "run the local test suite" --access-profile approve_for_me
+cowork run "perform this trusted local maintenance" --access-profile full_access
+cowork run "inspect the bounded project" --access-profile review-repository
+```
+
+The profile controls sandboxing, approval and reviewer behavior, command-tool availability,
+filesystem roots/rules, and network/domain policy. `--remote` sends the requested id to the target
+Control Plane, where it is resolved and enforced using that node's settings and administrator
+policy. Credentials and local browser sessions are not transferred by selecting a profile.
+
+`--permission-mode` remains available for older integrations and maps to the legacy compatibility
+path. `--shell` is also retained as a compatibility alias and maps to the bounded
+`ask_for_approval` profile; it is not an unrestricted shell switch. Prefer `--access-profile` for
+new scripts.
+
+If a named profile is missing, invalid, or unavailable on the target, the task fails closed with a
+read-only unavailable profile and may pause for user action. A later approval cannot widen that
+profile. See [Access Profiles](access-profiles.md) for the full field reference and migration
+contract.
 
 `approve` and `reject` use a local desktop handoff by default. The CLI sends the response to the already-running CoWork OS app through the app's single-instance bridge, so the live task runtime can wake and continue without Control Plane. If no desktop app is running, open CoWork OS and retry, or use `cowork approve <approvalId> --remote` / `cowork reject <approvalId> --remote` against a running Control Plane target.
 
@@ -141,6 +170,9 @@ See [Agent Security with Numbat](agent-security-numbat.md) for policy defaults, 
 - `--remote` is the token-gated path and should be treated like any other remote device operation.
 - `--json` emits structured JSONL events for machine consumers without exposing hidden reasoning.
 - Numbat decisions are an additional restriction layer. They cannot grant a permission, suppress an approval, or weaken sandbox and network controls.
+- Access profiles are resolved before the CLI task starts. A profile can be constrained by admin
+  policy, hard guardrails, protected paths, and export/location consent; CLI mode does not bypass
+  those boundaries.
 - Set `COWORK_CLI_DEBUG=1` when you need verbose local runtime diagnostics.
 
 ## Troubleshooting

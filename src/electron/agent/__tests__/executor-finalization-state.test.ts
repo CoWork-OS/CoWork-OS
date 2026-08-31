@@ -61,7 +61,8 @@ function createExecutorForFinalization(overrides: Partial<Any> = {}): Any {
       failureClass,
     }));
   executor.computeReliabilityOutcomes = vi.fn().mockImplementation((terminalStatus: string) => ({
-    coreOutcome: terminalStatus === "failed" ? "failed" : terminalStatus === "ok" ? "ok" : "partial",
+    coreOutcome:
+      terminalStatus === "failed" ? "failed" : terminalStatus === "ok" ? "ok" : "partial",
     dependencyOutcome: "healthy",
     failureDomains: [],
     stopReasons: [],
@@ -140,6 +141,76 @@ describe("TaskExecutor terminal finalization state", () => {
         terminalStatusReason:
           "Soft deadline reached during execution. Finalizing with best-effort answer.",
         failedStepIds: ["step-1"],
+      }),
+    );
+  });
+
+  it("forwards recovered failed step IDs so the daemon completion gate can resolve them", () => {
+    const executor = createExecutorForFinalization({
+      recoveredFailureStepIds: new Set(["step-1"]),
+      plan: {
+        description: "Plan",
+        steps: [
+          {
+            id: "step-1",
+            description: "Collect evidence",
+            status: "failed",
+            error: "Original attempt failed",
+            completedAt: Date.now(),
+            kind: "primary",
+          },
+          {
+            id: "recovery-1",
+            description: "Try an alternative toolchain",
+            status: "completed",
+            completedAt: Date.now(),
+            kind: "recovery",
+          },
+        ],
+      },
+    });
+
+    (TaskExecutor as Any).prototype.finalizeTaskBestEffort.call(
+      executor,
+      "Recovered result.",
+      "Recovery completed.",
+      createTerminalState("partial_success", {
+        reason: "Recovery completed.",
+        failureClass: "contract_error",
+        failedStepIds: ["step-1"],
+      }),
+    );
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
+      "task-terminal-state",
+      "Recovered result.",
+      expect.objectContaining({
+        recoveredFailedStepIds: ["step-1"],
+      }),
+    );
+  });
+
+  it("does not waive a recovery that was planned but never completed", () => {
+    const executor = createExecutorForFinalization({
+      recoveredFailureStepIds: new Set(["step-1"]),
+    });
+
+    (TaskExecutor as Any).prototype.finalizeTaskBestEffort.call(
+      executor,
+      "Partial result.",
+      "Recovery stopped before completion.",
+      createTerminalState("partial_success", {
+        reason: "Recovery stopped before completion.",
+        failureClass: "contract_error",
+        failedStepIds: ["step-1"],
+      }),
+    );
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalledWith(
+      "task-terminal-state",
+      "Partial result.",
+      expect.objectContaining({
+        recoveredFailedStepIds: expect.anything(),
       }),
     );
   });

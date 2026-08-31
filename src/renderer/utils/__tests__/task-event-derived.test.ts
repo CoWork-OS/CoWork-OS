@@ -24,18 +24,36 @@ function makeEvent(
 }
 
 describe("deriveSharedTaskEventUiState action blocks", () => {
+  it("shows rename destinations instead of stale source paths", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("rename-1", 100, "file_modified", {
+          action: "rename",
+          from: "inbox/invoice_final_FINAL.txt",
+          to: "inbox/Invoices/invoice.txt",
+        }),
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+      workspace: { path: "/workspace" } as Any,
+      verboseSteps: true,
+    });
+
+    expect(shared.files.map((file) => file.path)).toEqual(["inbox/Invoices/invoice.txt"]);
+  });
+
   it("coalesces a legacy final response that differs only by Markdown whitespace", () => {
     const shared = deriveSharedTaskEventUiState({
       rawEvents: [
         makeEvent("assistant-final", 100, "timeline_step_updated", {
           legacyType: "assistant_message",
           internal: false,
-          message: "Finished draft.\n\nThank you,\nAlmarion",
+          message: "Finished draft.\n\nThank you,\nAlmarion\n\n```bash\n  npm test\n```",
         }),
         makeEvent("task-complete", 200, "timeline_step_finished", {
           legacyType: "task_completed",
           message: "Task completed with partial results",
-          resultSummary: "Finished draft.\n\nThank you,  \nAlmarion",
+          resultSummary:
+            "Finished draft.\n\nThank you,  \nAlmarion\n\n  ```bash\n    npm test\n  ```",
         }),
       ],
       task: { id: "task-1", status: "completed" } as Any,
@@ -75,6 +93,40 @@ describe("deriveSharedTaskEventUiState action blocks", () => {
         .filter((item) => item.kind === "event")
         .map((item) => (item.kind === "event" ? item.event.id : "")),
     ).toEqual(["task-complete"]);
+  });
+
+  it("coalesces each assistant response against its own completion when a task has follow-ups", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("assistant-initial", 100, "timeline_step_updated", {
+          legacyType: "assistant_message",
+          internal: false,
+          message: "Initial result.",
+        }),
+        makeEvent("task-complete-initial", 200, "timeline_step_finished", {
+          legacyType: "task_completed",
+          resultSummary: "Initial result.",
+        }),
+        makeEvent("assistant-follow-up", 300, "timeline_step_updated", {
+          legacyType: "assistant_message",
+          internal: false,
+          message: "Approval was denied; no action was taken.",
+        }),
+        makeEvent("task-complete-follow-up", 400, "timeline_step_finished", {
+          legacyType: "task_completed",
+          resultSummary: "Approval was denied; no action was taken.",
+        }),
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+      workspace: null,
+      verboseSteps: true,
+    });
+
+    expect(
+      shared.baseTimelineItems
+        .filter((item) => item.kind === "event")
+        .map((item) => (item.kind === "event" ? item.event.id : "")),
+    ).toEqual(["task-complete-initial", "task-complete-follow-up"]);
   });
 
   it("preserves a distinct assistant response before the completion", () => {
@@ -268,6 +320,38 @@ describe("deriveSharedTaskEventUiState action blocks", () => {
       "user-1",
       "error-1",
       "error-3",
+    ]);
+  });
+
+  it("does not force internal assistant recovery text into the live feed", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("user-1", 100, "user_message", { message: "fetch" }),
+        makeEvent("assistant-internal", 200, "timeline_step_updated", {
+          legacyType: "assistant_message",
+          internal: true,
+          message: "200",
+        }),
+        makeEvent("assistant-visible", 300, "timeline_step_updated", {
+          legacyType: "assistant_message",
+          internal: false,
+          message: "The fetch was blocked by policy, so no status was available.",
+        }),
+        makeEvent("failure", 400, "timeline_step_finished", {
+          legacyType: "step_failed",
+          message: "Network access is disabled.",
+        }),
+      ],
+      task: { id: "task-1", status: "failed" } as Any,
+      workspace: null,
+      verboseSteps: false,
+      projectionMode: "live",
+    });
+
+    expect(shared.filteredEvents.map((event) => event.id)).toEqual([
+      "user-1",
+      "assistant-visible",
+      "failure",
     ]);
   });
 

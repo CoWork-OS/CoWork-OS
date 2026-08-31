@@ -28,7 +28,13 @@ export class WebFetchTools {
   }
 
   private ensureNetworkAllowed(url: string, toolName: string): void {
-    const decision = evaluateNetworkPolicy({ url, toolName });
+    const decision = evaluateNetworkPolicy({
+      url,
+      toolName,
+      networkEnabled: this.workspace.permissions?.network,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions?.accessDomainRules,
+    });
     this.daemon.logEvent(this.taskId, "network_policy_decision", decision);
     if (decision.action === "allow") return;
     if (decision.reason === "legacy_guardrail_domain_denied") {

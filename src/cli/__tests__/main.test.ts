@@ -50,6 +50,22 @@ describe("CLI argument parsing", () => {
     expect(parsed.flags.get("--force")).toBe(true);
     expect(parsed.flags.get("--detach")).toBe(true);
   });
+
+  it("parses the access profile selector for task runs", () => {
+    const parsed = parseArgs([
+      "run",
+      "inspect the repo",
+      "--access-profile",
+      "full_access",
+      "--permission-mode",
+      "default",
+    ]);
+
+    expect(parsed.command).toBe("run");
+    expect(parsed.rest).toEqual(["inspect the repo"]);
+    expect(parsed.flags.get("--access-profile")).toBe("full_access");
+    expect(parsed.flags.get("--permission-mode")).toBe("default");
+  });
 });
 
 describe("interactive command parsing", () => {
@@ -60,7 +76,7 @@ describe("interactive command parsing", () => {
   it("maps slash commands to CLI argv", () => {
     expect(parseInteractiveCommand("/workspace list")).toEqual(["workspace", "list"]);
     expect(parseInteractiveCommand("/tasks list --active")).toEqual(["tasks", "list", "--active"]);
-    expect(parseInteractiveCommand("/providers configure openai --model \"gpt-4.1-mini\"")).toEqual([
+    expect(parseInteractiveCommand('/providers configure openai --model "gpt-4.1-mini"')).toEqual([
       "providers",
       "configure",
       "openai",
@@ -86,7 +102,7 @@ describe("run command guard", () => {
     const code = await main(["run", "doctor"]);
 
     expect(code).toBe(1);
-    expect(stderr).toContain('Did you mean `cowork doctor`?');
+    expect(stderr).toContain("Did you mean `cowork doctor`?");
     expect(stderr).toContain("cowork run --force doctor");
   });
 });

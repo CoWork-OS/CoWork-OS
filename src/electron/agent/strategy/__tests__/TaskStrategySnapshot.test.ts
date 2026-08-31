@@ -4,7 +4,9 @@ import { makeRoute } from "./task-strategy-test-fixtures";
 
 describe("TaskStrategySnapshot", () => {
   it("classifies chat and thinking as companion direct responses", () => {
-    const chat = TaskStrategyService.derive(makeRoute({ intent: "chat", conversationMode: "chat" }));
+    const chat = TaskStrategyService.derive(
+      makeRoute({ intent: "chat", conversationMode: "chat" }),
+    );
     const thinking = TaskStrategyService.derive(
       makeRoute({ intent: "thinking", conversationMode: "think", answerFirst: true }),
     );
@@ -47,7 +49,9 @@ describe("TaskStrategySnapshot", () => {
   });
 
   it("persists the snapshot onto agent config", () => {
-    const strategy = TaskStrategyService.derive(makeRoute({ intent: "planning", answerFirst: true }));
+    const strategy = TaskStrategyService.derive(
+      makeRoute({ intent: "planning", answerFirst: true }),
+    );
     const config = TaskStrategyService.applyToAgentConfig({}, strategy);
 
     expect(config.taskStrategySnapshot).toEqual(strategy.snapshot);

@@ -5,9 +5,7 @@ import { deriveSlashCommandTaskTitle } from "../slash-command-title";
 describe("deriveSlashCommandTaskTitle", () => {
   it("uses legal slash command names and trailing args for readable titles", () => {
     expect(
-      deriveSlashCommandTaskTitle(
-        "/litigation-legal-demand-intake unpaid invoices acme logistics",
-      ),
+      deriveSlashCommandTaskTitle("/litigation-legal-demand-intake unpaid invoices acme logistics"),
     ).toBe("Litigation Demand Intake: unpaid invoices acme logistics");
   });
 

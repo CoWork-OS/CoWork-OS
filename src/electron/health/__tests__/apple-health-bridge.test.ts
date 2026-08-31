@@ -64,19 +64,21 @@ describe("AppleHealthBridge", () => {
   });
 
   it("parses status, authorization, sync, and write responses from the helper", async () => {
-    spawnMock.mockImplementation(() => createBridgeProcess({
-      ok: true,
-      data: {
-        available: true,
-        executablePath: "/tmp/HealthKitBridge",
-        authorizationStatus: "authorized",
-        readableTypes: ["steps", "sleep"],
-        writableTypes: ["steps", "sleep"],
-        sourceMode: "native",
-        lastSyncedAt: 123,
-        lastError: undefined,
-      },
-    }));
+    spawnMock.mockImplementation(() =>
+      createBridgeProcess({
+        ok: true,
+        data: {
+          available: true,
+          executablePath: "/tmp/HealthKitBridge",
+          authorizationStatus: "authorized",
+          readableTypes: ["steps", "sleep"],
+          writableTypes: ["steps", "sleep"],
+          sourceMode: "native",
+          lastSyncedAt: 123,
+          lastError: undefined,
+        },
+      }),
+    );
     const { AppleHealthBridge } = await import("../apple-health-bridge");
 
     const status = await AppleHealthBridge.getStatus("native");

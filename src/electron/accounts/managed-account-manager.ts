@@ -291,14 +291,13 @@ export class ManagedAccountManager {
             : existing.label,
         status: sanitizeStatus(input.status) ?? existing.status,
         signupUrl:
-          input.signupUrl !== undefined
-            ? sanitizeOptionalUrl(input.signupUrl)
-            : existing.signupUrl,
+          input.signupUrl !== undefined ? sanitizeOptionalUrl(input.signupUrl) : existing.signupUrl,
         dashboardUrl:
           input.dashboardUrl !== undefined
             ? sanitizeOptionalUrl(input.dashboardUrl)
             : existing.dashboardUrl,
-        docsUrl: input.docsUrl !== undefined ? sanitizeOptionalUrl(input.docsUrl) : existing.docsUrl,
+        docsUrl:
+          input.docsUrl !== undefined ? sanitizeOptionalUrl(input.docsUrl) : existing.docsUrl,
         notes:
           input.notes !== undefined
             ? sanitizeOptionalString(input.notes, MAX_NOTES_LENGTH)
@@ -372,7 +371,10 @@ export class ManagedAccountManager {
     return true;
   }
 
-  static toPublicView(account: ManagedAccountRecord, includeSecrets = false): ManagedAccountPublicView {
+  static toPublicView(
+    account: ManagedAccountRecord,
+    includeSecrets = false,
+  ): ManagedAccountPublicView {
     const { secrets, ...rest } = account;
 
     if (includeSecrets) {

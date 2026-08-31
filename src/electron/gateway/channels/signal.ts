@@ -31,7 +31,12 @@ import {
   CallbackQuery as _CallbackQuery,
   CallbackQueryHandler,
 } from "./types";
-import { SignalClient, SignalMessage, SignalDataMessage as _SignalDataMessage, SignalAttachment } from "./signal-client";
+import {
+  SignalClient,
+  SignalMessage,
+  SignalDataMessage as _SignalDataMessage,
+  SignalAttachment,
+} from "./signal-client";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -351,7 +356,7 @@ export class SignalAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendTyping(chatId);
-    } catch  {
+    } catch {
       // Ignore typing indicator errors
     }
   }
@@ -366,7 +371,7 @@ export class SignalAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendTyping(chatId, true);
-    } catch  {
+    } catch {
       // Ignore typing indicator errors
     }
   }
@@ -414,7 +419,7 @@ export class SignalAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendReadReceipt(sender, [messageTimestamp]);
-    } catch  {
+    } catch {
       // Ignore read receipt errors
     }
   }

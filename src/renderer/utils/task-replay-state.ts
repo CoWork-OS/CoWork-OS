@@ -80,7 +80,10 @@ function stripFinalTaskFields(task: Task, status: TaskStatus, updatedAt: number)
   } as Task;
 }
 
-export function deriveReplayTaskSnapshot(task: Task | undefined, replayEvents: TaskEvent[]): Task | undefined {
+export function deriveReplayTaskSnapshot(
+  task: Task | undefined,
+  replayEvents: TaskEvent[],
+): Task | undefined {
   if (!task) return undefined;
 
   let status: TaskStatus = "pending";

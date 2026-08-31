@@ -210,7 +210,11 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     const reloaded = service.getCompany(company.id);
     expect(reloaded?.defaultWorkspaceId).toBe(company.defaultWorkspaceId);
 
-    const workspace = reloaded?.defaultWorkspaceId ? db.prepare("SELECT * FROM workspaces WHERE id = ?").get(reloaded.defaultWorkspaceId) as Any : null;
+    const workspace = reloaded?.defaultWorkspaceId
+      ? (db
+          .prepare("SELECT * FROM workspaces WHERE id = ?")
+          .get(reloaded.defaultWorkspaceId) as Any)
+      : null;
     expect(workspace?.path).toContain(path.join("company-workspaces", "workspace-co"));
     expect(fs.existsSync(path.join(workspace.path, ".cowork"))).toBe(true);
     expect(fs.existsSync(path.join(workspace.path, "projects"))).toBe(true);

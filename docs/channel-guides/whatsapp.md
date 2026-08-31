@@ -45,7 +45,7 @@ Draft a short reply to this customer complaint.
 - Use `/steer <guidance>` for important corrections.
 - In groups, prefer mention-or-command routing unless the group exists only for CoWork tasks.
 - Use group specialization for trusted groups that should always route into the same workspace and role.
-- Use direct self-chat for approvals involving files, shell commands, or private data.
+- Use direct self-chat for approvals involving files, command tools, or private data. New channel tasks inherit the target workspace's [access profile](../access-profiles.md), so group specialization can narrow policy but cannot widen it.
 
 ## Watch-Outs
 

@@ -133,9 +133,9 @@ describe("TaskExecutor skill shortlist routing", () => {
     const prompt = "We need to review PR #55 on cowork os repo. Spin up Codex to review it.";
     const executor = createExecutor(prompt);
 
-    const handled = await (TaskExecutor as Any).prototype.maybeHandleHighConfidenceSkillRouting.call(
-      executor,
-    );
+    const handled = await (
+      TaskExecutor as Any
+    ).prototype.maybeHandleHighConfidenceSkillRouting.call(executor);
 
     expect(handled).toBe(false);
     expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
@@ -173,9 +173,9 @@ describe("TaskExecutor skill shortlist routing", () => {
     ].join("\n");
     const executor = createExecutor(prompt);
 
-    const handled = await (TaskExecutor as Any).prototype.maybeHandleHighConfidenceSkillRouting.call(
-      executor,
-    );
+    const handled = await (
+      TaskExecutor as Any
+    ).prototype.maybeHandleHighConfidenceSkillRouting.call(executor);
 
     expect(handled).toBe(false);
     expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
@@ -445,9 +445,9 @@ describe("TaskExecutor skill shortlist routing", () => {
       };
     });
 
-    const handled = await (
-      TaskExecutor as Any
-    ).prototype.maybeHandleNaturalLlmWikiPrompt.call(executor);
+    const handled = await (TaskExecutor as Any).prototype.maybeHandleNaturalLlmWikiPrompt.call(
+      executor,
+    );
 
     expect(handled).toBe(true);
     expect(executor.appliedSkills).toEqual(
@@ -497,9 +497,9 @@ describe("TaskExecutor skill shortlist routing", () => {
       "Build a persistent Obsidian-friendly research vault in this workspace. If I have not given the topic yet, ask me for it first.";
     const executor = createExecutor(prompt);
 
-    const handled = await (
-      TaskExecutor as Any
-    ).prototype.maybeHandleNaturalLlmWikiPrompt.call(executor);
+    const handled = await (TaskExecutor as Any).prototype.maybeHandleNaturalLlmWikiPrompt.call(
+      executor,
+    );
 
     expect(handled).toBe(true);
     expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();

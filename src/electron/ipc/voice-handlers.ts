@@ -23,9 +23,7 @@ export function setupVoiceActionHandlers(options: VoiceActionHandlerOptions = {}
   const ipc = options.ipc || ipcMain;
   const resolveService = options.getService || getVoiceService;
 
-  ipc.handle(IPC_CHANNELS.VOICE_GET_CAPABILITIES, async () =>
-    resolveService().getCapabilities(),
-  );
+  ipc.handle(IPC_CHANNELS.VOICE_GET_CAPABILITIES, async () => resolveService().getCapabilities());
 
   ipc.handle(IPC_CHANNELS.VOICE_GET_STATE, async () => resolveService().getState());
 

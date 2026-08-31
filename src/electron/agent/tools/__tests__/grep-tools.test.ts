@@ -3,6 +3,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // Mock electron
 vi.mock("electron", () => ({
@@ -109,6 +112,39 @@ describe("GrepTools", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("does not exist");
+    });
+
+    it("should skip a directory denied by the active access profile", async () => {
+      const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-profile-"));
+      const deniedPath = path.join(workspacePath, "private");
+      fs.mkdirSync(deniedPath);
+      fs.writeFileSync(path.join(workspacePath, "public.txt"), "needle\n");
+      fs.writeFileSync(path.join(deniedPath, "secret.txt"), "needle\n");
+
+      try {
+        const tools = new GrepTools(
+          {
+            ...mockWorkspace,
+            path: workspacePath,
+            permissions: {
+              read: true,
+              write: true,
+              delete: true,
+              network: false,
+              shell: false,
+              accessFilesystemRules: [{ path: deniedPath, access: "deny" }],
+            },
+          } as Workspace,
+          mockDaemon as Any,
+          "test-task-id",
+        );
+        const result = await tools.grep({ pattern: "needle" });
+
+        expect(result.success).toBe(true);
+        expect(result.matches.map((match) => match.file)).toEqual(["public.txt"]);
+      } finally {
+        fs.rmSync(workspacePath, { recursive: true, force: true });
+      }
     });
   });
 

@@ -17,7 +17,9 @@ describe("worker-role-registry", () => {
     const verifier = resolveWorkerRoleAgentConfig("verifier", {});
     expect(verifier.executionMode).toBe("verified");
     expect(verifier.allowUserInput).toBe(false);
-    expect(verifier.toolRestrictions).toEqual(expect.arrayContaining(["group:write", "spawn_agent"]));
+    expect(verifier.toolRestrictions).toEqual(
+      expect.arrayContaining(["group:write", "spawn_agent"]),
+    );
     expect(verifier.toolRestrictions).not.toContain("group:destructive");
 
     const researcher = resolveWorkerRoleAgentConfig("researcher", {});
@@ -51,9 +53,9 @@ describe("worker-role-registry", () => {
   });
 
   it("infers worker roles from delegation prompts and honors explicit overrides", () => {
-    expect(inferWorkerRoleKindFromPrompt("Investigate the failing test and summarize the findings")).toBe(
-      "researcher",
-    );
+    expect(
+      inferWorkerRoleKindFromPrompt("Investigate the failing test and summarize the findings"),
+    ).toBe("researcher");
     expect(inferWorkerRoleKindFromPrompt("Validate the patch and give a second opinion")).toBe(
       "verifier",
     );

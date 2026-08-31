@@ -26,9 +26,7 @@ describe("cron workspace context helpers", () => {
 
   it("builds a deterministic managed workspace path under user data", () => {
     const managedPath = buildManagedScheduledWorkspacePath(tmpDir, "Daily Briefing", "job-123");
-    expect(managedPath).toBe(
-      path.join(tmpDir, "scheduled-workspaces", "daily-briefing-job-123"),
-    );
+    expect(managedPath).toBe(path.join(tmpDir, "scheduled-workspaces", "daily-briefing-job-123"));
     expect(isManagedScheduledWorkspacePath(managedPath, tmpDir)).toBe(true);
     expect(isManagedScheduledWorkspacePath(path.join(tmpDir, "other", "workspace"), tmpDir)).toBe(
       false,

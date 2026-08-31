@@ -28,13 +28,17 @@ describe("ToolRegistry task_list_*", () => {
 
   it("delegates create and update to the runtime checklist handler in execute mode", async () => {
     const create = vi.fn().mockReturnValue({
-      items: [{ id: "item-1", title: "Implement feature", kind: "implementation", status: "pending" }],
+      items: [
+        { id: "item-1", title: "Implement feature", kind: "implementation", status: "pending" },
+      ],
       updatedAt: 1,
       verificationNudgeNeeded: false,
       nudgeReason: null,
     });
     const update = vi.fn().mockReturnValue({
-      items: [{ id: "item-1", title: "Implement feature", kind: "implementation", status: "completed" }],
+      items: [
+        { id: "item-1", title: "Implement feature", kind: "implementation", status: "completed" },
+      ],
       updatedAt: 2,
       verificationNudgeNeeded: true,
       nudgeReason: "Add verification.",
@@ -45,8 +49,7 @@ describe("ToolRegistry task_list_*", () => {
         getTaskById: vi.fn().mockResolvedValue({ agentConfig: { executionMode: "execute" } }),
       },
       getTaskExecutionMode: (ToolRegistry as Any).prototype.getTaskExecutionMode,
-      withImmediateTaskListReminder:
-        (ToolRegistry as Any).prototype.withImmediateTaskListReminder,
+      withImmediateTaskListReminder: (ToolRegistry as Any).prototype.withImmediateTaskListReminder,
       taskListHandler: {
         create,
         update,

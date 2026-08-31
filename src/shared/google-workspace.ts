@@ -149,8 +149,8 @@ export function getGoogleWorkspaceSettingsForAccount(
 export function hasGoogleWorkspaceTokens(settings: GoogleWorkspaceSettingsData): boolean {
   return Boolean(
     settings.accessToken ||
-      settings.refreshToken ||
-      settings.accounts?.some((account) => account.accessToken || account.refreshToken),
+    settings.refreshToken ||
+    settings.accounts?.some((account) => account.accessToken || account.refreshToken),
   );
 }
 

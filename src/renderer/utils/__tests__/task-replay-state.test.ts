@@ -26,7 +26,11 @@ function makeTask(): Task {
   } as Task;
 }
 
-function makeEvent(type: TaskEvent["type"], timestamp: number, payload: Record<string, unknown> = {}): TaskEvent {
+function makeEvent(
+  type: TaskEvent["type"],
+  timestamp: number,
+  payload: Record<string, unknown> = {},
+): TaskEvent {
   return {
     id: `${type}-${timestamp}`,
     taskId: "task-1",
@@ -54,10 +58,7 @@ describe("deriveReplayTaskSnapshot", () => {
 
   it("prevents final output summaries from leaking into early sidebar replay state", () => {
     const task = makeTask();
-    const replayEvents = [
-      makeEvent("task_created", 110),
-      makeEvent("plan_created", 130),
-    ];
+    const replayEvents = [makeEvent("task_created", 110), makeEvent("plan_created", 130)];
     const replayTask = deriveReplayTaskSnapshot(task, replayEvents);
     const shared = deriveSharedTaskEventUiState({
       rawEvents: replayEvents,

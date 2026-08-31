@@ -235,7 +235,12 @@ describe("buildSidebarVirtualRows", () => {
     const tree = [
       {
         task: createTask({ id: "pinned-root", pinned: true, createdAt: older }),
-        children: [{ task: createTask({ id: "pinned-child", parentTaskId: "pinned-root", createdAt: today }), children: [] }],
+        children: [
+          {
+            task: createTask({ id: "pinned-child", parentTaskId: "pinned-root", createdAt: today }),
+            children: [],
+          },
+        ],
       },
       {
         task: createTask({ id: "today-root", createdAt: today }),
@@ -283,7 +288,9 @@ describe("normalizeSidebarSessionSearch", () => {
 
 describe("capitalizeSidebarSessionTitle", () => {
   it("capitalizes a lower-case session title", () => {
-    expect(capitalizeSidebarSessionTitle("create a sample spreadsheet")).toBe("Create a sample spreadsheet");
+    expect(capitalizeSidebarSessionTitle("create a sample spreadsheet")).toBe(
+      "Create a sample spreadsheet",
+    );
   });
 
   it("keeps already-capitalized and acronym-leading titles unchanged", () => {
@@ -329,6 +336,14 @@ describe("getSidebarSessionTitle", () => {
     });
 
     expect(title).toBe("Go to llmwizard.com and test");
+  });
+
+  it("removes persisted truncation suffixes from session titles", () => {
+    const title = getSidebarSessionTitle({
+      task: createTask({ title: "Check coworkosapp.com and summary..." }),
+    });
+
+    expect(title).toBe("Check coworkosapp.com and summary");
   });
 
   it("derives readable titles from slash command task titles", () => {
@@ -422,7 +437,9 @@ describe("shouldShowTaskInSidebarSessions", () => {
   });
 
   it("hides agent-panel test backing tasks from the sidebar", () => {
-    expect(shouldShowTaskInSidebarSessions(createTask({ source: "managed_agent_panel" }))).toBe(false);
+    expect(shouldShowTaskInSidebarSessions(createTask({ source: "managed_agent_panel" }))).toBe(
+      false,
+    );
   });
 
   it("keeps local tasks visible in the sidebar", () => {
@@ -466,15 +483,29 @@ describe("isAutomatedSession", () => {
   });
 
   it("treats explicit Heartbeat titled tasks as automated even when linkage fields are missing", () => {
-    expect(isAutomatedSession(createTask({ source: "api", title: "Heartbeat: CoWork OS Ops Lead" }))).toBe(true);
-    expect(isAutomatedSession(createTask({ title: "Heartbeat: cowork os inc Company Planner" }))).toBe(true);
+    expect(
+      isAutomatedSession(createTask({ source: "api", title: "Heartbeat: CoWork OS Ops Lead" })),
+    ).toBe(true);
+    expect(
+      isAutomatedSession(createTask({ title: "Heartbeat: cowork os inc Company Planner" })),
+    ).toBe(true);
   });
 
   it("treats chief-of-staff autonomy task titles as automated", () => {
-    expect(isAutomatedSession(createTask({ source: "hook", title: "Chief of Staff briefing" }))).toBe(true);
-    expect(isAutomatedSession(createTask({ source: "hook", title: "Routine prep: active pipeline" }))).toBe(true);
-    expect(isAutomatedSession(createTask({ source: "hook", title: "Follow up: launch checklist" }))).toBe(true);
-    expect(isAutomatedSession(createTask({ source: "hook", title: "Organize work session: onboarding redesign" }))).toBe(true);
+    expect(
+      isAutomatedSession(createTask({ source: "hook", title: "Chief of Staff briefing" })),
+    ).toBe(true);
+    expect(
+      isAutomatedSession(createTask({ source: "hook", title: "Routine prep: active pipeline" })),
+    ).toBe(true);
+    expect(
+      isAutomatedSession(createTask({ source: "hook", title: "Follow up: launch checklist" })),
+    ).toBe(true);
+    expect(
+      isAutomatedSession(
+        createTask({ source: "hook", title: "Organize work session: onboarding redesign" }),
+      ),
+    ).toBe(true);
   });
 });
 

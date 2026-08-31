@@ -25,12 +25,12 @@ describe("Claude for Legal plugin packs", () => {
       expect(manifest.category).toBe("Legal");
       expect(manifest.license).toBe("Apache-2.0");
       expect(manifest.homepage).toContain("anthropics/claude-for-legal");
-      expect(manifest.skills.some((skill: { id: string }) => skill.id.endsWith("legal-guardrails"))).toBe(
-        true,
-      );
-      expect(manifest.slashCommands.every((command: { name: string }) => !command.name.includes(":"))).toBe(
-        true,
-      );
+      expect(
+        manifest.skills.some((skill: { id: string }) => skill.id.endsWith("legal-guardrails")),
+      ).toBe(true);
+      expect(
+        manifest.slashCommands.every((command: { name: string }) => !command.name.includes(":")),
+      ).toBe(true);
     }
   });
 
@@ -49,6 +49,8 @@ describe("Claude for Legal plugin packs", () => {
       skillId: "commercial-legal-review",
     });
     expect(reviewSkill.metadata.upstream.ref).toBe("993f6619fc2f321cfdd65daa6919ad6cd2c56d92");
-    expect(reviewSkill.metadata.upstream.sourcePath).toBe("commercial-legal/skills/review/SKILL.md");
+    expect(reviewSkill.metadata.upstream.sourcePath).toBe(
+      "commercial-legal/skills/review/SKILL.md",
+    );
   });
 });

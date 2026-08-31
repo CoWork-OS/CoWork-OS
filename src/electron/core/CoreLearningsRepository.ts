@@ -1,9 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
-import type {
-  CoreLearningsEntry,
-  ListCoreLearningsRequest,
-} from "../../shared/types";
+import type { CoreLearningsEntry, ListCoreLearningsRequest } from "../../shared/types";
 
 type Any = any;
 
@@ -15,21 +12,23 @@ export class CoreLearningsRepository {
       ...input,
       id: input.id || randomUUID(),
     };
-    this.db.prepare(
-      `INSERT INTO core_learnings_log (
+    this.db
+      .prepare(
+        `INSERT INTO core_learnings_log (
         id, profile_id, workspace_id, kind, summary, details, related_cluster_id, related_experiment_id, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      entry.id,
-      entry.profileId,
-      entry.workspaceId || null,
-      entry.kind,
-      entry.summary,
-      entry.details || null,
-      entry.relatedClusterId || null,
-      entry.relatedExperimentId || null,
-      entry.createdAt,
-    );
+      )
+      .run(
+        entry.id,
+        entry.profileId,
+        entry.workspaceId || null,
+        entry.kind,
+        entry.summary,
+        entry.details || null,
+        entry.relatedClusterId || null,
+        entry.relatedExperimentId || null,
+        entry.createdAt,
+      );
     return entry;
   }
 
@@ -54,9 +53,9 @@ export class CoreLearningsRepository {
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = Math.max(1, Math.min(500, request.limit ?? 100));
-    const rows = this.db.prepare(
-      `SELECT * FROM core_learnings_log ${where} ORDER BY created_at DESC LIMIT ?`,
-    ).all(...values, limit) as Any[];
+    const rows = this.db
+      .prepare(`SELECT * FROM core_learnings_log ${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...values, limit) as Any[];
     return rows.map((row) => ({
       id: String(row.id),
       profileId: String(row.profile_id),

@@ -52,7 +52,9 @@ function inferReplacementText(instruction: string, selectionText?: string): stri
     return normalizeWhitespace(explicitReplacement[1]);
   }
 
-  const quoted = Array.from(normalized.matchAll(/["“”']([^"“”']+)["“”']/g)).map((match) => match[1]);
+  const quoted = Array.from(normalized.matchAll(/["“”']([^"“”']+)["“”']/g)).map(
+    (match) => match[1],
+  );
   if (quoted.length > 0 && /\b(?:replace|rewrite|change|set)\b/i.test(normalized)) {
     return normalizeWhitespace(quoted[quoted.length - 1]);
   }
@@ -79,15 +81,13 @@ function groupTextLines(items: ExtractedTextItem[]): string {
     }
   }
 
-  return lines.map((line) => normalizeLineText(line.text)).filter(Boolean).join("\n");
+  return lines
+    .map((line) => normalizeLineText(line.text))
+    .filter(Boolean)
+    .join("\n");
 }
 
-function wrapParagraph(
-  paragraph: string,
-  font: Any,
-  fontSize: number,
-  maxWidth: number,
-): string[] {
+function wrapParagraph(paragraph: string, font: Any, fontSize: number, maxWidth: number): string[] {
   const normalized = normalizeLineText(paragraph);
   if (!normalized) return [""];
 
@@ -113,12 +113,7 @@ function wrapParagraph(
   return lines.length > 0 ? lines : [normalized];
 }
 
-function wrapTextToBox(
-  text: string,
-  font: Any,
-  fontSize: number,
-  maxWidth: number,
-): string[] {
+function wrapTextToBox(text: string, font: Any, fontSize: number, maxWidth: number): string[] {
   const wrapped: string[] = [];
   const paragraphs = text.split("\n");
   for (const paragraph of paragraphs) {
@@ -147,7 +142,10 @@ function chooseFontSize(
   for (let size = maxSize; size >= minSize; size -= 0.5) {
     const lines = wrapTextToBox(text, font, size, maxWidth);
     const height = measureWrappedTextHeight(size, lines.length);
-    const widest = lines.reduce((max, line) => Math.max(max, font.widthOfTextAtSize(line, size)), 0);
+    const widest = lines.reduce(
+      (max, line) => Math.max(max, font.widthOfTextAtSize(line, size)),
+      0,
+    );
     if (widest <= maxWidth && height <= maxHeight) {
       return { size, lines };
     }
@@ -200,7 +198,10 @@ async function extractSelectionText(
       const itemRight = x + itemWidth;
       const itemBottom = y + itemHeight;
       const intersects =
-        x <= right + 8 && itemRight >= selectionRect.x - 8 && y <= bottom + 8 && itemBottom >= selectionRect.y - 8;
+        x <= right + 8 &&
+        itemRight >= selectionRect.x - 8 &&
+        y <= bottom + 8 &&
+        itemBottom >= selectionRect.y - 8;
       if (intersects) {
         items.push({ str: item.str, x, y });
       }

@@ -35,7 +35,12 @@ function isPrivateIpAddress(hostname: string): boolean {
   }
   if (net.isIP(hostname) === 6) {
     const normalized = hostname.toLowerCase();
-    return normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:");
+    return (
+      normalized === "::1" ||
+      normalized.startsWith("fc") ||
+      normalized.startsWith("fd") ||
+      normalized.startsWith("fe80:")
+    );
   }
   return false;
 }
@@ -79,7 +84,9 @@ function buildHeaders(agent: ACPAgentCard): Record<string, string> {
   return headers;
 }
 
-function normalizeRemoteResult(result: A2ARemoteTaskResult | Record<string, unknown>): RemoteInvocationResult {
+function normalizeRemoteResult(
+  result: A2ARemoteTaskResult | Record<string, unknown>,
+): RemoteInvocationResult {
   const status = String(
     (result as A2ARemoteTaskResult).status ||
       (result as Record<string, unknown>).state ||
@@ -99,7 +106,10 @@ function normalizeRemoteResult(result: A2ARemoteTaskResult | Record<string, unkn
         : typeof (result as A2ARemoteTaskResult).output === "string"
           ? (result as A2ARemoteTaskResult).output
           : undefined,
-    error: typeof (result as A2ARemoteTaskResult).error === "string" ? (result as A2ARemoteTaskResult).error : undefined,
+    error:
+      typeof (result as A2ARemoteTaskResult).error === "string"
+        ? (result as A2ARemoteTaskResult).error
+        : undefined,
     remoteTaskId:
       typeof (result as A2ARemoteTaskResult).taskId === "string"
         ? (result as A2ARemoteTaskResult).taskId
@@ -110,7 +120,11 @@ function normalizeRemoteResult(result: A2ARemoteTaskResult | Record<string, unkn
 }
 
 export class RemoteAgentInvoker {
-  private async sendRequest<T>(agent: ACPAgentCard, method: A2AJsonRpcRequest["method"], params: Record<string, unknown>): Promise<T> {
+  private async sendRequest<T>(
+    agent: ACPAgentCard,
+    method: A2AJsonRpcRequest["method"],
+    params: Record<string, unknown>,
+  ): Promise<T> {
     if (!agent.endpoint) {
       throw new Error(`Remote agent ${agent.id} is missing an endpoint`);
     }
@@ -142,7 +156,9 @@ export class RemoteAgentInvoker {
     if (!response.ok) {
       throw new Error(`Remote agent responded with HTTP ${response.status}`);
     }
-    const payload = (await response.json()) as A2AJsonRpcSuccessResponse<T> | A2AJsonRpcErrorResponse;
+    const payload = (await response.json()) as
+      | A2AJsonRpcSuccessResponse<T>
+      | A2AJsonRpcErrorResponse;
     if ("error" in payload) {
       throw new Error(payload.error.message || "Remote agent invocation failed");
     }

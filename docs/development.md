@@ -187,6 +187,50 @@ npx vitest run src/cli/__tests__/main.test.ts src/cli/__tests__/terminal-ui.test
 
 For packaged or npm-release checks, verify the package includes `dist/cli`, `bin/cowork-cli.js`, and `tsconfig.cli.json`, then test both `cowork --help` and one local `cowork run` command from a clean install.
 
+## Access Profile Development Contract
+
+Access profiles are the canonical task-level access contract. New execution surfaces must carry an
+`accessProfileId` or explicitly document why they are a non-executing/read-only surface. Do not add
+a new user-facing shell enable/disable control.
+
+Implementation boundaries:
+
+- `src/shared/access-profiles.ts` owns profile types, built-ins, inheritance merging, and
+  privilege-comparison rules. Keep custom profile ids distinct from built-ins.
+- `src/electron/security/access-profile-resolver.ts` resolves explicit task profiles, configured
+  defaults, legacy permission modes, and administrator constraints. A missing or invalid named
+  profile must resolve to an unavailable read-only state rather than a broad fallback.
+- `src/electron/security/access-profile-paths.ts` is the canonical path evaluator. Route file,
+  artifact, attachment, memory, export, and connector path checks through it so symlink,
+  non-existent-suffix, protected-root, and one-shot external-file semantics stay consistent.
+- Apply the effective profile before per-request `PermissionEngine` evaluation. Later rules may
+  further restrict a profile but may not widen a finite filesystem/domain scope.
+- Child tasks, managed sessions, scheduled work, remote dispatch, worktrees, and device-targeted
+  tasks must preserve the parent's or environment's profile ceiling.
+- `shellAccess`, `enableShell`, `defaultShellEnabled`, legacy `permissionMode`, and legacy
+  unrestricted/allowed-path fields are compatibility inputs only. Do not use them as the modern
+  source of truth.
+- Side Chat remains a no-command-tools surface, and Heartbeat/Dreaming memory-only work must use a
+  profile-derived read guard instead of bypassing the task boundary.
+
+Focused validation for profile changes:
+
+```bash
+npx vitest run \
+  src/shared/__tests__/access-profiles.test.ts \
+  src/electron/security/__tests__/access-profile-resolver.test.ts \
+  src/electron/security/__tests__/access-profile-paths.test.ts \
+  tests/tools/shell-tools.test.ts \
+  src/electron/agent/runtime/__tests__/PermissionEngine.test.ts
+npm run type-check
+npm run build:electron
+npm run build:daemon
+npm run build:react
+```
+
+See [Access Profiles](access-profiles.md) for the user/API contract and [Security Model](security/security-model.md)
+for the defense-layer view.
+
 ## Renderer Bundle Size
 
 The renderer startup bundle is intentionally kept separate from secondary product surfaces and heavyweight renderers.
@@ -276,8 +320,8 @@ Implementation contract:
 - `New task` compiles schedule triggers to the normal `runMode: "new_task"` cron path.
 - API-triggered routines compile same-thread targets to webhook mappings with `action: "task_message"` and an explicit `targetTaskId`.
 - Event-triggered routines compile same-thread targets to event triggers with `runMode: "thread_follow_up"`; invalid thread targets must fail instead of silently creating a new task.
-- Default run mode is `Chat`, with `shellAccess: false`, `allowUserInput: false`, and no clarifying check-ins. Execute-mode tasks use hard-blocker-only human input by default; Plan/Debug can opt into structured `request_user_input`.
-- `Local` sets `shellAccess: true`.
+- Default run mode is `Chat`, with an access-profile-controlled command-tool boundary, `allowUserInput: false`, and no clarifying check-ins. Execute-mode tasks use hard-blocker-only human input by default; Plan/Debug can opt into structured `request_user_input`.
+- `Local` uses the selected access profile for command tools. `shellAccess` remains only in legacy payloads for backward compatibility.
 - `Worktree` must not be combined with `Continue thread`; the UI disables that path and lower-level worktree payloads force `New task`.
 - Saved prompts should include a source task title, task ID, and `cowork://tasks/<taskId>` deeplink so future runs remain traceable.
 - Template selection should fill name, prompt, and schedule only; templates are not managed agents.

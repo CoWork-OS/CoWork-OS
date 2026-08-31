@@ -30,6 +30,12 @@ A Digital Twin does not define:
 - trigger ownership
 - device ownership
 
+It also does not grant access. Twin-backed tasks resolve the selected or
+inherited [access profile](access-profiles.md) before using skills, connectors,
+command tools, files, network, or devices. Persona capabilities and
+automation settings may narrow that profile, but cannot widen it or bypass
+administrator and hard-guardrail restrictions.
+
 If you want a twin-backed role to become always-on, activate the twin first, then attach a separate automation profile from Mission Control.
 
 ---

@@ -378,7 +378,11 @@ export class RelationshipMemoryService {
     const maxChars = Math.max(300, options.maxChars ?? 1200);
     const includeDueSoon = options.includeDueSoon !== false;
     const profile = this.load();
-    const scopedItems = this.filterByScope(profile.items, options.contactIdentityId, options.companyId);
+    const scopedItems = this.filterByScope(
+      profile.items,
+      options.contactIdentityId,
+      options.companyId,
+    );
     if (!scopedItems.length) return "";
 
     const lines: string[] = ["RELATIONSHIP MEMORY (continuity context, not hard constraints):"];
@@ -648,7 +652,9 @@ export class RelationshipMemoryService {
                 text: cleanedIdentityText,
                 confidence: clamp(Number(item.confidence ?? 0.65), 0, 1),
                 source:
-                  item.source === "feedback" || item.source === "task" ? item.source : "conversation",
+                  item.source === "feedback" || item.source === "task"
+                    ? item.source
+                    : "conversation",
                 createdAt: Number(item.createdAt || Date.now()),
                 updatedAt: Number(item.updatedAt || Date.now()),
               };

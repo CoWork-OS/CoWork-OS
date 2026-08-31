@@ -1,5 +1,9 @@
 import { ipcMain } from "electron";
-import { IPC_CHANNELS, type TaskTraceRunDetail, type TaskTraceRunSummary } from "../../shared/types";
+import {
+  IPC_CHANNELS,
+  type TaskTraceRunDetail,
+  type TaskTraceRunSummary,
+} from "../../shared/types";
 import { TaskTraceRepository } from "../database/repositories";
 import {
   TaskTraceGetRequestSchema,

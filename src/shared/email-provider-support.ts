@@ -5,7 +5,10 @@ function normalizeEmailDomain(email: string | undefined): string | null {
   if (!email) return null;
   const atIndex = email.lastIndexOf("@");
   if (atIndex === -1) return null;
-  const domain = email.slice(atIndex + 1).trim().toLowerCase();
+  const domain = email
+    .slice(atIndex + 1)
+    .trim()
+    .toLowerCase();
   return domain || null;
 }
 

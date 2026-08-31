@@ -42,9 +42,7 @@ interface FleetConnectionEntry {
   observer: FleetObserverEntry[];
 }
 
-function toLevelForState(
-  state: RemoteGatewayConnectionState,
-): FleetObserverEntry["level"] {
+function toLevelForState(state: RemoteGatewayConnectionState): FleetObserverEntry["level"] {
   switch (state) {
     case "connected":
       return "info";

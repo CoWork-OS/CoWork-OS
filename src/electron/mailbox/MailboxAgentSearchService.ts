@@ -8,7 +8,11 @@ import type {
   MailboxThreadDetail,
 } from "../../shared/mailbox";
 
-export type MailboxSearchSource = "local_fts" | "local_vector" | "provider_search" | "attachment_text";
+export type MailboxSearchSource =
+  | "local_fts"
+  | "local_vector"
+  | "provider_search"
+  | "attachment_text";
 
 export interface MailboxSearchQueryPlan {
   originalQuery: string;
@@ -37,8 +41,18 @@ export interface MailboxAgentSearchOutput {
 }
 
 export interface MailboxAgentSearchProgress {
-  stepStarted(stepId: string, label: string, detail?: string, payload?: Record<string, unknown>): void;
-  stepCompleted(stepId: string, label: string, detail?: string, payload?: Record<string, unknown>): void;
+  stepStarted(
+    stepId: string,
+    label: string,
+    detail?: string,
+    payload?: Record<string, unknown>,
+  ): void;
+  stepCompleted(
+    stepId: string,
+    label: string,
+    detail?: string,
+    payload?: Record<string, unknown>,
+  ): void;
 }
 
 type SearchCandidate = {
@@ -127,7 +141,15 @@ const FINANCIAL_EXPANSIONS: Array<{ pattern: RegExp; terms: string[] }> = [
   },
   {
     pattern: /\b(payment|pay|due|odeme|ödem|son)\b/i,
-    terms: ["payment", "due", "odeme", "odeme tarihi", "son odeme tarihi", "asgari odeme", "tutari"],
+    terms: [
+      "payment",
+      "due",
+      "odeme",
+      "odeme tarihi",
+      "son odeme tarihi",
+      "asgari odeme",
+      "tutari",
+    ],
   },
   {
     pattern: /\b(statement|extract|ekstre|invoice|bill|receipt)\b/i,
@@ -162,7 +184,11 @@ export class MailboxAgentSearchService {
     limit: number,
     progress?: MailboxAgentSearchProgress,
   ): Promise<MailboxAgentSearchOutput> {
-    progress?.stepStarted("plan_search", "Plan mailbox search", "Extracting entities, intent, and provider queries.");
+    progress?.stepStarted(
+      "plan_search",
+      "Plan mailbox search",
+      "Extracting entities, intent, and provider queries.",
+    );
     const plan = planMailboxSearchQuery(query);
     progress?.stepCompleted("plan_search", "Plan mailbox search", undefined, {
       entities: plan.entities,
@@ -170,34 +196,64 @@ export class MailboxAgentSearchService {
       wantsFinancialEvidence: plan.wantsFinancialEvidence,
       wantsDueDate: plan.wantsDueDate,
     });
-    progress?.stepStarted("prepare_indexes", "Prepare local indexes", "Refreshing mailbox text and semantic search indexes.");
+    progress?.stepStarted(
+      "prepare_indexes",
+      "Prepare local indexes",
+      "Refreshing mailbox text and semantic search indexes.",
+    );
     this.deps.ensureLocalSearchIndex?.();
-    progress?.stepStarted("extract_attachments", "Check attachments", "Reading relevant statement, invoice, PDF, and attachment text when needed.");
+    progress?.stepStarted(
+      "extract_attachments",
+      "Check attachments",
+      "Reading relevant statement, invoice, PDF, and attachment text when needed.",
+    );
     await this.deps.extractCandidateAttachments?.(plan.semanticQuery);
     progress?.stepCompleted("extract_attachments", "Check attachments");
     this.backfillEmbeddingsFromFts();
     progress?.stepCompleted("prepare_indexes", "Prepare local indexes");
 
     const candidates = new Map<string, SearchCandidate>();
-    progress?.stepStarted("local_fts", "Search local mailbox text", "Searching subjects, senders, bodies, and extracted attachment text.");
+    progress?.stepStarted(
+      "local_fts",
+      "Search local mailbox text",
+      "Searching subjects, senders, bodies, and extracted attachment text.",
+    );
     const ftsCandidates = this.searchLocalFts(plan, limit);
     for (const candidate of ftsCandidates) mergeCandidate(candidates, candidate);
-    progress?.stepCompleted("local_fts", "Search local mailbox text", `${ftsCandidates.length} local text candidate${ftsCandidates.length === 1 ? "" : "s"} found.`, {
-      count: ftsCandidates.length,
-    });
+    progress?.stepCompleted(
+      "local_fts",
+      "Search local mailbox text",
+      `${ftsCandidates.length} local text candidate${ftsCandidates.length === 1 ? "" : "s"} found.`,
+      {
+        count: ftsCandidates.length,
+      },
+    );
 
-    progress?.stepStarted("local_vector", "Search semantic mailbox index", "Comparing the question to local message and attachment embeddings.");
+    progress?.stepStarted(
+      "local_vector",
+      "Search semantic mailbox index",
+      "Comparing the question to local message and attachment embeddings.",
+    );
     const vectorCandidates = this.searchLocalVectors(plan, limit);
     for (const candidate of vectorCandidates) mergeCandidate(candidates, candidate);
-    progress?.stepCompleted("local_vector", "Search semantic mailbox index", `${vectorCandidates.length} semantic candidate${vectorCandidates.length === 1 ? "" : "s"} found.`, {
-      count: vectorCandidates.length,
-    });
+    progress?.stepCompleted(
+      "local_vector",
+      "Search semantic mailbox index",
+      `${vectorCandidates.length} semantic candidate${vectorCandidates.length === 1 ? "" : "s"} found.`,
+      {
+        count: vectorCandidates.length,
+      },
+    );
 
     let providerCount = 0;
     let searchedProvider = false;
     if (this.deps.providerSearch) {
       searchedProvider = true;
-      progress?.stepStarted("provider_search", "Search connected providers", "Checking Gmail and Outlook provider search where available.");
+      progress?.stepStarted(
+        "provider_search",
+        "Search connected providers",
+        "Checking Gmail and Outlook provider search where available.",
+      );
       try {
         const providerResults = await this.deps.providerSearch(plan, Math.max(limit * 2, 10));
         providerCount = providerResults.length;
@@ -215,12 +271,21 @@ export class MailboxAgentSearchService {
       } catch {
         // Provider-native search is additive; local search should still answer.
       }
-      progress?.stepCompleted("provider_search", "Search connected providers", `${providerCount} provider candidate${providerCount === 1 ? "" : "s"} found.`, {
-        count: providerCount,
-      });
+      progress?.stepCompleted(
+        "provider_search",
+        "Search connected providers",
+        `${providerCount} provider candidate${providerCount === 1 ? "" : "s"} found.`,
+        {
+          count: providerCount,
+        },
+      );
     }
 
-    progress?.stepStarted("shortlist_evidence", "Shortlist and read evidence", "Merging search signals and reading the best matching threads.");
+    progress?.stepStarted(
+      "shortlist_evidence",
+      "Shortlist and read evidence",
+      "Merging search signals and reading the best matching threads.",
+    );
     const ranked = Array.from(candidates.values())
       .map((candidate) => this.applyIntentScore(plan, candidate))
       .sort((a, b) => b.score - a.score);
@@ -233,8 +298,11 @@ export class MailboxAgentSearchService {
       if (!detail) continue;
       seenThreads.add(candidate.threadId);
 
-      const attachmentId = candidate.attachmentId || this.findBestAttachmentForThread(plan, candidate.threadId);
-      const matchedAttachment = attachmentId ? this.deps.getAttachment(attachmentId, true) || undefined : undefined;
+      const attachmentId =
+        candidate.attachmentId || this.findBestAttachmentForThread(plan, candidate.threadId);
+      const matchedAttachment = attachmentId
+        ? this.deps.getAttachment(attachmentId, true) || undefined
+        : undefined;
       const snippet = normalizeWhitespace(
         candidate.evidenceSnippets.find((entry) => entry.trim().length > 0) ||
           candidate.snippet ||
@@ -249,7 +317,9 @@ export class MailboxAgentSearchService {
         score: Math.round(candidate.score),
         searchSources: Array.from(candidate.sources),
         matchedFields: Array.from(candidate.matchedFields),
-        evidenceSnippets: candidate.evidenceSnippets.slice(0, 4).map((entry) => normalizeWhitespace(entry, 320)),
+        evidenceSnippets: candidate.evidenceSnippets
+          .slice(0, 4)
+          .map((entry) => normalizeWhitespace(entry, 320)),
       });
       if (results.length >= limit) break;
     }
@@ -257,10 +327,15 @@ export class MailboxAgentSearchService {
     if (!results.length && this.deps.fallbackSearch) {
       results.push(...(await this.deps.fallbackSearch(query, limit)));
     }
-    progress?.stepCompleted("shortlist_evidence", "Shortlist and read evidence", `${results.length} result${results.length === 1 ? "" : "s"} selected.`, {
-      count: results.length,
-      topScore: results[0]?.score ?? 0,
-    });
+    progress?.stepCompleted(
+      "shortlist_evidence",
+      "Shortlist and read evidence",
+      `${results.length} result${results.length === 1 ? "" : "s"} selected.`,
+      {
+        count: results.length,
+        topScore: results[0]?.score ?? 0,
+      },
+    );
 
     return {
       plan,
@@ -302,7 +377,9 @@ export class MailboxAgentSearchService {
     if (text.length < 3) return;
     const textHash = sha256(text);
     const existing = db
-      .prepare(`SELECT source_text_hash FROM mailbox_search_embeddings WHERE record_type = ? AND record_id = ?`)
+      .prepare(
+        `SELECT source_text_hash FROM mailbox_search_embeddings WHERE record_type = ? AND record_id = ?`,
+      )
       .get(input.recordType, input.recordId) as { source_text_hash: string } | undefined;
     if (existing?.source_text_hash === textHash) return;
     db.prepare(
@@ -410,14 +487,17 @@ export class MailboxAgentSearchService {
       .map((row) => {
         const embedding = parseEmbedding(row.embedding_json);
         const similarity = embedding ? cosineSimilarity(queryEmbedding, embedding) : 0;
-        const source: MailboxSearchSource = row.record_type === "attachment" ? "attachment_text" : "local_vector";
+        const source: MailboxSearchSource =
+          row.record_type === "attachment" ? "attachment_text" : "local_vector";
         return {
           threadId: row.thread_id,
           attachmentId: row.attachment_id || undefined,
           snippet: row.snippet,
           score: similarity * 100,
           sources: new Set<MailboxSearchSource>([source]),
-          matchedFields: new Set<string>([row.record_type === "attachment" ? "attachment" : "message"]),
+          matchedFields: new Set<string>([
+            row.record_type === "attachment" ? "attachment" : "message",
+          ]),
           evidenceSnippets: [row.snippet],
         } satisfies SearchCandidate;
       })
@@ -431,11 +511,15 @@ export class MailboxAgentSearchService {
       subject: normalizeSearchText(row.subject || ""),
       sender: normalizeSearchText(row.sender || ""),
       body: normalizeSearchText(row.body || ""),
-      attachment: normalizeSearchText(`${row.attachment_filename || ""} ${row.attachment_text || ""}`),
+      attachment: normalizeSearchText(
+        `${row.attachment_filename || ""} ${row.attachment_text || ""}`,
+      ),
     };
     const all = Object.values(haystacks).join(" ");
     const matchedTokens = plan.expandedTokens.filter((token) => all.includes(token));
-    const exactEntityMatches = plan.entities.filter((entity) => all.includes(normalizeSearchText(entity)));
+    const exactEntityMatches = plan.entities.filter((entity) =>
+      all.includes(normalizeSearchText(entity)),
+    );
     const matchedFields = new Set<string>();
     for (const [field, text] of Object.entries(haystacks)) {
       if (plan.expandedTokens.some((token) => text.includes(token))) matchedFields.add(field);
@@ -451,7 +535,8 @@ export class MailboxAgentSearchService {
     const attachmentHit = row.record_type === "attachment" || matchedFields.has("attachment");
     const source: MailboxSearchSource = attachmentHit ? "attachment_text" : "local_fts";
     const intentBonus =
-      (plan.wantsFinancialEvidence && /\b(qnb|bank|credit|card|payment|due|odeme|ekstre|hesap|asgari|kredi)\b/.test(all)
+      (plan.wantsFinancialEvidence &&
+      /\b(qnb|bank|credit|card|payment|due|odeme|ekstre|hesap|asgari|kredi)\b/.test(all)
         ? 28
         : 0) +
       (plan.wantsDueDate && /\b(due|date|tarih|son odeme|ödeme|odeme)\b/.test(all) ? 24 : 0) +
@@ -472,11 +557,20 @@ export class MailboxAgentSearchService {
     };
   }
 
-  private applyIntentScore(plan: MailboxSearchQueryPlan, candidate: SearchCandidate): SearchCandidate {
+  private applyIntentScore(
+    plan: MailboxSearchQueryPlan,
+    candidate: SearchCandidate,
+  ): SearchCandidate {
     const text = normalizeSearchText([candidate.snippet, ...candidate.evidenceSnippets].join(" "));
-    const exactEntityMatches = plan.entities.filter((entity) => text.includes(normalizeSearchText(entity))).length;
-    const dueDateEvidence = /\b(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}|due|son odeme|son ödeme|tarih)\b/i.test(text);
-    const financialEvidence = /\b(qnb|bank|credit|card|kredi|kart|payment|odeme|ödeme|ekstre|hesap|asgari|tutari)\b/i.test(text);
+    const exactEntityMatches = plan.entities.filter((entity) =>
+      text.includes(normalizeSearchText(entity)),
+    ).length;
+    const dueDateEvidence =
+      /\b(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}|due|son odeme|son ödeme|tarih)\b/i.test(text);
+    const financialEvidence =
+      /\b(qnb|bank|credit|card|kredi|kart|payment|odeme|ödeme|ekstre|hesap|asgari|tutari)\b/i.test(
+        text,
+      );
     return {
       ...candidate,
       score:
@@ -488,7 +582,10 @@ export class MailboxAgentSearchService {
     };
   }
 
-  private findBestAttachmentForThread(plan: MailboxSearchQueryPlan, threadId: string): string | undefined {
+  private findBestAttachmentForThread(
+    plan: MailboxSearchQueryPlan,
+    threadId: string,
+  ): string | undefined {
     if (!plan.wantsAttachmentEvidence && !plan.wantsFinancialEvidence) return undefined;
     const rows = this.db
       .prepare(
@@ -505,10 +602,14 @@ export class MailboxAgentSearchService {
     }>;
     let best: { id: string; score: number } | undefined;
     for (const row of rows) {
-      const text = normalizeSearchText(`${row.attachment_filename || ""} ${row.attachment_text || ""}`);
+      const text = normalizeSearchText(
+        `${row.attachment_filename || ""} ${row.attachment_text || ""}`,
+      );
       const score =
         plan.expandedTokens.filter((token) => text.includes(token)).length * 10 +
-        (plan.wantsFinancialEvidence && /\b(qnb|odeme|ekstre|hesap|asgari|kredi|kart)\b/.test(text) ? 25 : 0);
+        (plan.wantsFinancialEvidence && /\b(qnb|odeme|ekstre|hesap|asgari|kredi|kart)\b/.test(text)
+          ? 25
+          : 0);
       const id = row.attachment_id || row.record_id;
       if (!best || score > best.score) best = { id, score };
     }
@@ -531,10 +632,18 @@ export function planMailboxSearchQuery(query: string): MailboxSearchQueryPlan {
   for (const entity of entities) {
     for (const token of tokenize(normalizeSearchText(entity))) expanded.add(token);
   }
-  const expandedTokens = Array.from(expanded).filter((token) => token.length >= 2).slice(0, 28);
-  const wantsAttachmentEvidence = /\b(invoice|bill|receipt|statement|extract|ekstre|pdf|attachment|file|hesap)\b/i.test(query);
-  const wantsFinancialEvidence = /\b(bank|qnb|payment|pay|due|credit|card|statement|extract|invoice|bill|ekstre|odeme|ödeme|kredi|kart)\b/i.test(query);
-  const wantsDueDate = /\b(when|due|date|deadline|payment|pay|son|tarih|odeme|ödeme)\b/i.test(query);
+  const expandedTokens = Array.from(expanded)
+    .filter((token) => token.length >= 2)
+    .slice(0, 28);
+  const wantsAttachmentEvidence =
+    /\b(invoice|bill|receipt|statement|extract|ekstre|pdf|attachment|file|hesap)\b/i.test(query);
+  const wantsFinancialEvidence =
+    /\b(bank|qnb|payment|pay|due|credit|card|statement|extract|invoice|bill|ekstre|odeme|ödeme|kredi|kart)\b/i.test(
+      query,
+    );
+  const wantsDueDate = /\b(when|due|date|deadline|payment|pay|son|tarih|odeme|ödeme)\b/i.test(
+    query,
+  );
   const semanticQuery = normalizeWhitespace([query, ...expandedTokens, ...entities].join(" "), 900);
   return {
     originalQuery: query,
@@ -584,19 +693,24 @@ function ensureMailboxEmbeddingTable(db: Database.Database): void {
   `);
 }
 
-function mergeCandidate(candidates: Map<string, SearchCandidate>, candidate: SearchCandidate): void {
+function mergeCandidate(
+  candidates: Map<string, SearchCandidate>,
+  candidate: SearchCandidate,
+): void {
   const existing = candidates.get(candidate.threadId);
   if (!existing) {
     candidates.set(candidate.threadId, candidate);
     return;
   }
   existing.score += candidate.score * 0.72;
-  if (!existing.attachmentId && candidate.attachmentId) existing.attachmentId = candidate.attachmentId;
+  if (!existing.attachmentId && candidate.attachmentId)
+    existing.attachmentId = candidate.attachmentId;
   if (candidate.snippet && candidate.score > existing.score) existing.snippet = candidate.snippet;
   for (const source of candidate.sources) existing.sources.add(source);
   for (const field of candidate.matchedFields) existing.matchedFields.add(field);
   for (const snippet of candidate.evidenceSnippets) {
-    if (snippet && !existing.evidenceSnippets.includes(snippet)) existing.evidenceSnippets.push(snippet);
+    if (snippet && !existing.evidenceSnippets.includes(snippet))
+      existing.evidenceSnippets.push(snippet);
   }
 }
 
@@ -632,7 +746,11 @@ function buildProviderQueries(
   query: string,
   entities: string[],
   expandedTokens: string[],
-  intent: { wantsAttachmentEvidence: boolean; wantsFinancialEvidence: boolean; wantsDueDate: boolean },
+  intent: {
+    wantsAttachmentEvidence: boolean;
+    wantsFinancialEvidence: boolean;
+    wantsDueDate: boolean;
+  },
 ): string[] {
   const queries = new Set<string>([query]);
   const entityText = entities.slice(0, 3).join(" ");
@@ -640,13 +758,20 @@ function buildProviderQueries(
     .filter((token) => token.length >= 3 && !STOP_WORDS.has(token))
     .slice(0, 8)
     .join(" ");
-  if (entityText || importantTokens) queries.add([entityText, importantTokens].filter(Boolean).join(" "));
+  if (entityText || importantTokens)
+    queries.add([entityText, importantTokens].filter(Boolean).join(" "));
   if (intent.wantsFinancialEvidence) {
-    queries.add([entityText, "credit card payment due statement invoice bill"].filter(Boolean).join(" "));
-    queries.add([entityText, "kredi karti odeme tarihi ekstre hesap ozeti"].filter(Boolean).join(" "));
+    queries.add(
+      [entityText, "credit card payment due statement invoice bill"].filter(Boolean).join(" "),
+    );
+    queries.add(
+      [entityText, "kredi karti odeme tarihi ekstre hesap ozeti"].filter(Boolean).join(" "),
+    );
   }
-  if (intent.wantsAttachmentEvidence) queries.add([entityText, "has:attachment statement invoice pdf"].filter(Boolean).join(" "));
-  if (intent.wantsDueDate) queries.add([entityText, "due date payment date son odeme tarihi"].filter(Boolean).join(" "));
+  if (intent.wantsAttachmentEvidence)
+    queries.add([entityText, "has:attachment statement invoice pdf"].filter(Boolean).join(" "));
+  if (intent.wantsDueDate)
+    queries.add([entityText, "due date payment date son odeme tarihi"].filter(Boolean).join(" "));
   return Array.from(queries)
     .map((entry) => normalizeWhitespace(entry, 160))
     .filter((entry) => entry.length > 0)

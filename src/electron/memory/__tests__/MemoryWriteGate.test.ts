@@ -25,10 +25,12 @@ const repoMock = vi.hoisted(() => {
           (!params.status || record.status === params.status),
       ),
     ),
-    countPending: vi.fn((workspaceId?: string) =>
-      records.filter(
-        (record) => record.status === "pending" && (!workspaceId || record.workspaceId === workspaceId),
-      ).length,
+    countPending: vi.fn(
+      (workspaceId?: string) =>
+        records.filter(
+          (record) =>
+            record.status === "pending" && (!workspaceId || record.workspaceId === workspaceId),
+        ).length,
     ),
     findById: vi.fn((id: string) => records.find((record) => record.id === id)),
     updateStatus: vi.fn((id: string, status: string, details: Any = {}) => {
@@ -38,14 +40,16 @@ const repoMock = vi.hoisted(() => {
       record.resolution = details.resolution;
       return record;
     }),
-    updateStatusIfCurrent: vi.fn((id: string, expectedStatus: string, status: string, details: Any = {}) => {
-      const record = records.find((item) => item.id === id);
-      if (!record || record.status !== expectedStatus) return undefined;
-      record.status = status;
-      record.resolution = details.resolution;
-      record.reviewedBy = details.reviewedBy;
-      return record;
-    }),
+    updateStatusIfCurrent: vi.fn(
+      (id: string, expectedStatus: string, status: string, details: Any = {}) => {
+        const record = records.find((item) => item.id === id);
+        if (!record || record.status !== expectedStatus) return undefined;
+        record.status = status;
+        record.resolution = details.resolution;
+        record.reviewedBy = details.reviewedBy;
+        return record;
+      },
+    ),
   };
 });
 

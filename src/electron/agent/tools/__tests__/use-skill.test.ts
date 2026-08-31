@@ -83,7 +83,12 @@ function matchesSkillRoutingQuery(skill: CustomSkill, query: string): boolean {
 
     const targets = [skill.id, skill.name]
       .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-      .map((value) => value.toLowerCase().replace(/[-_\s]+/g, " ").trim());
+      .map((value) =>
+        value
+          .toLowerCase()
+          .replace(/[-_\s]+/g, " ")
+          .trim(),
+      );
 
     return targets.some((target) => {
       const escaped = target
@@ -98,7 +103,12 @@ function matchesSkillRoutingQuery(skill: CustomSkill, query: string): boolean {
 
   const explicitMatch = [skill.id, skill.name]
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .map((value) => value.toLowerCase().replace(/[-_\s]+/g, " ").trim())
+    .map((value) =>
+      value
+        .toLowerCase()
+        .replace(/[-_\s]+/g, " ")
+        .trim(),
+    )
     .some((target) => {
       const escaped = target
         .split(" ")
@@ -107,10 +117,12 @@ function matchesSkillRoutingQuery(skill: CustomSkill, query: string): boolean {
         .join("\\s+");
 
       return (
-        /\b(?:use|run|call|invoke|activate|apply|launch|start|enable|turn on|work on|help with|help me with)\b/.test(
+        (/\b(?:use|run|call|invoke|activate|apply|launch|start|enable|turn on|work on|help with|help me with)\b/.test(
           normalizedQuery,
-        ) || /\bskill\b/.test(normalizedQuery)
-      ) && new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i").test(normalizedQuery);
+        ) ||
+          /\bskill\b/.test(normalizedQuery)) &&
+        new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i").test(normalizedQuery)
+      );
     });
   if (explicitMatch) return true;
 
@@ -133,10 +145,7 @@ function matchesSkillRoutingQuery(skill: CustomSkill, query: string): boolean {
 
   return keywords.some((keyword) => {
     if (typeof keyword !== "string") return false;
-    const normalizedKeyword = keyword
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .trim();
+    const normalizedKeyword = keyword.toLowerCase().replace(/\s+/g, " ").trim();
     if (!normalizedKeyword) return false;
 
     const escaped = normalizedKeyword
@@ -156,36 +165,46 @@ vi.mock("../../custom-skill-loader", () => ({
     listModelInvocableSkills: vi.fn().mockImplementation(() => Array.from(mockSkills.values())),
     listRuntimeSkillDescriptors: vi
       .fn()
-      .mockImplementation(() => Array.from(mockSkills.values()).map((skill) => toRuntimeDescriptor(skill))),
-    getRuntimeSkillDescriptor: vi.fn().mockImplementation((skill: CustomSkill) => toRuntimeDescriptor(skill)),
+      .mockImplementation(() =>
+        Array.from(mockSkills.values()).map((skill) => toRuntimeDescriptor(skill)),
+      ),
+    getRuntimeSkillDescriptor: vi
+      .fn()
+      .mockImplementation((skill: CustomSkill) => toRuntimeDescriptor(skill)),
     getSkillStatusEntry: vi.fn().mockResolvedValue(null),
     matchesSkillRoutingQuery: vi
       .fn()
-      .mockImplementation((skill: CustomSkill, query: string) => matchesSkillRoutingQuery(skill, query)),
-    expandPrompt: vi.fn().mockImplementation((
-      skill: CustomSkill,
-      params: Record<string, Any>,
-      context: { artifactDir?: string; workspaceArtifactDir?: string } = {},
-    ) => {
-      let prompt = skill.prompt;
-      const fileDir = skill.filePath ? path.dirname(skill.filePath) : "/mock/resources/skills";
-      const scopedBaseDir = skill.filePath ? path.join(fileDir, skill.id) : fileDir;
-      prompt = prompt.replace(/\{baseDir\}/g, scopedBaseDir);
-      if (context.artifactDir) {
-        prompt = prompt.replace(/\{artifactDir\}/g, context.artifactDir);
-      }
-      if (context.workspaceArtifactDir) {
-        prompt = prompt.replace(/\{workspaceArtifactDir\}/g, context.workspaceArtifactDir);
-      }
-      if (skill.parameters) {
-        for (const param of skill.parameters) {
-          const value = params[param.name] ?? param.default ?? "";
-          const placeholder = new RegExp(`\\{\\{${param.name}\\}\\}`, "g");
-          prompt = prompt.replace(placeholder, String(value));
-        }
-      }
-      return prompt.replace(/\{\{[^}]+\}\}/g, "").trim();
-    }),
+      .mockImplementation((skill: CustomSkill, query: string) =>
+        matchesSkillRoutingQuery(skill, query),
+      ),
+    expandPrompt: vi
+      .fn()
+      .mockImplementation(
+        (
+          skill: CustomSkill,
+          params: Record<string, Any>,
+          context: { artifactDir?: string; workspaceArtifactDir?: string } = {},
+        ) => {
+          let prompt = skill.prompt;
+          const fileDir = skill.filePath ? path.dirname(skill.filePath) : "/mock/resources/skills";
+          const scopedBaseDir = skill.filePath ? path.join(fileDir, skill.id) : fileDir;
+          prompt = prompt.replace(/\{baseDir\}/g, scopedBaseDir);
+          if (context.artifactDir) {
+            prompt = prompt.replace(/\{artifactDir\}/g, context.artifactDir);
+          }
+          if (context.workspaceArtifactDir) {
+            prompt = prompt.replace(/\{workspaceArtifactDir\}/g, context.workspaceArtifactDir);
+          }
+          if (skill.parameters) {
+            for (const param of skill.parameters) {
+              const value = params[param.name] ?? param.default ?? "";
+              const placeholder = new RegExp(`\\{\\{${param.name}\\}\\}`, "g");
+              prompt = prompt.replace(placeholder, String(value));
+            }
+          }
+          return prompt.replace(/\{\{[^}]+\}\}/g, "").trim();
+        },
+      ),
     getSkillDescriptionsForModel: vi.fn().mockReturnValue(""),
   })),
 }));
@@ -661,9 +680,7 @@ describe("Skill tool", () => {
       const resolved = takeResolvedSkill(result);
 
       expect(result.success).toBe(true);
-      expect(resolved?.content).toContain(
-        "/mock/resources/skills/script-skill/scripts/run.sh",
-      );
+      expect(resolved?.content).toContain("/mock/resources/skills/script-skill/scripts/run.sh");
       expect(resolved?.content).toContain(
         "/mock/workspace/artifacts/skills/test-task-123/script-skill/result.txt",
       );
@@ -804,7 +821,9 @@ describe("Skill tool", () => {
         expect(resolved?.content).toContain("spawn_agent");
         expect(resolved?.content).toContain('`runtime`: `"acpx"`');
         expect(resolved?.content).toContain('`runtime_agent`: `"codex"`');
-        expect(resolved?.content).toContain("review the current workspace changes and inspect the diff.");
+        expect(resolved?.content).toContain(
+          "review the current workspace changes and inspect the diff.",
+        );
         expect(resolved?.content).not.toContain("legacy prompt should be bypassed");
         expect(resolved?.content).not.toContain("Phase 0");
         expect(resolved?.content).not.toContain("Read `{baseDir}/SKILL.md`");
@@ -843,7 +862,9 @@ describe("Skill tool", () => {
 
         expect(result.success).toBe(true);
         expect(resolved?.content).toContain("spawn_agent");
-        expect(resolved?.content).toContain("Omit `runtime` so the child uses the native Codex CLI path.");
+        expect(resolved?.content).toContain(
+          "Omit `runtime` so the child uses the native Codex CLI path.",
+        );
         expect(resolved?.content).not.toContain('`runtime`: `"acpx"`');
         expect(resolved?.content).toContain("fix the failing test in the current workspace.");
       } finally {

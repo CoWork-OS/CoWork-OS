@@ -28,11 +28,7 @@ export type SubconsciousRunOutcome =
 export type SubconsciousHypothesisStatus = "proposed" | "rejected" | "winner";
 export type SubconsciousCritiqueVerdict = "support" | "mixed" | "reject";
 export type SubconsciousBacklogStatus = "open" | "dispatched" | "done" | "rejected";
-export type SubconsciousDispatchKind =
-  | "task"
-  | "suggestion"
-  | "notify"
-  | "code_change_task";
+export type SubconsciousDispatchKind = "task" | "suggestion" | "notify" | "code_change_task";
 export type SubconsciousDispatchStatus =
   | "queued"
   | "dispatched"

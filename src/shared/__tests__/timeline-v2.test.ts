@@ -97,9 +97,9 @@ describe("timeline v2 helpers", () => {
     expect(inferTimelineStageForLegacyType("task_path_rewrite_applied")).toBe("FIX");
     expect(inferTimelineStageForLegacyType("task_path_recovery_attempted")).toBe("FIX");
     expect(inferTimelineStageForLegacyType("task_path_recovery_failed")).toBe("FIX");
-    expect(
-      inferTimelineStageForLegacyType("tool_disable_suppressed_recoverable_path_drift"),
-    ).toBe("FIX");
+    expect(inferTimelineStageForLegacyType("tool_disable_suppressed_recoverable_path_drift")).toBe(
+      "FIX",
+    );
     expect(inferTimelineStageForLegacyType("mutation_checkpoint_retry_applied")).toBe("FIX");
     expect(inferTimelineStageForLegacyType("tool_protocol_violation")).toBe("FIX");
     expect(inferTimelineStageForLegacyType("turn_window_soft_exhausted")).toBe("FIX");
@@ -115,16 +115,22 @@ describe("timeline v2 helpers", () => {
   });
 
   it("returns sub-stage labels for FIX-stage events", () => {
-    expect(inferTimelineSubStageLabel("workspace_path_alias_normalized")).toBe("Preparing workspace");
+    expect(inferTimelineSubStageLabel("workspace_path_alias_normalized")).toBe(
+      "Preparing workspace",
+    );
     expect(inferTimelineSubStageLabel("task_path_root_pinned")).toBe("Preparing workspace");
     expect(inferTimelineSubStageLabel("task_list_created")).toBe("Updating checklist");
-    expect(inferTimelineSubStageLabel("task_list_verification_nudged")).toBe("Preparing verification");
+    expect(inferTimelineSubStageLabel("task_list_verification_nudged")).toBe(
+      "Preparing verification",
+    );
     expect(inferTimelineSubStageLabel("verification_preflight_policy_applied")).toBe(
       "Preparing verification",
     );
     expect(inferTimelineSubStageLabel("step_failed")).toBe("Applying fixes");
     expect(inferTimelineSubStageLabel("retry_started")).toBe("Retrying");
-    expect(inferTimelineSubStageLabel("context_compaction_started")).toBe("Making room to continue");
+    expect(inferTimelineSubStageLabel("context_compaction_started")).toBe(
+      "Making room to continue",
+    );
     expect(inferTimelineSubStageLabel("verification_failed")).toBe("Verifying results");
     expect(inferTimelineSubStageLabel("plan_contract_conflict")).toBe("Adjusting approach");
     expect(inferTimelineSubStageLabel("task_created")).toBeUndefined();
@@ -137,11 +143,7 @@ describe("timeline v2 helpers", () => {
       type: "workflow_detected",
       payload: {
         phaseCount: 3,
-        phases: [
-          { type: "research" },
-          { type: "build" },
-          { type: "verify" },
-        ],
+        phases: [{ type: "research" }, { type: "build" }, { type: "verify" }],
       },
       timestamp: 1_700_000_000_200,
       eventId: "event-workflow",

@@ -32,9 +32,7 @@ describe("WhatsApp natural command mapping for slash workflows", () => {
     expect(normalizeWhatsAppNaturalCommand("queue check this after")).toBe(
       "/queue check this after",
     );
-    expect(normalizeWhatsAppNaturalCommand("steer focus on tests")).toBe(
-      "/steer focus on tests",
-    );
+    expect(normalizeWhatsAppNaturalCommand("steer focus on tests")).toBe("/steer focus on tests");
     expect(normalizeWhatsAppNaturalCommand("btw summarize the logs")).toBe(
       "/background summarize the logs",
     );

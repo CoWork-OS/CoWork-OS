@@ -6,7 +6,12 @@
  */
 
 import { describe, it, expect, beforeEach as _beforeEach, vi as _vi } from "vitest";
-import type { Task, AgentConfig, AgentType, Workspace as _Workspace } from "../../../../shared/types";
+import type {
+  Task,
+  AgentConfig,
+  AgentType,
+  Workspace as _Workspace,
+} from "../../../../shared/types";
 import {
   isExplicitCodexSpawnRequest,
   resolveExternalRuntimePermissionMode,

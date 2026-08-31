@@ -425,9 +425,7 @@ export function normalizeRemoteCommandName(command: string): string {
     .toLowerCase();
 }
 
-export function resolveRemoteCommand(
-  command: string,
-): RemoteCommandDefinition | undefined {
+export function resolveRemoteCommand(command: string): RemoteCommandDefinition | undefined {
   const name = normalizeRemoteCommandName(command);
   if (!name) return undefined;
   return COMMANDS_BY_NAME.get(name);

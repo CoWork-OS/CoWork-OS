@@ -12,10 +12,7 @@ import {
   TableRow,
   TextRun,
 } from "docx";
-import type {
-  EditableDocumentBlock,
-  EditableDocumentRun,
-} from "../../shared/document-preview";
+import type { EditableDocumentBlock, EditableDocumentRun } from "../../shared/document-preview";
 import { parseDocxBlocksFromXml } from "../documents/docx-blocks";
 
 function textFromRuns(runs: EditableDocumentRun[] | undefined, fallback = ""): string {
@@ -24,10 +21,7 @@ function textFromRuns(runs: EditableDocumentRun[] | undefined, fallback = ""): s
 }
 
 function escapeXmlText(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function decodeXmlText(text: string): string {
@@ -50,13 +44,14 @@ function buildTextRuns(runs: EditableDocumentRun[] | undefined, fallback = ""): 
   const source = runs && runs.length > 0 ? runs : [{ text: fallback }];
   const textRuns = source
     .filter((run) => run.text.length > 0)
-    .map((run) =>
-      new TextRun({
-        text: run.text,
-        bold: run.bold,
-        italics: run.italic,
-        underline: run.underline ? {} : undefined,
-      }),
+    .map(
+      (run) =>
+        new TextRun({
+          text: run.text,
+          bold: run.bold,
+          italics: run.italic,
+          underline: run.underline ? {} : undefined,
+        }),
     );
   return textRuns.length > 0 ? textRuns : [new TextRun("")];
 }
@@ -139,18 +134,18 @@ function replaceTextRunsInXml(xml: string, text: string): string {
 
   return xml.replace(/<w:t\b([^>]*)>[\s\S]*?<\/w:t>/g, (_match, attrs: string) => {
     const isLast = index === textMatches.length - 1;
-    const length = totalOriginalLength > 0
-      ? originalLengths[index] + (isLast ? Math.max(0, text.length - totalOriginalLength) : 0)
-      : isLast
-      ? text.length
-      : 0;
+    const length =
+      totalOriginalLength > 0
+        ? originalLengths[index] + (isLast ? Math.max(0, text.length - totalOriginalLength) : 0)
+        : isLast
+          ? text.length
+          : 0;
     const nextText = text.slice(offset, offset + length);
     offset += length;
     index += 1;
     const needsPreserve = /^\s|\s$/.test(nextText);
-    const normalizedAttrs = needsPreserve && !/\bxml:space=/.test(attrs)
-      ? `${attrs} xml:space="preserve"`
-      : attrs;
+    const normalizedAttrs =
+      needsPreserve && !/\bxml:space=/.test(attrs) ? `${attrs} xml:space="preserve"` : attrs;
     return `<w:t${normalizedAttrs}>${escapeXmlText(nextText)}</w:t>`;
   });
 }
@@ -179,10 +174,11 @@ function createParagraphXml(block: EditableDocumentBlock): string {
 function createTableXml(block: EditableDocumentBlock): string {
   const rows = block.rows || [];
   return `<w:tbl>${rows
-    .map((row) =>
-      `<w:tr>${row
-        .map((cell) => `<w:tc><w:p><w:r><w:t>${escapeXmlText(cell)}</w:t></w:r></w:p></w:tc>`)
-        .join("")}</w:tr>`,
+    .map(
+      (row) =>
+        `<w:tr>${row
+          .map((cell) => `<w:tc><w:p><w:r><w:t>${escapeXmlText(cell)}</w:t></w:r></w:p></w:tc>`)
+          .join("")}</w:tr>`,
     )
     .join("")}</w:tbl>`;
 }

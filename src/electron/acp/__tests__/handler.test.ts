@@ -90,17 +90,8 @@ class FakeDatabase {
       },
       run: (...args: unknown[]) => {
         if (normalized.startsWith("insert into acp_agents")) {
-          const [
-            id,
-            origin,
-            endpoint,
-            name,
-            provider,
-            status,
-            registeredAt,
-            updatedAt,
-            cardJson,
-          ] = args;
+          const [id, origin, endpoint, name, provider, status, registeredAt, updatedAt, cardJson] =
+            args;
           const next = {
             id,
             origin,
@@ -493,7 +484,10 @@ describe("ACP Handler", () => {
       })) as Any;
 
       expect(result.task.status).toBe("cancelled");
-      expect(cancelSpy).toHaveBeenCalledWith(expect.objectContaining({ id: registered.agent.id }), "remote-task-1");
+      expect(cancelSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ id: registered.agent.id }),
+        "remote-task-1",
+      );
     });
   });
 

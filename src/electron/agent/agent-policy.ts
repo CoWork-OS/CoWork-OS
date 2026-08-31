@@ -100,7 +100,9 @@ const LOOP_THRESHOLD_ALIAS_MAP: Record<string, keyof LoopGuardrailConfig> = {
 const policyCache = new Map<string, { mtimeMs: number; result: AgentPolicyLoadResult }>();
 
 function normalizeToolName(name: string): string {
-  return String(name || "").trim().toLowerCase();
+  return String(name || "")
+    .trim()
+    .toLowerCase();
 }
 
 function parseTomlScalar(raw: string): unknown {
@@ -184,9 +186,7 @@ function stripInlineComment(line: string): string {
 
 function toStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value
-      .map((item) => String(item || "").trim())
-      .filter(Boolean);
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
   }
   if (typeof value === "string") {
     return value
@@ -362,11 +362,7 @@ export function parseAgentPolicyToml(rawToml: string): AgentPolicyConfig {
           activeHook.whenContains = String(value || "");
           break;
         case "action":
-          if (
-            value === "allow" ||
-            value === "block_with_feedback" ||
-            value === "force_action"
-          ) {
+          if (value === "allow" || value === "block_with_feedback" || value === "force_action") {
             activeHook.action = value;
           }
           break;
@@ -392,8 +388,14 @@ export function parseAgentPolicyToml(rawToml: string): AgentPolicyConfig {
   return parsed;
 }
 
-export function loadAgentPolicyFromWorkspace(workspacePath: string): AgentPolicyLoadResult {
+export function loadAgentPolicyFromWorkspace(
+  workspacePath: string,
+  readGuard?: (candidatePath: string) => boolean,
+): AgentPolicyLoadResult {
   const filePath = path.join(String(workspacePath || ""), POLICY_FILE_NAME);
+  if (readGuard && !readGuard(filePath)) {
+    return { filePath, policy: null, parseError: "access_denied" };
+  }
   try {
     const stat = fs.statSync(filePath);
     const cached = policyCache.get(filePath);
@@ -532,7 +534,8 @@ export function evaluateAgentPolicyHook(opts: {
     if (rule.whenTool && normalizeToolName(rule.whenTool) !== toolName) continue;
     if (rule.whenMode && rule.whenMode !== opts.mode) continue;
     if (rule.whenDomain && rule.whenDomain !== opts.domain) continue;
-    if (rule.whenContains && !reasonText.includes(String(rule.whenContains).toLowerCase())) continue;
+    if (rule.whenContains && !reasonText.includes(String(rule.whenContains).toLowerCase()))
+      continue;
 
     if (rule.action === "allow") {
       return { action: "allow", feedback: rule.feedback };

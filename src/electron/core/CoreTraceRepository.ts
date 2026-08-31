@@ -1,10 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
-import type {
-  CoreTrace,
-  CoreTraceEvent,
-  ListCoreTracesRequest,
-} from "../../shared/types";
+import type { CoreTrace, CoreTraceEvent, ListCoreTracesRequest } from "../../shared/types";
 
 type Any = any;
 

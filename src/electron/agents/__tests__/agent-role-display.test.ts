@@ -10,9 +10,6 @@ describe("agent-role-display", () => {
   });
 
   it("formats collaborative titles without leaking literal undefined prefixes", () => {
-    expect(formatAgentRoleDisplay("System QA Twin", "undefined")).toBe(
-      "🤖 System QA Twin",
-    );
+    expect(formatAgentRoleDisplay("System QA Twin", "undefined")).toBe("🤖 System QA Twin");
   });
 });
-

@@ -96,14 +96,24 @@ describe("agent loop routing matrix", () => {
     },
     {
       name: "thinking-only prompt",
-      route: makeRoute({ intent: "thinking", conversationMode: "think", answerFirst: true, domain: "general" }),
+      route: makeRoute({
+        intent: "thinking",
+        conversationMode: "think",
+        answerFirst: true,
+        domain: "general",
+      }),
       title: "Think through tradeoffs",
       prompt: "Think deeply about whether I should use SQLite or Postgres here.",
       expected: { taskIntent: "thinking", directResponseMode: "companion", workflowMode: "none" },
     },
     {
       name: "advice prompt",
-      route: makeRoute({ intent: "advice", conversationMode: "hybrid", answerFirst: true, domain: "general" }),
+      route: makeRoute({
+        intent: "advice",
+        conversationMode: "hybrid",
+        answerFirst: true,
+        domain: "general",
+      }),
       title: "Advice",
       prompt: "Should I use pnpm or npm for this repo?",
       expected: {
@@ -114,7 +124,12 @@ describe("agent loop routing matrix", () => {
     },
     {
       name: "mixed answer then execute",
-      route: makeRoute({ intent: "mixed", conversationMode: "hybrid", answerFirst: true, signals: ["path-or-command"] }),
+      route: makeRoute({
+        intent: "mixed",
+        conversationMode: "hybrid",
+        answerFirst: true,
+        signals: ["path-or-command"],
+      }),
       title: "Explain then fix",
       prompt: "Briefly explain the likely bug, then edit src/app.ts to fix it.",
       expected: {
@@ -125,21 +140,34 @@ describe("agent loop routing matrix", () => {
     },
     {
       name: "workflow task",
-      route: makeRoute({ intent: "workflow", conversationMode: "task", complexity: "high", domain: "code" }),
+      route: makeRoute({
+        intent: "workflow",
+        conversationMode: "task",
+        complexity: "high",
+        domain: "code",
+      }),
       title: "Launch workflow",
       prompt: "Run a multi-phase workflow to research, implement, test, and summarize the feature.",
       expected: { taskIntent: "workflow", executionMode: "execute", workflowMode: "workflow" },
     },
     {
       name: "simple image generation",
-      route: makeRoute({ intent: "execution", domain: "media", signals: ["image-creation-intent"] }),
+      route: makeRoute({
+        intent: "execution",
+        domain: "media",
+        signals: ["image-creation-intent"],
+      }),
       title: "Create image",
       prompt: "Create an image of a snow leopard wearing a small backpack.",
       expected: { taskIntent: "execution", executionMode: "execute", taskDomain: "media" },
     },
     {
       name: "document artifact task",
-      route: makeRoute({ intent: "execution", domain: "writing", signals: ["artifact-creation-intent"] }),
+      route: makeRoute({
+        intent: "execution",
+        domain: "writing",
+        signals: ["artifact-creation-intent"],
+      }),
       title: "Create PDF",
       prompt: "Create a PDF report from the attached notes and save it in the workspace.",
       expected: { taskIntent: "execution", executionMode: "execute", taskDomain: "writing" },
@@ -153,9 +181,12 @@ describe("agent loop routing matrix", () => {
     },
   ];
 
-  it.each(cases)("$name derives the expected canonical strategy", ({ route, title, prompt, expected }) => {
-    const strategy = TaskStrategyService.derive(route, undefined, { title, prompt });
+  it.each(cases)(
+    "$name derives the expected canonical strategy",
+    ({ route, title, prompt, expected }) => {
+      const strategy = TaskStrategyService.derive(route, undefined, { title, prompt });
 
-    expect(strategy.snapshot).toMatchObject(expected);
-  });
+      expect(strategy.snapshot).toMatchObject(expected);
+    },
+  );
 });

@@ -1,8 +1,4 @@
-import type {
-  CoreMemoryCandidate,
-  CoreMemoryCandidateType,
-  CoreTrace,
-} from "../../shared/types";
+import type { CoreMemoryCandidate, CoreMemoryCandidateType, CoreTrace } from "../../shared/types";
 import type { SubconsciousTargetRef } from "../../shared/subconscious";
 import { CoreMemoryCandidateRepository } from "./CoreMemoryCandidateRepository";
 import { CoreMemoryScopeResolver } from "./CoreMemoryScopeResolver";
@@ -19,13 +15,17 @@ export class CoreMemoryCandidateService {
     private readonly scopeResolver: CoreMemoryScopeResolver,
   ) {}
 
-  extractFromTrace(traceId: string, params?: { target?: SubconsciousTargetRef; sourceRunId?: string }): CoreMemoryCandidate[] {
+  extractFromTrace(
+    traceId: string,
+    params?: { target?: SubconsciousTargetRef; sourceRunId?: string },
+  ): CoreMemoryCandidate[] {
     const trace = this.traceRepo.findById(traceId);
     if (!trace) return [];
     const events = this.traceRepo.listEvents(traceId);
     const candidates: Array<Omit<CoreMemoryCandidate, "id" | "createdAt">> = [];
 
-    const normalized = `${trace.summary || ""}\n${events.map((event) => event.summary).join("\n")}`.toLowerCase();
+    const normalized =
+      `${trace.summary || ""}\n${events.map((event) => event.summary).join("\n")}`.toLowerCase();
     const scope = params?.target
       ? this.scopeResolver.resolveFromTarget(params.target, trace.profileId)
       : this.scopeResolver.resolveProfileScope(trace.profileId, trace.workspaceId);
@@ -66,7 +66,11 @@ export class CoreMemoryCandidateService {
       );
     }
 
-    if (normalized.includes("correct") || normalized.includes("rejected") || normalized.includes("invalidated")) {
+    if (
+      normalized.includes("correct") ||
+      normalized.includes("rejected") ||
+      normalized.includes("invalidated")
+    ) {
       pushCandidate(
         "correction",
         "Workflow intelligence should adjust a prior assumption",
@@ -138,7 +142,11 @@ export class CoreMemoryCandidateService {
       );
     }
 
-    if (normalized.includes("recurring") || normalized.includes("cadence") || normalized.includes("every ")) {
+    if (
+      normalized.includes("recurring") ||
+      normalized.includes("cadence") ||
+      normalized.includes("every ")
+    ) {
       pushCandidate(
         "recurring_task",
         "This workflow may be recurring",
@@ -150,14 +158,7 @@ export class CoreMemoryCandidateService {
     }
 
     if (!candidates.length && trace.status === "completed" && trace.summary) {
-      pushCandidate(
-        "open_loop",
-        trace.summary.slice(0, 140),
-        trace.summary,
-        0.55,
-        0.31,
-        0.45,
-      );
+      pushCandidate("open_loop", trace.summary.slice(0, 140), trace.summary, 0.55, 0.31, 0.45);
     }
 
     return this.candidateRepo.bulkCreate(this.dedupeCandidates(candidates));

@@ -72,8 +72,14 @@ function isStageBoundaryEvent(event: TaskEvent): boolean {
   const stage = String(p?.stage || "").toUpperCase();
   if (!STAGE_NAMES.has(stage)) return false;
   const groupId = String(event.groupId || p?.groupId || "").toLowerCase();
-  const message = String(p?.message || p?.groupLabel || "").trim().toUpperCase();
-  return groupId === `stage:${stage.toLowerCase()}` || message === `STARTING ${stage}` || message === stage;
+  const message = String(p?.message || p?.groupLabel || "")
+    .trim()
+    .toUpperCase();
+  return (
+    groupId === `stage:${stage.toLowerCase()}` ||
+    message === `STARTING ${stage}` ||
+    message === stage
+  );
 }
 
 /** Format tool/step labels for compact display (e.g. "grep done", "web search started") */
@@ -87,10 +93,8 @@ function formatStepLabel(type: string, desc: string): string {
   if (running) return `${humanize(running[1])} started`;
   if (completed) return `${humanize(completed[1])} done`;
   if (failed) return `${humanize(failed[1])} failed`;
-  if (type === "step_completed" && /^[a-z0-9_]+$/i.test(d))
-    return `${humanize(d)} done`;
-  if (type === "step_started" && /^[a-z0-9_]+$/i.test(d))
-    return `${humanize(d)} started`;
+  if (type === "step_completed" && /^[a-z0-9_]+$/i.test(d)) return `${humanize(d)} done`;
+  if (type === "step_started" && /^[a-z0-9_]+$/i.test(d)) return `${humanize(d)} started`;
   return humanize(d);
 }
 
@@ -201,7 +205,11 @@ function getAgentLineStatusKind(
   status: string,
   isStreaming: boolean,
 ): AgentLineStatusKind {
-  if (task?.terminalStatus === "failed" || task?.status === "failed" || task?.status === "cancelled")
+  if (
+    task?.terminalStatus === "failed" ||
+    task?.status === "failed" ||
+    task?.status === "cancelled"
+  )
     return "failed";
   if (
     task?.terminalStatus === "partial_success" ||
@@ -255,7 +263,14 @@ export function CollaborativeAgentLines({
   // Subscribe to streaming thoughts for "is thinking" indicator (maps agentRoleId -> thought)
   // Team items link child tasks to agent roles; we match via listTeamItems when needed
   const [teamItems, setTeamItems] = useState<
-    Array<{ id: string; title: string; sourceTaskId?: string; ownerAgentRoleId?: string; sortOrder?: number; icon?: string }>
+    Array<{
+      id: string;
+      title: string;
+      sourceTaskId?: string;
+      ownerAgentRoleId?: string;
+      sortOrder?: number;
+      icon?: string;
+    }>
   >([]);
   const [agentRoles, setAgentRoles] = useState<Map<string, { icon?: string }>>(new Map());
   useEffect(() => {
@@ -342,9 +357,7 @@ export function CollaborativeAgentLines({
   const agentLines: AgentLine[] = [];
 
   // From child tasks (spawned agents)
-  for (const t of childTasks
-    .slice()
-    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))) {
+  for (const t of childTasks.slice().sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))) {
     const roleId = t.assignedAgentRoleId ?? taskToRole.get(t.id);
     const isStreaming = !!roleId && streamingByAgent.has(roleId);
     const role = roleId ? agentRoles.get(roleId) : undefined;
@@ -423,9 +436,7 @@ export function CollaborativeAgentLines({
                   return <Icon size={14} strokeWidth={1.5} />;
                 })()}
               </span>
-              <span className="collab-agent-name">
-                {stripLeadingEmoji(title)}
-              </span>
+              <span className="collab-agent-name">{stripLeadingEmoji(title)}</span>
             </span>
             <span
               className={`collab-agent-state collab-agent-state-${statusKind}`}
@@ -462,7 +473,11 @@ export function CollaborativeAgentLines({
       {!mainTaskCompleted && onWrapUp && (
         <div className="collab-lines-actions">
           <span className="collab-lines-status">
-            {isWrappingUp ? "Wrapping up..." : isMultiLlm ? "Models are working..." : "Agents are working..."}
+            {isWrappingUp
+              ? "Wrapping up..."
+              : isMultiLlm
+                ? "Models are working..."
+                : "Agents are working..."}
           </span>
           <button
             type="button"

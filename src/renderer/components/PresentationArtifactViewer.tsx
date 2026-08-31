@@ -100,9 +100,7 @@ function formatFileSize(bytes: number): string {
 }
 
 function isImageAttachment(attachment: PendingPresentationAttachment): boolean {
-  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(
-    attachment.mimeType || "",
-  );
+  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(attachment.mimeType || "");
 }
 
 function buildPresentationText(preview: PresentationPreview | null): string {
@@ -158,7 +156,7 @@ export function PresentationArtifactViewer({
   const voiceInput = useVoiceInput({
     onTranscript: (text) => {
       setVoiceNotice("");
-      setFullscreenMessage((current) => current ? `${current} ${text}` : text);
+      setFullscreenMessage((current) => (current ? `${current} ${text}` : text));
     },
     onError: (message) => setVoiceNotice(message),
     onNotConfigured: () => {
@@ -188,7 +186,11 @@ export function PresentationArtifactViewer({
         .readFileForViewer(filePath, workspacePath, { presentationRenderMode: "full" })
         .then((result) => {
           if (cancelled) return;
-          if (result.success && result.data?.fileType === "pptx" && result.data.presentationPreview) {
+          if (
+            result.success &&
+            result.data?.fileType === "pptx" &&
+            result.data.presentationPreview
+          ) {
             applyViewerData(result.data);
           }
         })
@@ -262,9 +264,7 @@ export function PresentationArtifactViewer({
   const preview = useMemo(() => fileData?.presentationPreview || null, [fileData]);
   const slideCount = preview?.slideCount ?? 0;
   const renderNotice =
-    renderingImages || preview?.renderStatus === "rendering"
-      ? "Rendering slide previews..."
-      : "";
+    renderingImages || preview?.renderStatus === "rendering" ? "Rendering slide previews..." : "";
 
   const handleCopyText = async () => {
     const text = buildPresentationText(preview);
@@ -303,46 +303,46 @@ export function PresentationArtifactViewer({
   }, [workspacePath]);
 
   const removeAttachment = useCallback((id: string) => {
-    setFullscreenAttachments((current) =>
-      current.filter((attachment) => attachment.id !== id),
-    );
+    setFullscreenAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }, []);
 
-  const buildMessageWithAttachments = useCallback(async (message: string) => {
-    if (fullscreenAttachments.length === 0) {
-      return { message, images: undefined as ImageAttachment[] | undefined };
-    }
+  const buildMessageWithAttachments = useCallback(
+    async (message: string) => {
+      if (fullscreenAttachments.length === 0) {
+        return { message, images: undefined as ImageAttachment[] | undefined };
+      }
 
-    const importedAttachments = workspaceId
-      ? await window.electronAPI.importFilesToWorkspace({
-          workspaceId,
-          files: fullscreenAttachments.map((attachment) => attachment.path),
-        })
-      : [];
-    const attachmentLines =
-      importedAttachments.length > 0
-        ? importedAttachments.map(
-            (attachment) => `- ${attachment.fileName} (${attachment.relativePath})`,
-          )
-        : fullscreenAttachments.map((attachment) => `- ${attachment.name} (${attachment.path})`);
-    const base = message || "Please review the attached files.";
-    const images = fullscreenAttachments
-      .filter(isImageAttachment)
-      .map((attachment) => ({
+      const importedAttachments = workspaceId
+        ? await window.electronAPI.importFilesToWorkspace({
+            workspaceId,
+            files: fullscreenAttachments.map((attachment) => attachment.path),
+          })
+        : [];
+      const attachmentLines =
+        importedAttachments.length > 0
+          ? importedAttachments.map(
+              (attachment) => `- ${attachment.fileName} (${attachment.relativePath})`,
+            )
+          : fullscreenAttachments.map((attachment) => `- ${attachment.name} (${attachment.path})`);
+      const base = message || "Please review the attached files.";
+      const images = fullscreenAttachments.filter(isImageAttachment).map((attachment) => ({
         filePath: attachment.path,
         mimeType: attachment.mimeType as ImageAttachment["mimeType"],
         filename: attachment.name,
         sizeBytes: attachment.size,
       }));
-    return {
-      message: `${base}\n\nAttached files:\n${attachmentLines.join("\n")}`,
-      images: images.length > 0 ? images : undefined,
-    };
-  }, [fullscreenAttachments, workspaceId]);
+      return {
+        message: `${base}\n\nAttached files:\n${attachmentLines.join("\n")}`,
+        images: images.length > 0 ? images : undefined,
+      };
+    },
+    [fullscreenAttachments, workspaceId],
+  );
 
   const handleFullscreenSend = async () => {
     const message = fullscreenMessage.trim();
-    if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending) return;
+    if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending)
+      return;
     const previousMessage = fullscreenMessage;
     const previousAttachments = fullscreenAttachments;
     setFullscreenSending(true);
@@ -362,9 +362,12 @@ export function PresentationArtifactViewer({
   };
 
   const renderBody = () => {
-    if (loading && !preview) return <div className="presentation-artifact-state">Loading presentation...</div>;
-    if (error) return <div className="presentation-artifact-state presentation-artifact-error">{error}</div>;
-    if (!preview) return <div className="presentation-artifact-state">No presentation preview available.</div>;
+    if (loading && !preview)
+      return <div className="presentation-artifact-state">Loading presentation...</div>;
+    if (error)
+      return <div className="presentation-artifact-state presentation-artifact-error">{error}</div>;
+    if (!preview)
+      return <div className="presentation-artifact-state">No presentation preview available.</div>;
     return (
       <PresentationViewer
         fileName={fileName}
@@ -407,7 +410,11 @@ export function PresentationArtifactViewer({
       <div className="presentation-artifact-viewer-titlebar">
         <div className="presentation-artifact-viewer-format">
           {formatLabel}
-          {slideCount ? <span>{slideCount} slide{slideCount === 1 ? "" : "s"}</span> : null}
+          {slideCount ? (
+            <span>
+              {slideCount} slide{slideCount === 1 ? "" : "s"}
+            </span>
+          ) : null}
         </div>
         <button
           type="button"
@@ -465,9 +472,7 @@ export function PresentationArtifactViewer({
                 <div className="spreadsheet-viewer-turn-body">
                   <p>{turnContext.summary}</p>
                   {turnContext.secondaryText && (
-                    <p className="spreadsheet-viewer-turn-secondary">
-                      {turnContext.secondaryText}
-                    </p>
+                    <p className="spreadsheet-viewer-turn-secondary">{turnContext.secondaryText}</p>
                   )}
                   {turnContext.events && turnContext.events.length > 0 && (
                     <div className="spreadsheet-viewer-turn-events">
@@ -478,9 +483,7 @@ export function PresentationArtifactViewer({
                             event.tone ? `tone-${event.tone}` : ""
                           }`}
                         >
-                          <span className="spreadsheet-viewer-turn-event-text">
-                            {event.text}
-                          </span>
+                          <span className="spreadsheet-viewer-turn-event-text">{event.text}</span>
                         </div>
                       ))}
                     </div>
@@ -506,7 +509,9 @@ export function PresentationArtifactViewer({
                         <span className="attachment-name" title={attachment.name}>
                           {attachment.name}
                         </span>
-                        <span className="attachment-size">{formatAttachmentSize(attachment.size)}</span>
+                        <span className="attachment-size">
+                          {formatAttachmentSize(attachment.size)}
+                        </span>
                         <button
                           type="button"
                           className="attachment-remove"
@@ -598,12 +603,6 @@ export function PresentationArtifactViewer({
             </div>
             <div className="input-below-actions spreadsheet-viewer-composer-actions">
               <span className="input-status-workspace">Work in a folder</span>
-              <span className="shell-toggle shell-toggle-inline enabled">
-                Shell
-                <span className="goal-mode-switch-track on">
-                  <span className="goal-mode-switch-thumb" />
-                </span>
-              </span>
               <span className="input-status-mode">Execute</span>
               <span className="input-status-mode">Auto</span>
             </div>

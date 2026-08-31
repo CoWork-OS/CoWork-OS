@@ -26,20 +26,30 @@ function makeEvent(
 describe("isRendererNoiseEvent", () => {
   it("identifies noise event types", () => {
     expect(isRendererNoiseEvent(makeEvent({ taskId: "t1", type: "log", timestamp: 1 }))).toBe(true);
-    expect(isRendererNoiseEvent(makeEvent({ taskId: "t1", type: "llm_streaming", timestamp: 1 }))).toBe(true);
-    expect(isRendererNoiseEvent(makeEvent({ taskId: "t1", type: "progress_update", timestamp: 1 }))).toBe(true);
+    expect(
+      isRendererNoiseEvent(makeEvent({ taskId: "t1", type: "llm_streaming", timestamp: 1 })),
+    ).toBe(true);
+    expect(
+      isRendererNoiseEvent(makeEvent({ taskId: "t1", type: "progress_update", timestamp: 1 })),
+    ).toBe(true);
   });
 
   it("identifies structural event types", () => {
-    expect(isRendererNoiseEvent(makeEvent({ taskId: "t1", type: "assistant_message", timestamp: 1 }))).toBe(false);
-    expect(isRendererNoiseEvent(makeEvent({ taskId: "t1", type: "task_completed", timestamp: 1 }))).toBe(false);
+    expect(
+      isRendererNoiseEvent(makeEvent({ taskId: "t1", type: "assistant_message", timestamp: 1 })),
+    ).toBe(false);
+    expect(
+      isRendererNoiseEvent(makeEvent({ taskId: "t1", type: "task_completed", timestamp: 1 })),
+    ).toBe(false);
   });
 });
 
 describe("getTransientEventReplacementKey", () => {
   it("returns null for non-replaceable types", () => {
     expect(
-      getTransientEventReplacementKey(makeEvent({ taskId: "t1", type: "assistant_message", timestamp: 1 })),
+      getTransientEventReplacementKey(
+        makeEvent({ taskId: "t1", type: "assistant_message", timestamp: 1 }),
+      ),
     ).toBeNull();
   });
 
@@ -52,7 +62,9 @@ describe("getTransientEventReplacementKey", () => {
       groupId: "group-1",
       payload: { stage: "analyzing" },
     });
-    expect(getTransientEventReplacementKey(event)).toBe("t1:progress_update:step-1:group-1:analyzing");
+    expect(getTransientEventReplacementKey(event)).toBe(
+      "t1:progress_update:step-1:group-1:analyzing",
+    );
   });
 
   it("extracts stepId from payload.step.id", () => {
@@ -175,9 +187,7 @@ describe("appendRendererTaskEvents", () => {
   });
 
   it("appends event with new ID that does not match any existing event", () => {
-    const prev = [
-      makeEvent({ id: "evt-1", taskId: "t1", type: "user_message", timestamp: 1 }),
-    ];
+    const prev = [makeEvent({ id: "evt-1", taskId: "t1", type: "user_message", timestamp: 1 })];
     const incoming = [
       makeEvent({ id: "evt-2", taskId: "t1", type: "assistant_message", timestamp: 2 }),
     ];
@@ -193,10 +203,7 @@ describe("appendRendererTaskEvents", () => {
       stepId: "s1",
       payload: { stage: "old" },
     });
-    const prev = [
-      makeEvent({ taskId: "t1", type: "assistant_message", timestamp: 0 }),
-      existing,
-    ];
+    const prev = [makeEvent({ taskId: "t1", type: "assistant_message", timestamp: 0 }), existing];
 
     const replacement = makeEvent({
       taskId: "t1",

@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UserFact, UserProfile } from "../types";
-import {
-  buildStructuredUserProfileSummary,
-  inferUserFactCategory,
-} from "../user-profile-summary";
+import { buildStructuredUserProfileSummary, inferUserFactCategory } from "../user-profile-summary";
 
 function fact(overrides: Partial<UserFact>): UserFact {
   return {

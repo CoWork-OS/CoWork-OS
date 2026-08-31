@@ -51,12 +51,14 @@ export interface TunnelRelayServer {
   sessions: Map<string, RelaySession>;
 }
 
-export async function startTunnelRelayServer(options: {
-  port?: number;
-  host?: string;
-  adminToken?: string;
-  allowUnauthenticatedAdmin?: boolean;
-} = {}): Promise<TunnelRelayServer> {
+export async function startTunnelRelayServer(
+  options: {
+    port?: number;
+    host?: string;
+    adminToken?: string;
+    allowUnauthenticatedAdmin?: boolean;
+  } = {},
+): Promise<TunnelRelayServer> {
   const records = new Map<string, RelayTunnelRecord>();
   const sessions = new Map<string, RelaySession>();
   const wss = new WebSocketServer({ noServer: true });
@@ -150,7 +152,8 @@ async function handleHttpRequest(
   if (req.method === "POST" && url.pathname === "/v1/tunnels") {
     requireAdmin(req, auth);
     const body = await readJsonBody(req);
-    const id = typeof body.id === "string" && body.id.trim() ? body.id.trim() : `tun_${randomUUID()}`;
+    const id =
+      typeof body.id === "string" && body.id.trim() ? body.id.trim() : `tun_${randomUUID()}`;
     const record: RelayTunnelRecord = {
       id,
       name: typeof body.name === "string" && body.name.trim() ? body.name.trim() : id,
@@ -216,7 +219,11 @@ async function handleHttpRequest(
       sendJson(res, 403, { error: policyResult.reason });
       return;
     }
-    const response = await forwardToClient(session, payload, url.searchParams.get("caller") || undefined);
+    const response = await forwardToClient(
+      session,
+      payload,
+      url.searchParams.get("caller") || undefined,
+    );
     sendJson(res, response.error ? 502 : 200, response);
     return;
   }
@@ -338,10 +345,28 @@ function sanitizeRelayPolicy(value: unknown): SecureMcpTunnelPolicy {
   const policy = isRecord(value) ? value : {};
   return {
     ...DEFAULT_SECURE_MCP_TUNNEL_POLICY,
-    readOnly: typeof policy.readOnly === "boolean" ? policy.readOnly : DEFAULT_SECURE_MCP_TUNNEL_POLICY.readOnly,
-    maxRequestBytes: clampInt(policy.maxRequestBytes, 1024, 10 * 1024 * 1024, DEFAULT_SECURE_MCP_TUNNEL_POLICY.maxRequestBytes),
-    maxResponseBytes: clampInt(policy.maxResponseBytes, 1024, 25 * 1024 * 1024, DEFAULT_SECURE_MCP_TUNNEL_POLICY.maxResponseBytes),
-    requestTimeoutMs: clampInt(policy.requestTimeoutMs, 1000, 300000, DEFAULT_SECURE_MCP_TUNNEL_POLICY.requestTimeoutMs),
+    readOnly:
+      typeof policy.readOnly === "boolean"
+        ? policy.readOnly
+        : DEFAULT_SECURE_MCP_TUNNEL_POLICY.readOnly,
+    maxRequestBytes: clampInt(
+      policy.maxRequestBytes,
+      1024,
+      10 * 1024 * 1024,
+      DEFAULT_SECURE_MCP_TUNNEL_POLICY.maxRequestBytes,
+    ),
+    maxResponseBytes: clampInt(
+      policy.maxResponseBytes,
+      1024,
+      25 * 1024 * 1024,
+      DEFAULT_SECURE_MCP_TUNNEL_POLICY.maxResponseBytes,
+    ),
+    requestTimeoutMs: clampInt(
+      policy.requestTimeoutMs,
+      1000,
+      300000,
+      DEFAULT_SECURE_MCP_TUNNEL_POLICY.requestTimeoutMs,
+    ),
     allowedTools: Array.isArray(policy.allowedTools)
       ? policy.allowedTools
           .map((tool) => (typeof tool === "string" ? tool.trim() : ""))

@@ -115,7 +115,12 @@ The default posture is:
 
 - reviewable suggestions for new or uncertain patterns
 - autonomous execution only for trusted routine operator work
-- auto-approval only for common automation-safe actions such as shell commands and trusted network/external-service operations
+- auto-approval only for common automation-safe actions such as profile-permitted command tools and trusted network/external-service operations
 - hard guardrails, workspace capability denials, and explicit dangerous actions still remain enforced
+
+Every core-created task also receives an explicit access profile. The profile is the ceiling for
+command tools, filesystem access, network/domain scope, sandboxing, and approvals; the core
+automation allowlist can reduce prompts only inside that ceiling. It cannot turn on command tools,
+restore a denied path, or bypass export/location consent. See [Access Profiles](access-profiles.md).
 
 See [Workflow Intelligence](workflow-intelligence.md), [Heartbeat v3](heartbeat-v3.md), [Mission Control](mission-control.md), and [Permission System](permission-system.md).

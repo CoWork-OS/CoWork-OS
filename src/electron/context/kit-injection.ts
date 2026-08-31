@@ -14,6 +14,7 @@ export interface InjectionContext {
   roleDir?: string;
   includeWarnings?: boolean;
   onboardingIncomplete?: boolean;
+  readGuard?: (candidatePath: string) => boolean;
 }
 
 export interface RenderedKitSection {
@@ -42,11 +43,17 @@ function shouldIncludeContract(contract: KitContract, ctx: InjectionContext): bo
   return true;
 }
 
-function renderSection(parsed: ParsedKitDoc, contract: KitContract, relPath: string, includeWarnings = false): string {
+function renderSection(
+  parsed: ParsedKitDoc,
+  contract: KitContract,
+  relPath: string,
+  includeWarnings = false,
+): string {
   const heading = `### ${contract.title} (${relPath.replace(/\\/g, "/")})`;
-  const warningText = includeWarnings && parsed.warnings.length > 0
-    ? `\nWarnings:\n- ${parsed.warnings.join("\n- ")}`
-    : "";
+  const warningText =
+    includeWarnings && parsed.warnings.length > 0
+      ? `\nWarnings:\n- ${parsed.warnings.join("\n- ")}`
+      : "";
   return `${heading}\n${parsed.body}${warningText}`.trim();
 }
 
@@ -60,6 +67,13 @@ export function buildWorkspaceKitSections(ctx: InjectionContext): RenderedKitSec
 
     const relPath = path.join(".cowork", contract.file).replace(/\\/g, "/");
     const absPath = path.join(ctx.workspacePath, ".cowork", contract.file);
+    if (ctx.readGuard) {
+      try {
+        if (!ctx.readGuard(absPath)) continue;
+      } catch {
+        continue;
+      }
+    }
     const parsed = parseKitDocument(absPath, contract, relPath);
     if (!parsed) continue;
 

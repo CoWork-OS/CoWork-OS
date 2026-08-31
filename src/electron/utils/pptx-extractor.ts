@@ -55,9 +55,7 @@ export async function extractPptxContentFromFile(
   }
 
   const metadataText =
-    structured.metadata.length > 0
-      ? `[PPTX Metadata]\n${structured.metadata.join("\n")}\n\n`
-      : "";
+    structured.metadata.length > 0 ? `[PPTX Metadata]\n${structured.metadata.join("\n")}\n\n` : "";
   const summaryLine = `[PPTX Slides: ${
     structured.processedSlideCount === structured.slideCount
       ? structured.slideCount
@@ -416,9 +414,7 @@ function extractPptxTableSpan(cellXml: string, spanType: "gridSpan" | "rowSpan")
     new RegExp(`(?:\\w+:)?${spanType}\\b[^>]*?(?:\\b(?:w:)?val|\\bval)=(["'])(\\d+)\\1`, "i"),
   );
   const legacyTagMatch = !tagMatch
-    ? tcPr.match(
-        new RegExp(`(?:\\w+:)?${spanType}\\b[^>]*?(?:\\b(?:w:)?val|\\bval)="(\\d+)"`, "i"),
-      )
+    ? tcPr.match(new RegExp(`(?:\\w+:)?${spanType}\\b[^>]*?(?:\\b(?:w:)?val|\\bval)="(\\d+)"`, "i"))
     : null;
   const unquotedTagMatch =
     !tagMatch && !legacyTagMatch

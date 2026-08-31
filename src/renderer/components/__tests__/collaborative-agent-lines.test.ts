@@ -96,7 +96,11 @@ describe("CollaborativeAgentLines", () => {
 
   it("shows warnings for partial-success subagents", () => {
     const markup = renderLines(
-      makeTask({ status: "completed", terminalStatus: "partial_success", completedAt: 1740841080000 }),
+      makeTask({
+        status: "completed",
+        terminalStatus: "partial_success",
+        completedAt: 1740841080000,
+      }),
       [
         makeEvent("step_failed", 1740841020000, { description: "Optional changelog lookup" }),
         makeEvent("task_completed", 1740841080000, { terminalStatus: "partial_success" }),
@@ -125,7 +129,12 @@ describe("CollaborativeAgentLines", () => {
           }),
         ],
         childEvents: [
-          makeEvent("step_failed", 1740841020000, { description: "Run verification" }, { taskId: "child-2" }),
+          makeEvent(
+            "step_failed",
+            1740841020000,
+            { description: "Run verification" },
+            { taskId: "child-2" },
+          ),
         ],
         onOpenAgent: () => undefined,
         onWrapUp: () => undefined,

@@ -4,10 +4,13 @@ import { ToolHandlerRegistry } from "../tool-handler-registry";
 describe("ToolHandlerRegistry", () => {
   it("resolves predicate handlers when no exact handler exists", async () => {
     const registry = new ToolHandlerRegistry();
-    registry.registerPredicate((name) => name.startsWith("mcp_"), async ({ request }) => ({
-      tool: request.name,
-      matched: true,
-    }));
+    registry.registerPredicate(
+      (name) => name.startsWith("mcp_"),
+      async ({ request }) => ({
+        tool: request.name,
+        matched: true,
+      }),
+    );
 
     await expect(
       registry.execute("mcp_demo", {
@@ -24,7 +27,10 @@ describe("ToolHandlerRegistry", () => {
 
   it("prefers exact handlers over predicate handlers", async () => {
     const registry = new ToolHandlerRegistry();
-    registry.registerPredicate((name) => name.startsWith("mcp_"), async () => "predicate");
+    registry.registerPredicate(
+      (name) => name.startsWith("mcp_"),
+      async () => "predicate",
+    );
     registry.register("mcp_demo", async () => "exact");
 
     await expect(

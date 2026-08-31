@@ -1,14 +1,7 @@
 import { useState } from "react";
 import type { PersonalityConfigV2, ContextMode } from "../../../shared/types";
 
-const CONTEXT_MODES: ContextMode[] = [
-  "all",
-  "coding",
-  "chat",
-  "planning",
-  "writing",
-  "research",
-];
+const CONTEXT_MODES: ContextMode[] = ["all", "coding", "chat", "planning", "writing", "research"];
 
 interface PersonalityAdvancedTabProps {
   config: PersonalityConfigV2;
@@ -77,9 +70,7 @@ export function PersonalityAdvancedTab({
   return (
     <div className="personality-advanced-tab settings-section">
       <h3>Advanced</h3>
-      <p className="settings-description">
-        SOUL.md editor, preview, and import/export.
-      </p>
+      <p className="settings-description">SOUL.md editor, preview, and import/export.</p>
 
       <div className="soul-editor">
         <h4>SOUL Document</h4>
@@ -155,26 +146,16 @@ export function PersonalityAdvancedTab({
             {previewLoading ? "Loading..." : "Preview"}
           </button>
         </div>
-        {previewResult && (
-          <pre className="preview-output">{previewResult}</pre>
-        )}
+        {previewResult && <pre className="preview-output">{previewResult}</pre>}
       </div>
 
       <div className="import-export">
         <h4>Import / Export</h4>
         <div className="import-export-buttons">
-          <button
-            type="button"
-            className="button-primary"
-            onClick={() => exportProfile("json")}
-          >
+          <button type="button" className="button-primary" onClick={() => exportProfile("json")}>
             Export JSON
           </button>
-          <button
-            type="button"
-            className="button-primary"
-            onClick={() => exportProfile("md")}
-          >
+          <button type="button" className="button-primary" onClick={() => exportProfile("md")}>
             Export SOUL.md
           </button>
           <button type="button" className="button-secondary" onClick={importProfile}>

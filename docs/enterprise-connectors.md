@@ -41,6 +41,13 @@ Connector mention behavior:
 - selected connectors render as icon+name chips in the prompt and user message history
 - submitted `integrationMentions` metadata is soft routing guidance only; it does not grant permissions or set `allowedTools`
 
+Connector availability and connector mentions do not bypass the task's
+[access profile](access-profiles.md). MCP and native connector calls are
+filtered by the profile, administrator policy, connector scope, and normal
+approval rules before invocation. A connector may narrow its own tool
+allowlist, but it cannot widen a profile's filesystem, network, domain, or
+command boundary.
+
 See [Composer Mentions](composer-mentions.md) for the full resolver and runtime contract.
 
 ## Connector Events and Content Triggers

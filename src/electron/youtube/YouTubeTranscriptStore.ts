@@ -1,11 +1,7 @@
 import { createHash } from "crypto";
 import { DatabaseManager } from "../database/schema";
 import { buildYouTubeWatchUrl } from "./url";
-import type {
-  YouTubeSearchHit,
-  YouTubeTranscriptSegment,
-  YouTubeVideoMetadata,
-} from "./types";
+import type { YouTubeSearchHit, YouTubeTranscriptSegment, YouTubeVideoMetadata } from "./types";
 
 type TranscriptDatabase = Pick<import("better-sqlite3").Database, "exec" | "prepare">;
 
@@ -57,7 +53,9 @@ export function buildYouTubeTranscriptFtsQuery(query: string): string {
 }
 
 function normalizeSegmentText(text: string): string {
-  return String(text || "").replace(/\s+/g, " ").trim();
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizeWorkspaceId(workspaceId: string): string {
@@ -237,9 +235,7 @@ export class YouTubeTranscriptStore {
     const db = this.getDatabase();
     if (!db || !this.ensureSchema(db)) return null;
     const row = db
-      .prepare(
-        "SELECT * FROM youtube_workspace_videos WHERE workspace_id = ? AND video_id = ?",
-      )
+      .prepare("SELECT * FROM youtube_workspace_videos WHERE workspace_id = ? AND video_id = ?")
       .get(scopedWorkspaceId, videoId) as Record<string, unknown> | undefined;
     if (!row) return null;
     return {
@@ -247,8 +243,7 @@ export class YouTubeTranscriptStore {
       url: String(row.url || buildYouTubeWatchUrl(videoId)),
       title: typeof row.title === "string" ? row.title : undefined,
       channel: typeof row.channel === "string" ? row.channel : undefined,
-      durationSeconds:
-        typeof row.duration_seconds === "number" ? row.duration_seconds : undefined,
+      durationSeconds: typeof row.duration_seconds === "number" ? row.duration_seconds : undefined,
       thumbnailUrl: typeof row.thumbnail_url === "string" ? row.thumbnail_url : undefined,
       uploadDate: typeof row.upload_date === "string" ? row.upload_date : undefined,
       description: typeof row.description === "string" ? row.description : undefined,

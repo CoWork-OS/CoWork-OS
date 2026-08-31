@@ -7,6 +7,10 @@ import { DocumentBuilder } from "../skills/document";
 import { PresentationBuilder } from "../skills/presentation";
 import { FolderOrganizer } from "../skills/organizer";
 import { editPdfRegion } from "../../documents/pdf-region-editor";
+import {
+  createWorkspaceFilesystemApprovalHandlers,
+  resolveWorkspaceFilesystemAccessWithApproval,
+} from "../../security/access-profile-paths";
 
 /**
  * SkillTools implements high-level skills for document creation
@@ -40,6 +44,40 @@ export class SkillTools {
     this.folderOrganizer = new FolderOrganizer(workspace, this.daemon, this.taskId);
   }
 
+  private async assertPathAllowed(
+    requestedPath: string,
+    operation: "read" | "write",
+    label = "skill file",
+  ): Promise<string> {
+    if (operation === "read" && this.workspace.permissions.read === false) {
+      throw new Error("Read permission not granted");
+    }
+    if (operation === "write" && this.workspace.permissions.write === false) {
+      throw new Error("Write permission not granted");
+    }
+
+    const access = await resolveWorkspaceFilesystemAccessWithApproval(
+      this.workspace,
+      requestedPath,
+      operation,
+      label,
+      createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "skill_tools"),
+    );
+    if (access.decision !== "allow") {
+      if (access.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${access.path}`);
+      }
+      if (access.reason === "access_profile_unavailable") {
+        throw new Error("The selected access profile is unavailable.");
+      }
+      if (access.reason === "outside_workspace") {
+        throw new Error(`External ${label} access was not approved: ${access.path}`);
+      }
+      throw new Error(`Path is outside the active access profile boundary: ${access.path}`);
+    }
+    return access.path;
+  }
+
   /**
    * Create spreadsheet
    */
@@ -53,7 +91,11 @@ export class SkillTools {
 
     const filename = input.filename.endsWith(".xlsx") ? input.filename : `${input.filename}.xlsx`;
 
-    const outputPath = path.join(this.workspace.path, filename);
+    const outputPath = await this.assertPathAllowed(
+      path.join(this.workspace.path, filename),
+      "write",
+      "spreadsheet output",
+    );
 
     await this.spreadsheetBuilder.create(outputPath, input.sheets);
 
@@ -102,7 +144,11 @@ export class SkillTools {
       ? input.filename
       : `${input.filename}.${input.format}`;
 
-    const outputPath = path.join(this.workspace.path, filename);
+    const outputPath = await this.assertPathAllowed(
+      path.join(this.workspace.path, filename),
+      "write",
+      "document output",
+    );
 
     await this.documentBuilder.create(outputPath, input.format, input.content);
 
@@ -132,7 +178,12 @@ export class SkillTools {
   async editDocument(input: {
     sourcePath: string;
     destPath?: string;
-    action?: "append" | "move_section" | "insert_after_section" | "list_sections" | "replace_blocks";
+    action?:
+      | "append"
+      | "move_section"
+      | "insert_after_section"
+      | "list_sections"
+      | "replace_blocks";
     newContent?: Array<{
       type: string;
       text: string;
@@ -165,8 +216,18 @@ export class SkillTools {
     }
 
     const action = input.action || "append";
-    const inputPath = path.join(this.workspace.path, input.sourcePath);
-    const outputPath = input.destPath ? path.join(this.workspace.path, input.destPath) : inputPath;
+    const inputPath = await this.assertPathAllowed(input.sourcePath, "read", "document source");
+    // Editing in place is still a write. Reusing the read-checked source path
+    // here would let a read-only profile mutate a document without a second
+    // write-boundary evaluation.
+    const outputPath =
+      action === "list_sections"
+        ? inputPath
+        : await this.assertPathAllowed(
+            input.destPath || input.sourcePath,
+            "write",
+            "document output",
+          );
 
     console.log(`[SkillTools] editDocument called: action=${action}, source=${input.sourcePath}`);
 
@@ -361,16 +422,8 @@ export class SkillTools {
       throw new Error("instruction is required");
     }
 
-    const workspaceRoot = path.resolve(this.workspace.path);
-    const sourcePath = path.resolve(path.join(workspaceRoot, input.sourcePath));
-    const destPath = path.resolve(path.join(workspaceRoot, input.destPath));
-    const sep = path.sep;
-    if (
-      !sourcePath.startsWith(workspaceRoot + sep) && sourcePath !== workspaceRoot ||
-      !destPath.startsWith(workspaceRoot + sep) && destPath !== workspaceRoot
-    ) {
-      throw new Error("Path escapes workspace root");
-    }
+    const sourcePath = await this.assertPathAllowed(input.sourcePath, "read", "PDF source");
+    const destPath = await this.assertPathAllowed(input.destPath, "write", "PDF output");
     await editPdfRegion({
       sourcePath,
       destPath,
@@ -413,8 +466,37 @@ export class SkillTools {
       content?: string[];
       subtitle?: string;
       imagePath?: string;
-      layout?: "title" | "titleContent" | "twoColumn" | "imageOnly" | "blank" | "section" | "quote" | "timeline" | "comparison" | "process" | "chart" | "table" | "product" | "metric" | "closing";
-      slideType?: "cover" | "content" | "image" | "quote" | "timeline" | "comparison" | "process" | "chart" | "table" | "section" | "product" | "metric" | "closing" | "blank";
+      layout?:
+        | "title"
+        | "titleContent"
+        | "twoColumn"
+        | "imageOnly"
+        | "blank"
+        | "section"
+        | "quote"
+        | "timeline"
+        | "comparison"
+        | "process"
+        | "chart"
+        | "table"
+        | "product"
+        | "metric"
+        | "closing";
+      slideType?:
+        | "cover"
+        | "content"
+        | "image"
+        | "quote"
+        | "timeline"
+        | "comparison"
+        | "process"
+        | "chart"
+        | "table"
+        | "section"
+        | "product"
+        | "metric"
+        | "closing"
+        | "blank";
       visualBrief?: string;
       notes?: string;
     }>;
@@ -425,9 +507,28 @@ export class SkillTools {
 
     const filename = input.filename.endsWith(".pptx") ? input.filename : `${input.filename}.pptx`;
 
-    const outputPath = path.join(this.workspace.path, filename);
+    const outputPath = await this.assertPathAllowed(
+      path.join(this.workspace.path, filename),
+      "write",
+      "presentation output",
+    );
 
-    await this.presentationBuilder.create(outputPath, input.slides, {
+    const slides = await Promise.all(
+      input.slides.map(async (slide) => ({
+        ...slide,
+        ...(slide.imagePath
+          ? {
+              imagePath: await this.assertPathAllowed(
+                slide.imagePath,
+                "read",
+                "presentation asset",
+              ),
+            }
+          : {}),
+      })),
+    );
+
+    await this.presentationBuilder.create(outputPath, slides, {
       title: input.title,
       author: input.author,
       audience: input.audience,
@@ -441,7 +542,7 @@ export class SkillTools {
     this.daemon.logEvent(this.taskId, "file_created", {
       path: filename,
       type: "presentation",
-      slides: input.slides.length,
+      slides: slides.length,
     });
 
     return {
@@ -462,6 +563,7 @@ export class SkillTools {
       throw new Error("Write permission not granted");
     }
 
+    await this.assertPathAllowed(input.path, "write", "organizer folder");
     const changes = await this.folderOrganizer.organize(input.path, input.strategy, input.rules);
 
     this.daemon.logEvent(this.taskId, "file_modified", {

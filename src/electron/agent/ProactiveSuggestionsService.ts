@@ -292,9 +292,8 @@ export class ProactiveSuggestionsService {
     this.loadDismissed();
 
     try {
-      const searchWorkspaceIds = Array.isArray(workspaceIds) && workspaceIds.length > 0
-        ? workspaceIds
-        : [workspaceId];
+      const searchWorkspaceIds =
+        Array.isArray(workspaceIds) && workspaceIds.length > 0 ? workspaceIds : [workspaceId];
       const results = searchWorkspaceIds.flatMap((id) =>
         MemoryService.searchByContentMarker(id, SUGGESTION_MARKER, 50).map((entry) => ({
           entry,
@@ -329,9 +328,10 @@ export class ProactiveSuggestionsService {
         .sort((a, b) => b.score - a.score)
         .map((entry) => entry.suggestion);
 
-      const visible = (opts?.includeDeferred
-        ? ranked
-        : ranked.filter((s) => !this.shouldDefer(s.workspaceId || workspaceId, s))
+      const visible = (
+        opts?.includeDeferred
+          ? ranked
+          : ranked.filter((s) => !this.shouldDefer(s.workspaceId || workspaceId, s))
       ).slice(0, MAX_ACTIVE_SUGGESTIONS);
 
       if (opts?.recordSurface !== false) {
@@ -376,7 +376,11 @@ export class ProactiveSuggestionsService {
     return true;
   }
 
-  static recordEditedAction(workspaceId: string, suggestionId: string, editedPrompt: string): boolean {
+  static recordEditedAction(
+    workspaceId: string,
+    suggestionId: string,
+    editedPrompt: string,
+  ): boolean {
     this.loadDismissed();
     const suggestion = this.findSuggestionById(workspaceId, suggestionId);
     if (!suggestion) return false;
@@ -606,7 +610,8 @@ export class ProactiveSuggestionsService {
       .filter(
         (decision) =>
           decision.status === "suggested" &&
-          (decision.policyLevel === "suggest_only" || decision.policyLevel === "execute_with_approval"),
+          (decision.policyLevel === "suggest_only" ||
+            decision.policyLevel === "execute_with_approval"),
       )
       .slice(0, 4);
 
@@ -630,7 +635,11 @@ export class ProactiveSuggestionsService {
    * Detect recurring task patterns from playbook entries.
    */
   static async detectRecurringPatterns(workspaceId: string): Promise<void> {
-    const results = MemoryService.searchByContentMarker(workspaceId, "[PLAYBOOK] Task succeeded", 50);
+    const results = MemoryService.searchByContentMarker(
+      workspaceId,
+      "[PLAYBOOK] Task succeeded",
+      50,
+    );
     const playbookEntries = results
       .filter((r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]"))
       .slice(0, 30);
@@ -821,10 +830,12 @@ export class ProactiveSuggestionsService {
     if (suggestion.sourceEntity) payload.sourceEntity = suggestion.sourceEntity;
     if (suggestion.suggestionClass) payload.suggestionClass = suggestion.suggestionClass;
     if (suggestion.urgency) payload.urgency = suggestion.urgency;
-    if (suggestion.learningSignalIds?.length) payload.learningSignalIds = suggestion.learningSignalIds;
+    if (suggestion.learningSignalIds?.length)
+      payload.learningSignalIds = suggestion.learningSignalIds;
     if (suggestion.workspaceScope) payload.workspaceScope = suggestion.workspaceScope;
     if (suggestion.sourceSignals?.length) payload.sourceSignals = suggestion.sourceSignals;
-    if (suggestion.recommendedDelivery) payload.recommendedDelivery = suggestion.recommendedDelivery;
+    if (suggestion.recommendedDelivery)
+      payload.recommendedDelivery = suggestion.recommendedDelivery;
     if (suggestion.companionStyle) payload.companionStyle = suggestion.companionStyle;
 
     const content = `${SUGGESTION_MARKER} ${JSON.stringify(payload)}`;
@@ -890,12 +901,16 @@ export class ProactiveSuggestionsService {
         suggestionClass: data.suggestionClass,
         urgency: data.urgency,
         learningSignalIds: Array.isArray(data.learningSignalIds)
-          ? data.learningSignalIds.filter((value: unknown): value is string => typeof value === "string")
+          ? data.learningSignalIds.filter(
+              (value: unknown): value is string => typeof value === "string",
+            )
           : undefined,
         workspaceScope: data.workspaceScope === "all" ? "all" : "single",
         workspaceId,
         sourceSignals: Array.isArray(data.sourceSignals)
-          ? data.sourceSignals.filter((value: unknown): value is string => typeof value === "string")
+          ? data.sourceSignals.filter(
+              (value: unknown): value is string => typeof value === "string",
+            )
           : undefined,
         recommendedDelivery:
           data.recommendedDelivery === "briefing" ||
@@ -903,7 +918,12 @@ export class ProactiveSuggestionsService {
           data.recommendedDelivery === "nudge"
             ? data.recommendedDelivery
             : undefined,
-        companionStyle: data.companionStyle === "email" ? "email" : data.companionStyle === "note" ? "note" : undefined,
+        companionStyle:
+          data.companionStyle === "email"
+            ? "email"
+            : data.companionStyle === "note"
+              ? "note"
+              : undefined,
         createdAt,
         expiresAt: createdAt + SEVEN_DAYS_MS,
         snoozedUntil: this.snoozedUntil.get(data.id || memoryId),
@@ -987,7 +1007,10 @@ export class ProactiveSuggestionsService {
     }
   }
 
-  private static findSuggestionById(workspaceId: string, suggestionId: string): ProactiveSuggestion | null {
+  private static findSuggestionById(
+    workspaceId: string,
+    suggestionId: string,
+  ): ProactiveSuggestion | null {
     try {
       const results = MemoryService.searchByContentMarker(workspaceId, SUGGESTION_MARKER, 50);
       for (const r of results) {
@@ -1001,8 +1024,13 @@ export class ProactiveSuggestionsService {
     return null;
   }
 
-  private static getSuggestionFeedbackKey(workspaceId: string, suggestion: ProactiveSuggestion): string {
-    const titleKey = this.normalizeTitle(suggestion.title || suggestion.description || "suggestion");
+  private static getSuggestionFeedbackKey(
+    workspaceId: string,
+    suggestion: ProactiveSuggestion,
+  ): string {
+    const titleKey = this.normalizeTitle(
+      suggestion.title || suggestion.description || "suggestion",
+    );
     return [
       workspaceId,
       suggestion.suggestionClass || suggestion.type || "general",
@@ -1054,9 +1082,9 @@ export class ProactiveSuggestionsService {
           ? "edited"
           : action === "ignored"
             ? "ignored"
-          : action === "snoozed"
-            ? "snoozed"
-            : "dismissed";
+            : action === "snoozed"
+              ? "snoozed"
+              : "dismissed";
     const type =
       action === "acted_on"
         ? "workflow_pattern"
@@ -1091,11 +1119,17 @@ export class ProactiveSuggestionsService {
     }
   }
 
-  private static getFeedbackAdjustment(workspaceId: string, suggestion: ProactiveSuggestion): number {
+  private static getFeedbackAdjustment(
+    workspaceId: string,
+    suggestion: ProactiveSuggestion,
+  ): number {
     const stats = this.feedbackByKey.get(this.getSuggestionFeedbackKey(workspaceId, suggestion));
     if (!stats) return 0;
     const positive = Math.min(0.45, stats.actedOn * 0.15 + (stats.edited || 0) * 0.08);
-    const negative = Math.min(0.45, stats.dismissed * 0.16 + stats.snoozed * 0.1 + (stats.ignored || 0) * 0.08);
+    const negative = Math.min(
+      0.45,
+      stats.dismissed * 0.16 + stats.snoozed * 0.1 + (stats.ignored || 0) * 0.08,
+    );
     return positive - negative;
   }
 
@@ -1129,7 +1163,10 @@ export class ProactiveSuggestionsService {
 
     let score = 0;
     for (const event of workspaceEvents) {
-      const distance = Math.min(Math.abs(event.hour - currentHour), 24 - Math.abs(event.hour - currentHour));
+      const distance = Math.min(
+        Math.abs(event.hour - currentHour),
+        24 - Math.abs(event.hour - currentHour),
+      );
       const proximity = Math.max(0, 1 - distance / 6);
       if (event.type === "acted_on") score += 0.35 * proximity;
       if (event.type === "dismissed") score -= 0.2 * proximity;
@@ -1138,7 +1175,9 @@ export class ProactiveSuggestionsService {
   }
 
   private static shouldDefer(workspaceId: string, suggestion: ProactiveSuggestion): boolean {
-    const workspaceEvents = this.telemetryEvents.filter((event) => event.workspaceId === workspaceId);
+    const workspaceEvents = this.telemetryEvents.filter(
+      (event) => event.workspaceId === workspaceId,
+    );
     const acted = workspaceEvents.filter((event) => event.type === "acted_on");
     if (acted.length < 3) return false;
     const adjustment = this.getTimingAdjustment(workspaceId, suggestion);

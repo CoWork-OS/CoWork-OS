@@ -1,8 +1,4 @@
-import type {
-  SecureMcpTunnelPolicy,
-  TunnelClientMessage,
-  TunnelRelayMessage,
-} from "./types";
+import type { SecureMcpTunnelPolicy, TunnelClientMessage, TunnelRelayMessage } from "./types";
 
 const WRITE_TOOL_RE =
   /(^|[_\-\s])(write|create|update|delete|remove|rename|move|copy|patch|edit|send|post|put|publish|execute|run|install|deploy|commit|push)([_\-\s]|$)/i;
@@ -87,7 +83,11 @@ export function enforceTunnelPolicy(
   }
 
   if (policy.readOnly && WRITE_TOOL_RE.test(toolName)) {
-    return { approved: false, reason: `Tool is blocked by read-only policy: ${toolName}`, toolName };
+    return {
+      approved: false,
+      reason: `Tool is blocked by read-only policy: ${toolName}`,
+      toolName,
+    };
   }
 
   return { approved: true };

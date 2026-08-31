@@ -1,4 +1,4 @@
-import type { TaskEvent, ExecutionMode } from "../../../shared/types";
+import type { Task, TaskEvent, ExecutionMode } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { isVerificationStepDescription } from "../../../shared/plan-utils";
 import { hasAssistantMediaDirective } from "../../utils/assistant-media-directives";
@@ -9,6 +9,7 @@ import {
 } from "../utils/attachment-content";
 import { deriveSlashCommandTaskTitle } from "../../utils/slash-command-title";
 import { formatTimelineActivityLabel } from "../../../shared/timeline-v2";
+import { formatUserFacingCompletionSummary } from "../../../shared/task-completion";
 import { TASK_TITLE_MAX_LENGTH, TITLE_ELLIPSIS_REGEX } from "./main-content-constants";
 
 type Any = Record<string, any>;
@@ -41,14 +42,21 @@ export const isVerificationNoiseEvent = (event: TaskEvent): boolean => {
 export const getAssistantStepDescription = (event: TaskEvent): string => {
   if (typeof event.payload?.stepDescription === "string") return event.payload.stepDescription;
   const step = event.payload?.step;
-  if (step && typeof step === "object" && typeof (step as Record<string, unknown>).description === "string") {
+  if (
+    step &&
+    typeof step === "object" &&
+    typeof (step as Record<string, unknown>).description === "string"
+  ) {
     return (step as Record<string, string>).description;
   }
   return "";
 };
 
 export const shouldRevealInternalAssistantMessageInVerbose = (event: TaskEvent): boolean => {
-  if (getEffectiveTaskEventType(event) !== "assistant_message" || event.payload?.internal !== true) {
+  if (
+    getEffectiveTaskEventType(event) !== "assistant_message" ||
+    event.payload?.internal !== true
+  ) {
     return false;
   }
   const message = typeof event.payload?.message === "string" ? event.payload.message.trim() : "";
@@ -64,27 +72,40 @@ export const getCompletionSummaryText = (event: TaskEvent): string => {
   if (getEffectiveTaskEventType(event) !== "task_completed") return "";
   const resultSummary =
     typeof event.payload?.resultSummary === "string" ? event.payload.resultSummary.trim() : "";
-  const semanticSummary =
-    typeof event.payload?.semanticSummary === "string" ? event.payload.semanticSummary.trim() : "";
-  const verificationVerdict =
-    typeof event.payload?.verificationVerdict === "string"
-      ? event.payload.verificationVerdict.trim()
-      : "";
-  const verificationReport =
-    typeof event.payload?.verificationReport === "string"
-      ? event.payload.verificationReport.trim()
-      : "";
-  const summary = [resultSummary, semanticSummary].filter((value) => value.length > 0).join("\n\n");
-  if (!verificationVerdict && !verificationReport) {
-    return summary;
+  return formatUserFacingCompletionSummary({
+    resultSummary,
+    verificationVerdict: event.payload?.verificationVerdict,
+    verificationReport: event.payload?.verificationReport,
+  });
+};
+
+export const getAssistantBubbleStatusLabel = (
+  task: Pick<Task, "status" | "terminalStatus" | "awaitingUserInputReasonCode">,
+  blockedApprovalLabel = "Needs approval",
+): string => {
+  if (task.status === "completed") {
+    if (task.terminalStatus === "needs_user_action") return "Completed - action required";
+    if (task.terminalStatus === "partial_success") return "Completed - partial success";
+    // A successful answer should stand on its own. Decorating it with persona
+    // copy such as "All set." breaks exact-output requests and makes the label
+    // look like part of the assistant response.
+    return "";
   }
-  const verification = [
-    verificationVerdict ? `Verification: ${verificationVerdict}` : "",
-    verificationReport || "",
-  ]
-    .filter((value) => value.length > 0)
-    .join("\n");
-  return [summary, verification].filter((value) => value.length > 0).join("\n\n");
+  if (task.status === "paused") {
+    return task.awaitingUserInputReasonCode === "skill_parameters"
+      ? "Waiting for your skill answer"
+      : "Waiting for your direction";
+  }
+  if (task.status === "blocked") {
+    return task.terminalStatus === "awaiting_approval"
+      ? blockedApprovalLabel || "Needs approval"
+      : "Waiting for your input";
+  }
+  if (task.status === "cancelled") return "Cancelled";
+  if (task.status === "interrupted" && task.terminalStatus === "resume_available") {
+    return "Interrupted - resume available";
+  }
+  return "";
 };
 
 export const isLowSignalPauseMessage = (
@@ -96,7 +117,10 @@ export const isLowSignalPauseMessage = (
   const lower = trimmed.toLowerCase();
   if (reasonCode && lower === String(reasonCode).trim().toLowerCase()) return true;
   if (
-    String(reasonCode || "").trim().toLowerCase().startsWith('required_decision') &&
+    String(reasonCode || "")
+      .trim()
+      .toLowerCase()
+      .startsWith("required_decision") &&
     /\b(best next task|recommend(?:ed|ation)?.{0,80}next task)\b/.test(lower)
   ) {
     return true;
@@ -135,7 +159,8 @@ export const getFailureEventText = (event: TaskEvent): string => {
   if (direct) return direct;
 
   const result = payload.result && typeof payload.result === "object" ? payload.result : null;
-  const resultError = result && typeof (result as Any).error === "string" ? (result as Any).error.trim() : "";
+  const resultError =
+    result && typeof (result as Any).error === "string" ? (result as Any).error.trim() : "";
   if (resultError) return resultError;
 
   const input = payload.input && typeof payload.input === "object" ? payload.input : null;
@@ -258,12 +283,14 @@ export function shouldSuppressInitialPromptUserEvent(params: {
   return eventTimestamp >= taskCreatedAt - 5_000 && eventTimestamp <= taskCreatedAt + 60_000;
 }
 
-export function deriveTaskHeaderPresentation(task?: {
-  title?: string | null;
-  prompt?: string | null;
-  rawPrompt?: string | null;
-  userPrompt?: string | null;
-} | null): {
+export function deriveTaskHeaderPresentation(
+  task?: {
+    title?: string | null;
+    prompt?: string | null;
+    rawPrompt?: string | null;
+    userPrompt?: string | null;
+  } | null,
+): {
   cleanedDisplayPrompt: string;
   trimmedPrompt: string;
   promptAttachmentNames: string[];
@@ -283,7 +310,9 @@ export function deriveTaskHeaderPresentation(task?: {
     ? normalizeInitialPromptText(displayPromptValue)
     : "";
   const trimmedPromptValue = cleanedDisplayPromptValue.trim();
-  const promptAttachmentNamesValue = displayPromptValue ? extractAttachmentNames(displayPromptValue) : [];
+  const promptAttachmentNamesValue = displayPromptValue
+    ? extractAttachmentNames(displayPromptValue)
+    : [];
   const baseTitleValue = task?.title || buildTaskTitle(trimmedPromptValue);
   const normalizedTitle = baseTitleValue.replace(TITLE_ELLIPSIS_REGEX, "").trim();
   const titleMatchesPrompt =
@@ -439,7 +468,8 @@ export function humanizeTimelineMessage(message: string): string {
 
   // Other technical patterns
   if (m.startsWith("execution_run_summary")) return "Execution summary";
-  if (/^\[verified-mode\]/i.test(m)) return m.replace(/^\[verified-mode\]\s*/i, "").trim() || "Verification";
+  if (/^\[verified-mode\]/i.test(m))
+    return m.replace(/^\[verified-mode\]\s*/i, "").trim() || "Verification";
   if (m.includes("Suppressed raw tool-call markup")) return "Cleaned up model output";
   if (m.includes("Security:") && m.includes("Suspicious output")) return "Security check applied";
   if (m.includes("Security:") && m.includes("Potential injection")) return "Security check applied";
@@ -449,12 +479,16 @@ export function humanizeTimelineMessage(message: string): string {
   if (m.includes("Step timeout detected")) return "Step took too long; finishing with best effort";
   if (m.includes("Wrap-up requested")) return "Finishing up";
   if (m.includes("Answer-first short-circuit")) return "Answered directly (simple prompt)";
-  if (m.includes("Answer-first non-execute short-circuit")) return "Answered directly (no execution needed)";
+  if (m.includes("Answer-first non-execute short-circuit"))
+    return "Answered directly (no execution needed)";
   if (m.includes("Pre-flight framing failed")) return "Continuing with execution";
   if (m.includes("Answer-first pre-response failed")) return "Continuing with full execution";
-  if (m.includes("Applied /batch external=none policy")) return "Running in batch mode (no external tools)";
-  if (m.includes("User granted explicit external side-effect approval")) return "Approved to use external tools";
-  if (m.includes("External side-effect approval request failed")) return "Could not get approval for external tools";
+  if (m.includes("Applied /batch external=none policy"))
+    return "Running in batch mode (no external tools)";
+  if (m.includes("User granted explicit external side-effect approval"))
+    return "Approved to use external tools";
+  if (m.includes("External side-effect approval request failed"))
+    return "Could not get approval for external tools";
   if (m.includes("Normalized /") && m.includes("to deterministic skill")) return "Running skill";
   if (m.includes("Detected inline /") && m.includes("chain")) return "Running skill chain";
   if (m.includes("Step soft deadline reached")) return "Step time limit approached";

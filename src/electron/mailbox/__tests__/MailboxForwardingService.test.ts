@@ -73,56 +73,58 @@ describeWithSqlite("MailboxForwardingService", () => {
     let createdLabelCount = 0;
     const modifiedThreadCalls: Array<Record<string, unknown>> = [];
 
-    gmailRequestMock.mockImplementation(async (_settings: unknown, options: { path: string; method: string; body?: Any }) => {
-      if (options.path === "/users/me/labels" && options.method === "GET") {
-        return { status: 200, data: { labels: [] } };
-      }
-      if (options.path === "/users/me/labels" && options.method === "POST") {
-        createdLabelCount += 1;
-        return { status: 200, data: { id: `label-${createdLabelCount}` } };
-      }
-      if (options.path === "/users/me/messages" && options.method === "GET") {
-        return { status: 200, data: { messages: [{ id: "msg-1", threadId: "thread-1" }] } };
-      }
-      if (options.path === "/users/me/threads/thread-1" && options.method === "GET") {
-        return {
-          status: 200,
-          data: {
-            id: "thread-1",
-            messages: [
-              {
-                id: "msg-1",
-                threadId: "thread-1",
-                internalDate: Date.now(),
-                labelIds: ["INBOX"],
-                payload: {
-                  headers: [
-                    { name: "From", value: "Vendor Billing <billing@vendor.com>" },
-                    { name: "Subject", value: "Invoice April" },
-                  ],
-                  parts: [
-                    {
-                      mimeType: "text/plain",
-                      body: { data: Buffer.from("Invoice attached").toString("base64url") },
-                    },
-                    {
-                      filename: "invoice-april.pdf",
-                      mimeType: "application/pdf",
-                      body: { data: Buffer.from("fake-pdf").toString("base64url") },
-                    },
-                  ],
+    gmailRequestMock.mockImplementation(
+      async (_settings: unknown, options: { path: string; method: string; body?: Any }) => {
+        if (options.path === "/users/me/labels" && options.method === "GET") {
+          return { status: 200, data: { labels: [] } };
+        }
+        if (options.path === "/users/me/labels" && options.method === "POST") {
+          createdLabelCount += 1;
+          return { status: 200, data: { id: `label-${createdLabelCount}` } };
+        }
+        if (options.path === "/users/me/messages" && options.method === "GET") {
+          return { status: 200, data: { messages: [{ id: "msg-1", threadId: "thread-1" }] } };
+        }
+        if (options.path === "/users/me/threads/thread-1" && options.method === "GET") {
+          return {
+            status: 200,
+            data: {
+              id: "thread-1",
+              messages: [
+                {
+                  id: "msg-1",
+                  threadId: "thread-1",
+                  internalDate: Date.now(),
+                  labelIds: ["INBOX"],
+                  payload: {
+                    headers: [
+                      { name: "From", value: "Vendor Billing <billing@vendor.com>" },
+                      { name: "Subject", value: "Invoice April" },
+                    ],
+                    parts: [
+                      {
+                        mimeType: "text/plain",
+                        body: { data: Buffer.from("Invoice attached").toString("base64url") },
+                      },
+                      {
+                        filename: "invoice-april.pdf",
+                        mimeType: "application/pdf",
+                        body: { data: Buffer.from("fake-pdf").toString("base64url") },
+                      },
+                    ],
+                  },
                 },
-              },
-            ],
-          },
-        };
-      }
-      if (options.path === "/users/me/threads/thread-1/modify" && options.method === "POST") {
-        modifiedThreadCalls.push(options.body || {});
-        return { status: 200, data: {} };
-      }
-      throw new Error(`Unhandled gmailRequest call: ${options.method} ${options.path}`);
-    });
+              ],
+            },
+          };
+        }
+        if (options.path === "/users/me/threads/thread-1/modify" && options.method === "POST") {
+          modifiedThreadCalls.push(options.body || {});
+          return { status: 200, data: {} };
+        }
+        throw new Error(`Unhandled gmailRequest call: ${options.method} ${options.path}`);
+      },
+    );
 
     const service = new MailboxForwardingService({ db });
     const summary = await service.runNow(created.id);
@@ -156,54 +158,61 @@ describeWithSqlite("MailboxForwardingService", () => {
       dryRun: true,
     });
 
-    gmailRequestMock.mockImplementation(async (_settings: unknown, options: { path: string; method: string; body?: Any }) => {
-      if (options.path === "/users/me/labels" && options.method === "GET") {
-        return { status: 200, data: { labels: [] } };
-      }
-      if (options.path === "/users/me/labels" && options.method === "POST") {
-        return { status: 200, data: { id: `label-${Math.random()}` } };
-      }
-      if (options.path === "/users/me/messages" && options.method === "GET") {
-        throw new Error("Mailbox-wide message search should not run for provider-thread scoped automations");
-      }
-      if (options.path === "/users/me/threads/provider-thread-42" && options.method === "GET") {
-        return {
-          status: 200,
-          data: {
-            id: "provider-thread-42",
-            messages: [
-              {
-                id: "msg-thread-only",
-                threadId: "provider-thread-42",
-                internalDate: Date.now(),
-                labelIds: ["INBOX"],
-                payload: {
-                  headers: [
-                    { name: "From", value: "Vendor Billing <billing@vendor.com>" },
-                    { name: "Subject", value: "Thread scoped invoice" },
-                  ],
-                  parts: [
-                    {
-                      mimeType: "text/plain",
-                      body: { data: Buffer.from("Invoice attached").toString("base64url") },
-                    },
-                    {
-                      filename: "thread-only.pdf",
-                      mimeType: "application/pdf",
-                      body: { data: Buffer.from("fake-pdf").toString("base64url") },
-                    },
-                  ],
+    gmailRequestMock.mockImplementation(
+      async (_settings: unknown, options: { path: string; method: string; body?: Any }) => {
+        if (options.path === "/users/me/labels" && options.method === "GET") {
+          return { status: 200, data: { labels: [] } };
+        }
+        if (options.path === "/users/me/labels" && options.method === "POST") {
+          return { status: 200, data: { id: `label-${Math.random()}` } };
+        }
+        if (options.path === "/users/me/messages" && options.method === "GET") {
+          throw new Error(
+            "Mailbox-wide message search should not run for provider-thread scoped automations",
+          );
+        }
+        if (options.path === "/users/me/threads/provider-thread-42" && options.method === "GET") {
+          return {
+            status: 200,
+            data: {
+              id: "provider-thread-42",
+              messages: [
+                {
+                  id: "msg-thread-only",
+                  threadId: "provider-thread-42",
+                  internalDate: Date.now(),
+                  labelIds: ["INBOX"],
+                  payload: {
+                    headers: [
+                      { name: "From", value: "Vendor Billing <billing@vendor.com>" },
+                      { name: "Subject", value: "Thread scoped invoice" },
+                    ],
+                    parts: [
+                      {
+                        mimeType: "text/plain",
+                        body: { data: Buffer.from("Invoice attached").toString("base64url") },
+                      },
+                      {
+                        filename: "thread-only.pdf",
+                        mimeType: "application/pdf",
+                        body: { data: Buffer.from("fake-pdf").toString("base64url") },
+                      },
+                    ],
+                  },
                 },
-              },
-            ],
-          },
-        };
-      }
-      if (options.path === "/users/me/threads/provider-thread-42/modify" && options.method === "POST") {
-        return { status: 200, data: {} };
-      }
-      throw new Error(`Unhandled gmailRequest call: ${options.method} ${options.path}`);
-    });
+              ],
+            },
+          };
+        }
+        if (
+          options.path === "/users/me/threads/provider-thread-42/modify" &&
+          options.method === "POST"
+        ) {
+          return { status: 200, data: {} };
+        }
+        throw new Error(`Unhandled gmailRequest call: ${options.method} ${options.path}`);
+      },
+    );
 
     const service = new MailboxForwardingService({ db });
     const summary = await service.runNow(created.id);
@@ -233,62 +242,67 @@ describeWithSqlite("MailboxForwardingService", () => {
     const messageQueries: string[] = [];
     let sendCount = 0;
 
-    gmailRequestMock.mockImplementation(async (_settings: unknown, options: { path: string; method: string; body?: Any; query?: Record<string, unknown> }) => {
-      if (options.path === "/users/me/labels" && options.method === "GET") {
-        return { status: 200, data: { labels: [] } };
-      }
-      if (options.path === "/users/me/labels" && options.method === "POST") {
-        return { status: 200, data: { id: `label-${Math.random()}` } };
-      }
-      if (options.path === "/users/me/messages" && options.method === "GET") {
-        messageQueries.push(String(options.query?.q || ""));
-        if (messageQueries.length === 1) {
-          return { status: 200, data: { messages: [{ id: "msg-1", threadId: "thread-1" }] } };
+    gmailRequestMock.mockImplementation(
+      async (
+        _settings: unknown,
+        options: { path: string; method: string; body?: Any; query?: Record<string, unknown> },
+      ) => {
+        if (options.path === "/users/me/labels" && options.method === "GET") {
+          return { status: 200, data: { labels: [] } };
         }
-        return { status: 200, data: { messages: [] } };
-      }
-      if (options.path === "/users/me/threads/thread-1" && options.method === "GET") {
-        return {
-          status: 200,
-          data: {
-            id: "thread-1",
-            messages: [
-              {
-                id: "msg-1",
-                threadId: "thread-1",
-                internalDate: Date.now(),
-                labelIds: ["INBOX"],
-                payload: {
-                  headers: [
-                    { name: "From", value: "Vendor Billing <billing@vendor.com>" },
-                    { name: "Subject", value: "Invoice April" },
-                  ],
-                  parts: [
-                    {
-                      mimeType: "text/plain",
-                      body: { data: Buffer.from("Invoice attached").toString("base64url") },
-                    },
-                    {
-                      filename: "invoice-april.pdf",
-                      mimeType: "application/pdf",
-                      body: { data: Buffer.from("fake-pdf").toString("base64url") },
-                    },
-                  ],
+        if (options.path === "/users/me/labels" && options.method === "POST") {
+          return { status: 200, data: { id: `label-${Math.random()}` } };
+        }
+        if (options.path === "/users/me/messages" && options.method === "GET") {
+          messageQueries.push(String(options.query?.q || ""));
+          if (messageQueries.length === 1) {
+            return { status: 200, data: { messages: [{ id: "msg-1", threadId: "thread-1" }] } };
+          }
+          return { status: 200, data: { messages: [] } };
+        }
+        if (options.path === "/users/me/threads/thread-1" && options.method === "GET") {
+          return {
+            status: 200,
+            data: {
+              id: "thread-1",
+              messages: [
+                {
+                  id: "msg-1",
+                  threadId: "thread-1",
+                  internalDate: Date.now(),
+                  labelIds: ["INBOX"],
+                  payload: {
+                    headers: [
+                      { name: "From", value: "Vendor Billing <billing@vendor.com>" },
+                      { name: "Subject", value: "Invoice April" },
+                    ],
+                    parts: [
+                      {
+                        mimeType: "text/plain",
+                        body: { data: Buffer.from("Invoice attached").toString("base64url") },
+                      },
+                      {
+                        filename: "invoice-april.pdf",
+                        mimeType: "application/pdf",
+                        body: { data: Buffer.from("fake-pdf").toString("base64url") },
+                      },
+                    ],
+                  },
                 },
-              },
-            ],
-          },
-        };
-      }
-      if (options.path === "/users/me/threads/thread-1/modify" && options.method === "POST") {
-        return { status: 200, data: {} };
-      }
-      if (options.path === "/users/me/messages/send" && options.method === "POST") {
-        sendCount += 1;
-        return { status: 200, data: { id: `sent-${sendCount}` } };
-      }
-      throw new Error(`Unhandled gmailRequest call: ${options.method} ${options.path}`);
-    });
+              ],
+            },
+          };
+        }
+        if (options.path === "/users/me/threads/thread-1/modify" && options.method === "POST") {
+          return { status: 200, data: {} };
+        }
+        if (options.path === "/users/me/messages/send" && options.method === "POST") {
+          sendCount += 1;
+          return { status: 200, data: { id: `sent-${sendCount}` } };
+        }
+        throw new Error(`Unhandled gmailRequest call: ${options.method} ${options.path}`);
+      },
+    );
 
     const service = new MailboxForwardingService({ db });
     await service.runNow(created.id);
@@ -321,18 +335,20 @@ describeWithSqlite("MailboxForwardingService", () => {
     });
     MailboxAutomationRegistry.setForwardNextRun(created.id, Date.parse("2026-04-23T11:00:00.000Z"));
 
-    gmailRequestMock.mockImplementation(async (_settings: unknown, options: { path: string; method: string; body?: Any }) => {
-      if (options.path === "/users/me/labels" && options.method === "GET") {
-        return { status: 200, data: { labels: [] } };
-      }
-      if (options.path === "/users/me/labels" && options.method === "POST") {
-        return { status: 200, data: { id: `label-${Math.random()}` } };
-      }
-      if (options.path === "/users/me/messages" && options.method === "GET") {
-        return { status: 200, data: { messages: [] } };
-      }
-      throw new Error(`Unhandled gmailRequest call: ${options.method} ${options.path}`);
-    });
+    gmailRequestMock.mockImplementation(
+      async (_settings: unknown, options: { path: string; method: string; body?: Any }) => {
+        if (options.path === "/users/me/labels" && options.method === "GET") {
+          return { status: 200, data: { labels: [] } };
+        }
+        if (options.path === "/users/me/labels" && options.method === "POST") {
+          return { status: 200, data: { id: `label-${Math.random()}` } };
+        }
+        if (options.path === "/users/me/messages" && options.method === "GET") {
+          return { status: 200, data: { messages: [] } };
+        }
+        throw new Error(`Unhandled gmailRequest call: ${options.method} ${options.path}`);
+      },
+    );
 
     const service = new MailboxForwardingService({ db });
     await service.runNow(created.id);

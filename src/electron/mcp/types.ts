@@ -24,6 +24,14 @@ export interface MCPAuthConfig {
   username?: string;
   password?: string; // Encrypted when stored
   headerName?: string; // Custom header name for API key auth
+
+  // Optional OAuth refresh metadata. The access token still travels as a
+  // bearer token; these fields let HTTP transports renew it when needed.
+  refreshToken?: string; // Encrypted when stored
+  clientId?: string;
+  clientSecret?: string; // Encrypted when stored
+  tokenUrl?: string;
+  expiresAt?: number;
 }
 
 // MCP Server Configuration
@@ -40,9 +48,12 @@ export interface MCPServerConfig {
   env?: Record<string, string>; // Environment variables
   cwd?: string; // Working directory
 
-  // HTTP-based transport config (SSE/WebSocket)
+  // HTTP-based transport config (SSE/WebSocket/Streamable HTTP)
   url?: string; // e.g., "http://localhost:8080/mcp"
   headers?: Record<string, string>; // Custom headers
+
+  // Registry identity for built-in/managed remote connectors
+  registryId?: string;
 
   // Authentication
   auth?: MCPAuthConfig;
@@ -338,6 +349,7 @@ export interface MCPRegistryEntry {
   defaultCommand?: string;
   defaultArgs?: string[];
   defaultEnv?: Record<string, string>;
+  defaultUrl?: string;
 
   // Tool information
   tools: Array<{

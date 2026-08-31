@@ -33,7 +33,9 @@ describe("TaskExecutor — isRedirectIntent", () => {
     });
 
     it("detects 'ignore X and build Y'", () => {
-      expect(isRedirect("ignore the refactoring tasks and build the new onboarding flow")).toBe(true);
+      expect(isRedirect("ignore the refactoring tasks and build the new onboarding flow")).toBe(
+        true,
+      );
     });
   });
 
@@ -65,9 +67,9 @@ describe("TaskExecutor — isRedirectIntent", () => {
 
   describe("Pattern 3 — contrast pivot", () => {
     it("detects 'instead of X, focus on Y'", () => {
-      expect(
-        isRedirect("instead of refactoring the old code, focus on writing new tests"),
-      ).toBe(true);
+      expect(isRedirect("instead of refactoring the old code, focus on writing new tests")).toBe(
+        true,
+      );
     });
 
     it("detects 'rather than X, build Y'", () => {
@@ -95,7 +97,9 @@ describe("TaskExecutor — isRedirectIntent", () => {
     });
 
     it("detects 'drop X, concentrate on Y'", () => {
-      expect(isRedirect("drop the OpenClaw integration, concentrate on the new features")).toBe(true);
+      expect(isRedirect("drop the OpenClaw integration, concentrate on the new features")).toBe(
+        true,
+      );
     });
 
     it("detects 'abandon X, focus instead'", () => {

@@ -1,10 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { PermissionRule } from "../../shared/types";
-import {
-  normalizePermissionScope,
-  permissionRuleFingerprint,
-} from "./permission-utils";
+import { normalizePermissionScope, permissionRuleFingerprint } from "./permission-utils";
 
 const MANIFEST_RELATIVE_PATH = path.join(".cowork", "policy", "permissions.json");
 
@@ -17,7 +14,9 @@ export function getWorkspacePermissionManifestPath(workspacePath: string): strin
   return path.join(workspacePath, MANIFEST_RELATIVE_PATH);
 }
 
-export function loadWorkspacePermissionManifest(workspacePath: string): WorkspacePermissionManifest {
+export function loadWorkspacePermissionManifest(
+  workspacePath: string,
+): WorkspacePermissionManifest {
   const manifestPath = getWorkspacePermissionManifestPath(workspacePath);
   try {
     const raw = fs.readFileSync(manifestPath, "utf8");

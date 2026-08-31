@@ -262,8 +262,7 @@ export class WalletManager {
   }
 
   private static getBaseRpcUrls(): string[] {
-    const fromEnv = process.env.COWORK_BASE_RPC_URLS
-      ?.split(",")
+    const fromEnv = process.env.COWORK_BASE_RPC_URLS?.split(",")
       .map((value) => value.trim())
       .filter(Boolean);
     if (fromEnv && fromEnv.length > 0) {
@@ -292,10 +291,7 @@ export class WalletManager {
 
   private static logRpcFailure(rpcUrl: string, error: unknown): void {
     const message = this.errorToMessage(error);
-    this.logWarnThrottled(
-      rpcUrl,
-      `[WalletManager] Balance fetch failed (${rpcUrl}): ${message}`,
-    );
+    this.logWarnThrottled(rpcUrl, `[WalletManager] Balance fetch failed (${rpcUrl}): ${message}`);
   }
 
   private static logWarnThrottled(scope: string, message: string): void {

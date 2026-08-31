@@ -49,11 +49,9 @@ describe("Codex Security plugin pack", () => {
       ]),
     );
     for (const skill of manifest.skillDirectories as Array<{ path: string }>) {
-      expect(
-        fs.existsSync(
-          path.resolve(path.dirname(MANIFEST_PATH), skill.path, "SKILL.md"),
-        ),
-      ).toBe(true);
+      expect(fs.existsSync(path.resolve(path.dirname(MANIFEST_PATH), skill.path, "SKILL.md"))).toBe(
+        true,
+      );
     }
   });
 });

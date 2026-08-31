@@ -107,13 +107,13 @@ export interface ConnectorProfileViewProps {
     p: ConnectorProvider,
     id: string,
     name: string,
-    env?: Record<string, string>
+    env?: Record<string, string>,
   ) => void;
   onOpenEnvModal: (
     id: string,
     name: string,
     env: Record<string, string> | undefined,
-    fields: ConnectorEnvField[]
+    fields: ConnectorEnvField[],
   ) => void;
   onUpdate?: (serverId: string) => void | Promise<void>;
 }
@@ -155,7 +155,9 @@ export function ConnectorProfileView({
         // ignore
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [connector.registryId]);
 
   useEffect(() => {
@@ -170,7 +172,9 @@ export function ConnectorProfileView({
         // ignore
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [config?.id]);
 
   const tools = status?.tools ?? registryEntry?.tools ?? [];
@@ -227,21 +231,11 @@ export function ConnectorProfileView({
       <div className="cm-profile-modal" onClick={(e) => e.stopPropagation()}>
         {/* Top nav: Back + Close */}
         <div className="cm-profile-nav">
-          <button
-            type="button"
-            className="cm-profile-back"
-            onClick={onClose}
-            aria-label="Back"
-          >
+          <button type="button" className="cm-profile-back" onClick={onClose} aria-label="Back">
             <ArrowLeft size={18} strokeWidth={2} />
             <span>Back</span>
           </button>
-          <button
-            type="button"
-            className="mcp-modal-close"
-            onClick={onClose}
-            aria-label="Close"
-          >
+          <button type="button" className="mcp-modal-close" onClick={onClose} aria-label="Close">
             ×
           </button>
         </div>
@@ -290,17 +284,20 @@ export function ConnectorProfileView({
                 OAuth Setup
               </button>
             )}
-            {isInstalled && !isConnected && connector.envFields && connector.envFields.length > 0 && (
-              <button
-                type="button"
-                className="button-secondary button-small"
-                onClick={() =>
-                  onOpenEnvModal(config!.id, config!.name, config!.env, connector.envFields!)
-                }
-              >
-                Configure
-              </button>
-            )}
+            {isInstalled &&
+              !isConnected &&
+              connector.envFields &&
+              connector.envFields.length > 0 && (
+                <button
+                  type="button"
+                  className="button-secondary button-small"
+                  onClick={() =>
+                    onOpenEnvModal(config!.id, config!.name, config!.env, connector.envFields!)
+                  }
+                >
+                  Configure
+                </button>
+              )}
           </div>
         </div>
 
@@ -314,193 +311,190 @@ export function ConnectorProfileView({
         )}
 
         <div className="cm-profile-body">
-        {/* Example cards */}
-        {examples.length > 0 && (
-          <div className="cm-profile-examples">
-            <h3 className="cm-profile-section-label">Examples</h3>
-            <div className="cm-profile-examples-grid">
-              {examples.map((ex, i) => (
-                <div key={i} className="cm-example-card">
-                  <div className="cm-example-prompt">{ex.prompt}</div>
-                  <div className="cm-example-result">
-                    {ex.resultImageUrl ? (
-                      <img src={ex.resultImageUrl} alt={ex.resultLabel ?? "Example output"} />
-                    ) : (
-                      <div className="cm-example-placeholder">
-                        {ex.resultLabel ?? "Example output"}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Description */}
-        <div className="cm-profile-description">
-          <p>{longDescription}</p>
-        </div>
-
-        {/* Key features */}
-        {keyFeatures.length > 0 && (
-          <div className="cm-profile-features">
-            <h3 className="cm-profile-section-label">Key features</h3>
-            <ul className="cm-profile-features-list">
-              {keyFeatures.map((f, i) => (
-                <li key={i}>
-                  <strong>{f.title}</strong> — {f.description}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Developed by & Trust warning (for MCP connectors) */}
-        {(author || registryEntry || toolNames.length > 0) && (
-          <div className="cm-profile-developed-by">
-            {author && (
-              <p className="cm-profile-developed-by-text">
-                <span className="cm-profile-developed-by-label">Developed by</span>{" "}
-                {homepage ? (
-                  <a
-                    href={homepage}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="cm-profile-author-link"
-                  >
-                    {author}
-                    <ExternalLink size={12} strokeWidth={2} />
-                  </a>
-                ) : (
-                  author
-                )}
-              </p>
-            )}
-            <p className="cm-profile-trust-warning">
-              Only use connectors from developers you trust. Anthropic does not control these tools.
-            </p>
-          </div>
-        )}
-
-        {/* Tools */}
-        {toolNames.length > 0 && (
-          <div className="cm-profile-tools">
-            <h3 className="cm-profile-section-label">
-              Tools <span className="cm-profile-tools-badge">{toolNames.length}</span>
-            </h3>
-            <div className="cm-profile-tools-pills">
-              {toolNames.map((name) => (
-                <span key={name} className="cm-profile-tool-pill">
-                  {name}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Details */}
-        {(version || author || homepage || connectorUrl) && (
-          <div className="cm-profile-details">
-            <h3 className="cm-profile-section-label">Details</h3>
-            <div className="cm-profile-details-grid">
-              <div className="cm-profile-details-col">
-                {version && (
-                  <div className="cm-profile-detail-row">
-                    <span className="cm-profile-detail-label">Version</span>
-                    <span className="cm-profile-detail-value">
-                      {version}
-                      {updateInfo && (
-                        <span className="cm-profile-update-badge">Update available</span>
-                      )}
-                    </span>
-                  </div>
-                )}
-                <div className="cm-profile-detail-row">
-                  <span className="cm-profile-detail-label">Capabilities</span>
-                  <span className="cm-profile-detail-value">Interactive</span>
-                </div>
-                {(homepage || registryEntry?.repository) && (
-                  <div className="cm-profile-detail-row">
-                    <span className="cm-profile-detail-label">More info</span>
-                    <span className="cm-profile-detail-links">
-                      {homepage && (
-                        <a
-                          href={homepage}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="cm-profile-detail-link"
-                        >
-                          Documentation
-                          <ExternalLink size={12} strokeWidth={2} />
-                        </a>
-                      )}
-                      {registryEntry?.repository && (
-                        <a
-                          href={registryEntry.repository}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="cm-profile-detail-link"
-                        >
-                          Support
-                          <ExternalLink size={12} strokeWidth={2} />
-                        </a>
-                      )}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <div className="cm-profile-details-col">
-                {author && (
-                  <div className="cm-profile-detail-row">
-                    <span className="cm-profile-detail-label">Author</span>
-                    <span className="cm-profile-detail-value">
-                      {homepage ? (
-                        <a
-                          href={homepage}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="cm-profile-detail-link"
-                        >
-                          {author}
-                          <ExternalLink size={12} strokeWidth={2} />
-                        </a>
+          {/* Example cards */}
+          {examples.length > 0 && (
+            <div className="cm-profile-examples">
+              <h3 className="cm-profile-section-label">Examples</h3>
+              <div className="cm-profile-examples-grid">
+                {examples.map((ex, i) => (
+                  <div key={i} className="cm-example-card">
+                    <div className="cm-example-prompt">{ex.prompt}</div>
+                    <div className="cm-example-result">
+                      {ex.resultImageUrl ? (
+                        <img src={ex.resultImageUrl} alt={ex.resultLabel ?? "Example output"} />
                       ) : (
-                        author
+                        <div className="cm-example-placeholder">
+                          {ex.resultLabel ?? "Example output"}
+                        </div>
                       )}
-                    </span>
+                    </div>
                   </div>
-                )}
-                {connectorUrl && (
-                  <div className="cm-profile-detail-row">
-                    <span className="cm-profile-detail-label">Connector URL</span>
-                    <span className="cm-profile-detail-value cm-profile-detail-url">
-                      <code>{connectorUrl}</code>
-                      <button
-                        type="button"
-                        className="cm-profile-copy-btn"
-                        onClick={handleCopyUrl}
-                        aria-label="Copy URL"
-                      >
-                        <Copy size={14} strokeWidth={2} />
-                      </button>
-                    </span>
-                  </div>
-                )}
+                ))}
               </div>
             </div>
-          </div>
-        )}
+          )}
 
+          {/* Description */}
+          <div className="cm-profile-description">
+            <p>{longDescription}</p>
+          </div>
+
+          {/* Key features */}
+          {keyFeatures.length > 0 && (
+            <div className="cm-profile-features">
+              <h3 className="cm-profile-section-label">Key features</h3>
+              <ul className="cm-profile-features-list">
+                {keyFeatures.map((f, i) => (
+                  <li key={i}>
+                    <strong>{f.title}</strong> — {f.description}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Developed by & Trust warning (for MCP connectors) */}
+          {(author || registryEntry || toolNames.length > 0) && (
+            <div className="cm-profile-developed-by">
+              {author && (
+                <p className="cm-profile-developed-by-text">
+                  <span className="cm-profile-developed-by-label">Developed by</span>{" "}
+                  {homepage ? (
+                    <a
+                      href={homepage}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="cm-profile-author-link"
+                    >
+                      {author}
+                      <ExternalLink size={12} strokeWidth={2} />
+                    </a>
+                  ) : (
+                    author
+                  )}
+                </p>
+              )}
+              <p className="cm-profile-trust-warning">
+                Only use connectors from developers you trust. Anthropic does not control these
+                tools.
+              </p>
+            </div>
+          )}
+
+          {/* Tools */}
+          {toolNames.length > 0 && (
+            <div className="cm-profile-tools">
+              <h3 className="cm-profile-section-label">
+                Tools <span className="cm-profile-tools-badge">{toolNames.length}</span>
+              </h3>
+              <div className="cm-profile-tools-pills">
+                {toolNames.map((name) => (
+                  <span key={name} className="cm-profile-tool-pill">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Details */}
+          {(version || author || homepage || connectorUrl) && (
+            <div className="cm-profile-details">
+              <h3 className="cm-profile-section-label">Details</h3>
+              <div className="cm-profile-details-grid">
+                <div className="cm-profile-details-col">
+                  {version && (
+                    <div className="cm-profile-detail-row">
+                      <span className="cm-profile-detail-label">Version</span>
+                      <span className="cm-profile-detail-value">
+                        {version}
+                        {updateInfo && (
+                          <span className="cm-profile-update-badge">Update available</span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  <div className="cm-profile-detail-row">
+                    <span className="cm-profile-detail-label">Capabilities</span>
+                    <span className="cm-profile-detail-value">Interactive</span>
+                  </div>
+                  {(homepage || registryEntry?.repository) && (
+                    <div className="cm-profile-detail-row">
+                      <span className="cm-profile-detail-label">More info</span>
+                      <span className="cm-profile-detail-links">
+                        {homepage && (
+                          <a
+                            href={homepage}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="cm-profile-detail-link"
+                          >
+                            Documentation
+                            <ExternalLink size={12} strokeWidth={2} />
+                          </a>
+                        )}
+                        {registryEntry?.repository && (
+                          <a
+                            href={registryEntry.repository}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="cm-profile-detail-link"
+                          >
+                            Support
+                            <ExternalLink size={12} strokeWidth={2} />
+                          </a>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="cm-profile-details-col">
+                  {author && (
+                    <div className="cm-profile-detail-row">
+                      <span className="cm-profile-detail-label">Author</span>
+                      <span className="cm-profile-detail-value">
+                        {homepage ? (
+                          <a
+                            href={homepage}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="cm-profile-detail-link"
+                          >
+                            {author}
+                            <ExternalLink size={12} strokeWidth={2} />
+                          </a>
+                        ) : (
+                          author
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {connectorUrl && (
+                    <div className="cm-profile-detail-row">
+                      <span className="cm-profile-detail-label">Connector URL</span>
+                      <span className="cm-profile-detail-value cm-profile-detail-url">
+                        <code>{connectorUrl}</code>
+                        <button
+                          type="button"
+                          className="cm-profile-copy-btn"
+                          onClick={handleCopyUrl}
+                          aria-label="Copy URL"
+                        >
+                          <Copy size={14} strokeWidth={2} />
+                        </button>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Connection status & tools (compact) */}
         {isInstalled && (
           <div className="cm-profile-footer">
-            <span
-              className="cm-profile-status"
-              style={{ color: getStatusColor(serverStatus) }}
-            >
+            <span className="cm-profile-status" style={{ color: getStatusColor(serverStatus) }}>
               <span
                 className="mcp-status-dot"
                 style={{ backgroundColor: getStatusColor(serverStatus) }}

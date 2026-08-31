@@ -2,15 +2,8 @@ import { randomUUID } from "crypto";
 import type { JSONRPCRequest, JSONRPCResponse } from "../mcp/types";
 import { MCPHostServer } from "../mcp/host/MCPHostServer";
 import { createLogger } from "../utils/logger";
-import {
-  enforceTunnelPolicy,
-  getMcpToolName,
-  validateJsonRpcRequest,
-} from "./protocol";
-import type {
-  SecureMcpTunnelAuditEvent,
-  SecureMcpTunnelConfig,
-} from "./types";
+import { enforceTunnelPolicy, getMcpToolName, validateJsonRpcRequest } from "./protocol";
+import type { SecureMcpTunnelAuditEvent, SecureMcpTunnelConfig } from "./types";
 
 const logger = createLogger("McpTunnelForwarder");
 
@@ -22,7 +15,11 @@ export interface ForwardResult {
 export class McpTunnelForwarder {
   constructor(private readonly config: SecureMcpTunnelConfig) {}
 
-  async forward(payload: JSONRPCRequest, caller?: string, deadlineMs?: number): Promise<ForwardResult> {
+  async forward(
+    payload: JSONRPCRequest,
+    caller?: string,
+    deadlineMs?: number,
+  ): Promise<ForwardResult> {
     const startedAt = Date.now();
     const method = payload.method;
     const toolName = getMcpToolName(payload);
@@ -66,7 +63,11 @@ export class McpTunnelForwarder {
     } catch (error: Any) {
       logger.warn(`MCP tunnel forwarding failed for ${this.config.name}`, error);
       return {
-        response: buildJsonRpcError(payload.id, -32000, error?.message || "Tunnel forwarding failed"),
+        response: buildJsonRpcError(
+          payload.id,
+          -32000,
+          error?.message || "Tunnel forwarding failed",
+        ),
         auditEvent: this.buildAuditEvent({
           caller,
           method,
@@ -80,7 +81,10 @@ export class McpTunnelForwarder {
     }
   }
 
-  private async forwardHttp(payload: JSONRPCRequest, deadlineMs?: number): Promise<JSONRPCResponse> {
+  private async forwardHttp(
+    payload: JSONRPCRequest,
+    deadlineMs?: number,
+  ): Promise<JSONRPCResponse> {
     const targetUrl = this.getTargetUrl();
     const timeoutMs = Math.min(
       this.config.policy.requestTimeoutMs,

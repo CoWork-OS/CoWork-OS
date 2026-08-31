@@ -17,9 +17,21 @@ import type {
 import { parseDocxBlocksFromBuffer } from "./docx-blocks";
 import { editPdfRegion } from "./pdf-region-editor";
 import { extractPdfReviewData } from "../utils/pdf-review";
+import {
+  applyAccessProfileToWorkspace,
+  applyDefaultAccessProfile,
+  resolveEffectiveAccessProfile,
+} from "../security/access-profile-resolver";
+import {
+  assertWorkspaceFilesystemAccess,
+  evaluateWorkspaceFilesystemAccess,
+} from "../security/access-profile-paths";
+import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { loadPolicies } from "../admin/policies";
 
 type SessionRecord = {
   id: string;
+  workspaceId: string;
   workspacePath?: string;
   basePath: string;
   currentPath: string;
@@ -48,12 +60,6 @@ function getFileType(filePath: string): "pdf" | "docx" | null {
   if (ext === ".pdf") return "pdf";
   if (ext === ".docx") return "docx";
   return null;
-}
-
-function ensureWithinAllowedRoots(targetPath: string, allowedRoots: string[]): boolean {
-  return allowedRoots.some(
-    (root) => targetPath === root || targetPath.startsWith(`${root}${path.sep}`),
-  );
 }
 
 function normalizeVersionBase(filePath: string): { dir: string; ext: string; stem: string } {
@@ -102,31 +108,37 @@ export class DocumentEditorSessionService {
     return fsSync.realpathSync(candidate);
   }
 
-  private assertWritablePath(filePath: string, workspacePath?: string): void {
-    const allowedRoots = new Set<string>();
-    if (workspacePath) {
-      allowedRoots.add(fsSync.existsSync(workspacePath) ? fsSync.realpathSync(workspacePath) : path.resolve(workspacePath));
+  private assertDocumentPathAccess(
+    workspace: Workspace,
+    filePath: string,
+    operation: "read" | "write",
+  ): string {
+    return assertWorkspaceFilesystemAccess(workspace, filePath, operation, "document path");
+  }
+
+  private findWorkspaceById(workspaceId: string): Workspace | undefined {
+    const repository = this.workspaceRepo as Any;
+    if (typeof repository.findById === "function") {
+      return repository.findById(workspaceId) || undefined;
     }
-    for (const workspace of this.workspaceRepo.findAll()) {
-      if (fsSync.existsSync(workspace.path)) {
-        allowedRoots.add(fsSync.realpathSync(workspace.path));
-      }
-      for (const allowedPath of workspace.permissions.allowedPaths || []) {
-        if (fsSync.existsSync(allowedPath)) {
-          allowedRoots.add(fsSync.realpathSync(allowedPath));
-        } else {
-          allowedRoots.add(path.resolve(allowedPath));
-        }
-      }
-    }
-    if (!ensureWithinAllowedRoots(filePath, Array.from(allowedRoots))) {
-      throw new Error("Access denied: document path is outside the workspace or allowed paths.");
-    }
+    return typeof repository.findAll === "function"
+      ? repository.findAll().find((workspace: Workspace) => workspace.id === workspaceId)
+      : undefined;
   }
 
   listVersions(filePath: string, workspacePath?: string): DocumentVersionEntry[] {
     const resolvedPath = this.resolvePath(filePath, workspacePath);
+    const workspace = this.resolveWorkspaceForPath(resolvedPath, workspacePath);
+    const visiblePath = (candidate: string): boolean => {
+      try {
+        this.assertDocumentPathAccess(workspace, candidate, "read");
+        return true;
+      } catch {
+        return false;
+      }
+    };
     const { dir, ext, stem } = normalizeVersionBase(resolvedPath);
+    this.assertDocumentPathAccess(workspace, dir, "read");
     const entries = fsSync
       .readdirSync(dir, { withFileTypes: true })
       .filter((entry) => entry.isFile())
@@ -135,7 +147,7 @@ export class DocumentEditorSessionService {
         const candidateExt = path.extname(candidate).toLowerCase();
         if (candidateExt !== ext.toLowerCase()) return false;
         const candidateStem = path.basename(candidate, candidateExt).replace(/-v\d+$/i, "");
-        return candidateStem === stem;
+        return candidateStem === stem && visiblePath(candidate);
       })
       .sort((a, b) => versionSortKey(a) - versionSortKey(b));
 
@@ -161,18 +173,90 @@ export class DocumentEditorSessionService {
     return path.join(dir, `${stem}-v${nextVersion}${ext}`);
   }
 
-  private resolveWorkspaceForPath(filePath: string): Workspace {
-    const workspace = this.workspaceRepo.findAll().find((item) => {
-      const roots = [item.path, ...(item.permissions.allowedPaths || [])]
-        .map((candidate) =>
-          fsSync.existsSync(candidate) ? fsSync.realpathSync(candidate) : path.resolve(candidate),
-        );
-      return ensureWithinAllowedRoots(filePath, roots);
+  private resolveWorkspaceForPath(filePath: string, preferredWorkspacePath?: string): Workspace {
+    const normalizedPreferred = preferredWorkspacePath
+      ? path.resolve(preferredWorkspacePath)
+      : undefined;
+    const workspaces = this.workspaceRepo.findAll();
+    const ordered = normalizedPreferred
+      ? [...workspaces].sort((a, b) => {
+          const aMatch = path.resolve(a.path) === normalizedPreferred ? 0 : 1;
+          const bMatch = path.resolve(b.path) === normalizedPreferred ? 0 : 1;
+          return aMatch - bMatch;
+        })
+      : workspaces;
+    const workspace = ordered.find((item) => {
+      try {
+        // Workspace/profile roots, filesystem deny rules, symlink resolution,
+        // and legacy allowed paths all live in the shared evaluator. Keeping
+        // editor workspace discovery on that path prevents a file that is
+        // visible to the editor from bypassing a named profile boundary later.
+        return evaluateWorkspaceFilesystemAccess(item, filePath, "read").decision === "allow";
+      } catch {
+        return false;
+      }
     });
     if (!workspace) {
       throw new Error("Could not resolve workspace for editable document.");
     }
     return workspace;
+  }
+
+  private getEffectiveWorkspace(workspace: Workspace, task?: Task): Workspace {
+    // A document opened from a task inherits that task's exact profile. A
+    // standalone editor task gets the current configured default profile when
+    // it is created below; opening the file itself still uses the workspace's
+    // persisted boundary so legacy allowed-path documents remain discoverable.
+    if (!task) return workspace;
+    const profile = resolveEffectiveAccessProfile({
+      task,
+      workspace,
+      settings: PermissionSettingsManager.loadSettings(),
+      adminPolicies: loadPolicies(),
+    });
+    return applyAccessProfileToWorkspace(workspace, profile);
+  }
+
+  private async ensureDirectPdfAccess(
+    task: Task,
+    workspace: Workspace,
+    sourcePath: string,
+    destPath: string,
+  ): Promise<void> {
+    const effectiveWorkspace = this.getEffectiveWorkspace(workspace, task);
+    for (const [candidate, operation] of [
+      [sourcePath, "read"],
+      [destPath, "write"],
+    ] as const) {
+      const decision = evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidate, operation);
+      if (decision.decision === "allow") continue;
+      if (decision.reason !== "outside_workspace") {
+        throw new Error(`Access denied for document ${operation}: ${candidate}`);
+      }
+
+      const approved = await this.agentDaemon.requestApproval(
+        task.id,
+        "external_file_access",
+        `Allow ${operation} access to external document: ${candidate}`,
+        {
+          path: candidate,
+          operation,
+          tool: "document_editor",
+        },
+      );
+      if (!approved) {
+        throw new Error(`External document ${operation} was not approved.`);
+      }
+      const granted = evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidate, operation, {
+        externalApprovalGranted: true,
+      });
+      if (granted.decision !== "allow") {
+        throw new Error(`Access denied for document ${operation}: ${granted.reason}`);
+      }
+      const consume = (this.agentDaemon as Any).consumeExternalFileApproval;
+      if (typeof consume === "function")
+        consume.call(this.agentDaemon, task.id, candidate, operation);
+    }
   }
 
   private createDirectDocumentTask(params: {
@@ -182,6 +266,13 @@ export class DocumentEditorSessionService {
     prompt: string;
     instruction: string;
   }): Task {
+    const sourceTask = params.session.sourceTaskId
+      ? this.taskRepo.findById(params.session.sourceTaskId)
+      : undefined;
+    const agentConfig = applyDefaultAccessProfile(
+      sourceTask?.agentConfig,
+      PermissionSettingsManager.loadSettings(),
+    );
     const hasParent = Boolean(
       params.session.sourceTaskId && this.taskRepo.findById(params.session.sourceTaskId),
     );
@@ -195,6 +286,7 @@ export class DocumentEditorSessionService {
       parentTaskId: hasParent ? params.session.sourceTaskId : undefined,
       agentType: hasParent ? "sub" : "main",
       depth: hasParent ? 1 : 0,
+      agentConfig,
       source: "manual",
     });
     this.agentDaemon.logEvent(task.id, "task_created", { task });
@@ -226,6 +318,9 @@ export class DocumentEditorSessionService {
     const { task, sourcePath, destPath, selection, instruction } = params;
     const stepId = "document_edit:pdf";
     try {
+      const workspace = this.findWorkspaceById(task.workspaceId);
+      if (!workspace) throw new Error("Document workspace not found.");
+      await this.ensureDirectPdfAccess(task, workspace, sourcePath, destPath);
       this.agentDaemon.logEvent(task.id, "timeline_step_updated", {
         stepId,
         status: "in_progress",
@@ -306,12 +401,33 @@ export class DocumentEditorSessionService {
       throw new Error("Only PDF and DOCX files are editable.");
     }
 
-    this.assertWritablePath(resolvedPath, workspacePath);
+    const workspace = this.resolveWorkspaceForPath(resolvedPath, workspacePath);
+    const allVersions = this.listVersions(resolvedPath, workspace.path);
+    const sourceArtifact =
+      this.artifactRepo.findLatestByPath(allVersions[allVersions.length - 1]?.path || "") ||
+      this.artifactRepo.findLatestByPath(resolvedPath);
+    const sourceTask = sourceArtifact?.taskId
+      ? this.taskRepo.findById(sourceArtifact.taskId)
+      : undefined;
+    const effectiveWorkspace = this.getEffectiveWorkspace(workspace, sourceTask);
+    this.assertDocumentPathAccess(effectiveWorkspace, resolvedPath, "read");
 
-    const versions = this.listVersions(resolvedPath, workspacePath);
+    const versions = allVersions
+      .filter((version) => {
+        try {
+          this.assertDocumentPathAccess(effectiveWorkspace, version.path, "read");
+          return true;
+        } catch {
+          return false;
+        }
+      })
+      .map((version, index, visibleVersions) => ({
+        ...version,
+        isCurrent: index === visibleVersions.length - 1,
+      }));
     const currentVersion = versions[versions.length - 1];
     const currentPath = currentVersion?.path || resolvedPath;
-    const sourceArtifact = this.artifactRepo.findLatestByPath(currentPath) || this.artifactRepo.findLatestByPath(resolvedPath);
+    this.assertDocumentPathAccess(effectiveWorkspace, currentPath, "read");
     const sessionId = uuidv4();
 
     const session: DocumentEditorSession = {
@@ -349,6 +465,7 @@ export class DocumentEditorSessionService {
 
     this.sessions.set(sessionId, {
       id: sessionId,
+      workspaceId: workspace.id,
       workspacePath,
       basePath: resolvedPath,
       currentPath,
@@ -388,7 +505,14 @@ export class DocumentEditorSessionService {
       throw new Error("Instruction is required.");
     }
 
-    const workspace = this.resolveWorkspaceForPath(session.currentPath);
+    const workspace =
+      this.findWorkspaceById(session.workspaceId) ||
+      this.resolveWorkspaceForPath(session.currentPath, session.workspacePath);
+    const sourceTask = session.sourceTaskId
+      ? this.taskRepo.findById(session.sourceTaskId)
+      : undefined;
+    const effectiveWorkspace = this.getEffectiveWorkspace(workspace, sourceTask);
+    this.assertDocumentPathAccess(effectiveWorkspace, session.currentPath, "read");
 
     if (session.fileType === "pdf") {
       const selection = request.selection as PdfRegionSelection;

@@ -143,15 +143,15 @@ export class SecureSettingsRepository {
       const machineIdPath = path.join(userDataPath, MACHINE_ID_FILE);
 
       if (fs.existsSync(machineIdPath)) {
-      this.machineId = fs.readFileSync(machineIdPath, "utf-8").trim();
-      logger.debug("Loaded existing machine ID");
-    } else {
-      // Generate a new stable machine ID
-      this.machineId = uuidv4();
-      // Write with restrictive permissions (owner read/write only)
-      fs.writeFileSync(machineIdPath, this.machineId, { mode: 0o600 });
-      logger.debug("Generated new machine ID");
-    }
+        this.machineId = fs.readFileSync(machineIdPath, "utf-8").trim();
+        logger.debug("Loaded existing machine ID");
+      } else {
+        // Generate a new stable machine ID
+        this.machineId = uuidv4();
+        // Write with restrictive permissions (owner read/write only)
+        fs.writeFileSync(machineIdPath, this.machineId, { mode: 0o600 });
+        logger.debug("Generated new machine ID");
+      }
     } catch (error) {
       console.warn(
         "[SecureSettingsRepository] Failed to initialize machine ID, using fallback:",
@@ -301,10 +301,7 @@ export class SecureSettingsRepository {
    * Check if settings can be decrypted (health check)
    * Returns the status without exposing the actual data
    */
-  checkHealth(
-    category: SettingsCategory,
-    options: { logErrors?: boolean } = {},
-  ): LoadStatus {
+  checkHealth(category: SettingsCategory, options: { logErrors?: boolean } = {}): LoadStatus {
     return this.loadWithStatus(category, options).status;
   }
 

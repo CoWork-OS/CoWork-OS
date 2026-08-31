@@ -31,6 +31,123 @@
   background: rgba(0, 0, 0, 0.4) !important;
 }
 
+.session-progress-card {
+  margin: 10px 10px 2px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 7%, rgba(0, 0, 0, 0.25));
+}
+
+.session-progress-card.stale,
+.session-progress-card.blocked,
+.session-progress-card.waiting {
+  border-color: color-mix(in srgb, var(--color-warning, #e3aa55) 42%, var(--color-border-subtle));
+}
+
+.session-progress-card-header,
+.session-progress-card-meta,
+.session-progress-card-actions,
+.session-progress-card-artifact {
+  display: flex;
+  align-items: center;
+}
+
+.session-progress-card-header {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.session-progress-card-label,
+.session-progress-card-artifact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.session-progress-card-label {
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.session-progress-card-status,
+.session-progress-card-meta,
+.session-progress-card-artifact {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.session-progress-card-headline {
+  margin-top: 8px;
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.session-progress-card-meta {
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.session-progress-card-waiting {
+  margin-top: 8px;
+  color: var(--color-warning, #e3aa55);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.session-progress-card-artifact {
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.session-progress-card-artifact span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-progress-card-error {
+  margin-top: 8px;
+  color: var(--color-error, #ef6b73);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.session-progress-card-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.session-progress-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.session-progress-card-actions button:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.session-progress-card-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .cli-panel-header {
   display: flex;
   align-items: center;
@@ -724,7 +841,6 @@
   color: var(--color-error);
 }
 
-
 .right-panel-section {
   border-bottom: 1px solid var(--color-border-subtle);
 }
@@ -1254,7 +1370,6 @@
 }
 
 @keyframes blink {
-
   0%,
   100% {
     opacity: 1;
@@ -1673,13 +1788,12 @@ button {
   height: 20px;
   width: 92%;
   border-radius: 5px;
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--color-text-muted) 8%, transparent) 0%,
-      color-mix(in srgb, var(--color-text-muted) 14%, transparent) 42%,
-      color-mix(in srgb, var(--color-text-muted) 8%, transparent) 84%
-    );
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-text-muted) 8%, transparent) 0%,
+    color-mix(in srgb, var(--color-text-muted) 14%, transparent) 42%,
+    color-mix(in srgb, var(--color-text-muted) 8%, transparent) 84%
+  );
   background-size: 220% 100%;
   animation: sidebarSessionSkeletonPulse 1.35s ease-in-out infinite;
 }
@@ -2941,15 +3055,27 @@ button {
 }
 
 .collab-agent-summary-row.completed {
-  --collab-agent-state-color: color-mix(in srgb, var(--color-success, #22c55e) 78%, var(--right-panel-text-secondary, #ffffff));
+  --collab-agent-state-color: color-mix(
+    in srgb,
+    var(--color-success, #22c55e) 78%,
+    var(--right-panel-text-secondary, #ffffff)
+  );
 }
 
 .collab-agent-summary-row.warning {
-  --collab-agent-state-color: color-mix(in srgb, var(--color-warning, #d97706) 76%, var(--right-panel-text-secondary, #ffffff));
+  --collab-agent-state-color: color-mix(
+    in srgb,
+    var(--color-warning, #d97706) 76%,
+    var(--right-panel-text-secondary, #ffffff)
+  );
 }
 
 .collab-agent-summary-row.failed {
-  --collab-agent-state-color: color-mix(in srgb, var(--color-error, #ef4444) 80%, var(--right-panel-text-secondary, #ffffff));
+  --collab-agent-state-color: color-mix(
+    in srgb,
+    var(--color-error, #ef4444) 80%,
+    var(--right-panel-text-secondary, #ffffff)
+  );
 }
 
 .collab-agent-summary-row.running {

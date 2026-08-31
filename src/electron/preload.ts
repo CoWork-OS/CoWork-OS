@@ -112,6 +112,12 @@ import type {
   ManagedSessionEvent,
   ManagedSessionUserMessageRequest,
   ManagedSessionWorkpaper,
+  WorkContext,
+  WorkContextCreateInput,
+  WorkContextMemberInput,
+  WorkContextUpdateInput,
+  SessionProgressState,
+  SessionSearchResult,
   UpdateManagedAgentRoutineRequest,
   ConvertAgentRoleToManagedAgentRequest,
   ConvertAutomationProfileToManagedAgentRequest,
@@ -165,6 +171,9 @@ import type {
   AgentMailSettingsData,
   AgentMailStatus,
   AgentMailWorkspaceBinding,
+  BoxBrainSettings,
+  BoxBrainStatus,
+  BoxBrainSyncResult,
   SymphonyConfig,
   SymphonyConfigUpdate,
   SymphonyStatus,
@@ -185,6 +194,7 @@ import type {
   TaskTimelinePageRequest,
   TaskTimelinePageResult,
 } from "../shared/types";
+import type { AccessProfileId } from "../shared/access-profiles";
 import type {
   SubconsciousBrainSummary,
   SubconsciousHistoryResetResult,
@@ -641,7 +651,7 @@ interface SkillsConfig {
 }
 
 // MCP types (inlined for sandboxed preload)
-type MCPTransportType = "stdio" | "sse" | "websocket";
+type MCPTransportType = "stdio" | "sse" | "websocket" | "streamable-http";
 type MCPConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
 
 interface MCPServerConfig {
@@ -656,6 +666,20 @@ interface MCPServerConfig {
   cwd?: string;
   url?: string;
   headers?: Record<string, string>;
+  registryId?: string;
+  auth?: {
+    type: "none" | "bearer" | "api-key" | "basic";
+    token?: string;
+    apiKey?: string;
+    username?: string;
+    password?: string;
+    headerName?: string;
+    refreshToken?: string;
+    clientId?: string;
+    clientSecret?: string;
+    tokenUrl?: string;
+    expiresAt?: number;
+  };
   connectionTimeout?: number;
   requestTimeout?: number;
 }
@@ -697,10 +721,11 @@ interface MCPRegistryEntry {
   description: string;
   version: string;
   author: string;
-  installMethod: "npm" | "pip" | "binary" | "docker";
+  installMethod: "npm" | "pip" | "binary" | "docker" | "manual";
   installCommand?: string;
   transport: MCPTransportType;
   defaultCommand?: string;
+  defaultUrl?: string;
   tools: Array<{ name: string; description: string }>;
   tags: string[];
   verified: boolean;
@@ -876,6 +901,7 @@ interface CronJob {
   name: string;
   description?: string;
   enabled: boolean;
+  accessProfileId?: string;
   shellAccess?: boolean;
   allowUserInput?: boolean;
   deleteAfterRun?: boolean;
@@ -896,6 +922,7 @@ interface CronJobCreate {
   name: string;
   description?: string;
   enabled: boolean;
+  accessProfileId?: string;
   shellAccess?: boolean;
   allowUserInput?: boolean;
   deleteAfterRun?: boolean;
@@ -913,6 +940,7 @@ interface CronJobPatch {
   name?: string;
   description?: string;
   enabled?: boolean;
+  accessProfileId?: string;
   shellAccess?: boolean;
   allowUserInput?: boolean;
   deleteAfterRun?: boolean;
@@ -2105,12 +2133,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     workspacePath: string;
     blocks: EditableDocumentBlock[];
   }) => ipcRenderer.invoke(IPC_CHANNELS.FILE_UPDATE_DOCUMENT, data) as Promise<FileViewerResult>,
-  listTerminalTabs: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_LIST, { workspaceId }) as Promise<
-      ShellSessionInfo[]
-    >,
-  createTerminalTab: (data: { workspaceId: string; cwd?: string; title?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_CREATE, data) as Promise<ShellSessionInfo>,
+  listTerminalTabs: (workspaceId: string, taskId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_LIST, {
+      workspaceId,
+      ...(taskId ? { taskId } : {}),
+    }) as Promise<ShellSessionInfo[]>,
+  createTerminalTab: (data: {
+    workspaceId: string;
+    taskId?: string;
+    cwd?: string;
+    title?: string;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_CREATE, data) as Promise<ShellSessionInfo>,
   runTerminalTabCommand: (data: {
     tabId: string;
     workspaceId: string;
@@ -2119,13 +2152,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     cwd?: string;
     timeoutMs?: number;
   }) => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_RUN, data) as Promise<TerminalTabRunResult>,
-  writeTerminalTabInput: (data: { tabId: string; workspaceId: string; input: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_WRITE, data) as Promise<ShellSessionInfo>,
-  resizeTerminalTab: (data: { tabId: string; workspaceId: string; cols: number; rows: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_RESIZE, data) as Promise<ShellSessionInfo>,
-  stopTerminalTab: (data: { tabId: string; workspaceId: string }) =>
+  writeTerminalTabInput: (data: {
+    tabId: string;
+    workspaceId: string;
+    taskId?: string;
+    input: string;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_WRITE, data) as Promise<ShellSessionInfo>,
+  resizeTerminalTab: (data: {
+    tabId: string;
+    workspaceId: string;
+    taskId?: string;
+    cols: number;
+    rows: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_RESIZE, data) as Promise<ShellSessionInfo>,
+  stopTerminalTab: (data: { tabId: string; workspaceId: string; taskId?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_STOP, data) as Promise<ShellSessionInfo | null>,
-  closeTerminalTab: (data: { tabId: string; workspaceId: string }) =>
+  closeTerminalTab: (data: { tabId: string; workspaceId: string; taskId?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_TAB_CLOSE, data) as Promise<{ success: boolean }>,
   onTerminalTabOutput: (callback: (event: TerminalTabOutputEvent) => void) => {
     const handler = (_: Any, event: TerminalTabOutputEvent) => callback(event);
@@ -2571,6 +2613,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Task APIs
   createTask: (data: Any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CREATE, data),
   getTask: (id: string) => invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_GET, id),
+  getSessionProgress: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_PROGRESS_GET, taskId) as Promise<
+      SessionProgressState | undefined
+    >,
+  searchSessions: (request: { query: string; workspaceId?: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_SEARCH, request) as Promise<SessionSearchResult[]>,
   listTasks: (opts?: {
     limit?: number;
     offset?: number;
@@ -2671,6 +2719,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     options?: {
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
+      accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
     },
   ) => {
@@ -2682,6 +2731,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       quotedAssistantMessage,
       ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
       ...(options?.shellAccess !== undefined ? { shellAccess: options.shellAccess } : {}),
+      ...(options?.accessProfileId ? { accessProfileId: options.accessProfileId } : {}),
       ...(options && Object.prototype.hasOwnProperty.call(options, "integrationMentions")
         ? { integrationMentions: options.integrationMentions ?? [] }
         : {}),
@@ -2711,8 +2761,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   pruneTempWorkspaces: (options?: { dryRun?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_PRUNE_TEMP, options),
   touchWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_TOUCH, id),
-  updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
+  updateWorkspacePermissions: (
+    id: string,
+    permissions: {
+      network?: boolean;
+      read?: boolean;
+      write?: boolean;
+      delete?: boolean;
+    },
+  ) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
 
   // Approval APIs
   respondToApproval: (data: ApprovalResponse) =>
@@ -2918,6 +2975,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_CANCEL_IPC, sessionId) as Promise<
       ManagedSession | undefined
     >,
+  listWorkContexts: (params?: {
+    workspaceId?: string;
+    includeArchived?: boolean;
+    limit?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.WORK_CONTEXT_LIST_IPC, params) as Promise<WorkContext[]>,
+  getWorkContext: (contextId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORK_CONTEXT_GET_IPC, contextId) as Promise<WorkContext | null>,
+  createWorkContext: (request: WorkContextCreateInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORK_CONTEXT_CREATE_IPC, request) as Promise<WorkContext>,
+  updateWorkContext: (request: WorkContextUpdateInput) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.WORK_CONTEXT_UPDATE_IPC,
+      request,
+    ) as Promise<WorkContext | null>,
+  addWorkContextMember: (request: WorkContextMemberInput) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.WORK_CONTEXT_MEMBER_ADD_IPC,
+      request,
+    ) as Promise<WorkContext | null>,
   listManagedSessionEvents: (sessionId: string, limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_EVENTS_LIST_IPC, {
       sessionId,
@@ -3156,6 +3232,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveBoxSettings: (settings: Any) => ipcRenderer.invoke(IPC_CHANNELS.BOX_SAVE_SETTINGS, settings),
   testBoxConnection: () => ipcRenderer.invoke(IPC_CHANNELS.BOX_TEST_CONNECTION),
   getBoxStatus: () => ipcRenderer.invoke(IPC_CHANNELS.BOX_GET_STATUS),
+  getBoxBrainStatus: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOX_BRAIN_GET_STATUS, workspaceId) as Promise<BoxBrainStatus>,
+  syncBoxBrainNow: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOX_BRAIN_SYNC_NOW, workspaceId) as Promise<BoxBrainSyncResult>,
 
   // OneDrive Settings APIs
   getOneDriveSettings: () => ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_GET_SETTINGS),
@@ -3454,6 +3534,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // MCP Connector OAuth
   startConnectorOAuth: (payload: {
     provider:
+      | "box"
       | "salesforce"
       | "jira"
       | "hubspot"
@@ -3841,6 +3922,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     prompt: string;
     workspaceId?: string;
     agentConfig?: Any;
+    accessProfileId?: string;
     shellAccess?: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_ASSIGN_TASK, params),
   deviceGetProfiles: () => ipcRenderer.invoke(IPC_CHANNELS.DEVICE_GET_PROFILES),
@@ -5603,6 +5685,12 @@ export interface ElectronAPI {
   ) => Promise<{ success: boolean; error?: string }>;
   createTask: (data: Any) => Promise<Any>;
   getTask: (id: string) => Promise<Any>;
+  getSessionProgress: (taskId: string) => Promise<SessionProgressState | undefined>;
+  searchSessions: (request: {
+    query: string;
+    workspaceId?: string;
+    limit?: number;
+  }) => Promise<SessionSearchResult[]>;
   listTasks: (opts?: {
     limit?: number;
     offset?: number;
@@ -5668,6 +5756,7 @@ export interface ElectronAPI {
     options?: {
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
+      accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
     },
   ) => Promise<void>;
@@ -5700,9 +5789,10 @@ export interface ElectronAPI {
     scope?: "task" | "workspace",
   ) => Promise<ShellSessionInfo | null>;
   onShellSessionEvent: (callback: (event: ShellSessionLifecycleEvent) => void) => () => void;
-  listTerminalTabs: (workspaceId: string) => Promise<ShellSessionInfo[]>;
+  listTerminalTabs: (workspaceId: string, taskId?: string) => Promise<ShellSessionInfo[]>;
   createTerminalTab: (data: {
     workspaceId: string;
+    taskId?: string;
     title?: string;
     cwd?: string;
   }) => Promise<ShellSessionInfo>;
@@ -5716,19 +5806,26 @@ export interface ElectronAPI {
   writeTerminalTabInput: (data: {
     tabId: string;
     workspaceId: string;
+    taskId?: string;
     input: string;
   }) => Promise<ShellSessionInfo>;
   resizeTerminalTab: (data: {
     tabId: string;
     workspaceId: string;
+    taskId?: string;
     cols: number;
     rows: number;
   }) => Promise<ShellSessionInfo>;
   stopTerminalTab: (data: {
     tabId: string;
     workspaceId: string;
+    taskId?: string;
   }) => Promise<ShellSessionInfo | null>;
-  closeTerminalTab: (data: { tabId: string; workspaceId: string }) => Promise<{ success: boolean }>;
+  closeTerminalTab: (data: {
+    tabId: string;
+    workspaceId: string;
+    taskId?: string;
+  }) => Promise<{ success: boolean }>;
   onTerminalTabOutput: (callback: (event: TerminalTabOutputEvent) => void) => () => void;
   createWorkspace: (data: Any) => Promise<Workspace>;
   listWorkspaces: () => Promise<Workspace[]>;
@@ -5746,7 +5843,12 @@ export interface ElectronAPI {
   touchWorkspace: (id: string) => Promise<Any>;
   updateWorkspacePermissions: (
     id: string,
-    permissions: { shell?: boolean; network?: boolean },
+    permissions: {
+      network?: boolean;
+      read?: boolean;
+      write?: boolean;
+      delete?: boolean;
+    },
   ) => Promise<Any>;
   respondToApproval: (data: ApprovalResponse) => Promise<void>;
   setSessionAutoApprove: (enabled: boolean) => Promise<void>;
@@ -5860,6 +5962,15 @@ export interface ElectronAPI {
     sessionId: string,
   ) => Promise<{ resumed: boolean; session?: ManagedSession }>;
   cancelManagedSession: (sessionId: string) => Promise<ManagedSession | undefined>;
+  listWorkContexts: (params?: {
+    workspaceId?: string;
+    includeArchived?: boolean;
+    limit?: number;
+  }) => Promise<WorkContext[]>;
+  getWorkContext: (contextId: string) => Promise<WorkContext | null>;
+  createWorkContext: (request: WorkContextCreateInput) => Promise<WorkContext>;
+  updateWorkContext: (request: WorkContextUpdateInput) => Promise<WorkContext | null>;
+  addWorkContextMember: (request: WorkContextMemberInput) => Promise<WorkContext | null>;
   listManagedSessionEvents: (sessionId: string, limit?: number) => Promise<ManagedSessionEvent[]>;
   getManagedSessionWorkpaper: (sessionId: string) => Promise<ManagedSessionWorkpaper>;
   listAgentTemplates: () => Promise<AgentTemplate[]>;
@@ -6218,9 +6329,19 @@ export interface ElectronAPI {
   getBoxSettings: () => Promise<{
     enabled: boolean;
     accessToken?: string;
+    clientId?: string;
+    clientSecret?: string;
+    refreshToken?: string;
+    tokenExpiresAt?: number;
+    scopes?: string[];
+    mcpEnabled?: boolean;
     timeoutMs?: number;
+    brain?: BoxBrainSettings;
   }>;
-  saveBoxSettings: (settings: Any) => Promise<{ success: boolean }>;
+  saveBoxSettings: (settings: Any) => Promise<{
+    success: boolean;
+    mcp?: { serverId?: string; connected?: boolean; error?: string };
+  }>;
   testBoxConnection: () => Promise<{
     success: boolean;
     error?: string;
@@ -6232,7 +6353,12 @@ export interface ElectronAPI {
     connected: boolean;
     name?: string;
     error?: string;
+    mcpConfigured?: boolean;
+    mcpConnected?: boolean;
+    mcpError?: string;
   }>;
+  getBoxBrainStatus: (workspaceId?: string) => Promise<BoxBrainStatus>;
+  syncBoxBrainNow: (workspaceId?: string) => Promise<BoxBrainSyncResult>;
   // OneDrive Settings
   getOneDriveSettings: () => Promise<{
     enabled: boolean;
@@ -6870,6 +6996,7 @@ export interface ElectronAPI {
   }>;
   startConnectorOAuth: (payload: {
     provider:
+      | "box"
       | "salesforce"
       | "jira"
       | "hubspot"
@@ -6893,6 +7020,7 @@ export interface ElectronAPI {
     prompt?: "select_account" | "consent";
   }) => Promise<{
     provider:
+      | "box"
       | "salesforce"
       | "jira"
       | "hubspot"
@@ -7281,6 +7409,7 @@ export interface ElectronAPI {
     prompt: string;
     workspaceId?: string;
     agentConfig?: Any;
+    accessProfileId?: string;
     shellAccess?: boolean;
   }) => Promise<{ ok: boolean; taskId?: string; error?: string }>;
   deviceGetProfiles: () => Promise<{ ok: boolean; profiles?: Any[]; error?: string }>;
@@ -7854,6 +7983,16 @@ export interface ElectronAPI {
       };
     };
     runtime: {
+      allowedPermissionModes: PermissionMode[];
+      allowedSandboxTypes: Array<"macos" | "docker" | "none">;
+      requireSandboxForShell: boolean;
+      allowUnsandboxedShell: boolean;
+      network: {
+        defaultAction: "allow" | "deny";
+        allowedDomains: string[];
+        blockedDomains: string[];
+        allowShellNetwork: boolean;
+      };
       agentSecurity: import("../shared/agent-security").AgentSecurityPolicy;
     };
     general: {
@@ -7883,6 +8022,16 @@ export interface ElectronAPI {
       };
     };
     runtime: {
+      allowedPermissionModes: PermissionMode[];
+      allowedSandboxTypes: Array<"macos" | "docker" | "none">;
+      requireSandboxForShell: boolean;
+      allowUnsandboxedShell: boolean;
+      network: {
+        defaultAction: "allow" | "deny";
+        allowedDomains: string[];
+        blockedDomains: string[];
+        allowShellNetwork: boolean;
+      };
       agentSecurity: import("../shared/agent-security").AgentSecurityPolicy;
     };
     general: {

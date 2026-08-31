@@ -787,7 +787,9 @@ async function runNvidiaSkillEvaluator(bundleDir: string): Promise<{
     const incomplete = hasIncompleteNvidiaScans(outputDir);
     return {
       status: incomplete ? "failed" : "passed",
-      detail: incomplete ? "NVIDIA SkillEvaluator reported an incomplete security scan." : undefined,
+      detail: incomplete
+        ? "NVIDIA SkillEvaluator reported an incomplete security scan."
+        : undefined,
       findings,
       reportAvailable,
       incomplete,
@@ -849,10 +851,7 @@ function findJsonFiles(rootDir: string): string[] {
   return files;
 }
 
-function readNvidiaFindings(
-  outputDir: string,
-  bundleDir: string,
-): CapabilitySecurityFinding[] {
+function readNvidiaFindings(outputDir: string, bundleDir: string): CapabilitySecurityFinding[] {
   const findings: CapabilitySecurityFinding[] = [];
   for (const reportPath of findJsonFiles(outputDir)) {
     const report = readJsonFile<NvidiaReport>(reportPath);
@@ -873,12 +872,10 @@ function readNvidiaFindings(
               ? path.join("bundle", relativePath)
               : "bundle",
           message: finding.message || `NVIDIA SkillEvaluator reported a ${category} finding.`,
-          detail: [
-            finding.line_number ? `line ${finding.line_number}` : undefined,
-            finding.suggestion,
-          ]
-            .filter(Boolean)
-            .join(": ") || undefined,
+          detail:
+            [finding.line_number ? `line ${finding.line_number}` : undefined, finding.suggestion]
+              .filter(Boolean)
+              .join(": ") || undefined,
         });
       }
     }

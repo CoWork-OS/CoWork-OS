@@ -41,7 +41,8 @@ describe("PlaybookSkillPromoter", () => {
         {
           id: "m1",
           type: "insight",
-          snippet: '[PLAYBOOK] Reinforced pattern: "Deploy service"\nTools: shell, git_commit\nOriginal request: deploy the API',
+          snippet:
+            '[PLAYBOOK] Reinforced pattern: "Deploy service"\nTools: shell, git_commit\nOriginal request: deploy the API',
           relevanceScore: 0.9,
           createdAt: Date.now(),
           source: "db",
@@ -49,7 +50,8 @@ describe("PlaybookSkillPromoter", () => {
         {
           id: "m2",
           type: "insight",
-          snippet: '[PLAYBOOK] Reinforced pattern: "Deploy service"\nTools: shell\nOriginal request: deploy to production',
+          snippet:
+            '[PLAYBOOK] Reinforced pattern: "Deploy service"\nTools: shell\nOriginal request: deploy to production',
           relevanceScore: 0.8,
           createdAt: Date.now(),
           source: "db",
@@ -57,7 +59,8 @@ describe("PlaybookSkillPromoter", () => {
         {
           id: "m3",
           type: "insight",
-          snippet: '[PLAYBOOK] Reinforced pattern: "Deploy service"\nTools: shell, git_commit\nOriginal request: deploy the service',
+          snippet:
+            '[PLAYBOOK] Reinforced pattern: "Deploy service"\nTools: shell, git_commit\nOriginal request: deploy the service',
           relevanceScore: 0.7,
           createdAt: Date.now(),
           source: "db",
@@ -154,7 +157,8 @@ describe("PlaybookSkillPromoter", () => {
         {
           id: "m1",
           type: "insight",
-          snippet: '[PLAYBOOK] Reinforced pattern: "Run tests"\nTools: shell\nOriginal request: run the test suite',
+          snippet:
+            '[PLAYBOOK] Reinforced pattern: "Run tests"\nTools: shell\nOriginal request: run the test suite',
           relevanceScore: 0.9,
           createdAt: Date.now(),
           source: "db",
@@ -162,7 +166,8 @@ describe("PlaybookSkillPromoter", () => {
         {
           id: "m2",
           type: "insight",
-          snippet: '[PLAYBOOK] Reinforced pattern: "Run tests"\nTools: shell\nOriginal request: execute tests',
+          snippet:
+            '[PLAYBOOK] Reinforced pattern: "Run tests"\nTools: shell\nOriginal request: execute tests',
           relevanceScore: 0.8,
           createdAt: Date.now(),
           source: "db",
@@ -170,7 +175,8 @@ describe("PlaybookSkillPromoter", () => {
         {
           id: "m3",
           type: "insight",
-          snippet: '[PLAYBOOK] Reinforced pattern: "Run tests"\nTools: shell\nOriginal request: run tests',
+          snippet:
+            '[PLAYBOOK] Reinforced pattern: "Run tests"\nTools: shell\nOriginal request: run tests',
           relevanceScore: 0.7,
           createdAt: Date.now(),
           source: "db",

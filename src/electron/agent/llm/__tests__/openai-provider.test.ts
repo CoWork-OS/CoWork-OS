@@ -171,9 +171,7 @@ describe("OpenAIProvider structured errors", () => {
           {
             type: "message",
             role: "system",
-            content: [
-              { type: "input_text", text: "Current time: 2026-04-04T10:00:00Z" },
-            ],
+            content: [{ type: "input_text", text: "Current time: 2026-04-04T10:00:00Z" }],
           },
           {
             type: "message",

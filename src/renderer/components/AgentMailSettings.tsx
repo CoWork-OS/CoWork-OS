@@ -60,7 +60,12 @@ export function AgentMailSettings() {
     reason: "",
   });
   const [apiKeyName, setApiKeyName] = useState("");
-  const [testResult, setTestResult] = useState<{ success: boolean; error?: string; podCount?: number; inboxCount?: number } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    error?: string;
+    podCount?: number;
+    inboxCount?: number;
+  } | null>(null);
 
   useEffect(() => {
     void loadBootstrap();
@@ -219,7 +224,10 @@ export function AgentMailSettings() {
   };
 
   const renameInbox = async (inbox: AgentMailInbox) => {
-    const nextDisplayName = window.prompt("Display name", inbox.displayName || inbox.email || inbox.inboxId);
+    const nextDisplayName = window.prompt(
+      "Display name",
+      inbox.displayName || inbox.email || inbox.inboxId,
+    );
     if (!nextDisplayName || !selectedWorkspaceId) return;
     await withBusy(`rename-${inbox.inboxId}`, async () => {
       await window.electronAPI.updateAgentMailInbox({
@@ -345,7 +353,11 @@ export function AgentMailSettings() {
         <div className="settings-section-header">
           <h3>AgentMail</h3>
           <div className="settings-actions">
-            <button className="btn-secondary btn-sm" onClick={testConnection} disabled={busy !== null}>
+            <button
+              className="btn-secondary btn-sm"
+              onClick={testConnection}
+              disabled={busy !== null}
+            >
               {busy === "test-connection" ? "Testing..." : "Test Connection"}
             </button>
             <button className="btn-primary btn-sm" onClick={saveSettings} disabled={busy !== null}>
@@ -354,8 +366,8 @@ export function AgentMailSettings() {
           </div>
         </div>
         <p className="settings-description">
-          Native AgentMail support for workspace pods, inbox provisioning, domains, lists, inbox-scoped
-          API keys, REST sync, and realtime event streaming.
+          Native AgentMail support for workspace pods, inbox provisioning, domains, lists,
+          inbox-scoped API keys, REST sync, and realtime event streaming.
         </p>
         {error && <p className="settings-hint">Error: {error}</p>}
         {testResult && (
@@ -432,21 +444,29 @@ export function AgentMailSettings() {
         </div>
         <div className="settings-hint">
           Status: {status?.connected ? "Connected" : "Not connected"} · Realtime:{" "}
-          {status?.connectionState || "disconnected"} · Last event: {formatTimestamp(status?.lastEventAt)}
+          {status?.connectionState || "disconnected"} · Last event:{" "}
+          {formatTimestamp(status?.lastEventAt)}
         </div>
       </div>
 
       <div className="settings-section">
         <div className="settings-section-header">
           <h3>Workspace Pod Binding</h3>
-          <button className="btn-secondary btn-sm" onClick={refreshWorkspace} disabled={!selectedWorkspaceId || busy !== null}>
+          <button
+            className="btn-secondary btn-sm"
+            onClick={refreshWorkspace}
+            disabled={!selectedWorkspaceId || busy !== null}
+          >
             {busy === "refresh-workspace" ? "Refreshing..." : "Refresh Workspace"}
           </button>
         </div>
         <div className="settings-grid">
           <div className="setting-item">
             <label>Workspace</label>
-            <select value={selectedWorkspaceId} onChange={(event) => setSelectedWorkspaceId(event.target.value)}>
+            <select
+              value={selectedWorkspaceId}
+              onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+            >
               {workspaces.map((workspace) => (
                 <option key={workspace.id} value={workspace.id}>
                   {workspace.name}
@@ -456,11 +476,16 @@ export function AgentMailSettings() {
           </div>
           <div className="setting-item">
             <label>Bound pod</label>
-            <div>{binding ? `${binding.podName || binding.podId} (${binding.podId})` : "Not bound"}</div>
+            <div>
+              {binding ? `${binding.podName || binding.podId} (${binding.podId})` : "Not bound"}
+            </div>
           </div>
           <div className="setting-item">
             <label>Bind existing pod</label>
-            <select value={workspacePodChoice} onChange={(event) => setWorkspacePodChoice(event.target.value)}>
+            <select
+              value={workspacePodChoice}
+              onChange={(event) => setWorkspacePodChoice(event.target.value)}
+            >
               <option value="">Select pod...</option>
               {pods.map((pod) => (
                 <option key={pod.podId} value={pod.podId}>
@@ -480,10 +505,18 @@ export function AgentMailSettings() {
           </div>
         </div>
         <div className="settings-actions">
-          <button className="btn-secondary btn-sm" onClick={bindWorkspacePod} disabled={!workspacePodChoice || busy !== null}>
+          <button
+            className="btn-secondary btn-sm"
+            onClick={bindWorkspacePod}
+            disabled={!workspacePodChoice || busy !== null}
+          >
             {busy === "bind-pod" ? "Binding..." : "Bind Pod"}
           </button>
-          <button className="btn-primary btn-sm" onClick={createWorkspacePod} disabled={!selectedWorkspaceId || busy !== null}>
+          <button
+            className="btn-primary btn-sm"
+            onClick={createWorkspacePod}
+            disabled={!selectedWorkspaceId || busy !== null}
+          >
             {busy === "create-pod" ? "Creating..." : "Create Pod"}
           </button>
         </div>
@@ -492,7 +525,9 @@ export function AgentMailSettings() {
       <div className="settings-section">
         <div className="settings-section-header">
           <h3>Inboxes</h3>
-          <div className="settings-hint">Provider badge in Inbox Agent will show `agentmail` for these threads.</div>
+          <div className="settings-hint">
+            Provider badge in Inbox Agent will show `agentmail` for these threads.
+          </div>
         </div>
         <div className="settings-grid">
           <div className="setting-item">
@@ -524,29 +559,56 @@ export function AgentMailSettings() {
           </div>
         </div>
         <div className="settings-actions">
-          <button className="btn-primary btn-sm" onClick={createInbox} disabled={!binding || busy !== null}>
+          <button
+            className="btn-primary btn-sm"
+            onClick={createInbox}
+            disabled={!binding || busy !== null}
+          >
             {busy === "create-inbox" ? "Creating..." : "Create Inbox"}
           </button>
         </div>
         <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
           {inboxes.map((inbox) => (
-            <div key={inbox.inboxId} className="setting-item" style={{ border: "1px solid var(--color-border-subtle)", padding: 12, borderRadius: 10 }}>
-              <div style={{ fontWeight: 600 }}>{inbox.displayName || inbox.email || inbox.inboxId}</div>
+            <div
+              key={inbox.inboxId}
+              className="setting-item"
+              style={{
+                border: "1px solid var(--color-border-subtle)",
+                padding: 12,
+                borderRadius: 10,
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>
+                {inbox.displayName || inbox.email || inbox.inboxId}
+              </div>
               <div className="settings-hint">{inbox.inboxId}</div>
               <div className="settings-actions">
-                <button className="btn-secondary btn-sm" onClick={() => renameInbox(inbox)} disabled={busy !== null}>
+                <button
+                  className="btn-secondary btn-sm"
+                  onClick={() => renameInbox(inbox)}
+                  disabled={busy !== null}
+                >
                   Rename
                 </button>
-                <button className="btn-secondary btn-sm" onClick={() => setSelectedInboxId(inbox.inboxId)}>
+                <button
+                  className="btn-secondary btn-sm"
+                  onClick={() => setSelectedInboxId(inbox.inboxId)}
+                >
                   {selectedInboxId === inbox.inboxId ? "Selected" : "Manage"}
                 </button>
-                <button className="btn-secondary btn-sm" onClick={() => deleteInbox(inbox)} disabled={busy !== null}>
+                <button
+                  className="btn-secondary btn-sm"
+                  onClick={() => deleteInbox(inbox)}
+                  disabled={busy !== null}
+                >
                   Delete
                 </button>
               </div>
             </div>
           ))}
-          {inboxes.length === 0 && <div className="settings-hint">No inboxes yet for this workspace pod.</div>}
+          {inboxes.length === 0 && (
+            <div className="settings-hint">No inboxes yet for this workspace pod.</div>
+          )}
         </div>
       </div>
 
@@ -569,33 +631,57 @@ export function AgentMailSettings() {
             <input
               type="checkbox"
               checked={domainForm.feedbackEnabled}
-              onChange={(event) => setDomainForm({ ...domainForm, feedbackEnabled: event.target.checked })}
+              onChange={(event) =>
+                setDomainForm({ ...domainForm, feedbackEnabled: event.target.checked })
+              }
             />
           </div>
         </div>
         <div className="settings-actions">
-          <button className="btn-primary btn-sm" onClick={createDomain} disabled={!binding || busy !== null}>
+          <button
+            className="btn-primary btn-sm"
+            onClick={createDomain}
+            disabled={!binding || busy !== null}
+          >
             {busy === "create-domain" ? "Creating..." : "Create Domain"}
           </button>
         </div>
         <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
           {domains.map((domain) => (
-            <div key={domain.domainId} className="setting-item" style={{ border: "1px solid var(--color-border-subtle)", padding: 12, borderRadius: 10 }}>
+            <div
+              key={domain.domainId}
+              className="setting-item"
+              style={{
+                border: "1px solid var(--color-border-subtle)",
+                padding: 12,
+                borderRadius: 10,
+              }}
+            >
               <div style={{ fontWeight: 600 }}>
-                {domain.domain} <span className="settings-hint">({domain.status || "unknown"})</span>
+                {domain.domain}{" "}
+                <span className="settings-hint">({domain.status || "unknown"})</span>
               </div>
               <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
                 {domain.records.map((record, index) => (
                   <div key={`${domain.domainId}-${index}`} className="settings-hint">
-                    {record.type} {record.name} → {record.value} {record.status ? `(${record.status})` : ""}
+                    {record.type} {record.name} → {record.value}{" "}
+                    {record.status ? `(${record.status})` : ""}
                   </div>
                 ))}
               </div>
               <div className="settings-actions">
-                <button className="btn-secondary btn-sm" onClick={() => verifyDomain(domain)} disabled={busy !== null}>
+                <button
+                  className="btn-secondary btn-sm"
+                  onClick={() => verifyDomain(domain)}
+                  disabled={busy !== null}
+                >
                   Verify
                 </button>
-                <button className="btn-secondary btn-sm" onClick={() => deleteDomain(domain)} disabled={busy !== null}>
+                <button
+                  className="btn-secondary btn-sm"
+                  onClick={() => deleteDomain(domain)}
+                  disabled={busy !== null}
+                >
                   Delete
                 </button>
               </div>
@@ -612,7 +698,10 @@ export function AgentMailSettings() {
         <div className="settings-grid">
           <div className="setting-item">
             <label>Inbox scope</label>
-            <select value={selectedInboxId} onChange={(event) => setSelectedInboxId(event.target.value)}>
+            <select
+              value={selectedInboxId}
+              onChange={(event) => setSelectedInboxId(event.target.value)}
+            >
               <option value="">Organization scope</option>
               {inboxes.map((inbox) => (
                 <option key={inbox.inboxId} value={inbox.inboxId}>
@@ -678,19 +767,36 @@ export function AgentMailSettings() {
         </div>
         <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
           {listEntries.map((entry) => (
-            <div key={`${entry.inboxId || "org"}:${entry.direction}:${entry.listType}:${entry.entry}`} className="setting-item" style={{ border: "1px solid var(--color-border-subtle)", padding: 10, borderRadius: 10 }}>
+            <div
+              key={`${entry.inboxId || "org"}:${entry.direction}:${entry.listType}:${entry.entry}`}
+              className="setting-item"
+              style={{
+                border: "1px solid var(--color-border-subtle)",
+                padding: 10,
+                borderRadius: 10,
+              }}
+            >
               <div style={{ fontWeight: 600 }}>
-                {entry.entry} <span className="settings-hint">({entry.direction}/{entry.listType})</span>
+                {entry.entry}{" "}
+                <span className="settings-hint">
+                  ({entry.direction}/{entry.listType})
+                </span>
               </div>
               {entry.reason && <div className="settings-hint">{entry.reason}</div>}
               <div className="settings-actions">
-                <button className="btn-secondary btn-sm" onClick={() => deleteListEntry(entry)} disabled={busy !== null}>
+                <button
+                  className="btn-secondary btn-sm"
+                  onClick={() => deleteListEntry(entry)}
+                  disabled={busy !== null}
+                >
                   Delete
                 </button>
               </div>
             </div>
           ))}
-          {listEntries.length === 0 && <div className="settings-hint">No list entries for this scope.</div>}
+          {listEntries.length === 0 && (
+            <div className="settings-hint">No list entries for this scope.</div>
+          )}
         </div>
 
         <div style={{ marginTop: 18 }}>
@@ -706,19 +812,35 @@ export function AgentMailSettings() {
             </div>
           </div>
           <div className="settings-actions">
-            <button className="btn-primary btn-sm" onClick={createApiKey} disabled={!selectedInboxId || busy !== null}>
+            <button
+              className="btn-primary btn-sm"
+              onClick={createApiKey}
+              disabled={!selectedInboxId || busy !== null}
+            >
               {busy === "create-api-key" ? "Creating..." : "Create Inbox API Key"}
             </button>
           </div>
           <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
             {apiKeys.map((apiKey) => (
-              <div key={apiKey.apiKeyId} className="setting-item" style={{ border: "1px solid var(--color-border-subtle)", padding: 10, borderRadius: 10 }}>
+              <div
+                key={apiKey.apiKeyId}
+                className="setting-item"
+                style={{
+                  border: "1px solid var(--color-border-subtle)",
+                  padding: 10,
+                  borderRadius: 10,
+                }}
+              >
                 <div style={{ fontWeight: 600 }}>{apiKey.name || apiKey.prefix}</div>
                 <div className="settings-hint">
                   {apiKey.prefix} · {formatTimestamp(apiKey.createdAt)}
                 </div>
                 <div className="settings-actions">
-                  <button className="btn-secondary btn-sm" onClick={() => deleteApiKey(apiKey)} disabled={busy !== null}>
+                  <button
+                    className="btn-secondary btn-sm"
+                    onClick={() => deleteApiKey(apiKey)}
+                    disabled={busy !== null}
+                  >
                     Delete
                   </button>
                 </div>

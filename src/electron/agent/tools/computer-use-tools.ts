@@ -42,7 +42,10 @@ const BLOCKED_KEY_COMBOS = new Set([
 ]);
 
 function normalizeKeysForBlocklist(keys: string[]): string {
-  return keys.map((k) => k.toLowerCase().trim()).sort().join("+");
+  return keys
+    .map((k) => k.toLowerCase().trim())
+    .sort()
+    .join("+");
 }
 
 export type ComputerUseMouseButton = "left" | "right" | "wheel" | "back" | "forward";
@@ -115,7 +118,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 function normalizeQuery(value: string | undefined): string {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function formatWindowChoice(appName: string, windowTitle: string): string {
@@ -451,9 +456,11 @@ export class ComputerUseTools {
   }
 
   private hasVisibleControlGrant(target: ComputerUseTargetState): boolean {
-    return ComputerUseTools.visibleControlGrants
-      .get(this.taskId)
-      ?.has(this.visibleControlGrantKey(target)) === true;
+    return (
+      ComputerUseTools.visibleControlGrants
+        .get(this.taskId)
+        ?.has(this.visibleControlGrantKey(target)) === true
+    );
   }
 
   private rememberVisibleControlGrant(target: ComputerUseTargetState): void {
@@ -599,7 +606,10 @@ export class ComputerUseTools {
     return this.buildResult(toolName, note);
   }
 
-  private toTargetState(app: ComputerUseHelperApp, window: ComputerUseHelperWindow): ComputerUseTargetState {
+  private toTargetState(
+    app: ComputerUseHelperApp,
+    window: ComputerUseHelperWindow,
+  ): ComputerUseTargetState {
     if (typeof window.windowId !== "number") {
       throw new Error(
         `The selected window in ${app.appName} cannot be controlled because macOS did not expose a stable window id.`,
@@ -673,7 +683,9 @@ export class ComputerUseTools {
     return null;
   }
 
-  private async findRetargetedApp(previous: ComputerUseTargetState): Promise<ComputerUseHelperApp | null> {
+  private async findRetargetedApp(
+    previous: ComputerUseTargetState,
+  ): Promise<ComputerUseHelperApp | null> {
     const previousAppName = normalizeQuery(previous.appName);
     const previousBundleId = normalizeQuery(previous.bundleId);
     const candidates = (await this.helper().listApps())
@@ -709,7 +721,9 @@ export class ComputerUseTools {
     let windows = await this.helper().listWindows(targetApp.pid);
     let refreshed =
       windows.find((entry) => entry.windowId === this.currentTarget?.windowId) ||
-      windows.find((entry) => normalizeQuery(entry.title) === normalizeQuery(this.currentTarget?.windowTitle)) ||
+      windows.find(
+        (entry) => normalizeQuery(entry.title) === normalizeQuery(this.currentTarget?.windowTitle),
+      ) ||
       this.chooseRefreshFallbackWindow(windows, this.currentTarget);
 
     if (!refreshed) {
@@ -722,8 +736,10 @@ export class ComputerUseTools {
         };
         windows = await this.helper().listWindows(targetApp.pid);
         refreshed =
-          windows.find((entry) => normalizeQuery(entry.title) === normalizeQuery(this.currentTarget?.windowTitle)) ||
-          this.chooseRefreshFallbackWindow(windows, this.currentTarget);
+          windows.find(
+            (entry) =>
+              normalizeQuery(entry.title) === normalizeQuery(this.currentTarget?.windowTitle),
+          ) || this.chooseRefreshFallbackWindow(windows, this.currentTarget);
       }
     }
 
@@ -778,7 +794,9 @@ export class ComputerUseTools {
     return ranked[0].entry;
   }
 
-  private async resolveTargetFromSelection(selection: ScreenshotSelection): Promise<ComputerUseTargetState> {
+  private async resolveTargetFromSelection(
+    selection: ScreenshotSelection,
+  ): Promise<ComputerUseTargetState> {
     const appQuery = normalizeQuery(selection.app);
     const windowQuery = normalizeQuery(selection.windowTitle);
     if (!appQuery && !windowQuery) {
@@ -821,7 +839,8 @@ export class ComputerUseTools {
           ? exactOrContainsScore(window.title, windowQuery)
           : scoreWindow(window);
         if (windowQuery && windowScore === 0) continue;
-        const score = appScore + windowScore + (window.isFocused ? 25 : 0) + (window.isMain ? 10 : 0);
+        const score =
+          appScore + windowScore + (window.isFocused ? 25 : 0) + (window.isMain ? 10 : 0);
         if (score <= 0) continue;
         scoredCandidates.push({ app, window, score });
       }
@@ -847,7 +866,9 @@ export class ComputerUseTools {
           return this.toTargetState(candidateApps[0], fallbackWindow);
         }
       }
-      const label = selection.windowTitle ? `window "${selection.windowTitle}"` : "a controllable window";
+      const label = selection.windowTitle
+        ? `window "${selection.windowTitle}"`
+        : "a controllable window";
       throw new Error(`Could not find ${label}${selection.app ? ` in ${selection.app}` : ""}.`);
     }
 
@@ -866,10 +887,14 @@ export class ComputerUseTools {
       throw new Error(CONTROLLED_WINDOW_ERROR);
     }
     if (this.currentCapture.windowId !== this.currentTarget.windowId) {
-      throw new Error("The current capture no longer matches the controlled window. Call screenshot() to refresh.");
+      throw new Error(
+        "The current capture no longer matches the controlled window. Call screenshot() to refresh.",
+      );
     }
     if (captureId && captureId !== this.currentCapture.id) {
-      throw new Error(`captureId ${captureId} is stale. Call screenshot() to refresh and use the newest capture.`);
+      throw new Error(
+        `captureId ${captureId} is stale. Call screenshot() to refresh and use the newest capture.`,
+      );
     }
     return this.currentCapture;
   }
@@ -992,15 +1017,8 @@ export class ComputerUseTools {
     }
   }
 
-  async doubleClick(
-    x: number,
-    y: number,
-    captureId?: string,
-  ): Promise<ComputerUseToolResult> {
-    const { target, capture, visibleControl } = await this.prepareAction(
-      "double_click",
-      captureId,
-    );
+  async doubleClick(x: number, y: number, captureId?: string): Promise<ComputerUseToolResult> {
+    const { target, capture, visibleControl } = await this.prepareAction("double_click", captureId);
     validatePointInCapture(x, y, capture);
     try {
       if (!visibleControl) {
@@ -1027,15 +1045,8 @@ export class ComputerUseTools {
     }
   }
 
-  async moveMouse(
-    x: number,
-    y: number,
-    captureId?: string,
-  ): Promise<ComputerUseToolResult> {
-    const { target, capture, visibleControl } = await this.prepareAction(
-      "move_mouse",
-      captureId,
-    );
+  async moveMouse(x: number, y: number, captureId?: string): Promise<ComputerUseToolResult> {
+    const { target, capture, visibleControl } = await this.prepareAction("move_mouse", captureId);
     validatePointInCapture(x, y, capture);
     try {
       if (!visibleControl) {
@@ -1213,7 +1224,10 @@ export class ComputerUseTools {
     try {
       await this.ensureVisibleControlAllowed("keypress", target, "keyboard_event");
       await this.bringTargetToFront(target);
-      await this.helper().pressKeys({ ...parseKeypressSpec(target.pid, keys), windowId: target.windowId });
+      await this.helper().pressKeys({
+        ...parseKeypressSpec(target.pid, keys),
+        windowId: target.windowId,
+      });
       return await this.captureTarget("keypress");
     } catch (error) {
       this.daemon.logEvent(this.taskId, "tool_error", {
@@ -1225,7 +1239,8 @@ export class ComputerUseTools {
   }
 
   async wait(ms?: number): Promise<ComputerUseToolResult> {
-    const delayMs = ms === undefined ? DEFAULT_WAIT_MS : requireIntegerInRange("ms", ms, 0, MAX_WAIT_MS);
+    const delayMs =
+      ms === undefined ? DEFAULT_WAIT_MS : requireIntegerInRange("ms", ms, 0, MAX_WAIT_MS);
     await this.ensureReady();
     await this.refreshCurrentTarget();
     this.requireCurrentCapture();
@@ -1270,8 +1285,14 @@ export class ComputerUseTools {
         input_schema: {
           type: "object",
           properties: {
-            x: { type: "number", description: "Window-relative X coordinate from the latest screenshot." },
-            y: { type: "number", description: "Window-relative Y coordinate from the latest screenshot." },
+            x: {
+              type: "number",
+              description: "Window-relative X coordinate from the latest screenshot.",
+            },
+            y: {
+              type: "number",
+              description: "Window-relative Y coordinate from the latest screenshot.",
+            },
             button: {
               type: "string",
               enum: ["left", "right", "wheel", "back", "forward"],
@@ -1292,8 +1313,14 @@ export class ComputerUseTools {
         input_schema: {
           type: "object",
           properties: {
-            x: { type: "number", description: "Window-relative X coordinate from the latest screenshot." },
-            y: { type: "number", description: "Window-relative Y coordinate from the latest screenshot." },
+            x: {
+              type: "number",
+              description: "Window-relative X coordinate from the latest screenshot.",
+            },
+            y: {
+              type: "number",
+              description: "Window-relative Y coordinate from the latest screenshot.",
+            },
             captureId: {
               type: "string",
               description: "Optional validation token from the latest screenshot().",
@@ -1309,8 +1336,14 @@ export class ComputerUseTools {
         input_schema: {
           type: "object",
           properties: {
-            x: { type: "number", description: "Window-relative X coordinate from the latest screenshot." },
-            y: { type: "number", description: "Window-relative Y coordinate from the latest screenshot." },
+            x: {
+              type: "number",
+              description: "Window-relative X coordinate from the latest screenshot.",
+            },
+            y: {
+              type: "number",
+              description: "Window-relative Y coordinate from the latest screenshot.",
+            },
             captureId: {
               type: "string",
               description: "Optional validation token from the latest screenshot().",
@@ -1353,8 +1386,14 @@ export class ComputerUseTools {
         input_schema: {
           type: "object",
           properties: {
-            x: { type: "number", description: "Window-relative X coordinate from the latest screenshot." },
-            y: { type: "number", description: "Window-relative Y coordinate from the latest screenshot." },
+            x: {
+              type: "number",
+              description: "Window-relative X coordinate from the latest screenshot.",
+            },
+            y: {
+              type: "number",
+              description: "Window-relative Y coordinate from the latest screenshot.",
+            },
             scrollX: { type: "number", description: "Signed horizontal scroll delta in lines." },
             scrollY: { type: "number", description: "Signed vertical scroll delta in lines." },
             captureId: {

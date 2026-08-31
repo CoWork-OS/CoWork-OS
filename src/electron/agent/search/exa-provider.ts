@@ -6,6 +6,7 @@ import {
   SearchResult,
   SearchType,
 } from "./types";
+import { assertNetworkPolicyAllowed } from "../../security/network-policy";
 
 interface ExaResult {
   title?: string;
@@ -50,7 +51,15 @@ export class ExaProvider implements SearchProvider {
       );
     }
 
-    const response = await fetch(`${this.baseUrl}/search`, {
+    const endpointUrl = `${this.baseUrl}/search`;
+    assertNetworkPolicyAllowed({
+      url: endpointUrl,
+      toolName: "web_search",
+      networkEnabled: query.networkEnabled,
+      accessNetworkMode: query.accessNetworkMode,
+      profileDomainRules: query.profileDomainRules,
+    });
+    const response = await fetch(endpointUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

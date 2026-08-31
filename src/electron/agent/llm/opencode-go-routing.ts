@@ -2,10 +2,7 @@ export function isOpenCodeGoBaseUrl(baseUrl: string): boolean {
   const trimmed = baseUrl.trim();
   try {
     const url = new URL(trimmed);
-    return (
-      url.hostname.toLowerCase() === "opencode.ai" &&
-      /\/zen\/go(?:\/|$)/i.test(url.pathname)
-    );
+    return url.hostname.toLowerCase() === "opencode.ai" && /\/zen\/go(?:\/|$)/i.test(url.pathname);
   } catch {
     return trimmed.toLowerCase().includes("opencode.ai/zen/go/");
   }
@@ -52,10 +49,7 @@ export function normalizeOpenCodeGoModelId(model: string): string {
   return trimmed;
 }
 
-export function isOpenCodeAnthropicMessagesModel(
-  model: string,
-  product: OpenCodeProduct,
-): boolean {
+export function isOpenCodeAnthropicMessagesModel(model: string, product: OpenCodeProduct): boolean {
   const normalized = withoutOpenCodePrefix(model).toLowerCase();
   const withoutVariant = normalized.includes(":")
     ? normalized.slice(0, normalized.indexOf(":"))

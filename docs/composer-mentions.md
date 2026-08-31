@@ -44,7 +44,11 @@ Configured integration rules:
 
 ## Runtime Semantics
 
-Integration mentions are routing hints, not permissions.
+Integration mentions are routing hints, not permissions. The task's [access
+profile](access-profiles.md), connector policy, and provider scopes are still
+resolved before any mentioned tool can run. Selecting `@Gmail`, `@Box`, or an
+MCP connector does not widen filesystem, network, domain, approval, or export
+access.
 
 The submitted task/follow-up includes:
 

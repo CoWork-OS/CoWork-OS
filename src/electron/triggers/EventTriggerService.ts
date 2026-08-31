@@ -33,7 +33,10 @@ export class EventTriggerService {
   private queueTimer: NodeJS.Timeout | null = null;
   private drainingQueue = false;
   private fireInterceptor:
-    | ((trigger: EventTrigger, event: TriggerEvent) => Promise<{ handled: boolean; actionResult?: string }>)
+    | ((
+        trigger: EventTrigger,
+        event: TriggerEvent,
+      ) => Promise<{ handled: boolean; actionResult?: string }>)
     | null = null;
 
   constructor(deps: EventTriggerServiceDeps, db?: Any) {
@@ -72,7 +75,10 @@ export class EventTriggerService {
 
   setFireInterceptor(
     interceptor:
-      | ((trigger: EventTrigger, event: TriggerEvent) => Promise<{ handled: boolean; actionResult?: string }>)
+      | ((
+          trigger: EventTrigger,
+          event: TriggerEvent,
+        ) => Promise<{ handled: boolean; actionResult?: string }>)
       | null,
   ): void {
     this.fireInterceptor = interceptor;
@@ -156,7 +162,6 @@ export class EventTriggerService {
   }
 
   private async evaluateEventNow(event: TriggerEvent): Promise<void> {
-
     for (const trigger of this.triggers.values()) {
       if (!trigger.enabled) continue;
       if (!triggerMatchesEventSource(trigger.source, event.source)) continue;
@@ -320,7 +325,9 @@ export class EventTriggerService {
           .get(now) as Any | undefined;
         if (!row) return;
         this.db
-          .prepare("UPDATE event_trigger_queue SET status = 'processing', attempt_count = attempt_count + 1, updated_at = ? WHERE id = ?")
+          .prepare(
+            "UPDATE event_trigger_queue SET status = 'processing', attempt_count = attempt_count + 1, updated_at = ? WHERE id = ?",
+          )
           .run(now, row.id);
         try {
           const event = JSON.parse(String(row.event_json)) as TriggerEvent;
@@ -331,12 +338,21 @@ export class EventTriggerService {
           const message = error instanceof Error ? error.message : String(error);
           if (attemptCount >= 5) {
             this.db
-              .prepare("UPDATE event_trigger_queue SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+              .prepare(
+                "UPDATE event_trigger_queue SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
+              )
               .run(message, Date.now(), row.id);
           } else {
             this.db
-              .prepare("UPDATE event_trigger_queue SET status = 'pending', error = ?, available_at = ?, updated_at = ? WHERE id = ?")
-              .run(message, Date.now() + Math.min(60_000, 1_000 * 2 ** attemptCount), Date.now(), row.id);
+              .prepare(
+                "UPDATE event_trigger_queue SET status = 'pending', error = ?, available_at = ?, updated_at = ? WHERE id = ?",
+              )
+              .run(
+                message,
+                Date.now() + Math.min(60_000, 1_000 * 2 ** attemptCount),
+                Date.now(),
+                row.id,
+              );
           }
         }
       }

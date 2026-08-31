@@ -113,8 +113,7 @@ describe("task-event transport", () => {
   it("scopes collaborative timeline pages server-side and sanitizes payloads", () => {
     let receivedRequest: Record<string, unknown> | null = null;
     const taskRepo = {
-      findById: () =>
-        makeTask({ agentConfig: { collaborativeMode: true } as Task["agentConfig"] }),
+      findById: () => makeTask({ agentConfig: { collaborativeMode: true } as Task["agentConfig"] }),
       findByParent: () => [makeTask({ id: "child-1", parentTaskId: "task-1" })],
     };
     const eventRepo = {
@@ -155,8 +154,7 @@ describe("task-event transport", () => {
   it("scopes event detail requests to the selected task and collaborative children", () => {
     let receivedScope: Record<string, unknown> | undefined;
     const taskRepo = {
-      findById: () =>
-        makeTask({ agentConfig: { collaborativeMode: true } as Task["agentConfig"] }),
+      findById: () => makeTask({ agentConfig: { collaborativeMode: true } as Task["agentConfig"] }),
       findByParent: () => [makeTask({ id: "child-1", parentTaskId: "task-1" })],
     };
     const eventRepo = {

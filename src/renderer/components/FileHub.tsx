@@ -270,10 +270,7 @@ export const FileHub: React.FC<{ workspaceId?: string }> = ({ workspaceId: _work
         )}
       </div>
       {viewerFilePath && (
-        <DocumentAwareFileModal
-          filePath={viewerFilePath}
-          onClose={() => setViewerFilePath(null)}
-        />
+        <DocumentAwareFileModal filePath={viewerFilePath} onClose={() => setViewerFilePath(null)} />
       )}
     </div>
   );

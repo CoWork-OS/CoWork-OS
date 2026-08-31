@@ -1,9 +1,19 @@
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
-import type { Task, AgentConfig, OrchestrationGraphNode, OrchestrationGraphRun, OrchestrationNodeNotification, WorkerRoleKind } from "../../../shared/types";
+import type {
+  Task,
+  AgentConfig,
+  OrchestrationGraphNode,
+  OrchestrationGraphRun,
+  OrchestrationNodeNotification,
+  WorkerRoleKind,
+} from "../../../shared/types";
 import { getACPRegistry } from "../../acp";
 import { RemoteAgentInvoker } from "../../acp/remote-invoker";
-import { OrchestrationGraphRepository, type OrchestrationGraphSnapshot } from "./OrchestrationGraphRepository";
+import {
+  OrchestrationGraphRepository,
+  type OrchestrationGraphSnapshot,
+} from "./OrchestrationGraphRepository";
 
 interface AgentRoleLike {
   id: string;
@@ -46,28 +56,28 @@ export interface OrchestrationGraphCreateInput {
 }
 
 export interface OrchestrationGraphEngineDeps {
-    createChildTask: (params: {
-      title: string;
-      prompt: string;
-      workspaceId: string;
-      parentTaskId: string;
-      agentType: "sub" | "parallel";
-      agentConfig?: AgentConfig;
-      depth?: number;
-      assignedAgentRoleId?: string;
-      workerRole?: WorkerRoleKind;
-      teamRunId?: string;
-      teamItemId?: string;
-    }) => Promise<Task>;
-    createRootTask: (params: {
-      title: string;
-      prompt: string;
-      workspaceId: string;
-      assignedAgentRoleId?: string;
-      workerRole?: WorkerRoleKind;
-      agentConfig?: AgentConfig;
-      source?: Task["source"];
-    }) => Promise<Task>;
+  createChildTask: (params: {
+    title: string;
+    prompt: string;
+    workspaceId: string;
+    parentTaskId: string;
+    agentType: "sub" | "parallel";
+    agentConfig?: AgentConfig;
+    depth?: number;
+    assignedAgentRoleId?: string;
+    workerRole?: WorkerRoleKind;
+    teamRunId?: string;
+    teamItemId?: string;
+  }) => Promise<Task>;
+  createRootTask: (params: {
+    title: string;
+    prompt: string;
+    workspaceId: string;
+    assignedAgentRoleId?: string;
+    workerRole?: WorkerRoleKind;
+    agentConfig?: AgentConfig;
+    source?: Task["source"];
+  }) => Promise<Task>;
   getTaskById: (taskId: string) => Promise<Task | undefined>;
   cancelTask: (taskId: string) => Promise<void>;
   getActiveAgentRoles: () => AgentRoleLike[];
@@ -75,7 +85,9 @@ export interface OrchestrationGraphEngineDeps {
 }
 
 function isTerminalNodeStatus(status: OrchestrationGraphNode["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked";
+  return (
+    status === "completed" || status === "failed" || status === "cancelled" || status === "blocked"
+  );
 }
 
 function summarizeTask(task: Task): string {
@@ -88,7 +100,9 @@ function summarizeTask(task: Task): string {
   return `Task ${task.status}`;
 }
 
-function notificationToPayload(notification: OrchestrationNodeNotification): Record<string, unknown> {
+function notificationToPayload(
+  notification: OrchestrationNodeNotification,
+): Record<string, unknown> {
   return {
     runId: notification.runId,
     nodeId: notification.nodeId,
@@ -145,7 +159,12 @@ export class OrchestrationGraphEngine extends EventEmitter {
     const nodeIdByKey = new Map<string, string>();
     const nodes = input.nodes.map((node, index) => {
       const id = node.id ?? uuidv4();
-      const key = node.key || node.teamItemId || node.workflowPhaseId || node.acpTaskId || `node-${index + 1}`;
+      const key =
+        node.key ||
+        node.teamItemId ||
+        node.workflowPhaseId ||
+        node.acpTaskId ||
+        `node-${index + 1}`;
       nodeIdByKey.set(key, id);
       return {
         id,
@@ -199,14 +218,24 @@ export class OrchestrationGraphEngine extends EventEmitter {
   async appendNodes(input: {
     runId: string;
     nodes: OrchestrationGraphNodeInput[];
-    edges?: Array<{ fromNodeId?: string; fromNodeKey?: string; toNodeId?: string; toNodeKey?: string }>;
+    edges?: Array<{
+      fromNodeId?: string;
+      fromNodeKey?: string;
+      toNodeId?: string;
+      toNodeKey?: string;
+    }>;
   }): Promise<OrchestrationGraphSnapshot | undefined> {
     const existing = this.repo.findSnapshotByRunId(input.runId);
     if (!existing) return undefined;
     const nodeIdByKey = new Map(existing.nodes.map((node) => [node.key, node.id]));
     const nodes = input.nodes.map((node, index) => {
       const id = node.id ?? uuidv4();
-      const key = node.key || node.teamItemId || node.workflowPhaseId || node.acpTaskId || `node-${existing.nodes.length + index + 1}`;
+      const key =
+        node.key ||
+        node.teamItemId ||
+        node.workflowPhaseId ||
+        node.acpTaskId ||
+        `node-${existing.nodes.length + index + 1}`;
       nodeIdByKey.set(key, id);
       return {
         id,
@@ -230,8 +259,10 @@ export class OrchestrationGraphEngine extends EventEmitter {
       };
     });
     const edges = (input.edges || []).flatMap((edge) => {
-      const fromNodeId = edge.fromNodeId || (edge.fromNodeKey ? nodeIdByKey.get(edge.fromNodeKey) : undefined);
-      const toNodeId = edge.toNodeId || (edge.toNodeKey ? nodeIdByKey.get(edge.toNodeKey) : undefined);
+      const fromNodeId =
+        edge.fromNodeId || (edge.fromNodeKey ? nodeIdByKey.get(edge.fromNodeKey) : undefined);
+      const toNodeId =
+        edge.toNodeId || (edge.toNodeKey ? nodeIdByKey.get(edge.toNodeKey) : undefined);
       if (!fromNodeId || !toNodeId) return [];
       return [{ fromNodeId, toNodeId }];
     });
@@ -387,7 +418,9 @@ export class OrchestrationGraphEngine extends EventEmitter {
       snapshot.nodes.filter((node) => node.status === "completed").map((node) => node.id),
     );
     const blockedNodeIds = new Set(
-      snapshot.nodes.filter((node) => node.status === "failed" || node.status === "cancelled").map((node) => node.id),
+      snapshot.nodes
+        .filter((node) => node.status === "failed" || node.status === "cancelled")
+        .map((node) => node.id),
     );
     const incomingByTarget = new Map<string, string[]>();
     for (const edge of snapshot.edges) {
@@ -411,7 +444,10 @@ export class OrchestrationGraphEngine extends EventEmitter {
     });
   }
 
-  private async dispatchNode(run: OrchestrationGraphRun, node: OrchestrationGraphNode): Promise<void> {
+  private async dispatchNode(
+    run: OrchestrationGraphRun,
+    node: OrchestrationGraphNode,
+  ): Promise<void> {
     try {
       const prompt = this.buildPromptWithDependencyContext(run.id, node);
       if (node.dispatchTarget === "remote_acp") {
@@ -459,13 +495,26 @@ export class OrchestrationGraphEngine extends EventEmitter {
         completedAt: Date.now(),
       });
       const notification = this.buildNotification(run.id, updated || node, "failed");
-      this.repo.createNodeEvent(run.id, node.id, "orchestration_node_failed", notificationToPayload(notification));
+      this.repo.createNodeEvent(
+        run.id,
+        node.id,
+        "orchestration_node_failed",
+        notificationToPayload(notification),
+      );
       this.emit("node_notification", notification);
-      this.emitRootEvent(run.rootTaskId, "orchestration_node_failed", notificationToPayload(notification));
+      this.emitRootEvent(
+        run.rootTaskId,
+        "orchestration_node_failed",
+        notificationToPayload(notification),
+      );
     }
   }
 
-  private markNodeRunning(run: OrchestrationGraphRun, node: OrchestrationGraphNode, taskId: string): void {
+  private markNodeRunning(
+    run: OrchestrationGraphRun,
+    node: OrchestrationGraphNode,
+    taskId: string,
+  ): void {
     const updated = this.repo.updateNode(node.id, {
       status: "running",
       taskId,
@@ -475,7 +524,12 @@ export class OrchestrationGraphEngine extends EventEmitter {
     });
     const effectiveNode = updated || node;
     const notification = this.buildNotification(run.id, effectiveNode, "running");
-    this.repo.createNodeEvent(run.id, node.id, "orchestration_node_dispatched", notificationToPayload(notification));
+    this.repo.createNodeEvent(
+      run.id,
+      node.id,
+      "orchestration_node_dispatched",
+      notificationToPayload(notification),
+    );
     this.emit("node_notification", notification);
     this.emitRootEvent(run.rootTaskId, "orchestration_node_dispatched", {
       ...notificationToPayload(notification),
@@ -483,7 +537,10 @@ export class OrchestrationGraphEngine extends EventEmitter {
     });
   }
 
-  private async dispatchRemoteAcpNode(run: OrchestrationGraphRun, node: OrchestrationGraphNode): Promise<void> {
+  private async dispatchRemoteAcpNode(
+    run: OrchestrationGraphRun,
+    node: OrchestrationGraphNode,
+  ): Promise<void> {
     const acpAgentId = node.acpAgentId;
     if (!acpAgentId) {
       throw new Error("Remote ACP node is missing acpAgentId");
@@ -530,7 +587,11 @@ export class OrchestrationGraphEngine extends EventEmitter {
     this.emit("node_notification", notification);
     this.emitRootEvent(
       run.rootTaskId,
-      terminal ? (effectiveNode.status === "completed" ? "orchestration_node_completed" : "orchestration_node_failed") : "orchestration_node_dispatched",
+      terminal
+        ? effectiveNode.status === "completed"
+          ? "orchestration_node_completed"
+          : "orchestration_node_failed"
+        : "orchestration_node_dispatched",
       notificationToPayload(notification),
     );
   }
@@ -541,7 +602,11 @@ export class OrchestrationGraphEngine extends EventEmitter {
       if (node.taskId) {
         const task = await this.deps.getTaskById(node.taskId);
         if (!task) continue;
-        if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
+        if (
+          task.status === "completed" ||
+          task.status === "failed" ||
+          task.status === "cancelled"
+        ) {
           const nextStatus =
             task.status === "completed"
               ? "completed"
@@ -556,21 +621,21 @@ export class OrchestrationGraphEngine extends EventEmitter {
             completedAt: Date.now(),
           });
           const effectiveNode = updated || node;
-          const notification = this.buildNotification(
-            snapshot.run.id,
-            effectiveNode,
-            nextStatus,
-          );
+          const notification = this.buildNotification(snapshot.run.id, effectiveNode, nextStatus);
           this.repo.createNodeEvent(
             snapshot.run.id,
             node.id,
-            nextStatus === "completed" ? "orchestration_node_completed" : "orchestration_node_failed",
+            nextStatus === "completed"
+              ? "orchestration_node_completed"
+              : "orchestration_node_failed",
             notificationToPayload(notification),
           );
           this.emit("node_notification", notification);
           this.emitRootEvent(
             snapshot.run.rootTaskId,
-            nextStatus === "completed" ? "orchestration_node_completed" : "orchestration_node_failed",
+            nextStatus === "completed"
+              ? "orchestration_node_completed"
+              : "orchestration_node_failed",
             notificationToPayload(notification),
           );
         }
@@ -595,11 +660,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
           completedAt: Date.now(),
         });
         const effectiveNode = updated || node;
-        const notification = this.buildNotification(
-          snapshot.run.id,
-          effectiveNode,
-          nextStatus,
-        );
+        const notification = this.buildNotification(snapshot.run.id, effectiveNode, nextStatus);
         this.repo.createNodeEvent(
           snapshot.run.id,
           node.id,
@@ -619,7 +680,8 @@ export class OrchestrationGraphEngine extends EventEmitter {
   private async finalizeRunIfTerminal(snapshot: OrchestrationGraphSnapshot): Promise<void> {
     if (snapshot.nodes.some((node) => !isTerminalNodeStatus(node.status))) return;
     const hasFailure = snapshot.nodes.some(
-      (node) => node.status === "failed" || node.status === "cancelled" || node.status === "blocked",
+      (node) =>
+        node.status === "failed" || node.status === "cancelled" || node.status === "blocked",
     );
     const status = hasFailure ? "failed" : "completed";
     const updated = this.repo.updateRun(snapshot.run.id, {
@@ -667,7 +729,11 @@ export class OrchestrationGraphEngine extends EventEmitter {
     };
   }
 
-  private emitRootEvent(rootTaskId: string, eventType: string, payload: Record<string, unknown>): void {
+  private emitRootEvent(
+    rootTaskId: string,
+    eventType: string,
+    payload: Record<string, unknown>,
+  ): void {
     if (!rootTaskId) return;
     this.deps.emitRootEvent?.(rootTaskId, eventType, payload);
   }
@@ -679,7 +745,9 @@ export class OrchestrationGraphEngine extends EventEmitter {
       .filter((edge) => edge.toNodeId === node.id)
       .map((edge) => edge.fromNodeId);
     if (predecessorIds.length === 0) return node.prompt;
-    const predecessors = snapshot.nodes.filter((candidate) => predecessorIds.includes(candidate.id));
+    const predecessors = snapshot.nodes.filter((candidate) =>
+      predecessorIds.includes(candidate.id),
+    );
     const completedOutputs = predecessors
       .map((candidate, index) => {
         const text = candidate.output || candidate.summary || "";

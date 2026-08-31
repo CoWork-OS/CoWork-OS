@@ -12,6 +12,7 @@ import {
   MemoryEmbeddingRepository,
   MemorySummaryRepository,
   MemorySettingsRepository,
+  WorkspaceRepository,
   Memory,
   MemorySettings,
   MemorySearchResult,
@@ -28,7 +29,10 @@ import {
   createLocalEmbedding,
   tokenizeForLocalEmbedding,
 } from "./local-embedding";
-import { MarkdownMemoryIndexService } from "./MarkdownMemoryIndexService";
+import {
+  MarkdownMemoryIndexService,
+  type MarkdownMemoryReadGuard,
+} from "./MarkdownMemoryIndexService";
 import { MemoryTierService } from "./MemoryTierService";
 import { SupermemoryService } from "./SupermemoryService";
 import { MemoryObservationService } from "./MemoryObservationService";
@@ -112,6 +116,10 @@ export interface MemoryCaptureOptions {
   scopeKind?: CoreMemoryScopeKind;
   scopeRef?: string;
   skipMemoryWriteGate?: boolean;
+  /** Allow an explicit, user-enabled source sync to write even when auto-capture is off. */
+  forceCapture?: boolean;
+  /** Permit the optional external-memory mirror for this capture. */
+  allowExternalMirror?: boolean;
 }
 
 interface CompressionQueueEntry {
@@ -178,6 +186,7 @@ export class MemoryService {
   private static sideChannelPolicyPaused = false;
   private static cleanupIntervalHandle?: ReturnType<typeof setInterval>;
   private static db?: import("better-sqlite3").Database;
+  private static workspaceRepo?: WorkspaceRepository;
   private static ftsWorker: import("../database/FtsWorkerClient").FtsWorkerClient | null = null;
 
   private static promptRecallCache = new Map<
@@ -205,6 +214,7 @@ export class MemoryService {
     const db = dbManager.getDatabase();
     this.db = db;
     MemoryWriteGate.initialize(dbManager);
+    this.workspaceRepo = new WorkspaceRepository(db);
     this.memoryRepo = new MemoryRepository(db);
     this.embeddingRepo = new MemoryEmbeddingRepository(db);
     this.summaryRepo = new MemorySummaryRepository(db);
@@ -231,10 +241,11 @@ export class MemoryService {
     workspaceId: string,
     workspacePath: string,
     force = false,
+    readGuard?: MarkdownMemoryReadGuard,
   ): Promise<void> {
     this.ensureInitialized();
     if (!this.markdownIndex) return;
-    await this.markdownIndex.syncWorkspace(workspaceId, workspacePath, force);
+    await this.markdownIndex.syncWorkspace(workspaceId, workspacePath, force, undefined, readGuard);
   }
 
   /**
@@ -246,11 +257,12 @@ export class MemoryService {
     workspacePath: string,
     query: string,
     limit = 10,
+    readGuard?: MarkdownMemoryReadGuard,
   ): MemorySearchResult[] {
     this.ensureInitialized();
     if (!this.markdownIndex) return [];
     try {
-      return this.markdownIndex.search(workspaceId, workspacePath, query, limit);
+      return this.markdownIndex.search(workspaceId, workspacePath, query, limit, readGuard);
     } catch {
       return [];
     }
@@ -260,11 +272,12 @@ export class MemoryService {
     workspaceId: string,
     workspacePath: string,
     limit = 3,
+    readGuard?: MarkdownMemoryReadGuard,
   ): MemorySearchResult[] {
     this.ensureInitialized();
     if (!this.markdownIndex) return [];
     try {
-      return this.markdownIndex.getRecentSnippets(workspaceId, workspacePath, limit);
+      return this.markdownIndex.getRecentSnippets(workspaceId, workspacePath, limit, readGuard);
     } catch {
       return [];
     }
@@ -299,7 +312,7 @@ export class MemoryService {
 
     // Check settings
     const settings = this.settingsRepo.getOrCreate(workspaceId);
-    if (!settings.enabled || !settings.autoCapture) {
+    if (!settings.enabled || (!settings.autoCapture && !options?.forceCapture)) {
       return null;
     }
 
@@ -318,7 +331,10 @@ export class MemoryService {
     // Check for sensitive content
     const containsSensitive = this.containsSensitiveData(privacyPrepared.content);
     const finalIsPrivate =
-      isPrivate || privacyPrepared.hadPrivateBlock || containsSensitive || settings.privacyMode === "strict";
+      isPrivate ||
+      privacyPrepared.hadPrivateBlock ||
+      containsSensitive ||
+      settings.privacyMode === "strict";
 
     // Estimate tokens
     const tokens = estimateTokens(privacyPrepared.content);
@@ -439,7 +455,11 @@ export class MemoryService {
     // Emit event
     memoryEvents.emit("memoryChanged", { type: "created", workspaceId });
 
-    if (!finalIsPrivate) {
+    if (
+      !finalIsPrivate &&
+      options?.allowExternalMirror !== false &&
+      this.isExternalMemoryMirrorAllowed(workspaceId)
+    ) {
       void SupermemoryService.mirrorMemory({
         workspace: {
           id: workspaceId,
@@ -493,7 +513,11 @@ export class MemoryService {
     return results;
   }
 
-  private static searchInternal(workspaceId: string, query: string, limit = 20): MemorySearchResult[] {
+  private static searchInternal(
+    workspaceId: string,
+    query: string,
+    limit = 20,
+  ): MemorySearchResult[] {
     this.ensureInitialized();
     // Include private memories — private means not shared externally, not hidden from the owner
     const lexicalLimit = Math.min(Math.max(limit, 5), 50);
@@ -632,6 +656,7 @@ export class MemoryService {
       candidateId: options.candidateId,
       scopeKind: options.scopeKind,
       scopeRef: options.scopeRef,
+      forceCapture: options.forceCapture,
     };
   }
 
@@ -879,13 +904,18 @@ export class MemoryService {
     this.ensureInitialized();
     return this.memoryRepo
       .getRecentForWorkspace(workspaceId, limit, true)
-      .filter((memory) =>
-        !this.isPromptRecallIgnoredContent(memory.content) &&
-        !MemoryObservationService.isPromptSuppressed(memory.id)
+      .filter(
+        (memory) =>
+          !this.isPromptRecallIgnoredContent(memory.content) &&
+          !MemoryObservationService.isPromptSuppressed(memory.id),
       );
   }
 
-  static searchForPromptRecall(workspaceId: string, query: string, limit = 20): MemorySearchResult[] {
+  static searchForPromptRecall(
+    workspaceId: string,
+    query: string,
+    limit = 20,
+  ): MemorySearchResult[] {
     this.ensureInitialized();
     const results = this.search(workspaceId, query, limit);
     if (results.length === 0) return results;
@@ -893,9 +923,10 @@ export class MemoryService {
     const details = this.memoryRepo.getFullDetails(results.map((result) => result.id));
     const ignoredIds = new Set(
       details
-        .filter((memory) =>
-          this.isPromptRecallIgnoredContent(memory.content) ||
-          MemoryObservationService.isPromptSuppressed(memory.id)
+        .filter(
+          (memory) =>
+            this.isPromptRecallIgnoredContent(memory.content) ||
+            MemoryObservationService.isPromptSuppressed(memory.id),
         )
         .map((memory) => memory.id),
     );
@@ -919,11 +950,7 @@ export class MemoryService {
       return cached.results;
     }
 
-    const rawResults = this.memoryRepo.searchLocalForPromptRecall(
-      workspaceId,
-      query,
-      limit + 5,
-    );
+    const rawResults = this.memoryRepo.searchLocalForPromptRecall(workspaceId, query, limit + 5);
 
     const results = this.filterPromptRecallRows(rawResults, limit);
     this.rememberPromptRecallResults(cacheKey, results);
@@ -1086,7 +1113,10 @@ export class MemoryService {
       try {
         const results = await this.ftsWorker.search(workspaceId, query, limit, true);
         if (results.length > 0 && this.db) {
-          MemoryTierService.recordReferenceBatch(this.db, results.map((r) => r.id));
+          MemoryTierService.recordReferenceBatch(
+            this.db,
+            results.map((r) => r.id),
+          );
         }
         if (results.length > 0) return results;
       } catch {
@@ -1096,7 +1126,10 @@ export class MemoryService {
     return this.search(workspaceId, query, limit);
   }
 
-  static async getContextForInjectionAsync(workspaceId: string, taskPrompt: string): Promise<string> {
+  static async getContextForInjectionAsync(
+    workspaceId: string,
+    taskPrompt: string,
+  ): Promise<string> {
     this.ensureInitialized();
     const featureSettings = MemoryFeaturesManager.loadSettings();
     if (featureSettings.defaultArchiveInjectionEnabled !== true) {
@@ -1181,7 +1214,10 @@ export class MemoryService {
     return /<\s*no-memory\s*\/?\s*>/i.test(content);
   }
 
-  private static applyInlinePrivacy(content: string): { content: string; hadPrivateBlock: boolean } {
+  private static applyInlinePrivacy(content: string): {
+    content: string;
+    hadPrivateBlock: boolean;
+  } {
     let hadPrivateBlock = false;
     const redacted = content.replace(/<\s*private\s*>[\s\S]*?<\s*\/\s*private\s*>/gi, () => {
       hadPrivateBlock = true;
@@ -1523,7 +1559,9 @@ export class MemoryService {
 
   static deleteEntries(workspaceId: string, ids: string[]): number {
     this.ensureInitialized();
-    const uniqueIds = [...new Set((ids || []).map((id) => String(id || "").trim()).filter(Boolean))];
+    const uniqueIds = [
+      ...new Set((ids || []).map((id) => String(id || "").trim()).filter(Boolean)),
+    ];
     let deleted = 0;
     for (const id of uniqueIds) {
       try {
@@ -1536,6 +1574,82 @@ export class MemoryService {
       memoryEvents.emit("memoryChanged", { type: "deleted", workspaceId });
     }
     return deleted;
+  }
+
+  /**
+   * Replace a memory owned by a trusted, explicit source synchronizer.
+   *
+   * This keeps source-backed memories stable (and therefore deduplicated) while
+   * refreshing their content and local embedding when the upstream document
+   * changes. The workspace check prevents a source from mutating another
+   * workspace's memory row.
+   */
+  static replaceMemory(
+    workspaceId: string,
+    memoryId: string,
+    content: string,
+    summary?: string,
+  ): Memory | null {
+    this.ensureInitialized();
+
+    const settings = this.settingsRepo.getOrCreate(workspaceId);
+    if (!settings.enabled || settings.privacyMode === "disabled") return null;
+
+    const current = this.memoryRepo.findById(memoryId);
+    if (!current || current.workspaceId !== workspaceId) return null;
+
+    const privacyPrepared = this.applyInlinePrivacy(content);
+    if (this.shouldExclude(privacyPrepared.content, settings)) return null;
+    const truncatedContent =
+      privacyPrepared.content.length > 10000
+        ? `${privacyPrepared.content.slice(0, 10000)}\n[... truncated]`
+        : privacyPrepared.content;
+    const finalSummary = this.buildDeterministicSummary(summary || truncatedContent);
+    const updatedAt = Date.now();
+
+    this.memoryRepo.update(memoryId, {
+      content: truncatedContent,
+      summary: finalSummary || undefined,
+      tokens: estimateTokens(truncatedContent),
+      isCompressed: true,
+    });
+
+    try {
+      this.embeddingRepo.deleteByMemoryIds([memoryId]);
+      const embedding = createLocalEmbedding(
+        this.normalizeForEmbedding(finalSummary, truncatedContent),
+      );
+      this.embeddingRepo.upsert(workspaceId, memoryId, embedding, updatedAt);
+      this.cacheEmbedding(workspaceId, memoryId, embedding, updatedAt);
+      if (this.importedEmbeddingsLoaded) {
+        this.importedEmbeddings.set(memoryId, {
+          updatedAt,
+          embedding: Float32Array.from(embedding),
+          workspaceId,
+        });
+      }
+    } catch {
+      // Search can fall back to lexical matching if local embedding refresh fails.
+    }
+
+    const updated = this.memoryRepo.findById(memoryId);
+    if (!updated) return null;
+
+    if (MemoryFeaturesManager.loadSettings().structuredObservationsEnabled !== false) {
+      try {
+        MemoryObservationService.createForMemory(updated, {
+          origin: "import",
+          captureReason: "box_brain_sync",
+          privacyState: updated.isPrivate ? "private" : "normal",
+        });
+      } catch {
+        // Structured observations are auxiliary and must not block source sync.
+      }
+    }
+
+    this.promptRecallCache.clear();
+    memoryEvents.emit("memoryChanged", { type: "updated", workspaceId });
+    return updated;
   }
 
   private static clearCompressionStateForWorkspace(workspaceId: string): void {
@@ -1558,7 +1672,8 @@ export class MemoryService {
 
     if (workspaceId) {
       return this.cloneCompressionDiagnostics(
-        this.compressionDiagnosticsByWorkspace.get(workspaceId) || this.createCompressionDiagnostics(),
+        this.compressionDiagnosticsByWorkspace.get(workspaceId) ||
+          this.createCompressionDiagnostics(),
       );
     }
 
@@ -1609,7 +1724,9 @@ export class MemoryService {
     };
   }
 
-  private static getCompressionDiagnosticsForWorkspace(workspaceId: string): CompressionDiagnostics {
+  private static getCompressionDiagnosticsForWorkspace(
+    workspaceId: string,
+  ): CompressionDiagnostics {
     const existing = this.compressionDiagnosticsByWorkspace.get(workspaceId);
     if (existing) return existing;
     const created = this.createCompressionDiagnostics();
@@ -1779,7 +1896,10 @@ export class MemoryService {
     if (origin === "heartbeat") {
       return tokens >= MIN_TOKENS_FOR_OBSERVATION_COMPRESSION ? "normal" : "low";
     }
-    if (this.isStructuredLowValueContent(content) && tokens < MIN_TOKENS_FOR_OBSERVATION_COMPRESSION) {
+    if (
+      this.isStructuredLowValueContent(content) &&
+      tokens < MIN_TOKENS_FOR_OBSERVATION_COMPRESSION
+    ) {
       return "low";
     }
     if (tokens >= MIN_TOKENS_FOR_OBSERVATION_COMPRESSION) return "normal";
@@ -1823,7 +1943,10 @@ export class MemoryService {
     if (trimmed.includes("```")) return true;
     if (trimmed.length <= 80) return false;
 
-    const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const lines = trimmed
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
     if (lines.length >= 4) {
       const bulletCount = lines.filter((line) => /^([-*]|\d+[.)])\s+/.test(line)).length;
       if (bulletCount >= 2) return true;
@@ -1839,7 +1962,10 @@ export class MemoryService {
     const trimmed = this.stripPromptRecallIgnoreMarker(content).trim();
     if (!trimmed) return "";
 
-    const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const lines = trimmed
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
     let summary = lines.find((line) => !line.startsWith("```")) || lines[0] || trimmed;
     summary = summary.replace(/\s+/g, " ").trim();
     if (summary.length > LOCAL_SUMMARY_MAX_CHARS) {
@@ -2083,7 +2209,12 @@ export class MemoryService {
   ): Promise<void> {
     for (const memory of memories) {
       if (!memory.summary) {
-        this.updateMemorySummary(memory, group.workspaceId, this.buildDeterministicSummary(memory.content), true);
+        this.updateMemorySummary(
+          memory,
+          group.workspaceId,
+          this.buildDeterministicSummary(memory.content),
+          true,
+        );
       }
     }
 
@@ -2161,7 +2292,8 @@ export class MemoryService {
       .join("\n");
 
     return {
-      system: "You write compact durable memory digests for agent work. Be factual, concise, and avoid filler.",
+      system:
+        "You write compact durable memory digests for agent work. Be factual, concise, and avoid filler.",
       user,
     };
   }
@@ -2591,6 +2723,28 @@ export class MemoryService {
   }
 
   /**
+   * Automatic mirrors must honor the persisted workspace profile even when a
+   * caller does not carry a task-local effective workspace into this service.
+   * Test-only/in-memory callers may not initialize a workspace repository; in
+   * that compatibility case the explicit caller option remains authoritative.
+   */
+  private static isExternalMemoryMirrorAllowed(workspaceId: string): boolean {
+    if (!this.workspaceRepo) return true;
+    try {
+      const workspace = this.workspaceRepo.findById(workspaceId);
+      if (!workspace?.permissions) return false;
+      return (
+        workspace.permissions.network === true &&
+        workspace.permissions.accessProfileUnavailable !== true &&
+        workspace.permissions.accessNetworkMode !== "disabled" &&
+        workspace.permissions.accessNetworkMode !== "on-request"
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Truncate text to specified length
    */
   private static truncate(text: string, maxLength: number): string {
@@ -2632,6 +2786,7 @@ export class MemoryService {
     this.compressionRetryCounts.clear();
     this.compressionBudgetByWorkspace.clear();
     this.compressionDiagnosticsByWorkspace.clear();
+    this.workspaceRepo = undefined;
     this.initialized = false;
     logger.info("[MemoryService] Shutdown complete");
   }

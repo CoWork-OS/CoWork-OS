@@ -22,7 +22,8 @@ export function MCDetailPanel({ data }: MCDetailPanelProps) {
 
   if (!detailPanel) return null;
 
-  const typeLabel = detailPanel.kind === "task" ? "Task" : detailPanel.kind === "agent" ? "Agent" : "Issue";
+  const typeLabel =
+    detailPanel.kind === "task" ? "Task" : detailPanel.kind === "agent" ? "Agent" : "Issue";
 
   return (
     <aside className="mc-v2-detail-panel">
@@ -30,14 +31,22 @@ export function MCDetailPanel({ data }: MCDetailPanelProps) {
         <div className="mc-v2-detail-header-left">
           <span className="mc-v2-detail-type">{typeLabel}</span>
         </div>
-        <button className="mc-v2-detail-close" onClick={() => setDetailPanel(null)} title="Close (Esc)">
+        <button
+          className="mc-v2-detail-close"
+          onClick={() => setDetailPanel(null)}
+          title="Close (Esc)"
+        >
           <X size={14} />
         </button>
       </div>
       <div className="mc-v2-detail-body">
         {detailPanel.kind === "task" && <MCTaskDetail data={data} taskId={detailPanel.taskId} />}
-        {detailPanel.kind === "agent" && <MCAgentDetail data={data} agentId={detailPanel.agentId} />}
-        {detailPanel.kind === "issue" && <MCIssueDetail data={data} issueId={detailPanel.issueId} />}
+        {detailPanel.kind === "agent" && (
+          <MCAgentDetail data={data} agentId={detailPanel.agentId} />
+        )}
+        {detailPanel.kind === "issue" && (
+          <MCIssueDetail data={data} issueId={detailPanel.issueId} />
+        )}
       </div>
     </aside>
   );

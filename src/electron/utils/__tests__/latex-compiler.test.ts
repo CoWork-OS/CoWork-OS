@@ -36,7 +36,10 @@ describe("latex compiler", () => {
 
   it("returns a clear failure when no engine is installed", async () => {
     const workspace = await makeWorkspace();
-    await fs.writeFile(path.join(workspace, "paper.tex"), "\\documentclass{article}\\begin{document}Hi\\end{document}");
+    await fs.writeFile(
+      path.join(workspace, "paper.tex"),
+      "\\documentclass{article}\\begin{document}Hi\\end{document}",
+    );
     const execFileImpl = vi.fn(async () => {
       throw new Error("not found");
     });

@@ -318,17 +318,12 @@
   .settings-combined-body
   > .settings-section
   > .settings-description:first-of-type,
-.system-security-section--admin
-  .settings-panel
-  > .settings-description:first-of-type {
+.system-security-section--admin .settings-panel > .settings-description:first-of-type {
   margin-top: -2px;
   margin-bottom: 16px;
 }
 
-.system-security-section--tray
-  .tray-settings
-  > .settings-section:first-child
-  > h3:first-child,
+.system-security-section--tray .tray-settings > .settings-section:first-child > h3:first-child,
 .system-security-section--permissions
   .settings-combined-body
   > .settings-section
@@ -466,8 +461,14 @@
 }
 
 @keyframes insights-fade-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ── Insights: Header ── */
@@ -1074,7 +1075,9 @@
   padding: 6px 10px;
   border-radius: 999px;
   cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
 }
 
 .insights-awu-toggle-btn:hover {

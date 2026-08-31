@@ -81,7 +81,10 @@ export class DailyBriefingService {
       this.log("[DailyBriefing] refreshSuggestions skipped:", err);
     }
 
-    const sectionGenerators: Record<BriefingSectionType, () => BriefingSection | Promise<BriefingSection>> = {
+    const sectionGenerators: Record<
+      BriefingSectionType,
+      () => BriefingSection | Promise<BriefingSection>
+    > = {
       task_summary: () => this.buildTaskSummary(workspaceId),
       awareness_digest: () => this.buildAwarenessDigest(workspaceId),
       active_suggestions: () => this.buildSuggestions(workspaceId),
@@ -207,7 +210,9 @@ export class DailyBriefingService {
   private isBackgroundTask(title: string | undefined): boolean {
     const normalized = this.cleanLabel(this.stripWorkspacePrefix(title || ""));
     if (!normalized) return true;
-    return DailyBriefingService.BACKGROUND_TASK_PATTERNS.some((pattern) => pattern.test(normalized));
+    return DailyBriefingService.BACKGROUND_TASK_PATTERNS.some((pattern) =>
+      pattern.test(normalized),
+    );
   }
 
   private isGenericFocus(text: string | undefined): boolean {
@@ -252,7 +257,11 @@ export class DailyBriefingService {
     ) {
       score += 8;
     }
-    if (/^(fix|ship|review|resolve|publish|launch|document|test|clean|organize|follow up|finish)\b/.test(normalized)) {
+    if (
+      /^(fix|ship|review|resolve|publish|launch|document|test|clean|organize|follow up|finish)\b/.test(
+        normalized,
+      )
+    ) {
       score += 4;
     }
     if (
@@ -268,14 +277,18 @@ export class DailyBriefingService {
   }
 
   private isUsefulAwarenessItem(item: Any): boolean {
-    const title = this.normalizeSemanticText(this.stripWorkspacePrefix(item?.title || item?.label || ""));
+    const title = this.normalizeSemanticText(
+      this.stripWorkspacePrefix(item?.title || item?.label || ""),
+    );
     const detail = this.cleanLabel(item?.detail || item?.description || "");
     if (!title) return false;
     if (this.isLowSignalText(title)) return false;
     if (detail && this.isLowSignalText(detail)) return false;
     if (this.isMetaActionText(title) || this.isMetaActionText(detail)) return false;
     const source = String(item?.source || "").toLowerCase();
-    const tags = Array.isArray(item?.tags) ? item.tags.map((tag: unknown) => String(tag).toLowerCase()) : [];
+    const tags = Array.isArray(item?.tags)
+      ? item.tags.map((tag: unknown) => String(tag).toLowerCase())
+      : [];
     if ((source === "apps" || source === "browser") && this.isGenericFocus(`${title} ${detail}`)) {
       return false;
     }
@@ -293,18 +306,26 @@ export class DailyBriefingService {
     if (detail && this.isLowSignalText(detail)) return false;
     if (this.isMetaActionText(title) || this.isMetaActionText(detail)) return false;
     if (this.isGenericFocus(`${title} ${detail}`)) return false;
-    return /^(review|fix|ship|follow up|resolve|publish|finish|check|update|triage|prepare|draft|test|clean|optimize)/i.test(title);
+    return /^(review|fix|ship|follow up|resolve|publish|finish|check|update|triage|prepare|draft|test|clean|optimize)/i.test(
+      title,
+    );
   }
 
   private decisionScore(decision: Any): number {
     const title = this.normalizeSemanticText(this.stripWorkspacePrefix(decision?.title || ""));
-    const detail = this.normalizeSemanticText(this.stripWorkspacePrefix(decision?.description || ""));
+    const detail = this.normalizeSemanticText(
+      this.stripWorkspacePrefix(decision?.description || ""),
+    );
     let score = 0;
     if (!title || this.isLowSignalText(title)) return -100;
     if (detail && this.isLowSignalText(detail)) return -100;
     if (this.isMetaActionText(title) || this.isMetaActionText(detail)) return -100;
     if (decision?.priority === "high") score += 10;
-    if (/\b(block|blocked|urgent|risk|deadline|security|follow up|review|finish|ship|fix)\b/i.test(`${title} ${detail}`)) {
+    if (
+      /\b(block|blocked|urgent|risk|deadline|security|follow up|review|finish|ship|fix)\b/i.test(
+        `${title} ${detail}`,
+      )
+    ) {
       score += 6;
     }
     if (title.length <= 96) score += 2;
@@ -315,7 +336,11 @@ export class DailyBriefingService {
     const title = this.normalizeSemanticText(task?.title || "");
     let score = 0;
     if (!title || this.isBackgroundTask(title) || this.isLowSignalText(title)) return -100;
-    if (/^(fix|ship|release|publish|deploy|build|implement|refactor|document|add|remove|resolve|launch|clean)/i.test(title)) {
+    if (
+      /^(fix|ship|release|publish|deploy|build|implement|refactor|document|add|remove|resolve|launch|clean)/i.test(
+        title,
+      )
+    ) {
       score += 8;
     }
     if (task?.workspaceName) score += 1;
@@ -337,7 +362,10 @@ export class DailyBriefingService {
 
   private evolutionHasEnoughSignal(snapshot: Any): boolean {
     const byId = new Map<string, { value?: number }>(
-      (snapshot?.metrics || []).map((metric: Any) => [String(metric?.id || ""), metric as { value?: number }]),
+      (snapshot?.metrics || []).map((metric: Any) => [
+        String(metric?.id || ""),
+        metric as { value?: number },
+      ]),
     );
     return (
       Number(byId.get("knowledge_growth")?.value || 0) > 0 ||
@@ -347,11 +375,7 @@ export class DailyBriefingService {
     );
   }
 
-  private dedupeBriefingItems(
-    items: Any[],
-    keyFn: (item: Any) => string,
-    limit?: number,
-  ): Any[] {
+  private dedupeBriefingItems(items: Any[], keyFn: (item: Any) => string, limit?: number): Any[] {
     const map = new Map<string, Any>();
     for (const item of items) {
       const key = keyFn(item);
@@ -409,14 +433,15 @@ export class DailyBriefingService {
       items.push({
         label: `${failed.length} failed`,
         status: "failed",
-        detail: [
-          notableFailed.length > 0 ? notableFailed.map((t: Any) => t.title).join(", ") : null,
-          backgroundFailedCount > 0
-            ? `${backgroundFailedCount} background automation failure${backgroundFailedCount === 1 ? "" : "s"}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" · ") || undefined,
+        detail:
+          [
+            notableFailed.length > 0 ? notableFailed.map((t: Any) => t.title).join(", ") : null,
+            backgroundFailedCount > 0
+              ? `${backgroundFailedCount} background automation failure${backgroundFailedCount === 1 ? "" : "s"}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || undefined,
       });
 
     const notableCompleted = completed
@@ -453,7 +478,15 @@ export class DailyBriefingService {
         ...this.deps.searchMemory(workspaceId, "constraint", 5),
       ].filter((memory: Any) => {
         const type = String(memory?.type || "");
-        if (!["preference", "constraint", "timing_preference", "workflow_pattern", "correction_rule"].includes(type)) {
+        if (
+          ![
+            "preference",
+            "constraint",
+            "timing_preference",
+            "workflow_pattern",
+            "correction_rule",
+          ].includes(type)
+        ) {
           return false;
         }
         const text = memory?.summary || memory?.content || memory?.snippet || "";
@@ -472,9 +505,10 @@ export class DailyBriefingService {
       5,
     ).map((m: Any) => ({
       label: `${this.describeMemoryType(m.type)} ${m.label}`.trim(),
-      detail: [m.workspaceName ? `Workspaces: ${m.workspaceName}` : null, this.memoryTypeDetail(m.type)]
-        .filter(Boolean)
-        .join(" · ") || undefined,
+      detail:
+        [m.workspaceName ? `Workspaces: ${m.workspaceName}` : null, this.memoryTypeDetail(m.type)]
+          .filter(Boolean)
+          .join(" · ") || undefined,
       status: "info" as const,
     }));
     return { type: "memory_highlights", title: "Durable Changes", items, enabled: true };
@@ -486,8 +520,14 @@ export class DailyBriefingService {
         value === "high" ? 3 : value === "medium" ? 2 : value === "low" ? 1 : 0;
       const deliveryScore = (value: string | undefined) =>
         value === "nudge" ? 3 : value === "inbox" ? 2 : value === "briefing" ? 1 : 0;
-      const combinedA = urgencyScore(a.urgency) * 10 + deliveryScore(a.recommendedDelivery) * 5 + (a.confidence || 0);
-      const combinedB = urgencyScore(b.urgency) * 10 + deliveryScore(b.recommendedDelivery) * 5 + (b.confidence || 0);
+      const combinedA =
+        urgencyScore(a.urgency) * 10 +
+        deliveryScore(a.recommendedDelivery) * 5 +
+        (a.confidence || 0);
+      const combinedB =
+        urgencyScore(b.urgency) * 10 +
+        deliveryScore(b.recommendedDelivery) * 5 +
+        (b.confidence || 0);
       return combinedB - combinedA;
     });
     const items: BriefingItem[] = this.dedupeBriefingItems(
@@ -495,9 +535,9 @@ export class DailyBriefingService {
         .filter((s: Any) => this.isUsefulSuggestion(s))
         .slice(0, 20)
         .map((s: Any) => ({
-        ...s,
-        label: this.prefixWorkspace(s, s.title || s.description),
-      })),
+          ...s,
+          label: this.prefixWorkspace(s, s.title || s.description),
+        })),
       (item) =>
         `${this.normalizeSemanticText(item.label || item.title || "")}::${this.normalizeSemanticText(
           item.detail || item.description || "",
@@ -505,10 +545,7 @@ export class DailyBriefingService {
       3,
     ).map((s: Any) => ({
       label: this.stripMarkdownFormatting(s.label),
-      detail: [
-        s.description || "",
-        s.workspaceName ? `Workspaces: ${s.workspaceName}` : null,
-      ]
+      detail: [s.description || "", s.workspaceName ? `Workspaces: ${s.workspaceName}` : null]
         .filter(Boolean)
         .join(" · "),
       status: "info" as const,
@@ -555,7 +592,11 @@ export class DailyBriefingService {
     if (!raw) return { type: "priority_review", title: "Priorities", items: [], enabled: true };
     const lines = this.parsePriorityLines(raw);
     const ranked = lines
-      .map((line: string, index: number) => ({ line, index, score: this.priorityScore(line, index) }))
+      .map((line: string, index: number) => ({
+        line,
+        index,
+        score: this.priorityScore(line, index),
+      }))
       .sort((a, b) => b.score - a.score || a.index - b.index);
     const items: BriefingItem[] = this.dedupeBriefingItems(
       ranked.slice(0, 12).map(({ line }: { line: string }) => ({
@@ -611,7 +652,9 @@ export class DailyBriefingService {
   }
 
   private async buildMailboxSummary(workspaceId: string): Promise<BriefingSection> {
-    const digest = this.deps.getMailboxDigest ? await this.deps.getMailboxDigest(workspaceId) : null;
+    const digest = this.deps.getMailboxDigest
+      ? await this.deps.getMailboxDigest(workspaceId)
+      : null;
     if (!digest) {
       return { type: "mailbox_summary", title: "Inbox Summary", items: [], enabled: true };
     }
@@ -643,7 +686,10 @@ export class DailyBriefingService {
       items.push({
         label: `${digest.eventCount} mailbox event${digest.eventCount === 1 ? "" : "s"} captured`,
         detail: digest.recentEventTypes
-          .map((event: MailboxDigestSnapshot["recentEventTypes"][number]) => `${event.type}: ${event.count}`)
+          .map(
+            (event: MailboxDigestSnapshot["recentEventTypes"][number]) =>
+              `${event.type}: ${event.count}`,
+          )
           .join(" · "),
         status: "info",
       });
@@ -665,7 +711,9 @@ export class DailyBriefingService {
       const riskSignals = (summary.whatMattersNow || [])
         .filter((item: Any) => this.isUsefulAwarenessItem(item))
         .filter((item: Any) => {
-          const tags = Array.isArray(item?.tags) ? item.tags.map((tag: unknown) => String(tag).toLowerCase()) : [];
+          const tags = Array.isArray(item?.tags)
+            ? item.tags.map((tag: unknown) => String(tag).toLowerCase())
+            : [];
           const text = `${item?.title || ""} ${item?.detail || ""}`;
           return (
             tags.includes("deadline") ||
@@ -706,13 +754,13 @@ export class DailyBriefingService {
 
       const deduped = this.dedupeBriefingItems(
         items,
-        (item) => `${this.normalizeSemanticText(item.label || "")}::${this.normalizeSemanticText(item.detail || "")}`,
+        (item) =>
+          `${this.normalizeSemanticText(item.label || "")}::${this.normalizeSemanticText(item.detail || "")}`,
         4,
       ).map((item: Any) => ({
         label: this.stripMarkdownFormatting(item.label),
         detail:
-          item.detail ||
-          (item.workspaceName ? `Workspaces: ${item.workspaceName}` : undefined),
+          item.detail || (item.workspaceName ? `Workspaces: ${item.workspaceName}` : undefined),
         status: item.status,
       }));
 
@@ -734,7 +782,8 @@ export class DailyBriefingService {
         title: "Needs Attention Today",
         items: this.dedupeBriefingItems(
           deduped,
-          (item) => `${this.normalizeSemanticText(item.label || "")}::${this.normalizeSemanticText(item.detail || "")}`,
+          (item) =>
+            `${this.normalizeSemanticText(item.label || "")}::${this.normalizeSemanticText(item.detail || "")}`,
           4,
         ),
         enabled: true,
@@ -770,7 +819,12 @@ export class DailyBriefingService {
       const items: BriefingItem[] = snapshot.metrics.map((m) => ({
         label: `${m.label}: ${m.value}${m.unit}`,
         detail: m.detail,
-        status: m.trend === "improving" ? ("completed" as const) : m.trend === "declining" ? ("failed" as const) : ("info" as const),
+        status:
+          m.trend === "improving"
+            ? ("completed" as const)
+            : m.trend === "declining"
+              ? ("failed" as const)
+              : ("info" as const),
       }));
       items.push({
         label: `Overall Evolution Score: ${snapshot.overallScore}/100`,

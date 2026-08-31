@@ -68,18 +68,28 @@ function readLocalConnectionDescriptor(userDataDir: string): LocalControlPlaneDi
     }
     return { url, token, source: filePath };
   } catch (error) {
-    return { error: `Failed to read ${filePath}: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      error: `Failed to read ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
 export function discoverUserDataDirs(profileName?: string): string[] {
   const roots = process.env.COWORK_USER_DATA_DIR
     ? [process.env.COWORK_USER_DATA_DIR]
-    : Array.from(new Set([getPlatformElectronUserDataRoot(), path.join(os.homedir(), ".cowork")].filter(Boolean) as string[]));
+    : Array.from(
+        new Set(
+          [getPlatformElectronUserDataRoot(), path.join(os.homedir(), ".cowork")].filter(
+            Boolean,
+          ) as string[],
+        ),
+      );
   const dirs: string[] = [];
   for (const root of roots) {
     dirs.push(root);
-    const normalized = normalizeProfileId(profileName || process.env.COWORK_PROFILE || process.env.COWORK_PROFILE_ID || "");
+    const normalized = normalizeProfileId(
+      profileName || process.env.COWORK_PROFILE || process.env.COWORK_PROFILE_ID || "",
+    );
     if (normalized && normalized !== "default") {
       dirs.push(path.join(root, "profiles", normalized));
     }
@@ -99,10 +109,14 @@ function readLegacySettings(userDataDir: string): LocalControlPlaneDiscoveryResu
   const settingsPath = path.join(userDataDir, "control-plane-settings.json");
   if (!fs.existsSync(settingsPath)) return {};
   try {
-    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as StoredControlPlaneSettings;
+    const settings = JSON.parse(
+      fs.readFileSync(settingsPath, "utf8"),
+    ) as StoredControlPlaneSettings;
     return normalizeSettings(settings, settingsPath);
   } catch (error) {
-    return { error: `Failed to read ${settingsPath}: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      error: `Failed to read ${settingsPath}: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
@@ -156,10 +170,15 @@ function readDatabaseSettingsWithSqliteCli(
     if (!output) return {};
     const [encryptedData, checksum] = output.split("\t");
     if (!encryptedData || !checksum) return { error: `Invalid sqlite3 output for ${dbPath}` };
-    const decrypted = decryptSecureSettings({ encrypted_data: encryptedData, checksum }, userDataDir);
+    const decrypted = decryptSecureSettings(
+      { encrypted_data: encryptedData, checksum },
+      userDataDir,
+    );
     return normalizeSettings(JSON.parse(decrypted) as StoredControlPlaneSettings, dbPath);
   } catch (error) {
-    return { error: `Failed sqlite3 fallback for ${dbPath}: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      error: `Failed sqlite3 fallback for ${dbPath}: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
@@ -172,8 +191,10 @@ function normalizeSettings(
   if (settings.enabled === false) {
     return { error: `Control plane is disabled in ${source}` };
   }
-  const host = typeof settings.host === "string" && settings.host.trim() ? settings.host.trim() : "127.0.0.1";
-  const port = typeof settings.port === "number" && Number.isFinite(settings.port) ? settings.port : 18789;
+  const host =
+    typeof settings.host === "string" && settings.host.trim() ? settings.host.trim() : "127.0.0.1";
+  const port =
+    typeof settings.port === "number" && Number.isFinite(settings.port) ? settings.port : 18789;
   return {
     url: `ws://${host}:${port}`,
     token,
@@ -230,7 +251,8 @@ function readMachineIdentifier(userDataDir: string): string {
 
 function getPlatformElectronUserDataRoot(): string | undefined {
   const home = os.homedir();
-  if (process.platform === "darwin") return path.join(home, "Library", "Application Support", "cowork-os");
+  if (process.platform === "darwin")
+    return path.join(home, "Library", "Application Support", "cowork-os");
   if (process.platform === "win32") {
     const appData = process.env.APPDATA || path.join(home, "AppData", "Roaming");
     return path.join(appData, "cowork-os");
@@ -249,7 +271,11 @@ function isProcessRunning(pid: number): boolean {
 }
 
 function normalizeProfileId(input: string): string {
-  const normalized = input.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-");
+  const normalized = input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-");
   return normalized.replace(/^[-_.]+|[-_.]+$/g, "").slice(0, 64);
 }
 

@@ -1,11 +1,6 @@
 import { useMemo, useState } from "react";
 
-export type ConnectorProvider =
-  | "salesforce"
-  | "jira"
-  | "hubspot"
-  | "zendesk"
-  | "google-workspace";
+export type ConnectorProvider = "salesforce" | "jira" | "hubspot" | "zendesk" | "google-workspace";
 
 interface ConnectorSetupModalProps {
   provider: ConnectorProvider;

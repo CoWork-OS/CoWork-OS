@@ -1,56 +1,57 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { IPC_CHANNELS } from "../../../shared/types";
 
-const {
-  registeredHandlers,
-  mockConfigure,
-  mockCheck,
-  mockGetResetTime,
-  mockHealthManager,
-} = vi.hoisted(() => {
-  const registeredHandlers = new Map<string, (...args: any[]) => unknown>();
-  const mockConfigure = vi.fn();
-  const mockCheck = vi.fn(() => true);
-  const mockGetResetTime = vi.fn(() => Date.now() + 1_000);
-  const mockHealthManager = {
-    getDashboard: vi.fn(() => ({
-      generatedAt: 1,
-      isDemo: false,
-      stats: {},
-      sources: [],
-      metrics: [],
-      records: [],
-      insights: [],
-      workflows: [],
-    })),
-    listSources: vi.fn(() => []),
-    upsertSource: vi.fn((source) => ({ id: "source-id", ...source })),
-    removeSource: vi.fn(() => ({ success: true })),
-    syncSource: vi.fn((sourceId: string) => ({ ok: true, sourceId })),
-    importFiles: vi.fn(async (sourceId: string, filePaths: string[]) => ({
-      ok: true,
-      sourceId,
-      filePaths,
-      metrics: [],
-      records: [],
-      insights: [],
-      workflow: null,
-    })),
-    generateWorkflow: vi.fn(async (request) => ({ success: true, request })),
-    disconnectAppleHealth: vi.fn(() => ({ success: true })),
-    connectAppleHealth: vi.fn(async (request) => ({ success: true, request })),
-    getAppleHealthStatus: vi.fn(async () => ({
-      available: true,
-      authorizationStatus: "authorized",
-      readableTypes: [],
-      writableTypes: [],
-      sourceMode: "native",
-    })),
-    previewAppleHealthWriteback: vi.fn(async (request) => ({ success: true, preview: { sourceId: request.sourceId } })),
-    applyAppleHealthWriteback: vi.fn(async (request) => ({ success: true, writtenCount: request.items.length })),
-  };
-  return { registeredHandlers, mockConfigure, mockCheck, mockGetResetTime, mockHealthManager };
-});
+const { registeredHandlers, mockConfigure, mockCheck, mockGetResetTime, mockHealthManager } =
+  vi.hoisted(() => {
+    const registeredHandlers = new Map<string, (...args: any[]) => unknown>();
+    const mockConfigure = vi.fn();
+    const mockCheck = vi.fn(() => true);
+    const mockGetResetTime = vi.fn(() => Date.now() + 1_000);
+    const mockHealthManager = {
+      getDashboard: vi.fn(() => ({
+        generatedAt: 1,
+        isDemo: false,
+        stats: {},
+        sources: [],
+        metrics: [],
+        records: [],
+        insights: [],
+        workflows: [],
+      })),
+      listSources: vi.fn(() => []),
+      upsertSource: vi.fn((source) => ({ id: "source-id", ...source })),
+      removeSource: vi.fn(() => ({ success: true })),
+      syncSource: vi.fn((sourceId: string) => ({ ok: true, sourceId })),
+      importFiles: vi.fn(async (sourceId: string, filePaths: string[]) => ({
+        ok: true,
+        sourceId,
+        filePaths,
+        metrics: [],
+        records: [],
+        insights: [],
+        workflow: null,
+      })),
+      generateWorkflow: vi.fn(async (request) => ({ success: true, request })),
+      disconnectAppleHealth: vi.fn(() => ({ success: true })),
+      connectAppleHealth: vi.fn(async (request) => ({ success: true, request })),
+      getAppleHealthStatus: vi.fn(async () => ({
+        available: true,
+        authorizationStatus: "authorized",
+        readableTypes: [],
+        writableTypes: [],
+        sourceMode: "native",
+      })),
+      previewAppleHealthWriteback: vi.fn(async (request) => ({
+        success: true,
+        preview: { sourceId: request.sourceId },
+      })),
+      applyAppleHealthWriteback: vi.fn(async (request) => ({
+        success: true,
+        writtenCount: request.items.length,
+      })),
+    };
+    return { registeredHandlers, mockConfigure, mockCheck, mockGetResetTime, mockHealthManager };
+  });
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -174,7 +175,9 @@ describe("health IPC handlers", () => {
       expect.objectContaining({ workflowType: "visit-prep" }),
     );
 
-    await expect(disconnectHandler(null, "health-source:abc123")).resolves.toEqual({ success: true });
+    await expect(disconnectHandler(null, "health-source:abc123")).resolves.toEqual({
+      success: true,
+    });
     await expect(
       connectHandler(null, {
         sourceId: "health-source:abc123",

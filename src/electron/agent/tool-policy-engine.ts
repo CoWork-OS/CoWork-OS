@@ -197,11 +197,7 @@ const ALWAYS_VISIBLE_TOOLS = new Set([
   "Skill",
 ]);
 
-const SESSION_CHECKLIST_TOOLS = new Set([
-  "task_list_create",
-  "task_list_update",
-  "task_list_list",
-]);
+const SESSION_CHECKLIST_TOOLS = new Set(["task_list_create", "task_list_update", "task_list_list"]);
 
 const CHECKLIST_EXECUTION_INTENT_PATTERN =
   /\b(build|create|edit|fix|implement|modify|refactor|migrate|deploy|install|configure|test|verify|write|generate|ship|workflow|long-running|end-to-end)\b/i;
@@ -235,6 +231,8 @@ const NATIVE_GUI_ACTION_PATTERN =
   /\b(click|tap|press|type|enter|select|choose|toggle|drag|drop|scroll|hover|move (?:the )?mouse|cursor|navigate|create|rename|delete|compose|reply|submit)\b/i;
 const NATIVE_APP_OPEN_PATTERN =
   /\b(open|launch|activate|bring(?:ing)? .* front|focus|switch to|use)\b/i;
+const GENERIC_NATIVE_SURFACE_PATTERN =
+  /\b(?:the|this|that|current)\s+(?:(?:native|desktop|macos|windows)\s+)?(?:app|application|desktop|screen)\b/i;
 const WEB_SURFACE_PATTERN =
   /\b(browser|website|web page|web app|dom|url|https?:\/\/|localhost|127\.0\.0\.1|chrome|safari|firefox|brave|edge|browser tab|webview)\b/i;
 const ORCHESTRATION_INTENT_PATTERN =
@@ -243,7 +241,9 @@ const ADMIN_INTENT_PATTERN =
   /\b(personality|persona|agent name|user name|response style|quirks|vibes|lore|heartbeat|integration setup)\b/i;
 
 function normalizeTaskText(taskText?: string): string {
-  return String(taskText || "").trim().toLowerCase();
+  return String(taskText || "")
+    .trim()
+    .toLowerCase();
 }
 
 function hasBrowserSurfaceIntent(taskText: string): boolean {
@@ -257,7 +257,8 @@ export function hasPdfVisualIntent(taskText: string): boolean {
 export function hasNativeDesktopGuiIntent(taskText: string): boolean {
   if (!taskText) return false;
   if (COMPUTER_USE_INTENT_PATTERN.test(taskText)) return true;
-  const hasNativeAppReference = NATIVE_APP_REFERENCE_PATTERN.test(taskText);
+  const hasNativeAppReference =
+    NATIVE_APP_REFERENCE_PATTERN.test(taskText) || GENERIC_NATIVE_SURFACE_PATTERN.test(taskText);
   const hasGuiAction = NATIVE_GUI_ACTION_PATTERN.test(taskText);
   const hasOpenOrFocusAction = NATIVE_APP_OPEN_PATTERN.test(taskText);
 
@@ -266,15 +267,19 @@ export function hasNativeDesktopGuiIntent(taskText: string): boolean {
   }
 
   if (hasBrowserSurfaceIntent(taskText)) return false;
-
-  return hasOpenOrFocusAction && hasGuiAction;
+  return false;
 }
 
 function hasToolAffinity(toolName: string, tools?: Iterable<string>): boolean {
   if (!tools) return false;
   const target = toolName.trim().toLowerCase();
   for (const entry of tools) {
-    if (String(entry || "").trim().toLowerCase() === target) return true;
+    if (
+      String(entry || "")
+        .trim()
+        .toLowerCase() === target
+    )
+      return true;
   }
   return false;
 }
@@ -307,7 +312,11 @@ function inferToolExposureMetadata(
   if (SESSION_CHECKLIST_TOOLS.has(toolName)) {
     return { lane: "core", exposure: "conditional", overlapGroup: "session_checklist" };
   }
-  if (INTEGRATION_TOOLS.has(toolName) || toolName.endsWith("_action") || toolName.startsWith("mcp_")) {
+  if (
+    INTEGRATION_TOOLS.has(toolName) ||
+    toolName.endsWith("_action") ||
+    toolName.startsWith("mcp_")
+  ) {
     return { lane: "integration", exposure: "conditional", overlapGroup: "integration" };
   }
   if (toolName.startsWith("browser_") || toolName.startsWith("canvas_")) {
@@ -319,7 +328,9 @@ function inferToolExposureMetadata(
   }
   if (ARTIFACT_TOOLS.has(toolName)) {
     const overlapGroup =
-      toolName.includes("document") || toolName.includes("presentation") || toolName.includes("spreadsheet")
+      toolName.includes("document") ||
+      toolName.includes("presentation") ||
+      toolName.includes("spreadsheet")
         ? "artifact_generation"
         : toolName === "create_diagram"
           ? "diagram_generation"
@@ -457,9 +468,7 @@ export function evaluateToolAvailability(
       return { decision: "defer", reason: "artifact_intent_missing", metadata };
     case "system":
       if (normalizedToolName === "open_application") {
-        return hasNativeDesktopGuiIntent(taskText) ||
-          SYSTEM_INTENT_PATTERN.test(taskText) ||
-          ctx.taskDomain === "operations"
+        return hasNativeDesktopGuiIntent(taskText) || SYSTEM_INTENT_PATTERN.test(taskText)
           ? { decision: "allow", metadata }
           : { decision: "defer", reason: "system_intent_missing", metadata };
       }
@@ -470,7 +479,7 @@ export function evaluateToolAvailability(
         if (hasNativeDesktopGuiIntent(taskText)) {
           return { decision: "defer", reason: "prefer_computer_use_for_native_gui", metadata };
         }
-        return SYSTEM_INTENT_PATTERN.test(taskText) || ctx.taskDomain === "operations"
+        return SYSTEM_INTENT_PATTERN.test(taskText)
           ? { decision: "allow", metadata }
           : { decision: "defer", reason: "system_intent_missing", metadata };
       }
@@ -486,13 +495,17 @@ export function evaluateToolAvailability(
       }
       if (isComputerUseToolName(normalizedToolName)) {
         if (WEB_SURFACE_PATTERN.test(taskText) && !COMPUTER_USE_INTENT_PATTERN.test(taskText)) {
-          return { decision: "defer", reason: "prefer_browser_background_for_web_surface", metadata };
+          return {
+            decision: "defer",
+            reason: "prefer_browser_background_for_web_surface",
+            metadata,
+          };
         }
-        return hasNativeDesktopGuiIntent(taskText) || ctx.taskDomain === "operations"
+        return hasNativeDesktopGuiIntent(taskText)
           ? { decision: "allow", metadata }
           : { decision: "defer", reason: "computer_use_intent_missing", metadata };
       }
-      return SYSTEM_INTENT_PATTERN.test(taskText) || ctx.taskDomain === "operations"
+      return SYSTEM_INTENT_PATTERN.test(taskText)
         ? { decision: "allow", metadata }
         : { decision: "defer", reason: "system_intent_missing", metadata };
     default:
@@ -656,7 +669,11 @@ function applyHumanInputGate(
   return `Tool "${toolName}" is blocked because structured human input is disabled for this task.`;
 }
 
-function applyDomainGate(toolName: string, domain: TaskDomain, shellEnabled?: boolean): string | null {
+function applyDomainGate(
+  toolName: string,
+  domain: TaskDomain,
+  shellEnabled?: boolean,
+): string | null {
   if (domain === "auto" || domain === "code" || domain === "operations") return null;
 
   if (toolName === "run_command" || toolName === "run_applescript" || toolName === "execute_code") {

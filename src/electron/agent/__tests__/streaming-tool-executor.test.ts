@@ -7,13 +7,10 @@ describe("StreamingToolExecutor", () => {
       .fn()
       .mockResolvedValueOnce({ result: { ok: 1 } })
       .mockResolvedValueOnce({ result: { ok: 2 } });
-    const executor = new StreamingToolExecutor(
-      { executeTool } as Any,
-      {
-        taskId: "task-1",
-        phase: "step",
-      },
-    );
+    const executor = new StreamingToolExecutor({ executeTool } as Any, {
+      taskId: "task-1",
+      phase: "step",
+    });
 
     executor.addToolUse({ type: "tool_use", id: "1", name: "read_file", input: {} });
     executor.addToolUse({ type: "tool_use", id: "2", name: "glob", input: {} });
@@ -26,13 +23,10 @@ describe("StreamingToolExecutor", () => {
 
   it("discards pending tool uses", async () => {
     const executeTool = vi.fn();
-    const executor = new StreamingToolExecutor(
-      { executeTool } as Any,
-      {
-        taskId: "task-1",
-        phase: "step",
-      },
-    );
+    const executor = new StreamingToolExecutor({ executeTool } as Any, {
+      taskId: "task-1",
+      phase: "step",
+    });
 
     executor.addToolUse({ type: "tool_use", id: "1", name: "read_file", input: {} });
     executor.discard();

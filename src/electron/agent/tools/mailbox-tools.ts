@@ -38,7 +38,17 @@ interface MailboxActionInput {
   include_availability?: boolean;
   proposal_id?: string;
   draft_id?: string;
-  type?: "cleanup" | "follow_up" | "archive" | "trash" | "mark_read" | "label" | "send_draft" | "discard_draft" | "schedule_event" | "dismiss_proposal";
+  type?:
+    | "cleanup"
+    | "follow_up"
+    | "archive"
+    | "trash"
+    | "mark_read"
+    | "label"
+    | "send_draft"
+    | "discard_draft"
+    | "schedule_event"
+    | "dismiss_proposal";
   label?: string;
   to?: MailboxRecipientInput[] | string[];
   cc?: MailboxRecipientInput[] | string[];
@@ -48,7 +58,15 @@ interface MailboxActionInput {
   body_html?: string;
 }
 
-const MUTATING_ACTION_TYPES = new Set(["archive", "trash", "mark_read", "label", "send_draft", "discard_draft", "schedule_event"]);
+const MUTATING_ACTION_TYPES = new Set([
+  "archive",
+  "trash",
+  "mark_read",
+  "label",
+  "send_draft",
+  "discard_draft",
+  "schedule_event",
+]);
 
 function normalizeComposeMode(mode: MailboxActionInput["mode"]): MailboxComposeMode {
   return mode === "reply" || mode === "reply_all" || mode === "forward" ? mode : "new";

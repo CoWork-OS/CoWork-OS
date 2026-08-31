@@ -50,8 +50,11 @@ function parseTableRows(tableXml: string): string[][] {
   return rows;
 }
 
-function parseTopLevelElements(bodyXml: string): Array<{ kind: "paragraph" | "table"; xml: string; start: number; end: number }> {
-  const elements: Array<{ kind: "paragraph" | "table"; xml: string; start: number; end: number }> = [];
+function parseTopLevelElements(
+  bodyXml: string,
+): Array<{ kind: "paragraph" | "table"; xml: string; start: number; end: number }> {
+  const elements: Array<{ kind: "paragraph" | "table"; xml: string; start: number; end: number }> =
+    [];
   const elementRegex = /<w:(p|tbl)\b[^>]*>[\s\S]*?<\/w:\1>/g;
   let match: RegExpExecArray | null;
   while ((match = elementRegex.exec(bodyXml)) !== null) {
@@ -80,7 +83,10 @@ export function parseDocxBlocksFromXml(xmlContent: string): ParsedDocxBlock[] {
     .map((element, index): ParsedDocxBlock | null => {
       if (element.kind === "table") {
         const rows = parseTableRows(element.xml);
-        const text = rows.map((row) => row.join(" | ")).join("\n").trim();
+        const text = rows
+          .map((row) => row.join(" | "))
+          .join("\n")
+          .trim();
         return {
           id: `tbl-${index + 1}`,
           type: "table",

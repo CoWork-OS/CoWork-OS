@@ -1,14 +1,15 @@
-import {
-  memo,
-  useState,
-  useRef,
-  useCallback,
-  lazy,
-  Suspense,
-  useLayoutEffect,
-} from "react";
+import { memo, useState, useRef, useCallback, lazy, Suspense, useLayoutEffect } from "react";
 import { GitFork } from "lucide-react";
-import type { QuotedAssistantMessage, IntegrationMentionSelection } from "../../../shared/types";
+import type {
+  IntegrationMentionSelection,
+  QuotedAssistantMessage,
+  TaskEvent,
+} from "../../../shared/types";
+import {
+  isImageAttachmentMimeType,
+  type UserMessageAttachmentMetadata,
+} from "../../../shared/user-message-attachments";
+import { InlineImagePreview } from "../InlineImagePreview";
 import {
   COLLAPSED_USER_BUBBLE_MAX_HEIGHT,
   COLLAPSED_USER_BUBBLE_MIN_HEIGHT,
@@ -27,6 +28,79 @@ const LazyMarkdownRenderer = lazy(() =>
 const LazyHighlightedCodePreview = lazy(() =>
   import("../HighlightedCode").then((module) => ({ default: module.HighlightedCodePreview })),
 );
+
+export const UserMessageImageGallery = memo(function UserMessageImageGallery({
+  attachments,
+  workspacePath,
+  onOpenViewer,
+}: {
+  attachments: UserMessageAttachmentMetadata[];
+  workspacePath?: string;
+  onOpenViewer?: (path: string) => void;
+}) {
+  const imageAttachments = attachments.filter((attachment) =>
+    isImageAttachmentMimeType(attachment.mimeType),
+  );
+  if (imageAttachments.length === 0) return null;
+
+  const layout =
+    imageAttachments.length === 1
+      ? "single"
+      : imageAttachments.length === 2
+        ? "double"
+        : "multiple";
+
+  return (
+    <div
+      className={`user-message-image-gallery user-message-image-gallery-${layout}`}
+      role="group"
+      aria-label={`${imageAttachments.length} attached image${
+        imageAttachments.length === 1 ? "" : "s"
+      }`}
+    >
+      {imageAttachments.map((attachment, index) => {
+        const label = attachment.filename || `Image ${index + 1}`;
+        const key = `${attachment.filePath || attachment.filename || "image"}-${index}`;
+
+        if (attachment.filePath && workspacePath) {
+          return (
+            <div className="user-message-image-gallery-item" key={key}>
+              <InlineImagePreview
+                filePath={attachment.filePath}
+                workspacePath={workspacePath}
+                onOpenViewer={onOpenViewer}
+              />
+            </div>
+          );
+        }
+
+        return (
+          <div
+            className="user-message-image-gallery-fallback"
+            key={key}
+            role="img"
+            aria-label={label}
+          >
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              aria-hidden="true"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="m21 15-4.5-4.5L7 20" />
+            </svg>
+            <span title={label}>{label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+});
 
 export function DeferredMarkdown({
   children,
@@ -115,7 +189,10 @@ export function normalizeQuotedAssistantMarkdownPreview(
   return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
-export function summarizeQuotedAssistantMessage(message: string, maxChars = MAX_QUOTED_ASSISTANT_PREVIEW_CHARS): string {
+export function summarizeQuotedAssistantMessage(
+  message: string,
+  maxChars = MAX_QUOTED_ASSISTANT_PREVIEW_CHARS,
+): string {
   const collapsed = message.replace(/\s+/g, " ").trim();
   if (collapsed.length <= maxChars) return collapsed;
   return `${collapsed.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
@@ -137,6 +214,13 @@ export function createQuotedAssistantMessage(
       : cleaned,
     ...(truncated ? { truncated: true } : {}),
   };
+}
+
+export function isLastAssistantMessageEvent(
+  event: { id?: TaskEvent["id"] },
+  lastAssistantMessage?: { id?: TaskEvent["id"] } | null,
+): boolean {
+  return Boolean(event.id && lastAssistantMessage?.id === event.id);
 }
 
 // Copy button for user messages
@@ -194,7 +278,12 @@ export const MessageQuoteButton = memo(function MessageQuoteButton({
   onQuote: () => void;
 }) {
   return (
-    <button type="button" className="message-quote-btn" onClick={onQuote} title="Quote this message">
+    <button
+      type="button"
+      className="message-quote-btn"
+      onClick={onQuote}
+      title="Quote this message"
+    >
       <svg
         width="12"
         height="12"
@@ -219,7 +308,12 @@ export const MessageForkButton = memo(function MessageForkButton({
   onFork: () => void;
 }) {
   return (
-    <button type="button" className="message-fork-btn" onClick={onFork} title="Fork from this message">
+    <button
+      type="button"
+      className="message-fork-btn"
+      onClick={onFork}
+      title="Fork from this message"
+    >
       <GitFork size={12} strokeWidth={2} aria-hidden="true" />
       <span>Fork</span>
     </button>
@@ -487,5 +581,7 @@ export function UserMessageText({
 }
 
 export function getIntegrationMentionsSignature(mentions?: IntegrationMentionSelection[]): string {
-  return mentions?.map((mention) => `${mention.id}:${mention.label}:${mention.iconKey}`).join("|") ?? "";
+  return (
+    mentions?.map((mention) => `${mention.id}:${mention.label}:${mention.iconKey}`).join("|") ?? ""
+  );
 }

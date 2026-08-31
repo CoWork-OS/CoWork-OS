@@ -88,8 +88,7 @@ describe("timeline payload sanitizer", () => {
       100,
     );
     expect(
-      (sanitized.payload as { result: { imageBase64Omitted: boolean } }).result
-        .imageBase64Omitted,
+      (sanitized.payload as { result: { imageBase64Omitted: boolean } }).result.imageBase64Omitted,
     ).toBe(true);
   });
 });

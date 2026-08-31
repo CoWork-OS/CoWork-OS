@@ -4,9 +4,7 @@ import { classifyShellPermissionDecision } from "../shell-permission-intents";
 describe("classifyShellPermissionDecision", () => {
   it("detects explicit enable phrases", () => {
     expect(classifyShellPermissionDecision("enable shell")).toBe("enable_shell");
-    expect(classifyShellPermissionDecision("please turn on shell access")).toBe(
-      "enable_shell",
-    );
+    expect(classifyShellPermissionDecision("please turn on shell access")).toBe("enable_shell");
   });
 
   it("detects continue-without-shell phrases", () => {
@@ -14,6 +12,12 @@ describe("classifyShellPermissionDecision", () => {
       "continue_without_shell",
     );
     expect(classifyShellPermissionDecision("go ahead, limited best effort is fine")).toBe(
+      "continue_without_shell",
+    );
+    expect(classifyShellPermissionDecision("continue without commands")).toBe(
+      "continue_without_shell",
+    );
+    expect(classifyShellPermissionDecision("proceed with no command tools")).toBe(
       "continue_without_shell",
     );
   });

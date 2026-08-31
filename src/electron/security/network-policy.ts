@@ -1,5 +1,6 @@
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { loadPolicies } from "../admin/policies";
+import type { AccessDomainRule } from "../../shared/access-profiles";
 
 export interface NetworkPolicyDecision {
   action: "allow" | "deny";
@@ -7,27 +8,46 @@ export interface NetworkPolicyDecision {
   domain: string;
   toolName: string;
   reason: string;
-  ruleSource: "admin_policy" | "legacy_guardrails";
+  ruleSource: "admin_policy" | "legacy_guardrails" | "access_profile" | "workspace_permissions";
   matchedRule?: string;
 }
 
 export interface NetworkPolicyRequest {
   url: string;
   toolName: string;
+  networkEnabled?: boolean;
+  accessNetworkMode?: "disabled" | "on-request" | "enabled";
+  profileDomainRules?: AccessDomainRule[];
 }
 
 function normalizeDomainPattern(pattern: string): string {
-  return String(pattern || "").trim().toLowerCase();
+  return String(pattern || "")
+    .trim()
+    .toLowerCase();
 }
 
-function domainMatches(hostname: string, pattern: string): boolean {
+export function domainMatches(hostname: string, pattern: string): boolean {
+  const normalizedHostname = String(hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\.$/, "");
   const normalizedPattern = normalizeDomainPattern(pattern);
-  if (!hostname || !normalizedPattern) return false;
+  if (!normalizedHostname || !normalizedPattern) return false;
+  if (normalizedPattern === "*") return true;
+  if (normalizedPattern.startsWith("**.")) {
+    const suffix = normalizedPattern.slice(3);
+    return (
+      Boolean(suffix) &&
+      (normalizedHostname === suffix || normalizedHostname.endsWith(`.${suffix}`))
+    );
+  }
   if (normalizedPattern.startsWith("*.")) {
     const suffix = normalizedPattern.slice(2);
-    return hostname === suffix || hostname.endsWith(`.${suffix}`);
+    return (
+      Boolean(suffix) && normalizedHostname !== suffix && normalizedHostname.endsWith(`.${suffix}`)
+    );
   }
-  return hostname === normalizedPattern;
+  return normalizedHostname === normalizedPattern.replace(/\.$/, "");
 }
 
 export function toLogSafeNetworkPolicyUrl(url: URL): string {
@@ -56,7 +76,56 @@ export function evaluateNetworkPolicy(request: NetworkPolicyRequest): NetworkPol
 
   const domain = parsed.hostname.toLowerCase();
   const logSafeUrl = toLogSafeNetworkPolicyUrl(parsed);
+  if (request.accessNetworkMode === "disabled") {
+    return {
+      action: "deny",
+      url: logSafeUrl,
+      domain,
+      toolName: request.toolName,
+      reason: "profile_network_disabled",
+      ruleSource: "access_profile",
+    };
+  }
+  if (request.networkEnabled === false) {
+    return {
+      action: "deny",
+      url: logSafeUrl,
+      domain,
+      toolName: request.toolName,
+      reason: "workspace_network_disabled",
+      ruleSource: "workspace_permissions",
+    };
+  }
   const policies = loadPolicies();
+  const profileRules = request.profileDomainRules || [];
+  const profileDeny = profileRules.find(
+    (rule) => rule.access === "deny" && domainMatches(domain, rule.pattern),
+  );
+  if (profileDeny) {
+    return {
+      action: "deny",
+      url: logSafeUrl,
+      domain,
+      toolName: request.toolName,
+      reason: "profile_domain_denied",
+      ruleSource: "access_profile",
+      matchedRule: profileDeny.pattern,
+    };
+  }
+  const profileAllows = profileRules.filter((rule) => rule.access === "allow");
+  if (
+    profileAllows.length > 0 &&
+    !profileAllows.some((rule) => domainMatches(domain, rule.pattern))
+  ) {
+    return {
+      action: "deny",
+      url: logSafeUrl,
+      domain,
+      toolName: request.toolName,
+      reason: "profile_domain_not_allowed",
+      ruleSource: "access_profile",
+    };
+  }
   const blockedMatch = policies.runtime.network.blockedDomains.find((pattern) =>
     domainMatches(domain, pattern),
   );

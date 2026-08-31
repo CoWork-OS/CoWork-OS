@@ -91,9 +91,17 @@ describe("EvolutionMetricsService", () => {
       mockSearch.mockImplementation((_ws: string, query: string) => {
         if (query.includes("[PLAYBOOK] Task")) {
           return [
-            { type: "insight", snippet: "[PLAYBOOK] Task succeeded: \"Deploy\"", createdAt: Date.now() },
-            { type: "insight", snippet: "[PLAYBOOK] Task succeeded: \"Build\"", createdAt: Date.now() },
-            { type: "insight", snippet: "[PLAYBOOK] Task failed: \"Test\"", createdAt: Date.now() },
+            {
+              type: "insight",
+              snippet: '[PLAYBOOK] Task succeeded: "Deploy"',
+              createdAt: Date.now(),
+            },
+            {
+              type: "insight",
+              snippet: '[PLAYBOOK] Task succeeded: "Build"',
+              createdAt: Date.now(),
+            },
+            { type: "insight", snippet: '[PLAYBOOK] Task failed: "Test"', createdAt: Date.now() },
           ];
         }
         return [];
@@ -116,14 +124,30 @@ describe("EvolutionMetricsService", () => {
         if (query.includes("failed")) {
           return [
             // Recent: only 1 failure
-            { type: "insight", snippet: "[PLAYBOOK] Task failed: \"A\"", createdAt: now - 100000 },
+            { type: "insight", snippet: '[PLAYBOOK] Task failed: "A"', createdAt: now - 100000 },
             // Older period: 6 failures (high rate)
-            { type: "insight", snippet: "[PLAYBOOK] Task failed: \"B\"", createdAt: oneWeekAgo },
-            { type: "insight", snippet: "[PLAYBOOK] Task failed: \"C\"", createdAt: oneWeekAgo - 1000 },
-            { type: "insight", snippet: "[PLAYBOOK] Task failed: \"D\"", createdAt: twoWeeksAgo },
-            { type: "insight", snippet: "[PLAYBOOK] Task failed: \"E\"", createdAt: twoWeeksAgo - 1000 },
-            { type: "insight", snippet: "[PLAYBOOK] Task failed: \"F\"", createdAt: twoWeeksAgo - 2000 },
-            { type: "insight", snippet: "[PLAYBOOK] Task failed: \"G\"", createdAt: twoWeeksAgo - 3000 },
+            { type: "insight", snippet: '[PLAYBOOK] Task failed: "B"', createdAt: oneWeekAgo },
+            {
+              type: "insight",
+              snippet: '[PLAYBOOK] Task failed: "C"',
+              createdAt: oneWeekAgo - 1000,
+            },
+            { type: "insight", snippet: '[PLAYBOOK] Task failed: "D"', createdAt: twoWeeksAgo },
+            {
+              type: "insight",
+              snippet: '[PLAYBOOK] Task failed: "E"',
+              createdAt: twoWeeksAgo - 1000,
+            },
+            {
+              type: "insight",
+              snippet: '[PLAYBOOK] Task failed: "F"',
+              createdAt: twoWeeksAgo - 2000,
+            },
+            {
+              type: "insight",
+              snippet: '[PLAYBOOK] Task failed: "G"',
+              createdAt: twoWeeksAgo - 3000,
+            },
           ];
         }
         return [];
@@ -167,7 +191,8 @@ describe("EvolutionMetricsService", () => {
     it("increases with knowledge graph size", async () => {
       // First snapshot with empty KG
       vi.mocked(
-        (await import("../../knowledge-graph/KnowledgeGraphService")).KnowledgeGraphService.getStats,
+        (await import("../../knowledge-graph/KnowledgeGraphService")).KnowledgeGraphService
+          .getStats,
       ).mockReturnValueOnce({
         entityCount: 0,
         edgeCount: 0,
@@ -178,7 +203,8 @@ describe("EvolutionMetricsService", () => {
 
       // Second snapshot with larger KG
       vi.mocked(
-        (await import("../../knowledge-graph/KnowledgeGraphService")).KnowledgeGraphService.getStats,
+        (await import("../../knowledge-graph/KnowledgeGraphService")).KnowledgeGraphService
+          .getStats,
       ).mockReturnValueOnce({
         entityCount: 100,
         edgeCount: 200,

@@ -68,7 +68,9 @@ function stripDirectoriesFromSummary(
 ): TaskOutputSummary | null {
   if (!summary || directoryPaths.size === 0) return summary;
 
-  const created = summary.created.filter((filePath) => !directoryPaths.has(normalizePath(filePath)));
+  const created = summary.created.filter(
+    (filePath) => !directoryPaths.has(normalizePath(filePath)),
+  );
   const modifiedFallback = (summary.modifiedFallback || []).filter(
     (filePath) => !directoryPaths.has(normalizePath(filePath)),
   );
@@ -113,7 +115,9 @@ export function sanitizeTaskOutputSummary(raw: unknown): TaskOutputSummary | nul
     folders?: unknown[];
   };
 
-  const created = toUniqueNormalizedPaths(Array.isArray(candidate.created) ? candidate.created : []);
+  const created = toUniqueNormalizedPaths(
+    Array.isArray(candidate.created) ? candidate.created : [],
+  );
   const modifiedFallback = toUniqueNormalizedPaths(
     Array.isArray(candidate.modifiedFallback) ? candidate.modifiedFallback : [],
   );
@@ -235,7 +239,9 @@ export function resolveTaskOutputSummaryFromCompletionEvent(
   return null;
 }
 
-export function hasTaskOutputs(summary: TaskOutputSummary | null | undefined): summary is TaskOutputSummary {
+export function hasTaskOutputs(
+  summary: TaskOutputSummary | null | undefined,
+): summary is TaskOutputSummary {
   return !!summary && summary.outputCount > 0;
 }
 

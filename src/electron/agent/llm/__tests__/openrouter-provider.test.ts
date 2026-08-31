@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  OPENROUTER_DEFAULT_MODEL,
-  OpenRouterProvider,
-} from "../openrouter-provider";
+import { OPENROUTER_DEFAULT_MODEL, OpenRouterProvider } from "../openrouter-provider";
 
 function countCacheMarkers(messages: Any[]): number {
   return messages.reduce((count, message) => {
@@ -100,9 +97,7 @@ describe("OpenRouterProvider attribution headers", () => {
       messages: [{ role: "user", content: "write code" }],
     });
 
-    expect(capturedBody.plugins).toEqual([
-      { id: "pareto-router", min_coding_score: 0.8 },
-    ]);
+    expect(capturedBody.plugins).toEqual([{ id: "pareto-router", min_coding_score: 0.8 }]);
   });
 
   it("applies the Pareto router plugin to the Nitro variant", async () => {
@@ -134,9 +129,7 @@ describe("OpenRouterProvider attribution headers", () => {
       messages: [{ role: "user", content: "write code quickly" }],
     });
 
-    expect(capturedBody.plugins).toEqual([
-      { id: "pareto-router", min_coding_score: 0.66 },
-    ]);
+    expect(capturedBody.plugins).toEqual([{ id: "pareto-router", min_coding_score: 0.66 }]);
   });
 
   it("omits the Pareto router plugin when no min coding score is configured", async () => {
@@ -352,7 +345,7 @@ describe("OpenRouterProvider attribution headers", () => {
             {
               type: "tool_result",
               tool_use_id: "tool_1",
-              content: "{\"ok\":true}",
+              content: '{"ok":true}',
             },
           ],
         },
@@ -593,7 +586,8 @@ describe("OpenRouterProvider attribution headers", () => {
     ).rejects.toMatchObject({
       status: 404,
       retryable: true,
-      providerMessage: "No endpoints found that support image input for model minimax/minimax-m2.5:free",
+      providerMessage:
+        "No endpoints found that support image input for model minimax/minimax-m2.5:free",
     });
 
     expect(fetchMock).not.toHaveBeenCalled();

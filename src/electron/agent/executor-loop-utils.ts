@@ -16,7 +16,9 @@ function stableStringify(value: unknown): string {
 }
 
 function isPackagingRelatedToolCall(toolName: string, input: unknown): boolean {
-  const normalizedToolName = String(toolName || "").trim().toLowerCase();
+  const normalizedToolName = String(toolName || "")
+    .trim()
+    .toLowerCase();
   if (
     /^(create_document|generate_document|compile_latex|generate_epub|nano-pdf|nano_pdf)$/i.test(
       normalizedToolName,
@@ -77,13 +79,20 @@ export function recordPackagingFailureFingerprint(opts: {
   error: string;
   counts: Map<string, number>;
   threshold?: number;
-}): { isPackagingFailure: boolean; fingerprint?: string; count: number; thresholdReached: boolean } {
+}): {
+  isPackagingFailure: boolean;
+  fingerprint?: string;
+  count: number;
+  thresholdReached: boolean;
+} {
   if (!isPackagingRelatedToolCall(opts.toolName, opts.input)) {
     return { isPackagingFailure: false, count: 0, thresholdReached: false };
   }
 
   const fingerprint = [
-    String(opts.toolName || "").trim().toLowerCase(),
+    String(opts.toolName || "")
+      .trim()
+      .toLowerCase(),
     extractPackagingTarget(opts.input),
     normalizePackagingFailureMessage(opts.error),
   ].join("::");
@@ -526,12 +535,12 @@ export function maybeInjectLowProgressNudge(opts: {
         type: "text",
         text: (() => {
           const message =
-          opts.mutationRequired && !opts.mutationSatisfied
-            ? opts.requiredActionText ||
-              `You are repeatedly probing the same target ("${topTarget}") without meaningful progress. ` +
-                "Stop probing and perform the required write/canvas mutation now."
-            : `You are repeatedly probing the same target ("${topTarget}") without meaningful progress. ` +
-              "Stop additional probing now. Synthesize the best answer from current evidence, and explicitly list any missing data as blockers.";
+            opts.mutationRequired && !opts.mutationSatisfied
+              ? opts.requiredActionText ||
+                `You are repeatedly probing the same target ("${topTarget}") without meaningful progress. ` +
+                  "Stop probing and perform the required write/canvas mutation now."
+              : `You are repeatedly probing the same target ("${topTarget}") without meaningful progress. ` +
+                "Stop additional probing now. Synthesize the best answer from current evidence, and explicitly list any missing data as blockers.";
           return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
         })(),
       },
@@ -603,8 +612,8 @@ export function maybeInjectStopReasonNudge(opts: {
             type: "text",
             text: (() => {
               const message =
-              "This step requires an artifact mutation and it has not happened yet. " +
-              `Do not stop tool calls yet. Perform ${requiredTools} now, then continue.`;
+                "This step requires an artifact mutation and it has not happened yet. " +
+                `Do not stop tool calls yet. Perform ${requiredTools} now, then continue.`;
               return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
             })(),
           },
@@ -620,8 +629,8 @@ export function maybeInjectStopReasonNudge(opts: {
           type: "text",
           text: (() => {
             const message =
-            "You have been in repeated tool-use turns. Stop calling tools unless absolutely required for correctness. " +
-            "Produce a concise, direct answer from gathered evidence, and list unresolved gaps explicitly.";
+              "You have been in repeated tool-use turns. Stop calling tools unless absolutely required for correctness. " +
+              "Produce a concise, direct answer from gathered evidence, and list unresolved gaps explicitly.";
             return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
           })(),
         },

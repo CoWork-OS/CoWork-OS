@@ -26,7 +26,10 @@ function makeDb(rows: Record<string, unknown>[] = []) {
           const minRef = args[0] as number;
           let changed = 0;
           for (const row of store.values()) {
-            if ((row["tier"] ?? "short") === "short" && (row["reference_count"] as number) >= minRef) {
+            if (
+              (row["tier"] ?? "short") === "short" &&
+              (row["reference_count"] as number) >= minRef
+            ) {
               row["tier"] = "medium";
               changed++;
             }
@@ -36,7 +39,10 @@ function makeDb(rows: Record<string, unknown>[] = []) {
           const minRef = args[0] as number;
           let changed = 0;
           for (const row of store.values()) {
-            if ((row["tier"] ?? "short") === "medium" && (row["reference_count"] as number) >= minRef) {
+            if (
+              (row["tier"] ?? "short") === "medium" &&
+              (row["reference_count"] as number) >= minRef
+            ) {
               row["tier"] = "long";
               changed++;
             }
@@ -66,7 +72,9 @@ function makeDb(rows: Record<string, unknown>[] = []) {
       },
     }),
     _store: store,
-  } as unknown as import("better-sqlite3").Database & { _store: Map<string, Record<string, unknown>> };
+  } as unknown as import("better-sqlite3").Database & {
+    _store: Map<string, Record<string, unknown>>;
+  };
 }
 
 describe("MemoryTierService", () => {
@@ -74,7 +82,9 @@ describe("MemoryTierService", () => {
     it("increments reference count for an existing memory", () => {
       const db = makeDb([{ id: "m1", tier: "short", reference_count: 2, created_at: Date.now() }]);
       MemoryTierService.recordReference(db, "m1");
-      const row = (db as unknown as { _store: Map<string, Record<string, unknown>> })._store.get("m1");
+      const row = (db as unknown as { _store: Map<string, Record<string, unknown>> })._store.get(
+        "m1",
+      );
       expect(row?.["reference_count"]).toBe(3);
     });
   });

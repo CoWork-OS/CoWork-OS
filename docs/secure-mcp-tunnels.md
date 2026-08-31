@@ -4,6 +4,17 @@ Secure MCP Tunnels let CoWork OS expose selected local or private MCP tools thro
 
 This feature is guarded by `COWORK_SECURE_MCP_TUNNELS=1`.
 
+## Access Profile Boundary
+
+Secure MCP Tunnel credentials authorize the tunnel transport; they do not
+grant a task new local capabilities. When the target is the local CoWork MCP
+host, the target node still applies the task's effective [access
+profile](access-profiles.md), administrator policy, tool restrictions, and
+hard guardrails before a tool executes. Relay policy and `allowedTools` can
+only narrow that result. A caller token cannot select a broader profile,
+escape a filesystem/domain boundary, or turn a denied profile into an
+available one.
+
 ## What It Solves
 
 Use Secure MCP Tunnels when a remote CoWork surface needs to call a private MCP server:
@@ -212,6 +223,7 @@ Security controls:
 - Remote callers authenticate with a separate `callerToken`.
 - Relay-side policy is authoritative. The local client cannot relax it.
 - Local policy is also enforced before forwarding to the private MCP target.
+- The target task's access profile remains authoritative for CoWork MCP-host calls; tunnel tokens do not widen it.
 - Plain HTTP relay URLs are allowed only for loopback development; non-loopback relay URLs must use HTTPS/WSS.
 - Custom MCP targets must be loopback, `.local`, or private-network addresses.
 - Request and response size limits are enforced.
@@ -299,6 +311,7 @@ Check the relay policy and the local tunnel policy:
 - `allowedTools` blocks all tools not listed when non-empty
 - read-only mode blocks write-like tool names
 - request or response size limits may reject large payloads
+- the target task's access profile or administrator policy may deny the tool; choose a valid, sufficiently capable profile on the target node rather than widening the tunnel policy
 
 ### Local CoWork Host Fails
 

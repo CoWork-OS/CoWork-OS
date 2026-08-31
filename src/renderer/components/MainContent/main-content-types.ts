@@ -5,6 +5,7 @@ import type {
   AgentConfig,
   IntegrationMentionSelection,
 } from "../../../shared/types";
+import type { AccessProfileId } from "../../../shared/access-profiles";
 
 export type SettingsTab =
   | "appearance"
@@ -39,6 +40,7 @@ export interface CreateTaskOptions {
   autonomousMode?: boolean;
   permissionMode?: PermissionMode;
   shellAccess?: boolean;
+  accessProfileId?: AccessProfileId;
   collaborativeMode?: boolean;
   multitaskMode?: boolean;
   multitaskLaneCount?: number;

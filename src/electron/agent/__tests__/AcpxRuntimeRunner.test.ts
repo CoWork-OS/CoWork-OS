@@ -182,10 +182,10 @@ describe("AcpxRuntimeRunner helpers", () => {
       {
         type: "command_output",
         payload: {
-          command: "/bin/zsh -lc \"ls -1A\"",
+          command: '/bin/zsh -lc "ls -1A"',
           cwd: "/repo",
           type: "start",
-          output: "$ /bin/zsh -lc \"ls -1A\"\n",
+          output: '$ /bin/zsh -lc "ls -1A"\n',
         },
       },
       {
@@ -201,7 +201,7 @@ describe("AcpxRuntimeRunner helpers", () => {
             cwd: "/repo",
             parsed_cmd: [{ type: "list_files" }],
           },
-          command: "/bin/zsh -lc \"ls -1A\"",
+          command: '/bin/zsh -lc "ls -1A"',
           cwd: "/repo",
         },
       },
@@ -226,7 +226,7 @@ describe("AcpxRuntimeRunner helpers", () => {
       {
         type: "command_output",
         payload: {
-          command: "/bin/zsh -lc \"ls -1A\"",
+          command: '/bin/zsh -lc "ls -1A"',
           cwd: "/repo",
           type: "stdout",
           output: "src\npackage.json\n",
@@ -464,9 +464,7 @@ describe("AcpxRuntimeRunner", () => {
   it("falls back to npx acpx@latest when acpx is missing", async () => {
     const missingProc = createFakeProcess();
     const fallbackProc = createFakeProcess();
-    childProcessMocks.spawn
-      .mockReturnValueOnce(missingProc)
-      .mockReturnValueOnce(fallbackProc);
+    childProcessMocks.spawn.mockReturnValueOnce(missingProc).mockReturnValueOnce(fallbackProc);
     const runner = new AcpxRuntimeRunner({
       taskId: "task-1",
       cwd: "/repo",
@@ -558,12 +556,18 @@ describe("AcpxRuntimeRunner", () => {
     });
 
     const createPromise = runner.createSession();
-    missingCreateProc.emit("error", Object.assign(new Error("spawn acpx ENOENT"), { code: "ENOENT" }));
+    missingCreateProc.emit(
+      "error",
+      Object.assign(new Error("spawn acpx ENOENT"), { code: "ENOENT" }),
+    );
     fallbackCreateProc.emit("close", 0);
     await createPromise;
 
     const cancelPromise = runner.cancel();
-    missingCancelProc.emit("error", Object.assign(new Error("spawn acpx ENOENT"), { code: "ENOENT" }));
+    missingCancelProc.emit(
+      "error",
+      Object.assign(new Error("spawn acpx ENOENT"), { code: "ENOENT" }),
+    );
     missingCancelProc.emit("close", -2);
     fallbackCancelProc.emit("close", 0);
     await cancelPromise;

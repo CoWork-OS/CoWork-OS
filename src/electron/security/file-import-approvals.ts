@@ -23,7 +23,10 @@ function pruneExpiredApprovals(now: number): void {
   const oldestEntries = Array.from(approvedImportPaths.entries()).sort(
     (left, right) => left[1] - right[1],
   );
-  for (const [filePath] of oldestEntries.slice(0, approvedImportPaths.size - MAX_APPROVED_IMPORTS)) {
+  for (const [filePath] of oldestEntries.slice(
+    0,
+    approvedImportPaths.size - MAX_APPROVED_IMPORTS,
+  )) {
     approvedImportPaths.delete(filePath);
   }
 }

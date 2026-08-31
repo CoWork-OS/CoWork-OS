@@ -108,7 +108,7 @@ export class ChannelTools {
         name: "channel_list_chats",
         description:
           "List recently active chats for a given messaging channel (from the local gateway message log). " +
-          "Use this to discover chat IDs before fetching message history. " +
+          "For requests to read or summarize messages, use this before browser automation to discover chat IDs. " +
           "This is privacy-sensitive and may be restricted in shared contexts.",
         input_schema: {
           type: "object",
@@ -135,7 +135,7 @@ export class ChannelTools {
         name: "channel_history",
         description:
           "Fetch recent message history for a specific chat from the local gateway message log. " +
-          "Use channel_list_chats first if you do not know the chat_id. " +
+          "Use channel_list_chats first if you do not know the chat_id; prefer this local history over opening the channel's web app. " +
           "This is privacy-sensitive and may be restricted in shared contexts.",
         input_schema: {
           type: "object",
@@ -490,10 +490,7 @@ export class ChannelTools {
     return result;
   }
 
-  async fetchDiscordMessages(input: {
-    chat_id: unknown;
-    limit?: unknown;
-  }): Promise<Any> {
+  async fetchDiscordMessages(input: { chat_id: unknown; limit?: unknown }): Promise<Any> {
     const chatId = typeof input?.chat_id === "string" ? input.chat_id.trim() : "";
     const limitRaw = typeof input?.limit === "number" ? input.limit : undefined;
     const limit = Math.min(Math.max(limitRaw ?? 100, 1), 100);
@@ -510,7 +507,7 @@ export class ChannelTools {
     if (!isValidDiscordSnowflake(chatId)) {
       return {
         success: false,
-        error: 'Invalid chat_id: must be a Discord channel snowflake ID (17–19 digits)',
+        error: "Invalid chat_id: must be a Discord channel snowflake ID (17–19 digits)",
       };
     }
 
@@ -518,8 +515,7 @@ export class ChannelTools {
     if (!provider) {
       return {
         success: false,
-        error:
-          "Discord live fetch is unavailable. The gateway may not be initialized yet.",
+        error: "Discord live fetch is unavailable. The gateway may not be initialized yet.",
       };
     }
 
@@ -554,13 +550,9 @@ export class ChannelTools {
     }
   }
 
-  async downloadDiscordAttachment(input: {
-    chat_id: unknown;
-    message_id: unknown;
-  }): Promise<Any> {
+  async downloadDiscordAttachment(input: { chat_id: unknown; message_id: unknown }): Promise<Any> {
     const chatId = typeof input?.chat_id === "string" ? input.chat_id.trim() : "";
-    const messageId =
-      typeof input?.message_id === "string" ? input.message_id.trim() : "";
+    const messageId = typeof input?.message_id === "string" ? input.message_id.trim() : "";
 
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "channel_download_discord_attachment",
@@ -577,7 +569,7 @@ export class ChannelTools {
     if (!isValidDiscordSnowflake(chatId) || !isValidDiscordSnowflake(messageId)) {
       return {
         success: false,
-        error: 'Invalid chat_id or message_id: must be Discord snowflake IDs (17–19 digits)',
+        error: "Invalid chat_id or message_id: must be Discord snowflake IDs (17–19 digits)",
       };
     }
 
@@ -585,8 +577,7 @@ export class ChannelTools {
     if (!provider) {
       return {
         success: false,
-        error:
-          "Discord live fetch is unavailable. The gateway may not be initialized yet.",
+        error: "Discord live fetch is unavailable. The gateway may not be initialized yet.",
       };
     }
 

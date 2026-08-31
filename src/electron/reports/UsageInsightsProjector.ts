@@ -324,7 +324,8 @@ export class UsageInsightsProjector {
   }
 
   private async backfillAll(): Promise<void> {
-    const { schemaVersion, taskWatermarkMs, eventWatermarkMs, llmWatermarkMs } = this.getWatermarks();
+    const { schemaVersion, taskWatermarkMs, eventWatermarkMs, llmWatermarkMs } =
+      this.getWatermarks();
     const shouldResetRollups =
       schemaVersion !== USAGE_INSIGHTS_SCHEMA_VERSION ||
       (this.getState(BACKFILL_COMPLETE_KEY) !== "1" &&
@@ -628,7 +629,10 @@ export class UsageInsightsProjector {
   private collectWorkspaceDatePairs(): Array<{ workspaceId: string; dateKey: string }> {
     const pairs = new Set<string>();
 
-    const addPair = (workspaceId: string | null | undefined, timestamp: number | null | undefined) => {
+    const addPair = (
+      workspaceId: string | null | undefined,
+      timestamp: number | null | undefined,
+    ) => {
       if (!workspaceId || typeof timestamp !== "number" || !Number.isFinite(timestamp)) return;
       pairs.add(`${workspaceId}|${usageLocalDateKey(timestamp)}`);
     };
@@ -664,7 +668,9 @@ export class UsageInsightsProjector {
 
     try {
       const llmRows = this.db
-        .prepare("SELECT workspace_id, timestamp FROM llm_call_events WHERE workspace_id IS NOT NULL")
+        .prepare(
+          "SELECT workspace_id, timestamp FROM llm_call_events WHERE workspace_id IS NOT NULL",
+        )
         .all() as Array<{ workspace_id: string; timestamp: number }>;
       for (const row of llmRows) {
         addPair(row.workspace_id, row.timestamp);
@@ -693,9 +699,9 @@ export class UsageInsightsProjector {
 
   private getMaxTimestamp(tableName: "llm_call_events"): number {
     try {
-      const row = this.db
-        .prepare(`SELECT MAX(timestamp) as max_ts FROM ${tableName}`)
-        .get() as { max_ts: number | null } | undefined;
+      const row = this.db.prepare(`SELECT MAX(timestamp) as max_ts FROM ${tableName}`).get() as
+        | { max_ts: number | null }
+        | undefined;
       return row?.max_ts || 0;
     } catch {
       return 0;
@@ -705,12 +711,26 @@ export class UsageInsightsProjector {
   private rebuildWorkspaceDate(workspaceId: string, dateKey: string): void {
     const { start, endExclusive } = dayBoundsForDateKey(dateKey);
 
-    this.db.prepare("DELETE FROM usage_insights_day WHERE workspace_id = ? AND date_key = ?").run(workspaceId, dateKey);
-    this.db.prepare("DELETE FROM usage_insights_hour WHERE workspace_id = ? AND date_key = ?").run(workspaceId, dateKey);
-    this.db.prepare("DELETE FROM usage_insights_skill_day WHERE workspace_id = ? AND date_key = ?").run(workspaceId, dateKey);
-    this.db.prepare("DELETE FROM usage_insights_tool_day WHERE workspace_id = ? AND date_key = ?").run(workspaceId, dateKey);
-    this.db.prepare("DELETE FROM usage_insights_persona_day WHERE workspace_id = ? AND date_key = ?").run(workspaceId, dateKey);
-    this.db.prepare("DELETE FROM usage_insights_feedback_reason_day WHERE workspace_id = ? AND date_key = ?").run(workspaceId, dateKey);
+    this.db
+      .prepare("DELETE FROM usage_insights_day WHERE workspace_id = ? AND date_key = ?")
+      .run(workspaceId, dateKey);
+    this.db
+      .prepare("DELETE FROM usage_insights_hour WHERE workspace_id = ? AND date_key = ?")
+      .run(workspaceId, dateKey);
+    this.db
+      .prepare("DELETE FROM usage_insights_skill_day WHERE workspace_id = ? AND date_key = ?")
+      .run(workspaceId, dateKey);
+    this.db
+      .prepare("DELETE FROM usage_insights_tool_day WHERE workspace_id = ? AND date_key = ?")
+      .run(workspaceId, dateKey);
+    this.db
+      .prepare("DELETE FROM usage_insights_persona_day WHERE workspace_id = ? AND date_key = ?")
+      .run(workspaceId, dateKey);
+    this.db
+      .prepare(
+        "DELETE FROM usage_insights_feedback_reason_day WHERE workspace_id = ? AND date_key = ?",
+      )
+      .run(workspaceId, dateKey);
 
     const taskRow = this.db
       .prepare(
@@ -794,11 +814,7 @@ export class UsageInsightsProjector {
     }
 
     const feedbackTotal = feedbackAccepted + feedbackRejected;
-    if (
-      (taskRow?.total || 0) > 0 ||
-      feedbackTotal > 0 ||
-      (awuRow?.count || 0) > 0
-    ) {
+    if ((taskRow?.total || 0) > 0 || feedbackTotal > 0 || (awuRow?.count || 0) > 0) {
       this.db
         .prepare(
           `INSERT INTO usage_insights_day (
@@ -916,12 +932,19 @@ export class UsageInsightsProjector {
       legacy_type: string | null;
       payload: string;
     }>;
-    const toolMap = new Map<string, { calls: number; results: number; errors: number; blocked: number; warnings: number }>();
+    const toolMap = new Map<
+      string,
+      { calls: number; results: number; errors: number; blocked: number; warnings: number }
+    >();
     for (const row of toolRows) {
       const eventType = getEffectiveEventType(row);
       let toolName = "";
       try {
-        const payload = JSON.parse(row.payload) as { tool?: string; name?: string; toolName?: string };
+        const payload = JSON.parse(row.payload) as {
+          tool?: string;
+          name?: string;
+          toolName?: string;
+        };
         toolName = payload.tool || payload.name || payload.toolName || "";
       } catch {
         // Ignore malformed tool rows.
@@ -1083,7 +1106,9 @@ export class UsageInsightsProjector {
   private updateWatermarks(): void {
     try {
       const taskRow = this.db
-        .prepare("SELECT MAX(created_at) as task_max, MAX(completed_at) as completed_max FROM tasks")
+        .prepare(
+          "SELECT MAX(created_at) as task_max, MAX(completed_at) as completed_max FROM tasks",
+        )
         .get() as { task_max: number | null; completed_max: number | null } | undefined;
       const eventRow = this.db
         .prepare(

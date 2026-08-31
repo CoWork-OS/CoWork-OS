@@ -4,6 +4,11 @@ CoWork OS has a layered memory runtime, a full personality engine, 15+ channels,
 
 All improvements are opt-in (admin-toggleable), rate-limited, and governed by the existing guardrail system. No changes to the security or local-first architecture.
 
+Learning signals, playbook reinforcement, and trusted-pattern promotion do not
+grant runtime access. Each resulting task still resolves an [access profile](access-profiles.md)
+before tools run, and an improvement can only make an already-permitted action
+more predictable or less interruptive within that profile's boundary.
+
 ---
 
 ## 0. Runtime Visibility

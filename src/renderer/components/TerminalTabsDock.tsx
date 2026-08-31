@@ -42,6 +42,7 @@ function buildTerminalTheme() {
 
 export const TerminalTabsDock = memo(function TerminalTabsDock({
   workspace,
+  taskId,
   onClose,
 }: {
   workspace: Workspace | null;
@@ -67,23 +68,30 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
 
-  const sendTerminalInput = useCallback((tabId: string, input: string) => {
-    if (!workspace?.id) return;
-    void window.electronAPI.writeTerminalTabInput({
-      tabId,
-      workspaceId: workspace.id,
-      input,
-    }).then(() => {
-      setError(null);
-    }).catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : "Failed to send input.");
-    });
-  }, [workspace?.id]);
+  const sendTerminalInput = useCallback(
+    (tabId: string, input: string) => {
+      if (!workspace?.id) return;
+      void window.electronAPI
+        .writeTerminalTabInput({
+          tabId,
+          workspaceId: workspace.id,
+          ...(taskId ? { taskId } : {}),
+          input,
+        })
+        .then(() => {
+          setError(null);
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Failed to send input.");
+        });
+    },
+    [taskId, workspace?.id],
+  );
 
   const refresh = useCallback(async () => {
     if (!workspace?.id) return;
     try {
-      const nextTabs = await window.electronAPI.listTerminalTabs(workspace.id);
+      const nextTabs = await window.electronAPI.listTerminalTabs(workspace.id, taskId || undefined);
       const dedupedTabs = uniqueTabs(nextTabs);
       setTabs(dedupedTabs);
       setActiveTabId((current) => {
@@ -98,7 +106,7 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
       setTabsLoaded(true);
       setError(err instanceof Error ? err.message : "Failed to load terminal tabs.");
     }
-  }, [workspace?.id]);
+  }, [taskId, workspace?.id]);
 
   const fitTerminal = useCallback((tabId: string) => {
     const handle = terminalHandlesRef.current[tabId];
@@ -120,73 +128,85 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     });
   }, []);
 
-  const ensureTerminal = useCallback((tabId: string): TerminalHandle => {
-    const existing = terminalHandlesRef.current[tabId];
-    if (existing) return existing;
-    const terminal = new Terminal({
-      allowProposedApi: false,
-      convertEol: false,
-      cursorBlink: true,
-      cursorStyle: "block",
-      disableStdin: false,
-      fontFamily: readCssVar("--font-mono", '"SF Mono", Menlo, Monaco, Consolas, monospace'),
-      fontSize: 12,
-      letterSpacing: 0,
-      lineHeight: 1.35,
-      scrollback: 10_000,
-      theme: buildTerminalTheme(),
-    });
-    const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon((_event, uri) => {
-      void window.electronAPI.openExternal(uri).catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Failed to open link.");
+  const ensureTerminal = useCallback(
+    (tabId: string): TerminalHandle => {
+      const existing = terminalHandlesRef.current[tabId];
+      if (existing) return existing;
+      const terminal = new Terminal({
+        allowProposedApi: false,
+        convertEol: false,
+        cursorBlink: true,
+        cursorStyle: "block",
+        disableStdin: false,
+        fontFamily: readCssVar("--font-mono", '"SF Mono", Menlo, Monaco, Consolas, monospace'),
+        fontSize: 12,
+        letterSpacing: 0,
+        lineHeight: 1.35,
+        scrollback: 10_000,
+        theme: buildTerminalTheme(),
       });
-    });
-    terminal.loadAddon(fitAddon);
-    terminal.loadAddon(webLinksAddon);
-    const disposables = [
-      terminal.onResize(({ cols, rows }) => {
-        if (!workspace?.id) return;
-        void window.electronAPI.resizeTerminalTab({
-          tabId,
-          workspaceId: workspace.id,
-          cols,
-          rows,
-        }).then((updatedTab) => {
-          setTabs((current) => current.map((tab) => (tab.id === updatedTab.id ? updatedTab : tab)));
-        }).catch(() => {
-          // Resize failures are non-fatal; the next fit will retry.
+      const fitAddon = new FitAddon();
+      const webLinksAddon = new WebLinksAddon((_event, uri) => {
+        void window.electronAPI.openExternal(uri).catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Failed to open link.");
         });
-      }),
-      terminal.onData((data) => {
-        if (activeTabIdRef.current !== tabId) return;
-        sendTerminalInput(tabId, data);
-      }),
-    ];
-    const handle: TerminalHandle = {
-      terminal,
-      fitAddon,
-      disposables,
-      opened: false,
-    };
-    terminalHandlesRef.current[tabId] = handle;
-    return handle;
-  }, [sendTerminalInput, workspace?.id]);
+      });
+      terminal.loadAddon(fitAddon);
+      terminal.loadAddon(webLinksAddon);
+      const disposables = [
+        terminal.onResize(({ cols, rows }) => {
+          if (!workspace?.id) return;
+          void window.electronAPI
+            .resizeTerminalTab({
+              tabId,
+              workspaceId: workspace.id,
+              ...(taskId ? { taskId } : {}),
+              cols,
+              rows,
+            })
+            .then((updatedTab) => {
+              setTabs((current) =>
+                current.map((tab) => (tab.id === updatedTab.id ? updatedTab : tab)),
+              );
+            })
+            .catch(() => {
+              // Resize failures are non-fatal; the next fit will retry.
+            });
+        }),
+        terminal.onData((data) => {
+          if (activeTabIdRef.current !== tabId) return;
+          sendTerminalInput(tabId, data);
+        }),
+      ];
+      const handle: TerminalHandle = {
+        terminal,
+        fitAddon,
+        disposables,
+        opened: false,
+      };
+      terminalHandlesRef.current[tabId] = handle;
+      return handle;
+    },
+    [sendTerminalInput, taskId, workspace?.id],
+  );
 
-  const openTerminalInContainer = useCallback((tabId: string, element: HTMLDivElement | null) => {
-    terminalContainersRef.current[tabId] = element;
-    if (!element) return;
-    const handle = ensureTerminal(tabId);
-    if (!handle.opened) {
-      handle.terminal.open(element);
-      handle.opened = true;
-    }
-    requestAnimationFrame(() => {
-      if (tabId !== activeTabId) return;
-      fitTerminal(tabId);
-      handle.terminal.focus();
-    });
-  }, [activeTabId, ensureTerminal, fitTerminal]);
+  const openTerminalInContainer = useCallback(
+    (tabId: string, element: HTMLDivElement | null) => {
+      terminalContainersRef.current[tabId] = element;
+      if (!element) return;
+      const handle = ensureTerminal(tabId);
+      if (!handle.opened) {
+        handle.terminal.open(element);
+        handle.opened = true;
+      }
+      requestAnimationFrame(() => {
+        if (tabId !== activeTabId) return;
+        fitTerminal(tabId);
+        handle.terminal.focus();
+      });
+    },
+    [activeTabId, ensureTerminal, fitTerminal],
+  );
 
   const disposeTerminal = useCallback((tabId: string) => {
     const handle = terminalHandlesRef.current[tabId];
@@ -209,6 +229,7 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     try {
       const tab = await window.electronAPI.createTerminalTab({
         workspaceId: workspace.id,
+        ...(taskId ? { taskId } : {}),
         title: workspace.name || "Terminal",
       });
       setTabs((current) => uniqueTabs([...current, tab]));
@@ -218,7 +239,7 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     } finally {
       createInFlightRef.current = false;
     }
-  }, [workspace?.id, workspace?.name]);
+  }, [taskId, workspace?.id, workspace?.name]);
 
   const stopTab = useCallback(async () => {
     if (!workspace?.id || !activeTab) return;
@@ -226,6 +247,7 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
       const updatedTab = await window.electronAPI.stopTerminalTab({
         tabId: activeTab.id,
         workspaceId: workspace.id,
+        ...(taskId ? { taskId } : {}),
       });
       if (updatedTab) {
         setTabs((current) => current.map((tab) => (tab.id === updatedTab.id ? updatedTab : tab)));
@@ -233,32 +255,42 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to stop terminal tab.");
     }
-  }, [activeTab, workspace?.id]);
+  }, [activeTab, taskId, workspace?.id]);
 
-  const closeTab = useCallback(async (tabId: string) => {
-    if (!workspace?.id) return;
-    const closingIndex = tabs.findIndex((tab) => tab.id === tabId);
-    setError(null);
-    try {
-      await window.electronAPI.closeTerminalTab({ tabId, workspaceId: workspace.id });
-      disposeTerminal(tabId);
-      setTabs((current) => {
-        const next = uniqueTabs(current.filter((tab) => tab.id !== tabId));
-        if (next.length === 0) {
-          userClosedAllTabsRef.current = true;
-          setActiveTabId(null);
-          return next;
-        }
-        setActiveTabId((activeId) => {
-          if (activeId && activeId !== tabId && next.some((tab) => tab.id === activeId)) return activeId;
-          return next[Math.max(0, Math.min(closingIndex, next.length - 1))]?.id || next[0]?.id || null;
+  const closeTab = useCallback(
+    async (tabId: string) => {
+      if (!workspace?.id) return;
+      const closingIndex = tabs.findIndex((tab) => tab.id === tabId);
+      setError(null);
+      try {
+        await window.electronAPI.closeTerminalTab({
+          tabId,
+          workspaceId: workspace.id,
+          ...(taskId ? { taskId } : {}),
         });
-        return next;
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to close terminal tab.");
-    }
-  }, [disposeTerminal, tabs, workspace?.id]);
+        disposeTerminal(tabId);
+        setTabs((current) => {
+          const next = uniqueTabs(current.filter((tab) => tab.id !== tabId));
+          if (next.length === 0) {
+            userClosedAllTabsRef.current = true;
+            setActiveTabId(null);
+            return next;
+          }
+          setActiveTabId((activeId) => {
+            if (activeId && activeId !== tabId && next.some((tab) => tab.id === activeId))
+              return activeId;
+            return (
+              next[Math.max(0, Math.min(closingIndex, next.length - 1))]?.id || next[0]?.id || null
+            );
+          });
+          return next;
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to close terminal tab.");
+      }
+    },
+    [disposeTerminal, tabs, taskId, workspace?.id],
+  );
 
   useEffect(() => {
     if (!workspace?.id) return;
@@ -292,15 +324,18 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
       ensureTerminal(tab.id);
       if (attachedTabIdsRef.current.has(tab.id)) continue;
       attachedTabIdsRef.current.add(tab.id);
-      void window.electronAPI.writeTerminalTabInput({
-        tabId: tab.id,
-        workspaceId: workspace.id,
-        input: "",
-      }).catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Failed to attach terminal tab.");
-      });
+      void window.electronAPI
+        .writeTerminalTabInput({
+          tabId: tab.id,
+          workspaceId: workspace.id,
+          ...(taskId ? { taskId } : {}),
+          input: "",
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Failed to attach terminal tab.");
+        });
     }
-  }, [ensureTerminal, tabs, workspace?.id]);
+  }, [ensureTerminal, tabs, taskId, workspace?.id]);
 
   useEffect(() => {
     return window.electronAPI.onTerminalTabOutput((event) => {
@@ -308,16 +343,18 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
       const handle = ensureTerminal(event.tabId);
       handle.terminal.write(event.output);
       if (event.cwd || event.status) {
-        setTabs((current) => current.map((tab) => (
-          tab.id === event.tabId
-            ? {
-              ...tab,
-              cwd: event.cwd || tab.cwd,
-              status: event.status || tab.status,
-              updatedAt: event.timestamp,
-            }
-            : tab
-        )));
+        setTabs((current) =>
+          current.map((tab) =>
+            tab.id === event.tabId
+              ? {
+                  ...tab,
+                  cwd: event.cwd || tab.cwd,
+                  status: event.status || tab.status,
+                  updatedAt: event.timestamp,
+                }
+              : tab,
+          ),
+        );
       }
     });
   }, [ensureTerminal, workspace?.id]);
@@ -360,7 +397,10 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
       <div className="terminal-dock-tabbar">
         {tabs.length > 0 ? (
           tabs.map((tab) => (
-            <div key={tab.id} className={`terminal-dock-tab-wrap ${activeTab?.id === tab.id ? "active" : ""}`}>
+            <div
+              key={tab.id}
+              className={`terminal-dock-tab-wrap ${activeTab?.id === tab.id ? "active" : ""}`}
+            >
               <button
                 type="button"
                 className={`terminal-dock-tab ${activeTab?.id === tab.id ? "active" : ""}`}
@@ -386,12 +426,21 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
             </div>
           ))
         ) : (
-          <button type="button" className="terminal-dock-tab active" onClick={() => void createTab()}>
+          <button
+            type="button"
+            className="terminal-dock-tab active"
+            onClick={() => void createTab()}
+          >
             <SquareTerminal size={13} />
             <span>{workspace.name || "terminal"}</span>
           </button>
         )}
-        <button type="button" className="terminal-dock-icon-btn" onClick={() => void createTab()} title="New terminal tab">
+        <button
+          type="button"
+          className="terminal-dock-icon-btn"
+          onClick={() => void createTab()}
+          title="New terminal tab"
+        >
           <Plus size={14} />
         </button>
         <div className="terminal-dock-spacer" />

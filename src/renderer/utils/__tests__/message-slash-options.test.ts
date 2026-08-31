@@ -27,9 +27,7 @@ describe("buildMessageSlashOptions", () => {
         skill({ id: "strategy", name: "Strategy", icon: "S" }),
         skill({ id: "direct-skill", name: "Direct Skill", icon: "D" }),
       ],
-      pluginSlashCommands: [
-        { name: "plan-doc", description: "Plan a doc", skillId: "strategy" },
-      ],
+      pluginSlashCommands: [{ name: "plan-doc", description: "Plan a doc", skillId: "strategy" }],
       limit: 20,
     });
 
@@ -71,9 +69,7 @@ describe("buildMessageSlashOptions", () => {
       limit: 20,
     });
 
-    expect(options.map((option) => option.commandName)).toEqual(
-      expect.arrayContaining(["review"]),
-    );
+    expect(options.map((option) => option.commandName)).toEqual(expect.arrayContaining(["review"]));
     expect(options.find((option) => option.commandName === "review")).toMatchObject({
       kind: "app",
       description: "Review local changes or a pull request in the current workspace.",
@@ -130,9 +126,7 @@ describe("buildMessageSlashOptions", () => {
     });
 
     expect(
-      codexQueryOptions.some(
-        (option) => option.commandName === "codex-security:security-scan",
-      ),
+      codexQueryOptions.some((option) => option.commandName === "codex-security:security-scan"),
     ).toBe(false);
   });
 
@@ -144,9 +138,7 @@ describe("buildMessageSlashOptions", () => {
         skill({ id: "review", name: "Review", description: "Direct review" }),
         skill({ id: "strategy", name: "Strategy", description: "Alias target" }),
       ],
-      pluginSlashCommands: [
-        { name: "review", description: "Alias review", skillId: "strategy" },
-      ],
+      pluginSlashCommands: [{ name: "review", description: "Alias review", skillId: "strategy" }],
       limit: 20,
     });
 

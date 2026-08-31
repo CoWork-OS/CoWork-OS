@@ -2,10 +2,7 @@ import { EventEmitter } from "events";
 import WebSocket from "ws";
 import { createLogger } from "../utils/logger";
 import { McpTunnelForwarder } from "./McpTunnelForwarder";
-import {
-  parseTunnelRelayMessage,
-  serializeTunnelClientMessage,
-} from "./protocol";
+import { parseTunnelRelayMessage, serializeTunnelClientMessage } from "./protocol";
 import type {
   SecureMcpTunnelAuditEvent,
   SecureMcpTunnelConfig,
@@ -172,7 +169,11 @@ export class TunnelClient extends EventEmitter {
     }
 
     this.lastRequestAt = Date.now();
-    const result = await this.forwarder.forward(message.payload, message.caller, message.deadlineMs);
+    const result = await this.forwarder.forward(
+      message.payload,
+      message.caller,
+      message.deadlineMs,
+    );
     this.emit("audit", result.auditEvent);
     this.send({ type: "audit_event", tunnelId: this.config.id, event: result.auditEvent });
     if (result.response) {

@@ -212,7 +212,8 @@ describe("AgentsHubPanel draft helpers", () => {
               style: "public-radio",
             },
             imageGenProfileId: "profile-1",
-            workflowBrief: "Prepare weekly executive briefs, escalate blockers, and share decisions.",
+            workflowBrief:
+              "Prepare weekly executive briefs, escalate blockers, and share decisions.",
             approvalPolicy: {
               autoApproveReadOnly: true,
               requireApprovalFor: ["send email"],

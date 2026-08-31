@@ -208,8 +208,7 @@ type RoutineFormState = {
 };
 
 const DEFAULT_CRON = "0 9 * * 1-5";
-const DEFAULT_SCHEDULE_TZ =
-  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+const DEFAULT_SCHEDULE_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 const chipStyle = {
   display: "inline-flex",
@@ -408,14 +407,15 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
     setLoading(true);
     setError(null);
     try {
-      const [routineList, routineRuns, workspaceList, status, settings, servers] = await Promise.all([
-        window.electronAPI.listRoutines(),
-        window.electronAPI.listRoutineRuns?.(undefined, 200) || Promise.resolve([]),
-        window.electronAPI.listWorkspaces(),
-        window.electronAPI.getHooksStatus(),
-        window.electronAPI.getHooksSettings(),
-        window.electronAPI.getMCPStatus?.() || Promise.resolve([]),
-      ]);
+      const [routineList, routineRuns, workspaceList, status, settings, servers] =
+        await Promise.all([
+          window.electronAPI.listRoutines(),
+          window.electronAPI.listRoutineRuns?.(undefined, 200) || Promise.resolve([]),
+          window.electronAPI.listWorkspaces(),
+          window.electronAPI.getHooksStatus(),
+          window.electronAPI.getHooksSettings(),
+          window.electronAPI.getMCPStatus?.() || Promise.resolve([]),
+        ]);
 
       setRoutines((routineList || []) as Routine[]);
       setRuns((routineRuns || []) as RoutineRun[]);
@@ -456,7 +456,8 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
     const manualTrigger = routine.triggers.find((trigger) => trigger.type === "manual");
     const channelOutput = routine.outputs.find((output) => output.kind === "channel_message");
     const webhookOutput = routine.outputs.find((output) => output.kind === "webhook_response");
-    const hasTaskOnly = routine.outputs.some((output) => output.kind === "task_only") || routine.outputs.length === 0;
+    const hasTaskOnly =
+      routine.outputs.some((output) => output.kind === "task_only") || routine.outputs.length === 0;
 
     setEditingRoutineId(routine.id);
     setShowForm(true);
@@ -474,23 +475,27 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
       approvalMode: routine.approvalPolicy?.mode || "inherit",
       outputTaskOnly: hasTaskOnly,
       outputChannelMessage: Boolean(channelOutput),
-      outputChannelType: channelOutput?.kind === "channel_message" ? channelOutput.channelType || "" : "",
-      outputChannelId: channelOutput?.kind === "channel_message" ? channelOutput.channelId || "" : "",
-      outputSummaryOnly: channelOutput?.kind === "channel_message" ? channelOutput.summaryOnly ?? true : true,
+      outputChannelType:
+        channelOutput?.kind === "channel_message" ? channelOutput.channelType || "" : "",
+      outputChannelId:
+        channelOutput?.kind === "channel_message" ? channelOutput.channelId || "" : "",
+      outputSummaryOnly:
+        channelOutput?.kind === "channel_message" ? (channelOutput.summaryOnly ?? true) : true,
       outputDeliverOnSuccess:
-        channelOutput?.kind === "channel_message" ? channelOutput.deliverOnSuccess ?? true : true,
+        channelOutput?.kind === "channel_message" ? (channelOutput.deliverOnSuccess ?? true) : true,
       outputDeliverOnError:
-        channelOutput?.kind === "channel_message" ? channelOutput.deliverOnError ?? true : true,
+        channelOutput?.kind === "channel_message" ? (channelOutput.deliverOnError ?? true) : true,
       outputWebhookResponse: Boolean(webhookOutput),
       outputWebhookStatusCode:
-        webhookOutput?.kind === "webhook_response" ? webhookOutput.statusCode ?? 202 : 202,
+        webhookOutput?.kind === "webhook_response" ? (webhookOutput.statusCode ?? 202) : 202,
       outputWebhookMessage:
-        webhookOutput?.kind === "webhook_response" ? webhookOutput.message || "" : "Routine accepted",
+        webhookOutput?.kind === "webhook_response"
+          ? webhookOutput.message || ""
+          : "Routine accepted",
       outputWebhookIncludeTaskId:
-        webhookOutput?.kind === "webhook_response" ? webhookOutput.includeTaskId ?? true : true,
+        webhookOutput?.kind === "webhook_response" ? (webhookOutput.includeTaskId ?? true) : true,
       scheduleEnabled: Boolean(scheduleTrigger),
-      scheduleKind:
-        scheduleTrigger?.type === "schedule" ? scheduleTrigger.schedule.kind : "cron",
+      scheduleKind: scheduleTrigger?.type === "schedule" ? scheduleTrigger.schedule.kind : "cron",
       scheduleExpr:
         scheduleTrigger?.type === "schedule" && scheduleTrigger.schedule.kind === "cron"
           ? scheduleTrigger.schedule.expr
@@ -515,7 +520,9 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
       connectorEventChangeType:
         connectorTrigger?.type === "connector_event" ? connectorTrigger.changeType || "" : "",
       connectorEventResourceUriContains:
-        connectorTrigger?.type === "connector_event" ? connectorTrigger.resourceUriContains || "" : "",
+        connectorTrigger?.type === "connector_event"
+          ? connectorTrigger.resourceUriContains || ""
+          : "",
       channelEventEnabled: Boolean(channelTrigger),
       channelEventChannelType:
         channelTrigger?.type === "channel_event" ? channelTrigger.channelType || "" : "",
@@ -535,14 +542,11 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
       mailboxEventLabelContains:
         mailboxTrigger?.type === "mailbox_event" ? mailboxTrigger.labelContains || "" : "",
       githubEventEnabled: Boolean(githubTrigger),
-      githubEventName:
-        githubTrigger?.type === "github_event" ? githubTrigger.eventName || "" : "",
+      githubEventName: githubTrigger?.type === "github_event" ? githubTrigger.eventName || "" : "",
       githubEventRepository:
         githubTrigger?.type === "github_event" ? githubTrigger.repository || "" : "",
-      githubEventAction:
-        githubTrigger?.type === "github_event" ? githubTrigger.action || "" : "",
-      githubEventRef:
-        githubTrigger?.type === "github_event" ? githubTrigger.ref || "" : "",
+      githubEventAction: githubTrigger?.type === "github_event" ? githubTrigger.action || "" : "",
+      githubEventRef: githubTrigger?.type === "github_event" ? githubTrigger.ref || "" : "",
       manualEnabled: manualTrigger?.type === "manual" ? manualTrigger.enabled : true,
     });
   }
@@ -589,13 +593,17 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
       setError("Choose a connector for the connector event trigger");
       return;
     }
-    if (form.outputChannelMessage && (!form.outputChannelType.trim() || !form.outputChannelId.trim())) {
+    if (
+      form.outputChannelMessage &&
+      (!form.outputChannelType.trim() || !form.outputChannelId.trim())
+    ) {
       setError("Channel outputs need both a channel type and channel ID");
       return;
     }
 
-    const existing =
-      editingRoutineId ? routines.find((routine) => routine.id === editingRoutineId) || null : null;
+    const existing = editingRoutineId
+      ? routines.find((routine) => routine.id === editingRoutineId) || null
+      : null;
     const triggers = buildTriggers(form, existing);
     const outputs = buildOutputs(form);
 
@@ -638,7 +646,9 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
   }
 
   async function deleteRoutine(routineId: string) {
-    if (!confirm("Delete this routine and all of its generated triggers, hooks, and schedule jobs?")) {
+    if (
+      !confirm("Delete this routine and all of its generated triggers, hooks, and schedule jobs?")
+    ) {
       return;
     }
     setSaving(true);
@@ -660,7 +670,10 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
     setSaving(true);
     setError(null);
     try {
-      const run = (await window.electronAPI.runRoutineNow?.(routineId)) as RoutineRun | null | undefined;
+      const run = (await window.electronAPI.runRoutineNow?.(routineId)) as
+        | RoutineRun
+        | null
+        | undefined;
       if (run?.backingTaskId && onOpenTask) {
         setSaving(false);
         onOpenTask(run.backingTaskId);
@@ -698,7 +711,14 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
   return (
     <div className="settings-subsection">
       <div className="settings-section">
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 16,
+            alignItems: "flex-start",
+          }}
+        >
           <div>
             <h3>Routines</h3>
             <p className="settings-description">
@@ -790,7 +810,13 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
             />
           </label>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 16,
+            }}
+          >
             <label className="settings-field">
               <span>Execution Target</span>
               <select
@@ -799,7 +825,8 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                 onChange={(event) =>
                   setForm({
                     ...form,
-                    executionTargetKind: event.target.value as RoutineFormState["executionTargetKind"],
+                    executionTargetKind: event.target
+                      .value as RoutineFormState["executionTargetKind"],
                   })
                 }
               >
@@ -865,7 +892,8 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                 onChange={(event) =>
                   setForm({
                     ...form,
-                    connectorPolicyMode: event.target.value as RoutineFormState["connectorPolicyMode"],
+                    connectorPolicyMode: event.target
+                      .value as RoutineFormState["connectorPolicyMode"],
                   })
                 }
               >
@@ -912,13 +940,17 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                     <input
                       className="settings-input"
                       value={form.outputChannelType}
-                      onChange={(event) => setForm({ ...form, outputChannelType: event.target.value })}
+                      onChange={(event) =>
+                        setForm({ ...form, outputChannelType: event.target.value })
+                      }
                       placeholder="slack"
                     />
                     <input
                       className="settings-input"
                       value={form.outputChannelId}
-                      onChange={(event) => setForm({ ...form, outputChannelId: event.target.value })}
+                      onChange={(event) =>
+                        setForm({ ...form, outputChannelId: event.target.value })
+                      }
                       placeholder="C123456"
                     />
                   </div>
@@ -931,9 +963,7 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                     <RoutineCheckbox
                       checked={form.outputDeliverOnSuccess}
                       label="Send on success"
-                      onChange={(checked) =>
-                        setForm({ ...form, outputDeliverOnSuccess: checked })
-                      }
+                      onChange={(checked) => setForm({ ...form, outputDeliverOnSuccess: checked })}
                     />
                     <RoutineCheckbox
                       checked={form.outputDeliverOnError}
@@ -951,7 +981,12 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
               />
               {form.outputWebhookResponse && (
                 <div style={nestedOptionsStyle}>
-                  <div style={{ ...compactInputGridStyle, gridTemplateColumns: "140px minmax(220px, 360px)" }}>
+                  <div
+                    style={{
+                      ...compactInputGridStyle,
+                      gridTemplateColumns: "140px minmax(220px, 360px)",
+                    }}
+                  >
                     <input
                       className="settings-input"
                       type="number"
@@ -1016,9 +1051,7 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                       <input
                         className="settings-input"
                         value={form.scheduleExpr}
-                        onChange={(event) =>
-                          setForm({ ...form, scheduleExpr: event.target.value })
-                        }
+                        onChange={(event) => setForm({ ...form, scheduleExpr: event.target.value })}
                         placeholder="0 9 * * 1-5"
                       />
                       <input
@@ -1076,7 +1109,13 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                 onChange={(checked) => setForm({ ...form, connectorEventEnabled: checked })}
               />
               {form.connectorEventEnabled && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 12,
+                  }}
+                >
                   <input
                     className="settings-input"
                     value={form.connectorEventConnectorId}
@@ -1114,7 +1153,13 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                 onChange={(checked) => setForm({ ...form, channelEventEnabled: checked })}
               />
               {form.channelEventEnabled && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 12,
+                  }}
+                >
                   <input
                     className="settings-input"
                     value={form.channelEventChannelType}
@@ -1157,13 +1202,17 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                 onChange={(checked) => setForm({ ...form, mailboxEventEnabled: checked })}
               />
               {form.mailboxEventEnabled && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 12,
+                  }}
+                >
                   <input
                     className="settings-input"
                     value={form.mailboxEventType}
-                    onChange={(event) =>
-                      setForm({ ...form, mailboxEventType: event.target.value })
-                    }
+                    onChange={(event) => setForm({ ...form, mailboxEventType: event.target.value })}
                     placeholder="message_received"
                   />
                   <input
@@ -1200,13 +1249,17 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                 onChange={(checked) => setForm({ ...form, githubEventEnabled: checked })}
               />
               {form.githubEventEnabled && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 12,
+                  }}
+                >
                   <input
                     className="settings-input"
                     value={form.githubEventName}
-                    onChange={(event) =>
-                      setForm({ ...form, githubEventName: event.target.value })
-                    }
+                    onChange={(event) => setForm({ ...form, githubEventName: event.target.value })}
                     placeholder="pull_request.opened"
                   />
                   <input
@@ -1228,9 +1281,7 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                   <input
                     className="settings-input"
                     value={form.githubEventRef}
-                    onChange={(event) =>
-                      setForm({ ...form, githubEventRef: event.target.value })
-                    }
+                    onChange={(event) => setForm({ ...form, githubEventRef: event.target.value })}
                     placeholder="refs/heads/main"
                   />
                 </div>
@@ -1246,7 +1297,11 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
           </div>
 
           <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
-            <button style={routineButtonStyle("primary", saving)} onClick={saveRoutine} disabled={saving}>
+            <button
+              style={routineButtonStyle("primary", saving)}
+              onClick={saveRoutine}
+              disabled={saving}
+            >
               <Save size={16} />
               {saving ? "Saving..." : "Save Routine"}
             </button>
@@ -1276,12 +1331,23 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                   gap: 14,
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 16,
+                    alignItems: "flex-start",
+                  }}
+                >
                   <div>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <div
+                      style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+                    >
                       <strong>{routine.name}</strong>
                       <span style={chipStyle}>{routine.enabled ? "Enabled" : "Disabled"}</span>
-                      <span style={chipStyle}>{routine.executionTarget.kind.replace(/_/g, " ")}</span>
+                      <span style={chipStyle}>
+                        {routine.executionTarget.kind.replace(/_/g, " ")}
+                      </span>
                       <span style={chipStyle}>{workspace?.name || routine.workspaceId}</span>
                     </div>
                     {routine.description && (
@@ -1300,7 +1366,10 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                       <Play size={16} />
                       Run Now
                     </button>
-                    <button style={routineButtonStyle("secondary")} onClick={() => startEdit(routine)}>
+                    <button
+                      style={routineButtonStyle("secondary")}
+                      onClick={() => startEdit(routine)}
+                    >
                       <Pencil size={16} />
                       Edit
                     </button>
@@ -1354,7 +1423,9 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                       <button
                         style={routineButtonStyle("secondary")}
                         onClick={() =>
-                          copyText(`${apiBaseUrl}/${apiTrigger.path || `routines/${routine.id}/${apiTrigger.id}`}`)
+                          copyText(
+                            `${apiBaseUrl}/${apiTrigger.path || `routines/${routine.id}/${apiTrigger.id}`}`,
+                          )
                         }
                       >
                         Copy URL
@@ -1396,7 +1467,14 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                           gap: 6,
                         }}
                       >
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            flexWrap: "wrap",
+                            alignItems: "center",
+                          }}
+                        >
                           <span style={chipStyle}>{run.triggerType.replace(/_/g, " ")}</span>
                           <span style={chipStyle}>{run.status}</span>
                           <span style={chipStyle}>output: {run.outputStatus}</span>
@@ -1415,7 +1493,9 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
                           <div className="settings-help">
                             {run.backingTaskId ? `Task: ${run.backingTaskId}` : ""}
                             {run.backingTaskId && run.backingManagedSessionId ? " · " : ""}
-                            {run.backingManagedSessionId ? `Session: ${run.backingManagedSessionId}` : ""}
+                            {run.backingManagedSessionId
+                              ? `Session: ${run.backingManagedSessionId}`
+                              : ""}
                           </div>
                         )}
                       </div>
@@ -1475,7 +1555,9 @@ function RoutineCheckbox(props: {
 
 function buildTriggers(form: RoutineFormState, existing: Routine | null): RoutineTrigger[] {
   const findExisting = <T extends RoutineTrigger["type"]>(type: T) =>
-    existing?.triggers.find((trigger): trigger is Extract<RoutineTrigger, { type: T }> => trigger.type === type);
+    existing?.triggers.find(
+      (trigger): trigger is Extract<RoutineTrigger, { type: T }> => trigger.type === type,
+    );
 
   const triggers: RoutineTrigger[] = [];
   const scheduleExisting = findExisting("schedule");
@@ -1492,7 +1574,11 @@ function buildTriggers(form: RoutineFormState, existing: Routine | null): Routin
         ? { kind: "every", everyMs: form.scheduleEveryMinutes * 60_000 }
         : form.scheduleKind === "at"
           ? { kind: "at", atMs: new Date(form.scheduleAt).getTime() }
-          : { kind: "cron", expr: form.scheduleExpr.trim(), tz: form.scheduleTz.trim() || undefined };
+          : {
+              kind: "cron",
+              expr: form.scheduleExpr.trim(),
+              tz: form.scheduleTz.trim() || undefined,
+            };
     triggers.push({
       ...(scheduleExisting || { id: window.crypto.randomUUID() }),
       type: "schedule",

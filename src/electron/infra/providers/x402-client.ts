@@ -227,10 +227,7 @@ export class X402Client {
     if (typeof details.amount === "string" && Number.isFinite(Number(details.amount))) {
       return details.amount;
     }
-    if (
-      typeof details.maxAmountRequired === "string" &&
-      /^\d+$/.test(details.maxAmountRequired)
-    ) {
+    if (typeof details.maxAmountRequired === "string" && /^\d+$/.test(details.maxAmountRequired)) {
       return ethers.formatUnits(details.maxAmountRequired, 6);
     }
     return null;

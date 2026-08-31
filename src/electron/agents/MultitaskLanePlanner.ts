@@ -20,7 +20,8 @@ export interface MultitaskLanePlannerOptions {
 const FALLBACK_LANES: Array<{ title: string; focus: string }> = [
   {
     title: "Context and Scope",
-    focus: "Map the current system, clarify constraints, and identify the safest execution boundaries.",
+    focus:
+      "Map the current system, clarify constraints, and identify the safest execution boundaries.",
   },
   {
     title: "Implementation Path",
@@ -56,10 +57,7 @@ function normalizeLaneCount(value?: number): number {
   if (!Number.isFinite(value || NaN)) return MULTITASK_DEFAULT_LANE_COUNT;
   return Math.max(
     MULTITASK_MIN_LANE_COUNT,
-    Math.min(
-      MULTITASK_MAX_LANE_COUNT,
-      Math.floor(value || MULTITASK_DEFAULT_LANE_COUNT),
-    ),
+    Math.min(MULTITASK_MAX_LANE_COUNT, Math.floor(value || MULTITASK_DEFAULT_LANE_COUNT)),
   );
 }
 
@@ -125,7 +123,10 @@ function fallbackLanes(prompt: string, laneCount: number): MultitaskLane[] {
 }
 
 export class MultitaskLanePlanner {
-  static async plan(prompt: string, options: MultitaskLanePlannerOptions = {}): Promise<MultitaskLane[]> {
+  static async plan(
+    prompt: string,
+    options: MultitaskLanePlannerOptions = {},
+  ): Promise<MultitaskLane[]> {
     const laneCount = normalizeLaneCount(options.requestedLaneCount);
     const explicit = parseExplicitLanes(prompt, laneCount);
     if (explicit) return explicit;
@@ -167,8 +168,7 @@ export class MultitaskLanePlanner {
       const text = (response.content || [])
         .filter(
           (block): block is { type: "text"; text: string } =>
-            block.type === "text" &&
-            typeof (block as { text?: string }).text === "string",
+            block.type === "text" && typeof (block as { text?: string }).text === "string",
         )
         .map((block) => block.text)
         .join("");

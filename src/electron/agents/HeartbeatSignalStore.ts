@@ -200,17 +200,12 @@ export class HeartbeatSignalStore {
     if (signalSnapshots.length === 0) return;
     this.load();
     const snapshots = new Map(signalSnapshots.map((signal) => [signal.id, signal]));
-    this.state.signals = this.state.signals.filter(
-      (signal) => {
-        if (signal.agentRoleId !== agentRoleId) return true;
-        const snapshot = snapshots.get(signal.id);
-        if (!snapshot) return true;
-        return (
-          signal.lastSeenAt > snapshot.lastSeenAt ||
-          signal.mergedCount > snapshot.mergedCount
-        );
-      },
-    );
+    this.state.signals = this.state.signals.filter((signal) => {
+      if (signal.agentRoleId !== agentRoleId) return true;
+      const snapshot = snapshots.get(signal.id);
+      if (!snapshot) return true;
+      return signal.lastSeenAt > snapshot.lastSeenAt || signal.mergedCount > snapshot.mergedCount;
+    });
     this.save();
   }
 

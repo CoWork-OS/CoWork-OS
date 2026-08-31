@@ -11,7 +11,7 @@ For the full inbox workspace, see [Inbox Agent](inbox-agent.md).
 | **Channels** | `channel_list_chats`, `channel_history` | Works with Slack, iMessage, WhatsApp, Telegram, Email (configured per workspace) |
 | **File I/O** | `read_file`, `write_file` | Workspace files, artifacts |
 | **LaTeX compile** | `compile_latex` | Optional system TeX engine required for PDF output; keeps `.tex` source if unavailable |
-| **Shell** | `run_command` | Local commands (with approval) |
+| **Command tools** | `run_command` | Local commands when exposed by the active [access profile](access-profiles.md), with guardrails and approval as required |
 | **Web fetch** | `web_fetch` | Static pages, APIs |
 | **Browser** | `browser_navigate`, `browser_snapshot`, ref-aware `browser_click` / `browser_fill`, diagnostics, screenshots | Forms, interactive sites, JavaScript apps, visual QA |
 | **Scraping** | `scrape_page`, `scrape_multiple` | Structured extraction |

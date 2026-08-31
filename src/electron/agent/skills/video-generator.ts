@@ -2,6 +2,12 @@ import * as fs from "fs";
 import * as path from "path";
 import { Workspace } from "../../../shared/types";
 import { LLMProviderFactory } from "../llm/provider-factory";
+import {
+  assertWorkspaceReadableFileAccessWithApproval,
+  evaluateWorkspaceFilesystemAccess,
+  type WorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
+import { evaluateNetworkPolicy } from "../../security/network-policy";
 
 // ── Provider & model types ────────────────────────────────────────────────────
 
@@ -64,7 +70,12 @@ interface AdapterArgs {
   request: VideoGenerationRequest;
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>;
   outputDir: string;
+  outputPathGuard: (outputPath: string) => void;
+  networkPolicyGuard?: NetworkPolicyGuard;
 }
+
+type OutputPathGuard = (outputPath: string) => void;
+type NetworkPolicyGuard = (url: string, toolName?: string) => void;
 
 interface AdapterResult {
   success: boolean;
@@ -105,6 +116,7 @@ async function generateWithOpenAI(args: AdapterArgs): Promise<AdapterResult> {
     body.image = { b64_json: imgData.toString("base64") };
   }
 
+  args.networkPolicyGuard?.("https://api.openai.com/v1/video/generations", "generate_video");
   const response = await fetch("https://api.openai.com/v1/video/generations", {
     method: "POST",
     headers: {
@@ -132,7 +144,13 @@ async function generateWithOpenAI(args: AdapterArgs): Promise<AdapterResult> {
   }
 
   if (data.data && data.data.length > 0) {
-    const outputPaths = await downloadVideoItems(data.data, args.outputDir, args.request.filename);
+    const outputPaths = await downloadVideoItems(
+      data.data,
+      args.outputDir,
+      args.request.filename,
+      args.outputPathGuard,
+      args.networkPolicyGuard,
+    );
     return { success: true, jobId, outputPaths, model };
   }
 
@@ -144,7 +162,13 @@ async function pollOpenAIJob(
   apiKey: string,
   outputDir: string,
   filename?: string,
+  outputPathGuard?: OutputPathGuard,
+  networkPolicyGuard?: NetworkPolicyGuard,
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
+  networkPolicyGuard?.(
+    `https://api.openai.com/v1/video/generations/${jobId}`,
+    "get_video_generation_job",
+  );
   const response = await fetch(`https://api.openai.com/v1/video/generations/${jobId}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -159,7 +183,13 @@ async function pollOpenAIJob(
   };
   const status = mapOpenAIStatus(data.status);
   if (status === "succeeded" && data.data?.length) {
-    const outputPaths = await downloadVideoItems(data.data, outputDir, filename);
+    const outputPaths = await downloadVideoItems(
+      data.data,
+      outputDir,
+      filename,
+      outputPathGuard,
+      networkPolicyGuard,
+    );
     return { jobId, provider: "openai", status, outputPaths };
   }
   return {
@@ -208,7 +238,10 @@ function normalizeAzureBaseEndpoint(endpoint: string): string {
   return endpoint.replace(/\/$/, "");
 }
 
-function normalizeAzureVideoModel(model?: string, configuredModel?: string): "sora-2" | "sora-2-pro" {
+function normalizeAzureVideoModel(
+  model?: string,
+  configuredModel?: string,
+): "sora-2" | "sora-2-pro" {
   const raw = model?.trim() || configuredModel?.trim() || "";
   const lowered = raw.toLowerCase();
 
@@ -236,7 +269,16 @@ function normalizeAzureVideoApiVersion(apiVersion?: string): string {
 function aspectRatioAndResolutionToAzureVideoSize(
   aspectRatio: VideoAspectRatio,
   resolution?: VideoResolution,
-): "480x480" | "720x720" | "1080x1080" | "480x854" | "854x480" | "720x1280" | "1280x720" | "1080x1920" | "1920x1080" {
+):
+  | "480x480"
+  | "720x720"
+  | "1080x1080"
+  | "480x854"
+  | "854x480"
+  | "720x1280"
+  | "1280x720"
+  | "1080x1920"
+  | "1920x1080" {
   if (aspectRatio === "1:1") {
     if (resolution === "1080p") return "1080x1080";
     if (resolution === "480p") return "480x480";
@@ -278,7 +320,10 @@ async function generateWithAzure(args: AdapterArgs): Promise<AdapterResult> {
   const apiVersion = normalizeAzureVideoApiVersion(vCfg?.videoApiVersion);
 
   if (!apiKey || !rawEndpoint) {
-    return { success: false, error: "Azure OpenAI API key and endpoint are required for video generation." };
+    return {
+      success: false,
+      error: "Azure OpenAI API key and endpoint are required for video generation.",
+    };
   }
 
   const base = normalizeAzureBaseEndpoint(rawEndpoint);
@@ -305,12 +350,14 @@ async function generateWithAzure(args: AdapterArgs): Promise<AdapterResult> {
   if (mode === "image_to_video" && args.request.referenceImagePath) {
     return {
       success: false,
-      error: "Azure Sora 2 image-to-video is not implemented in this build yet. Use text_to_video for now.",
+      error:
+        "Azure Sora 2 image-to-video is not implemented in this build yet. Use text_to_video for now.",
     };
   }
 
   console.log(`[VideoGenerator][Azure] POST ${url}`, JSON.stringify(body));
 
+  args.networkPolicyGuard?.(url, "generate_video");
   const response = await fetch(url, {
     method: "POST",
     headers: { "api-key": apiKey, "Content-Type": "application/json" },
@@ -319,7 +366,10 @@ async function generateWithAzure(args: AdapterArgs): Promise<AdapterResult> {
 
   if (!response.ok) {
     const errText = await response.text().catch(() => String(response.status));
-    return { success: false, error: `Azure Sora error ${response.status}: ${errText} — URL: ${url}` };
+    return {
+      success: false,
+      error: `Azure Sora error ${response.status}: ${errText} — URL: ${url}`,
+    };
   }
 
   const data = (await response.json()) as { id?: string; status?: string };
@@ -336,20 +386,28 @@ async function pollAzureJob(
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
   outputDir: string,
   filename?: string,
+  outputPathGuard?: OutputPathGuard,
+  networkPolicyGuard?: NetworkPolicyGuard,
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
   const azCfg = settings.azure;
   const vCfg = settings.videoGeneration?.azure;
   const apiKey = (vCfg?.videoApiKey?.trim() || azCfg?.apiKey?.trim()) ?? "";
-  const rawEndpoint = ((vCfg?.videoEndpoint?.trim() || azCfg?.endpoint?.trim()) ?? "");
+  const rawEndpoint = (vCfg?.videoEndpoint?.trim() || azCfg?.endpoint?.trim()) ?? "";
   const apiVersion = normalizeAzureVideoApiVersion(vCfg?.videoApiVersion);
   const base = normalizeAzureBaseEndpoint(rawEndpoint);
 
   const statusUrl = `${base}/openai/v1/videos/${jobId}?api-version=${encodeURIComponent(apiVersion)}`;
   console.log(`[VideoGenerator][Azure] GET ${statusUrl}`);
 
+  networkPolicyGuard?.(statusUrl, "get_video_generation_job");
   const response = await fetch(statusUrl, { headers: { "api-key": apiKey } });
   if (!response.ok) {
-    return { jobId, provider: "azure", status: "failed", error: `HTTP ${response.status} polling ${statusUrl}` };
+    return {
+      jobId,
+      provider: "azure",
+      status: "failed",
+      error: `HTTP ${response.status} polling ${statusUrl}`,
+    };
   }
 
   const data = (await response.json()) as {
@@ -362,14 +420,21 @@ async function pollAzureJob(
   if (status === "succeeded") {
     const videoUrl = `${base}/openai/v1/videos/${jobId}/content?api-version=${encodeURIComponent(apiVersion)}&variant=video`;
     console.log(`[VideoGenerator][Azure] Downloading video from ${videoUrl}`);
+    networkPolicyGuard?.(videoUrl, "video_output_download");
     const videoResponse = await fetch(videoUrl, {
       headers: { "api-key": apiKey, Accept: "application/binary" },
     });
     if (!videoResponse.ok) {
-      return { jobId, provider: "azure", status: "failed", error: `Failed to download video: HTTP ${videoResponse.status}` };
+      return {
+        jobId,
+        provider: "azure",
+        status: "failed",
+        error: `Failed to download video: HTTP ${videoResponse.status}`,
+      };
     }
 
     const outputPath = buildOutputPath(outputDir, filename, "mp4");
+    outputPathGuard?.(outputPath);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     const buffer = Buffer.from(await videoResponse.arrayBuffer());
     fs.writeFileSync(outputPath, buffer);
@@ -422,14 +487,13 @@ async function generateWithGemini(args: AdapterArgs): Promise<AdapterResult> {
     },
   };
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  );
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`;
+  args.networkPolicyGuard?.(endpoint, "generate_video");
+  const response = await fetch(`${endpoint}?key=${apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 
   if (!response.ok) {
     const errText = await response.text().catch(() => String(response.status));
@@ -444,7 +508,11 @@ async function generateWithGemini(args: AdapterArgs): Promise<AdapterResult> {
   const data = (await response.json()) as {
     name?: string; // long-running operation name
     done?: boolean;
-    response?: { candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> } }> };
+    response?: {
+      candidates?: Array<{
+        content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
+      }>;
+    };
     error?: { message?: string };
   };
 
@@ -457,6 +525,7 @@ async function generateWithGemini(args: AdapterArgs): Promise<AdapterResult> {
     const part = data.response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
     if (part?.inlineData?.data) {
       const outputPath = buildOutputPath(args.outputDir, args.request.filename, "mp4");
+      args.outputPathGuard(outputPath);
       const videoBuffer = Buffer.from(part.inlineData.data, "base64");
       fs.mkdirSync(path.dirname(outputPath), { recursive: true });
       fs.writeFileSync(outputPath, videoBuffer);
@@ -478,20 +547,36 @@ async function pollGeminiOperation(
   apiKey: string,
   outputDir: string,
   filename?: string,
+  outputPathGuard?: OutputPathGuard,
+  networkPolicyGuard?: NetworkPolicyGuard,
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`,
-  );
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/${operationName}`;
+  networkPolicyGuard?.(endpoint, "get_video_generation_job");
+  const response = await fetch(`${endpoint}?key=${apiKey}`);
   if (!response.ok) {
-    return { jobId: operationName, provider: "gemini", status: "failed", error: `HTTP ${response.status}` };
+    return {
+      jobId: operationName,
+      provider: "gemini",
+      status: "failed",
+      error: `HTTP ${response.status}`,
+    };
   }
   const data = (await response.json()) as {
     done?: boolean;
-    response?: { candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> } }> };
+    response?: {
+      candidates?: Array<{
+        content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
+      }>;
+    };
     error?: { message?: string };
   };
   if (data.error) {
-    return { jobId: operationName, provider: "gemini", status: "failed", error: data.error.message };
+    return {
+      jobId: operationName,
+      provider: "gemini",
+      status: "failed",
+      error: data.error.message,
+    };
   }
   if (!data.done) {
     return { jobId: operationName, provider: "gemini", status: "running" };
@@ -499,11 +584,22 @@ async function pollGeminiOperation(
   const part = data.response?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
   if (part?.inlineData?.data) {
     const outputPath = buildOutputPath(outputDir, filename, "mp4");
+    outputPathGuard?.(outputPath);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.writeFileSync(outputPath, Buffer.from(part.inlineData.data, "base64"));
-    return { jobId: operationName, provider: "gemini", status: "succeeded", outputPaths: [outputPath] };
+    return {
+      jobId: operationName,
+      provider: "gemini",
+      status: "succeeded",
+      outputPaths: [outputPath],
+    };
   }
-  return { jobId: operationName, provider: "gemini", status: "failed", error: "No video data in completed operation." };
+  return {
+    jobId: operationName,
+    provider: "gemini",
+    status: "failed",
+    error: "No video data in completed operation.",
+  };
 }
 
 // ── Vertex AI Veo ─────────────────────────────────────────────────────────────
@@ -516,7 +612,10 @@ async function generateWithVertex(args: AdapterArgs): Promise<AdapterResult> {
   const outputGcsUri = vxCfg?.outputGcsUri?.trim();
 
   if (!projectId || !accessToken) {
-    return { success: false, error: "Vertex AI project ID and access token are required for video generation." };
+    return {
+      success: false,
+      error: "Vertex AI project ID and access token are required for video generation.",
+    };
   }
 
   const model = args.request.model || vxCfg?.model || "veo-3";
@@ -548,6 +647,7 @@ async function generateWithVertex(args: AdapterArgs): Promise<AdapterResult> {
 
   const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
 
+  args.networkPolicyGuard?.(endpoint, "generate_video");
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -575,13 +675,20 @@ async function pollVertexOperation(
   accessToken: string,
   outputDir: string,
   filename?: string,
+  outputPathGuard?: OutputPathGuard,
+  networkPolicyGuard?: NetworkPolicyGuard,
+  location = "us-central1",
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
-  const response = await fetch(
-    `https://us-central1-aiplatform.googleapis.com/v1/${operationName}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-  );
+  const endpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+  networkPolicyGuard?.(endpoint, "get_video_generation_job");
+  const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!response.ok) {
-    return { jobId: operationName, provider: "vertex", status: "failed", error: `HTTP ${response.status}` };
+    return {
+      jobId: operationName,
+      provider: "vertex",
+      status: "failed",
+      error: `HTTP ${response.status}`,
+    };
   }
   const data = (await response.json()) as {
     done?: boolean;
@@ -596,7 +703,12 @@ async function pollVertexOperation(
   };
 
   if (data.error) {
-    return { jobId: operationName, provider: "vertex", status: "failed", error: data.error.message };
+    return {
+      jobId: operationName,
+      provider: "vertex",
+      status: "failed",
+      error: data.error.message,
+    };
   }
   if (!data.done) {
     return { jobId: operationName, provider: "vertex", status: "running" };
@@ -615,12 +727,23 @@ async function pollVertexOperation(
   if (pred?.bytesBase64Encoded) {
     const ext = pred.mimeType?.includes("mp4") ? "mp4" : "mp4";
     const outputPath = buildOutputPath(outputDir, filename, ext);
+    outputPathGuard?.(outputPath);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.writeFileSync(outputPath, Buffer.from(pred.bytesBase64Encoded, "base64"));
-    return { jobId: operationName, provider: "vertex", status: "succeeded", outputPaths: [outputPath] };
+    return {
+      jobId: operationName,
+      provider: "vertex",
+      status: "succeeded",
+      outputPaths: [outputPath],
+    };
   }
 
-  return { jobId: operationName, provider: "vertex", status: "failed", error: "No prediction data." };
+  return {
+    jobId: operationName,
+    provider: "vertex",
+    status: "failed",
+    error: "No prediction data.",
+  };
 }
 
 // ── Kling ─────────────────────────────────────────────────────────────────────
@@ -661,6 +784,7 @@ async function generateWithKling(args: AdapterArgs): Promise<AdapterResult> {
     body.image = imgData.toString("base64");
   }
 
+  args.networkPolicyGuard?.(endpoint, "generate_video");
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -698,11 +822,15 @@ async function pollKlingJob(
   kCfg: NonNullable<ReturnType<typeof LLMProviderFactory.loadSettings>["videoGeneration"]>["kling"],
   outputDir: string,
   filename?: string,
+  outputPathGuard?: OutputPathGuard,
+  networkPolicyGuard?: NetworkPolicyGuard,
 ): Promise<VideoGenerationJobStatus & { outputPaths?: string[] }> {
   const apiKey = kCfg?.apiKey?.trim() ?? "";
   const baseUrl = (kCfg?.baseUrl?.trim() || "https://api.klingai.com").replace(/\/$/, "");
 
-  const response = await fetch(`${baseUrl}/v1/videos/text2video/${taskId}`, {
+  const statusUrl = `${baseUrl}/v1/videos/text2video/${taskId}`;
+  networkPolicyGuard?.(statusUrl, "get_video_generation_job");
+  const response = await fetch(statusUrl, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
 
@@ -727,8 +855,13 @@ async function pollKlingJob(
     for (let i = 0; i < videos.length; i++) {
       const videoUrl = videos[i].url;
       if (videoUrl) {
-        const outputPath = buildOutputPath(outputDir, filename ? `${filename}_${i}` : undefined, "mp4");
-        await downloadUrlToFile(videoUrl, outputPath);
+        const outputPath = buildOutputPath(
+          outputDir,
+          filename ? `${filename}_${i}` : undefined,
+          "mp4",
+        );
+        outputPathGuard?.(outputPath);
+        await downloadUrlToFile(videoUrl, outputPath, outputPathGuard, networkPolicyGuard);
         outputPaths.push(outputPath);
       }
     }
@@ -736,7 +869,12 @@ async function pollKlingJob(
   }
 
   if (taskStatus === "failed") {
-    return { jobId: taskId, provider: "kling", status: "failed", error: data.data?.task_status_msg };
+    return {
+      jobId: taskId,
+      provider: "kling",
+      status: "failed",
+      error: data.data?.task_status_msg,
+    };
   }
 
   return { jobId: taskId, provider: "kling", status: "running" };
@@ -748,14 +886,17 @@ async function downloadVideoItems(
   items: Array<{ url?: string; b64_json?: string }>,
   outputDir: string,
   filename?: string,
+  outputPathGuard?: OutputPathGuard,
+  networkPolicyGuard?: NetworkPolicyGuard,
 ): Promise<string[]> {
   const outputPaths: string[] = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const outputPath = buildOutputPath(outputDir, filename ? `${filename}_${i}` : undefined, "mp4");
+    outputPathGuard?.(outputPath);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     if (item.url) {
-      await downloadUrlToFile(item.url, outputPath);
+      await downloadUrlToFile(item.url, outputPath, outputPathGuard, networkPolicyGuard);
     } else if (item.b64_json) {
       fs.writeFileSync(outputPath, Buffer.from(item.b64_json, "base64"));
     }
@@ -764,7 +905,14 @@ async function downloadVideoItems(
   return outputPaths;
 }
 
-async function downloadUrlToFile(url: string, outputPath: string): Promise<void> {
+async function downloadUrlToFile(
+  url: string,
+  outputPath: string,
+  outputPathGuard?: OutputPathGuard,
+  networkPolicyGuard?: NetworkPolicyGuard,
+): Promise<void> {
+  outputPathGuard?.(outputPath);
+  networkPolicyGuard?.(url, "video_output_download");
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to download video: HTTP ${res.status}`);
   const buffer = Buffer.from(await res.arrayBuffer());
@@ -772,18 +920,42 @@ async function downloadUrlToFile(url: string, outputPath: string): Promise<void>
   fs.writeFileSync(outputPath, buffer);
 }
 
-function buildOutputPath(outputDir: string, filename?: string, ext = "mp4"): string {
-  const base = filename ? filename.replace(/\.[^.]+$/, "") : `video_${Date.now()}`;
-  return path.join(outputDir, `${base}.${ext}`);
+export function buildOutputPath(outputDir: string, filename?: string, ext = "mp4"): string {
+  if (!filename?.trim()) return path.join(outputDir, `video_${Date.now()}.${ext}`);
+
+  const rawFilename = filename.trim().replaceAll("\\", "/");
+  if (
+    rawFilename.includes("\0") ||
+    path.posix.isAbsolute(rawFilename) ||
+    path.win32.isAbsolute(rawFilename) ||
+    /^[A-Za-z]:/.test(rawFilename)
+  ) {
+    throw new Error("Video filename must be a relative path inside the output directory.");
+  }
+
+  const segments = rawFilename.split("/").filter((segment) => segment && segment !== ".");
+  if (segments.length === 0 || segments.some((segment) => segment === "..")) {
+    throw new Error("Video filename must not contain parent-directory traversal.");
+  }
+
+  const sanitizedSegments = segments.map((segment) => {
+    const sanitized = segment.replace(/[^\p{L}\p{N}._-]/gu, "_");
+    return /^\.+$/.test(sanitized) ? "_" : sanitized || "_";
+  });
+  const lastIndex = sanitizedSegments.length - 1;
+  const stem = sanitizedSegments[lastIndex].replace(/\.[^.]+$/, "") || "video";
+  return path.join(outputDir, ...sanitizedSegments.slice(0, lastIndex), `${stem}.${ext}`);
 }
 
-function buildSetupHint(
-  provider: VideoProvider,
-): { type: string; label: string; target: string } {
+function buildSetupHint(provider: VideoProvider): { type: string; label: string; target: string } {
   if (provider === "gemini")
     return { type: "open_settings", label: "Set up Gemini API key", target: "gemini" };
   if (provider === "azure")
-    return { type: "open_settings", label: "Set up Azure OpenAI video deployment", target: "azure" };
+    return {
+      type: "open_settings",
+      label: "Set up Azure OpenAI video deployment",
+      target: "azure",
+    };
   if (provider === "vertex")
     return { type: "open_settings", label: "Set up Vertex AI project/access token", target: "llm" };
   if (provider === "kling")
@@ -798,11 +970,16 @@ function getConfiguredVideoProviders(
 ): VideoProvider[] {
   const providers: VideoProvider[] = [];
   if (settings.openai?.apiKey?.trim()) providers.push("openai");
-  const azureVideoApiKey = settings.videoGeneration?.azure?.videoApiKey?.trim() || settings.azure?.apiKey?.trim();
-  const azureVideoEndpoint = settings.videoGeneration?.azure?.videoEndpoint?.trim() || settings.azure?.endpoint?.trim();
+  const azureVideoApiKey =
+    settings.videoGeneration?.azure?.videoApiKey?.trim() || settings.azure?.apiKey?.trim();
+  const azureVideoEndpoint =
+    settings.videoGeneration?.azure?.videoEndpoint?.trim() || settings.azure?.endpoint?.trim();
   if (azureVideoApiKey && azureVideoEndpoint) providers.push("azure");
   if (settings.gemini?.apiKey?.trim()) providers.push("gemini");
-  if (settings.videoGeneration?.vertex?.projectId?.trim() && settings.videoGeneration?.vertex?.accessToken?.trim())
+  if (
+    settings.videoGeneration?.vertex?.projectId?.trim() &&
+    settings.videoGeneration?.vertex?.accessToken?.trim()
+  )
     providers.push("vertex");
   if (settings.videoGeneration?.kling?.apiKey?.trim()) providers.push("kling");
   return providers;
@@ -848,13 +1025,128 @@ function selectVideoProviderOrder(
  * Parallel to ImageGenerator — dispatches to the best configured provider with fallback.
  */
 export class VideoGenerator {
-  constructor(private workspace: Workspace) {}
+  constructor(
+    private workspace: Workspace,
+    private filesystemApprovalHandlers: WorkspaceFilesystemApprovalHandlers = {},
+  ) {}
+
+  /** Check the concrete provider/download destination against profile rules. */
+  private assertNetworkAccess(url: string, toolName = "generate_video"): void {
+    const decision = evaluateNetworkPolicy({
+      url,
+      toolName,
+      networkEnabled: this.workspace.permissions.network,
+      accessNetworkMode: this.workspace.permissions.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions.accessDomainRules,
+    });
+    if (decision.action !== "allow") {
+      throw new Error(`Network access denied for ${decision.url}: ${decision.reason}`);
+    }
+  }
+
+  private getProviderNetworkEndpoint(
+    provider: VideoProvider,
+    settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
+  ): string | null {
+    switch (provider) {
+      case "openai":
+        return "https://api.openai.com/v1/video/generations";
+      case "azure": {
+        const endpoint =
+          settings.videoGeneration?.azure?.videoEndpoint?.trim() ||
+          settings.azure?.endpoint?.trim();
+        return endpoint ? normalizeAzureBaseEndpoint(endpoint) : null;
+      }
+      case "gemini":
+        return "https://generativelanguage.googleapis.com/v1beta";
+      case "vertex": {
+        const location = settings.videoGeneration?.vertex?.location?.trim() || "us-central1";
+        return `https://${location}-aiplatform.googleapis.com/v1`;
+      }
+      case "kling":
+        return (
+          settings.videoGeneration?.kling?.baseUrl?.trim() || "https://api.klingai.com"
+        ).replace(/\/+$/, "");
+    }
+  }
+
+  private async normalizeReferencePaths(
+    request: VideoGenerationRequest,
+  ): Promise<VideoGenerationRequest> {
+    const normalized = { ...request };
+    if (request.referenceImagePath) {
+      normalized.referenceImagePath = await this.validateReferencePath(
+        this.workspace,
+        request.referenceImagePath,
+        "Video reference image",
+        25 * 1024 * 1024,
+      );
+    }
+    if (request.referenceVideoPath) {
+      normalized.referenceVideoPath = await this.validateReferencePath(
+        this.workspace,
+        request.referenceVideoPath,
+        "Video reference video",
+        500 * 1024 * 1024,
+      );
+    }
+    return normalized;
+  }
+
+  private async validateReferencePath(
+    workspace: Workspace,
+    rawPath: string,
+    label: string,
+    maxBytes: number,
+  ): Promise<string> {
+    const resolvedPath = await assertWorkspaceReadableFileAccessWithApproval(
+      workspace,
+      rawPath,
+      label,
+      this.filesystemApprovalHandlers,
+    );
+    const stats = await fs.promises.stat(resolvedPath);
+    if (stats.size > maxBytes) {
+      throw new Error(
+        `${label} is too large (${stats.size} bytes). Max allowed is ${maxBytes} bytes.`,
+      );
+    }
+    const extension = path.extname(rawPath).toLowerCase();
+    const allowedExtensions =
+      label === "Video reference image"
+        ? new Set([".png", ".jpg", ".jpeg", ".webp"])
+        : new Set([".mp4", ".mov", ".m4v", ".webm"]);
+    if (!allowedExtensions.has(extension)) {
+      throw new Error(
+        `${label} type "${extension || "(none)"}" is not supported. ` +
+          `Allowed: ${Array.from(allowedExtensions.values()).join(", ")}`,
+      );
+    }
+    return resolvedPath;
+  }
+
+  private assertOutputPathAllowed(outputPath: string): void {
+    if (this.workspace.permissions.write === false) {
+      throw new Error("Write permission not granted for video generation");
+    }
+    const access = evaluateWorkspaceFilesystemAccess(this.workspace, outputPath, "write");
+    if (access.decision !== "allow") {
+      if (access.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${outputPath}`);
+      }
+      throw new Error(
+        `Video output path is outside the active access profile boundary: ${outputPath}`,
+      );
+    }
+  }
 
   async generate(request: VideoGenerationRequest): Promise<VideoGenerationResult> {
     const settings = LLMProviderFactory.loadSettings();
     const outputDir = this.workspace.path;
     const providerOrder = selectVideoProviderOrder(settings, request.provider);
-    console.log(`[VideoGenerator] request.provider=${request.provider ?? "undefined"}, providerOrder=[${providerOrder.join(", ")}], defaultProvider=${settings.videoGeneration?.defaultProvider ?? "unset"}`);
+    console.log(
+      `[VideoGenerator] request.provider=${request.provider ?? "undefined"}, providerOrder=[${providerOrder.join(", ")}], defaultProvider=${settings.videoGeneration?.defaultProvider ?? "unset"}`,
+    );
 
     if (providerOrder.length === 0) {
       return {
@@ -865,10 +1157,21 @@ export class VideoGenerator {
       };
     }
 
+    // VideoTools validates references at the tool boundary; repeat the check
+    // here because VideoGenerator is also exported and can be called directly
+    // by an integration or a future provider adapter.
+    const safeRequest = await this.normalizeReferencePaths(request);
+
     let bestError: { error: string; actionHint: ReturnType<typeof buildSetupHint> } | null = null;
 
     for (const provider of providerOrder) {
-      const args: AdapterArgs = { request, settings, outputDir };
+      const args: AdapterArgs = {
+        request: safeRequest,
+        settings,
+        outputDir,
+        outputPathGuard: this.assertOutputPathAllowed.bind(this),
+        networkPolicyGuard: this.assertNetworkAccess.bind(this),
+      };
       let result: AdapterResult;
 
       try {
@@ -895,7 +1198,10 @@ export class VideoGenerator {
 
       console.error(`[VideoGenerator] Provider "${provider}" failed:`, result.error);
       if (!bestError) {
-        bestError = { error: result.error ?? "Unknown error", actionHint: buildSetupHint(provider) };
+        bestError = {
+          error: result.error ?? "Unknown error",
+          actionHint: buildSetupHint(provider),
+        };
       }
     }
 
@@ -925,23 +1231,62 @@ export class VideoGenerator {
     const outputDir = this.workspace.path;
 
     try {
+      const providerEndpoint = this.getProviderNetworkEndpoint(provider, settings);
+      if (providerEndpoint) {
+        this.assertNetworkAccess(providerEndpoint, "get_video_generation_job");
+      }
       if (provider === "openai") {
         const apiKey = settings.openai?.apiKey?.trim() ?? "";
-        return await pollOpenAIJob(normalizedJobId, apiKey, outputDir, filename);
+        return await pollOpenAIJob(
+          normalizedJobId,
+          apiKey,
+          outputDir,
+          filename,
+          this.assertOutputPathAllowed.bind(this),
+          this.assertNetworkAccess.bind(this),
+        );
       }
       if (provider === "azure") {
-        return await pollAzureJob(normalizedJobId, settings, outputDir, filename);
+        return await pollAzureJob(
+          normalizedJobId,
+          settings,
+          outputDir,
+          filename,
+          this.assertOutputPathAllowed.bind(this),
+          this.assertNetworkAccess.bind(this),
+        );
       }
       if (provider === "gemini") {
         const apiKey = settings.gemini?.apiKey?.trim() ?? "";
-        return await pollGeminiOperation(normalizedJobId, apiKey, outputDir, filename);
+        return await pollGeminiOperation(
+          normalizedJobId,
+          apiKey,
+          outputDir,
+          filename,
+          this.assertOutputPathAllowed.bind(this),
+          this.assertNetworkAccess.bind(this),
+        );
       }
       if (provider === "vertex") {
         const accessToken = settings.videoGeneration?.vertex?.accessToken?.trim() ?? "";
-        return await pollVertexOperation(normalizedJobId, accessToken, outputDir, filename);
+        return await pollVertexOperation(
+          normalizedJobId,
+          accessToken,
+          outputDir,
+          filename,
+          this.assertOutputPathAllowed.bind(this),
+          this.assertNetworkAccess.bind(this),
+        );
       }
       if (provider === "kling") {
-        return await pollKlingJob(normalizedJobId, settings.videoGeneration?.kling, outputDir, filename);
+        return await pollKlingJob(
+          normalizedJobId,
+          settings.videoGeneration?.kling,
+          outputDir,
+          filename,
+          this.assertOutputPathAllowed.bind(this),
+          this.assertNetworkAccess.bind(this),
+        );
       }
     } catch (err) {
       return {
@@ -952,7 +1297,12 @@ export class VideoGenerator {
       };
     }
 
-    return { jobId: normalizedJobId, provider, status: "failed", error: `Unknown provider: ${provider}` };
+    return {
+      jobId: normalizedJobId,
+      provider,
+      status: "failed",
+      error: `Unknown provider: ${provider}`,
+    };
   }
 
   async cancelJob(
@@ -964,10 +1314,17 @@ export class VideoGenerator {
     try {
       if (provider === "openai") {
         const apiKey = settings.openai?.apiKey?.trim() ?? "";
-        const response = await fetch(`https://api.openai.com/v1/video/generations/${jobId}/cancel`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}` },
-        });
+        this.assertNetworkAccess(
+          `https://api.openai.com/v1/video/generations/${jobId}/cancel`,
+          "cancel_video_generation_job",
+        );
+        const response = await fetch(
+          `https://api.openai.com/v1/video/generations/${jobId}/cancel`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}` },
+          },
+        );
         return { success: response.ok, error: response.ok ? undefined : `HTTP ${response.status}` };
       }
       // Other providers do not expose a cancel endpoint; return unsupported.

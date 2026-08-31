@@ -25,6 +25,10 @@ import {
   getProjectIdFromWorkspaceRelPath,
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
+import {
+  assertWorkspaceReadableFileAccessWithApproval,
+  createWorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
 
 export interface ParseDocumentInput {
   path: string;
@@ -210,12 +214,30 @@ export class DocumentParserTools {
       ? path.resolve(rawPath)
       : path.resolve(this.workspace.path, rawPath);
 
-    if (!fsSync.existsSync(candidatePath)) {
-      throw new Error(`File not found: ${rawPath}`);
-    }
-
-    const resolvedPath = fsSync.realpathSync(candidatePath);
-    if (!this.isPathAllowed(resolvedPath)) {
+    let resolvedPath: string;
+    try {
+      const approvalHandlers =
+        this.daemon && this.taskId
+          ? createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "parse_document")
+          : {};
+      // Return the canonical existing file path. Besides preventing symlink
+      // escapes, this keeps downstream parsers and project checks operating
+      // on the same path that the filesystem actually opens (including
+      // macOS's /var -> /private/var alias).
+      resolvedPath = await assertWorkspaceReadableFileAccessWithApproval(
+        this.workspace,
+        candidatePath,
+        "Document path",
+        approvalHandlers,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/does not exist|not found/i.test(message)) {
+        throw new Error(`File not found: ${rawPath}`);
+      }
+      if (/profile_filesystem_denied/i.test(message)) {
+        throw new Error(`Path is denied by the active access profile: ${candidatePath}`);
+      }
       throw new Error(
         "Access denied: document path must be inside the workspace or an approved allowed path.",
       );
@@ -239,26 +261,6 @@ export class DocumentParserTools {
     }
 
     return resolvedPath;
-  }
-
-  private isPathAllowed(targetPath: string): boolean {
-    if (this.workspace.permissions.unrestrictedFileAccess) {
-      return true;
-    }
-
-    const allowedRoots = [this.workspace.path, ...(this.workspace.permissions.allowedPaths || [])]
-      .map((root) => {
-        try {
-          return fsSync.existsSync(root) ? fsSync.realpathSync(root) : path.resolve(root);
-        } catch {
-          return null;
-        }
-      })
-      .filter((root): root is string => Boolean(root));
-
-    return allowedRoots.some(
-      (root) => targetPath === root || targetPath.startsWith(`${root}${path.sep}`),
-    );
   }
 
   private async parsePdf(filePath: string): Promise<{

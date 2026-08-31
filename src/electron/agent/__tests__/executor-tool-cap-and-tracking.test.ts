@@ -55,7 +55,10 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
   it("uses stable hash tie-breaking instead of registry order for equal-score MCP tools", () => {
     const executorA = createExecutor("execution");
     const executorB = createExecutor("execution");
-    const builtIn = Array.from({ length: 10 }, (_, i) => ({ name: `builtin_${i}`, description: "" }));
+    const builtIn = Array.from({ length: 10 }, (_, i) => ({
+      name: `builtin_${i}`,
+      description: "",
+    }));
     const mcp = Array.from({ length: 140 }, (_, i) => ({
       name: `mcp_generic_${i}`,
       description: "generic external tool",
@@ -65,7 +68,9 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
       .filter((t) => String(t.name).startsWith("mcp_"))
       .map((t) => t.name)
       .sort();
-    const selectedB = ((executorB as Any).capToolCount([...builtIn, ...mcp.slice().reverse()]) as Any[])
+    const selectedB = (
+      (executorB as Any).capToolCount([...builtIn, ...mcp.slice().reverse()]) as Any[]
+    )
       .filter((t) => String(t.name).startsWith("mcp_"))
       .map((t) => t.name)
       .sort();
@@ -102,7 +107,9 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
 
   it("decays tool usage counts to avoid permanent early-phase bias", () => {
     const executor = createExecutor("execution");
-    const recordToolUsage = (executor as Any).recordToolUsage.bind(executor) as (name: string) => void;
+    const recordToolUsage = (executor as Any).recordToolUsage.bind(executor) as (
+      name: string,
+    ) => void;
 
     for (let i = 0; i < 40; i++) {
       recordToolUsage("mcp_important_tool");
@@ -126,12 +133,17 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
         status: "in_progress",
       },
     ];
-    executor.getMapsMcpToolNames = vi.fn().mockReturnValue([
-      "mcp_maps.search_places",
-      "mcp_maps.route",
-      "mcp_maps.rank_nearby_options",
-    ]);
-    const builtIn = Array.from({ length: 10 }, (_, i) => ({ name: `builtin_${i}`, description: "" }));
+    executor.getMapsMcpToolNames = vi
+      .fn()
+      .mockReturnValue([
+        "mcp_maps.search_places",
+        "mcp_maps.route",
+        "mcp_maps.rank_nearby_options",
+      ]);
+    const builtIn = Array.from({ length: 10 }, (_, i) => ({
+      name: `builtin_${i}`,
+      description: "",
+    }));
     const mcp = Array.from({ length: 220 }, (_, i) => ({
       name: `mcp_generic_${i}`,
       description: "generic external tool",
@@ -152,9 +164,9 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
     const executor = createExecutor("execution");
     executor.executeStepUnified = vi.fn().mockRejectedValue(new Error("boom"));
 
-    await expect((executor as Any).executeStep({ id: "X", description: "x", status: "pending" })).rejects.toThrow(
-      "boom",
-    );
+    await expect(
+      (executor as Any).executeStep({ id: "X", description: "x", status: "pending" }),
+    ).rejects.toThrow("boom");
     expect((executor as Any).currentStepId).toBeNull();
   });
 });

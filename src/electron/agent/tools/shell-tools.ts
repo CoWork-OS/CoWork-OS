@@ -1,17 +1,20 @@
 import { spawn, ChildProcess, execSync } from "child_process";
 import * as path from "path";
+import * as os from "os";
 import { existsSync } from "fs";
 import type { Workspace, CommandTerminationReason } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager, type RunCommandApprovalMode } from "./builtin-settings";
-import {
-  ShellSessionManager,
-  isLikelyInteractiveCommand,
-} from "./shell-session-manager";
+import { ShellSessionManager, isLikelyInteractiveCommand } from "./shell-session-manager";
 import { createSandbox } from "../sandbox/sandbox-factory";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
 import { createLogger } from "../../utils/logger";
+import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
+import {
+  evaluateWorkspaceFilesystemAccess,
+  hasEffectiveFilesystemScope,
+} from "../../security/access-profile-paths";
 
 const log = createLogger("ShellTools");
 
@@ -88,9 +91,16 @@ const SHELL_OUTPUT_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: str
   // Bearer tokens in output
   { pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, replacement: "Bearer [REDACTED]" },
   // JWT tokens (header.payload.signature)
-  { pattern: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, replacement: "[REDACTED_JWT]" },
+  {
+    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+    replacement: "[REDACTED_JWT]",
+  },
   // JSON fields containing tokens/secrets/keys with string values
-  { pattern: /("(?:access_token|refresh_token|api_key|apiKey|secret_key|client_secret|password|token)":\s*")([^"]{8,})(")/gi, replacement: "$1[REDACTED]$3" },
+  {
+    pattern:
+      /("(?:access_token|refresh_token|api_key|apiKey|secret_key|client_secret|password|token)":\s*")([^"]{8,})(")/gi,
+    replacement: "$1[REDACTED]$3",
+  },
 ];
 
 /**
@@ -164,12 +174,33 @@ function shouldUsePersistentShell(command: string): boolean {
   );
 }
 
+function shouldSandboxShellCommand(input: {
+  persistentShellAllowed: boolean;
+  requireSandboxForShell: boolean;
+  accessSandboxMode?: string;
+  accessApprovalPolicy?: string;
+  hasScopedAccessRules?: boolean;
+}): boolean {
+  const fullAccessProfile =
+    input.accessSandboxMode === "danger-full-access" &&
+    input.accessApprovalPolicy === "never" &&
+    input.hasScopedAccessRules !== true;
+  return (
+    (!input.persistentShellAllowed && !fullAccessProfile) ||
+    input.requireSandboxForShell ||
+    !fullAccessProfile
+  );
+}
+
 function isSandboxRuntimeFailure(stderr: string, exitCode: number | null): boolean {
   if (exitCode === 134) return true;
   const text = stderr || "";
   if (/sandbox_apply/i.test(text)) return true;
   if (/Abort trap(?::\s*\d+)?/i.test(text) && /sandbox-exec/i.test(text)) return true;
-  if (/sandbox-exec/i.test(text) && /(?:failed|aborted|killed|Operation not permitted)/i.test(text)) {
+  if (
+    /sandbox-exec/i.test(text) &&
+    /(?:failed|aborted|killed|Operation not permitted)/i.test(text)
+  ) {
     return true;
   }
   return false;
@@ -200,7 +231,10 @@ function getExecutableTokenIndex(tokens: string[]): number {
 
   if (tokens[index] === "env") {
     index += 1;
-    while (index < tokens.length && (tokens[index].startsWith("-") || isEnvAssignment(tokens[index]))) {
+    while (
+      index < tokens.length &&
+      (tokens[index].startsWith("-") || isEnvAssignment(tokens[index]))
+    ) {
       index += 1;
     }
   }
@@ -350,8 +384,14 @@ function getShellArgs(shell: string, command: string): string[] {
 
 function resolveCommandCwd(workspacePath: string, cwd?: string): string {
   if (!cwd || cwd === ".") return workspacePath;
-  if (path.isAbsolute(cwd)) return cwd;
-  return path.resolve(workspacePath, cwd);
+  const expanded =
+    cwd === "~"
+      ? os.homedir()
+      : cwd.startsWith("~/") || cwd.startsWith("~\\")
+        ? path.join(os.homedir(), cwd.slice(2))
+        : cwd;
+  if (path.isAbsolute(expanded) || /^[A-Za-z]:[\\/]/.test(expanded)) return expanded;
+  return path.resolve(workspacePath, expanded);
 }
 
 function resolveDockerSandboxCwd(workspacePath: string, cwd: string): string {
@@ -445,10 +485,10 @@ function getDescendantPidsWindows(parentPid: number): number[] {
         );
       } catch {
         // Fallback to wmic for older Windows versions
-        output = execSync(
-          `wmic process where (ParentProcessId=${pid}) get ProcessId /format:csv`,
-          { encoding: "utf-8", timeout: 3000 },
-        );
+        output = execSync(`wmic process where (ParentProcessId=${pid}) get ProcessId /format:csv`, {
+          encoding: "utf-8",
+          timeout: 3000,
+        });
       }
       const childPids = output
         .split("\n")
@@ -526,7 +566,10 @@ function killProcessTree(pid: number, signal: NodeJS.Signals): void {
 export class ShellTools {
   private static readonly verificationCommandTtlMs = 120_000;
   private static runningVerificationCommands = new Map<string, { startedAt: number }>();
-  private static recentVerificationResults = new Map<string, { completedAt: number; result: RunCommandResult }>();
+  private static recentVerificationResults = new Map<
+    string,
+    { completedAt: number; result: RunCommandResult }
+  >();
   private readonly recentApprovals = new Map<string, { approvedAt: number; count: number }>();
   private readonly approvalWindowMs = 2 * 60 * 1000;
   private readonly bundleApprovalWindowMs = 10 * 60 * 1000;
@@ -613,16 +656,24 @@ export class ShellTools {
     }
   }
 
-  private recordVerificationCommandResult(key: string | null, result: RunCommandResult): RunCommandResult {
+  private recordVerificationCommandResult(
+    key: string | null,
+    result: RunCommandResult,
+  ): RunCommandResult {
     if (!key) return result;
     this.pruneVerificationCommandCache();
     ShellTools.runningVerificationCommands.delete(key);
-    ShellTools.recentVerificationResults.set(key, { completedAt: Date.now(), result: { ...result } });
+    ShellTools.recentVerificationResults.set(key, {
+      completedAt: Date.now(),
+      result: { ...result },
+    });
     return result;
   }
 
   private allowUnsandboxedShellFallback(policies: AdminPolicies): boolean {
     return (
+      (this.workspace.permissions.accessSandboxMode === undefined ||
+        this.workspace.permissions.accessSandboxMode === "danger-full-access") &&
       policies.runtime.allowUnsandboxedShell === true &&
       process.env[UNSANDBOXED_SHELL_OVERRIDE_ENV] === "1"
     );
@@ -630,6 +681,11 @@ export class ShellTools {
 
   private shouldAllowShellNetwork(policies: AdminPolicies): boolean {
     if (this.workspace.permissions?.network !== true) return false;
+    if (this.workspace.permissions.accessNetworkMode === "disabled") return false;
+    // The shell has no domain-aware egress proxy. A scoped domain profile must
+    // therefore fail closed for shell networking instead of bypassing its
+    // allow/deny rules through curl, node, or another subprocess.
+    if ((this.workspace.permissions.accessDomainRules?.length || 0) > 0) return false;
     const network = policies.runtime.network;
     return (
       network.allowShellNetwork === true &&
@@ -656,7 +712,10 @@ export class ShellTools {
     truncated?: boolean;
     terminationReason?: CommandTerminationReason;
   } | null> {
-    const sandbox = await createSandbox(this.workspace);
+    const sandbox = await createSandbox(
+      this.workspace,
+      this.workspace.permissions.sandboxType || "auto",
+    );
     try {
       const policies = options.policies;
       const sandboxAllowed = policies.runtime.allowedSandboxTypes.includes(sandbox.type);
@@ -665,7 +724,8 @@ export class ShellTools {
           this.daemon.logEvent(this.taskId, "shell_sandbox_bypassed", {
             command,
             cwd: options.cwd,
-            reason: sandbox.type === "none" ? "no_os_sandbox_available" : "sandbox_type_not_allowed",
+            reason:
+              sandbox.type === "none" ? "no_os_sandbox_available" : "sandbox_type_not_allowed",
             sandboxType: sandbox.type,
             requireSandboxForShell: policies.runtime.requireSandboxForShell,
             overrideEnv: UNSANDBOXED_SHELL_OVERRIDE_ENV,
@@ -783,9 +843,9 @@ export class ShellTools {
           ? "Command timed out"
           : terminationReason === "user_stopped"
             ? "Command stopped by user"
-          : !success
-            ? `Command exited with code ${result.exitCode}`
-            : undefined);
+            : !success
+              ? `Command exited with code ${result.exitCode}`
+              : undefined);
 
       this.daemon.logEvent(this.taskId, "command_output", {
         command,
@@ -934,9 +994,7 @@ export class ShellTools {
         if (childProcess && !childProcess.killed && childProcess.pid === pid) {
           // Additional safety: verify we own this process before killing
           if (!isProcessOwnedByCurrentUser(pid)) {
-            log.warn(
-              `Process ${pid} no longer owned by current user, skipping SIGTERM`,
-            );
+            log.warn(`Process ${pid} no longer owned by current user, skipping SIGTERM`);
             return;
           }
           try {
@@ -961,9 +1019,7 @@ export class ShellTools {
         if (childProcess && !childProcess.killed && childProcess.pid === pid) {
           // Additional safety: verify we own this process before killing
           if (!isProcessOwnedByCurrentUser(pid)) {
-            log.warn(
-              `Process ${pid} no longer owned by current user, skipping SIGKILL`,
-            );
+            log.warn(`Process ${pid} no longer owned by current user, skipping SIGKILL`);
             return;
           }
           try {
@@ -1001,9 +1057,8 @@ export class ShellTools {
   }
 
   /**
-   * Execute a shell command (requires user approval unless auto-approve is enabled)
-   * Note: We don't check workspace.permissions.shell here because
-   * shell commands are gated by approval flow (or auto-approve/trust settings)
+   * Execute a shell command (requires command tools from the active access profile and user
+   * approval unless auto-approve is enabled).
    */
   async runCommand(
     command: string,
@@ -1011,8 +1066,18 @@ export class ShellTools {
       cwd?: string;
       timeout?: number;
       env?: Record<string, string>;
+      signal?: AbortSignal;
     },
   ): Promise<RunCommandResult> {
+    if (options?.signal?.aborted) {
+      throw new Error("Command execution cancelled before approval");
+    }
+    if (this.workspace.permissions.shell !== true) {
+      throw new Error(
+        'Tool "run_command" is unavailable because the active access profile does not expose command tools',
+      );
+    }
+
     // Check if command is blocked by guardrails BEFORE anything else
     const blockCheck = GuardrailManager.isCommandBlocked(command);
     if (blockCheck.blocked) {
@@ -1037,6 +1102,33 @@ export class ShellTools {
       throw new Error(remediation);
     }
 
+    const networkCommand = isLikelyNetworkShellCommand(command);
+    const policies = loadPolicies();
+    const cwd = resolveCommandCwd(this.workspace.path, options?.cwd);
+    const cwdAccess = evaluateWorkspaceFilesystemAccess(this.workspace, cwd, "read");
+    if (cwdAccess.decision !== "allow") {
+      throw new Error(
+        `Shell working directory is outside the active access profile boundary: ${cwd}`,
+      );
+    }
+    if (networkCommand) {
+      if (
+        this.workspace.permissions.network !== true ||
+        this.workspace.permissions.accessNetworkMode === "disabled"
+      ) {
+        throw new Error(
+          "This shell command is blocked because the active profile disables network access.",
+        );
+      }
+      if (!this.shouldAllowShellNetwork(policies)) {
+        throw new Error(
+          "This shell command is blocked because shell network access is not allowed by the active policy. Use web_fetch, http_request, or web_search instead of retrying shell networking.",
+        );
+      }
+    }
+    const networkRequiresApproval =
+      networkCommand && this.workspace.permissions.accessNetworkMode === "on-request";
+
     // Check if command is trusted (auto-approve without user confirmation)
     const trustCheck = GuardrailManager.isCommandTrusted(command);
     const autoApproveEnabled = BuiltinToolsSettingsManager.getToolAutoApprove("run_command");
@@ -1048,20 +1140,20 @@ export class ShellTools {
     const signature = this.getCommandSignature(command);
     const now = Date.now();
 
-    if (bundleEligible && this.isBundleApprovalActive(now)) {
+    if (!networkRequiresApproval && bundleEligible && this.isBundleApprovalActive(now)) {
       approved = true;
       this.recordBundleApproval(now);
       this.daemon.logEvent(this.taskId, "log", {
         message: `Auto-approved command via single bundle (${this.bundleApproval?.count || 1} approved in current bundle)`,
         command,
       });
-    } else if (autoApproveEnabled && safeForAutoApproval) {
+    } else if (!networkRequiresApproval && autoApproveEnabled && safeForAutoApproval) {
       approved = true;
       this.daemon.logEvent(this.taskId, "log", {
         message: "Auto-approved command (user setting enabled)",
         command,
       });
-    } else if (trustCheck.trusted) {
+    } else if (!networkRequiresApproval && trustCheck.trusted) {
       // Auto-approve trusted commands
       approved = true;
       this.daemon.logEvent(this.taskId, "log", {
@@ -1072,6 +1164,7 @@ export class ShellTools {
       const previousApproval = signature ? this.recentApprovals.get(signature) : undefined;
 
       if (
+        !networkRequiresApproval &&
         signature &&
         previousApproval &&
         now - previousApproval.approvedAt <= this.approvalWindowMs &&
@@ -1095,11 +1188,12 @@ export class ShellTools {
             : "Review the shell command below before approving.",
           {
             command,
-            cwd: options?.cwd || this.workspace.path,
+            cwd,
             timeout: options?.timeout || DEFAULT_TIMEOUT,
             approvalMode,
             bundleScope: bundleEligible ? "safe_commands_in_this_task" : undefined,
           },
+          { signal: options?.signal },
         );
 
         if (approved && signature) {
@@ -1118,6 +1212,9 @@ export class ShellTools {
     if (!approved) {
       throw new Error("User denied command execution");
     }
+    if (options?.signal?.aborted) {
+      throw new Error("Command execution cancelled after approval expired");
+    }
 
     // Log the command execution attempt
     this.daemon.logEvent(this.taskId, "tool_call", {
@@ -1126,7 +1223,6 @@ export class ShellTools {
       cwd: options?.cwd || this.workspace.path,
     });
 
-    const cwd = resolveCommandCwd(this.workspace.path, options?.cwd);
     const verificationCommandKey = this.getVerificationCommandKey(command, cwd);
     if (verificationCommandKey) {
       const reused = await this.waitForVerificationCommandResult(verificationCommandKey);
@@ -1139,9 +1235,17 @@ export class ShellTools {
     })();
     const promptPrefix = dirName ? `$ ${dirName} % ` : `$ `;
     const timeout = Math.min(options?.timeout || DEFAULT_TIMEOUT, MAX_TIMEOUT);
-    const policies = loadPolicies();
     const persistentShellAllowed = shouldUsePersistentShell(command);
-    if (!persistentShellAllowed || policies.runtime.requireSandboxForShell) {
+    const shouldSandboxCommand = shouldSandboxShellCommand({
+      persistentShellAllowed,
+      requireSandboxForShell: policies.runtime.requireSandboxForShell,
+      accessSandboxMode: this.workspace.permissions.accessSandboxMode,
+      accessApprovalPolicy: this.workspace.permissions.accessApprovalPolicy,
+      hasScopedAccessRules:
+        hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions) ||
+        (this.workspace.permissions.accessDomainRules?.length || 0) > 0,
+    });
+    if (shouldSandboxCommand) {
       const sandboxResult = await this.runCommandInSandbox(command, {
         cwd,
         timeout,
@@ -1167,7 +1271,7 @@ export class ShellTools {
           workspaceId: this.workspace.id,
           workspacePath: this.workspace.path,
           command,
-          cwd: options?.cwd,
+          cwd,
           timeoutMs: Math.min(options?.timeout || DEFAULT_TIMEOUT, MAX_TIMEOUT),
           fallbackRunner: async () => ({
             success: false,
@@ -1450,14 +1554,16 @@ export class ShellTools {
           error: errorMessage,
         });
 
-        resolve(this.recordVerificationCommandResult(verificationCommandKey, {
-          success,
-          stdout: this.sanitizeCommandOutput(truncatedStdout),
-          stderr: this.sanitizeCommandOutput(truncatedStderr),
-          exitCode: code,
-          truncated: stdout.length > MAX_OUTPUT_SIZE || stderr.length > MAX_OUTPUT_SIZE,
-          terminationReason,
-        }));
+        resolve(
+          this.recordVerificationCommandResult(verificationCommandKey, {
+            success,
+            stdout: this.sanitizeCommandOutput(truncatedStdout),
+            stderr: this.sanitizeCommandOutput(truncatedStderr),
+            exitCode: code,
+            truncated: stdout.length > MAX_OUTPUT_SIZE || stderr.length > MAX_OUTPUT_SIZE,
+            terminationReason,
+          }),
+        );
       });
 
       child.on("error", (error: Error) => {
@@ -1484,13 +1590,15 @@ export class ShellTools {
           terminationReason,
         });
 
-        resolve(this.recordVerificationCommandResult(verificationCommandKey, {
-          success: false,
-          stdout: this.sanitizeCommandOutput(this.truncateOutput(stdout)),
-          stderr: this.sanitizeCommandOutput(error.message),
-          exitCode: null,
-          terminationReason,
-        }));
+        resolve(
+          this.recordVerificationCommandResult(verificationCommandKey, {
+            success: false,
+            stdout: this.sanitizeCommandOutput(this.truncateOutput(stdout)),
+            stderr: this.sanitizeCommandOutput(error.message),
+            exitCode: null,
+            terminationReason,
+          }),
+        );
       });
     });
   }
@@ -1576,6 +1684,7 @@ export const _testUtils = {
   killProcessTree,
   resolveCommandCwd,
   shouldUsePersistentShell,
+  shouldSandboxShellCommand,
   isSandboxRuntimeFailure,
   buildEmptyCommandFailureMessage,
   buildSafeShellPath,

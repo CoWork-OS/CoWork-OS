@@ -22,7 +22,10 @@ import {
   Methods,
 } from "./protocol";
 import { ControlPlaneClient, ClientRegistry, type ClientScope } from "./client";
-import { ControlPlaneSettingsManager, type ControlPlaneSettings as _ControlPlaneSettings } from "./settings";
+import {
+  ControlPlaneSettingsManager,
+  type ControlPlaneSettings as _ControlPlaneSettings,
+} from "./settings";
 import {
   startTailscaleExposure,
   stopTailscaleExposure as _stopTailscaleExposure,
@@ -374,7 +377,8 @@ export class ControlPlaneServer {
    */
   private handleConnection(socket: WebSocket, request: http.IncomingMessage): void {
     const origin = request.headers["origin"];
-    const originValue = typeof origin === "string" ? origin : Array.isArray(origin) ? origin[0] : undefined;
+    const originValue =
+      typeof origin === "string" ? origin : Array.isArray(origin) ? origin[0] : undefined;
     if (!this.isOriginAllowed(originValue, request.headers.host)) {
       console.warn(`[ControlPlane] Rejected WebSocket origin: ${originValue || "none"}`);
       socket.close(1008, "Origin not allowed");
@@ -516,7 +520,9 @@ export class ControlPlaneServer {
       .filter(Boolean);
     if (configured.includes(normalizedOrigin)) return true;
 
-    const normalizedHost = String(hostHeader || "").trim().toLowerCase();
+    const normalizedHost = String(hostHeader || "")
+      .trim()
+      .toLowerCase();
     if (!normalizedHost) return false;
     return parsedOrigin.host.toLowerCase() === normalizedHost;
   }
@@ -568,11 +574,7 @@ export class ControlPlaneServer {
       | undefined;
 
     const requestedRole = params?.role;
-    if (
-      requestedRole !== undefined &&
-      requestedRole !== "operator" &&
-      requestedRole !== "node"
-    ) {
+    if (requestedRole !== undefined && requestedRole !== "operator" && requestedRole !== "node") {
       this.recordFailedAuth(remoteAddress);
       client.reject();
       client.send(createErrorResponse(request.id, ErrorCodes.UNAUTHORIZED, "Invalid role"));

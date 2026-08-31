@@ -13,6 +13,12 @@ agents, approvals, artifacts, automations, and task context belong to the CoWork
 Individual models still differ in tool use, vision, reasoning, streaming, caching, and context
 limits.
 
+Provider or subscription access answers **which model can respond**; the task
+[access profile](access-profiles.md) answers **what that task may do**. A
+provider account, API key, or local model does not grant command tools,
+filesystem, network, domain, connector, or device access, and changing models
+does not widen the active profile.
+
 <p align="center">
   <img src="../resources/branding/images/cowork-os-10.webp" alt="LLM provider settings" width="700">
   <br><em>Provider settings centralize built-in models, compatible gateways, authentication, and fallback routing.</em>

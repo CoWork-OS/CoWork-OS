@@ -63,7 +63,14 @@ interface SlideDefinition {
   quote?: string;
   attribution?: string;
   data?: SlideDataDefinition;
-  image?: { id?: string; path?: string; url?: string; width?: number; height?: number; alt?: string };
+  image?: {
+    id?: string;
+    path?: string;
+    url?: string;
+    width?: number;
+    height?: number;
+    alt?: string;
+  };
 }
 
 interface PptxOptions {
@@ -801,10 +808,7 @@ await fs.mkdir(path.dirname(outputPath), { recursive: true });
 await pptx.save(outputPath);
 `;
 
-async function generatePPTXWithPptxGenJs(
-  outputPath: string,
-  options: PptxOptions,
-): Promise<void> {
+async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOptions): Promise<void> {
   const PptxGenJS = (await import("pptxgenjs")).default;
   const pptx = new PptxGenJS();
 
@@ -814,10 +818,11 @@ async function generatePPTXWithPptxGenJs(
     options.brand?.secondaryColor ||
     "#0f172a"
   ).replace("#", "");
-  const accentColor = (options.theme?.accentColor || options.brand?.accentColor || "#f97316").replace(
-    "#",
-    "",
-  );
+  const accentColor = (
+    options.theme?.accentColor ||
+    options.brand?.accentColor ||
+    "#f97316"
+  ).replace("#", "");
   const fontFace = options.theme?.fontFace || "Helvetica Neue";
 
   if (options.title) pptx.title = options.title;
@@ -827,12 +832,22 @@ async function generatePPTXWithPptxGenJs(
 
   const slides = options.slides.length
     ? options.slides
-    : [{ title: options.title || "Presentation", subtitle: options.subject, layout: "title" as const }];
+    : [
+        {
+          title: options.title || "Presentation",
+          subtitle: options.subject,
+          layout: "title" as const,
+        },
+      ];
 
   const getItems = (slideDef: SlideDefinition): string[] => {
     const content = slideDef.content ? [slideDef.content] : [];
     return [...content, ...(slideDef.bullets || [])]
-      .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+      .map((item) =>
+        String(item || "")
+          .replace(/\s+/g, " ")
+          .trim(),
+      )
       .filter(Boolean);
   };
 
@@ -1000,7 +1015,8 @@ async function generatePPTXWithPptxGenJs(
     } else if (slideType === "chart") {
       addHeader(slide, slideDef, index);
       const values = slideDef.data?.series?.[0]?.values || [3, 5, 4, 7];
-      const categories = slideDef.data?.categories || values.map((_, itemIndex) => `Item ${itemIndex + 1}`);
+      const categories =
+        slideDef.data?.categories || values.map((_, itemIndex) => `Item ${itemIndex + 1}`);
       const max = Math.max(...values.map((value) => Math.abs(value)), 1);
       values.slice(0, 7).forEach((value, itemIndex) => {
         const h = Math.max(0.18, (Math.abs(value) / max) * 3.2);

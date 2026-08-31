@@ -111,9 +111,9 @@ export function ComputerUseSettings() {
           Computer use
         </h3>
         <p className="settings-description">
-          Pi-style native desktop control for macOS and Windows. The agent targets one
-          controlled window at a time through `screenshot()`, then uses screenshot-relative
-          mouse, keyboard, scroll, and typing actions.
+          Pi-style native desktop control for macOS and Windows. The agent targets one controlled
+          window at a time through `screenshot()`, then uses screenshot-relative mouse, keyboard,
+          scroll, and typing actions.
         </p>
       </div>
 
@@ -122,8 +122,8 @@ export function ComputerUseSettings() {
       {!isMac && !isWindows ? (
         <div className="computer-use-platform-note">
           Computer use is available on <strong>macOS</strong> and <strong>Windows</strong> desktop
-          builds only. On this platform the controls below reflect limited or unavailable
-          permission APIs.
+          builds only. On this platform the controls below reflect limited or unavailable permission
+          APIs.
         </div>
       ) : null}
 
@@ -146,21 +146,29 @@ export function ComputerUseSettings() {
         </div>
 
         <div className="computer-use-status-card">
-          <div className="computer-use-status-title">{isWindows ? "Input control" : "Accessibility"}</div>
+          <div className="computer-use-status-title">
+            {isWindows ? "Input control" : "Accessibility"}
+          </div>
           <div
             className={`computer-use-status-value ${status?.accessibilityTrusted ? "ok" : "bad"}`}
           >
             {statusLabel(Boolean(status?.accessibilityTrusted))}
           </div>
           {isMac ? (
-            <button type="button" className="button-secondary" onClick={() => void openAccessibility()}>
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => void openAccessibility()}
+            >
               Open Accessibility settings
             </button>
           ) : null}
         </div>
 
         <div className="computer-use-status-card">
-          <div className="computer-use-status-title">{isWindows ? "Window capture" : "Screen Recording"}</div>
+          <div className="computer-use-status-title">
+            {isWindows ? "Window capture" : "Screen Recording"}
+          </div>
           <div
             className={`computer-use-status-value ${
               status?.screenCaptureStatus === "granted" ? "ok" : "bad"
@@ -179,8 +187,8 @@ export function ComputerUseSettings() {
       {isMac ? (
         <p className="computer-use-restart-hint">
           Inline bootstrap will prompt for missing helper permissions at first use. After changing
-          Screen Recording, macOS may still require <strong>restarting CoWork</strong> before capture
-          works reliably.
+          Screen Recording, macOS may still require <strong>restarting CoWork</strong> before
+          capture works reliably.
         </p>
       ) : null}
 
@@ -224,7 +232,6 @@ export function ComputerUseSettings() {
           </button>
         </div>
       </div>
-
     </div>
   );
 }

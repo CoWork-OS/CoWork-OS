@@ -37,19 +37,33 @@ export function enrichToolEventPayload(
     payload.policyTrace && typeof payload.policyTrace === "object"
       ? (payload.policyTrace as ToolPolicyTrace)
       : undefined;
+  const resultRecord = asRecord(payload.result);
+  const resultStatus = String(payload.status || "")
+    .trim()
+    .toLowerCase();
+  const outcomeFailed =
+    type === "tool_error" ||
+    payload.success === false ||
+    payload.isError === true ||
+    payload.is_error === true ||
+    ["error", "failed", "blocked", "cancelled"].includes(resultStatus) ||
+    resultRecord.success === false ||
+    resultRecord.blocked === true ||
+    typeof resultRecord.error === "string";
+  const outcomeError = payload.error || resultRecord.error || resultRecord.reason;
 
   const envelope = buildToolResultEnvelope({
     toolUseId,
     toolName,
-    status: type === "tool_error" ? "error" : "success",
+    status: outcomeFailed ? "error" : "success",
     result: payload.result,
-    error: type === "tool_error" ? asToolError(payload.error) : undefined,
+    error: outcomeFailed ? asToolError(outcomeError) : undefined,
     retryable: false,
     policyTrace,
     userSummary:
       typeof payload.message === "string" && payload.message.trim()
         ? payload.message.trim()
-        : `${toolName} ${type === "tool_error" ? "failed" : "completed"}`,
+        : `${toolName} ${outcomeFailed ? "failed" : "completed"}`,
     telemetry: {
       source: "event_enrichment",
       ...(typeof payload.durationMs === "number" ? { durationMs: payload.durationMs } : {}),
@@ -67,7 +81,6 @@ export function enrichToolEventPayload(
     nextPayload.policyTrace = policyTrace;
   }
 
-  const resultRecord = asRecord(payload.result);
   if (type === "tool_result" && Object.keys(resultRecord).length > 0) {
     nextPayload.result = resultRecord;
   }

@@ -1,6 +1,13 @@
 # Claude-for-Legal Workflows
 
-CoWork OS bundles Claude-for-Legal plugin packs as normal plugin-pack skills and slash commands. They keep the upstream workflow names, but run through CoWork's composer, task timeline, approval model, and workspace-local file rules.
+CoWork OS bundles Claude-for-Legal plugin packs as normal plugin-pack skills and slash commands. They keep the upstream workflow names, but run through CoWork's composer, task timeline, [access profile](access-profiles.md), approval model, and workspace-local file rules.
+
+Legal skills do not create a special permission lane. The task profile remains
+the ceiling for local files, command tools, network, connectors, and exports;
+legal-specific consent or an approval preset may add review, but cannot widen
+that boundary. Use a profile with the narrowest filesystem and domain scope
+that supports the matter, especially when working with privileged or personal
+information.
 
 ## Starting A Legal Workflow
 

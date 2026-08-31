@@ -109,7 +109,9 @@ export class SecureMcpTunnelSupervisor extends EventEmitter {
     if (persisted.length > 0) {
       return persisted;
     }
-    const events = tunnelId ? this.auditEvents.filter((event) => event.tunnelId === tunnelId) : this.auditEvents;
+    const events = tunnelId
+      ? this.auditEvents.filter((event) => event.tunnelId === tunnelId)
+      : this.auditEvents;
     return events.slice(-100).reverse();
   }
 

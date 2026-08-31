@@ -8,10 +8,7 @@
 import { EventEmitter } from "events";
 import { resolveModelPreferenceToModelKey } from "../../../shared/agent-preferences";
 import type { WorkerRoleKind } from "../../../shared/types";
-import {
-  WorkflowPhase,
-  workflowPhaseTypeToCapability,
-} from "./WorkflowDecomposer";
+import { WorkflowPhase, workflowPhaseTypeToCapability } from "./WorkflowDecomposer";
 
 export interface WorkflowPipelineDeps {
   createChildTask: (params: {
@@ -111,7 +108,9 @@ export class WorkflowPipeline extends EventEmitter {
           workspaceId: this.state.workspaceId,
           parentTaskId: this.state.rootTaskId,
           agentConfig: {
-            ...(phase.llmOverride?.providerType ? { providerType: phase.llmOverride.providerType } : {}),
+            ...(phase.llmOverride?.providerType
+              ? { providerType: phase.llmOverride.providerType }
+              : {}),
             ...(phase.llmOverride?.modelKey
               ? { modelKey: phase.llmOverride.modelKey }
               : phase.llmOverride?.modelPreference
@@ -198,9 +197,7 @@ export class WorkflowPipeline extends EventEmitter {
     return { status: "timeout" };
   }
 
-  private resolveWorkerRoleForPhase(
-    phaseType: WorkflowPhase["phaseType"],
-  ): WorkerRoleKind {
+  private resolveWorkerRoleForPhase(phaseType: WorkflowPhase["phaseType"]): WorkerRoleKind {
     if (phaseType === "research" || phaseType === "analyze") {
       return "researcher";
     }

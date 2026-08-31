@@ -81,7 +81,9 @@ function validatePackName(name: string): string | null {
  * Get the user extensions directory
  */
 function getUserExtensionsDir(): string {
-  const userDataPath = app?.getPath?.("userData") || path.join(process.env.HOME || process.env.USERPROFILE || "", ".cowork");
+  const userDataPath =
+    app?.getPath?.("userData") ||
+    path.join(process.env.HOME || process.env.USERPROFILE || "", ".cowork");
   return path.join(userDataPath, "extensions");
 }
 

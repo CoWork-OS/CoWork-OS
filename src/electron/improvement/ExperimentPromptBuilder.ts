@@ -79,7 +79,10 @@ export function loadImprovementProgram(
       "Constrain changes to the smallest subsystem that explains the evidence.",
       "Prefer targeted tests and localized fixes over broad refactors.",
     ].join("\n"),
-    mutablePaths: ["Only edit files directly implicated by the failure evidence.", "Prefer one subsystem and one nearby test area."],
+    mutablePaths: [
+      "Only edit files directly implicated by the failure evidence.",
+      "Prefer one subsystem and one nearby test area.",
+    ],
     forbiddenChanges: [
       "Do not modify unrelated workspaces or generated artifacts.",
       "Do not add network dependencies unless they already exist in project workflow.",
@@ -160,7 +163,10 @@ export function buildImprovementVariantPrompt(
     for (const file of likelyFiles) lines.push(`- ${file}`);
   }
 
-  const likelyVerificationCommands = inferLikelyVerificationCommands(context.trainingEvidence, context.replayCases);
+  const likelyVerificationCommands = inferLikelyVerificationCommands(
+    context.trainingEvidence,
+    context.replayCases,
+  );
   if (likelyVerificationCommands.length > 0) {
     lines.push("", "Preferred targeted verification commands:");
     for (const command of likelyVerificationCommands) lines.push(`- ${command}`);
@@ -181,7 +187,9 @@ export function buildImprovementVariantPrompt(
 
   lines.push("", "Scout-to-implementation handoff requirements:");
   lines.push("- If you are in a scout/reproducing lane, do not mutate repository files.");
-  lines.push("- Produce a concrete root-cause and verification recommendation that an implementation lane can reuse.");
+  lines.push(
+    "- Produce a concrete root-cause and verification recommendation that an implementation lane can reuse.",
+  );
   lines.push("- If evidence is insufficient, say so explicitly instead of guessing.");
 
   lines.push("", "When you finish, include:");
@@ -234,12 +242,21 @@ function formatEvidence(evidence: ImprovementEvidence): string[] {
 function inferDefaultMutablePaths(instructions: string): string[] {
   const lowered = instructions.toLowerCase();
   if (lowered.includes("src/electron")) {
-    return ["Prefer `src/electron` files implicated by the failure.", "Touch renderer files only if evidence points there."];
+    return [
+      "Prefer `src/electron` files implicated by the failure.",
+      "Touch renderer files only if evidence points there.",
+    ];
   }
   if (lowered.includes("src/renderer")) {
-    return ["Prefer `src/renderer` files implicated by the failure.", "Touch Electron code only if necessary for the fix."];
+    return [
+      "Prefer `src/renderer` files implicated by the failure.",
+      "Touch Electron code only if necessary for the fix.",
+    ];
   }
-  return ["Only edit files directly implicated by the failure evidence.", "Keep changes close to existing tests or verification helpers."];
+  return [
+    "Only edit files directly implicated by the failure evidence.",
+    "Keep changes close to existing tests or verification helpers.",
+  ];
 }
 
 function inferLikelyRelevantFiles(evidence: ImprovementEvidence[]): string[] {

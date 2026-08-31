@@ -31,6 +31,18 @@ If no specialization matches, the gateway falls back to the existing channel con
 
 Workspace-local router rules still run for each message. Their explicit role or workspace choice takes precedence over specialization for that message. Otherwise the role order is router rule, specialization, session preference, then channel default. Tool restrictions are merged with context-policy restrictions using deny-first behavior.
 
+### Access profile on channel ingress
+
+New tasks created from a channel inherit the selected workspace's default [access profile](access-profiles.md)
+unless the ingress path supplies an explicit profile. Channel specialization and context policy can
+further restrict the task, but they cannot widen the profile or reintroduce a separate shell
+enable/disable decision. Follow-ups keep the profile already attached to the active task; use a
+fresh task when a different profile is required.
+
+Command tools, filesystem access, network/domain scope, sandboxing, and approvals are enforced by
+the daemon on the target workspace. An unavailable named profile fails closed and is surfaced as a
+task needing attention rather than silently using a broader profile.
+
 Active follow-ups do not reassign the task's workspace or role. When a chat already has a running task, ordinary text is delivered to that task under the existing task configuration. Once the active task is completed, failed, cancelled, or unlinked with `/new`, the next normal message resolves specialization again before starting a fresh task.
 
 ## Active Task Policy

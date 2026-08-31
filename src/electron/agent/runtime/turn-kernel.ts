@@ -63,7 +63,9 @@ export interface TurnKernelPolicy {
   beforeIteration?: (state: TurnKernelIterationState) => Promise<void> | void;
   requestResponse: (
     state: TurnKernelIterationState,
-  ) => Promise<TurnKernelPreparedResponse | TurnKernelRecoveredResponse | TurnKernelStoppedResponse>;
+  ) => Promise<
+    TurnKernelPreparedResponse | TurnKernelRecoveredResponse | TurnKernelStoppedResponse
+  >;
   handleResponse: (
     prepared: TurnKernelPreparedResponse,
     state: TurnKernelIterationState,
@@ -195,19 +197,13 @@ export class TurnKernel {
 }
 
 function isTurnKernelRecoveredResponse(
-  prepared:
-    | TurnKernelPreparedResponse
-    | TurnKernelRecoveredResponse
-    | TurnKernelStoppedResponse,
+  prepared: TurnKernelPreparedResponse | TurnKernelRecoveredResponse | TurnKernelStoppedResponse,
 ): prepared is TurnKernelRecoveredResponse {
   return "recovered" in prepared && prepared.recovered === true;
 }
 
 function isTurnKernelStoppedResponse(
-  prepared:
-    | TurnKernelPreparedResponse
-    | TurnKernelRecoveredResponse
-    | TurnKernelStoppedResponse,
+  prepared: TurnKernelPreparedResponse | TurnKernelRecoveredResponse | TurnKernelStoppedResponse,
 ): prepared is TurnKernelStoppedResponse {
   return "stopped" in prepared && prepared.stopped === true;
 }

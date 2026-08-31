@@ -231,7 +231,8 @@ export const HEALTH_SOURCE_TEMPLATES: HealthSourceTemplate[] = [
     provider: "apple-health",
     kind: "wearable",
     name: "Apple Health",
-    description: "Steps, sleep, heart rate, and activity from Apple Health on macOS; export imports elsewhere.",
+    description:
+      "Steps, sleep, heart rate, and activity from Apple Health on macOS; export imports elsewhere.",
     connectionModes: ["native", "import"],
   },
   {

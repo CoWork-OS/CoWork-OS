@@ -9,7 +9,10 @@ export interface ResolvedCoreMemoryScope {
 
 export class CoreMemoryScopeResolver {
   resolveFromTarget(
-    target: Pick<SubconsciousTargetRef, "kind" | "key" | "workspaceId" | "agentRoleId" | "codeWorkspacePath" | "pullRequestId">,
+    target: Pick<
+      SubconsciousTargetRef,
+      "kind" | "key" | "workspaceId" | "agentRoleId" | "codeWorkspacePath" | "pullRequestId"
+    >,
     profileId?: string,
   ): ResolvedCoreMemoryScope {
     switch (target.kind) {

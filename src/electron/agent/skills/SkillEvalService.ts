@@ -2,6 +2,8 @@ import fs from "fs/promises";
 import path from "path";
 import type { SkillProposalRecord } from "./SkillProposalService";
 
+const SAFE_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
 export interface SkillEvalCase {
   id: string;
   prompt: string;
@@ -57,13 +59,18 @@ function scoreCase(proposal: SkillProposalRecord, testCase: SkillEvalCase): Skil
     (tool) => !proposal.requiredTools.some((candidate) => normalize(candidate) === normalize(tool)),
   );
   const denominator = Math.max(1, expected.length + requiredTools.length);
-  const positiveScore = (matchedSignals.length + requiredTools.length - missingTools.length) / denominator;
+  const positiveScore =
+    (matchedSignals.length + requiredTools.length - missingTools.length) / denominator;
   const penalty = forbiddenMatches.length > 0 ? 0.35 : 0;
   const score = Math.max(0, Math.min(1, positiveScore - penalty));
   return {
     caseId: testCase.id,
     score,
-    passed: score >= 0.75 && missingSignals.length === 0 && missingTools.length === 0 && forbiddenMatches.length === 0,
+    passed:
+      score >= 0.75 &&
+      missingSignals.length === 0 &&
+      missingTools.length === 0 &&
+      forbiddenMatches.length === 0,
     matchedSignals,
     missingSignals: [...missingSignals, ...missingTools.map((tool) => `tool:${tool}`)],
     forbiddenMatches,
@@ -95,6 +102,9 @@ export class SkillEvalService {
   }
 
   private async writeReport(report: SkillEvalReport): Promise<void> {
+    if (!SAFE_RECORD_ID.test(report.proposalId)) {
+      throw new Error("Invalid skill proposal id for eval report");
+    }
     const dir = path.join(this.workspacePath, EVAL_REPORT_DIR);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(

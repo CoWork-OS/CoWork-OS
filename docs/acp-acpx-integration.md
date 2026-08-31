@@ -13,6 +13,8 @@ Cowork now supports more than ACP discovery-only plumbing:
 - `acp.task.cancel` can cancel both local delegated work and remote A2A-compatible tasks
 - orchestration tools can target `acp_agent_id` so local DAGs can delegate to local or remote ACP agents
 - remote ACP invocations are approval-gated under the same policy model as other governed actions
+- ACP child tasks and acpx-backed command execution inherit the effective [access profile](access-profiles.md)
+  and cannot widen the parent task's sandbox, command-tool, filesystem, network, or domain scope
 - ACP task and inbox access is scope-aware so non-operator clients are limited to their own work by default
 - remote endpoints are validated and timed out before invocation to reduce bad registrations and unsafe outbound calls
 

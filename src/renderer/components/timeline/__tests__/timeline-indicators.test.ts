@@ -13,10 +13,7 @@ import {
 } from "lucide-react";
 
 import type { TaskEvent } from "../../../../shared/types";
-import {
-  resolveTimelineIndicator,
-  shouldShowTimelineBranchStub,
-} from "../timeline-indicators";
+import { resolveTimelineIndicator, shouldShowTimelineBranchStub } from "../timeline-indicators";
 
 function makeEvent(
   type: TaskEvent["type"],
@@ -67,7 +64,9 @@ describe("timeline indicators", () => {
   });
 
   it("maps progress updates to spinning Loader2 active icon", () => {
-    const indicator = resolveTimelineIndicator(makeEvent("timeline_step_updated", { message: "Working" }));
+    const indicator = resolveTimelineIndicator(
+      makeEvent("timeline_step_updated", { message: "Working" }),
+    );
     expect(indicator.icon).toBe(Loader2);
     expect(indicator.tone).toBe("active");
     expect(indicator.spin).toBe(true);
@@ -91,6 +90,22 @@ describe("timeline indicators", () => {
     expect(indicator.tone).toBe("error");
   });
 
+  it("keeps cancelled groups and steps distinct from successful completion", () => {
+    const group = resolveTimelineIndicator(
+      makeEvent("timeline_group_finished", { status: "cancelled" }),
+    );
+    expect(group.icon).toBe(AlertTriangle);
+    expect(group.tone).toBe("error");
+    expect(group.label).toBe("Group cancelled");
+
+    const step = resolveTimelineIndicator(
+      makeEvent("timeline_step_finished", {}, { status: "cancelled" }),
+    );
+    expect(step.icon).toBe(AlertTriangle);
+    expect(step.tone).toBe("error");
+    expect(step.label).toBe("Step cancelled");
+  });
+
   it("maps artifacts to FileOutput success icon", () => {
     const indicator = resolveTimelineIndicator(
       makeEvent("timeline_artifact_emitted", { path: "docs/report.md" }),
@@ -100,9 +115,7 @@ describe("timeline indicators", () => {
   });
 
   it("maps verification failures to Shield warning icon", () => {
-    const indicator = resolveTimelineIndicator(
-      makeEvent("verification_failed", { attempt: 1 }),
-    );
+    const indicator = resolveTimelineIndicator(makeEvent("verification_failed", { attempt: 1 }));
     expect(indicator.icon).toBe(Shield);
     expect(indicator.tone).toBe("warning");
   });

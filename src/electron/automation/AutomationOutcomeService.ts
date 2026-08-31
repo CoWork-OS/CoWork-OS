@@ -1,7 +1,4 @@
-import type {
-  AutomationRunOutcome,
-  CreateAutomationRunOutcomeInput,
-} from "../../shared/types";
+import type { AutomationRunOutcome, CreateAutomationRunOutcomeInput } from "../../shared/types";
 import type { AutomationRunOutcomeRepository } from "./AutomationRunOutcomeRepository";
 import {
   buildAutomationNotification,

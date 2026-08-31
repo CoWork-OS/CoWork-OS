@@ -85,6 +85,23 @@ describe("SearchTools", () => {
   });
 
   describe("webSearch", () => {
+    it("blocks searches when the active access profile disables networking", async () => {
+      searchTools.setWorkspace({
+        ...mockWorkspace,
+        permissions: {
+          ...mockWorkspace.permissions,
+          network: false,
+          accessNetworkMode: "disabled",
+        },
+      });
+
+      const result = await searchTools.webSearch({ query: "should not leave the workspace" });
+
+      expect(result.success).toBe(false);
+      expect(result.metadata?.policyReason).toBe("workspace_network_disabled");
+      expect(SearchProviderFactory.searchWithFallback).not.toHaveBeenCalled();
+    });
+
     it("should return results from provider", async () => {
       vi.mocked(SearchProviderFactory.searchWithFallback).mockResolvedValue({
         query: "test query",
@@ -341,6 +358,34 @@ describe("SearchTools", () => {
       expect(result.metadata?.policyReason).toBe("domain_policy_filtered");
       expect(result.metadata?.originalResultCount).toBe(1);
       expect(result.metadata?.filteredOutCount).toBe(1);
+    });
+
+    it("applies access-profile domain rules to returned sources", async () => {
+      searchTools.setWorkspace({
+        ...mockWorkspace,
+        permissions: {
+          ...mockWorkspace.permissions,
+          accessDomainRules: [
+            { access: "allow", pattern: "trusted.example" },
+            { access: "deny", pattern: "blocked.example" },
+          ],
+        },
+      });
+      vi.mocked(SearchProviderFactory.searchWithFallback).mockResolvedValue({
+        query: "profile domains",
+        searchType: "web",
+        provider: "tavily",
+        results: [
+          { title: "Trusted", url: "https://trusted.example/a", snippet: "ok" },
+          { title: "Blocked", url: "https://blocked.example/b", snippet: "no" },
+          { title: "Other", url: "https://other.example/c", snippet: "no" },
+        ],
+      } as Any);
+
+      const result = await searchTools.webSearch({ query: "profile domains" });
+
+      expect(result.success).toBe(true);
+      expect(result.results.map((item) => item.url)).toEqual(["https://trusted.example/a"]);
     });
   });
 

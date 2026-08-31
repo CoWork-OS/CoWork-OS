@@ -30,6 +30,17 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import { Workspace } from "../../../shared/types";
+import {
+  evaluateWorkspaceFilesystemAccess,
+  hasEffectiveFilesystemScope,
+  isAccessPathWithin,
+  resolveAccessControlledPath,
+} from "../../security/access-profile-paths";
+import {
+  createSecureTempFile,
+  escapeSandboxProfileString,
+  validatePathForSandboxProfile,
+} from "./security-utils";
 
 /**
  * Sandbox execution options
@@ -82,6 +93,7 @@ const DEFAULT_OPTIONS: Required<SandboxOptions> = {
 export class SandboxRunner {
   private workspace: Workspace;
   private sandboxProfile?: string;
+  private runtimeTempDir?: string;
 
   constructor(workspace: Workspace) {
     this.workspace = workspace;
@@ -92,7 +104,7 @@ export class SandboxRunner {
    */
   async initialize(): Promise<void> {
     // Generate sandbox profile for this workspace
-    this.sandboxProfile = this.generateSandboxProfile();
+    this.sandboxProfile = this.generateSandboxProfile(this.workspace.permissions.network === true);
   }
 
   /**
@@ -104,6 +116,22 @@ export class SandboxRunner {
     options: SandboxOptions = {},
   ): Promise<SandboxResult> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
+
+    const networkError = this.getNetworkAccessError(
+      options.allowNetwork === undefined
+        ? this.workspace.permissions.network === true
+        : opts.allowNetwork === true,
+    );
+    if (networkError) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: networkError,
+        killed: false,
+        timedOut: false,
+        error: "Network access denied",
+      };
+    }
 
     // Determine working directory
     const cwd = opts.cwd || this.workspace.path;
@@ -119,6 +147,13 @@ export class SandboxRunner {
         error: "Path access denied",
       };
     }
+
+    this.sandboxProfile = this.generateSandboxProfile(
+      options.allowNetwork === undefined
+        ? this.workspace.permissions.network === true
+        : opts.allowNetwork === true,
+      opts,
+    );
 
     // Build minimal, safe environment
     const env = this.buildSafeEnvironment(opts.envPassthrough);
@@ -223,23 +258,18 @@ export class SandboxRunner {
   async executeCode(code: string, language: "python" | "javascript"): Promise<SandboxResult> {
     // Create temp file with code
     const ext = language === "python" ? ".py" : ".js";
-    const tempFile = path.join(os.tmpdir(), `cowork_script_${Date.now()}${ext}`);
+    const { filePath: tempFile, cleanup } = createSecureTempFile(ext, code);
 
     try {
-      fs.writeFileSync(tempFile, code, "utf8");
-
       const interpreter = language === "python" ? "python3" : "node";
       return await this.execute(interpreter, [tempFile], {
         timeout: 60 * 1000, // 1 minute for scripts
         allowNetwork: false,
+        allowedReadPaths: [tempFile],
       });
     } finally {
       // Cleanup temp file
-      try {
-        fs.unlinkSync(tempFile);
-      } catch {
-        // Ignore cleanup errors
-      }
+      cleanup();
     }
   }
 
@@ -249,33 +279,42 @@ export class SandboxRunner {
   cleanup(): void {
     // Clean up any temp files or resources
     this.sandboxProfile = undefined;
+    if (this.runtimeTempDir) {
+      try {
+        fs.rmSync(this.runtimeTempDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup; the directory is private to this sandbox.
+      }
+      this.runtimeTempDir = undefined;
+    }
   }
 
   /**
    * Check if a path is allowed based on workspace permissions
    */
   private isPathAllowed(targetPath: string, mode: "read" | "write"): boolean {
+    if (targetPath.includes("\0")) return false;
+    const access = evaluateWorkspaceFilesystemAccess(this.workspace, targetPath, mode);
+    if (access.decision === "allow") return true;
+    if (
+      access.reason === "profile_filesystem_denied" ||
+      access.reason === "profile_filesystem_outside" ||
+      access.reason === "protected_path"
+    ) {
+      return false;
+    }
+
+    if (this.isRuntimeTemporaryPath(targetPath)) return true;
+
+    if (hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)) {
+      return false;
+    }
+
     const normalizedTarget = path.resolve(targetPath);
-    const normalizedWorkspace = path.resolve(this.workspace.path);
-
-    // Always allow paths within workspace
-    if (normalizedTarget.startsWith(normalizedWorkspace)) {
-      return true;
-    }
-
-    // Check unrestricted access
-    if (this.workspace.permissions.unrestrictedFileAccess) {
-      return true;
-    }
-
-    // Check allowed paths
-    const allowedPaths = this.workspace.permissions.allowedPaths || [];
-    for (const allowed of allowedPaths) {
-      const normalizedAllowed = path.resolve(allowed);
-      if (normalizedTarget.startsWith(normalizedAllowed)) {
-        return true;
-      }
-    }
+    // A workspace may itself live below the OS temp directory (including the
+    // default test/temp workspace). The system temp fallback must not turn a
+    // disabled workspace read bit into an implicit grant.
+    if (isAccessPathWithin(this.workspace.path, normalizedTarget)) return false;
 
     // System paths for read-only access
     if (mode === "read") {
@@ -288,7 +327,8 @@ export class SandboxRunner {
         os.tmpdir(),
       ];
       for (const sysPath of systemReadPaths) {
-        if (normalizedTarget.startsWith(sysPath)) {
+        const relative = path.relative(path.resolve(sysPath), normalizedTarget);
+        if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
           return true;
         }
       }
@@ -325,7 +365,7 @@ export class SandboxRunner {
       safeEnv.SHELL = process.env.SHELL || "/bin/bash";
       safeEnv.TERM = "xterm-256color";
       safeEnv.LANG = process.env.LANG || "en_US.UTF-8";
-      safeEnv.TMPDIR = os.tmpdir();
+      safeEnv.TMPDIR = this.getRuntimeTempDirIfScoped();
 
       // Minimal PATH with only standard locations
       safeEnv.PATH = ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(":");
@@ -342,11 +382,25 @@ export class SandboxRunner {
   /**
    * Generate macOS sandbox-exec profile
    */
-  private generateSandboxProfile(): string {
-    const workspacePath = this.workspace.path;
+  private generateSandboxProfile(
+    allowNetwork = this.workspace.permissions.network === true,
+    options: SandboxOptions = {},
+  ): string {
+    const workspacePath = path.resolve(this.workspace.path);
     const permissions = this.workspace.permissions;
-    const tempDir = os.tmpdir();
-    const _homeDir = os.homedir();
+    const finiteFilesystemScope = hasEffectiveFilesystemScope(this.workspace.path, permissions);
+    const tempDir = finiteFilesystemScope ? this.getRuntimeTempDir() : os.tmpdir();
+    validatePathForSandboxProfile(workspacePath);
+    validatePathForSandboxProfile(tempDir);
+    const escapedTempDir = escapeSandboxProfileString(tempDir);
+    const workspaceAliases = this.getPathAliases(workspacePath);
+    const tempAliases = this.getPathAliases(tempDir);
+    const tempReadRules = finiteFilesystemScope
+      ? tempAliases.map((alias) => `  (subpath "${escapeSandboxProfileString(alias)}")`).join("\n")
+      : `  (subpath "/private/tmp")\n  (subpath "${escapedTempDir}")`;
+    const tempWriteRules = finiteFilesystemScope
+      ? tempAliases.map((alias) => `  (subpath "${escapeSandboxProfileString(alias)}")`).join("\n")
+      : `  (subpath "/private/tmp")\n  (subpath "${escapedTempDir}")\n  (subpath "/private/var/folders")`;
 
     let profile = `(version 1)
 (deny default)
@@ -372,37 +426,41 @@ export class SandboxRunner {
   (literal "/dev/null")
   (literal "/dev/urandom")
   (literal "/dev/random")
-  (subpath "/private/tmp")
-  (subpath "${tempDir}")
+${tempReadRules}
 )
 
 ; Allow homebrew on macOS
 (allow file-read* (subpath "/opt/homebrew"))
 
-; Allow reading workspace
-(allow file-read* (subpath "${workspacePath}"))
 `;
+    if (permissions.read) {
+      profile += `
+; Allow reading workspace
+(allow file-read* (subpath "${escapeSandboxProfileString(workspacePath)}"))
+`;
+      profile = this.appendReadRules(profile, workspaceAliases);
+    }
+    profile = this.appendReadRules(profile, tempAliases);
 
     // Allow writing to workspace if permitted
     if (permissions.write) {
       profile += `
 ; Allow writing to workspace
-(allow file-write* (subpath "${workspacePath}"))
+(allow file-write* (subpath "${escapeSandboxProfileString(workspacePath)}"))
 `;
+      profile = this.appendWriteRules(profile, workspaceAliases);
     }
 
     // Allow writing to temp directories
     profile += `
 ; Allow writing to temp directories
 (allow file-write*
-  (subpath "/private/tmp")
-  (subpath "${tempDir}")
-  (subpath "/private/var/folders")
+${tempWriteRules}
 )
 `;
 
     // Allow network if permitted
-    if (permissions.network) {
+    if (allowNetwork) {
       profile += `
 ; Allow network access
 (allow network*)
@@ -415,12 +473,63 @@ export class SandboxRunner {
 `;
     }
 
-    // Allow additional read paths
-    const allowedPaths = permissions.allowedPaths || [];
+    // Allow additional read paths only after the central evaluator approves
+    // them. This keeps this compatibility runner aligned with the refactored
+    // macOS sandbox instead of preserving the old prefix-only checks.
+    const allowedPaths = finiteFilesystemScope ? [] : permissions.allowedPaths || [];
     for (const allowedPath of allowedPaths) {
-      profile += `(allow file-read* (subpath "${allowedPath}"))\n`;
-      if (permissions.write) {
-        profile += `(allow file-write* (subpath "${allowedPath}"))\n`;
+      const resolved = this.resolvePolicyPath(allowedPath);
+      if (this.isPathAllowed(resolved, "read")) {
+        profile = this.appendReadRules(profile, this.getPathAliases(resolved));
+      }
+      if (permissions.write && this.isPathAllowed(resolved, "write")) {
+        profile = this.appendWriteRules(profile, this.getPathAliases(resolved));
+      }
+    }
+
+    for (const root of permissions.accessWorkspaceRoots || []) {
+      const resolved = this.resolvePolicyPath(root);
+      if (this.isPathAllowed(resolved, "read")) {
+        profile = this.appendReadRules(profile, this.getPathAliases(resolved));
+      }
+      if (permissions.write && this.isPathAllowed(resolved, "write")) {
+        profile = this.appendWriteRules(profile, this.getPathAliases(resolved));
+      }
+    }
+
+    for (const rule of permissions.accessFilesystemRules || []) {
+      const resolved = this.resolvePolicyPath(rule.path);
+      const aliases = this.getPathAliases(resolved);
+      if (rule.access === "deny") {
+        for (const alias of aliases) {
+          const escaped = escapeSandboxProfileString(alias);
+          profile += `(deny file-read* (subpath "${escaped}"))\n`;
+          profile += `(deny file-write* (subpath "${escaped}"))\n`;
+        }
+      } else if (this.isPathAllowed(resolved, "read")) {
+        profile = this.appendReadRules(profile, aliases);
+        if (rule.access === "write" && permissions.write && this.isPathAllowed(resolved, "write")) {
+          profile = this.appendWriteRules(profile, aliases);
+        }
+      }
+    }
+
+    for (const readPath of options.allowedReadPaths || []) {
+      const resolved = this.resolvePolicyPath(readPath);
+      if (
+        this.isPathAllowed(resolved, "read") ||
+        this.isExplicitTemporaryOptionPath(resolved, options.allowedReadPaths)
+      ) {
+        profile = this.appendReadRules(profile, this.getPathAliases(resolved));
+      }
+    }
+    for (const writePath of options.allowedWritePaths || []) {
+      const resolved = this.resolvePolicyPath(writePath);
+      if (
+        this.isPathAllowed(resolved, "write") ||
+        this.isExplicitTemporaryOptionPath(resolved, options.allowedWritePaths)
+      ) {
+        profile = this.appendWriteRules(profile, this.getPathAliases(resolved));
       }
     }
 
@@ -443,25 +552,93 @@ export class SandboxRunner {
    * Write sandbox profile to temp file
    */
   private writeTempProfile(): { profilePath: string; cleanup: () => void } {
-    const profilePath = path.join(os.tmpdir(), `cowork_sandbox_${Date.now()}.sb`);
-    fs.writeFileSync(profilePath, this.sandboxProfile!, "utf8");
+    const tempFile = createSecureTempFile(".sb", this.sandboxProfile!);
+    return { profilePath: tempFile.filePath, cleanup: tempFile.cleanup };
+  }
 
-    let cleaned = false;
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      try {
-        fs.unlinkSync(profilePath);
-      } catch {
-        // Ignore cleanup errors
-      }
-    };
+  private resolvePolicyPath(rawPath: string): string {
+    return resolveAccessControlledPath(this.workspace.path, rawPath);
+  }
 
-    // Fallback cleanup for abrupt exits where close/error handlers don't run.
-    const cleanupTimer = setTimeout(cleanup, 60 * 1000);
-    cleanupTimer.unref();
+  private getRuntimeTempDirIfScoped(): string {
+    return hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)
+      ? this.getRuntimeTempDir()
+      : os.tmpdir();
+  }
 
-    return { profilePath, cleanup };
+  private getRuntimeTempDir(): string {
+    if (!this.runtimeTempDir) {
+      this.runtimeTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-sandbox-"));
+    }
+    return this.runtimeTempDir;
+  }
+
+  private isExplicitTemporaryOptionPath(
+    targetPath: string,
+    candidates: readonly string[] | undefined,
+  ): boolean {
+    if (!hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)) return false;
+    if (!candidates || candidates.length === 0) return false;
+    const target = path.resolve(targetPath);
+    if (!this.getPathAliases(os.tmpdir()).some((alias) => isAccessPathWithin(alias, target))) {
+      return false;
+    }
+    return candidates.some((candidate) => {
+      const resolvedCandidate = this.resolvePolicyPath(candidate);
+      return resolvedCandidate && isAccessPathWithin(resolvedCandidate, target);
+    });
+  }
+
+  private isRuntimeTemporaryPath(targetPath: string): boolean {
+    if (isAccessPathWithin(this.workspace.path, targetPath)) return false;
+    const runtimeTempDir = hasEffectiveFilesystemScope(
+      this.workspace.path,
+      this.workspace.permissions,
+    )
+      ? this.runtimeTempDir
+      : os.tmpdir();
+    return Boolean(runtimeTempDir && isAccessPathWithin(runtimeTempDir, targetPath));
+  }
+
+  private getPathAliases(targetPath: string): string[] {
+    const aliases = new Set<string>([path.resolve(targetPath)]);
+    try {
+      if (fs.existsSync(targetPath)) aliases.add(fs.realpathSync(targetPath));
+    } catch {
+      // Keep the lexical path when a target is not resolvable.
+    }
+    for (const candidate of Array.from(aliases)) {
+      if (candidate.startsWith("/var/")) aliases.add(`/private${candidate}`);
+      if (candidate.startsWith("/private/var/")) aliases.add(candidate.slice("/private".length));
+    }
+    return Array.from(aliases);
+  }
+
+  private appendReadRules(profile: string, pathsToAllow: string[]): string {
+    return pathsToAllow.reduce((next, value) => {
+      validatePathForSandboxProfile(value);
+      return `${next}(allow file-read* (subpath "${escapeSandboxProfileString(value)}"))\n`;
+    }, profile);
+  }
+
+  private appendWriteRules(profile: string, pathsToAllow: string[]): string {
+    return pathsToAllow.reduce((next, value) => {
+      validatePathForSandboxProfile(value);
+      return `${next}(allow file-write* (subpath "${escapeSandboxProfileString(value)}"))\n`;
+    }, profile);
+  }
+
+  private getNetworkAccessError(allowNetwork: boolean): string | undefined {
+    if (!allowNetwork) return undefined;
+    const permissions = this.workspace.permissions;
+    if (permissions.network !== true) return "Network access is disabled for this workspace.";
+    if (permissions.accessNetworkMode === "disabled") {
+      return "Network access is disabled by the active access profile.";
+    }
+    if ((permissions.accessDomainRules || []).length > 0) {
+      return "The legacy sandbox runner cannot enforce domain-scoped network rules for arbitrary shell code.";
+    }
+    return undefined;
   }
 }
 

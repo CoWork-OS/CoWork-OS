@@ -86,7 +86,7 @@ describe("getTimelineErrorText", () => {
       getTimelineErrorText(
         makeEvent("timeline_error", {
           legacyType: "tool_error",
-          error: "The controlled window \"Calculator\" is no longer available.",
+          error: 'The controlled window "Calculator" is no longer available.',
         }),
       ),
     ).toBe('The controlled window "Calculator" is no longer available.');

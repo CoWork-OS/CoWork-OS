@@ -9,21 +9,21 @@
  * - C5: Dual Allowlist for Elevated Execution
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   SecurityPolicyManager,
   createPolicyManager,
   isToolAllowedQuick,
   PolicyCheckResult,
-} from '../../src/electron/security/policy-manager';
-import { Workspace, GatewayContextType, GuardrailSettings } from '../../src/shared/types';
+} from "../../src/electron/security/policy-manager";
+import { Workspace, GatewayContextType, GuardrailSettings } from "../../src/shared/types";
 
 // Mock workspace factory
-function createMockWorkspace(overrides: Partial<Workspace['permissions']> = {}): Workspace {
+function createMockWorkspace(overrides: Partial<Workspace["permissions"]> = {}): Workspace {
   return {
-    id: 'test-workspace-id',
-    name: 'Test Workspace',
-    path: '/tmp/test-workspace',
+    id: "test-workspace-id",
+    name: "Test Workspace",
+    path: "/tmp/test-workspace",
     permissions: {
       read: true,
       write: true,
@@ -56,9 +56,9 @@ function createMockGuardrails(overrides: Partial<GuardrailSettings> = {}): Guard
   };
 }
 
-describe('SecurityPolicyManager', () => {
-  describe('Constructor and Initialization', () => {
-    it('should create a policy manager with workspace context', () => {
+describe("SecurityPolicyManager", () => {
+  describe("Constructor and Initialization", () => {
+    it("should create a policy manager with workspace context", () => {
       const workspace = createMockWorkspace();
       const guardrails = createMockGuardrails();
 
@@ -70,361 +70,392 @@ describe('SecurityPolicyManager', () => {
       expect(manager).toBeDefined();
     });
 
-    it('should accept optional gateway context', () => {
+    it("should accept optional gateway context", () => {
       const workspace = createMockWorkspace();
       const guardrails = createMockGuardrails();
 
       const manager = new SecurityPolicyManager({
         workspace,
         guardrails,
-        gatewayContext: 'group',
+        gatewayContext: "group",
       });
 
       expect(manager).toBeDefined();
     });
   });
 
-  describe('Tool Access Checks', () => {
-    describe('Read-only tools', () => {
-      it('should allow read tools when read permission is granted', () => {
+  describe("Tool Access Checks", () => {
+    describe("Read-only tools", () => {
+      it("should allow read tools when read permission is granted", () => {
         const workspace = createMockWorkspace({ read: true });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
-        const result = manager.checkToolAccess('read_file');
+        const result = manager.checkToolAccess("read_file");
         expect(result.allowed).toBe(true);
       });
 
-      it('should deny read tools when read permission is revoked', () => {
+      it("should deny read tools when read permission is revoked", () => {
         const workspace = createMockWorkspace({ read: false });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
-        const result = manager.checkToolAccess('read_file');
+        const result = manager.checkToolAccess("read_file");
         expect(result.allowed).toBe(false);
-        expect(result.deniedBy).toBe('workspace_permissions');
+        expect(result.deniedBy).toBe("workspace_permissions");
       });
     });
 
-    describe('Write tools', () => {
-      it('should allow write tools when write permission is granted', () => {
+    describe("Write tools", () => {
+      it("should allow write tools when write permission is granted", () => {
         const workspace = createMockWorkspace({ write: true });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
-        const result = manager.checkToolAccess('write_file');
+        const result = manager.checkToolAccess("write_file");
         expect(result.allowed).toBe(true);
       });
 
-      it('should deny write tools when write permission is revoked', () => {
+      it("should deny write tools when write permission is revoked", () => {
         const workspace = createMockWorkspace({ write: false });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
-        const result = manager.checkToolAccess('write_file');
+        const result = manager.checkToolAccess("write_file");
         expect(result.allowed).toBe(false);
       });
     });
 
-    describe('Shell commands (run_command)', () => {
-      it('should deny shell commands when shell permission is false', () => {
+    describe("Shell commands (run_command)", () => {
+      it("should deny shell commands when shell permission is false", () => {
         const workspace = createMockWorkspace({ shell: false });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
-        const result = manager.checkToolAccess('run_command');
+        const result = manager.checkToolAccess("run_command");
         expect(result.allowed).toBe(false);
-        expect(result.deniedBy).toBe('workspace_permissions');
+        expect(result.deniedBy).toBe("workspace_permissions");
       });
 
-      it('should allow shell commands with approval when shell permission is true', () => {
+      it("should allow shell commands with approval when shell permission is true", () => {
         const workspace = createMockWorkspace({ shell: true });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
-        const result = manager.checkToolAccess('run_command');
+        const result = manager.checkToolAccess("run_command");
         expect(result.allowed).toBe(true);
         expect(result.requiresApproval).toBe(true);
       });
     });
 
-    describe('Network tools', () => {
-      it('should deny network tools when network permission is false', () => {
+    describe("Network tools", () => {
+      it("should deny network tools when network permission is false", () => {
         const workspace = createMockWorkspace({ network: false });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
-        const result = manager.checkToolAccess('web_search');
+        const result = manager.checkToolAccess("web_search");
         expect(result.allowed).toBe(false);
       });
 
-      it('should allow network tools when network permission is true', () => {
+      it("should allow network tools when network permission is true", () => {
         const workspace = createMockWorkspace({ network: true });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
-        const result = manager.checkToolAccess('web_search');
+        const result = manager.checkToolAccess("web_search");
         expect(result.allowed).toBe(true);
+      });
+
+      it("should deny network tools when the access profile disables networking", () => {
+        const workspace = createMockWorkspace({ network: true, accessNetworkMode: "disabled" });
+        const manager = createPolicyManager(workspace, createMockGuardrails());
+
+        const result = manager.checkToolAccess("web_search");
+        expect(result.allowed).toBe(false);
+        expect(result.deniedBy).toBe("workspace_permissions");
       });
     });
   });
 
-  describe('Monotonic Policy Precedence (C3 invariant)', () => {
-    it('should deny tool even if later layers would allow it', () => {
+  describe("Monotonic Policy Precedence (C3 invariant)", () => {
+    it("should deny tool even if later layers would allow it", () => {
       // Workspace denies read, but we're in private context (which allows everything)
       const workspace = createMockWorkspace({ read: false });
-      const manager = createPolicyManager(workspace, createMockGuardrails(), 'private');
+      const manager = createPolicyManager(workspace, createMockGuardrails(), "private");
 
-      const result = manager.checkToolAccess('read_file');
+      const result = manager.checkToolAccess("read_file");
       // Should still be denied because workspace layer denied it
       expect(result.allowed).toBe(false);
-      expect(result.deniedBy).toBe('workspace_permissions');
+      expect(result.deniedBy).toBe("workspace_permissions");
     });
 
-    it('should not allow context restrictions to override workspace denials', () => {
+    it("should not allow context restrictions to override workspace denials", () => {
       // Workspace denies shell
       const workspace = createMockWorkspace({ shell: false });
       // Even in private context (most permissive)
-      const manager = createPolicyManager(workspace, createMockGuardrails(), 'private');
+      const manager = createPolicyManager(workspace, createMockGuardrails(), "private");
 
-      const result = manager.checkToolAccess('run_command');
+      const result = manager.checkToolAccess("run_command");
       expect(result.allowed).toBe(false);
     });
 
-    it('should accumulate denials from all layers', () => {
+    it("should accumulate denials from all layers", () => {
       const workspace = createMockWorkspace({ read: true, write: true });
       // Public context denies clipboard
-      const manager = createPolicyManager(workspace, createMockGuardrails(), 'public');
+      const manager = createPolicyManager(workspace, createMockGuardrails(), "public");
 
-      const result = manager.checkToolAccess('read_clipboard');
+      const result = manager.checkToolAccess("read_clipboard");
       expect(result.allowed).toBe(false);
-      expect(result.deniedBy).toBe('context_restrictions');
+      expect(result.deniedBy).toBe("context_restrictions");
     });
   });
 
-  describe('Context-Aware Restrictions (C1 invariant)', () => {
-    describe('Private context', () => {
-      it('should allow memory tools in private context', () => {
+  describe("Context-Aware Restrictions (C1 invariant)", () => {
+    describe("Private context", () => {
+      it("should allow memory tools in private context", () => {
         const workspace = createMockWorkspace({ read: true, write: true });
-        const manager = createPolicyManager(workspace, createMockGuardrails(), 'private');
+        const manager = createPolicyManager(workspace, createMockGuardrails(), "private");
 
         // Memory tools should be allowed in private context
         // (assuming system tools are allowed)
-        const result = manager.checkToolAccess('read_file');
+        const result = manager.checkToolAccess("read_file");
         expect(result.allowed).toBe(true);
       });
     });
 
-    describe('Group context', () => {
-      it('should deny memory tools in group context (Memory Tool Isolation)', () => {
+    describe("Group context", () => {
+      it("should deny memory tools in group context (Memory Tool Isolation)", () => {
         const workspace = createMockWorkspace({ read: true, write: true });
-        const manager = createPolicyManager(workspace, createMockGuardrails(), 'group');
+        const manager = createPolicyManager(workspace, createMockGuardrails(), "group");
 
-        const result = manager.checkToolAccess('read_clipboard');
+        const result = manager.checkToolAccess("read_clipboard");
         expect(result.allowed).toBe(false);
       });
 
-      it('should require approval for delete_file in group context', () => {
+      it("should require approval for delete_file in group context", () => {
         const workspace = createMockWorkspace({ delete: true, shell: true });
-        const manager = createPolicyManager(workspace, createMockGuardrails(), 'group');
+        const manager = createPolicyManager(workspace, createMockGuardrails(), "group");
 
         // delete_file requires approval in group context
-        const deleteResult = manager.checkToolAccess('delete_file');
+        const deleteResult = manager.checkToolAccess("delete_file");
         expect(deleteResult.requiresApproval).toBe(true);
       });
 
-      it('should allow shell commands in group context (workspace permission controls)', () => {
+      it("should allow shell commands in group context (workspace permission controls)", () => {
         const workspace = createMockWorkspace({ shell: true });
-        const manager = createPolicyManager(workspace, createMockGuardrails(), 'group');
+        const manager = createPolicyManager(workspace, createMockGuardrails(), "group");
 
         // run_command is allowed in group context (not blocked by context restrictions)
-        const result = manager.checkToolAccess('run_command');
+        const result = manager.checkToolAccess("run_command");
         expect(result.allowed).toBe(true);
       });
     });
 
-    describe('Public context', () => {
-      it('should deny memory tools in public context', () => {
+    describe("Public context", () => {
+      it("should deny memory tools in public context", () => {
         const workspace = createMockWorkspace({ read: true, write: true });
-        const manager = createPolicyManager(workspace, createMockGuardrails(), 'public');
+        const manager = createPolicyManager(workspace, createMockGuardrails(), "public");
 
-        const result = manager.checkToolAccess('read_clipboard');
+        const result = manager.checkToolAccess("read_clipboard");
         expect(result.allowed).toBe(false);
       });
 
-      it('should allow system tools in public context (workspace permission controls)', () => {
+      it("should allow system tools in public context (workspace permission controls)", () => {
         const workspace = createMockWorkspace({ read: true, write: true });
-        const manager = createPolicyManager(workspace, createMockGuardrails(), 'public');
+        const manager = createPolicyManager(workspace, createMockGuardrails(), "public");
 
         // System tools are allowed - no longer blocked by context
-        const result = manager.checkToolAccess('take_screenshot');
+        const result = manager.checkToolAccess("take_screenshot");
         expect(result.allowed).toBe(true);
       });
 
-      it('should allow shell commands in public context (workspace permission controls)', () => {
+      it("should allow shell commands in public context (workspace permission controls)", () => {
         const workspace = createMockWorkspace({ shell: true });
-        const manager = createPolicyManager(workspace, createMockGuardrails(), 'public');
+        const manager = createPolicyManager(workspace, createMockGuardrails(), "public");
 
         // run_command is allowed in public context
-        expect(manager.checkToolAccess('run_command').allowed).toBe(true);
+        expect(manager.checkToolAccess("run_command").allowed).toBe(true);
       });
 
-      it('should require approval for delete_file in public context', () => {
+      it("should require approval for delete_file in public context", () => {
         const workspace = createMockWorkspace({ delete: true });
-        const manager = createPolicyManager(workspace, createMockGuardrails(), 'public');
+        const manager = createPolicyManager(workspace, createMockGuardrails(), "public");
 
         // delete_file requires approval
-        const result = manager.checkToolAccess('delete_file');
+        const result = manager.checkToolAccess("delete_file");
         expect(result.requiresApproval).toBe(true);
       });
     });
   });
 
-  describe('Command Policy Checks', () => {
+  describe("Command Policy Checks", () => {
     // Note: Command-specific policy checks happen during checkCommandPolicy
     // which is called internally. For these tests, we verify that:
     // 1. run_command requires approval when shell permission is granted
     // 2. The command patterns are correctly evaluated
 
-    it('should require approval for shell commands by default', () => {
+    it("should require approval for shell commands by default", () => {
       const workspace = createMockWorkspace({ shell: true });
       const guardrails = createMockGuardrails({ blockDangerousCommands: true });
       const manager = createPolicyManager(workspace, guardrails);
 
       // run_command tool should be allowed but require approval
-      const result = manager.checkToolAccess('run_command');
+      const result = manager.checkToolAccess("run_command");
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(true);
     });
 
-    it('should deny shell commands when shell permission is false', () => {
+    it("should deny shell commands when shell permission is false", () => {
       const workspace = createMockWorkspace({ shell: false });
       const guardrails = createMockGuardrails({ blockDangerousCommands: true });
       const manager = createPolicyManager(workspace, guardrails);
 
       // run_command tool should be denied at workspace layer
-      const result = manager.checkToolAccess('run_command');
+      const result = manager.checkToolAccess("run_command");
       expect(result.allowed).toBe(false);
-      expect(result.deniedBy).toBe('workspace_permissions');
+      expect(result.deniedBy).toBe("workspace_permissions");
     });
 
-    it('should track shell commands in approval-required list', () => {
+    it("should track shell commands in approval-required list", () => {
       const workspace = createMockWorkspace({ shell: true });
       const guardrails = createMockGuardrails();
       const manager = createPolicyManager(workspace, guardrails);
 
       const approvalRequired = manager.getApprovalRequiredTools();
-      expect(approvalRequired).toContain('run_command');
+      expect(approvalRequired).toContain("run_command");
     });
 
-    it('should not auto-approve non-matching commands', () => {
+    it("should not auto-approve non-matching commands", () => {
       const workspace = createMockWorkspace({ shell: true });
       const guardrails = createMockGuardrails({
         autoApproveTrustedCommands: true,
-        trustedCommandPatterns: ['npm *'],
+        trustedCommandPatterns: ["npm *"],
       });
       const manager = createPolicyManager(workspace, guardrails);
 
-      const result = manager.checkToolAccess('run_command', { command: 'python script.py' });
+      const result = manager.checkToolAccess("run_command", { command: "python script.py" });
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(true);
     });
 
-    it('should have shell commands always require approval even with permission', () => {
+    it("should have shell commands always require approval even with permission", () => {
       const workspace = createMockWorkspace({ shell: true });
       const guardrails = createMockGuardrails();
       const manager = createPolicyManager(workspace, guardrails);
 
       // Even with shell permission, run_command should require approval
-      const decisions = manager.getToolDecisions('run_command');
-      const workspaceDecision = decisions.find(d => d.layer === 'workspace_permissions');
-      expect(workspaceDecision?.decision).toBe('require_approval');
+      const decisions = manager.getToolDecisions("run_command");
+      const workspaceDecision = decisions.find((d) => d.layer === "workspace_permissions");
+      expect(workspaceDecision?.decision).toBe("require_approval");
     });
   });
 
-  describe('Static Helper Methods', () => {
-    describe('expandToolGroup', () => {
-      it('should return tools for valid group', () => {
-        const tools = SecurityPolicyManager.expandToolGroup('group:read');
+  describe("Static Helper Methods", () => {
+    describe("expandToolGroup", () => {
+      it("should return tools for valid group", () => {
+        const tools = SecurityPolicyManager.expandToolGroup("group:read");
         expect(tools.length).toBeGreaterThan(0);
-        expect(tools).toContain('read_file');
+        expect(tools).toContain("read_file");
       });
 
-      it('should return empty/undefined for invalid group', () => {
-        const tools = SecurityPolicyManager.expandToolGroup('group:invalid' as any);
+      it("should return empty/undefined for invalid group", () => {
+        const tools = SecurityPolicyManager.expandToolGroup("group:invalid" as any);
         // Returns undefined or empty array for invalid groups
         expect(!tools || tools.length === 0).toBe(true);
       });
     });
 
-    describe('isToolInGroup', () => {
-      it('should return true for tools in group', () => {
-        expect(SecurityPolicyManager.isToolInGroup('read_file', 'group:read')).toBe(true);
-        expect(SecurityPolicyManager.isToolInGroup('delete_file', 'group:destructive')).toBe(true);
+    describe("isToolInGroup", () => {
+      it("should return true for tools in group", () => {
+        expect(SecurityPolicyManager.isToolInGroup("read_file", "group:read")).toBe(true);
+        expect(SecurityPolicyManager.isToolInGroup("delete_file", "group:destructive")).toBe(true);
       });
 
-      it('should return false for tools not in group', () => {
-        expect(SecurityPolicyManager.isToolInGroup('delete_file', 'group:read')).toBe(false);
-        expect(SecurityPolicyManager.isToolInGroup('read_file', 'group:destructive')).toBe(false);
+      it("should return false for tools not in group", () => {
+        expect(SecurityPolicyManager.isToolInGroup("delete_file", "group:read")).toBe(false);
+        expect(SecurityPolicyManager.isToolInGroup("read_file", "group:destructive")).toBe(false);
       });
     });
 
-    describe('getToolRiskLevel', () => {
-      it('should return correct risk level', () => {
-        expect(SecurityPolicyManager.getToolRiskLevel('read_file')).toBe('read');
-        expect(SecurityPolicyManager.getToolRiskLevel('write_file')).toBe('write');
-        expect(SecurityPolicyManager.getToolRiskLevel('delete_file')).toBe('destructive');
+    describe("getToolRiskLevel", () => {
+      it("should return correct risk level", () => {
+        expect(SecurityPolicyManager.getToolRiskLevel("read_file")).toBe("read");
+        expect(SecurityPolicyManager.getToolRiskLevel("write_file")).toBe("write");
+        expect(SecurityPolicyManager.getToolRiskLevel("delete_file")).toBe("destructive");
       });
 
-      it('should return undefined for unknown tools', () => {
-        expect(SecurityPolicyManager.getToolRiskLevel('unknown_tool')).toBeUndefined();
+      it("should return undefined for unknown tools", () => {
+        expect(SecurityPolicyManager.getToolRiskLevel("unknown_tool")).toBeUndefined();
       });
     });
   });
 
-  describe('Utility Methods', () => {
-    describe('getDeniedTools', () => {
-      it('should return list of denied tools', () => {
+  describe("Utility Methods", () => {
+    describe("getDeniedTools", () => {
+      it("should return list of denied tools", () => {
         const workspace = createMockWorkspace({ read: false, shell: false });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
         const denied = manager.getDeniedTools();
-        expect(denied).toContain('read_file');
-        expect(denied).toContain('run_command');
+        expect(denied).toContain("read_file");
+        expect(denied).toContain("run_command");
       });
     });
 
-    describe('getApprovalRequiredTools', () => {
-      it('should return list of tools requiring approval', () => {
+    describe("getApprovalRequiredTools", () => {
+      it("should return list of tools requiring approval", () => {
         const workspace = createMockWorkspace({ shell: true, delete: false });
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
         const approval = manager.getApprovalRequiredTools();
-        expect(approval).toContain('run_command');
-        expect(approval).toContain('delete_file');
+        expect(approval).toContain("run_command");
+        expect(approval).toContain("delete_file");
       });
     });
 
-    describe('getToolDecisions', () => {
-      it('should return layer decisions for a tool', () => {
+    describe("getToolDecisions", () => {
+      it("should return layer decisions for a tool", () => {
         const workspace = createMockWorkspace();
         const manager = createPolicyManager(workspace, createMockGuardrails());
 
-        const decisions = manager.getToolDecisions('read_file');
+        const decisions = manager.getToolDecisions("read_file");
         expect(decisions.length).toBeGreaterThan(0);
-        expect(decisions[0]).toHaveProperty('layer');
-        expect(decisions[0]).toHaveProperty('decision');
+        expect(decisions[0]).toHaveProperty("layer");
+        expect(decisions[0]).toHaveProperty("decision");
       });
     });
   });
 });
 
-describe('isToolAllowedQuick', () => {
-  it('should quickly check if tool is allowed', () => {
+describe("isToolAllowedQuick", () => {
+  it("should quickly check if tool is allowed", () => {
     const workspace = createMockWorkspace({ read: true });
-    expect(isToolAllowedQuick('read_file', workspace)).toBe(true);
+    expect(isToolAllowedQuick("read_file", workspace)).toBe(true);
   });
 
-  it('should respect workspace permissions', () => {
+  it("should respect workspace permissions", () => {
     const workspace = createMockWorkspace({ read: false });
-    expect(isToolAllowedQuick('read_file', workspace)).toBe(false);
+    expect(isToolAllowedQuick("read_file", workspace)).toBe(false);
   });
 
-  it('should respect gateway context', () => {
+  it("should deny every network-capable tool family when network is disabled", () => {
+    const workspace = createMockWorkspace({ network: false });
+    const networkTools = [
+      "http_request",
+      "generate_image",
+      "generate_video",
+      "get_video_generation_job",
+      "cancel_video_generation_job",
+      "open_url",
+    ];
+    for (const toolName of networkTools) {
+      expect(isToolAllowedQuick(toolName, workspace)).toBe(false);
+    }
+  });
+
+  it("should hide network-capable tools when the access profile disables networking", () => {
+    const workspace = createMockWorkspace({ network: true, accessNetworkMode: "disabled" });
+    for (const toolName of ["web_search", "generate_image", "browser_navigate", "open_url"]) {
+      expect(isToolAllowedQuick(toolName, workspace)).toBe(false);
+    }
+  });
+
+  it("should respect gateway context", () => {
     const workspace = createMockWorkspace({ read: true });
-    expect(isToolAllowedQuick('read_clipboard', workspace, 'public')).toBe(false);
-    expect(isToolAllowedQuick('read_file', workspace, 'public')).toBe(true);
+    expect(isToolAllowedQuick("read_clipboard", workspace, "public")).toBe(false);
+    expect(isToolAllowedQuick("read_file", workspace, "public")).toBe(true);
   });
 });

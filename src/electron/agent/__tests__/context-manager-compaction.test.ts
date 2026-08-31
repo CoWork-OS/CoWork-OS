@@ -120,7 +120,7 @@ describe("ContextManager active-file path retention", () => {
 
     const messages: LLMMessage[] = [
       { role: "user", content: "Fix the auth module" }, // index 0 — always kept
-      msgWithPath("assistant", filePath),                // index 1 — should be retained
+      msgWithPath("assistant", filePath), // index 1 — should be retained
     ];
 
     // Bulk filler to force compaction — use 1000 chars (~250 tokens) each so
@@ -140,12 +140,12 @@ describe("ContextManager active-file path retention", () => {
     // Compaction must have removed something for this test to be meaningful
     expect(res.meta.kind).toBe("message_removal");
 
-    const keptContents = res.messages.map((m) =>
-      typeof m.content === "string" ? m.content : "",
-    );
+    const keptContents = res.messages.map((m) => (typeof m.content === "string" ? m.content : ""));
 
     // The old message referencing the active file should be retained
-    const activeFileRetained = keptContents.some((c) => c.includes(filePath) && c.startsWith("Here is"));
+    const activeFileRetained = keptContents.some(
+      (c) => c.includes(filePath) && c.startsWith("Here is"),
+    );
     expect(activeFileRetained).toBe(true);
   });
 
@@ -157,7 +157,7 @@ describe("ContextManager active-file path retention", () => {
 
     const messages: LLMMessage[] = [
       { role: "user", content: "Refactor the new feature" }, // index 0
-      msgWithPath("assistant", staleFile),                    // index 1 — stale, should be evicted
+      msgWithPath("assistant", staleFile), // index 1 — stale, should be evicted
     ];
 
     // Bulk filler — 1000 chars each to exceed the 8,000-token available budget
@@ -174,9 +174,7 @@ describe("ContextManager active-file path retention", () => {
     const res = cm.compactMessagesWithMeta(messages, 0);
     expect(res.meta.kind).toBe("message_removal");
 
-    const keptContents = res.messages.map((m) =>
-      typeof m.content === "string" ? m.content : "",
-    );
+    const keptContents = res.messages.map((m) => (typeof m.content === "string" ? m.content : ""));
 
     // The stale file message should NOT be among the kept messages (it fell outside budget)
     const staleRetained = keptContents.some(
@@ -200,7 +198,10 @@ describe("ContextManager active-file path retention", () => {
 
     // Recent turns (within window) also reference the file
     for (let i = 0; i < 4; i++) {
-      messages.push({ role: i % 2 === 0 ? "assistant" : "user", content: `Working on ${filePath}` });
+      messages.push({
+        role: i % 2 === 0 ? "assistant" : "user",
+        content: `Working on ${filePath}`,
+      });
     }
 
     const res = cm.compactMessagesWithMeta(messages, 0);
@@ -209,9 +210,7 @@ describe("ContextManager active-file path retention", () => {
       // Count how many of the large old messages were kept
       const keptOldActiveFileMessages = res.messages.filter(
         (m) =>
-          typeof m.content === "string" &&
-          m.content.includes(filePath) &&
-          m.content.length > 400,
+          typeof m.content === "string" && m.content.includes(filePath) && m.content.length > 400,
       );
       // Should not retain all 20 — budget cap must have kicked in
       expect(keptOldActiveFileMessages.length).toBeLessThan(20);

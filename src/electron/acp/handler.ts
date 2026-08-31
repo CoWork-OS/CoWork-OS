@@ -65,13 +65,15 @@ export interface ACPHandlerDeps {
     result?: string;
     error?: string;
   }>;
-  getDelegatedGraphStatus?: (acpTaskId: string) => {
-    status: string;
-    coworkTaskId?: string;
-    remoteTaskId?: string;
-    result?: string;
-    error?: string;
-  } | undefined;
+  getDelegatedGraphStatus?: (acpTaskId: string) =>
+    | {
+        status: string;
+        coworkTaskId?: string;
+        remoteTaskId?: string;
+        result?: string;
+        error?: string;
+      }
+    | undefined;
   cancelDelegatedGraphTask?: (acpTaskId: string) => Promise<void>;
   /** Function to get a task by ID */
   getTask?: (taskId: string) => { id: string; status: string; error?: string } | undefined;
@@ -264,7 +266,11 @@ async function syncTaskStatus(
         task.result = result.result;
         task.error = result.error;
         task.updatedAt = Date.now();
-        if (result.status === "completed" || result.status === "failed" || result.status === "cancelled") {
+        if (
+          result.status === "completed" ||
+          result.status === "failed" ||
+          result.status === "cancelled"
+        ) {
           task.completedAt = Date.now();
         }
       } catch (err: Any) {
@@ -491,7 +497,11 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
         acpTask.status = result.status as ACPTask["status"];
         acpTask.result = result.result;
         acpTask.error = result.error;
-        if (acpTask.status === "completed" || acpTask.status === "failed" || acpTask.status === "cancelled") {
+        if (
+          acpTask.status === "completed" ||
+          acpTask.status === "failed" ||
+          acpTask.status === "cancelled"
+        ) {
           acpTask.completedAt = Date.now();
         }
       } catch (err: Any) {
@@ -525,7 +535,11 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
         acpTask.status = result.status;
         acpTask.result = result.result;
         acpTask.error = result.error;
-        if (result.status === "completed" || result.status === "failed" || result.status === "cancelled") {
+        if (
+          result.status === "completed" ||
+          result.status === "failed" ||
+          result.status === "cancelled"
+        ) {
           acpTask.completedAt = Date.now();
         }
       } catch (err: Any) {

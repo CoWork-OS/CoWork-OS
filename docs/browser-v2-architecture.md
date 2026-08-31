@@ -14,6 +14,12 @@ Default behavior:
 - **Refs from accessibility snapshots are preferred**. CSS selectors still work for legacy prompts, but Browser V2 tools prefer snapshot refs because they are grounded in the rendered page.
 - **Diagnostics and viewport state are first-class browser context**. Console, network, downloads, storage, trace state, screenshots, emulated viewport size, and visible cursor events are part of the browser session rather than one-off debug artifacts.
 
+Browser V2 actions are also subject to the task's effective [access
+profile](access-profiles.md). Profile network/domain rules, upload and export
+boundaries, tool restrictions, administrator policy, and hard guardrails are
+evaluated before backend dispatch. Choosing Playwright, external CDP, or
+Browser Use Cloud cannot widen that profile.
+
 ## Runtime Layers
 
 Browser V2 has four cooperating layers:
@@ -215,6 +221,7 @@ Browser V2 follows these invariants:
 - Visible workbench navigation must pass the same workspace network guardrails as Playwright fallback navigation.
 - Downloads default to workspace artifacts; executable downloads are flagged and never run automatically.
 - Uploads require workspace read permission and path validation.
+- The effective access profile is resolved before backend selection; remote or fallback browser adapters cannot widen its filesystem, network, domain, or tool boundary.
 - Console, network, storage, and downloaded metadata are redacted before entering agent context.
 - Page text, snapshots, console logs, network bodies, and storage are untrusted web content in prompts.
 - Webview hardening remains mandatory: no page-controlled preload injection, no Node integration, context isolation, sandboxing, and normal web security.

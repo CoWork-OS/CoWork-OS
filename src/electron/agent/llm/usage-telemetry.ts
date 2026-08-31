@@ -92,21 +92,23 @@ export function recordLlmCallSuccess(
       cachedTokens,
       cost,
     );
-    UsageInsightsProjector.getIfInitialized()?.enqueueLlmTelemetry(input.workspaceId || null, timestamp);
+    UsageInsightsProjector.getIfInitialized()?.enqueueLlmTelemetry(
+      input.workspaceId || null,
+      timestamp,
+    );
   } catch {
     // Best-effort telemetry only.
   }
 }
 
-export function recordLlmCallError(
-  input: LlmCallTelemetryInput,
-  error: unknown,
-): void {
+export function recordLlmCallError(input: LlmCallTelemetryInput, error: unknown): void {
   const db = getDb();
   if (!db) return;
 
   const errorObj =
-    error && typeof error === "object" ? (error as { code?: unknown; message?: unknown; name?: unknown }) : null;
+    error && typeof error === "object"
+      ? (error as { code?: unknown; message?: unknown; name?: unknown })
+      : null;
   const errorCode =
     typeof errorObj?.code === "string"
       ? errorObj.code
@@ -153,7 +155,10 @@ export function recordLlmCallError(
       errorCode,
       errorMessage,
     );
-    UsageInsightsProjector.getIfInitialized()?.enqueueLlmTelemetry(input.workspaceId || null, timestamp);
+    UsageInsightsProjector.getIfInitialized()?.enqueueLlmTelemetry(
+      input.workspaceId || null,
+      timestamp,
+    );
   } catch {
     // Best-effort telemetry only.
   }

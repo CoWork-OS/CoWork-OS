@@ -76,9 +76,7 @@ describeWithSqlite("SessionRetentionService", () => {
 
     expect(result.taskCount).toBe(1);
     expect(taskRepo.findById(task.id)).toBeDefined();
-    expect(
-      taskRepo.findSidebarSummaries(10, 0, { includeArchivedSessions: false }),
-    ).toEqual([]);
+    expect(taskRepo.findSidebarSummaries(10, 0, { includeArchivedSessions: false })).toEqual([]);
     expect(
       taskRepo.findSidebarSummaries(10, 0, { includeArchivedSessions: true }).map((row) => row.id),
     ).toEqual([task.id]);
@@ -168,7 +166,12 @@ describe("SessionRetentionService unit", () => {
     const tasks: Task[] = [
       makeTask({ id: "delete-me", status: "completed", updatedAt: now - 40 * 24 * 60 * 60 * 1000 }),
       makeTask({ id: "active", status: "executing", updatedAt: now - 40 * 24 * 60 * 60 * 1000 }),
-      makeTask({ id: "pinned", status: "completed", pinned: true, updatedAt: now - 40 * 24 * 60 * 60 * 1000 }),
+      makeTask({
+        id: "pinned",
+        status: "completed",
+        pinned: true,
+        updatedAt: now - 40 * 24 * 60 * 60 * 1000,
+      }),
     ];
     const service = makeService(tasks);
 
@@ -212,8 +215,7 @@ describe("SessionRetentionService unit", () => {
 function makeService(tasks: Task[], events: TaskEvent[] = []): SessionRetentionService {
   const taskRepo = {
     findAll: () => [...tasks],
-    findBySessionId: (sessionId: string) =>
-      tasks.filter((task) => task.sessionId === sessionId),
+    findBySessionId: (sessionId: string) => tasks.filter((task) => task.sessionId === sessionId),
     findById: (id: string) => tasks.find((task) => task.id === id),
     delete: (id: string) => {
       const index = tasks.findIndex((task) => task.id === id);
@@ -227,16 +229,26 @@ function makeService(tasks: Task[], events: TaskEvent[] = []): SessionRetentionS
         return taskIds.includes(event.taskId) && (!types?.length || types.includes(effectiveType));
       }),
   };
-  const metadata = new Map<string, { sessionId: string; archivedAt?: number; createdAt: number; updatedAt: number }>();
+  const metadata = new Map<
+    string,
+    { sessionId: string; archivedAt?: number; createdAt: number; updatedAt: number }
+  >();
   const metadataRepo = {
     findBySessionIds: (sessionIds: string[]) =>
-      new Map(sessionIds.flatMap((id) => {
-        const value = metadata.get(id);
-        return value ? [[id, value] as const] : [];
-      })),
+      new Map(
+        sessionIds.flatMap((id) => {
+          const value = metadata.get(id);
+          return value ? [[id, value] as const] : [];
+        }),
+      ),
     findBySessionId: (sessionId: string) => metadata.get(sessionId),
     archive: (sessionId: string) => {
-      const value = { sessionId, archivedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now() };
+      const value = {
+        sessionId,
+        archivedAt: Date.now(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
       metadata.set(sessionId, value);
       return value;
     },

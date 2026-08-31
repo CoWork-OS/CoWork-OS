@@ -63,18 +63,15 @@ const SCRIPT = {
   ask_assistant_traits: "What kind of assistant do you want me to be? Pick what fits.",
   confirm_assistant_traits:
     "Good. I have the shape of the role now. Let me understand who I'm working with.",
-  ask_user_profile:
-    "And what should I call you?",
-  confirm_user_profile:
-    "Got it. I'll use that so this feels personal from the start.",
+  ask_user_profile: "And what should I call you?",
+  confirm_user_profile: "Got it. I'll use that so this feels personal from the start.",
   ask_time_drains:
     "Where does your time disappear most often? Pick the things that actually drag on your day.",
   confirm_time_drains:
     "Good. Those are exactly the kinds of bottlenecks I should be paying attention to.",
   ask_priorities:
     "Given what you told me, what do you want the most help with first? Pick your top priorities.",
-  confirm_priorities:
-    "Perfect. That's concrete enough to optimize around from the start.",
+  confirm_priorities: "Perfect. That's concrete enough to optimize around from the start.",
   ask_tools:
     "What apps or tools are central to your workflow? Include anything I should treat like home base.",
   confirm_tools:
@@ -84,8 +81,7 @@ const SCRIPT = {
     "Understood. I'll keep that response shape consistent unless the task clearly needs otherwise.",
   ask_additional_guidance:
     "One last thing before setup: is there anything you'd always want me to keep in mind?",
-  confirm_additional_guidance:
-    "Good. I'll carry that forward as part of how I operate with you.",
+  confirm_additional_guidance: "Good. I'll carry that forward as part of how I operate with you.",
   ask_voice: "Would you like spoken responses when they help?",
   confirm_voice_on: "Great. I'll speak when it adds clarity.",
   confirm_voice_off: "No problem. We'll stay text-first for now.",
@@ -665,23 +661,26 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     setShowInput(true);
   }, [clearPendingTransition]);
 
-  const submitAssistantTraits = useCallback((traits: OnboardingAssistantTraitId[]) => {
-    const normalizedTraits =
-      traits.length > 0 ? Array.from(new Set(traits)) : INITIAL_ONBOARDING_DATA.assistantTraits;
-    const nextPersona = deriveOnboardingPersona({
-      ...INITIAL_ONBOARDING_DATA,
-      ...data,
-      assistantTraits: normalizedTraits,
-    });
+  const submitAssistantTraits = useCallback(
+    (traits: OnboardingAssistantTraitId[]) => {
+      const normalizedTraits =
+        traits.length > 0 ? Array.from(new Set(traits)) : INITIAL_ONBOARDING_DATA.assistantTraits;
+      const nextPersona = deriveOnboardingPersona({
+        ...INITIAL_ONBOARDING_DATA,
+        ...data,
+        assistantTraits: normalizedTraits,
+      });
 
-    setData((d) => ({
-      ...d,
-      assistantTraits: normalizedTraits,
-      persona: nextPersona,
-    }));
-    setState("confirm_assistant_traits");
-    setCurrentText(SCRIPT.confirm_assistant_traits);
-  }, [data]);
+      setData((d) => ({
+        ...d,
+        assistantTraits: normalizedTraits,
+        persona: nextPersona,
+      }));
+      setState("confirm_assistant_traits");
+      setCurrentText(SCRIPT.confirm_assistant_traits);
+    },
+    [data],
+  );
 
   const submitUserProfile = useCallback((userName: string, userContext: string) => {
     setData((d) => ({
@@ -750,7 +749,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     setData((d) => ({ ...d, voiceEnabled: enabled }));
     setState("confirm_voice");
     setCurrentText(enabled ? SCRIPT.confirm_voice_on : SCRIPT.confirm_voice_off);
-
   }, []);
 
   // Handle work style selection
@@ -1221,11 +1219,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
 
   // Build save settings for a provider
   const buildSaveSettings = useCallback(
-    (
-      provider: LLMProviderType,
-      apiKey: string,
-      existingSettings?: LLMSettingsData | null,
-    ) => {
+    (provider: LLMProviderType, apiKey: string, existingSettings?: LLMSettingsData | null) => {
       const trimmedApiKey = apiKey.trim();
       const modelKey = getConfiguredModelForProvider(provider, existingSettings);
       const settings: Record<string, unknown> = {
@@ -1396,11 +1390,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           if (!isActiveAsyncMutation(mutationToken)) {
             return;
           }
-          const saveSettings = buildSaveSettings(
-            data.selectedProvider!,
-            key,
-            existingSettings,
-          );
+          const saveSettings = buildSaveSettings(data.selectedProvider!, key, existingSettings);
           if (!isActiveAsyncMutation(mutationToken)) {
             return;
           }
@@ -1684,7 +1674,8 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         if (tempWorkspace?.id) workspaceIds.add(tempWorkspace.id);
 
         for (const targetWorkspaceId of Array.from(workspaceIds)) {
-          const currentMemorySettings = await window.electronAPI.getMemorySettings(targetWorkspaceId);
+          const currentMemorySettings =
+            await window.electronAPI.getMemorySettings(targetWorkspaceId);
           const nextPrivacyMode: typeof currentMemorySettings.privacyMode = data.memoryEnabled
             ? currentMemorySettings.privacyMode === "disabled"
               ? "normal"
@@ -1710,7 +1701,11 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         }
       }
 
-      if (workspaceId && window.electronAPI?.initWorkspaceKit && window.electronAPI?.applyOnboardingProfile) {
+      if (
+        workspaceId &&
+        window.electronAPI?.initWorkspaceKit &&
+        window.electronAPI?.applyOnboardingProfile
+      ) {
         await window.electronAPI.initWorkspaceKit({
           workspaceId,
           mode: "missing",

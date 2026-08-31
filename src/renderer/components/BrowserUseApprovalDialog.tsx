@@ -21,7 +21,9 @@ interface KeyboardTargetInfo {
 }
 
 function readDetails(approval: ApprovalRequest): BrowserUseApprovalDetails {
-  return approval.details && typeof approval.details === "object" && !Array.isArray(approval.details)
+  return approval.details &&
+    typeof approval.details === "object" &&
+    !Array.isArray(approval.details)
     ? (approval.details as BrowserUseApprovalDetails)
     : {};
 }
@@ -78,7 +80,11 @@ function getKeyboardTargetInfo(target: EventTarget | null): KeyboardTargetInfo {
     isContentEditable: candidate.isContentEditable,
     hasInteractiveAncestor:
       typeof candidate.closest === "function"
-        ? Boolean(candidate.closest("button, input, select, textarea, a[href], [role='button'], [role='checkbox'], [contenteditable='true']"))
+        ? Boolean(
+            candidate.closest(
+              "button, input, select, textarea, a[href], [role='button'], [role='checkbox'], [contenteditable='true']",
+            ),
+          )
         : false,
   };
 }
@@ -94,10 +100,7 @@ export function getBrowserUseApprovalKeyboardAction(
   return null;
 }
 
-export function BrowserUseApprovalDialog({
-  approval,
-  onRespond,
-}: BrowserUseApprovalDialogProps) {
+export function BrowserUseApprovalDialog({ approval, onRespond }: BrowserUseApprovalDialogProps) {
   const [alwaysAllow, setAlwaysAllow] = useState(false);
   const isBrowserUseApproval = isBrowserUseDomainApproval(approval);
   const details = useMemo(() => readDetails(approval), [approval]);
@@ -138,7 +141,11 @@ export function BrowserUseApprovalDialog({
   }
 
   return (
-    <div className="session-approval-overlay browser-use-approval-overlay" role="dialog" aria-modal="true">
+    <div
+      className="session-approval-overlay browser-use-approval-overlay"
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="browser-use-approval-card">
         <div className="browser-use-approval-header">
           <span className="browser-use-approval-glyph" aria-hidden="true">
@@ -150,9 +157,7 @@ export function BrowserUseApprovalDialog({
           <span className="browser-use-approval-name">Browser Use</span>
         </div>
 
-        <h3 className="browser-use-approval-title">
-          Allow Browser Use to access {targetLabel}?
-        </h3>
+        <h3 className="browser-use-approval-title">Allow Browser Use to access {targetLabel}?</h3>
 
         <div className="browser-use-approval-footer">
           <label className="browser-use-approval-checkbox">

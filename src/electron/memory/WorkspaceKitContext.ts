@@ -1,15 +1,12 @@
 import fs from "fs";
 import path from "path";
 import { buildWorkspaceKitSections } from "../context/kit-injection";
-import {
-  WORKSPACE_KIT_CONTRACTS,
-  type KitContract,
-  type KitScope,
-} from "../context/kit-contracts";
+import { WORKSPACE_KIT_CONTRACTS, type KitContract, type KitScope } from "../context/kit-contracts";
 import { parseKitDocument } from "../context/kit-parser";
 import { checkProjectAccessFromMarkdown } from "../security/project-access";
 import { InputSanitizer } from "../agent/security";
 import { redactSensitiveMarkdownContent } from "./MarkdownMemoryIndexService";
+import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
 
 type ExtractedSection = {
   title: string;
@@ -24,6 +21,18 @@ const MAX_TOTAL_CHARS = 16000;
 const MAX_DESIGN_CONTEXT_CHARS = 7000;
 const AUTO_LORE_START = "<!-- cowork:auto:lore:start -->";
 const AUTO_LORE_END = "<!-- cowork:auto:lore:end -->";
+
+function canReadPath(
+  readGuard: MarkdownMemoryReadGuard | undefined,
+  candidatePath: string,
+): boolean {
+  if (!readGuard) return true;
+  try {
+    return readGuard(candidatePath) === true;
+  } catch {
+    return false;
+  }
+}
 
 const MAP_FILES: Array<{ relPath: string; title: string }> = [
   { relPath: "docs/CODEBASE_MAP.md", title: "Codebase Map" },
@@ -54,7 +63,12 @@ function safeResolveWithinWorkspace(workspacePath: string, relPath: string): str
   return null;
 }
 
-function readFilePrefix(absPath: string, maxBytes: number): string | null {
+function readFilePrefix(
+  absPath: string,
+  maxBytes: number,
+  readGuard?: MarkdownMemoryReadGuard,
+): string | null {
+  if (!canReadPath(readGuard, absPath)) return null;
   try {
     const stat = fs.statSync(absPath);
     if (!stat.isFile()) return null;
@@ -129,23 +143,21 @@ function extractBulletSections(
 }
 
 function extractFilledKvLines(markdown: string): string {
-  const kept = markdown
-    .split("\n")
-    .flatMap((line) => {
-      const bulletMatch = line.match(/^\s*-\s*([^:]+):(.*)$/);
-      if (bulletMatch) {
-        const value = bulletMatch[2].trim();
-        return value ? [`- ${bulletMatch[1].trim()}: ${value}`] : [];
-      }
+  const kept = markdown.split("\n").flatMap((line) => {
+    const bulletMatch = line.match(/^\s*-\s*([^:]+):(.*)$/);
+    if (bulletMatch) {
+      const value = bulletMatch[2].trim();
+      return value ? [`- ${bulletMatch[1].trim()}: ${value}`] : [];
+    }
 
-      const plainMatch = line.match(/^\s*([^#\-\s][^:]*):(.*)$/);
-      if (plainMatch) {
-        const value = plainMatch[2].trim();
-        return value ? [`${plainMatch[1].trim()}: ${value}`] : [];
-      }
+    const plainMatch = line.match(/^\s*([^#\-\s][^:]*):(.*)$/);
+    if (plainMatch) {
+      const value = plainMatch[2].trim();
+      return value ? [`${plainMatch[1].trim()}: ${value}`] : [];
+    }
 
-      return [];
-    });
+    return [];
+  });
 
   return kept.join("\n").trim();
 }
@@ -191,16 +203,21 @@ export function isDesignSystemRelevantTask(taskPrompt: string): boolean {
   );
 }
 
-export function buildWorkspaceDesignSystemContext(workspacePath: string, taskPrompt: string): string {
+export function buildWorkspaceDesignSystemContext(
+  workspacePath: string,
+  taskPrompt: string,
+  readGuard?: MarkdownMemoryReadGuard,
+): string {
   if (!isDesignSystemRelevantTask(taskPrompt)) return "";
 
   for (const relPath of DESIGN_SYSTEM_FILES) {
     const absPath = safeResolveWithinWorkspace(workspacePath, relPath);
     if (!absPath) continue;
-    const raw = readFilePrefix(absPath, MAX_FILE_BYTES);
+    const raw = readFilePrefix(absPath, MAX_FILE_BYTES, readGuard);
     if (!raw) continue;
 
-    const contract = relPath === ".cowork/DESIGN.md" ? WORKSPACE_KIT_CONTRACTS["DESIGN.md"] : undefined;
+    const contract =
+      relPath === ".cowork/DESIGN.md" ? WORKSPACE_KIT_CONTRACTS["DESIGN.md"] : undefined;
     const parsed = contract ? parseKitDocument(absPath, contract, relPath) : null;
     const source = parsed?.body || raw;
     const content = sanitizeForInjection(clampSection(source, MAX_DESIGN_CONTEXT_CHARS));
@@ -228,13 +245,16 @@ export function buildWorkspaceDesignSystemContext(workspacePath: string, taskPro
   ].join("\n");
 }
 
-function buildMapSections(workspacePath: string): ExtractedSection[] {
+function buildMapSections(
+  workspacePath: string,
+  readGuard?: MarkdownMemoryReadGuard,
+): ExtractedSection[] {
   const sections: ExtractedSection[] = [];
 
   for (const file of MAP_FILES) {
     const absPath = safeResolveWithinWorkspace(workspacePath, file.relPath);
     if (!absPath) continue;
-    const raw = readFilePrefix(absPath, MAX_FILE_BYTES);
+    const raw = readFilePrefix(absPath, MAX_FILE_BYTES, readGuard);
     if (!raw) continue;
     const extracted = sanitizeForInjection(clampSection(raw, MAX_SECTION_CHARS));
     if (!extracted) continue;
@@ -263,9 +283,11 @@ function renderProjectDoc(
   relPath: string,
   contract: KitContract,
   formatter?: (body: string) => string,
+  readGuard?: MarkdownMemoryReadGuard,
 ): string {
   const absPath = safeResolveWithinWorkspace(workspacePath, relPath);
   if (!absPath) return "";
+  if (!canReadPath(readGuard, absPath)) return "";
   const parsed = parseKitDocument(absPath, contract, relPath.replace(/\\/g, "/"));
   if (!parsed) return "";
   const body = formatter ? formatter(parsed.body) : parsed.body;
@@ -276,12 +298,14 @@ function buildProjectContextSections(
   workspacePath: string,
   taskPrompt: string,
   agentRoleId: string | null,
+  readGuard?: MarkdownMemoryReadGuard,
 ): ExtractedSection[] {
   const sections: ExtractedSection[] = [];
 
   const projectsDirRel = path.join(KIT_DIRNAME, "projects");
   const projectsDirAbs = safeResolveWithinWorkspace(workspacePath, projectsDirRel);
   if (!projectsDirAbs) return sections;
+  if (!canReadPath(readGuard, projectsDirAbs)) return sections;
 
   try {
     if (!fs.existsSync(projectsDirAbs) || !fs.statSync(projectsDirAbs).isDirectory()) {
@@ -306,7 +330,7 @@ function buildProjectContextSections(
       const contextAbs = safeResolveWithinWorkspace(workspacePath, contextRel);
       if (!contextAbs) continue;
 
-      const raw = readFilePrefix(contextAbs, MAX_FILE_BYTES);
+      const raw = readFilePrefix(contextAbs, MAX_FILE_BYTES, readGuard);
       if (!raw) continue;
 
       const nameScore = scoreTextOverlap(taskPrompt, name.replace(/[-_]/g, " "));
@@ -326,22 +350,38 @@ function buildProjectContextSections(
 
   for (const candidate of selected) {
     const accessAbs = safeResolveWithinWorkspace(workspacePath, candidate.accessRel);
-    const accessRaw = accessAbs ? readFilePrefix(accessAbs, Math.min(MAX_FILE_BYTES, 24 * 1024)) : null;
+    const accessRaw = accessAbs
+      ? readFilePrefix(accessAbs, Math.min(MAX_FILE_BYTES, 24 * 1024), readGuard)
+      : null;
     if (accessRaw && agentRoleId) {
       const res = checkProjectAccessFromMarkdown({ markdown: accessRaw, agentRoleId });
       if (!res.allowed) continue;
     }
 
     const accessText = accessContract
-      ? renderProjectDoc(workspacePath, candidate.accessRel, accessContract, (body) => clampSection(body, 2000))
+      ? renderProjectDoc(
+          workspacePath,
+          candidate.accessRel,
+          accessContract,
+          (body) => clampSection(body, 2000),
+          readGuard,
+        )
       : "";
     const contextText = contextContract
-      ? renderProjectDoc(workspacePath, candidate.contextRel, contextContract, (body) => clampSection(body, MAX_SECTION_CHARS))
+      ? renderProjectDoc(
+          workspacePath,
+          candidate.contextRel,
+          contextContract,
+          (body) => clampSection(body, MAX_SECTION_CHARS),
+          readGuard,
+        )
       : "";
 
     const combined = [
       accessText ? `#### Access (${candidate.accessRel.replace(/\\/g, "/")})\n${accessText}` : "",
-      contextText ? `#### Context (${candidate.contextRel.replace(/\\/g, "/")})\n${contextText}` : "",
+      contextText
+        ? `#### Context (${candidate.contextRel.replace(/\\/g, "/")})\n${contextText}`
+        : "",
     ]
       .filter(Boolean)
       .join("\n\n")
@@ -359,13 +399,17 @@ function buildProjectContextSections(
   return sections;
 }
 
-function buildDailyLogSection(workspacePath: string, now: Date): ExtractedSection[] {
+function buildDailyLogSection(
+  workspacePath: string,
+  now: Date,
+  readGuard?: MarkdownMemoryReadGuard,
+): ExtractedSection[] {
   const stamp = getLocalDateStamp(now);
   const relPath = path.join(KIT_DIRNAME, "memory", `${stamp}.md`);
   const absPath = safeResolveWithinWorkspace(workspacePath, relPath);
   if (!absPath) return [];
 
-  const raw = readFilePrefix(absPath, MAX_FILE_BYTES);
+  const raw = readFilePrefix(absPath, MAX_FILE_BYTES, readGuard);
   if (!raw) return [];
 
   const extracted = sanitizeForInjection(
@@ -390,11 +434,13 @@ function buildScopedKitSections(
   scopes: KitScope[],
   onboardingIncomplete: boolean,
   includeDesignSystem: boolean,
+  readGuard?: MarkdownMemoryReadGuard,
 ): ExtractedSection[] {
   return buildWorkspaceKitSections({
     workspacePath,
     scopes,
     onboardingIncomplete,
+    readGuard,
   })
     .filter((section) => includeDesignSystem || section.file !== "DESIGN.md")
     .map((section) => ({
@@ -408,23 +454,35 @@ export function buildWorkspaceKitContext(
   workspacePath: string,
   taskPrompt: string,
   now: Date = new Date(),
-  opts?: { agentRoleId?: string | null },
+  opts?: { agentRoleId?: string | null; readGuard?: MarkdownMemoryReadGuard },
 ): string {
   const collectedSections: ExtractedSection[] = [];
   const agentRoleId = typeof opts?.agentRoleId === "string" ? opts.agentRoleId : null;
   const includeDesignSystem = isDesignSystemRelevantTask(taskPrompt);
 
-  collectedSections.push(...buildMapSections(workspacePath));
+  collectedSections.push(...buildMapSections(workspacePath, opts?.readGuard));
 
   const kitDir = safeResolveWithinWorkspace(workspacePath, KIT_DIRNAME);
   if (kitDir) {
     try {
-      if (fs.existsSync(kitDir) && fs.statSync(kitDir).isDirectory()) {
+      if (
+        canReadPath(opts?.readGuard, kitDir) &&
+        fs.existsSync(kitDir) &&
+        fs.statSync(kitDir).isDirectory()
+      ) {
         collectedSections.push(
-          ...buildScopedKitSections(workspacePath, ["task", "company-ops"], false, includeDesignSystem),
+          ...buildScopedKitSections(
+            workspacePath,
+            ["task", "company-ops"],
+            false,
+            includeDesignSystem,
+            opts?.readGuard,
+          ),
         );
-        collectedSections.push(...buildProjectContextSections(workspacePath, taskPrompt, agentRoleId));
-        collectedSections.push(...buildDailyLogSection(workspacePath, now));
+        collectedSections.push(
+          ...buildProjectContextSections(workspacePath, taskPrompt, agentRoleId, opts?.readGuard),
+        );
+        collectedSections.push(...buildDailyLogSection(workspacePath, now, opts?.readGuard));
       }
     } catch {
       // ignore

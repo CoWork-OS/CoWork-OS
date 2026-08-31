@@ -148,13 +148,7 @@ export function HighlightedCodeBlock({
   );
 }
 
-export function HighlightedCodePreview({
-  code,
-  language,
-}: {
-  code: string;
-  language?: string;
-}) {
+export function HighlightedCodePreview({ code, language }: { code: string; language?: string }) {
   const highlightedHtml = useMemo(() => highlightCode(code, language), [code, language]);
   if (highlightedHtml) {
     return (

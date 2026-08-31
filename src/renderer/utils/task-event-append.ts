@@ -21,11 +21,7 @@ const LARGE_EVENT_TYPES = new Set([
   "timeline_command_output",
   "timeline_step_updated",
 ]);
-const LARGE_LEGACY_TYPES = new Set([
-  "command_output",
-  "tool_call",
-  "tool_result",
-]);
+const LARGE_LEGACY_TYPES = new Set(["command_output", "tool_call", "tool_result"]);
 const MAX_LARGE_EVENT_STRING_CHARS = 32 * 1024;
 const MAX_COMMAND_OUTPUT_CHARS = 16 * 1024;
 
@@ -98,7 +94,10 @@ function trimRendererEventPayload(event: TaskEvent): TaskEvent {
   if (payloadBytes <= MAX_LARGE_EVENT_STRING_CHARS) return event;
   return {
     ...event,
-    payload: truncatePayloadStrings(event.payload, MAX_LARGE_EVENT_STRING_CHARS) as TaskEvent["payload"],
+    payload: truncatePayloadStrings(
+      event.payload,
+      MAX_LARGE_EVENT_STRING_CHARS,
+    ) as TaskEvent["payload"],
   };
 }
 
@@ -140,7 +139,11 @@ export function capTaskEvents(
       );
       const recent = eventsForByteCap.slice(index + 1);
       const keepIds = new Set(recent.map((event) => event.id));
-      for (let structuralIndex = structural.length - 1; structuralIndex >= 0; structuralIndex -= 1) {
+      for (
+        let structuralIndex = structural.length - 1;
+        structuralIndex >= 0;
+        structuralIndex -= 1
+      ) {
         if (keepIds.size >= maxEvents) break;
         keepIds.add(structural[structuralIndex].id);
       }

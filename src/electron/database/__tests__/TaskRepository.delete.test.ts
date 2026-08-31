@@ -207,7 +207,9 @@ describeWithSqlite("TaskRepository.delete", () => {
     ).toEqual({ task_id: null });
 
     expect(
-      db.prepare("SELECT task_id FROM council_memos WHERE council_run_id = ?").get(councilRunId) as {
+      db
+        .prepare("SELECT task_id FROM council_memos WHERE council_run_id = ?")
+        .get(councilRunId) as {
         task_id: string | null;
       },
     ).toEqual({ task_id: null });
@@ -351,17 +353,23 @@ describeWithSqlite("TaskRepository.delete", () => {
       },
     ).toEqual({ task_id: null });
     expect(
-      db.prepare("SELECT task_id FROM memory_observation_metadata WHERE memory_id = ?").get(memoryId) as {
+      db
+        .prepare("SELECT task_id FROM memory_observation_metadata WHERE memory_id = ?")
+        .get(memoryId) as {
         task_id: string | null;
       },
     ).toEqual({ task_id: null });
     expect(
-      db.prepare("SELECT backing_task_id FROM managed_sessions WHERE id = ?").get(managedSessionId) as {
+      db
+        .prepare("SELECT backing_task_id FROM managed_sessions WHERE id = ?")
+        .get(managedSessionId) as {
         backing_task_id: string | null;
       },
     ).toEqual({ backing_task_id: null });
     expect(
-      db.prepare("SELECT source_task_id FROM managed_session_events WHERE session_id = ?").get(managedSessionId) as {
+      db
+        .prepare("SELECT source_task_id FROM managed_session_events WHERE session_id = ?")
+        .get(managedSessionId) as {
         source_task_id: string | null;
       },
     ).toEqual({ source_task_id: null });
@@ -407,7 +415,9 @@ describeWithSqlite("TaskRepository.delete", () => {
       count: 0,
     });
     expect(
-      db.prepare("SELECT source_task_id FROM legacy_optional_task_refs WHERE id = ?").get(optionalRefId),
+      db
+        .prepare("SELECT source_task_id FROM legacy_optional_task_refs WHERE id = ?")
+        .get(optionalRefId),
     ).toEqual({ source_task_id: null });
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });

@@ -84,7 +84,9 @@ Managed-session broadcasts:
 Managed Agents is not a second executor. It maps onto the existing runtime:
 
 - `ManagedAgentVersion` becomes the source of truth for model, prompt, execution mode, and runtime defaults
-- `ManagedEnvironment` becomes the source of truth for workspace binding, tool policy, MCP scope, and execution affordances
+- `ManagedEnvironment` becomes the source of truth for workspace binding, access profile, tool
+  policy, MCP scope, and execution affordances. `config.accessProfileId` is the canonical way to
+  choose command, filesystem, network, sandbox, and approval behavior for managed sessions.
 - `ManagedSession` creates exactly one backing `Task`
 - team-mode `ManagedSession` also creates a backing `AgentTeamRun`
 - `task_events` and daemon notifications are mirrored into `managed_session_events`
@@ -145,6 +147,11 @@ Managed Agents follows the same security posture as the rest of CoWork, with a f
 - managed session events are sanitized before persistence and sanitized again on read
 - MCP allowlists fail closed if the referenced server or its cached tool metadata is unavailable
 - managed account refs are validated server-side at environment creation/update time
+- the effective access profile is resolved and enforced on the target environment before the
+  backing task starts; a missing or invalid named profile produces a read-only unavailable-profile
+  state instead of widening access
+- child work spawned by a managed session cannot select a profile broader than the managed
+  session's profile
 - legacy tasks, runs, and team APIs are unchanged for non-managed flows
 
 These rules keep the managed control-plane surface suitable for UI/backend consumption without exposing sensitive linkage or silently broadening tool access.
@@ -176,7 +183,7 @@ const environment = await request("managedEnvironment.create", {
   name: "Local Test Env",
   config: {
     workspaceId,
-    enableShell: true,
+    accessProfileId: "ask_for_approval",
     enableBrowser: true,
   },
 });
@@ -215,9 +222,9 @@ For team mode:
 - create a `ManagedAgent` with `executionMode: "team"`
 - create a managed session
 - observe the backing team run from Mission Control and task surfaces
-- expect `managedSession.sendEvent` with `user.message` to reject for team-mode sessions in V1
-
-That rejection is intentional until follow-up routing is wired cleanly into the team orchestration path.
+- send `managedSession.sendEvent` with `user.message` to route new guidance to the team root
+- observe the guidance in the root task timeline and in future pending/synthesis team prompts
+- fork a terminal team session when the user needs a new independent continuation
 
 ## Compatibility Contract
 
@@ -230,5 +237,10 @@ The additive contract is:
 - Agent Teams still work outside managed sessions
 - managed sessions reuse the daemon and runtime instead of bypassing them
 - managed resources add a new control-plane namespace; they do not replace existing APIs
+- `enableShell` may still be present in older persisted environment configurations, but it is a
+  compatibility field only. New and edited environments should set `config.accessProfileId`; the
+  Agents Hub does not expose a separate shell toggle.
+
+See [Access Profiles](access-profiles.md#surfaces-and-inheritance) for the cross-surface contract.
 
 When changing this system, preserve that boundary and update the tests that prove it.

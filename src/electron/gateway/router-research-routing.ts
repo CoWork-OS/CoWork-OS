@@ -27,14 +27,8 @@ export function applyResearchChatRouting(params: {
   currentAgentRoleId?: string;
   roleExists: (id: string) => boolean;
 }): ResearchRoutingResult | null {
-  const {
-    channelType,
-    channelConfig,
-    chatId,
-    originalText,
-    currentAgentRoleId,
-    roleExists,
-  } = params;
+  const { channelType, channelConfig, chatId, originalText, currentAgentRoleId, roleExists } =
+    params;
 
   if (channelType !== "telegram" && channelType !== "whatsapp") {
     return null;
@@ -57,9 +51,9 @@ export function applyResearchChatRouting(params: {
   const roleId =
     typeof researchAgentRoleId === "string" && researchAgentRoleId.trim()
       ? researchAgentRoleId
-      : (typeof channelConfig.defaultAgentRoleId === "string"
-          ? channelConfig.defaultAgentRoleId
-          : undefined);
+      : typeof channelConfig.defaultAgentRoleId === "string"
+        ? channelConfig.defaultAgentRoleId
+        : undefined;
 
   const agentRoleId = roleId && roleExists(roleId) ? roleId : undefined;
 

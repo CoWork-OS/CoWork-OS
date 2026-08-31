@@ -129,7 +129,11 @@
 .task-trace-debugger-main {
   border: 1px solid var(--color-border);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-bg-secondary) 70%, transparent), transparent 180px),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-bg-secondary) 70%, transparent),
+      transparent 180px
+    ),
     var(--color-bg-primary);
   border-radius: 18px;
   box-shadow: 0 16px 40px color-mix(in srgb, var(--color-shadow) 8%, transparent);
@@ -350,7 +354,10 @@
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
 }
 
 .task-trace-run-chip.active {
@@ -458,25 +465,57 @@
 }
 
 /* --- Strip segment tones (translucent is fine) --- */
-.task-trace-strip-segment.tone-user { background: color-mix(in srgb, #ec4899 54%, transparent); }
-.task-trace-strip-segment.tone-agent { background: color-mix(in srgb, var(--color-accent) 70%, transparent); }
-.task-trace-strip-segment.tone-tool { background: color-mix(in srgb, #38bdf8 62%, transparent); }
-.task-trace-strip-segment.tone-model { background: color-mix(in srgb, #f59e0b 62%, transparent); }
+.task-trace-strip-segment.tone-user {
+  background: color-mix(in srgb, #ec4899 54%, transparent);
+}
+.task-trace-strip-segment.tone-agent {
+  background: color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+.task-trace-strip-segment.tone-tool {
+  background: color-mix(in srgb, #38bdf8 62%, transparent);
+}
+.task-trace-strip-segment.tone-model {
+  background: color-mix(in srgb, #f59e0b 62%, transparent);
+}
 .task-trace-strip-segment.tone-result,
-.task-trace-strip-segment.tone-success { background: color-mix(in srgb, var(--color-success) 64%, transparent); }
-.task-trace-strip-segment.tone-system { background: color-mix(in srgb, var(--color-border) 82%, transparent); }
-.task-trace-strip-segment.tone-active { background: color-mix(in srgb, var(--color-accent) 64%, transparent); }
-.task-trace-strip-segment.tone-error { background: color-mix(in srgb, var(--color-danger) 74%, transparent); }
+.task-trace-strip-segment.tone-success {
+  background: color-mix(in srgb, var(--color-success) 64%, transparent);
+}
+.task-trace-strip-segment.tone-system {
+  background: color-mix(in srgb, var(--color-border) 82%, transparent);
+}
+.task-trace-strip-segment.tone-active {
+  background: color-mix(in srgb, var(--color-accent) 64%, transparent);
+}
+.task-trace-strip-segment.tone-error {
+  background: color-mix(in srgb, var(--color-danger) 74%, transparent);
+}
 
 /* --- Feed label tones (opaque for white text readability) --- */
-.task-trace-feed-label.tone-user { background: #d946a8; }
-.task-trace-feed-label.tone-agent { background: color-mix(in srgb, var(--color-accent) 82%, #333); }
-.task-trace-feed-label.tone-tool { background: #1a8fc4; }
-.task-trace-feed-label.tone-model { background: #c27d08; }
-.task-trace-feed-label.tone-result { background: color-mix(in srgb, var(--color-success) 82%, #333); }
-.task-trace-feed-label.tone-system { background: color-mix(in srgb, var(--color-text-secondary) 60%, var(--color-border)); }
-.task-trace-feed-label.tone-active { background: color-mix(in srgb, var(--color-accent) 80%, #333); }
-.task-trace-feed-label.tone-error { background: color-mix(in srgb, var(--color-danger) 86%, #333); }
+.task-trace-feed-label.tone-user {
+  background: #d946a8;
+}
+.task-trace-feed-label.tone-agent {
+  background: color-mix(in srgb, var(--color-accent) 82%, #333);
+}
+.task-trace-feed-label.tone-tool {
+  background: #1a8fc4;
+}
+.task-trace-feed-label.tone-model {
+  background: #c27d08;
+}
+.task-trace-feed-label.tone-result {
+  background: color-mix(in srgb, var(--color-success) 82%, #333);
+}
+.task-trace-feed-label.tone-system {
+  background: color-mix(in srgb, var(--color-text-secondary) 60%, var(--color-border));
+}
+.task-trace-feed-label.tone-active {
+  background: color-mix(in srgb, var(--color-accent) 80%, #333);
+}
+.task-trace-feed-label.tone-error {
+  background: color-mix(in srgb, var(--color-danger) 86%, #333);
+}
 
 .task-trace-content {
   display: grid;

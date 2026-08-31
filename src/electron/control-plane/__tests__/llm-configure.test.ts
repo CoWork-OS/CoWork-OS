@@ -24,11 +24,9 @@ describe("configureLlmFromControlPlaneParams", () => {
         },
       }),
     );
-    vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(
-      (settings: Any) => {
-        savedSettings = settings;
-      },
-    );
+    vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation((settings: Any) => {
+      savedSettings = settings;
+    });
     vi.spyOn(LLMProviderFactory, "getConfigStatus").mockReturnValue({
       currentProvider: "openrouter",
       currentModel: "openrouter/pareto-code",

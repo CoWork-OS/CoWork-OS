@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { HeartbeatPulseEngine, getSignalStrength, type HeartbeatPulseInput } from "../HeartbeatPulseEngine";
+import {
+  HeartbeatPulseEngine,
+  getSignalStrength,
+  type HeartbeatPulseInput,
+} from "../HeartbeatPulseEngine";
 import type { AgentRole, HeartbeatSignal } from "../../../shared/types";
 
 function makeAgent(overrides: Partial<AgentRole> = {}): AgentRole {
@@ -119,9 +123,7 @@ describe("HeartbeatPulseEngine.evaluate", () => {
   });
 
   it("returns idle when cooldown is active", () => {
-    const decision = engine.evaluate(
-      baseInput({ cooldownUntil: Date.now() + 60_000 }),
-    );
+    const decision = engine.evaluate(baseInput({ cooldownUntil: Date.now() + 60_000 }));
     expect(decision.kind).toBe("idle");
     expect(decision.reason).toMatch(/cooldown/i);
   });
@@ -138,9 +140,7 @@ describe("HeartbeatPulseEngine.evaluate", () => {
   });
 
   it("returns idle when daily budget is exhausted", () => {
-    const decision = engine.evaluate(
-      baseInput({ dispatchesToday: 6, maxDispatchesPerDay: 6 }),
-    );
+    const decision = engine.evaluate(baseInput({ dispatchesToday: 6, maxDispatchesPerDay: 6 }));
     expect(decision.kind).toBe("idle");
     expect(decision.reason).toMatch(/budget/i);
   });
@@ -168,18 +168,14 @@ describe("HeartbeatPulseEngine.evaluate", () => {
   });
 
   it("dispatcher with pending mentions → dispatch_task", () => {
-    const decision = engine.evaluate(
-      baseInput({ pendingMentions: 2 }),
-    );
+    const decision = engine.evaluate(baseInput({ pendingMentions: 2 }));
     expect(decision.kind).toBe("dispatch_task");
     expect(decision.dispatchKind).toBe("task");
   });
 
   it("non-dispatcher with pending mentions → suggestion", () => {
     const agent = makeAgent({ heartbeatProfile: "operator" });
-    const decision = engine.evaluate(
-      baseInput({ agent, pendingMentions: 1 }),
-    );
+    const decision = engine.evaluate(baseInput({ agent, pendingMentions: 1 }));
     expect(decision.kind).toBe("suggestion");
     expect(decision.dispatchKind).toBe("suggestion");
   });

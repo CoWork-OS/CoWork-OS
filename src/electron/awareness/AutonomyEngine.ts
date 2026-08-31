@@ -50,10 +50,7 @@ interface AutonomyEngineDeps {
 }
 
 function hashFingerprint(parts: Array<string | number | undefined>): string {
-  return createHash("sha1")
-    .update(parts.filter(Boolean).join("|"))
-    .digest("hex")
-    .slice(0, 20);
+  return createHash("sha1").update(parts.filter(Boolean).join("|")).digest("hex").slice(0, 20);
 }
 
 function clampConfidence(value: number): number {
@@ -181,7 +178,10 @@ export class AutonomyEngine {
     return this.state.actions
       .filter((action) => !workspaceId || action.workspaceId === workspaceId)
       .sort((a, b) => b.createdAt - a.createdAt)
-      .map((action) => ({ ...action, metadata: action.metadata ? { ...action.metadata } : undefined }));
+      .map((action) => ({
+        ...action,
+        metadata: action.metadata ? { ...action.metadata } : undefined,
+      }));
   }
 
   listOutcomes(workspaceId?: string): AutonomyOutcome[] {
@@ -288,11 +288,13 @@ export class AutonomyEngine {
     this.ensureLoaded();
     if (!this.state.config.enabled) return;
     const workspaceIds = Array.from(
-      new Set([
-        ...(this.deps.listWorkspaceIds?.() || []),
-        ...Object.keys(this.state.worldModels),
-        this.deps.getDefaultWorkspaceId?.() || "",
-      ].filter(Boolean)),
+      new Set(
+        [
+          ...(this.deps.listWorkspaceIds?.() || []),
+          ...Object.keys(this.state.worldModels),
+          this.deps.getDefaultWorkspaceId?.() || "",
+        ].filter(Boolean),
+      ),
     ).slice(0, 12);
 
     for (const workspaceId of workspaceIds) {
@@ -329,7 +331,12 @@ export class AutonomyEngine {
     const now = Date.now();
 
     const goals = this.deriveGoals(workspaceId, summary.beliefs, profile.facts);
-    const projects = this.deriveProjects(workspaceId, snapshot.recentProjects, snapshot.recentFiles, summary.beliefs);
+    const projects = this.deriveProjects(
+      workspaceId,
+      snapshot.recentProjects,
+      snapshot.recentFiles,
+      summary.beliefs,
+    );
     const openLoops = this.deriveOpenLoops(workspaceId);
     const routines = this.deriveRoutines(workspaceId, summary.beliefs, summary.whatChanged);
     const focusSession = this.deriveFocusSession(workspaceId, snapshot, summary);
@@ -363,7 +370,13 @@ export class AutonomyEngine {
   private deriveGoals(
     workspaceId: string,
     beliefs: AwarenessBelief[],
-    facts: Array<{ id: string; category: string; value: string; confidence: number; lastUpdatedAt: number }>,
+    facts: Array<{
+      id: string;
+      category: string;
+      value: string;
+      confidence: number;
+      lastUpdatedAt: number;
+    }>,
   ): GoalState[] {
     const items: GoalState[] = [];
     for (const fact of facts.filter((entry) => entry.category === "goal").slice(0, 6)) {
@@ -449,7 +462,9 @@ export class AutonomyEngine {
     whatChanged: Array<{ id: string; title: string; detail: string; tags: string[] }>,
   ): RoutineState[] {
     const items: RoutineState[] = beliefs
-      .filter((entry) => entry.beliefType === "workflow_habit" || entry.beliefType === "device_context")
+      .filter(
+        (entry) => entry.beliefType === "workflow_habit" || entry.beliefType === "device_context",
+      )
       .slice(0, 8)
       .map((belief) => ({
         id: `routine-${belief.id}`,
@@ -459,7 +474,8 @@ export class AutonomyEngine {
         confidence: clampConfidence(belief.confidence),
         source: belief.source,
         evidenceRefs: [...belief.evidenceRefs],
-        trigger: belief.subject === "task_pattern" ? "repeated task completion" : "repeated context",
+        trigger:
+          belief.subject === "task_pattern" ? "repeated task completion" : "repeated context",
         suggestedActionType:
           belief.subject === "task_pattern" ? "create_task" : "organize_work_session",
         cooldownMinutes: 180,
@@ -467,7 +483,11 @@ export class AutonomyEngine {
         lastExecutedAt: this.findLastExecutedAt(`routine-${belief.id}`),
       }));
 
-    if (whatChanged.some((item) => item.tags.includes("focus") && /code|editor|vscode|cursor/i.test(item.detail))) {
+    if (
+      whatChanged.some(
+        (item) => item.tags.includes("focus") && /code|editor|vscode|cursor/i.test(item.detail),
+      )
+    ) {
       items.push({
         id: `routine-editor-${workspaceId}`,
         workspaceId,
@@ -475,7 +495,9 @@ export class AutonomyEngine {
         description: "User shifted into editor-focused work and likely needs active work context.",
         confidence: 0.68,
         source: "apps",
-        evidenceRefs: whatChanged.filter((item) => item.tags.includes("focus")).map((item) => item.id),
+        evidenceRefs: whatChanged
+          .filter((item) => item.tags.includes("focus"))
+          .map((item) => item.id),
         trigger: "focus enters editor work",
         suggestedActionType: "organize_work_session",
         cooldownMinutes: 120,
@@ -488,8 +510,16 @@ export class AutonomyEngine {
 
   private deriveFocusSession(
     workspaceId: string,
-    snapshot: ReturnType<typeof getAwarenessService>["getSnapshot"] extends (...args: never[]) => infer T ? T : never,
-    summary: ReturnType<typeof getAwarenessService>["getSummary"] extends (...args: never[]) => infer T ? T : never,
+    snapshot: ReturnType<typeof getAwarenessService>["getSnapshot"] extends (
+      ...args: never[]
+    ) => infer T
+      ? T
+      : never,
+    summary: ReturnType<typeof getAwarenessService>["getSummary"] extends (
+      ...args: never[]
+    ) => infer T
+      ? T
+      : never,
   ): FocusSessionState | undefined {
     if (!snapshot.currentFocus && !snapshot.activeApp) return undefined;
     const label = snapshot.currentFocus || snapshot.activeApp || "Current work";
@@ -500,7 +530,11 @@ export class AutonomyEngine {
       activeApp: snapshot.activeApp,
       activeWindowTitle: snapshot.activeWindowTitle,
       activeProject: snapshot.recentProjects[0],
-      mode: this.classifyFocusMode(snapshot.activeApp, snapshot.activeWindowTitle, summary.currentFocus),
+      mode: this.classifyFocusMode(
+        snapshot.activeApp,
+        snapshot.activeWindowTitle,
+        summary.currentFocus,
+      ),
       startedAt: Date.now() - 5 * 60 * 1000,
       lastActiveAt: Date.now(),
     };
@@ -562,7 +596,8 @@ export class AutonomyEngine {
 
     for (const openLoop of worldModel.openLoops.slice(0, 2)) {
       if (openLoop.status !== "open") continue;
-      const isUrgent = typeof openLoop.dueAt === "number" && openLoop.dueAt - now <= 24 * 60 * 60 * 1000;
+      const isUrgent =
+        typeof openLoop.dueAt === "number" && openLoop.dueAt - now <= 24 * 60 * 60 * 1000;
       pushDecision(
         `Follow up on: ${openLoop.title}`.slice(0, 100),
         openLoop.dueAt
@@ -592,7 +627,9 @@ export class AutonomyEngine {
       );
     }
 
-    const routine = worldModel.routines.find((item) => !item.paused && this.isRoutineReady(item, now));
+    const routine = worldModel.routines.find(
+      (item) => !item.paused && this.isRoutineReady(item, now),
+    );
     if (routine) {
       pushDecision(
         `Prepare routine context: ${routine.title}`.slice(0, 100),
@@ -625,7 +662,9 @@ export class AutonomyEngine {
 
   private mergeDecisions(decisions: AutonomyDecision[]): void {
     if (decisions.length === 0) return;
-    const fresh = decisions.filter((decision) => !this.hasActiveDecisionFingerprint(decision.fingerprint, decision.createdAt));
+    const fresh = decisions.filter(
+      (decision) => !this.hasActiveDecisionFingerprint(decision.fingerprint, decision.createdAt),
+    );
     if (fresh.length === 0) return;
     this.state.decisions = [...fresh, ...this.state.decisions]
       .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -791,7 +830,9 @@ export class AutonomyEngine {
     const seen = new Set<string>();
     const output: T[] = [];
     for (const item of items) {
-      const label = String(item.title || item.name || "").trim().toLowerCase();
+      const label = String(item.title || item.name || "")
+        .trim()
+        .toLowerCase();
       if (!label || seen.has(label)) continue;
       seen.add(label);
       output.push(item);

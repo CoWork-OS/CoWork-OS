@@ -384,9 +384,7 @@ describe("LLMProviderFactory custom provider config resolution", () => {
       }),
     );
 
-    const body = JSON.parse(
-      String(fetchSpy.mock.calls[0]?.[1]?.body || "{}"),
-    );
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body || "{}"));
     expect(body).toMatchObject({
       model: "qwen3.7-max",
       max_tokens: 4096,
@@ -426,9 +424,7 @@ describe("LLMProviderFactory custom provider config resolution", () => {
       }),
     );
 
-    const body = JSON.parse(
-      String(fetchSpy.mock.calls[0]?.[1]?.body || "{}"),
-    );
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body || "{}"));
     expect(body).toMatchObject({
       model: "qwen3.7-max",
       max_tokens: 10,
@@ -508,12 +504,10 @@ describe("LLMProviderFactory custom provider config resolution", () => {
       content: [{ type: "text", text: "ok" }],
     });
 
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
-      "https://opencode.ai/zen/go/v1/messages",
-    );
-    expect(
-      JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body || "{}")),
-    ).toMatchObject({ model: "qwen3.7-max" });
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://opencode.ai/zen/go/v1/messages");
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body || "{}"))).toMatchObject({
+      model: "qwen3.7-max",
+    });
 
     fetchSpy.mockClear();
     fetchSpy.mockResolvedValue({
@@ -541,12 +535,10 @@ describe("LLMProviderFactory custom provider config resolution", () => {
       content: [{ type: "text", text: "ok" }],
     });
 
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
-      "https://opencode.ai/zen/go/v1/chat/completions",
-    );
-    expect(
-      JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body || "{}")),
-    ).toMatchObject({ model: "kimi-k2.6" });
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://opencode.ai/zen/go/v1/chat/completions");
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body || "{}"))).toMatchObject({
+      model: "kimi-k2.6",
+    });
   });
 
   it("adapts OpenCode Go Kimi tool turns to the raw chat completions API", async () => {
@@ -569,9 +561,7 @@ describe("LLMProviderFactory custom provider config resolution", () => {
         model: "opencode-go/kimi-k2.6",
         system: "Use tools when useful.",
         maxTokens: 48000,
-        messages: [
-          { role: "user", content: "Search for current design skills" },
-        ],
+        messages: [{ role: "user", content: "Search for current design skills" }],
         tools: [
           {
             name: "web_search",
@@ -601,9 +591,7 @@ describe("LLMProviderFactory custom provider config resolution", () => {
       }),
     );
 
-    const body = JSON.parse(
-      String(fetchSpy.mock.calls[0]?.[1]?.body || "{}"),
-    );
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body || "{}"));
     expect(body).toMatchObject({
       model: "kimi-k2.6",
       max_completion_tokens: 32768,

@@ -44,7 +44,9 @@ describe("renderer perf replay fixture", () => {
     const replayedEvents: typeof taskSurfacePerfFixtureEvents = [];
 
     for (const batchIds of taskSurfacePerfFixtureBatches) {
-      const batchEvents = batchIds.map((id) => byId.get(id)).filter(Boolean) as typeof taskSurfacePerfFixtureEvents;
+      const batchEvents = batchIds
+        .map((id) => byId.get(id))
+        .filter(Boolean) as typeof taskSurfacePerfFixtureEvents;
       batchEvents.forEach((event) => noteRendererTaskEventReceived(event, true));
       noteRendererTaskEventsAppendDispatched(batchEvents, true);
       replayedEvents.push(...batchEvents);
@@ -62,10 +64,7 @@ describe("renderer perf replay fixture", () => {
 
       const feedRows = shared.baseTimelineItems.map((item, index) => ({
         kind: "timeline" as const,
-        key:
-          item.kind === "event"
-            ? `event:${item.event.id}`
-            : `action-block:${item.blockId}`,
+        key: item.kind === "event" ? `event:${item.event.id}` : `action-block:${item.blockId}`,
         estimatedHeight: 120,
         timelineIndex: index,
         item,
@@ -74,9 +73,7 @@ describe("renderer perf replay fixture", () => {
             ? `${item.event.id}:${item.event.type}`
             : `${item.blockId}:${item.events[item.events.length - 1]?.id ?? "none"}`,
         visiblePerfEventId:
-          item.kind === "event"
-            ? item.event.id
-            : item.events[item.events.length - 1]?.id ?? null,
+          item.kind === "event" ? item.event.id : (item.events[item.events.length - 1]?.id ?? null),
       }));
       const visible = selectVisibleTaskFeedRows(feedRows as Any, "live");
       for (const row of visible.visibleFeedRows) {
@@ -86,12 +83,14 @@ describe("renderer perf replay fixture", () => {
       }
     }
 
-    const state = (globalThis.window as Window & {
-      __coworkRendererPerfState__?: {
-        metrics: Map<string, { samples: number[] }>;
-        counters: Map<string, { value: number }>;
-      };
-    }).__coworkRendererPerfState__;
+    const state = (
+      globalThis.window as Window & {
+        __coworkRendererPerfState__?: {
+          metrics: Map<string, { samples: number[] }>;
+          counters: Map<string, { value: number }>;
+        };
+      }
+    ).__coworkRendererPerfState__;
 
     expect(state).toBeDefined();
 
@@ -105,7 +104,8 @@ describe("renderer perf replay fixture", () => {
       ...(state?.metrics.get("task-event.appended_to_visible_ms")?.samples ?? []),
     ];
     const visibleSignalCount = state?.counters.get("task-event.visible_signal_count")?.value ?? 0;
-    const visibleRecordedCount = state?.counters.get("task-event.visible_recorded_count")?.value ?? 0;
+    const visibleRecordedCount =
+      state?.counters.get("task-event.visible_recorded_count")?.value ?? 0;
 
     expect(visibleSamples.length).toBeGreaterThan(0);
     expect(appendedVisibleSamples.length).toBeGreaterThan(0);
@@ -132,10 +132,7 @@ describe("renderer perf replay fixture", () => {
 
     const feedRows = shared.baseTimelineItems.map((item, index) => ({
       kind: "timeline" as const,
-      key:
-        item.kind === "event"
-          ? `event:${item.event.id}`
-          : `action-block:${item.blockId}`,
+      key: item.kind === "event" ? `event:${item.event.id}` : `action-block:${item.blockId}`,
       estimatedHeight: 120,
       timelineIndex: index,
       item,
@@ -144,9 +141,7 @@ describe("renderer perf replay fixture", () => {
           ? `${item.event.id}:${item.event.type}`
           : `${item.blockId}:${item.events[item.events.length - 1]?.id ?? "none"}`,
       visiblePerfEventId:
-        item.kind === "event"
-          ? item.event.id
-          : item.events[item.events.length - 1]?.id ?? null,
+        item.kind === "event" ? item.event.id : (item.events[item.events.length - 1]?.id ?? null),
     }));
     const visible = selectVisibleTaskFeedRows(feedRows as Any, "live");
 

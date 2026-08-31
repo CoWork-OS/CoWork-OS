@@ -12,18 +12,12 @@ export function extractYouTubeVideoId(input: string): string | null {
       const id = parsed.pathname.split("/").filter(Boolean)[0] || "";
       return YOUTUBE_ID_PATTERN.test(id) ? id : null;
     }
-    if (
-      host === "youtube.com" ||
-      host === "m.youtube.com" ||
-      host === "music.youtube.com"
-    ) {
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
       const watchId = parsed.searchParams.get("v") || "";
       if (YOUTUBE_ID_PATTERN.test(watchId)) return watchId;
       const parts = parsed.pathname.split("/").filter(Boolean);
       const candidate =
-        parts[0] === "embed" || parts[0] === "shorts" || parts[0] === "live"
-          ? parts[1] || ""
-          : "";
+        parts[0] === "embed" || parts[0] === "shorts" || parts[0] === "live" ? parts[1] || "" : "";
       return YOUTUBE_ID_PATTERN.test(candidate) ? candidate : null;
     }
   } catch {

@@ -8,11 +8,15 @@ export function normalizePermissionPath(input: string): string {
 }
 
 export function normalizeCommandPrefix(input: string): string {
-  return String(input || "").replace(/\s+/g, " ").trim();
+  return String(input || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function normalizeServerName(input: string): string {
-  return String(input || "").trim().toLowerCase();
+  return String(input || "")
+    .trim()
+    .toLowerCase();
 }
 
 export function normalizePermissionScope(scope: PermissionRuleScope): PermissionRuleScope {
@@ -20,7 +24,9 @@ export function normalizePermissionScope(scope: PermissionRuleScope): Permission
     case "domain":
       return {
         kind: "domain",
-        domain: String(scope.domain || "").trim().toLowerCase(),
+        domain: String(scope.domain || "")
+          .trim()
+          .toLowerCase(),
         ...(scope.toolName ? { toolName: String(scope.toolName || "").trim() } : {}),
         ...(scope.toolPrefix ? { toolPrefix: String(scope.toolPrefix || "").trim() } : {}),
       };

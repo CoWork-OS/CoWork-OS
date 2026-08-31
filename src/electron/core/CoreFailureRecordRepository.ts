@@ -1,44 +1,41 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
-import type {
-  CoreFailureRecord,
-  ListCoreFailureRecordsRequest,
-} from "../../shared/types";
+import type { CoreFailureRecord, ListCoreFailureRecordsRequest } from "../../shared/types";
 
 type Any = any;
 
 export class CoreFailureRecordRepository {
   constructor(private readonly db: Database.Database) {}
 
-  create(
-    input: Omit<CoreFailureRecord, "id"> & { id?: string },
-  ): CoreFailureRecord {
+  create(input: Omit<CoreFailureRecord, "id"> & { id?: string }): CoreFailureRecord {
     const record: CoreFailureRecord = {
       ...input,
       id: input.id || randomUUID(),
     };
-    this.db.prepare(
-      `INSERT OR REPLACE INTO core_failure_records (
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO core_failure_records (
         id, trace_id, profile_id, workspace_id, target_key, category, severity, fingerprint,
         summary, details, status, source_surface, task_id, created_at, resolved_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      record.id,
-      record.traceId,
-      record.profileId,
-      record.workspaceId || null,
-      record.targetKey || null,
-      record.category,
-      record.severity,
-      record.fingerprint,
-      record.summary,
-      record.details || null,
-      record.status,
-      record.sourceSurface,
-      record.taskId || null,
-      record.createdAt,
-      record.resolvedAt || null,
-    );
+      )
+      .run(
+        record.id,
+        record.traceId,
+        record.profileId,
+        record.workspaceId || null,
+        record.targetKey || null,
+        record.category,
+        record.severity,
+        record.fingerprint,
+        record.summary,
+        record.details || null,
+        record.status,
+        record.sourceSurface,
+        record.taskId || null,
+        record.createdAt,
+        record.resolvedAt || null,
+      );
     return record;
   }
 
@@ -48,9 +45,9 @@ export class CoreFailureRecordRepository {
   }
 
   findByTraceId(traceId: string): CoreFailureRecord[] {
-    const rows = this.db.prepare(
-      "SELECT * FROM core_failure_records WHERE trace_id = ? ORDER BY created_at DESC",
-    ).all(traceId) as Any[];
+    const rows = this.db
+      .prepare("SELECT * FROM core_failure_records WHERE trace_id = ? ORDER BY created_at DESC")
+      .all(traceId) as Any[];
     return rows.map((row) => this.mapRow(row));
   }
 
@@ -79,9 +76,9 @@ export class CoreFailureRecordRepository {
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = Math.max(1, Math.min(500, request.limit ?? 100));
-    const rows = this.db.prepare(
-      `SELECT * FROM core_failure_records ${where} ORDER BY created_at DESC LIMIT ?`,
-    ).all(...values, limit) as Any[];
+    const rows = this.db
+      .prepare(`SELECT * FROM core_failure_records ${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...values, limit) as Any[];
     return rows.map((row) => this.mapRow(row));
   }
 
@@ -113,7 +110,9 @@ export class CoreFailureRecordRepository {
     }
     if (!fields.length) return existing;
     values.push(id);
-    this.db.prepare(`UPDATE core_failure_records SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    this.db
+      .prepare(`UPDATE core_failure_records SET ${fields.join(", ")} WHERE id = ?`)
+      .run(...values);
     return this.findById(id);
   }
 

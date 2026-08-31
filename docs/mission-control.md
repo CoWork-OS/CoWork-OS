@@ -6,6 +6,12 @@ Heartbeat v3 is the default background automation model exposed here. Mission Co
 
 Access it from **Settings** > **Mission Control**. For company-ops workflows, you can also jump into it directly from **Settings** > **Companies** with the selected company preloaded.
 
+Mission Control observes and configures tasks; it is not a second permission
+plane. When creating or editing an agent or automation, review the attached
+[access profile](access-profiles.md) alongside its autonomy, tool, connector,
+and workspace settings. Planner, Heartbeat, and dispatch policies can narrow
+or defer work, but they cannot widen the profile or revive an unavailable one.
+
 <p align="center">
   <img src="../resources/branding/images/cowork-os-8.webp" alt="Mission Control board" width="700">
   <br><em>Mission Control brings global runtime queue state, assigned board work, live feed, and review state into one operations view.</em>

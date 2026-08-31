@@ -202,13 +202,11 @@ export interface SessionRuntimeSnapshotV2 {
   };
   queues: {
     pendingFollowUps: TaskFollowUpInput[];
-    stepFeedbackSignal:
-      | {
-          stepId: string;
-          action: "retry" | "skip" | "stop" | "drift";
-          message?: string;
-        }
-      | null;
+    stepFeedbackSignal: {
+      stepId: string;
+      action: "retry" | "skip" | "stop" | "drift";
+      message?: string;
+    } | null;
   };
   skills: {
     pendingParameterCollection: PendingSkillParameterCollection | null;
@@ -276,15 +274,13 @@ export interface SessionRuntimeState {
     discoveredDeferredToolNames: Set<string>;
     availableToolsCacheKey: string | null;
     availableToolsCache: Any[] | null;
-    lastWebFetchFailure:
-      | {
-          timestamp: number;
-          tool: "web_fetch" | "http_request";
-          url?: string;
-          error?: string;
-          status?: number;
-        }
-      | null;
+    lastWebFetchFailure: {
+      timestamp: number;
+      tool: "web_fetch" | "http_request";
+      url?: string;
+      error?: string;
+      status?: number;
+    } | null;
   };
   files: {
     fileOperationTracker: FileOperationTracker;
@@ -329,13 +325,11 @@ export interface SessionRuntimeState {
   };
   queues: {
     pendingFollowUps: TaskFollowUpInput[];
-    stepFeedbackSignal:
-      | {
-          stepId: string;
-          action: "retry" | "skip" | "stop" | "drift";
-          message?: string;
-        }
-      | null;
+    stepFeedbackSignal: {
+      stepId: string;
+      action: "retry" | "skip" | "stop" | "drift";
+      message?: string;
+    } | null;
   };
   skills: {
     pendingParameterCollection: PendingSkillParameterCollection | null;
@@ -437,7 +431,10 @@ export interface SessionRuntimeDeps {
     hasTools: boolean,
     maxTokensBudget: number,
   ) => number;
-  callLLMWithRetry: (requestFn: (attempt: number) => Promise<Any>, operation: string) => Promise<Any>;
+  callLLMWithRetry: (
+    requestFn: (attempt: number) => Promise<Any>,
+    operation: string,
+  ) => Promise<Any>;
   createMessageWithTimeout: (request: Any, timeoutMs: number, operation: string) => Promise<Any>;
   log: (message: string) => void;
   getTaskEvents: () => TaskEvent[];
@@ -512,15 +509,16 @@ export class SessionRuntime {
   createTaskList(items: SessionChecklistToolItemInput[]): SessionChecklistState {
     if (this.state.checklist.items.length > 0) {
       const existingBySignature = new Map(
-        this.state.checklist.items.map((item) => [
-          `${item.title.toLowerCase()}\u0000${item.kind}`,
-          item.id,
-        ] as const),
+        this.state.checklist.items.map(
+          (item) => [`${item.title.toLowerCase()}\u0000${item.kind}`, item.id] as const,
+        ),
       );
       const mergedItems = (Array.isArray(items) ? items : []).map((item) => {
         const explicitId = String(item?.id || "").trim();
         if (explicitId) return item;
-        const title = String(item?.title || "").trim().toLowerCase();
+        const title = String(item?.title || "")
+          .trim()
+          .toLowerCase();
         const kind: SessionChecklistItem["kind"] =
           item?.kind === "verification" || item?.kind === "other" || item?.kind === "implementation"
             ? item.kind
@@ -550,7 +548,10 @@ export class SessionRuntime {
   }
 
   clearTaskListVerificationNudge(): void {
-    if (!this.state.checklist.verificationNudgeNeeded && !this.taskListVerificationReminderPending) {
+    if (
+      !this.state.checklist.verificationNudgeNeeded &&
+      !this.taskListVerificationReminderPending
+    ) {
       return;
     }
     this.state.checklist.verificationNudgeNeeded = false;
@@ -720,59 +721,63 @@ export class SessionRuntime {
     return snapshot;
   }
 
-  private normalizeTaskListItems(
-    items: SessionChecklistToolItemInput[],
-  ): SessionChecklistItem[] {
+  private normalizeTaskListItems(items: SessionChecklistToolItemInput[]): SessionChecklistItem[] {
     const rawItems = Array.isArray(items) ? items : [];
     if (rawItems.length === 0) {
       throw new Error("Session checklist must contain at least one item.");
     }
 
     const seenIds = new Set<string>();
-    const existingById = new Map(this.state.checklist.items.map((item) => [item.id, item] as const));
+    const existingById = new Map(
+      this.state.checklist.items.map((item) => [item.id, item] as const),
+    );
     let inProgressCount = 0;
     const now = Date.now();
 
-    return rawItems.map((rawItem, index) => {
-      const title = String(rawItem?.title || "").trim();
-      if (!title) {
-        throw new Error(`Checklist item ${index + 1} is missing a title.`);
-      }
+    return rawItems
+      .map((rawItem, index) => {
+        const title = String(rawItem?.title || "").trim();
+        if (!title) {
+          throw new Error(`Checklist item ${index + 1} is missing a title.`);
+        }
 
-      const status = String(rawItem?.status || "").trim() as SessionChecklistItem["status"];
-      if (!["pending", "in_progress", "completed", "blocked"].includes(status)) {
-        throw new Error(`Checklist item "${title}" has an invalid status.`);
-      }
-      if (status === "in_progress") {
-        inProgressCount += 1;
-      }
+        const status = String(rawItem?.status || "").trim() as SessionChecklistItem["status"];
+        if (!["pending", "in_progress", "completed", "blocked"].includes(status)) {
+          throw new Error(`Checklist item "${title}" has an invalid status.`);
+        }
+        if (status === "in_progress") {
+          inProgressCount += 1;
+        }
 
-      const kind = (rawItem?.kind || "implementation") as SessionChecklistItem["kind"];
-      if (!["implementation", "verification", "other"].includes(kind)) {
-        throw new Error(`Checklist item "${title}" has an invalid kind.`);
-      }
+        const kind = (rawItem?.kind || "implementation") as SessionChecklistItem["kind"];
+        if (!["implementation", "verification", "other"].includes(kind)) {
+          throw new Error(`Checklist item "${title}" has an invalid kind.`);
+        }
 
-      const normalizedId = String(rawItem?.id || "").trim() || `task_item_${randomUUID()}`;
-      if (seenIds.has(normalizedId)) {
-        throw new Error(`Checklist contains duplicate item id "${normalizedId}".`);
-      }
-      seenIds.add(normalizedId);
+        const normalizedId = String(rawItem?.id || "").trim() || `task_item_${randomUUID()}`;
+        if (seenIds.has(normalizedId)) {
+          throw new Error(`Checklist contains duplicate item id "${normalizedId}".`);
+        }
+        seenIds.add(normalizedId);
 
-      const existing = existingById.get(normalizedId);
-      return {
-        id: normalizedId,
-        title,
-        kind,
-        status,
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      };
-    }).map((item, index, list) => {
-      if (index === list.length - 1 && inProgressCount > 1) {
-        throw new Error("Session checklist may contain at most one item with status in_progress.");
-      }
-      return item;
-    });
+        const existing = existingById.get(normalizedId);
+        return {
+          id: normalizedId,
+          title,
+          kind,
+          status,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        };
+      })
+      .map((item, index, list) => {
+        if (index === list.length - 1 && inProgressCount > 1) {
+          throw new Error(
+            "Session checklist may contain at most one item with status in_progress.",
+          );
+        }
+        return item;
+      });
   }
 
   private cloneTaskListState(): SessionChecklistState {
@@ -1111,7 +1116,8 @@ export class SessionRuntime {
     const restrictedTools = this.deps.getTaskToolRestrictions();
     const hasAllowlist = this.deps.hasTaskToolAllowlistConfigured();
     const allowedTools = this.deps.getTaskToolAllowlist();
-    const restrictedByTask = (name: string) => restrictedTools.has("*") || restrictedTools.has(name);
+    const restrictedByTask = (name: string) =>
+      restrictedTools.has("*") || restrictedTools.has(name);
     const blockedByAllowlist = (name: string) =>
       hasAllowlist && !allowedTools.has("*") && !allowedTools.has(name);
     const disabledTools = this.state.tooling.toolFailureTracker.getDisabledTools();
@@ -1133,7 +1139,9 @@ export class SessionRuntime {
       taskPrompt: String(task.prompt || ""),
       lastUserMessage: String(this.state.transcript.lastUserMessage || ""),
       currentStepId: this.state.loop.currentStepId,
-      discoveredDeferredToolNames: Array.from(this.state.tooling.discoveredDeferredToolNames).sort(),
+      discoveredDeferredToolNames: Array.from(
+        this.state.tooling.discoveredDeferredToolNames,
+      ).sort(),
     });
     if (
       this.state.tooling.availableToolsCacheKey === renderedCacheKey &&
@@ -1151,8 +1159,7 @@ export class SessionRuntime {
       this.state.tooling.availableToolsCache = legacyTools.slice();
       return legacyTools;
     }
-    const baseTools =
-      typeof toolRegistry.getTools === "function" ? toolRegistry.getTools() : [];
+    const baseTools = typeof toolRegistry.getTools === "function" ? toolRegistry.getTools() : [];
     const deferredTools =
       typeof toolRegistry.getDeferredTools === "function" ? toolRegistry.getDeferredTools() : [];
 
@@ -1170,7 +1177,9 @@ export class SessionRuntime {
       .getAll()
       .filter(
         (entry) =>
-          !entry.deferred || entry.tool.runtime?.alwaysExpose || deferredMatchNames.has(entry.tool.name),
+          !entry.deferred ||
+          entry.tool.runtime?.alwaysExpose ||
+          deferredMatchNames.has(entry.tool.name),
       )
       .map((entry) => entry.tool);
     let finalTools: Any[];
@@ -1242,9 +1251,13 @@ export class SessionRuntime {
       applyRetryTokenCap: (baseMaxTokens, attempt, timeoutMs, hasTools) =>
         this.deps.applyRetryTokenCap(baseMaxTokens, attempt, timeoutMs, hasTools ?? false),
       getRetryTimeoutMs: (baseTimeoutMs, attempt, hasTools, maxTokensBudget) =>
-        this.deps.getRetryTimeoutMs(baseTimeoutMs, attempt, hasTools ?? false, maxTokensBudget ?? 0),
-      callLLMWithRetry: (requestFn, operation) =>
-        this.deps.callLLMWithRetry(requestFn, operation),
+        this.deps.getRetryTimeoutMs(
+          baseTimeoutMs,
+          attempt,
+          hasTools ?? false,
+          maxTokensBudget ?? 0,
+        ),
+      callLLMWithRetry: (requestFn, operation) => this.deps.callLLMWithRetry(requestFn, operation),
       createMessageWithTimeout: (request, timeoutMs, operation) =>
         this.deps.createMessageWithTimeout(request, timeoutMs, operation),
       buildPromptCacheRequestExtras: this.deps.buildPromptCacheRequestExtras,
@@ -1551,18 +1564,15 @@ export class SessionRuntime {
     });
 
     try {
-      const proactive = this.deps.getContextManager().proactiveCompactWithMeta(
-        opts.messages,
-        opts.systemPromptTokens,
-        0.35,
-      );
+      const proactive = this.deps
+        .getContextManager()
+        .proactiveCompactWithMeta(opts.messages, opts.systemPromptTokens, 0.35);
       let compactedMessages = proactive.messages;
       let removedMessages = proactive.meta.removedMessages.messages;
       if (!proactive.meta.removedMessages.didRemove) {
-        const fallback = this.deps.getContextManager().compactMessagesWithMeta(
-          compactedMessages,
-          opts.systemPromptTokens,
-        );
+        const fallback = this.deps
+          .getContextManager()
+          .compactMessagesWithMeta(compactedMessages, opts.systemPromptTokens);
         compactedMessages = fallback.messages;
         removedMessages = fallback.meta.removedMessages.messages;
       }
@@ -1684,7 +1694,8 @@ export class SessionRuntime {
     if (!this.deps.isWindowTurnLimitExceededError(error)) return false;
 
     while (true) {
-      const pendingSteps = this.deps.getPlan()?.steps?.filter((step) => step.status === "pending").length || 0;
+      const pendingSteps =
+        this.deps.getPlan()?.steps?.filter((step) => step.status === "pending").length || 0;
       const assessment = this.deps.assessContinuationWindow();
       const threshold = this.deps.getMinProgressScoreForAutoContinue();
       const continuationBudgetRemaining = Math.max(
@@ -1702,8 +1713,7 @@ export class SessionRuntime {
         this.deps.getContinuationStrategy() === "adaptive_progress" &&
         assessment.progressScore < threshold;
       const noPendingSteps = pendingSteps <= 0;
-      const lifetimeCapHit =
-        this.state.loop.lifetimeTurnCount >= this.deps.getMaxLifetimeTurns();
+      const lifetimeCapHit = this.state.loop.lifetimeTurnCount >= this.deps.getMaxLifetimeTurns();
       this.state.loop.noProgressStreak =
         assessment.progressScore <= 0 ? this.state.loop.noProgressStreak + 1 : 0;
       this.state.loop.lastLoopFingerprint =
@@ -1713,27 +1723,22 @@ export class SessionRuntime {
 
       let blockReason = "";
       if (lifetimeCapHit) {
-        blockReason =
-          `Lifetime turn limit reached (${this.state.loop.lifetimeTurnCount}/${this.deps.getMaxLifetimeTurns()}).`;
+        blockReason = `Lifetime turn limit reached (${this.state.loop.lifetimeTurnCount}/${this.deps.getMaxLifetimeTurns()}).`;
       } else if (noPendingSteps) {
         blockReason = "No pending plan steps remain to continue.";
       } else if (noProgressCircuitBreak) {
-        blockReason =
-          `No-progress circuit breaker reached (${this.state.loop.noProgressStreak}/${this.deps.getGlobalNoProgressCircuitBreaker()}).`;
+        blockReason = `No-progress circuit breaker reached (${this.state.loop.noProgressStreak}/${this.deps.getGlobalNoProgressCircuitBreaker()}).`;
       } else if (reachedContinuationCap) {
-        blockReason =
-          `Auto continuation limit reached (${this.state.loop.continuationCount}/${this.deps.getMaxAutoContinuations()}).`;
+        blockReason = `Auto continuation limit reached (${this.state.loop.continuationCount}/${this.deps.getMaxAutoContinuations()}).`;
       } else if (reachedLoopCritical) {
         this.state.loop.blockedLoopFingerprintForWindow = this.deps.getSignatureFromLoopFingerprint(
           assessment.dominantFingerprint,
         );
-        blockReason =
-          `Loop fingerprint repeated too often (${assessment.repeatedFingerprintCount}/${this.deps.getLoopCriticalThreshold()}).`;
+        blockReason = `Loop fingerprint repeated too often (${assessment.repeatedFingerprintCount}/${this.deps.getLoopCriticalThreshold()}).`;
       } else if (hasLoopRisk) {
         blockReason = `Loop risk is high (${assessment.loopRiskIndex.toFixed(2)}). Try changing strategy or constraints.`;
       } else if (belowProgressThreshold) {
-        blockReason =
-          `Recent progress score (${assessment.progressScore.toFixed(2)}) is below threshold (${threshold.toFixed(2)}).`;
+        blockReason = `Recent progress score (${assessment.progressScore.toFixed(2)}) is below threshold (${threshold.toFixed(2)}).`;
       }
 
       this.deps.emitEvent("continuation_decision", {
@@ -2223,7 +2228,9 @@ export class SessionRuntime {
 
   restoreFromEvents(events: TaskEvent[]): void {
     const checkpointPayload = this.deps.loadCheckpointPayload();
-    const snapshotEvents = events.filter((e) => this.deps.getReplayEventType(e) === "conversation_snapshot");
+    const snapshotEvents = events.filter(
+      (e) => this.deps.getReplayEventType(e) === "conversation_snapshot",
+    );
     const latestSnapshotPayload =
       snapshotEvents.length > 0 ? snapshotEvents[snapshotEvents.length - 1]?.payload : null;
 
@@ -2398,7 +2405,10 @@ export class SessionRuntime {
               restoredHistory = [
                 {
                   role: "user",
-                  content: [{ type: "text" as const, text: planContext }, ...(firstMsg.content as LLMContent[])],
+                  content: [
+                    { type: "text" as const, text: planContext },
+                    ...(firstMsg.content as LLMContent[]),
+                  ],
                 },
                 ...restoredHistory.slice(1),
               ];
@@ -2422,7 +2432,8 @@ export class SessionRuntime {
         this.restoreFromV2Payload(payload as SessionRuntimeSnapshotV2);
       } else {
         this.state.transcript.explicitChatSummaryBlock =
-          typeof payload.explicitChatSummaryBlock === "string" && payload.explicitChatSummaryBlock.trim()
+          typeof payload.explicitChatSummaryBlock === "string" &&
+          payload.explicitChatSummaryBlock.trim()
             ? payload.explicitChatSummaryBlock
             : null;
         this.state.transcript.explicitChatSummaryCreatedAt =
@@ -2463,11 +2474,9 @@ export class SessionRuntime {
   private restoreFromV2Payload(payload: SessionRuntimeSnapshotV2): void {
     this.state.transcript.lastUserMessage = payload.transcript.lastUserMessage || "";
     this.state.transcript.lastAssistantOutput = payload.transcript.lastAssistantOutput;
-    this.state.transcript.lastNonVerificationOutput =
-      payload.transcript.lastNonVerificationOutput;
+    this.state.transcript.lastNonVerificationOutput = payload.transcript.lastNonVerificationOutput;
     this.state.transcript.lastAssistantText = payload.transcript.lastAssistantText;
-    this.state.transcript.explicitChatSummaryBlock =
-      payload.transcript.explicitChatSummaryBlock;
+    this.state.transcript.explicitChatSummaryBlock = payload.transcript.explicitChatSummaryBlock;
     this.state.transcript.explicitChatSummaryCreatedAt =
       payload.transcript.explicitChatSummaryCreatedAt;
     this.state.transcript.explicitChatSummarySourceMessageCount =
@@ -2509,7 +2518,9 @@ export class SessionRuntime {
     this.state.permissions.temporaryGrants = new Map(payload.permissions?.temporaryGrants || []);
     this.state.permissions.denialTracking = new Map(payload.permissions?.denialTracking || []);
     this.state.permissions.latestPromptContext = payload.permissions?.latestPromptContext || null;
-    this.state.permissions.recentSensitiveSources = Array.isArray(payload.permissions?.recentSensitiveSources)
+    this.state.permissions.recentSensitiveSources = Array.isArray(
+      payload.permissions?.recentSensitiveSources,
+    )
       ? payload.permissions.recentSensitiveSources
       : [];
     this.state.verification.verificationEvidenceEntries =
@@ -2532,7 +2543,8 @@ export class SessionRuntime {
   }
 
   private restorePendingSkillStateFromEvents(events: TaskEvent[]): void {
-    let pending: PendingSkillParameterCollection | null = this.state.skills.pendingParameterCollection;
+    let pending: PendingSkillParameterCollection | null =
+      this.state.skills.pendingParameterCollection;
     let handled = this.state.skills.primarySlashCommandHandled;
     for (const event of events) {
       const type = this.deps.getReplayEventType(event);
@@ -2686,7 +2698,9 @@ export class SessionRuntime {
       path: normalizedPath,
       recordedAt: typeof source.recordedAt === "number" ? source.recordedAt : Date.now(),
     };
-    const deduped = this.state.permissions.recentSensitiveSources.filter((item) => item.path !== next.path);
+    const deduped = this.state.permissions.recentSensitiveSources.filter(
+      (item) => item.path !== next.path,
+    );
     deduped.push(next);
     this.state.permissions.recentSensitiveSources = deduped.slice(-12);
   }
@@ -2754,7 +2768,8 @@ export class SessionRuntime {
   getVerificationState(): SessionRuntimeVerificationState {
     return {
       verificationEvidenceEntries: this.state.verification.verificationEvidenceEntries,
-      nonBlockingVerificationFailedStepIds: this.state.verification.nonBlockingVerificationFailedStepIds,
+      nonBlockingVerificationFailedStepIds:
+        this.state.verification.nonBlockingVerificationFailedStepIds,
       blockingVerificationFailedStepIds: this.state.verification.blockingVerificationFailedStepIds,
       dispatchedMentionedAgents: this.state.worker.dispatchedMentionedAgents,
       verificationAgentState: this.state.worker.verificationAgentState,
@@ -2832,12 +2847,7 @@ export class SessionRuntime {
   }
 
   setRecoveryClass(
-    recoveryClass:
-      | "user_blocker"
-      | "local_runtime"
-      | "provider_quota"
-      | "external_unknown"
-      | null,
+    recoveryClass: "user_blocker" | "local_runtime" | "provider_quota" | "external_unknown" | null,
   ): void {
     this.state.recovery.lastRecoveryClass = recoveryClass;
   }

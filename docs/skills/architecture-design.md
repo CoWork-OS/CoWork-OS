@@ -79,6 +79,7 @@ The skill follows this evidence-first sequence:
 - Generated files stay inside the architecture project root.
 - Imported user assets should be copied into the project folder before mutation.
 - Source CAD overwrites, deletions, and long or expensive render jobs require explicit approval.
+- Rhino, Blender, and ComfyUI connector calls remain subject to the task's [access profile](../access-profiles.md); this skill cannot expose public services or widen project/file/network scope.
 - Outputs should be described as concept design until a qualified professional validates code, structure, accessibility, and MEP requirements.
 
 ## Example Prompts

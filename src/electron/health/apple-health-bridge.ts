@@ -2,12 +2,22 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { spawn } from "child_process";
-import type { HealthSourceConnectionMode, HealthWritebackItem, HealthWritebackType } from "../../shared/health";
+import type {
+  HealthSourceConnectionMode,
+  HealthWritebackItem,
+  HealthWritebackType,
+} from "../../shared/health";
 
 export interface AppleHealthBridgeStatus {
   available: boolean;
   executablePath?: string;
-  authorizationStatus: "authorized" | "denied" | "not-determined" | "restricted" | "import-only" | "unavailable";
+  authorizationStatus:
+    | "authorized"
+    | "denied"
+    | "not-determined"
+    | "restricted"
+    | "import-only"
+    | "unavailable";
   readableTypes: HealthWritebackType[];
   writableTypes: HealthWritebackType[];
   sourceMode: HealthSourceConnectionMode;
@@ -91,11 +101,35 @@ function isMac(): boolean {
 function candidateBridgePaths(): string[] {
   const packagedResources = typeof process.resourcesPath === "string" ? process.resourcesPath : "";
   return [
-    packagedResources ? path.join(packagedResources, "healthkit-bridge", "HealthKitBridge.app", "Contents", "MacOS", "HealthKitBridge") : "",
-    path.resolve(process.cwd(), "build", "healthkit-bridge", "HealthKitBridge.app", "Contents", "MacOS", "HealthKitBridge"),
+    packagedResources
+      ? path.join(
+          packagedResources,
+          "healthkit-bridge",
+          "HealthKitBridge.app",
+          "Contents",
+          "MacOS",
+          "HealthKitBridge",
+        )
+      : "",
+    path.resolve(
+      process.cwd(),
+      "build",
+      "healthkit-bridge",
+      "HealthKitBridge.app",
+      "Contents",
+      "MacOS",
+      "HealthKitBridge",
+    ),
     packagedResources ? path.join(packagedResources, "healthkit-bridge", "HealthKitBridge") : "",
     path.resolve(process.cwd(), "build", "healthkit-bridge", "HealthKitBridge"),
-    path.resolve(process.cwd(), "native", "healthkit-bridge", ".build", "release", "HealthKitBridge"),
+    path.resolve(
+      process.cwd(),
+      "native",
+      "healthkit-bridge",
+      ".build",
+      "release",
+      "HealthKitBridge",
+    ),
     path.resolve(__dirname, "../../../native/healthkit-bridge/.build/release/HealthKitBridge"),
   ].filter(Boolean);
 }
@@ -164,7 +198,9 @@ function readLocalBundleIdentifier(): string | undefined {
   try {
     const configPath = path.resolve(process.cwd(), ".cowork", "healthkit-bridge.json");
     if (!fs.existsSync(configPath)) return undefined;
-    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as { bundleIdentifier?: unknown };
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+      bundleIdentifier?: unknown;
+    };
     return typeof parsed.bundleIdentifier === "string" && parsed.bundleIdentifier.trim().length > 0
       ? parsed.bundleIdentifier.trim()
       : undefined;
@@ -190,7 +226,9 @@ function resolveProvisioningBundleIdentifier(bundlePath?: string): string {
 }
 
 function provisioningErrorMessage(bundlePath?: string): string {
-  const profilePath = bundlePath ? embeddedProvisioningProfilePath(bundlePath) : "the helper app bundle";
+  const profilePath = bundlePath
+    ? embeddedProvisioningProfilePath(bundlePath)
+    : "the helper app bundle";
   const bundleIdentifier = resolveProvisioningBundleIdentifier(bundlePath);
   return `Apple Health bridge cannot launch because HealthKit uses restricted entitlements and macOS requires an eligible embedded provisioning profile. Missing profile: ${profilePath}. Register this Mac in Apple Developer, create/download a Mac App Development profile for ${bundleIdentifier} with HealthKit enabled, set COWORK_HEALTHKIT_PROVISIONING_PROFILE (or .cowork/healthkit-bridge.json -> provisioningProfile), then rebuild the helper.`;
 }
@@ -228,10 +266,25 @@ function runBridge<T>(request: BridgeRequest): Promise<BridgeResponse<T>> {
       const responsePath = path.join(tempDir, "response.json");
       fs.writeFileSync(requestPath, `${JSON.stringify(request)}\n`, "utf8");
 
-      const child = spawn("open", ["-W", "-n", "-a", bundlePath, "--args", "--appkit", "--request-file", requestPath, "--response-file", responsePath], {
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      });
+      const child = spawn(
+        "open",
+        [
+          "-W",
+          "-n",
+          "-a",
+          bundlePath,
+          "--args",
+          "--appkit",
+          "--request-file",
+          requestPath,
+          "--response-file",
+          responsePath,
+        ],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
+      );
 
       let stderr = "";
       child.stderr.setEncoding("utf8");

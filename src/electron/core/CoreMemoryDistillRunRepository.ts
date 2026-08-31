@@ -1,9 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
-import type {
-  CoreMemoryDistillRun,
-  ListCoreMemoryDistillRunsRequest,
-} from "../../shared/types";
+import type { CoreMemoryDistillRun, ListCoreMemoryDistillRunsRequest } from "../../shared/types";
 
 type Any = any;
 
@@ -19,9 +16,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
 export class CoreMemoryDistillRunRepository {
   constructor(private readonly db: Database.Database) {}
 
-  create(
-    input: Omit<CoreMemoryDistillRun, "id"> & { id?: string },
-  ): CoreMemoryDistillRun {
+  create(input: Omit<CoreMemoryDistillRun, "id"> & { id?: string }): CoreMemoryDistillRun {
     const run: CoreMemoryDistillRun = {
       ...input,
       id: input.id || randomUUID(),
@@ -72,16 +67,20 @@ export class CoreMemoryDistillRunRepository {
       if (!(key in updates)) continue;
       const raw = (updates as Any)[key];
       fields.push(`${column} = ?`);
-      values.push(key === "summary" && raw ? JSON.stringify(raw) : raw ?? null);
+      values.push(key === "summary" && raw ? JSON.stringify(raw) : (raw ?? null));
     }
     if (!fields.length) return this.findById(id);
     values.push(id);
-    this.db.prepare(`UPDATE core_memory_distill_runs SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    this.db
+      .prepare(`UPDATE core_memory_distill_runs SET ${fields.join(", ")} WHERE id = ?`)
+      .run(...values);
     return this.findById(id);
   }
 
   findById(id: string): CoreMemoryDistillRun | undefined {
-    const row = this.db.prepare("SELECT * FROM core_memory_distill_runs WHERE id = ?").get(id) as Any;
+    const row = this.db
+      .prepare("SELECT * FROM core_memory_distill_runs WHERE id = ?")
+      .get(id) as Any;
     return row ? this.mapRow(row) : undefined;
   }
 

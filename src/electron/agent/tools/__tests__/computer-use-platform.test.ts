@@ -61,7 +61,10 @@ function makeProvider(overrides: Record<string, Any> = {}): Any {
   };
 }
 
-function makeTools(daemon: Any = { logEvent: vi.fn() }, taskId = `task-${Math.random()}`): ComputerUseTools {
+function makeTools(
+  daemon: Any = { logEvent: vi.fn() },
+  taskId = `task-${Math.random()}`,
+): ComputerUseTools {
   return new ComputerUseTools(
     { id: "w", name: "W", path: "/tmp", createdAt: 0, permissions: {} } as Any,
     daemon as Any,

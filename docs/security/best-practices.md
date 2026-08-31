@@ -25,12 +25,18 @@ Keep all guardrails enabled:
 - Budget limits prevent runaway costs
 - Iteration limits prevent infinite loops
 
-### 4. Review Tool Permissions
+### 4. Choose and review an access profile
 
-Start with minimal permissions:
-- Enable only what you need
-- Add permissions as required
-- Review periodically
+Start with the least-privileged profile that fits the task:
+- use **Ask for approval** for new or sensitive workflows
+- use **Approve for me** only when automatic review is appropriate for bounded work
+- use **Full access** only for a trusted task that genuinely needs unrestricted local access
+- use a **Custom** profile for repeatable filesystem or domain boundaries
+- review profile rules and administrator constraints periodically
+
+Command tools are derived from the profile. There is no separate new-task shell
+enable/disable switch. See [Access Profiles](../access-profiles.md) for the
+profile fields, inheritance ceiling, migration behavior, and fail-closed rules.
 
 ### 5. Keep Group Memory Explicit
 
@@ -169,14 +175,16 @@ Install updates promptly:
 
 ### Development
 
-- Unrestricted file access may be appropriate
-- Open mode acceptable for local testing
+- **Ask for approval** is the recommended development default
+- **Full access** is acceptable only for a deliberately trusted local task
+- Keep filesystem and domain scope narrow while testing new skills/connectors
 - Enable debug logging
 
 ### Production
 
 - Use pairing or allowlist mode
-- Restrict file access to workspace
+- Use **Ask for approval** or a reviewed **Custom** profile
+- Restrict file access to the workspace and explicitly approved roots
 - Disable debug logging
 - Enable all guardrails
 
@@ -247,7 +255,10 @@ Clipboard tools are blocked by default in group contexts. In DM contexts, only y
 
 ### Q: What happens if Docker isn't available?
 
-CoWork OS falls back to process isolation with timeouts. On macOS, native sandbox-exec is preferred.
+On macOS, native sandbox-exec is preferred. On other platforms, a restricted
+profile fails closed if the configured backend cannot enforce its boundary;
+CoWork does not silently turn an unavailable sandbox into unrestricted command
+execution. Check the active profile and sandbox backend in the task details.
 
 ### Q: How long are pairing codes valid?
 
@@ -257,13 +268,17 @@ Default: 5 minutes (300 seconds). Configurable in channel settings.
 
 Yes, context policies allow different modes for DMs vs groups on the same channel.
 
-### Q: Are shell commands logged?
+### Q: Are command-tool calls logged?
 
-Yes, all shell commands and their outputs are logged in the audit trail.
+Yes, command-tool calls and their outputs are recorded in the task audit trail,
+subject to normal redaction and output-size limits.
 
-### Q: Can I disable the approval requirement for shell commands?
+### Q: Can I disable the approval requirement for command tools?
 
-Shell commands with approval are designed for safety. You can add trusted patterns to auto-approve specific safe commands.
+Choose **Full access** when a trusted task intentionally needs the no-approval
+profile. **Approve for me** uses automatic review for eligible requests. Hard
+guardrails, administrator policy, explicit denies, export consent, and other
+non-bypassable boundaries still apply; there is no separate shell switch.
 
 ## Security Checklist
 
@@ -271,7 +286,8 @@ Shell commands with approval are designed for safety. You can add trusted patter
 
 - [ ] Updated to latest version
 - [ ] Reviewed default settings
-- [ ] Configured workspace permissions
+- [ ] Selected and reviewed the default access profile
+- [ ] Configured filesystem/domain scope and workspace compatibility gates
 - [ ] Tested pairing flow
 
 ### Before Adding External Channels

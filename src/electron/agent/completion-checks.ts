@@ -171,8 +171,7 @@ export function evaluateDomainCompletion(input: DomainCompletionInput): DomainCo
     if (domain === "research" && NON_SUBSTANTIVE_RESPONSES.has(normalized)) {
       return {
         failed: true,
-        reason:
-          "Tools ran but response lacks a findings summary. Summarize what was discovered.",
+        reason: "Tools ran but response lacks a findings summary. Summarize what was discovered.",
       };
     }
     if (domain === "writing" && NON_SUBSTANTIVE_RESPONSES.has(normalized)) {

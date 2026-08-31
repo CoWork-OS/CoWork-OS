@@ -59,8 +59,7 @@ export function ResearchChannelsSettings({
     }
   };
 
-  const hasChanges =
-    researchChatIds !== ids.join("\n") || researchAgentRoleId !== roleId;
+  const hasChanges = researchChatIds !== ids.join("\n") || researchAgentRoleId !== roleId;
 
   return (
     <div className="settings-section">
@@ -118,11 +117,7 @@ export function ResearchChannelsSettings({
             </p>
           </div>
           {hasChanges && (
-            <button
-              className="button-primary"
-              onClick={handleSave}
-              disabled={saving}
-            >
+            <button className="button-primary" onClick={handleSave} disabled={saving}>
               {saving ? "Saving..." : "Save Research Settings"}
             </button>
           )}

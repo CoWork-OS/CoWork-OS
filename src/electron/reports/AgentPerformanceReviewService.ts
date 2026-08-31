@@ -117,8 +117,8 @@ export class AgentPerformanceReviewService {
       (t) => t.status === "completed" || t.status === "failed" || t.status === "cancelled",
     );
     const coreOkCount = terminalTasks.filter((t) => t.terminal_status === "ok").length;
-    const corePartialCount = terminalTasks.filter((t) =>
-      t.terminal_status === "partial_success" || t.terminal_status === "needs_user_action",
+    const corePartialCount = terminalTasks.filter(
+      (t) => t.terminal_status === "partial_success" || t.terminal_status === "needs_user_action",
     ).length;
     const coreFailCount = terminalTasks.filter(
       (t) => t.terminal_status === "failed" || t.status === "failed",
@@ -154,7 +154,9 @@ export class AgentPerformanceReviewService {
         ((terminalTasks.length - dependencyIssueCount) / terminalTotal) * 100,
       ),
       verification_block_rate: Math.round((verificationBlockCount / terminalTotal) * 100),
-      artifact_contract_failure_rate: Math.round((artifactContractFailureCount / terminalTotal) * 100),
+      artifact_contract_failure_rate: Math.round(
+        (artifactContractFailureCount / terminalTotal) * 100,
+      ),
       core_outcome_ok_count: coreOkCount,
       core_outcome_partial_count: corePartialCount,
       core_outcome_failed_count: coreFailCount,

@@ -1,44 +1,44 @@
 # Security Guide for End Users
 
-This document explains the security model, permissions, and considerations for users who clone and run CoWork OS on their machines.
+This document summarizes the security model, permissions, and considerations for users who clone and run CoWork OS on their machines. The maintained references are [Access Profiles](docs/access-profiles.md) and [Security Guide](docs/security-guide.md).
 
 ## Overview
 
 CoWork OS is an AI-powered task automation tool that can execute actions on your behalf. By design, it has capabilities that require careful consideration:
 
-- Execute shell commands
+- Execute command tools when the active access profile exposes them
 - Read and write files
 - Browse the web
 - Connect to external APIs
 
-All of these capabilities are **consent-based** and **sandboxed** where possible.
+All of these capabilities are governed by the task's [access profile](docs/access-profiles.md), layered approval rules, administrator policy, and hard guardrails; sandboxing is applied where the active backend can represent it.
 
 ---
 
 ## Permissions Model
 
-### Workspace Permissions
+### Access Profiles
 
-Each workspace you create has configurable permissions:
+Each task has an effective access profile. The composer offers **Ask for approval**, **Approve for me**, **Full access**, and validated **Custom** profiles. A profile combines:
 
-| Permission | Description | Default |
-|------------|-------------|---------|
-| **Read** | Read files within the workspace | Enabled |
-| **Write** | Create and modify files | Enabled |
-| **Delete** | Remove files (requires approval) | Disabled |
-| **Shell** | Execute shell commands (requires approval) | Disabled |
+- sandbox boundary
+- approval and reviewer behavior
+- command-tool availability
+- network and domain scope
+- filesystem roots and read/write/deny rules
 
-**Recommendation**: Only enable shell and delete permissions for workspaces where you trust the AI to perform those operations.
+The selected profile is the task-level authority. Workspace booleans and legacy `shellAccess` values remain only for older tasks and integrations; new tasks do not have a separate Shell enabled/disabled switch. See [Access Profiles](docs/access-profiles.md) for defaults, inheritance, migration, and fail-closed behavior.
 
 ### Approval System
 
-Certain operations always require explicit user approval before execution:
+Many sensitive operations require explicit user approval before execution, depending on the effective profile and policy:
 
-- **Shell commands**: You see the exact command before it runs
+- **Command tools**: You see the exact command before it runs when the profile/policy requires review
 - **File deletion**: Confirmation required before removing files
-- **Sensitive operations**: Any action flagged as potentially destructive
+- **External writes and data export**: Review is required for outbound mutations and file/image transfers
+- **Location access**: One-time operating-system consent is always required
 
-You can approve or deny each request individually.
+You can approve or deny each request individually. An approval cannot widen a finite profile scope or repair an unavailable profile.
 
 ### Configurable Guardrails
 
@@ -49,9 +49,9 @@ CoWork OS includes configurable guardrails in **Settings > Guardrails** to limit
 | **Token Budget** | Max tokens (input + output) per task | 100,000 (enabled) |
 | **Cost Budget** | Max estimated cost (USD) per task | $1.00 (disabled) |
 | **Iteration Limit** | Max LLM calls per task | 50 (enabled) |
-| **Dangerous Commands** | Block shell commands matching patterns | Enabled |
+| **Dangerous Commands** | Block command tools matching dangerous patterns | Enabled |
 | **File Size Limit** | Max file size the agent can write | 50 MB (enabled) |
-| **Domain Allowlist** | Restrict browser to approved domains | Disabled |
+| **Domain Rules** | Profile- and administrator-controlled destination allow/deny rules | Profile-controlled |
 
 #### Dangerous Command Blocking
 
@@ -71,15 +71,16 @@ The following command patterns are blocked by default:
 
 Commands are blocked **before** reaching the approval dialog. You can add custom patterns in Settings.
 
-#### Domain Allowlist
+#### Domain Rules
 
-When enabled, browser automation is restricted to specified domains:
+When a profile contains positive domain rules, built-in browser and network tools are restricted to the specified destinations:
 
 - Exact match: `github.com`
-- Wildcard: `*.google.com` (matches subdomains)
-- If enabled with no domains: all navigation blocked
+- Wildcard: `*.google.com` (matches subdomains, not the apex)
+- `**.example.com` matches the apex and descendants
+- Deny rules win over allow rules
 
-This prevents unintended browsing during automation tasks.
+Arbitrary subprocess networking is not domain-aware and fails closed when a profile requires domain-level enforcement without a domain-aware proxy.
 
 ---
 
@@ -89,12 +90,13 @@ This prevents unintended browsing during automation tasks.
 
 | Scope | Access Level |
 |-------|--------------|
-| Workspace directories | Read/Write (based on permissions) |
-| Outside workspace | **No access** - path traversal is blocked |
-| System files | **No access** |
+| Workspace directories | Read/Write according to the effective profile and workspace capabilities |
+| Profile-declared roots | Access only under matching profile filesystem rules |
+| Outside profile scope | **No access**; finite profile scopes cannot be widened by approval |
+| Protected system files | **No mutation access** |
 
 **Technical details**:
-- Path traversal protection prevents accessing files outside the workspace
+- Path traversal protection and profile path rules prevent access outside the effective scope
 - **Symlink escape detection**: File tools resolve symlinks via `realpath()` and verify the resolved path remains within the workspace boundary. Symlinks that point outside the workspace are rejected before any read/write operation.
 - Implementation: `src/electron/agent/tools/file-tools.ts`
 
@@ -110,21 +112,21 @@ Enforcement applies to:
 - File/edit/grep/search tools when the path is inside `.cowork/projects/<projectId>/...`
 - Workspace-kit context injection (denied projects are excluded from injected context)
 
-Important: shell commands are not subject to these per-project access rules. Keep shell permission disabled unless you explicitly need it, and review shell approvals carefully.
+Important: project-role rules are one layer of policy. Command tools are exposed and sandboxed by the task's access profile, while project-role rules continue to govern project file and workspace-kit surfaces. Review command-tool approvals carefully, especially for broad profiles.
 
-### Shell Command Execution
+### Command-Tool Execution
 
-When you enable shell permissions:
+When command tools are exposed by the active access profile:
 
 | Aspect | Implementation |
 |--------|----------------|
-| Working directory | Restricted to workspace folder |
+| Working directory | Restricted to the active workspace and profile-approved roots |
 | Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR) |
 | API keys | **Never passed** to subprocesses |
 | Timeout | Maximum 5 minutes |
 | Output limit | 100KB (truncated if exceeded) |
 
-**Security note**: Your API keys and secrets are never exposed to shell commands. The app creates a minimal, safe environment for each command.
+**Security note**: Your API keys and secrets are never exposed to command tools. The app creates a minimal, safe environment for each command.
 
 ### Browser Automation
 
@@ -132,11 +134,11 @@ The app includes Playwright for web automation:
 
 | Capability | Details |
 |------------|---------|
-| Navigate to URLs | Any URL (user-controlled tasks) |
+| Navigate to URLs | Destinations allowed by the active profile, administrator network policy, and browser rules |
 | Fill forms | As directed by task |
 | Take screenshots | Saved to workspace |
 | Execute JavaScript | Within page context only |
-| Mode | Headless by default |
+| Mode | Headless by default; visible workbench actions remain separately gated |
 
 **User agent**: `CoWork OS Browser Automation`
 
@@ -228,6 +230,7 @@ All these are stored encrypted in the database:
 | `appearance` | Theme, accent color preferences |
 | `personality` | Agent personality settings |
 | `guardrails` | Safety limits and blocked patterns |
+| `permissions` | Default access profile, custom profiles, and permission rules |
 | `hooks` | Automation hooks configuration |
 | `mcp` | MCP server configurations |
 | `controlplane` | Control plane settings |
@@ -261,7 +264,7 @@ Your API keys are:
 2. Fallback to AES-256 app-level encryption with stable machine-derived key
 3. Decrypted only when needed for API calls
 4. Never logged or displayed in full
-5. Never passed to shell commands or subprocesses
+5. Never passed to command tools or subprocesses
 6. Checksummed for integrity verification
 
 ---
@@ -299,7 +302,7 @@ form-action 'self';
 | `files.user-selected.read-write` | Access to user-selected folders |
 | `network.client` | Connect to LLM APIs |
 
-**Not requested**: Camera, microphone, contacts, location, or other sensitive permissions.
+**Not requested automatically**: Camera, microphone, contacts, or other sensitive permissions. Location is requested only when a task explicitly uses the location tool and must be approved through the operating system.
 
 ---
 
@@ -359,9 +362,9 @@ git diff HEAD..origin/main
 
 ### For General Use
 
-1. **Review shell commands** before approving - read what will execute
+1. **Review command-tool requests** before approving - read what will execute and where
 2. **Use dedicated workspaces** - don't point at sensitive directories
-3. **Enable minimal permissions** - only enable what you need
+3. **Choose the least-privileged access profile** - start with Ask for approval and use Custom or Full access only when justified
 4. **Keep updated** - security fixes come through updates
 5. **Protect your API keys** - don't share configuration files
 
@@ -390,7 +393,7 @@ git diff HEAD..origin/main
 |--------|------------|
 | Path traversal | Path normalization and validation |
 | Symlink escape | `realpath()` resolution with workspace boundary check |
-| Command injection | User approval required |
+| Command injection | Profile-gated command tools, dangerous-pattern blocking, and approval where required |
 | API key leakage | Encrypted storage, minimal env |
 | XSS attacks | Content Security Policy |
 | Unauthorized bot access | Multiple auth modes |
@@ -417,11 +420,16 @@ git diff HEAD..origin/main
 
 ## Verifying Security
 
-### Check Workspace Permissions
+### Check Access Profiles And Workspace Permissions
 
-In the app, navigate to your workspace settings to review:
-- Read/Write/Delete/Shell permissions
-- Workspace path scope
+In the app, open **Settings > System & Security > Permissions** to review:
+- the default and selected access profile
+- sandbox, approval/reviewer, command-tool, network, filesystem, and domain scope
+- legacy workspace capability flags and workspace-local rules
+
+New tasks do not have a separate Shell enabled/disabled switch. Existing tasks
+may retain legacy fields until a profile is explicitly selected. See [Access
+Profiles](docs/access-profiles.md).
 
 ### Audit Connected Users (Bots)
 
@@ -463,7 +471,7 @@ Tools are categorized by risk level for policy-based access control:
 |------------|-------|-------------|
 | **Read** | `read_file`, `list_directory`, `search_files` | Low risk, read-only operations |
 | **Write** | `write_file`, `copy_file`, `create_directory` | Medium risk, creates/modifies files |
-| **Destructive** | `delete_file`, `run_command` | High risk, always requires approval |
+| **Destructive** | `delete_file`, `run_command` | High risk, exposed and approved according to the access profile and policy |
 | **System** | `read_clipboard`, `take_screenshot`, `open_application` | System-level access |
 | **Network** | `web_search`, `browser_*` | External network operations |
 
@@ -472,9 +480,10 @@ Tools are categorized by risk level for policy-based access control:
 Security policies are evaluated across multiple layers in order:
 
 1. **Global Guardrails** - Blocked commands, patterns
-2. **Workspace Permissions** - Read, write, delete, shell, network flags
-3. **Context Restrictions** - Gateway context (private/group/public)
-4. **Tool-Specific Rules** - Per-tool overrides
+2. **Access Profile** - Sandbox, approval, reviewer, command-tool, filesystem, network, and domain boundaries
+3. **Legacy Workspace Permissions** - Compatibility capability flags
+4. **Context Restrictions** - Gateway context (private/group/public)
+5. **Tool-Specific Rules** - Per-tool overrides
 
 **Key invariant**: Once denied by any layer, a tool cannot be re-enabled by later layers. This prevents policy bypasses.
 
@@ -484,9 +493,9 @@ When tasks originate from gateway bots (WhatsApp/Telegram/Discord/Slack/iMessage
 
 | Context | Restrictions |
 |---------|-------------|
-| **Private** | Full access (with approvals) |
-| **Group** | Memory tools blocked (clipboard), destructive tools blocked |
-| **Public** | System tools blocked, all destructive operations blocked |
+| **Private** | Target access profile with no additional channel restriction |
+| **Group** | Target profile plus memory-tool restrictions and any configured destructive-tool restrictions |
+| **Public** | Target profile plus the strongest configured channel restrictions; system/destructive operations may be blocked |
 
 This prevents accidental exposure of sensitive data in shared contexts.
 
@@ -519,14 +528,19 @@ When a user exceeds the maximum attempts:
 
 **Implementation**: `src/electron/gateway/security.ts`
 
-### Shell Command Sandboxing
+### Command-Tool Sandboxing
 
-On macOS, shell commands execute within a `sandbox-exec` profile that:
+When exposed by the task's access profile, macOS command tools execute within a generated `sandbox-exec` profile that:
 
-- Restricts filesystem access to workspace + temp directories
-- Blocks network access unless workspace has `network` permission
-- Limits write access based on workspace permissions
+- Restricts filesystem access to the workspace and profile-approved roots
+- Applies the profile's coarse network posture
+- Limits write access based on profile and workspace permissions
 - Uses minimal, safe environment variables
+
+Restricted profiles fail closed if no backend can represent their requested
+boundary. Domain-scoped arbitrary-process egress is denied unless a
+domain-aware proxy is available; built-in network tools apply domain rules
+in-process.
 
 **Implementation**: `src/electron/agent/sandbox/runner.ts`
 
@@ -580,9 +594,9 @@ CoWork OS is designed with security in mind:
 | Aspect | Status |
 |--------|--------|
 | API key storage | Encrypted (OS keychain) |
-| File access | Sandboxed to workspace |
-| Shell execution | Requires approval + sandbox |
-| Network access | Only configured providers |
+| File access | Bounded by the selected access profile and workspace |
+| Command execution | Exposed by the selected profile; sandboxed/approval-gated according to policy |
+| Network access | Profile- and administrator-controlled; export-sensitive actions remain separately reviewed |
 | Telemetry | None |
 | Electron security | Best practices followed |
 | Guardrails | Configurable limits on tokens, cost, iterations, commands, file size, and domains |
@@ -591,7 +605,7 @@ CoWork OS is designed with security in mind:
 | Concurrency | Mutex locks + idempotency guarantees |
 | Skill security | Input validation, path traversal protection, binary sanitization |
 
-**The security model is transparent and consent-based.** You remain in control of what the AI can do on your machine.
+**The security model is transparent and profile-governed.** You remain in control of what the AI can do on your machine through the selected profile, approvals, administrator policy, and hard guardrails.
 
 ### Guardrails Settings Location
 

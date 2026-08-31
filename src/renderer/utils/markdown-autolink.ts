@@ -41,10 +41,13 @@ export function autolinkBareUrls(text: string): string {
 }
 
 export function autolinkUrlsInBrackets(text: string): string {
-  return text.replace(BRACKETED_URL_REGEX, (_match, fullUrl: string | undefined, bareDomain: string | undefined) => {
-    const url = fullUrl ?? bareDomain;
-    if (!url) return _match;
-    const href = url.startsWith("http") ? url : `https://${url}`;
-    return `[${url}](${href})`;
-  });
+  return text.replace(
+    BRACKETED_URL_REGEX,
+    (_match, fullUrl: string | undefined, bareDomain: string | undefined) => {
+      const url = fullUrl ?? bareDomain;
+      if (!url) return _match;
+      const href = url.startsWith("http") ? url : `https://${url}`;
+      return `[${url}](${href})`;
+    },
+  );
 }

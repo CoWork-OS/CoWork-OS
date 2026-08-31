@@ -201,13 +201,19 @@ export class ChronicleCaptureService {
       return [];
     }
     const frames = await this.loadFrames();
-    const recent = frames.sort((a, b) => b.capturedAt - a.capturedAt).slice(0, this.settings.maxFrames);
+    const recent = frames
+      .sort((a, b) => b.capturedAt - a.capturedAt)
+      .slice(0, this.settings.maxFrames);
     const enriched = await this.enrichFramesForQuery(recent);
     const ranked = ChronicleSelector.rank(enriched, options.query, options.limit || 5);
     if (options.useFallback && ChronicleSelector.shouldFallback(ranked, options.query)) {
       const fallback = await this.captureFallbackFrame();
       if (fallback) {
-        const fallbackRanked = ChronicleSelector.rank([fallback, ...enriched], options.query, options.limit || 5);
+        const fallbackRanked = ChronicleSelector.rank(
+          [fallback, ...enriched],
+          options.query,
+          options.limit || 5,
+        );
         if (fallbackRanked[0]) {
           fallbackRanked[0].usedFallback = true;
         }
@@ -232,7 +238,9 @@ export class ChronicleCaptureService {
     return frames[0] || null;
   }
 
-  private async captureFrames(options: { usedFallback: boolean }): Promise<ChronicleBufferedFrame[]> {
+  private async captureFrames(options: {
+    usedFallback: boolean;
+  }): Promise<ChronicleBufferedFrame[]> {
     const desktopCapturer = this.deps.getDesktopCapturer();
     const electronScreen = this.deps.getScreen();
     if (!desktopCapturer || !electronScreen) return [];
@@ -263,7 +271,9 @@ export class ChronicleCaptureService {
     const filteredSources =
       this.settings.captureScope === "all_displays"
         ? sources.filter((entry: Any) => displayIds.has(String(entry.display_id || "")))
-        : sources.filter((entry: Any) => displayIds.has(String(entry.display_id || ""))).slice(0, 1);
+        : sources
+            .filter((entry: Any) => displayIds.has(String(entry.display_id || "")))
+            .slice(0, 1);
     const selectedSources = filteredSources.length > 0 ? filteredSources : [sources[0]];
     const frontmostContext = await this.deps.detectFrontmostContext().catch(() => ({
       appName: "Desktop",
@@ -295,14 +305,20 @@ export class ChronicleCaptureService {
           width: source.thumbnail.getSize().width,
           height: source.thumbnail.getSize().height,
         };
-        await fs.writeFile(this.metaPathForImage(imagePath), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+        await fs.writeFile(
+          this.metaPathForImage(imagePath),
+          `${JSON.stringify(meta, null, 2)}\n`,
+          "utf8",
+        );
         return meta;
       }),
     );
     return frames.filter((frame): frame is ChronicleBufferedFrame => frame !== null);
   }
 
-  private async enrichFramesForQuery(frames: ChronicleBufferedFrame[]): Promise<ChronicleBufferedFrame[]> {
+  private async enrichFramesForQuery(
+    frames: ChronicleBufferedFrame[],
+  ): Promise<ChronicleBufferedFrame[]> {
     const topCandidates = frames.slice(0, 6);
     const enriched = await Promise.all(
       topCandidates.map(async (frame) => {
@@ -313,7 +329,11 @@ export class ChronicleCaptureService {
           localTextSnippet: ocr || "",
         };
         try {
-          await fs.writeFile(this.metaPathForImage(frame.imagePath), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+          await fs.writeFile(
+            this.metaPathForImage(frame.imagePath),
+            `${JSON.stringify(next, null, 2)}\n`,
+            "utf8",
+          );
         } catch {
           // best-effort cache
         }
@@ -325,7 +345,10 @@ export class ChronicleCaptureService {
   }
 
   private async loadFrames(): Promise<ChronicleBufferedFrame[]> {
-    const dirs = [path.join(this.getChronicleRoot(), "buffer"), path.join(this.getChronicleRoot(), "fallback")];
+    const dirs = [
+      path.join(this.getChronicleRoot(), "buffer"),
+      path.join(this.getChronicleRoot(), "fallback"),
+    ];
     const frames: ChronicleBufferedFrame[] = [];
     for (const dir of dirs) {
       try {

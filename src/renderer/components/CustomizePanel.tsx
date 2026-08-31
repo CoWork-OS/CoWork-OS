@@ -179,7 +179,9 @@ export function CustomizePanel({
       return null;
     }
     return (
-      <span className={`settings-badge ${report.verdict === "quarantined" ? "settings-badge--error" : "settings-badge--warning"}`}>
+      <span
+        className={`settings-badge ${report.verdict === "quarantined" ? "settings-badge--error" : "settings-badge--warning"}`}
+      >
         {report.verdict === "quarantined" ? "Quarantined" : "Security Warning"}
       </span>
     );
@@ -358,7 +360,9 @@ export function CustomizePanel({
               <button
                 key={record.id}
                 className="cp-sidebar-item"
-                onClick={() => setExpandedReportId((current) => (current === record.id ? null : record.id))}
+                onClick={() =>
+                  setExpandedReportId((current) => (current === record.id ? null : record.id))
+                }
               >
                 <span className="cp-sidebar-icon">🛡️</span>
                 <span>{record.displayName || record.bundleId}</span>
@@ -387,7 +391,10 @@ export function CustomizePanel({
                     <input
                       type="checkbox"
                       checked={activePack.enabled}
-                      disabled={activePack.policyBlocked || (activePack.policyRequired && activePack.enabled)}
+                      disabled={
+                        activePack.policyBlocked ||
+                        (activePack.policyRequired && activePack.enabled)
+                      }
                       onChange={(e) => handleToggle(activePack.name, e.target.checked)}
                     />
                     <span className="cp-toggle-slider" />
@@ -431,7 +438,11 @@ export function CustomizePanel({
                   <span className="cp-rc-label">Best for:</span>
                   {activePack.bestFitWorkflows.map((lane) => (
                     <span key={lane} className={`cp-best-fit-badge cp-best-fit-badge--${lane}`}>
-                      {lane === "support_ops" ? "Support Ops" : lane === "it_ops" ? "IT Ops" : "Sales Ops"}
+                      {lane === "support_ops"
+                        ? "Support Ops"
+                        : lane === "it_ops"
+                          ? "IT Ops"
+                          : "Sales Ops"}
                     </span>
                   ))}
                 </div>
@@ -441,7 +452,9 @@ export function CustomizePanel({
                   <span className="cp-rc-label">Outcome examples:</span>
                   <ul className="cp-outcome-list">
                     {activePack.outcomeExamples.map((ex, i) => (
-                      <li key={i} className="cp-outcome-item">{ex}</li>
+                      <li key={i} className="cp-outcome-item">
+                        {ex}
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -547,10 +560,12 @@ export function CustomizePanel({
                   {activePack.agentRoles.map((a) => (
                     <div key={a.name} className="cp-agent-row">
                       <span className="cp-agent-icon">
-                        {a.icon ? (() => {
-                          const Icon = getEmojiIcon(a.icon);
-                          return <Icon size={18} strokeWidth={2} />;
-                        })() : null}
+                        {a.icon
+                          ? (() => {
+                              const Icon = getEmojiIcon(a.icon);
+                              return <Icon size={18} strokeWidth={2} />;
+                            })()
+                          : null}
                       </span>
                       <div className="cp-agent-info">
                         <span className="cp-agent-name">{a.displayName}</span>
@@ -599,7 +614,11 @@ export function CustomizePanel({
                 <h4>Quarantined Imports</h4>
                 <div className="cp-try-list">
                   {quarantinedPacks.map((record) => (
-                    <div key={record.id} className="cp-try-item" style={{ display: "block", cursor: "default" }}>
+                    <div
+                      key={record.id}
+                      className="cp-try-item"
+                      style={{ display: "block", cursor: "default" }}
+                    >
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                         <div>
                           <strong>{record.displayName || record.bundleId}</strong>
@@ -609,7 +628,9 @@ export function CustomizePanel({
                           <button
                             className="button-secondary button-small"
                             onClick={() =>
-                              setExpandedReportId((current) => (current === record.id ? null : record.id))
+                              setExpandedReportId((current) =>
+                                current === record.id ? null : record.id,
+                              )
                             }
                           >
                             {expandedReportId === record.id ? "Hide Report" : "View Report"}

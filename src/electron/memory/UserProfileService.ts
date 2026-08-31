@@ -33,10 +33,7 @@ export class UserProfileService {
     const profile = this.load();
     const now = Date.now();
     const normalizedCategory = this.normalizeCategory(request.category);
-    const preferredName = this.extractPreferredNameFromFactValue(
-      normalizedCategory,
-      request.value,
-    );
+    const preferredName = this.extractPreferredNameFromFactValue(normalizedCategory, request.value);
     const normalizedValue = this.normalizeFactValue(
       preferredName ? `Preferred name: ${preferredName}` : request.value,
     );
@@ -347,10 +344,7 @@ export class UserProfileService {
     return this.prioritizeFactCandidates(facts).slice(0, 8);
   }
 
-  private static extractOperatingFact(
-    text: string,
-    taskId?: string,
-  ): AddUserFactRequest | null {
+  private static extractOperatingFact(text: string, taskId?: string): AddUserFactRequest | null {
     const signalText = this.stripQuotedSegments(text);
     const signalLowered = signalText.toLowerCase();
     if (!this.isDirectPreferenceStatement(signalText)) {
@@ -437,14 +431,17 @@ export class UserProfileService {
 
     if (/\b(?:public writing|published content|write publicly|external copy)\b/i.test(signalText)) {
       const style = signalText
-        .match(/\b(?:public writing|published content|write publicly|external copy)[^.!?\n]{0,120}/i)?.[0]
+        .match(
+          /\b(?:public writing|published content|write publicly|external copy)[^.!?\n]{0,120}/i,
+        )?.[0]
         ?.trim();
       return {
         category: "voice",
-        value: `Public voice: ${style || "use a sharper, audience-safe voice distinct from private chat."}`.slice(
-          0,
-          MAX_FACT_VALUE_LENGTH,
-        ),
+        value:
+          `Public voice: ${style || "use a sharper, audience-safe voice distinct from private chat."}`.slice(
+            0,
+            MAX_FACT_VALUE_LENGTH,
+          ),
         confidence: 0.76,
         source: "conversation",
         taskId,
@@ -510,8 +507,7 @@ export class UserProfileService {
     };
 
     return facts.sort((left, right) => {
-      const priorityDelta =
-        categoryPriority[left.category] - categoryPriority[right.category];
+      const priorityDelta = categoryPriority[left.category] - categoryPriority[right.category];
       if (priorityDelta !== 0) return priorityDelta;
       return (right.confidence ?? 0.7) - (left.confidence ?? 0.7);
     });

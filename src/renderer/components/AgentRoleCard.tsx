@@ -59,10 +59,12 @@ export function AgentRoleCard({
     >
       <div className="agent-role-card-header">
         <div className="agent-role-icon" style={{ backgroundColor: role.color }}>
-          {role.icon ? (() => {
-            const Icon = resolveTwinIcon(role.icon);
-            return <Icon size={20} strokeWidth={2} />;
-          })() : null}
+          {role.icon
+            ? (() => {
+                const Icon = resolveTwinIcon(role.icon);
+                return <Icon size={20} strokeWidth={2} />;
+              })()
+            : null}
         </div>
         <div className="agent-role-info">
           <span className="agent-role-name">

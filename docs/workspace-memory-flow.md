@@ -14,6 +14,16 @@ An optional external provider lane can also sit beside that local stack. Today t
 
 Dreaming sits above these lanes as a memory-curation process. It reviews recent transcript evidence, structured observations, and curated hot memory, then writes reviewable `dreaming_candidates` instead of directly changing memory.
 
+## Access Profile Boundary
+
+Workspace memory is subject to the active [access profile](access-profiles.md). Interactive memory
+and workspace-kit tools use the same profile-derived filesystem evaluator as other file tools. The
+Heartbeat/Dreaming maintenance path also resolves a workspace read guard before inspecting
+file-backed kit or transcript evidence; an unavailable profile or denied path is skipped/fails
+closed rather than becoming an unrestricted background read. Memory database rows and candidate
+records do not grant filesystem authority, and accepted candidate writes still pass through memory
+write governance.
+
 Those lanes map into runtime layers as:
 
 - **L0 Identity**: curated user/workspace memory + `USER.md` essentials

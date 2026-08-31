@@ -2,6 +2,7 @@
  * Search Provider abstraction types
  * Allows switching between Tavily, Exa, Brave Search, SerpAPI, and Google Custom Search
  */
+import type { AccessDomainRule, AccessNetworkMode } from "../../../shared/access-profiles";
 
 export type SearchProviderType =
   | "tavily"
@@ -46,6 +47,12 @@ export interface SearchQuery {
     allowedDomains: string[];
     blockedDomains: string[];
   };
+  /** Access-profile domain rules applied to the provider endpoint as well as returned sources. */
+  profileDomainRules?: AccessDomainRule[];
+  /** Effective access-profile network mode for direct provider calls. */
+  accessNetworkMode?: AccessNetworkMode;
+  /** Effective workspace network capability for direct provider calls. */
+  networkEnabled?: boolean;
   // Override provider for this query
   provider?: SearchProviderType;
 }

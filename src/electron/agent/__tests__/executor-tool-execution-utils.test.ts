@@ -121,7 +121,9 @@ describe("tool failure normalization", () => {
 
     expect(result.is_error).toBe(true);
     expect(result.content).toContain('"alternatives":["write_file"]');
-    expect(result.content).toContain("Try one of these available alternatives instead: write_file.");
+    expect(result.content).toContain(
+      "Try one of these available alternatives instead: write_file.",
+    );
   });
 
   it("extracts message from structured error objects", () => {
@@ -212,8 +214,7 @@ describe("tool failure normalization", () => {
         "get_current_location",
         {
           success: false,
-          error:
-            "Desktop geolocation timed out. Do not retry get_current_location in this task.",
+          error: "Desktop geolocation timed out. Do not retry get_current_location in this task.",
         },
         "Desktop geolocation timed out. Do not retry get_current_location in this task.",
       ),
@@ -244,7 +245,7 @@ describe("tool failure normalization", () => {
     expect(isAdvisoryToolFailureResult({ success: false, nonBlocking: true })).toBe(true);
     expect(normalized.resultIsError).toBe(true);
     expect(normalized.toolResult.is_error).toBe(false);
-    expect(normalized.toolResult.content).toContain("\"nonBlocking\":true");
+    expect(normalized.toolResult.content).toContain('"nonBlocking":true');
   });
 
   it("compacts computer-use screenshot payloads and attaches companion image content", () => {
@@ -323,7 +324,7 @@ describe("tool failure normalization", () => {
     expect(compacted).toContain("https://api.github.com/repos/example/project/releases");
     expect(compacted).toContain("v1.0");
     expect(compacted).toContain("published_at");
-    expect(compacted).toContain("rel=\\\"last\\\"");
+    expect(compacted).toContain('rel=\\"last\\"');
     expect(compacted).not.toContain("avatar_url");
     expect(compacted).toContain("omittedItems");
   });
@@ -358,6 +359,8 @@ describe("tool failure normalization", () => {
 
     expect(normal.toolResult.content.length).toBeGreaterThan(compacted.toolResult.content.length);
     expect(compacted.toolResult.content).toContain("_cowork_compacted_for_local_model");
-    expect(compacted.toolResult.content).toContain("https://raw.githubusercontent.com/example/project/main/README.md");
+    expect(compacted.toolResult.content).toContain(
+      "https://raw.githubusercontent.com/example/project/main/README.md",
+    );
   });
 });

@@ -58,6 +58,25 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     checkRateLimit(IPC_CHANNELS.WORKTREE_MERGE);
     const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
     try {
+      const info = worktreeManager.getWorktreeInfo(validatedTaskId);
+      if (info) {
+        const baseRepoPath = info.repoPath || agentDaemon.getWorkspaceById(info.workspaceId)?.path;
+        if (!baseRepoPath) {
+          throw new Error("Cannot verify the base repository path for this worktree.");
+        }
+        agentDaemon.assertTaskWorkspaceFilesystemAccess(
+          validatedTaskId,
+          info.worktreePath,
+          "write",
+          "worktree merge",
+        );
+        agentDaemon.assertTaskBaseWorkspaceFilesystemAccess(
+          validatedTaskId,
+          baseRepoPath,
+          "write",
+          "git base repository",
+        );
+      }
       return await worktreeManager.mergeToBase(validatedTaskId);
     } catch (error: Any) {
       console.error(`[Worktree] Merge failed for task ${validatedTaskId}:`, error);
@@ -69,6 +88,25 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     checkRateLimit(IPC_CHANNELS.WORKTREE_CLEANUP);
     const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
     try {
+      const info = worktreeManager.getWorktreeInfo(validatedTaskId);
+      if (info) {
+        const baseRepoPath = info.repoPath || agentDaemon.getWorkspaceById(info.workspaceId)?.path;
+        if (!baseRepoPath) {
+          throw new Error("Cannot verify the base repository path for this worktree.");
+        }
+        agentDaemon.assertTaskWorkspaceFilesystemAccess(
+          validatedTaskId,
+          info.worktreePath,
+          "write",
+          "worktree cleanup",
+        );
+        agentDaemon.assertTaskBaseWorkspaceFilesystemAccess(
+          validatedTaskId,
+          baseRepoPath,
+          "write",
+          "git base repository cleanup",
+        );
+      }
       await worktreeManager.cleanup(validatedTaskId, true);
       return { success: true };
     } catch (error: Any) {

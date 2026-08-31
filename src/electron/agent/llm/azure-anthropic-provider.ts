@@ -10,11 +10,7 @@ function normalizeEndpoint(endpoint: string): string {
   const trimmed = endpoint.trim().replace(/\/+$/, "");
   // If user entered Azure OpenAI resource URL (e.g. https://xxx.openai.azure.com),
   // append /anthropic for the Anthropic gateway
-  if (
-    trimmed &&
-    !/\/anthropic(?:\/|$)/i.test(trimmed) &&
-    /\.openai\.azure\.com$/i.test(trimmed)
-  ) {
+  if (trimmed && !/\/anthropic(?:\/|$)/i.test(trimmed) && /\.openai\.azure\.com$/i.test(trimmed)) {
     return `${trimmed}/anthropic`;
   }
   return trimmed;
@@ -36,7 +32,9 @@ export class AzureAnthropicProvider implements LLMProvider {
       throw new Error("Azure Anthropic endpoint is required. Configure it in Settings.");
     }
     if (!deployment) {
-      throw new Error("Azure Anthropic deployment/model name is required. Configure it in Settings.");
+      throw new Error(
+        "Azure Anthropic deployment/model name is required. Configure it in Settings.",
+      );
     }
 
     const baseUrl = normalizeEndpoint(endpoint);

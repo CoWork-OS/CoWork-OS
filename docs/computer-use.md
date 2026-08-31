@@ -29,6 +29,17 @@ The planner and tool policy treat the computer-use lane as a **controlled, last-
 - **macOS** uses a bundled Swift helper with Accessibility and Screen Recording permissions.
 - **Windows v1** uses a bundled PowerShell/Win32 helper for visible, non-minimized windows. Some protected or elevated apps may block capture or input unless CoWork is running with comparable privileges.
 
+## Access-profile and operating-system boundaries
+
+Computer-use tools must be exposed by the task's effective [access
+profile](access-profiles.md) and remain subject to administrator policy,
+tool restrictions, hard key-combination blocks, and action-specific approval.
+Selecting **Full access** does not grant macOS Accessibility or Screen
+Recording; those are independent operating-system permissions. Conversely,
+granting those OS permissions does not widen the task's filesystem, network,
+or command-tool profile. A remote or fallback computer-use route cannot use
+its transport to bypass the local profile.
+
 ## macOS permissions
 
 Two system permissions gate computer use:

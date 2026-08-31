@@ -242,7 +242,9 @@ sources: [raw/articles/d.md]
       ]),
     );
     expect(report.stats.surprisingConnectionCount).toBeGreaterThan(0);
-    expect(report.surprisingConnections.some((entry: Any) => entry.sourceTitle === "GRPO")).toBe(true);
+    expect(report.surprisingConnections.some((entry: Any) => entry.sourceTitle === "GRPO")).toBe(
+      true,
+    );
     expect(report.suggestedQuestions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

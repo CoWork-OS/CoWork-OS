@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  collectSafetySignals,
-  extractArtifactSummary,
-} from "../ExperimentEvaluationService";
+import { collectSafetySignals, extractArtifactSummary } from "../ExperimentEvaluationService";
 
 describe("ExperimentEvaluationService helpers", () => {
   it("extracts multiple fallback verification commands when no explicit label is present", () => {
@@ -14,7 +11,9 @@ describe("ExperimentEvaluationService helpers", () => {
       8,
     );
 
-    expect(summary.reproductionMethod).toBe("reproduced from logs. Ran npm test, pnpm run lint, and bun run verify before marking PR readiness: ready.");
+    expect(summary.reproductionMethod).toBe(
+      "reproduced from logs. Ran npm test, pnpm run lint, and bun run verify before marking PR readiness: ready.",
+    );
     expect(summary.verificationCommands).toEqual(["npm test", "pnpm run lint", "bun run verify"]);
     expect(summary.prReadiness).toBe("ready");
   });

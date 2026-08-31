@@ -87,9 +87,9 @@ export class WorktreeManager {
 
   private loadLegacySettings(): WorktreeSettings | null {
     try {
-      const row = this.db
-        .prepare("SELECT value FROM settings WHERE key = ?")
-        .get(SETTINGS_KEY) as { value: string } | undefined;
+      const row = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(SETTINGS_KEY) as
+        | { value: string }
+        | undefined;
       if (!row?.value) {
         return null;
       }
@@ -119,6 +119,17 @@ export class WorktreeManager {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Return the infrastructure directory that would be mutated when creating
+   * a task worktree. Callers can authorize this path before invoking
+   * createForTask, which keeps profile deny rules ahead of .gitignore and
+   * worktree-directory writes.
+   */
+  async getWorktreeStoragePath(workspacePath: string): Promise<string> {
+    const repoPath = await GitService.getRepoRoot(workspacePath);
+    return path.join(repoPath, WORKTREES_DIR);
   }
 
   /**
@@ -375,10 +386,7 @@ export class WorktreeManager {
     if (this.gitignoreUpdated.has(repoPath)) return;
 
     const relativeToWorkspace = path.relative(path.resolve(workspacePath), path.resolve(repoPath));
-    if (
-      relativeToWorkspace.startsWith("..") ||
-      path.isAbsolute(relativeToWorkspace)
-    ) {
+    if (relativeToWorkspace.startsWith("..") || path.isAbsolute(relativeToWorkspace)) {
       logger.warn(
         `Skipping .gitignore update outside workspace boundary: repo=${repoPath} workspace=${workspacePath}`,
       );

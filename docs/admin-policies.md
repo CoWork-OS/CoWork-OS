@@ -48,6 +48,12 @@ execution. Its Numbat decision can only continue to the existing policy layers
 or deny the action; it cannot grant an action or override another denial. See
 [Agent Security with Numbat](agent-security-numbat.md).
 
+Runtime policy is an administrator ceiling over the user-selected [access
+profile](access-profiles.md). Administrators do not need a separate shell toggle
+to govern command tools: the selected profile determines whether command tools
+are exposed, while runtime policy can constrain the sandbox, legacy mode mapping,
+network, and shell egress below that selection.
+
 ---
 
 ## Policy Schema
@@ -159,6 +165,25 @@ or deny the action; it cannot grant an action or override another denial. See
 | `maxConcurrentBackgroundWork` | `number` | `1` | >= 1 | Caps concurrent Everyday Agent background jobs. |
 | `activeHours` | `object` | disabled | — | Optional organization active-hours ceiling. |
 
+#### `runtime` access-profile governance
+
+The runtime fields below are low-level administrator constraints. They do not
+replace the profile selector and they cannot widen a profile:
+
+| Field | Effect on access profiles |
+|-------|---------------------------|
+| `allowedPermissionModes` | Constrains legacy permission-mode mappings. An explicitly selected profile is still subject to the resulting admin ceiling. An empty list allows all legacy modes. |
+| `allowedSandboxTypes` | Restricts the sandbox backends that may enforce a profile. An unavailable backend fails closed; it does not become an unsandboxed fallback. Valid values are `macos`, `docker`, and `none`. |
+| `requireSandboxForShell` | Requires OS sandboxing for command execution and can constrain a full-access/unsandboxed request to the sandboxed compatibility path. |
+| `allowUnsandboxedShell` | Allows an explicit environment-gated local fallback only when the administrator permits it. It is not a user-facing profile and is not a general bypass. |
+| `network.defaultAction`, `allowedDomains`, `blockedDomains` | Apply administrator network policy before legacy domain guardrails and profile/network-tool evaluation. Blocked destinations remain blocked. |
+| `network.allowShellNetwork` | Coarse command-process egress gate. Shell networking is not domain-scoped today; full access still needs this gate and an unrestricted profile network posture. |
+| `autoReview.enabled` | Controls the narrow automatic-review helper. It cannot grant an action outside the selected profile or suppress hard/export/location approvals. |
+
+For a profile with domain rules, arbitrary subprocess/code networking fails
+closed unless the runtime has a domain-aware proxy. Use built-in network tools
+when domain-level enforcement is required. See [Access Profiles](access-profiles.md#network-and-command-behavior).
+
 #### `runtime.agentSecurity`
 
 | Field | Type | Default | Range / values | Description |
@@ -253,6 +278,12 @@ The Admin Policies panel is accessible from **Settings > System & Security > Adm
 - Blocked Capability Bundles — comma-separated bundle IDs
 - Max Heartbeat Cadence — maximum profile cadence in minutes
 - Max Background Work — concurrent background-work cap
+
+**Runtime Access Policy**
+- Constrain legacy permission-mode mappings and allowed sandbox backends
+- Require sandboxing for command tools where organization policy demands it
+- Configure administrator domain/network policy and the coarse command-process egress gate
+- Keep user-selected access profiles as the task-level source of truth; do not configure a separate shell toggle
 
 **Agent Security Runtime**
 - Enable or disable the policy

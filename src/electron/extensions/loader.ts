@@ -75,7 +75,7 @@ const getDefaultExtensionsDirs = (): string[] => {
 
   // Organization plugin packs directory (admin-managed)
   try {
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const { getOrgPluginDir } = require("../admin/policies");
     const orgDir = getOrgPluginDir();
     if (orgDir && fs.existsSync(orgDir)) {
@@ -220,7 +220,9 @@ export async function discoverPlugins(dirs?: string[]): Promise<PluginDiscoveryR
               pluginDir,
               normalizedManifest,
               fs.existsSync(securityService.getPackReportPath(pluginDir)),
-              fs.existsSync(securityService.getPackReportPath(pluginDir)) ? "managed" : "unmanaged-local",
+              fs.existsSync(securityService.getPackReportPath(pluginDir))
+                ? "managed"
+                : "unmanaged-local",
             );
             if (!inspection.allowed) {
               continue;

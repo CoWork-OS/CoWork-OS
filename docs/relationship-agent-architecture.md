@@ -8,6 +8,11 @@ CoWork OS should behave as a persistent personal agent that can:
 - Remember the user across time (identity, preferences, context, history, commitments).
 - Execute end-to-end actions safely and still finish with a complete response under pressure.
 
+Persistence and relationship context do not grant execution access. Each task
+resolves an [access profile](access-profiles.md) before tools run; memory,
+personality, intent, and strategy layers may shape the task but cannot widen
+its sandbox, command-tool, filesystem, network, domain, or approval boundary.
+
 ## 2) System Architecture
 
 ### A. Intent Layer (Conversation Brain)

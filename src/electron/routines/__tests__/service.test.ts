@@ -34,9 +34,8 @@ describeWithSqlite("RoutineService", () => {
     db = new Database(":memory:");
 
     ({ RoutineService: RoutineServiceCtor } = await import("../service"));
-    ({ EventTriggerService: EventTriggerServiceCtor } = await import(
-      "../../triggers/EventTriggerService"
-    ));
+    ({ EventTriggerService: EventTriggerServiceCtor } =
+      await import("../../triggers/EventTriggerService"));
 
     hooksSettings = {
       enabled: true,
@@ -713,7 +712,9 @@ describeWithSqlite("RoutineService", () => {
     await routineService.reconcileStaleTimeoutRuns();
 
     const row = db
-      .prepare("SELECT status, output_status, error_summary, artifacts_summary FROM routine_runs WHERE id = ?")
+      .prepare(
+        "SELECT status, output_status, error_summary, artifacts_summary FROM routine_runs WHERE id = ?",
+      )
       .get("run-timeout-backfill") as {
       status: string;
       output_status: string;

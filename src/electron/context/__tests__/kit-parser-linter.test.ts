@@ -119,9 +119,9 @@ describe("kit-parser-linter", () => {
     expect(doc).not.toBeNull();
 
     const issues = lintKitDoc(doc!, contract, new Date("2026-03-14T00:00:00Z"));
-    expect(issues.some((issue) => issue.code === "possible_secret" && issue.level === "error")).toBe(
-      true,
-    );
+    expect(
+      issues.some((issue) => issue.code === "possible_secret" && issue.level === "error"),
+    ).toBe(true);
   });
 
   it("returns null for documents whose sanitized body becomes empty", () => {

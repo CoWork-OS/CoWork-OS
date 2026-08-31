@@ -56,6 +56,16 @@ export interface SandboxResult {
 }
 
 /**
+ * Handle for a process that intentionally outlives the call that started it
+ * (for example, a local QA dev server). The sandbox owns the launch boundary;
+ * the caller owns the process lifetime and must terminate it when finished.
+ */
+export interface SandboxedProcess {
+  process: ChildProcess;
+  cleanup: () => void;
+}
+
+/**
  * Unified sandbox interface
  * All sandbox implementations must implement this interface
  */
@@ -73,6 +83,9 @@ export interface ISandbox {
    * Execute a command in the sandbox
    */
   execute(command: string, args?: string[], options?: SandboxOptions): Promise<SandboxResult>;
+
+  /** Start a long-running command without waiting for it to exit. */
+  spawnProcess?(command: string, args?: string[], options?: SandboxOptions): SandboxedProcess;
 
   /**
    * Execute code in the sandbox (Python or JavaScript)
@@ -116,10 +129,7 @@ export class NoSandbox implements ISandbox {
       let killed = false;
       let timedOut = false;
 
-      const shell =
-        process.platform === "win32"
-          ? process.env.COMSPEC || "cmd.exe"
-          : "/bin/sh";
+      const shell = process.platform === "win32" ? process.env.COMSPEC || "cmd.exe" : "/bin/sh";
       const proc =
         args.length > 0
           ? spawn(command, args, {
@@ -187,6 +197,39 @@ export class NoSandbox implements ISandbox {
         });
       });
     });
+  }
+
+  spawnProcess(
+    command: string,
+    args: string[] = [],
+    options: SandboxOptions = {},
+  ): SandboxedProcess {
+    const cwd = options.cwd || this.workspace.path;
+    const env: NodeJS.ProcessEnv = {};
+    const passthrough = options.envPassthrough || [
+      "PATH",
+      "HOME",
+      "USER",
+      "SHELL",
+      "LANG",
+      "TERM",
+      "TMPDIR",
+    ];
+    for (const key of passthrough) {
+      if (process.env[key]) env[key] = process.env[key];
+    }
+    env.PATH ||= process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
+    env.HOME ||= process.env.HOME;
+    env.TMPDIR ||= process.env.TMPDIR;
+
+    const proc = spawn(command, args, {
+      cwd,
+      env,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    options.onProcess?.(proc);
+    return { process: proc, cleanup: () => undefined };
   }
 
   async executeCode(code: string, language: "python" | "javascript"): Promise<SandboxResult> {
@@ -285,14 +328,10 @@ export async function isMacOSSandboxAvailable(): Promise<boolean> {
   }
 
   macOSSandboxCheckPromise = new Promise((resolve) => {
-    const proc = spawn(
-      "sandbox-exec",
-      ["-p", "(version 1)\n(allow default)", "/bin/echo", "ok"],
-      {
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    const proc = spawn("sandbox-exec", ["-p", "(version 1)\n(allow default)", "/bin/echo", "ok"], {
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     let stderr = "";
     let stdout = "";
@@ -318,8 +357,7 @@ export async function isMacOSSandboxAvailable(): Promise<boolean> {
     proc.on("close", (code) => {
       clearTimeout(timeout);
       const combined = `${stdout}\n${stderr}`;
-      const failedRuntime =
-        /Operation not permitted|Abort trap|sandbox_apply/i.test(combined);
+      const failedRuntime = /Operation not permitted|Abort trap|sandbox_apply/i.test(combined);
       finish(code === 0 && !failedRuntime);
     });
     proc.on("error", () => {

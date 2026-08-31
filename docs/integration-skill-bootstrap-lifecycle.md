@@ -34,6 +34,12 @@ Source: `src/electron/mcp/connectors/capabilities.ts`
 
 Related UI: configured integrations from native settings, gateway channels, and MCP connectors also feed the grouped composer `@` menu. That menu is documented in [Composer Mentions](composer-mentions.md) and uses local state only; it does not run `integration_setup` or health checks while typing.
 
+Integration setup and skill proposals do not grant runtime access. The task's
+[access profile](access-profiles.md), connector policy, provider scopes, and
+approval rules are resolved before a configured integration or proposed skill
+can call a tool; setup readiness cannot widen a filesystem, network, domain,
+or command-tool boundary.
+
 ### Tool actions
 
 `integration_setup` now supports:

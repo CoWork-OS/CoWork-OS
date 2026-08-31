@@ -381,7 +381,7 @@ describe("Gateway Infrastructure - Mock Adapter Integration", () => {
           text: "Broadcast",
         });
         results.push({ chatId, success: true, messageId });
-      } catch  {
+      } catch {
         results.push({
           chatId,
           success: false,

@@ -1,10 +1,7 @@
 import type { RefObject, MutableRefObject } from "react";
 import type { TaskEvent, Task, CustomSkill } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
-import {
-  getCompletionSummaryText,
-  humanizeTimelineMessage,
-} from "./task-event-presentation";
+import { getCompletionSummaryText, humanizeTimelineMessage } from "./task-event-presentation";
 import { sanitizeToolCallTextFromAssistant } from "../../../shared/tool-call-text-sanitizer";
 import {
   resolveTaskOutputSummaryFromCompletionEvent,
@@ -208,7 +205,11 @@ export function deriveAgentReasoningPanelState(args: {
     const event = args.events[index];
     if (event.taskId !== args.taskId) continue;
     const effectiveType = getEffectiveTaskEventType(event);
-    if (effectiveType === "log" || effectiveType === "llm_usage" || effectiveType === "command_output") {
+    if (
+      effectiveType === "log" ||
+      effectiveType === "llm_usage" ||
+      effectiveType === "command_output"
+    ) {
       continue;
     }
     if (isAgentReasoningStreamingEvent(event)) {
@@ -245,8 +246,7 @@ export function isTransientLiveTranscriptRow(row: TaskFeedRow): boolean {
   }
   if (effectiveType !== "progress_update") return false;
 
-  const payloadMessage =
-    typeof event.payload?.message === "string" ? event.payload.message : "";
+  const payloadMessage = typeof event.payload?.message === "string" ? event.payload.message : "";
   return !isUserFacingProgressMessage(payloadMessage);
 }
 
@@ -343,8 +343,7 @@ export function isUserFacingLiveStatusRow(row: TaskFeedRow): boolean {
   if (effectiveType === "step_started") return true;
   if (effectiveType !== "progress_update") return false;
 
-  const payloadMessage =
-    typeof event.payload?.message === "string" ? event.payload.message : "";
+  const payloadMessage = typeof event.payload?.message === "string" ? event.payload.message : "";
   return isUserFacingProgressMessage(payloadMessage);
 }
 
@@ -374,7 +373,10 @@ export function selectVisibleTaskFeedRows(
       const rowEvents = getTaskFeedRowEvents(row);
       for (const { event, eventIndex, eventOrder } of rowEvents) {
         const order = rowIndex + eventOrder / 1000;
-        if (getEffectiveTaskEventType(event) === "assistant_message" && event.payload?.internal !== true) {
+        if (
+          getEffectiveTaskEventType(event) === "assistant_message" &&
+          event.payload?.internal !== true
+        ) {
           finalAssistant = {
             order,
             row: createDeliveryEventRow(row, event, eventIndex, eventOrder),
@@ -479,7 +481,9 @@ export function pruneStringSetToActiveIds(
   return next;
 }
 
-export function getCommandOutputSessionsRevision(sessions: CommandOutputSession[] | undefined): string {
+export function getCommandOutputSessionsRevision(
+  sessions: CommandOutputSession[] | undefined,
+): string {
   if (!sessions || sessions.length === 0) return "none";
   return sessions
     .map(
@@ -531,9 +535,7 @@ export function isRedundantTimelineEvidenceEvent(event: TaskEvent, events: TaskE
   if (sources.size === 0) return false;
 
   const eventIndex = events.findIndex(
-    (candidate) =>
-      candidate === event ||
-      (event.id.trim().length > 0 && candidate.id === event.id),
+    (candidate) => candidate === event || (event.id.trim().length > 0 && candidate.id === event.id),
   );
   const previousEvents = (eventIndex >= 0 ? events.slice(0, eventIndex) : events).filter(
     (candidate) => candidate.type === "timeline_evidence_attached",
@@ -590,10 +592,7 @@ export function estimateTaskFeedRowHeight(
     return Math.min(420, 120 + Math.ceil(messageLength / 180) * 44);
   }
 
-  if (
-    effectiveType === "artifact_created" ||
-    event.type === "timeline_artifact_emitted"
-  ) {
+  if (effectiveType === "artifact_created" || event.type === "timeline_artifact_emitted") {
     return 42;
   }
 
@@ -628,5 +627,9 @@ export function shouldScheduleAutoScrollWrite(args: {
 }): boolean {
   const targetTop = getAutoScrollTargetTop(args.scrollHeight, args.clientHeight);
   const alreadyAtTarget = Math.abs(args.scrollTop - targetTop) < 2;
-  return !(alreadyAtTarget && args.lastTargetTop !== null && Math.abs(args.lastTargetTop - targetTop) < 2);
+  return !(
+    alreadyAtTarget &&
+    args.lastTargetTop !== null &&
+    Math.abs(args.lastTargetTop - targetTop) < 2
+  );
 }

@@ -74,7 +74,7 @@ Restrict tool groups per context:
 | Memory Tools | Clipboard read/write | Denied |
 | System Tools | Screenshot, app launch | Allowed |
 | Network Tools | Browser, web access | Allowed |
-| Destructive Tools | Delete, shell commands | Allowed (with approval) |
+| Destructive Tools | Delete, command tools | Allowed (with approval and profile controls) |
 
 ## Channel Specialization Policy
 
@@ -89,44 +89,57 @@ For shared gateway spaces, channel specialization adds a routing and policy laye
 
 Specialization tool restrictions merge with context-policy restrictions using deny-first behavior. A channel specialization must not contain provider tokens, bot credentials, or connector secrets.
 
-## Workspace Permissions
+## Access Profiles and Workspace Permissions
 
-### Basic Permissions
+[Access Profiles](../access-profiles.md) are the primary user-facing control for a task. Open
+**Settings > System & Security > Permissions** to choose the default profile or define a custom
+profile, then use the **Permission access mode** selector in the main composer for a particular
+task. The built-in choices are **Ask for approval**, **Approve for me**, **Full access**, and
+**Custom**.
 
-Configure per workspace in **Settings > Workspaces**. These booleans are coarse capability gates;
-the permission engine still evaluates explicit rules, guardrails, and mode defaults.
+A profile combines sandbox boundary, approval policy, reviewer policy, network posture, filesystem
+roots/rules, and domain rules. Command tools derive their availability from the selected profile;
+there is no separate shell enable/disable setting for a new task.
 
-| Permission | Description | Default |
-|------------|-------------|---------|
-| Read | Read files | Yes |
-| Write | Create/modify files | Yes |
-| Delete | Delete files (usually approval-gated, unless a matching rule allows it) | No |
-| Shell | Run shell commands (usually approval-gated, unless a matching rule allows it) | No |
-| Network | Allow network-capable tools to run at all. Export-sensitive requests may still prompt, and domain guardrails/rules may still block specific destinations. | Yes |
+### Legacy workspace capability gates
 
-### Allowed Paths
+Workspace booleans remain as compatibility and coarse capability data. They are not a second
+modern profile selector. For a task with a named profile, the profile's effective command/network
+and filesystem policy is applied before per-request rules. For an older unprofiled task, the legacy
+fields continue to preserve its prior behavior.
 
-Add paths outside workspace that tools can access:
+| Permission | Description | Modern profile behavior |
+|------------|-------------|-------------------------|
+| Read | Read files | Still required by the effective profile |
+| Write | Create/modify files | Still required; a read-only profile removes writes |
+| Delete | Delete files | Separate destructive capability; a `write` profile rule never grants delete |
+| `shell` | Legacy command-tool capability bit | Consulted for unprofiled legacy tasks; named profiles derive command access; not a new-task toggle |
+| Network | Coarse network capability | The profile chooses disabled/on-request/enabled, subject to admin policy and export rules |
 
-1. Go to **Settings > Workspaces > [Your Workspace]**
-2. Click **Add Allowed Path**
-3. Enter the path (e.g., `/Users/me/shared`)
+### Paths and unrestricted-file compatibility
 
-### Unrestricted Mode
+For modern profiles, use `workspaceRoots` and `filesystemRules` in the profile editor. Rules are
+deny-first, symlink-aware, and evaluated separately for read, write, and delete. A profile's finite
+filesystem scope cannot be widened by an old allowed-path entry or a new one-shot approval.
 
-Enable broader file access for development:
+The older workspace controls remain available for compatibility:
 
-1. Go to **Settings > Workspaces > [Your Workspace]**
-2. Toggle **Unrestricted File Access**
+- **Allowed Paths** can add an external root for an unprofiled legacy task. A named profile must
+  explicitly include any additional root it needs.
+- **Unrestricted File Access** is a legacy broad-file flag. It does not override a named profile's
+  finite roots, deny rules, protected operating-system paths, or unavailable-profile fail-closed
+  state.
 
-**Warning:** Only use in trusted environments.
+Do not use these legacy fields as a replacement for selecting a profile. See [Access Profiles](../access-profiles.md#filesystem-behavior)
+for external-file approvals, path canonicalization, and protected roots.
 
 ### Permission Rules
 
 For explicit tool, domain, path, command-prefix, and MCP-server rules:
 
 1. Open **Settings > System & Security**
-2. Set the default permission mode if needed
+2. Set the default access profile. Set a legacy permission mode only when maintaining an older
+   task or integration.
 3. Add profile rules for global policy
 4. Use the workspace-local rule list to review or remove rules for the active workspace
 
@@ -140,9 +153,9 @@ Available rule scopes:
 | `command_prefix` | Normalized shell prefix | Auto-approve trusted read/test commands |
 | `mcp_server` | One MCP backend | Narrow access to a specific connector/server |
 
-Common mode choices:
+Legacy permission-mode choices:
 
-- `default` - safe reads auto-run; writes, deletes, shell, data export, and external effects prompt
+- `default` - safe reads auto-run; writes, deletes, command tools, data export, and external effects prompt
 - `dangerous_only` - recommended when you want fewer interruptions without fully disabling review; safe reads/edits and conservative read/test shell commands auto-run, while risky or ambiguous actions still prompt
 - `dont_ask` / `bypass_permissions` - high-autonomy modes for trusted environments only, but export-sensitive actions still require explicit approval
 
@@ -173,9 +186,14 @@ Practical examples:
 
 ## Sandbox Configuration
 
+Access profiles choose the logical task boundary (`read-only`, `workspace-write`, or
+`danger-full-access`). The setting below chooses the backend used to enforce that boundary. A
+sandbox backend is not an alternative access profile, and selecting `None` does not remove hard
+guardrails or profile rules.
+
 ### Sandbox Type
 
-Choose your sandbox implementation:
+Choose the sandbox implementation for the effective profile:
 
 | Type | Platforms | Features |
 |------|-----------|----------|
@@ -254,6 +272,7 @@ After configuration, verify:
 - [ ] Context policies configured for groups
 - [ ] Channel specializations reviewed for shared groups, channels, and threads
 - [ ] Shared-memory opt-in enabled only for trusted specialized groups
+- [ ] Default access profile selected and custom profiles reviewed
 - [ ] Workspace permissions appropriate
 - [ ] Guardrails configured
 - [ ] Permission rules reviewed

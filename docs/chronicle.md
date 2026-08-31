@@ -128,6 +128,7 @@ If OCR-backed matching is important, install local `tesseract`. The Chronicle se
 - later image or vision analysis still follows the normal explicit screenshot / export approval path
 - only task-used observations are copied into workspace state
 - when **Respect workspace memory privacy and auto-capture settings** is on, durable Chronicle promotion follows workspace memory gates before writing observations
+- `screen_context_resolve` and Chronicle-backed promotion remain subject to the task's access profile and tool restrictions; a profile cannot grant Screen Recording or widen later file/image/export access
 - local Chronicle files can still be accessed by other software running as you on the same machine
 
 ## Sensitive content guidance

@@ -31,7 +31,11 @@ describe("scraping rate limiter", () => {
 
   it("does not delay when rate limiting is disabled", async () => {
     const sleep = vi.fn().mockResolvedValue(undefined);
-    await waitForScrapingSlot("https://example.com/one", { enabled: false, requestsPerMinute: 1 }, sleep);
+    await waitForScrapingSlot(
+      "https://example.com/one",
+      { enabled: false, requestsPerMinute: 1 },
+      sleep,
+    );
     expect(sleep).not.toHaveBeenCalled();
   });
 });

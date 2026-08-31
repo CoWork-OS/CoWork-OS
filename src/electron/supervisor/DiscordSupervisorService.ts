@@ -2,11 +2,7 @@ import type { BrowserWindow } from "electron";
 import type { Message } from "discord.js";
 import { ActivityRepository } from "../activity/ActivityRepository";
 import type { AgentDaemon } from "../agent/daemon";
-import {
-  ChannelRepository,
-  type Channel,
-  WorkspaceRepository,
-} from "../database/repositories";
+import { ChannelRepository, type Channel, WorkspaceRepository } from "../database/repositories";
 import { SupervisorExchangeRepository } from "./SupervisorExchangeRepository";
 import type {
   DiscordSupervisorConfig,
@@ -26,6 +22,7 @@ import {
   sanitizeForPrompt,
 } from "./protocol";
 import { createLogger } from "../utils/logger";
+import { formatUserFacingCompletionSummary } from "../../shared/task-completion";
 
 type PendingTaskContext = {
   exchangeId: string;
@@ -46,30 +43,19 @@ function truncate(value: string, max = 700): string {
 
 function buildTaskCompletionSummary(data: {
   resultSummary?: string;
-  semanticSummary?: string;
   verificationVerdict?: string;
   verificationReport?: string;
   message?: string;
 }): string {
   const resultSummary = typeof data.resultSummary === "string" ? data.resultSummary.trim() : "";
-  const semanticSummary = typeof data.semanticSummary === "string" ? data.semanticSummary.trim() : "";
-  const verificationVerdict =
-    typeof data.verificationVerdict === "string" ? data.verificationVerdict.trim() : "";
-  const verificationReport =
-    typeof data.verificationReport === "string" ? data.verificationReport.trim() : "";
   const message = typeof data.message === "string" ? data.message.trim() : "";
 
-  const summary = [resultSummary, semanticSummary].filter((value) => value.length > 0).join("\n\n");
-  const verification =
-    verificationVerdict || verificationReport
-      ? [
-          verificationVerdict ? `Verification: ${verificationVerdict}` : "",
-          verificationReport || "",
-        ]
-          .filter((value) => value.length > 0)
-          .join("\n")
-      : "";
-  return [summary, verification, message].filter((value) => value.length > 0).join("\n\n");
+  const summary = formatUserFacingCompletionSummary({
+    resultSummary,
+    verificationVerdict: data.verificationVerdict,
+    verificationReport: data.verificationReport,
+  });
+  return [summary, message].filter((value) => value.length > 0).join("\n\n");
 }
 
 function stripProtocolEnvelope(text: string): string {
@@ -105,7 +91,10 @@ function buildSupervisorPrompt(
   exchange: SupervisorExchange,
 ): string {
   const evidence = (exchange.evidenceRefs || [])
-    .map((ref, index) => `${index + 1}. channel=${ref.channelId} message=${ref.messageId}${ref.summary ? ` — ${ref.summary}` : ""}`)
+    .map(
+      (ref, index) =>
+        `${index + 1}. channel=${ref.channelId} message=${ref.messageId}${ref.summary ? ` — ${ref.summary}` : ""}`,
+    )
     .join("\n");
 
   return [
@@ -157,7 +146,6 @@ export class DiscordSupervisorService {
       async (data: {
         taskId: string;
         resultSummary?: string;
-        semanticSummary?: string;
         verificationVerdict?: string;
         verificationReport?: string;
         message?: string;
@@ -165,10 +153,13 @@ export class DiscordSupervisorService {
         await this.handleTaskCompleted(data);
       },
     );
-    this.agentDaemon.on("error", async (data: { taskId?: string; error?: string; message?: string }) => {
-      if (!data?.taskId) return;
-      await this.handleTaskFailed(data.taskId, data.error || data.message || "Unknown error");
-    });
+    this.agentDaemon.on(
+      "error",
+      async (data: { taskId?: string; error?: string; message?: string }) => {
+        if (!data?.taskId) return;
+        await this.handleTaskFailed(data.taskId, data.error || data.message || "Unknown error");
+      },
+    );
   }
 
   listExchanges(query: SupervisorExchangeListQuery) {
@@ -184,7 +175,9 @@ export class DiscordSupervisorService {
       throw new Error("Only escalated supervisor exchanges can be resolved");
     }
 
-    const mirrorTarget = request.mirrorToDiscord ? this.getDiscordMirrorTarget(existing) : undefined;
+    const mirrorTarget = request.mirrorToDiscord
+      ? this.getDiscordMirrorTarget(existing)
+      : undefined;
     const next = this.exchangeRepo.update(existing.id, {
       status: "closed",
       humanResolution: request.resolution.trim(),
@@ -208,7 +201,10 @@ export class DiscordSupervisorService {
     return next;
   }
 
-  async handleIncomingDiscordMessage(adapter: DiscordAdapter, message: IncomingMessage): Promise<void> {
+  async handleIncomingDiscordMessage(
+    adapter: DiscordAdapter,
+    message: IncomingMessage,
+  ): Promise<void> {
     this.activeDiscordAdapter = adapter;
     const channel = this.channelRepo.findByType("discord");
     if (!channel) return;
@@ -225,7 +221,14 @@ export class DiscordSupervisorService {
     if (!channelId) return;
 
     if (channelId === config.coordinationChannelId) {
-      await this.handleCoordinationMessage(adapter, channel, config, message, authorUserId, channelId);
+      await this.handleCoordinationMessage(
+        adapter,
+        channel,
+        config,
+        message,
+        authorUserId,
+        channelId,
+      );
       return;
     }
 
@@ -247,7 +250,9 @@ export class DiscordSupervisorService {
 
   private resolveWorkspaceId(channel: Channel): string | null {
     const configuredId =
-      typeof channel.config?.defaultWorkspaceId === "string" ? channel.config.defaultWorkspaceId : null;
+      typeof channel.config?.defaultWorkspaceId === "string"
+        ? channel.config.defaultWorkspaceId
+        : null;
     if (configuredId && this.workspaceRepo.findById(configuredId)) {
       return configuredId;
     }
@@ -371,7 +376,8 @@ export class DiscordSupervisorService {
           limit: 50,
         })
         .filter(
-          (item) => item.coordinationChannelId === channelId && item.sourcePeerUserId === peerUserId,
+          (item) =>
+            item.coordinationChannelId === channelId && item.sourcePeerUserId === peerUserId,
         );
 
       if (openCandidates.length === 1) {
@@ -404,10 +410,11 @@ export class DiscordSupervisorService {
     if (!storedMessage) return;
 
     const messageCount = this.exchangeRepo.listMessages(exchange.id).length;
-    exchange = this.exchangeRepo.update(exchange.id, {
-      lastIntent: parsed.intent,
-      turnCount: messageCount,
-    }) || exchange;
+    exchange =
+      this.exchangeRepo.update(exchange.id, {
+        lastIntent: parsed.intent,
+        turnCount: messageCount,
+      }) || exchange;
     this.emitSupervisorEvent("updated", exchange);
 
     if (messageCount > 3) {
@@ -418,10 +425,15 @@ export class DiscordSupervisorService {
       });
       if (closed) {
         this.emitSupervisorEvent("updated", closed);
-        this.createActivity(closed, "Supervisor exchange closed", "Maximum exchange depth reached.", {
-          exchangeId: closed.id,
-          exchangeStatus: closed.status,
-        });
+        this.createActivity(
+          closed,
+          "Supervisor exchange closed",
+          "Maximum exchange depth reached.",
+          {
+            exchangeId: closed.id,
+            exchangeStatus: closed.status,
+          },
+        );
       }
       return;
     }
@@ -434,10 +446,15 @@ export class DiscordSupervisorService {
       });
       if (closed) {
         this.emitSupervisorEvent("updated", closed);
-        this.createActivity(closed, "Supervisor exchange acknowledged", stripProtocolEnvelope(message.text), {
-          exchangeId: closed.id,
-          exchangeStatus: closed.status,
-        });
+        this.createActivity(
+          closed,
+          "Supervisor exchange acknowledged",
+          stripProtocolEnvelope(message.text),
+          {
+            exchangeId: closed.id,
+            exchangeStatus: closed.status,
+          },
+        );
       }
       return;
     }
@@ -450,21 +467,40 @@ export class DiscordSupervisorService {
       });
       if (escalated) {
         this.emitSupervisorEvent("updated", escalated);
-        this.createActivity(escalated, "Peer escalated supervisor exchange", stripProtocolEnvelope(message.text), {
-          exchangeId: escalated.id,
-          exchangeStatus: escalated.status,
-        });
+        this.createActivity(
+          escalated,
+          "Peer escalated supervisor exchange",
+          stripProtocolEnvelope(message.text),
+          {
+            exchangeId: escalated.id,
+            exchangeStatus: escalated.status,
+          },
+        );
       }
       return;
     }
 
     if (parsed.intent === "status_request") {
-      await this.startProtocolTask(adapter, channel, exchange, peerUserId, "worker", message.messageId);
+      await this.startProtocolTask(
+        adapter,
+        channel,
+        exchange,
+        peerUserId,
+        "worker",
+        message.messageId,
+      );
       return;
     }
 
     if (parsed.intent === "review_request") {
-      await this.startProtocolTask(adapter, channel, exchange, peerUserId, "supervisor", message.messageId);
+      await this.startProtocolTask(
+        adapter,
+        channel,
+        exchange,
+        peerUserId,
+        "supervisor",
+        message.messageId,
+      );
     }
   }
 
@@ -497,7 +533,11 @@ export class DiscordSupervisorService {
     const prompt =
       responseMode === "worker"
         ? buildWorkerPrompt(peerUserId, latestPeerMessage?.rawContent || sourceSummary, exchange.id)
-        : buildSupervisorPrompt(peerUserId, latestPeerMessage?.rawContent || sourceSummary, exchange);
+        : buildSupervisorPrompt(
+            peerUserId,
+            latestPeerMessage?.rawContent || sourceSummary,
+            exchange,
+          );
 
     const task = await this.agentDaemon.createTask({
       title:
@@ -533,7 +573,6 @@ export class DiscordSupervisorService {
   private async handleTaskCompleted(data: {
     taskId: string;
     resultSummary?: string;
-    semanticSummary?: string;
     verificationVerdict?: string;
     verificationReport?: string;
     message?: string;
@@ -546,7 +585,6 @@ export class DiscordSupervisorService {
 
     const rawOutput = buildTaskCompletionSummary({
       resultSummary: this.latestTaskMessages.get(data.taskId) || data.resultSummary,
-      semanticSummary: data.semanticSummary,
       verificationVerdict: data.verificationVerdict,
       verificationReport: data.verificationReport,
       message: data.message,
@@ -558,13 +596,12 @@ export class DiscordSupervisorService {
         peerBotUserIds: [context.peerUserId],
         strictMode: false,
       });
-      const outboundText =
-        formatPeerSupervisorMessage(
-          context.peerUserId,
-          "review_request",
-          stripProtocolEnvelope(rawOutput) || "Status reviewed. Requesting supervisor review.",
-          { exchangeId: exchange.id },
-        );
+      const outboundText = formatPeerSupervisorMessage(
+        context.peerUserId,
+        "review_request",
+        stripProtocolEnvelope(rawOutput) || "Status reviewed. Requesting supervisor review.",
+        { exchangeId: exchange.id },
+      );
       const sentId = await context.adapter.sendMessage({
         chatId: exchange.coordinationChannelId,
         text: outboundText,
@@ -586,11 +623,16 @@ export class DiscordSupervisorService {
       if (updated) {
         this.emitSupervisorEvent("updated", updated);
       }
-      this.createActivity(exchange, "Worker responded to supervisor exchange", stripProtocolEnvelope(outboundText), {
-        exchangeId: exchange.id,
-        exchangeStatus: updated?.status || exchange.status,
-        taskId: data.taskId,
-      });
+      this.createActivity(
+        exchange,
+        "Worker responded to supervisor exchange",
+        stripProtocolEnvelope(outboundText),
+        {
+          exchangeId: exchange.id,
+          exchangeStatus: updated?.status || exchange.status,
+          taskId: data.taskId,
+        },
+      );
       return;
     }
 
@@ -628,10 +670,15 @@ export class DiscordSupervisorService {
       });
       if (closed) {
         this.emitSupervisorEvent("updated", closed);
-        this.createActivity(closed, "Supervisor exchange acknowledged", stripProtocolEnvelope(outboundText), {
-          exchangeId: closed.id,
-          exchangeStatus: closed.status,
-        });
+        this.createActivity(
+          closed,
+          "Supervisor exchange acknowledged",
+          stripProtocolEnvelope(outboundText),
+          {
+            exchangeId: closed.id,
+            exchangeStatus: closed.status,
+          },
+        );
       }
       return;
     }
@@ -741,7 +788,9 @@ export class DiscordSupervisorService {
   private requireDiscordMirrorAdapter(): DiscordAdapter {
     const adapter = this.activeDiscordAdapter || this.getDiscordAdapter?.();
     if (!adapter) {
-      throw new Error("Discord mirror delivery is unavailable because no Discord adapter is active");
+      throw new Error(
+        "Discord mirror delivery is unavailable because no Discord adapter is active",
+      );
     }
     return adapter;
   }

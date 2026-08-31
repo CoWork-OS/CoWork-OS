@@ -104,7 +104,11 @@ The cache is meant to reduce repeated advisor cost during near-identical turns. 
 
 ## Tools and Images
 
-Advisors do not receive tools. If a task requires file edits, shell commands, browser actions, or MCP tools, those actions happen only after the aggregator chooses to call tools.
+Advisors do not receive tools. If a task requires file edits, command tools,
+browser actions, or MCP tools, those actions happen only after the aggregator
+chooses to call tools and the task's effective [access profile](access-profiles.md)
+permits them. MoA routing cannot widen the profile or bypass approval and
+guardrail decisions.
 
 For multimodal turns, advisors receive a text-rendered transcript of the request. The aggregator receives the original messages plus advisory context, so image-capable aggregators can still use the original visual inputs where the underlying provider supports them.
 

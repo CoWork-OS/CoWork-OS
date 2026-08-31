@@ -1,8 +1,4 @@
-import type {
-  LLMSettingsData,
-  OpenAIReasoningEffort,
-  LLMTextVerbosity,
-} from "../../shared/types";
+import type { LLMSettingsData, OpenAIReasoningEffort, LLMTextVerbosity } from "../../shared/types";
 
 export interface ClaudeCredentialInput {
   apiKey?: string;
@@ -20,10 +16,7 @@ export function resolveClaudeAuthMethod(
   if (anthropic?.authMethod) {
     return anthropic.authMethod;
   }
-  if (
-    anthropic?.subscriptionToken ||
-    isClaudeSubscriptionToken(anthropic?.apiKey)
-  ) {
+  if (anthropic?.subscriptionToken || isClaudeSubscriptionToken(anthropic?.apiKey)) {
     return "subscription";
   }
   return "api_key";
@@ -56,10 +49,7 @@ export function selectClaudeModelKey(
   providerModels: Array<{ key: string }>,
   currentModelKey?: string,
 ): string {
-  if (
-    currentModelKey &&
-    providerModels.some((model) => model.key === currentModelKey)
-  ) {
+  if (currentModelKey && providerModels.some((model) => model.key === currentModelKey)) {
     return currentModelKey;
   }
 

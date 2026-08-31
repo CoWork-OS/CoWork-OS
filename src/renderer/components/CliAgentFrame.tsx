@@ -1,5 +1,14 @@
 import { useMemo, useState } from "react";
-import { Check, X, Play, Loader2, ChevronDown, ChevronRight, Terminal, MessageSquare } from "lucide-react";
+import {
+  Check,
+  X,
+  Play,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  Terminal,
+  MessageSquare,
+} from "lucide-react";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import type { Task, TaskEvent } from "../../shared/types";
 import type { CliAgentType } from "../../shared/cli-agent-detection";
@@ -7,6 +16,7 @@ import { getCliAgentDisplayInfo } from "../../shared/cli-agent-detection";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
 import { formatProviderErrorForDisplay } from "../../shared/provider-error-format";
+import { formatUserFacingCompletionSummary } from "../../shared/task-completion";
 
 interface CliAgentFrameProps {
   task: Task;
@@ -42,28 +52,15 @@ interface FrameEvent {
 
 function buildTaskCompletionLabel(event: TaskEvent): string {
   const p = event.payload as Record<string, unknown> | undefined;
-  const resultSummary =
-    typeof p?.resultSummary === "string" ? p.resultSummary.trim() : "";
-  const semanticSummary =
-    typeof p?.semanticSummary === "string" ? p.semanticSummary.trim() : "";
-  const verificationVerdict =
-    typeof p?.verificationVerdict === "string" ? p.verificationVerdict.trim() : "";
-  const verificationReport =
-    typeof p?.verificationReport === "string" ? p.verificationReport.trim() : "";
-
-  const summary = [resultSummary, semanticSummary].filter((value) => value.length > 0).join(" · ");
-  if (!verificationVerdict && !verificationReport) {
-    return summary || "Task completed";
-  }
-
-  const verification = [
-    verificationVerdict ? `Verification: ${verificationVerdict}` : "",
-    verificationReport || "",
-  ]
-    .filter((value) => value.length > 0)
-    .join(" · ");
-
-  return [summary, verification].filter((value) => value.length > 0).join(" · ") || "Task completed";
+  const resultSummary = typeof p?.resultSummary === "string" ? p.resultSummary.trim() : "";
+  return (
+    formatUserFacingCompletionSummary({
+      resultSummary,
+      verificationVerdict: p?.verificationVerdict,
+      verificationReport: p?.verificationReport,
+      separator: " · ",
+    }) || "Task completed"
+  );
 }
 
 function classifyEvent(event: TaskEvent, agentName: string, task?: Task): FrameEvent | null {
@@ -80,7 +77,11 @@ function classifyEvent(event: TaskEvent, agentName: string, task?: Task): FrameE
       const desc = sanitize(step?.description || p?.description || "");
       const command = String(step?.command || "");
       // Detect specific patterns for better display
-      if (command || desc.toLowerCase().includes("running") || desc.toLowerCase().includes("bash")) {
+      if (
+        command ||
+        desc.toLowerCase().includes("running") ||
+        desc.toLowerCase().includes("bash")
+      ) {
         return {
           id: event.id,
           type: effectiveType,
@@ -139,7 +140,9 @@ function classifyEvent(event: TaskEvent, agentName: string, task?: Task): FrameE
         };
       }
       if (toolLower === "spawn_agent") {
-        const title = String(p?.title || (p?.input as Record<string, unknown>)?.title || "sub-task");
+        const title = String(
+          p?.title || (p?.input as Record<string, unknown>)?.title || "sub-task",
+        );
         return {
           id: event.id,
           type: effectiveType,
@@ -149,7 +152,12 @@ function classifyEvent(event: TaskEvent, agentName: string, task?: Task): FrameE
         };
       }
       if (toolLower.includes("read") || toolLower.includes("grep") || toolLower.includes("glob")) {
-        const filePath = String(p?.path || (p?.input as Record<string, unknown>)?.path || (p?.input as Record<string, unknown>)?.pattern || "");
+        const filePath = String(
+          p?.path ||
+            (p?.input as Record<string, unknown>)?.path ||
+            (p?.input as Record<string, unknown>)?.pattern ||
+            "",
+        );
         return {
           id: event.id,
           type: effectiveType,
@@ -168,7 +176,11 @@ function classifyEvent(event: TaskEvent, agentName: string, task?: Task): FrameE
           timestamp: event.timestamp,
         };
       }
-      if (toolLower.includes("fetch") || toolLower.includes("web") || toolLower.includes("browse")) {
+      if (
+        toolLower.includes("fetch") ||
+        toolLower.includes("web") ||
+        toolLower.includes("browse")
+      ) {
         const url = String(p?.url || (p?.input as Record<string, unknown>)?.url || "");
         return {
           id: event.id,
@@ -212,34 +224,35 @@ function classifyEvent(event: TaskEvent, agentName: string, task?: Task): FrameE
         timestamp: event.timestamp,
       };
     }
-    case "step_completed":
-      {
-        const completedLabel = sanitize(step?.description || p?.description || "step");
-        return {
-          id: event.id,
-          type: effectiveType,
-          icon: "check",
-          label: !completedLabel || completedLabel.toLowerCase() === "step" ? "Done" : `Done: ${completedLabel}`,
-          timestamp: event.timestamp,
-        };
-      }
-    case "step_failed":
-      {
-        const failedLabel = sanitize(step?.description || p?.description || "step");
-        const failureText = sanitize(
-          formatProviderErrorForDisplay(String(p?.error || p?.reason || ""), { task }),
-        );
-        return {
-          id: event.id,
-          type: effectiveType,
-          icon: "x",
-          label:
-            !failedLabel || failedLabel.toLowerCase() === "step"
-              ? `Something failed${failureText ? ` — ${failureText}` : ""}`
-              : `Failed: ${failedLabel}${failureText ? ` — ${failureText}` : ""}`,
-          timestamp: event.timestamp,
-        };
-      }
+    case "step_completed": {
+      const completedLabel = sanitize(step?.description || p?.description || "step");
+      return {
+        id: event.id,
+        type: effectiveType,
+        icon: "check",
+        label:
+          !completedLabel || completedLabel.toLowerCase() === "step"
+            ? "Done"
+            : `Done: ${completedLabel}`,
+        timestamp: event.timestamp,
+      };
+    }
+    case "step_failed": {
+      const failedLabel = sanitize(step?.description || p?.description || "step");
+      const failureText = sanitize(
+        formatProviderErrorForDisplay(String(p?.error || p?.reason || ""), { task }),
+      );
+      return {
+        id: event.id,
+        type: effectiveType,
+        icon: "x",
+        label:
+          !failedLabel || failedLabel.toLowerCase() === "step"
+            ? `Something failed${failureText ? ` — ${failureText}` : ""}`
+            : `Failed: ${failedLabel}${failureText ? ` — ${failureText}` : ""}`,
+        timestamp: event.timestamp,
+      };
+    }
     case "assistant_message":
       if (
         task?.resultSummary &&
@@ -320,27 +333,28 @@ function EventIcon({ icon }: { icon: FrameEvent["icon"] }) {
     case "play":
       return <Play size={13} strokeWidth={2} className="cli-event-icon cli-event-icon-play" />;
     case "check":
-      return (
-        <Check size={13} strokeWidth={2.5} className="cli-event-icon cli-event-icon-check" />
-      );
+      return <Check size={13} strokeWidth={2.5} className="cli-event-icon cli-event-icon-check" />;
     case "x":
       return <X size={13} strokeWidth={2.5} className="cli-event-icon cli-event-icon-x" />;
     case "loader":
-      return (
-        <Loader2 size={13} strokeWidth={2} className="cli-event-icon cli-event-icon-loader" />
-      );
+      return <Loader2 size={13} strokeWidth={2} className="cli-event-icon cli-event-icon-loader" />;
     case "terminal":
       return (
         <Terminal size={13} strokeWidth={2} className="cli-event-icon cli-event-icon-terminal" />
       );
     case "message":
-      return <MessageSquare size={13} strokeWidth={2} className="cli-event-icon cli-event-icon-message" />;
+      return (
+        <MessageSquare
+          size={13}
+          strokeWidth={2}
+          className="cli-event-icon cli-event-icon-message"
+        />
+      );
   }
 }
 
 function StatusChip({ status }: { status: Task["status"] }) {
-  const isTerminal =
-    status === "completed" || status === "failed" || status === "cancelled";
+  const isTerminal = status === "completed" || status === "failed" || status === "cancelled";
   const isExecuting = status === "executing" || status === "planning";
 
   return (
@@ -350,7 +364,17 @@ function StatusChip({ status }: { status: Task["status"] }) {
       {isExecuting && <Loader2 size={11} strokeWidth={2.5} className="cli-status-spinner" />}
       {status === "completed" && <Check size={11} strokeWidth={2.5} />}
       {status === "failed" && <X size={11} strokeWidth={2.5} />}
-      <span>{status === "executing" ? "Running" : status === "completed" ? "Done" : status === "failed" ? "Failed" : status === "cancelled" ? "Cancelled" : "Pending"}</span>
+      <span>
+        {status === "executing"
+          ? "Running"
+          : status === "completed"
+            ? "Done"
+            : status === "failed"
+              ? "Failed"
+              : status === "cancelled"
+                ? "Cancelled"
+                : "Pending"}
+      </span>
     </span>
   );
 }
@@ -380,18 +404,17 @@ export function CliAgentFrame({
   const duration = useMemo(() => {
     if (frameEvents.length === 0) return null;
     const start = frameEvents[0].timestamp;
-    const end = isTerminal
-      ? frameEvents[frameEvents.length - 1].timestamp
-      : Date.now();
+    const end = isTerminal ? frameEvents[frameEvents.length - 1].timestamp : Date.now();
     return formatDuration(start, end);
   }, [frameEvents, isTerminal]);
 
-  const firstEventTime = frameEvents.length > 0
-    ? new Date(frameEvents[0].timestamp).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : null;
+  const firstEventTime =
+    frameEvents.length > 0
+      ? new Date(frameEvents[0].timestamp).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : null;
 
   return (
     <div

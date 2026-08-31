@@ -244,9 +244,7 @@ export function configureLlmFromControlPlaneParams(params: unknown): {
           ...updatedSettings.openrouter,
           ...(validated.apiKey ? { apiKey: validated.apiKey } : {}),
           ...(baseUrl ? { baseUrl } : {}),
-          ...(paretoMinCodingScore !== undefined
-            ? { paretoMinCodingScore }
-            : {}),
+          ...(paretoMinCodingScore !== undefined ? { paretoMinCodingScore } : {}),
         };
       }
       break;

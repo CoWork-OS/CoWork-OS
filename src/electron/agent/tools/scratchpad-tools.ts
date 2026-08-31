@@ -1,6 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
 import type { LLMTool } from "../llm/types";
+import type { Workspace } from "../../../shared/types";
+import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 
 /**
  * ScratchpadTools provides session-scoped note-taking for agents during long-running tasks.
@@ -16,20 +19,41 @@ import type { LLMTool } from "../llm/types";
 export class ScratchpadTools {
   private scratchpad: Map<string, { content: string; timestamp: number }> = new Map();
   private checkpointPath?: string;
+  private checkpointWorkspace?: Pick<Workspace, "path" | "permissions">;
   private dirty = false;
 
   constructor(
     private taskId: string,
-    workspacePath?: string,
+    workspacePathOrWorkspace?: string | Pick<Workspace, "path" | "permissions">,
   ) {
+    const workspacePath =
+      typeof workspacePathOrWorkspace === "string"
+        ? workspacePathOrWorkspace
+        : workspacePathOrWorkspace?.path;
+    if (typeof workspacePathOrWorkspace === "object" && workspacePathOrWorkspace) {
+      this.checkpointWorkspace = workspacePathOrWorkspace;
+    }
     if (workspacePath) {
-      this.checkpointPath = path.join(
-        workspacePath,
-        ".cowork",
-        `scratchpad-${taskId.slice(0, 12)}.json`,
-      );
+      this.checkpointPath = this.getCheckpointPath(workspacePath);
       this.restoreFromDisk();
     }
+  }
+
+  /** Refresh the checkpoint boundary when a task changes workspace or profile. */
+  setWorkspace(workspace: Pick<Workspace, "path" | "permissions">): void {
+    const nextCheckpointPath = this.getCheckpointPath(workspace.path);
+    const checkpointChanged = this.checkpointPath !== nextCheckpointPath;
+    this.checkpointWorkspace = workspace;
+    this.checkpointPath = nextCheckpointPath;
+
+    // Never carry notes from one workspace into another. If the active
+    // profile can no longer read the checkpoint, also discard the in-memory
+    // copy so a revoked profile cannot continue to observe stale notes.
+    if (checkpointChanged || !this.canAccessCheckpoint("read")) {
+      this.scratchpad.clear();
+      this.dirty = false;
+    }
+    if (checkpointChanged) this.restoreFromDisk();
   }
 
   static getToolDefinitions(): LLMTool[] {
@@ -123,6 +147,7 @@ export class ScratchpadTools {
   /** Persist current scratchpad state to disk (best-effort) */
   private flushToDisk(): void {
     if (!this.checkpointPath || !this.dirty) return;
+    if (!this.canAccessCheckpoint("write")) return;
     try {
       const dir = path.dirname(this.checkpointPath);
       if (!fs.existsSync(dir)) {
@@ -142,6 +167,7 @@ export class ScratchpadTools {
   /** Restore scratchpad from a previous checkpoint on disk */
   private restoreFromDisk(): void {
     if (!this.checkpointPath) return;
+    if (!this.canAccessCheckpoint("read")) return;
     try {
       if (!fs.existsSync(this.checkpointPath)) return;
       const raw = fs.readFileSync(this.checkpointPath, "utf-8");
@@ -154,5 +180,23 @@ export class ScratchpadTools {
     } catch {
       // Corrupted checkpoint — start fresh
     }
+  }
+
+  private canAccessCheckpoint(operation: "read" | "write"): boolean {
+    // The string constructor is retained for older internal callers and tests
+    // that predate workspace permission metadata. Registry-created instances
+    // always pass the authoritative workspace view below.
+    if (!this.checkpointWorkspace || !this.checkpointPath) return true;
+    return (
+      evaluateWorkspaceFilesystemAccess(this.checkpointWorkspace, this.checkpointPath, operation)
+        .decision === "allow"
+    );
+  }
+
+  private getCheckpointPath(workspacePath: string): string {
+    const safeTaskPart = /^[A-Za-z0-9_-]{1,64}$/.test(this.taskId)
+      ? this.taskId.slice(0, 12)
+      : createHash("sha256").update(this.taskId).digest("hex").slice(0, 24);
+    return path.join(workspacePath, ".cowork", `scratchpad-${safeTaskPart}.json`);
   }
 }

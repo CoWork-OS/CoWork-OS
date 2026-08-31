@@ -21,7 +21,7 @@ describe("sanitizeEmailHtml", () => {
     expect(result).not.toContain("@import");
     expect(result).not.toContain("@font-face");
     expect(result).not.toContain("https://fonts.example.com");
-    expect(result).toContain("url(\"data:image/gif;base64,R0lGODlhAQABAAAAACw=\")");
+    expect(result).toContain('url("data:image/gif;base64,R0lGODlhAQABAAAAACw=")');
   });
 
   it("removes inline script hooks without stripping safe image URLs", () => {

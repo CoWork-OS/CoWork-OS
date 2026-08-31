@@ -376,7 +376,7 @@ export class MatrixAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendTyping(chatId, true);
-    } catch  {
+    } catch {
       // Ignore typing indicator errors
     }
   }
@@ -391,7 +391,7 @@ export class MatrixAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendTyping(chatId, false);
-    } catch  {
+    } catch {
       // Ignore typing indicator errors
     }
   }
@@ -417,7 +417,7 @@ export class MatrixAdapter implements ChannelAdapter {
 
     try {
       await this.client.sendReadReceipt(roomId, eventId);
-    } catch  {
+    } catch {
       // Ignore read receipt errors
     }
   }

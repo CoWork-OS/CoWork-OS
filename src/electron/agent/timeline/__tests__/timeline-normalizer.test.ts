@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildCompletionSummaryFromUiEvents,
-  normalizeTaskEvents,
-} from "../timeline-normalizer";
+import { buildCompletionSummaryFromUiEvents, normalizeTaskEvents } from "../timeline-normalizer";
 import type { NormalizerInputEvent } from "../../../../shared/timeline-events";
 
 // ---------------------------------------------------------------------------
@@ -125,9 +122,7 @@ describe("normalizeTaskEvents — batching", () => {
       makeEvent("timeline_error", { message: "Something went wrong" }),
     ];
     const result = normalizeTaskEvents(events, { batchWindowMs: 10_000 });
-    const errorCard = result.find(
-      (e) => e.kind === "summary" && e.status === "error",
-    );
+    const errorCard = result.find((e) => e.kind === "summary" && e.status === "error");
     expect(errorCard).toBeDefined();
   });
 });
@@ -253,9 +248,7 @@ describe("normalizeTaskEvents — phase inference", () => {
 
   it("infers 'complete' for artifact events", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeEvent("artifact_created", { path: "report.md" }),
-    ]);
+    const result = normalizeTaskEvents([makeEvent("artifact_created", { path: "report.md" })]);
     if (result[0].kind === "summary") {
       expect(result[0].phase).toBe("complete");
     }
@@ -292,9 +285,7 @@ describe("normalizeTaskEvents — summary generation", () => {
 
   it("generates stable summaries for shell commands", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeToolCall("run_command", { command: "npm run test" }),
-    ]);
+    const result = normalizeTaskEvents([makeToolCall("run_command", { command: "npm run test" })]);
     expect(result[0].summary).toMatch(/npm run test/);
   });
 
@@ -346,9 +337,7 @@ describe("normalizeTaskEvents — approval cards", () => {
 
   it("approval card starts as 'waiting'", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeEvent("approval_requested", { reason: "Deploy" }),
-    ]);
+    const result = normalizeTaskEvents([makeEvent("approval_requested", { reason: "Deploy" })]);
     if (result[0].kind === "approval") {
       expect(result[0].status).toBe("waiting");
     }
@@ -361,7 +350,9 @@ describe("normalizeTaskEvents — approval cards", () => {
       makeEvent("approval_granted", {}),
     ]);
     // approval_granted is its own card (batch breaker), check status
-    const approval = result.find((e) => e.kind === "approval" && e.rawEventIds.includes(events => false));
+    const approval = result.find(
+      (e) => e.kind === "approval" && e.rawEventIds.includes((events) => false),
+    );
     // Find the first approval card
     const firstApproval = result[0];
     expect(firstApproval.kind).toBe("approval");
@@ -413,9 +404,7 @@ describe("normalizeTaskEvents — agent cards", () => {
 
   it("agent card includes actor name", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeEvent("agent_started", { actor: "Research" }),
-    ]);
+    const result = normalizeTaskEvents([makeEvent("agent_started", { actor: "Research" })]);
     if (result[0].kind === "agent") {
       expect(result[0].actor).toBe("Research");
     }
@@ -429,18 +418,14 @@ describe("normalizeTaskEvents — agent cards", () => {
 describe("normalizeTaskEvents — evidence", () => {
   it("attaches file evidence with operation type", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeToolCall("read_file", { path: "src/main.ts" }),
-    ]);
+    const result = normalizeTaskEvents([makeToolCall("read_file", { path: "src/main.ts" })]);
     const card = result[0];
     expect(card.evidence.some((e) => e.type === "file" && e.path === "src/main.ts")).toBe(true);
   });
 
   it("attaches command evidence for shell events", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeToolCall("run_command", { command: "ls -la" }),
-    ]);
+    const result = normalizeTaskEvents([makeToolCall("run_command", { command: "ls -la" })]);
     expect(result[0].evidence.some((e) => e.type === "command")).toBe(true);
   });
 
@@ -457,9 +442,7 @@ describe("normalizeTaskEvents — evidence", () => {
 
   it("attaches query evidence for code searches", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeToolCall("search_files", { pattern: "useState" }),
-    ]);
+    const result = normalizeTaskEvents([makeToolCall("search_files", { pattern: "useState" })]);
     expect(result[0].evidence.some((e) => e.type === "query")).toBe(true);
   });
 });
@@ -471,15 +454,15 @@ describe("normalizeTaskEvents — evidence", () => {
 describe("normalizeTaskEvents — graceful degradation", () => {
   it("handles events with empty payload without throwing", () => {
     resetSeq();
-    expect(() =>
-      normalizeTaskEvents([makeEvent("unknown_event_type", {})]),
-    ).not.toThrow();
+    expect(() => normalizeTaskEvents([makeEvent("unknown_event_type", {})])).not.toThrow();
   });
 
   it("handles events with null payload without throwing", () => {
     resetSeq();
     expect(() =>
-      normalizeTaskEvents([{ ...makeEvent("tool_call", {}), payload: null as unknown as Record<string, unknown> }]),
+      normalizeTaskEvents([
+        { ...makeEvent("tool_call", {}), payload: null as unknown as Record<string, unknown> },
+      ]),
     ).not.toThrow();
   });
 
@@ -507,9 +490,11 @@ describe("normalizeTaskEvents — graceful degradation", () => {
 describe("normalizeTaskEvents — compression", () => {
   it("compresses 100 file-read events into a single card in default mode", () => {
     resetSeq();
-    const events = Array.from({ length: 100 }, (_, i) =>
-      // Ensure timestamp is within the batch window
-      ({ ...makeToolCall("read_file", { path: `src/file-${i}.ts` }), timestamp: 1000 + i * 10 }),
+    const events = Array.from(
+      { length: 100 },
+      (_, i) =>
+        // Ensure timestamp is within the batch window
+        ({ ...makeToolCall("read_file", { path: `src/file-${i}.ts` }), timestamp: 1000 + i * 10 }),
     );
     const result = normalizeTaskEvents(events, { batchWindowMs: 10_000 });
     // All within 10 seconds total
@@ -534,9 +519,7 @@ describe("buildCompletionSummaryFromUiEvents", () => {
 
   it("populates changed list from file edit cards", () => {
     resetSeq();
-    const events = normalizeTaskEvents([
-      makeToolCall("edit_file", { path: "src/main.ts" }),
-    ]);
+    const events = normalizeTaskEvents([makeToolCall("edit_file", { path: "src/main.ts" })]);
     const summary = buildCompletionSummaryFromUiEvents(events);
     expect(summary.changed.length).toBeGreaterThan(0);
   });

@@ -66,10 +66,14 @@ describeWithSqlite("DatabaseManager temporal kg edge migration", () => {
     const indexes = db.prepare("PRAGMA index_list(kg_edges)").all() as Array<{ name: string }>;
     const foreignKeysEnabled = db.pragma("foreign_keys", { simple: true }) as number;
     const legacyTable = db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kg_edges_legacy_temporal'")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kg_edges_legacy_temporal'",
+      )
       .get() as { name?: string } | undefined;
 
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["valid_from", "valid_to"]));
+    expect(columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["valid_from", "valid_to"]),
+    );
     expect(indexes.map((index) => index.name)).toEqual(
       expect.arrayContaining(["idx_kg_edges_validity", "idx_kg_edges_current_unique"]),
     );

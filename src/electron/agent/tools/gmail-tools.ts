@@ -453,9 +453,7 @@ export class GmailTools {
           }
           const batchIds = input.message_ids.slice(0, 50);
           const messages = await Promise.all(
-            batchIds.map((messageId: string) =>
-              this.getMessage(settings, messageId, "full"),
-            ),
+            batchIds.map((messageId: string) => this.getMessage(settings, messageId, "full")),
           );
           return {
             success: true,
@@ -624,7 +622,11 @@ export class GmailTools {
             input.add_label_names,
             Boolean(input.create_missing_labels),
           );
-          const removeLabelIds = await this.resolveLabelIds(settings, input.remove_label_names, false);
+          const removeLabelIds = await this.resolveLabelIds(
+            settings,
+            input.remove_label_names,
+            false,
+          );
           if (addLabelIds.length === 0 && removeLabelIds.length === 0) {
             throw new Error("At least one label name is required");
           }

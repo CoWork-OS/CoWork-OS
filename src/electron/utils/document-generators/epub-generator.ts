@@ -65,9 +65,7 @@ export async function generateEPUB(
   chapters.forEach((chapter, index) => {
     const fileName = `chapter-${String(index + 1).padStart(3, "0")}.xhtml`;
     const id = `ch${index + 1}`;
-    manifestItems.push(
-      `<item id="${id}" href="${fileName}" media-type="application/xhtml+xml" />`,
-    );
+    manifestItems.push(`<item id="${id}" href="${fileName}" media-type="application/xhtml+xml" />`);
     spineItems.push(`<itemref idref="${id}" />`);
     zip.file(
       `OEBPS/${fileName}`,
@@ -102,7 +100,9 @@ export async function generateEPUB(
     ),
   );
 
-  manifestItems.push(`<item id="toc" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />`);
+  manifestItems.push(
+    `<item id="toc" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />`,
+  );
 
   zip.file(
     "OEBPS/content.opf",
@@ -153,7 +153,10 @@ function renderXhtmlDocument(title: string, body: string): string {
 
 function markdownToXhtml(md: string): string {
   let html = escapeHtml(String(md || ""));
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => `<pre><code>${code.trim()}</code></pre>`);
+  html = html.replace(
+    /```(\w*)\n([\s\S]*?)```/g,
+    (_m, _lang, code) => `<pre><code>${code.trim()}</code></pre>`,
+  );
   html = html.replace(/^\s*[-*] (.+)$/gm, "<li>$1</li>");
   html = html.replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`);
   html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");

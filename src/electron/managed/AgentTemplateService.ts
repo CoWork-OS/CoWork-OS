@@ -10,4 +10,3 @@ export class AgentTemplateService {
     return BUILTIN_AGENT_TEMPLATES.find((template) => template.id === id);
   }
 }
-

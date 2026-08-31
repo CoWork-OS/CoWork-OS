@@ -81,7 +81,7 @@ describe("LocalWalletProvider", () => {
     await provider.x402Fetch({
       url: "https://paid.example/data",
       method: "POST",
-      body: "{\"q\":1}",
+      body: '{"q":1}',
       headers: { "x-test": "1" },
     });
 
@@ -89,7 +89,7 @@ describe("LocalWalletProvider", () => {
       "https://paid.example/data",
       expect.objectContaining({
         method: "POST",
-        body: "{\"q\":1}",
+        body: '{"q":1}',
         headers: { "x-test": "1" },
       }),
     );

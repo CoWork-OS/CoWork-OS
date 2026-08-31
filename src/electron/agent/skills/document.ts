@@ -960,7 +960,9 @@ export class DocumentBuilder {
     blockIds: string[],
     newContent: ContentBlock[],
   ): Promise<{ success: boolean; message: string; sectionsAdded: number }> {
-    const uniqueBlockIds = Array.from(new Set(blockIds.map((value) => value.trim()).filter(Boolean)));
+    const uniqueBlockIds = Array.from(
+      new Set(blockIds.map((value) => value.trim()).filter(Boolean)),
+    );
     if (uniqueBlockIds.length === 0) {
       return { success: false, message: "No blockIds provided", sectionsAdded: 0 };
     }
@@ -990,7 +992,9 @@ export class DocumentBuilder {
     const orderedSelection = [...selectedBlocks].sort((a, b) => a.order - b.order);
     const first = orderedSelection[0];
     const last = orderedSelection[orderedSelection.length - 1];
-    const isContiguous = orderedSelection.every((block, index) => block.order === first.order + index);
+    const isContiguous = orderedSelection.every(
+      (block, index) => block.order === first.order + index,
+    );
     if (!isContiguous) {
       return {
         success: false,

@@ -147,7 +147,16 @@ describeWithSqlite("SubconsciousLoopService", () => {
     db.prepare(
       `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(randomUUID(), "Fix failing test", "Investigate", "failed", workspace.id, now, now, "verification_failed");
+    ).run(
+      randomUUID(),
+      "Fix failing test",
+      "Investigate",
+      "failed",
+      workspace.id,
+      now,
+      now,
+      "verification_failed",
+    );
 
     db.prepare(
       `INSERT INTO memory_markdown_files (workspace_id, path, content_hash, mtime, size, updated_at)
@@ -158,7 +167,19 @@ describeWithSqlite("SubconsciousLoopService", () => {
       `INSERT INTO mailbox_events (
         id, fingerprint, workspace_id, event_type, thread_id, provider, subject, summary_text, payload_json, created_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(randomUUID(), "mailbox-fp", workspace.id, "message_received", "thread-1", "gmail", "Launch", "Need a reply", "{}", now, now);
+    ).run(
+      randomUUID(),
+      "mailbox-fp",
+      workspace.id,
+      "message_received",
+      "thread-1",
+      "gmail",
+      "Launch",
+      "Need a reply",
+      "{}",
+      now,
+      now,
+    );
 
     db.prepare(
       `INSERT INTO agent_roles (
@@ -272,17 +293,39 @@ describeWithSqlite("SubconsciousLoopService", () => {
     db.prepare(
       `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run("root-task", "Fix coordinator drift", "Investigate", "failed", repoRootWorkspace.id, now, now, "verification_failed");
+    ).run(
+      "root-task",
+      "Fix coordinator drift",
+      "Investigate",
+      "failed",
+      repoRootWorkspace.id,
+      now,
+      now,
+      "verification_failed",
+    );
     db.prepare(
       `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run("nested-task", "Fix renderer drift", "Investigate", "failed", nestedWorkspaceId, now, now, "verification_failed");
+    ).run(
+      "nested-task",
+      "Fix renderer drift",
+      "Investigate",
+      "failed",
+      nestedWorkspaceId,
+      now,
+      now,
+      "verification_failed",
+    );
 
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
-    const service = new SubconsciousLoopService(db, { getGlobalRoot: () => repoRootWorkspace.path });
+    const service = new SubconsciousLoopService(db, {
+      getGlobalRoot: () => repoRootWorkspace.path,
+    });
 
     await service.refreshTargets();
-    const codeTargets = service.listTargets().filter((target) => target.target.kind === "code_workspace");
+    const codeTargets = service
+      .listTargets()
+      .filter((target) => target.target.kind === "code_workspace");
 
     expect(codeTargets).toHaveLength(1);
     expect(codeTargets[0]?.key).toBe("code_workspace:github:CoWork-OS/CoWork-OS");
@@ -300,9 +343,9 @@ describeWithSqlite("SubconsciousLoopService", () => {
     const result = await service.refreshTargets();
 
     expect(result.targetCount).toBeGreaterThanOrEqual(1);
-    expect(
-      fs.existsSync(path.join(tmpDir, ".cowork", "subconscious", "brain", "state.json")),
-    ).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".cowork", "subconscious", "brain", "state.json"))).toBe(
+      true,
+    );
   });
 
   it("deduplicates repeated open backlog items during target refresh", async () => {
@@ -335,9 +378,11 @@ describeWithSqlite("SubconsciousLoopService", () => {
 
     await service.refreshTargets();
 
-    const row = db.prepare(
-      "SELECT COUNT(*) AS count FROM subconscious_backlog_items WHERE target_key = ? AND status = 'open'",
-    ).get(targetKey) as Any;
+    const row = db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM subconscious_backlog_items WHERE target_key = ? AND status = 'open'",
+      )
+      .get(targetKey) as Any;
     expect(Number(row.count)).toBe(1);
     expect(service.listTargets().find((target) => target.key === targetKey)?.backlogCount).toBe(1);
   });
@@ -352,9 +397,9 @@ describeWithSqlite("SubconsciousLoopService", () => {
     await service.refreshTargets();
 
     expect(fs.existsSync(workspace.path)).toBe(false);
-    expect(
-      fs.existsSync(path.join(tmpDir, ".cowork", "subconscious", "brain", "state.json")),
-    ).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".cowork", "subconscious", "brain", "state.json"))).toBe(
+      true,
+    );
   });
 
   it("excludes persona-template roles from agent_role targets and prunes stale twin targets", async () => {
@@ -435,7 +480,9 @@ describeWithSqlite("SubconsciousLoopService", () => {
     expect(targets.some((target) => target.key === "agent_role:operator-role")).toBe(true);
     expect(targets.some((target) => target.key === "agent_role:twin-role")).toBe(false);
     expect(
-      db.prepare("SELECT 1 FROM subconscious_targets WHERE target_key = ?").get("agent_role:twin-role"),
+      db
+        .prepare("SELECT 1 FROM subconscious_targets WHERE target_key = ?")
+        .get("agent_role:twin-role"),
     ).toBeUndefined();
   });
 
@@ -446,7 +493,16 @@ describeWithSqlite("SubconsciousLoopService", () => {
     db.prepare(
       `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run("task-1", "Patch flaky tests", "Fix the regression", "failed", workspace.id, now, now, "verification_failed");
+    ).run(
+      "task-1",
+      "Patch flaky tests",
+      "Fix the regression",
+      "failed",
+      workspace.id,
+      now,
+      now,
+      "verification_failed",
+    );
 
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
     const createTask = vi.fn().mockResolvedValue({ id: "dispatch-task-1" });
@@ -493,13 +549,28 @@ describeWithSqlite("SubconsciousLoopService", () => {
     }
 
     const counts = {
-      runs: Number((db.prepare("SELECT COUNT(*) as count FROM subconscious_runs").get() as Any).count),
-      hypotheses: Number((db.prepare("SELECT COUNT(*) as count FROM subconscious_hypotheses").get() as Any).count),
-      critiques: Number((db.prepare("SELECT COUNT(*) as count FROM subconscious_critiques").get() as Any).count),
-      decisions: Number((db.prepare("SELECT COUNT(*) as count FROM subconscious_decisions").get() as Any).count),
-      backlog: Number((db.prepare("SELECT COUNT(*) as count FROM subconscious_backlog_items").get() as Any).count),
-      dispatches: Number((db.prepare("SELECT COUNT(*) as count FROM subconscious_dispatch_records").get() as Any).count),
-      legacyCampaigns: Number((db.prepare("SELECT COUNT(*) as count FROM improvement_campaigns").get() as Any).count),
+      runs: Number(
+        (db.prepare("SELECT COUNT(*) as count FROM subconscious_runs").get() as Any).count,
+      ),
+      hypotheses: Number(
+        (db.prepare("SELECT COUNT(*) as count FROM subconscious_hypotheses").get() as Any).count,
+      ),
+      critiques: Number(
+        (db.prepare("SELECT COUNT(*) as count FROM subconscious_critiques").get() as Any).count,
+      ),
+      decisions: Number(
+        (db.prepare("SELECT COUNT(*) as count FROM subconscious_decisions").get() as Any).count,
+      ),
+      backlog: Number(
+        (db.prepare("SELECT COUNT(*) as count FROM subconscious_backlog_items").get() as Any).count,
+      ),
+      dispatches: Number(
+        (db.prepare("SELECT COUNT(*) as count FROM subconscious_dispatch_records").get() as Any)
+          .count,
+      ),
+      legacyCampaigns: Number(
+        (db.prepare("SELECT COUNT(*) as count FROM improvement_campaigns").get() as Any).count,
+      ),
     };
 
     expect(counts.runs).toBeGreaterThan(0);
@@ -540,7 +611,15 @@ describeWithSqlite("SubconsciousLoopService", () => {
     db.prepare(
       `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run("task-dedupe", "Follow up with customer", "Investigate", "completed", workspace.id, now, now);
+    ).run(
+      "task-dedupe",
+      "Follow up with customer",
+      "Investigate",
+      "completed",
+      workspace.id,
+      now,
+      now,
+    );
 
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
     const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
@@ -554,21 +633,28 @@ describeWithSqlite("SubconsciousLoopService", () => {
     const firstRun = await service.runNow(targetKey);
     expect(firstRun).not.toBeNull();
 
-    db.prepare("UPDATE subconscious_targets SET next_eligible_at = ? WHERE target_key = ?").run(now - 1000, targetKey);
+    db.prepare("UPDATE subconscious_targets SET next_eligible_at = ? WHERE target_key = ?").run(
+      now - 1000,
+      targetKey,
+    );
     const before = Number(
       (
-        db.prepare("SELECT next_eligible_at AS next_eligible_at FROM subconscious_targets WHERE target_key = ?").get(
-          targetKey,
-        ) as Any
+        db
+          .prepare(
+            "SELECT next_eligible_at AS next_eligible_at FROM subconscious_targets WHERE target_key = ?",
+          )
+          .get(targetKey) as Any
       ).next_eligible_at || 0,
     );
 
     const secondRun = await service.runNow(targetKey);
     const after = Number(
       (
-        db.prepare("SELECT next_eligible_at AS next_eligible_at FROM subconscious_targets WHERE target_key = ?").get(
-          targetKey,
-        ) as Any
+        db
+          .prepare(
+            "SELECT next_eligible_at AS next_eligible_at FROM subconscious_targets WHERE target_key = ?",
+          )
+          .get(targetKey) as Any
       ).next_eligible_at || 0,
     );
 
@@ -584,7 +670,16 @@ describeWithSqlite("SubconsciousLoopService", () => {
     db.prepare(
       `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run("task-restart", "Fix restart noise", "Investigate", "failed", workspace.id, now, now, "verification_failed");
+    ).run(
+      "task-restart",
+      "Fix restart noise",
+      "Investigate",
+      "failed",
+      workspace.id,
+      now,
+      now,
+      "verification_failed",
+    );
 
     const targetKey = "code_workspace:github:CoWork-OS/CoWork-OS";
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
@@ -660,7 +755,9 @@ describeWithSqlite("SubconsciousLoopService", () => {
       durableTargetKinds: ["workspace"],
     });
     await first.refreshTargets();
-    expect(first.listTargets().some((target) => target.key === "agent_role:session-role")).toBe(true);
+    expect(first.listTargets().some((target) => target.key === "agent_role:session-role")).toBe(
+      true,
+    );
     first.stop();
 
     const second = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
@@ -725,7 +822,16 @@ describeWithSqlite("SubconsciousLoopService", () => {
     db.prepare(
       `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run("fresh-task", "Investigate a new failure", "Investigate", "failed", freshWorkspace.id, now, now, "verification_failed");
+    ).run(
+      "fresh-task",
+      "Investigate a new failure",
+      "Investigate",
+      "failed",
+      freshWorkspace.id,
+      now,
+      now,
+      "verification_failed",
+    );
 
     await service.refreshTargets();
     const run = await service.runNow();
@@ -740,7 +846,16 @@ describeWithSqlite("SubconsciousLoopService", () => {
     db.prepare(
       `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at, failure_class)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run("task-dream", "Fix reflective drift", "Investigate", "failed", workspace.id, now, now, "verification_failed");
+    ).run(
+      "task-dream",
+      "Fix reflective drift",
+      "Investigate",
+      "failed",
+      workspace.id,
+      now,
+      now,
+      "verification_failed",
+    );
 
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
     const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });

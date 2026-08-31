@@ -263,11 +263,7 @@ export class AgentMailClient {
     );
   }
 
-  listLists(
-    direction: "send" | "receive" | "reply",
-    listType: "allow" | "block",
-    limit = 100,
-  ) {
+  listLists(direction: "send" | "receive" | "reply", listType: "allow" | "block", limit = 100) {
     return this.request<{ entries?: unknown[]; count?: number }>(
       `/lists/${direction}/${listType}`,
       {
@@ -366,13 +362,16 @@ export class AgentMailClient {
     inboxId: string,
     input: { name?: string; permissions?: Record<string, boolean> },
   ) {
-    return this.request<Record<string, unknown>>(`/inboxes/${encodeURIComponent(inboxId)}/api-keys`, {
-      method: "POST",
-      body: {
-        name: input.name,
-        permissions: input.permissions,
+    return this.request<Record<string, unknown>>(
+      `/inboxes/${encodeURIComponent(inboxId)}/api-keys`,
+      {
+        method: "POST",
+        body: {
+          name: input.name,
+          permissions: input.permissions,
+        },
       },
-    });
+    );
   }
 
   deleteInboxApiKey(inboxId: string, apiKeyId: string) {

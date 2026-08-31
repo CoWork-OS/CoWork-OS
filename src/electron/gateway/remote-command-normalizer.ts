@@ -1,10 +1,7 @@
 import type { ChannelType } from "./channels/types";
 import { getCanonicalRemoteCommand } from "./remote-command-registry";
 
-export type RemoteCommandNormalizationSource =
-  | "plain"
-  | "slash"
-  | "natural";
+export type RemoteCommandNormalizationSource = "plain" | "slash" | "natural";
 
 export interface RemoteCommandNormalizationResult {
   text: string;

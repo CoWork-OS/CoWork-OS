@@ -99,14 +99,17 @@ function defaultConnectionModeForSource(input: HealthSourceInput): HealthSourceC
   return "import";
 }
 
-function defaultPermissionStateForSource(input: HealthSourceInput): HealthSource["permissionState"] {
+function defaultPermissionStateForSource(
+  input: HealthSourceInput,
+): HealthSource["permissionState"] {
   if (input.provider !== "apple-health") return undefined;
   return AppleHealthBridge.isAvailable() ? "not-determined" : "import-only";
 }
 
 function appendSyncEvent(
   source: HealthSource,
-  event: Omit<HealthSyncEvent, "id" | "sourceId" | "createdAt"> & Partial<Pick<HealthSyncEvent, "id" | "sourceId" | "createdAt">>,
+  event: Omit<HealthSyncEvent, "id" | "sourceId" | "createdAt"> &
+    Partial<Pick<HealthSyncEvent, "id" | "sourceId" | "createdAt">>,
 ): HealthSource {
   const history = [...(source.syncHistory || [])];
   history.unshift({
@@ -126,14 +129,18 @@ function appendSyncEvent(
 
 function sourceReadTypes(source: HealthSource): HealthWritebackType[] {
   if (source.provider === "apple-health") {
-    return source.readableTypes && source.readableTypes.length > 0 ? source.readableTypes : APPLE_HEALTH_READ_TYPES;
+    return source.readableTypes && source.readableTypes.length > 0
+      ? source.readableTypes
+      : APPLE_HEALTH_READ_TYPES;
   }
   return [];
 }
 
 function sourceWriteTypes(source: HealthSource): HealthWritebackType[] {
   if (source.provider === "apple-health") {
-    return source.writableTypes && source.writableTypes.length > 0 ? source.writableTypes : APPLE_HEALTH_WRITE_TYPES;
+    return source.writableTypes && source.writableTypes.length > 0
+      ? source.writableTypes
+      : APPLE_HEALTH_WRITE_TYPES;
   }
   return [];
 }
@@ -160,7 +167,8 @@ function normalizeSourceInput(input: HealthSourceInput, existing?: HealthSource)
     name: input.name.trim(),
     description:
       input.description?.trim() ||
-      HEALTH_SOURCE_TEMPLATES.find((template) => template.provider === input.provider)?.description ||
+      HEALTH_SOURCE_TEMPLATES.find((template) => template.provider === input.provider)
+        ?.description ||
       titleCase(input.provider),
     status: existing?.status || "connected",
     enabled: existing?.enabled ?? true,
@@ -170,13 +178,12 @@ function normalizeSourceInput(input: HealthSourceInput, existing?: HealthSource)
     connectionMode: input.connectionMode || existing?.connectionMode || connectionMode,
     permissionState:
       existing?.permissionState ||
-      (input.connectionMode === "import"
-        ? "import-only"
-        : defaultPermissionStateForSource(input)),
+      (input.connectionMode === "import" ? "import-only" : defaultPermissionStateForSource(input)),
     readableTypes: existing?.readableTypes,
     writableTypes: existing?.writableTypes,
     syncHistory: existing?.syncHistory || [],
-    bridgeStatus: existing?.bridgeStatus || (input.provider === "apple-health" ? "unavailable" : undefined),
+    bridgeStatus:
+      existing?.bridgeStatus || (input.provider === "apple-health" ? "unavailable" : undefined),
     connectedAt: existing?.connectedAt ?? timestamp,
     lastSyncedAt: existing?.lastSyncedAt,
     lastSyncStatus: existing?.lastSyncStatus,
@@ -245,8 +252,14 @@ function parseImportedText(content: string): {
   const lowered = content.toLowerCase();
   const metrics: Array<{ key: HealthMetricKey; value: number }> = [];
 
-  const a1c = extractNumber(content, [/a1c[:\s]+([0-9]+(?:\.[0-9]+)?)/i, /hba1c[:\s]+([0-9]+(?:\.[0-9]+)?)/i]);
-  const glucose = extractNumber(content, [/glucose[:\s]+([0-9]+(?:\.[0-9]+)?)/i, /blood sugar[:\s]+([0-9]+(?:\.[0-9]+)?)/i]);
+  const a1c = extractNumber(content, [
+    /a1c[:\s]+([0-9]+(?:\.[0-9]+)?)/i,
+    /hba1c[:\s]+([0-9]+(?:\.[0-9]+)?)/i,
+  ]);
+  const glucose = extractNumber(content, [
+    /glucose[:\s]+([0-9]+(?:\.[0-9]+)?)/i,
+    /blood sugar[:\s]+([0-9]+(?:\.[0-9]+)?)/i,
+  ]);
   const ldl = extractNumber(content, [/ldl[:\s]+([0-9]+(?:\.[0-9]+)?)/i]);
   const hdl = extractNumber(content, [/hdl[:\s]+([0-9]+(?:\.[0-9]+)?)/i]);
   const triglycerides = extractNumber(content, [/triglycerides[:\s]+([0-9]+(?:\.[0-9]+)?)/i]);
@@ -268,14 +281,17 @@ function parseImportedText(content: string): {
     }
   }
 
-  const summary =
-    content.trim().slice(0, 220) ||
-    "Imported health document";
+  const summary = content.trim().slice(0, 220) || "Imported health document";
 
   return { metrics: metrics.filter((metric) => Number.isFinite(metric.value)), summary };
 }
 
-function makeMetric(source: HealthSource, key: HealthMetricKey, value: number, recordedAt = now()): HealthMetric {
+function makeMetric(
+  source: HealthSource,
+  key: HealthMetricKey,
+  value: number,
+  recordedAt = now(),
+): HealthMetric {
   const meta = metricLabelForKey(key);
   return {
     id: createId("health-metric"),
@@ -345,7 +361,8 @@ function deriveInsights(state: HealthState): HealthInsight[] {
       id: createId("health-insight"),
       title: "Activity is below your usual target",
       summary: `${Math.round(steps.value)} steps is under the 7k baseline we use for healthy daily movement.`,
-      detail: "Consider a short walk or a low-intensity session to lift the baseline without overreaching.",
+      detail:
+        "Consider a short walk or a low-intensity session to lift the baseline without overreaching.",
       severity: "watch",
       sourceIds: [steps.sourceId],
       metricKeys: ["steps"],
@@ -358,7 +375,8 @@ function deriveInsights(state: HealthState): HealthInsight[] {
       id: createId("health-insight"),
       title: "Sleep debt may be accumulating",
       summary: `${Math.round(sleep.value / 60)}h ${Math.round(sleep.value % 60)}m of sleep is below the 7h target.`,
-      detail: "Protect the next recovery window with an earlier bedtime, fewer late stimulants, and a lighter training load.",
+      detail:
+        "Protect the next recovery window with an earlier bedtime, fewer late stimulants, and a lighter training load.",
       severity: "action",
       sourceIds: [sleep.sourceId],
       metricKeys: ["sleep_minutes"],
@@ -371,7 +389,8 @@ function deriveInsights(state: HealthState): HealthInsight[] {
       id: createId("health-insight"),
       title: "Resting heart rate is elevated",
       summary: `Resting heart rate at ${Math.round(restingHr.value)} bpm can indicate stress, illness, or a hard training block.`,
-      detail: "Cross-check with sleep, illness symptoms, and recovery signals before pushing intensity.",
+      detail:
+        "Cross-check with sleep, illness symptoms, and recovery signals before pushing intensity.",
       severity: "watch",
       sourceIds: [restingHr.sourceId],
       metricKeys: ["resting_hr"],
@@ -397,7 +416,8 @@ function deriveInsights(state: HealthState): HealthInsight[] {
       id: createId("health-insight"),
       title: "A1C is trending into the prediabetes range",
       summary: `A1C of ${a1c.value.toFixed(1)}% should be reviewed with your clinician.`,
-      detail: "Use labs, diet, and symptom tracking together rather than interpreting this in isolation.",
+      detail:
+        "Use labs, diet, and symptom tracking together rather than interpreting this in isolation.",
       severity: "action",
       sourceIds: [a1c.sourceId],
       metricKeys: ["a1c"],
@@ -410,7 +430,8 @@ function deriveInsights(state: HealthState): HealthInsight[] {
       id: createId("health-insight"),
       title: "Glucose is above optimal fasting range",
       summary: `Glucose at ${Math.round(glucose.value)} mg/dL may merit follow-up.`,
-      detail: "Look for correlation with meal timing, sleep disruption, and activity before making changes.",
+      detail:
+        "Look for correlation with meal timing, sleep disruption, and activity before making changes.",
       severity: "watch",
       sourceIds: [glucose.sourceId],
       metricKeys: ["glucose"],
@@ -423,7 +444,8 @@ function deriveInsights(state: HealthState): HealthInsight[] {
       id: createId("health-insight"),
       title: "Symptom burden is elevated",
       summary: `Symptom score ${Math.round(symptom.value)}/10 is worth carrying into your next visit.`,
-      detail: "Use the visit-prep workflow to summarize patterns, triggers, and questions for your clinician.",
+      detail:
+        "Use the visit-prep workflow to summarize patterns, triggers, and questions for your clinician.",
       severity: "action",
       sourceIds: [symptom.sourceId],
       metricKeys: ["symptom_score"],
@@ -454,8 +476,9 @@ function toDashboard(state: HealthState, isDemo: boolean): HealthDashboard {
     isDemo,
     stats: {
       sourceCount: state.sources.length,
-      connectedCount: state.sources.filter((source) => source.enabled && source.status === "connected")
-        .length,
+      connectedCount: state.sources.filter(
+        (source) => source.enabled && source.status === "connected",
+      ).length,
       syncingCount: state.sources.filter((source) => source.status === "syncing").length,
       recordsCount: state.records.length,
       metricsCount: state.metrics.length,
@@ -516,14 +539,18 @@ function createDemoState(): HealthState {
       makeMetric(labSource, "ldl", 112, now() - 24 * 60 * 60 * 1000),
     ],
     records: [
-      makeRecord(source, "Sleep and recovery snapshot", "Recovery was moderate with a short sleep window and average HRV.", [
-        "sleep",
-        "recovery",
-      ]),
-      makeRecord(labSource, "Annual lab summary", "A1C is near the upper end of normal; LDL is slightly elevated.", [
-        "labs",
-        "metabolic",
-      ]),
+      makeRecord(
+        source,
+        "Sleep and recovery snapshot",
+        "Recovery was moderate with a short sleep window and average HRV.",
+        ["sleep", "recovery"],
+      ),
+      makeRecord(
+        labSource,
+        "Annual lab summary",
+        "A1C is near the upper end of normal; LDL is slightly elevated.",
+        ["labs", "metabolic"],
+      ),
     ],
     insights: [],
     workflows: [
@@ -531,10 +558,25 @@ function createDemoState(): HealthState {
         id: createId("health-workflow"),
         workflowType: "trend-analysis",
         title: "What changed this week",
-        summary: "Sleep dipped, steps held steady, and labs are available for a clinician-ready review.",
+        summary:
+          "Sleep dipped, steps held steady, and labs are available for a clinician-ready review.",
         sections: [
-          { title: "Highlights", items: ["Sleep fell below target on two nights.", "Resting HR stayed stable.", "Lab data is ready to review."] },
-          { title: "Next best actions", items: ["Protect tonight's sleep window.", "Keep the next session easy if recovery stays low.", "Bring the lab summary to your visit."] },
+          {
+            title: "Highlights",
+            items: [
+              "Sleep fell below target on two nights.",
+              "Resting HR stayed stable.",
+              "Lab data is ready to review.",
+            ],
+          },
+          {
+            title: "Next best actions",
+            items: [
+              "Protect tonight's sleep window.",
+              "Keep the next session easy if recovery stays low.",
+              "Bring the lab summary to your visit.",
+            ],
+          },
         ],
         sourceIds: [source.id, labSource.id],
         disclaimer: "Informational only. Not medical advice.",
@@ -562,7 +604,11 @@ function loadState(): HealthState {
       version: STATE_VERSION,
       sources: (stored.sources || []).map((source) => ({
         ...source,
-        connectionMode: source.connectionMode || (source.provider === "apple-health" ? sourceModeForAppleHealth(source) : source.connectionMode),
+        connectionMode:
+          source.connectionMode ||
+          (source.provider === "apple-health"
+            ? sourceModeForAppleHealth(source)
+            : source.connectionMode),
         permissionState:
           source.permissionState ||
           (source.provider === "apple-health"
@@ -573,7 +619,8 @@ function loadState(): HealthState {
         readableTypes: source.readableTypes || [],
         writableTypes: source.writableTypes || [],
         syncHistory: source.syncHistory || [],
-        bridgeStatus: source.bridgeStatus || (source.provider === "apple-health" ? "unavailable" : undefined),
+        bridgeStatus:
+          source.bridgeStatus || (source.provider === "apple-health" ? "unavailable" : undefined),
       })),
       metrics: stored.metrics || [],
       records: stored.records || [],
@@ -598,10 +645,15 @@ function updateState(mutator: (state: HealthState) => HealthState): HealthState 
   return next;
 }
 
-function sourceSeed(provider: HealthSourceProvider): { kind: HealthSourceKind; name: string; description: string } {
+function sourceSeed(provider: HealthSourceProvider): {
+  kind: HealthSourceKind;
+  name: string;
+  description: string;
+} {
   return (
     HEALTH_SOURCE_TEMPLATES.find((template) => template.provider === provider) || {
-      kind: provider === "lab-results" ? "lab" : provider === "medical-records" ? "record" : "manual",
+      kind:
+        provider === "lab-results" ? "lab" : provider === "medical-records" ? "record" : "manual",
       name: titleCase(provider),
       description: "Custom health source",
     }
@@ -680,16 +732,29 @@ function buildAppleHealthPreview(
     items,
     warnings: [
       ...(bridgeStatus?.available ? [] : ["Apple Health bridge is unavailable on this device."]),
-      ...(source.permissionState === "denied" ? ["HealthKit permission is denied for this source."] : []),
-      ...(source.permissionState === "restricted" ? ["HealthKit access is restricted by device policy."] : []),
+      ...(source.permissionState === "denied"
+        ? ["HealthKit permission is denied for this source."]
+        : []),
+      ...(source.permissionState === "restricted"
+        ? ["HealthKit access is restricted by device policy."]
+        : []),
     ],
   };
 }
 
-function pickMetricTrend(previous?: HealthMetric, current?: HealthMetric): "up" | "down" | "stable" {
+function pickMetricTrend(
+  previous?: HealthMetric,
+  current?: HealthMetric,
+): "up" | "down" | "stable" {
   if (!previous) return "stable";
   if (!current) return "stable";
-  if (current.key === "resting_hr" || current.key === "a1c" || current.key === "glucose" || current.key === "ldl" || current.key === "triglycerides") {
+  if (
+    current.key === "resting_hr" ||
+    current.key === "a1c" ||
+    current.key === "glucose" ||
+    current.key === "ldl" ||
+    current.key === "triglycerides"
+  ) {
     if (current.value > previous.value) return "up";
     if (current.value < previous.value) return "down";
     return "stable";
@@ -699,7 +764,10 @@ function pickMetricTrend(previous?: HealthMetric, current?: HealthMetric): "up" 
   return "stable";
 }
 
-function generateWearableSnapshot(source: HealthSource): { metrics: HealthMetric[]; records: HealthRecord[] } {
+function generateWearableSnapshot(source: HealthSource): {
+  metrics: HealthMetric[];
+  records: HealthRecord[];
+} {
   const seed = hashString(`${source.id}:${source.name}:${now()}`);
   const steps = 5200 + (seed % 5600);
   const sleep = 330 + (seed % 180);
@@ -735,7 +803,10 @@ function generateWearableSnapshot(source: HealthSource): { metrics: HealthMetric
   return { metrics, records };
 }
 
-function generateLabSnapshot(source: HealthSource): { metrics: HealthMetric[]; records: HealthRecord[] } {
+function generateLabSnapshot(source: HealthSource): {
+  metrics: HealthMetric[];
+  records: HealthRecord[];
+} {
   const seed = hashString(`${source.id}:${source.accountLabel || source.name}`);
   const a1c = Number((5.2 + (seed % 9) / 10).toFixed(1));
   const glucose = 92 + (seed % 22);
@@ -762,7 +833,10 @@ function generateLabSnapshot(source: HealthSource): { metrics: HealthMetric[]; r
   return { metrics, records };
 }
 
-function generateRecordSnapshot(source: HealthSource): { metrics: HealthMetric[]; records: HealthRecord[] } {
+function generateRecordSnapshot(source: HealthSource): {
+  metrics: HealthMetric[];
+  records: HealthRecord[];
+} {
   const seed = hashString(`${source.id}:${source.notes || source.name}`);
   const symptomScore = clamp(3 + (seed % 8), 0, 10);
   const recordedAt = now();
@@ -779,7 +853,10 @@ function generateRecordSnapshot(source: HealthSource): { metrics: HealthMetric[]
   return { metrics, records };
 }
 
-function buildSourceSnapshot(source: HealthSource): { metrics: HealthMetric[]; records: HealthRecord[] } {
+function buildSourceSnapshot(source: HealthSource): {
+  metrics: HealthMetric[];
+  records: HealthRecord[];
+} {
   switch (source.kind) {
     case "wearable":
       return generateWearableSnapshot(source);
@@ -803,14 +880,21 @@ function buildSourceSnapshot(source: HealthSource): { metrics: HealthMetric[]; r
   }
 }
 
-function withSourceUpdate(sourceId: string, updater: (source: HealthSource) => HealthSource): HealthState {
+function withSourceUpdate(
+  sourceId: string,
+  updater: (source: HealthSource) => HealthSource,
+): HealthState {
   return updateState((state) => {
-    const sources = state.sources.map((source) => (source.id === sourceId ? updater(source) : source));
+    const sources = state.sources.map((source) =>
+      source.id === sourceId ? updater(source) : source,
+    );
     return { ...state, sources };
   });
 }
 
-function parseImportedFile(filePath: string): Promise<{ metrics: HealthMetric[]; records: HealthRecord[] }> {
+function parseImportedFile(
+  filePath: string,
+): Promise<{ metrics: HealthMetric[]; records: HealthRecord[] }> {
   return fs.readFile(filePath, "utf-8").then((raw) => {
     const ext = path.extname(filePath).toLowerCase();
     let text = raw;
@@ -876,7 +960,9 @@ async function generateWorkflowFromLLM(
       relevantSources.some((source) => source.id === record.sourceId),
     );
     const relevantInsights = dashboard.insights.filter((insight) =>
-      insight.sourceIds.some((sourceId) => relevantSources.some((source) => source.id === sourceId)),
+      insight.sourceIds.some((sourceId) =>
+        relevantSources.some((source) => source.id === sourceId),
+      ),
     );
 
     const system = [
@@ -949,18 +1035,34 @@ async function generateWorkflowFromLLM(
       .trim();
     const jsonText = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
     if (!jsonText.startsWith("{")) {
-      console.warn("[HealthManager] LLM workflow response missing JSON object:", text.slice(0, 200));
+      console.warn(
+        "[HealthManager] LLM workflow response missing JSON object:",
+        text.slice(0, 200),
+      );
       return null;
     }
-    let parsed: { title?: string; summary?: string; sections?: HealthWorkflowSection[]; disclaimer?: string };
+    let parsed: {
+      title?: string;
+      summary?: string;
+      sections?: HealthWorkflowSection[];
+      disclaimer?: string;
+    };
     try {
       parsed = JSON.parse(jsonText) as typeof parsed;
     } catch (parseErr) {
-      console.warn("[HealthManager] LLM workflow JSON parse failed:", parseErr, "raw:", jsonText.slice(0, 300));
+      console.warn(
+        "[HealthManager] LLM workflow JSON parse failed:",
+        parseErr,
+        "raw:",
+        jsonText.slice(0, 300),
+      );
       return null;
     }
     if (!parsed.title || !Array.isArray(parsed.sections)) {
-      console.warn("[HealthManager] LLM workflow missing title or sections:", { title: parsed.title, hasSections: Array.isArray(parsed.sections) });
+      console.warn("[HealthManager] LLM workflow missing title or sections:", {
+        title: parsed.title,
+        hasSections: Array.isArray(parsed.sections),
+      });
       return null;
     }
     return {
@@ -1028,7 +1130,9 @@ function buildWorkflowFallback(
               topSleep && topSleep.value < 420
                 ? "Keep the next long run easy and extend the sleep window."
                 : "Keep one quality workout and one long aerobic session.",
-              topStep ? `Current steps baseline is ${Math.round(topStep.value)}; hold easy movement on recovery days.` : "Track daily movement and keep recovery days light.",
+              topStep
+                ? `Current steps baseline is ${Math.round(topStep.value)}; hold easy movement on recovery days.`
+                : "Track daily movement and keep recovery days light.",
               "Use resting HR and HRV to decide whether to push intensity or hold steady.",
             ],
           },
@@ -1056,8 +1160,12 @@ function buildWorkflowFallback(
             title: "Bring to the visit",
             items: [
               topA1c ? `A1C: ${topA1c.value.toFixed(1)}%` : "Latest labs",
-              topGlucose ? `Glucose: ${Math.round(topGlucose.value)} mg/dL` : "Recent glucose trends",
-              topSymptom ? `Symptoms: ${Math.round(topSymptom.value)}/10` : "Symptom log and pattern notes",
+              topGlucose
+                ? `Glucose: ${Math.round(topGlucose.value)} mg/dL`
+                : "Recent glucose trends",
+              topSymptom
+                ? `Symptoms: ${Math.round(topSymptom.value)}/10`
+                : "Symptom log and pattern notes",
             ],
           },
           {
@@ -1115,14 +1223,18 @@ function buildWorkflowFallback(
             title: "Movement and recovery",
             items: [
               topStep ? `Steps baseline: ${Math.round(topStep.value)} steps` : "No step data yet.",
-              topSleep ? `Sleep: ${Math.floor(topSleep.value / 60)}h ${Math.round(topSleep.value % 60)}m` : "No sleep data yet.",
+              topSleep
+                ? `Sleep: ${Math.floor(topSleep.value / 60)}h ${Math.round(topSleep.value % 60)}m`
+                : "No sleep data yet.",
             ],
           },
           {
             title: "Clinical context",
             items: [
               topA1c ? `A1C: ${topA1c.value.toFixed(1)}%` : "No lab data yet.",
-              topGlucose ? `Glucose: ${Math.round(topGlucose.value)} mg/dL` : "No glucose data yet.",
+              topGlucose
+                ? `Glucose: ${Math.round(topGlucose.value)} mg/dL`
+                : "No glucose data yet.",
             ],
           },
         ],
@@ -1165,11 +1277,13 @@ export class HealthManager {
       nextState.insights = deriveInsights(nextState);
       return nextState;
     });
-    return next.sources.find(
-      (source) =>
-        source.provider === input.provider &&
-        source.name.toLowerCase() === input.name.trim().toLowerCase(),
-    ) || normalizeSourceInput(input);
+    return (
+      next.sources.find(
+        (source) =>
+          source.provider === input.provider &&
+          source.name.toLowerCase() === input.name.trim().toLowerCase(),
+      ) || normalizeSourceInput(input)
+    );
   }
 
   static removeSource(sourceId: string): { success: boolean } {
@@ -1183,7 +1297,12 @@ export class HealthManager {
               status: "disabled",
               syncHistory: [
                 ...(source.syncHistory || []),
-                buildHealthSyncHistoryEvent(source.id, "disconnect", "success", "Source disabled by user."),
+                buildHealthSyncHistoryEvent(
+                  source.id,
+                  "disconnect",
+                  "success",
+                  "Source disabled by user.",
+                ),
               ].slice(-20),
               updatedAt: now(),
             }
@@ -1203,8 +1322,14 @@ export class HealthManager {
     lastError?: string;
   }> {
     const state = loadState();
-    const source = sourceId ? state.sources.find((entry) => entry.id === sourceId) : state.sources.find((entry) => entry.provider === "apple-health");
-    const mode = source ? sourceModeForAppleHealth(source) : AppleHealthBridge.isAvailable() ? "native" : "import";
+    const source = sourceId
+      ? state.sources.find((entry) => entry.id === sourceId)
+      : state.sources.find((entry) => entry.provider === "apple-health");
+    const mode = source
+      ? sourceModeForAppleHealth(source)
+      : AppleHealthBridge.isAvailable()
+        ? "native"
+        : "import";
     if (mode === "import") {
       return {
         available: false,
@@ -1239,10 +1364,13 @@ export class HealthManager {
     sourceId?: string;
     connectionMode?: HealthSourceConnectionMode;
   }): Promise<{ success: boolean; source?: HealthSource; error?: string }> {
-    const desiredMode = payload.connectionMode || (AppleHealthBridge.isAvailable() ? "native" : "import");
+    const desiredMode =
+      payload.connectionMode || (AppleHealthBridge.isAvailable() ? "native" : "import");
     const template = sourceSeed("apple-health");
     const existing = payload.sourceId
-      ? loadState().sources.find((entry) => entry.id === payload.sourceId && entry.provider === "apple-health")
+      ? loadState().sources.find(
+          (entry) => entry.id === payload.sourceId && entry.provider === "apple-health",
+        )
       : undefined;
     const source =
       existing ||
@@ -1296,7 +1424,11 @@ export class HealthManager {
         ),
       }));
       const updated = nextState.sources.find((entry) => entry.id === source.id) || source;
-      return { success: false, source: updated, error: status.lastError || "Apple Health bridge is unavailable." };
+      return {
+        success: false,
+        source: updated,
+        error: status.lastError || "Apple Health bridge is unavailable.",
+      };
     }
 
     const authorization = await AppleHealthBridge.authorize(
@@ -1317,7 +1449,9 @@ export class HealthManager {
               bridgeStatus: "available",
               status: authorization.granted ? "connected" : "needs-auth",
               enabled: true,
-              lastError: authorization.granted ? undefined : "HealthKit authorization was not granted.",
+              lastError: authorization.granted
+                ? undefined
+                : "HealthKit authorization was not granted.",
               connectedAt: authorization.granted ? entry.connectedAt || now() : entry.connectedAt,
               updatedAt: now(),
               syncHistory: [
@@ -1326,7 +1460,9 @@ export class HealthManager {
                   entry.id,
                   "authorize",
                   authorization.granted ? "success" : "error",
-                  authorization.granted ? "HealthKit permissions granted." : "HealthKit permissions denied.",
+                  authorization.granted
+                    ? "HealthKit permissions granted."
+                    : "HealthKit permissions denied.",
                 ),
               ].slice(-20),
             }
@@ -1359,12 +1495,19 @@ export class HealthManager {
               ...source,
               status: "disabled",
               enabled: false,
-              permissionState: source.provider === "apple-health" ? "import-only" : source.permissionState,
+              permissionState:
+                source.provider === "apple-health" ? "import-only" : source.permissionState,
               lastError: undefined,
-              bridgeStatus: source.provider === "apple-health" ? "unavailable" : source.bridgeStatus,
+              bridgeStatus:
+                source.provider === "apple-health" ? "unavailable" : source.bridgeStatus,
               syncHistory: [
                 ...(source.syncHistory || []),
-                buildHealthSyncHistoryEvent(source.id, "disconnect", "success", "Apple Health disconnected."),
+                buildHealthSyncHistoryEvent(
+                  source.id,
+                  "disconnect",
+                  "success",
+                  "Apple Health disconnected.",
+                ),
               ].slice(-20),
               updatedAt: now(),
             }
@@ -1377,7 +1520,9 @@ export class HealthManager {
   static resetAppleHealth(sourceId?: string): { success: boolean; removedCount: number } {
     const state = loadState();
     const appleSourceIds = state.sources
-      .filter((source) => source.provider === "apple-health" && (!sourceId || source.id === sourceId))
+      .filter(
+        (source) => source.provider === "apple-health" && (!sourceId || source.id === sourceId),
+      )
       .map((source) => source.id);
     if (appleSourceIds.length === 0) {
       return { success: true, removedCount: 0 };
@@ -1387,11 +1532,14 @@ export class HealthManager {
       const remainingSources = current.sources.filter(
         (source) => !(source.provider === "apple-health" && appleSourceIds.includes(source.id)),
       );
-      const remainingMetrics = current.metrics.filter((metric) => !appleSourceIds.includes(metric.sourceId));
-      const remainingRecords = current.records.filter((record) => !appleSourceIds.includes(record.sourceId));
+      const remainingMetrics = current.metrics.filter(
+        (metric) => !appleSourceIds.includes(metric.sourceId),
+      );
+      const remainingRecords = current.records.filter(
+        (record) => !appleSourceIds.includes(record.sourceId),
+      );
       const remainingInsights = current.insights.filter(
-        (insight) =>
-          !insight.sourceIds.some((candidate) => appleSourceIds.includes(candidate)),
+        (insight) => !insight.sourceIds.some((candidate) => appleSourceIds.includes(candidate)),
       );
       const remainingWorkflows = current.workflows.filter(
         (workflow) => !workflow.sourceIds.some((candidate) => appleSourceIds.includes(candidate)),
@@ -1422,7 +1570,11 @@ export class HealthManager {
     if (source.provider === "apple-health") {
       const mode = sourceModeForAppleHealth(source);
       if (mode === "import") {
-        return { ok: false, error: "Apple Health on this platform is import-only. Import an Apple Health export file instead." };
+        return {
+          ok: false,
+          error:
+            "Apple Health on this platform is import-only. Import an Apple Health export file instead.",
+        };
       }
 
       const status = await AppleHealthBridge.getStatus("native");
@@ -1473,7 +1625,12 @@ export class HealthManager {
                   lastError: "Apple Health sync failed.",
                   syncHistory: [
                     ...(entry.syncHistory || []),
-                    buildHealthSyncHistoryEvent(entry.id, "sync", "error", "Apple Health sync failed."),
+                    buildHealthSyncHistoryEvent(
+                      entry.id,
+                      "sync",
+                      "error",
+                      "Apple Health sync failed.",
+                    ),
                   ].slice(-20),
                   updatedAt: now(),
                 }
@@ -1509,7 +1666,12 @@ export class HealthManager {
                 updatedAt: now(),
                 syncHistory: [
                   ...(entry.syncHistory || []),
-                  buildHealthSyncHistoryEvent(entry.id, "sync", "success", "HealthKit data synced."),
+                  buildHealthSyncHistoryEvent(
+                    entry.id,
+                    "sync",
+                    "success",
+                    "HealthKit data synced.",
+                  ),
                 ].slice(-20),
               }
             : entry,
@@ -1547,7 +1709,9 @@ export class HealthManager {
         records,
         insights: nextState.insights.filter((insight) => insight.sourceIds.includes(sourceId)),
         workflow: null,
-        events: [buildHealthSyncHistoryEvent(source.id, "sync", "success", "HealthKit data synced.")],
+        events: [
+          buildHealthSyncHistoryEvent(source.id, "sync", "success", "HealthKit data synced."),
+        ],
       };
     }
 
@@ -1559,7 +1723,9 @@ export class HealthManager {
 
     const snapshot = buildSourceSnapshot(source);
     const metrics = snapshot.metrics.map((metric, index) => {
-      const previous = syncing.metrics.filter((item) => item.key === metric.key && item.sourceId === metric.sourceId)[index];
+      const previous = syncing.metrics.filter(
+        (item) => item.key === metric.key && item.sourceId === metric.sourceId,
+      )[index];
       return {
         ...metric,
         trend: pickMetricTrend(previous, metric),
@@ -1577,7 +1743,9 @@ export class HealthManager {
         lastError: undefined,
         updatedAt: now(),
       };
-      const sources = current.sources.map((entry) => (entry.id === sourceId ? updatedSource : entry));
+      const sources = current.sources.map((entry) =>
+        entry.id === sourceId ? updatedSource : entry,
+      );
       const records = [...snapshot.records, ...current.records].slice(0, 200);
       const mergedMetrics = mergeMetrics(current.metrics, metrics);
       const nextState = {
@@ -1592,7 +1760,9 @@ export class HealthManager {
       return nextState;
     });
 
-    const insightSlice = nextState.insights.filter((insight) => insight.sourceIds.includes(sourceId));
+    const insightSlice = nextState.insights.filter((insight) =>
+      insight.sourceIds.includes(sourceId),
+    );
     return {
       ok: true,
       source: nextState.sources.find((entry) => entry.id === sourceId),
@@ -1630,22 +1800,27 @@ export class HealthManager {
       }
     }
     if (imports.length === 0) {
-      const firstRejection = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
-      const errMsg = firstRejection?.reason instanceof Error
-        ? firstRejection.reason.message
-        : String(firstRejection?.reason ?? "Unknown error");
+      const firstRejection = results.find((r) => r.status === "rejected") as
+        | PromiseRejectedResult
+        | undefined;
+      const errMsg =
+        firstRejection?.reason instanceof Error
+          ? firstRejection.reason.message
+          : String(firstRejection?.reason ?? "Unknown error");
       return {
         ok: false,
         error: `Failed to import all files: ${failedFiles.join(", ")}. ${errMsg}`,
       };
     }
     const records = imports.flatMap((entry) => entry.records);
-    const metrics = imports.flatMap((entry) => entry.metrics).map((metric) => ({
-      ...metric,
-      sourceId,
-      sourceLabel: sourceLabel(source),
-      recordedAt: now(),
-    }));
+    const metrics = imports
+      .flatMap((entry) => entry.metrics)
+      .map((metric) => ({
+        ...metric,
+        sourceId,
+        sourceLabel: sourceLabel(source),
+        recordedAt: now(),
+      }));
 
     const nextState = updateState((current) => {
       const sources = current.sources.map((entry) =>
@@ -1658,7 +1833,12 @@ export class HealthManager {
               lastSyncStatus: "success" as const,
               syncHistory: [
                 ...(entry.syncHistory || []),
-                buildHealthSyncHistoryEvent(entry.id, "import", "success", "Imported health files."),
+                buildHealthSyncHistoryEvent(
+                  entry.id,
+                  "import",
+                  "success",
+                  "Imported health files.",
+                ),
               ].slice(-20),
               updatedAt: now(),
             }
@@ -1719,10 +1899,16 @@ export class HealthManager {
       return { success: false, error: "Health source not found." };
     }
     if (source.provider !== "apple-health") {
-      return { success: false, error: "Writeback preview is only available for Apple Health sources." };
+      return {
+        success: false,
+        error: "Writeback preview is only available for Apple Health sources.",
+      };
     }
 
-    const status = sourceModeForAppleHealth(source) === "native" ? await AppleHealthBridge.getStatus("native") : undefined;
+    const status =
+      sourceModeForAppleHealth(source) === "native"
+        ? await AppleHealthBridge.getStatus("native")
+        : undefined;
     const preview = buildAppleHealthPreview(source, request.items, status);
     return { success: true, preview };
   }
@@ -1742,7 +1928,10 @@ export class HealthManager {
       return { success: false, error: "Writeback is only available for Apple Health sources." };
     }
     if (sourceModeForAppleHealth(source) !== "native") {
-      return { success: false, error: "Apple Health writeback requires a native macOS connection." };
+      return {
+        success: false,
+        error: "Apple Health writeback requires a native macOS connection.",
+      };
     }
 
     const result = await AppleHealthBridge.write(source.id, "native", request.items);
@@ -1757,7 +1946,12 @@ export class HealthManager {
                 lastError: "Apple Health writeback failed.",
                 syncHistory: [
                   ...(entry.syncHistory || []),
-                  buildHealthSyncHistoryEvent(entry.id, "write", "error", "Apple Health writeback failed."),
+                  buildHealthSyncHistoryEvent(
+                    entry.id,
+                    "write",
+                    "error",
+                    "Apple Health writeback failed.",
+                  ),
                 ].slice(-20),
                 updatedAt: now(),
               }
@@ -1797,7 +1991,9 @@ export class HealthManager {
     };
   }
 
-  static async generateWorkflow(request: HealthWorkflowRequest): Promise<{ success: boolean; workflow?: HealthWorkflow; error?: string }> {
+  static async generateWorkflow(
+    request: HealthWorkflowRequest,
+  ): Promise<{ success: boolean; workflow?: HealthWorkflow; error?: string }> {
     const dashboard = this.getDashboard();
     const llmWorkflow = await generateWorkflowFromLLM(dashboard, request).catch(() => null);
     const workflow = llmWorkflow || buildWorkflowFallback(dashboard, request);

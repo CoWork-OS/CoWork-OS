@@ -278,7 +278,7 @@ export class WebSocketTransport extends EventEmitter implements MCPTransport {
 
       // Otherwise, pass to message handler (notifications)
       this.messageHandler?.(message as JSONRPCResponse | JSONRPCNotification);
-    } catch  {
+    } catch {
       console.error(`[MCP WebSocketTransport] Failed to parse message: ${data}`);
     }
   }

@@ -134,8 +134,7 @@ export class WebAccessServer {
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
-    const requestOrigin =
-      typeof req.headers.origin === "string" ? req.headers.origin.trim() : "";
+    const requestOrigin = typeof req.headers.origin === "string" ? req.headers.origin.trim() : "";
     const corsOrigin = this.resolveCorsOrigin(requestOrigin);
 
     // CORS headers

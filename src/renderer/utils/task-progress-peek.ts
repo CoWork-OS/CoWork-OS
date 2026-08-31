@@ -161,7 +161,9 @@ function getActivityForEvent(
       ? humanizeProgressStepDescription(stepPayload.description)
       : "";
   const message = cleanInlineText(getPayloadString(event, "message"));
-  const reason = cleanInlineText(getPayloadString(event, "reason") || getPayloadString(event, "error"));
+  const reason = cleanInlineText(
+    getPayloadString(event, "reason") || getPayloadString(event, "error"),
+  );
 
   if (effectiveType === "step_started" || event.type === "timeline_step_started") {
     return {
@@ -210,7 +212,10 @@ function getActivityForEvent(
   return null;
 }
 
-function deriveStatus(task: Task | null | undefined, isTaskWorking: boolean): TaskProgressPeekStatus {
+function deriveStatus(
+  task: Task | null | undefined,
+  isTaskWorking: boolean,
+): TaskProgressPeekStatus {
   if (!task) return "idle";
   if (task.terminalStatus === "awaiting_approval") return "waiting";
   if (isTaskWorking || task.status === "executing" || task.status === "planning") return "working";
@@ -264,8 +269,7 @@ export function deriveTaskProgressPeekModel({
   ).length;
   const failedCount = steps.filter((step) => step.status === "failed").length;
   const totalCount = steps.length;
-  const progressPercent =
-    totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : null;
+  const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : null;
   const progressText =
     totalCount > 0
       ? `${completedCount} of ${totalCount} steps complete${failedCount > 0 ? `, ${failedCount} failed` : ""}`
@@ -279,7 +283,11 @@ export function deriveTaskProgressPeekModel({
 
   const recentActivity: TaskProgressPeekActivity[] = [];
   const seenLabels = new Set<string>();
-  for (let index = events.length - 1; index >= 0 && recentActivity.length < maxRecentActivity; index -= 1) {
+  for (
+    let index = events.length - 1;
+    index >= 0 && recentActivity.length < maxRecentActivity;
+    index -= 1
+  ) {
     const event = events[index];
     if (task?.id && event.taskId !== task.id) continue;
     const activity = getActivityForEvent(event, now);

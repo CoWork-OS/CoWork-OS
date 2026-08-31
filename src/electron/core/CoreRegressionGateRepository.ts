@@ -21,32 +21,36 @@ export class CoreRegressionGateRepository {
       ...input,
       id: input.id || randomUUID(),
     };
-    this.db.prepare(
-      `INSERT OR REPLACE INTO core_regression_gate_results (
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO core_regression_gate_results (
         id, experiment_run_id, passed, target_improved, regressions_detected_json, summary, details_json, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      result.id,
-      result.experimentRunId,
-      result.passed ? 1 : 0,
-      result.targetImproved ? 1 : 0,
-      JSON.stringify(result.regressionsDetected || []),
-      result.summary,
-      result.details ? JSON.stringify(result.details) : null,
-      result.createdAt,
-    );
+      )
+      .run(
+        result.id,
+        result.experimentRunId,
+        result.passed ? 1 : 0,
+        result.targetImproved ? 1 : 0,
+        JSON.stringify(result.regressionsDetected || []),
+        result.summary,
+        result.details ? JSON.stringify(result.details) : null,
+        result.createdAt,
+      );
     return result;
   }
 
   findById(id: string): CoreRegressionGateResult | undefined {
-    const row = this.db.prepare("SELECT * FROM core_regression_gate_results WHERE id = ?").get(id) as Any;
+    const row = this.db
+      .prepare("SELECT * FROM core_regression_gate_results WHERE id = ?")
+      .get(id) as Any;
     return row ? this.mapRow(row) : undefined;
   }
 
   findByExperimentRunId(experimentRunId: string): CoreRegressionGateResult | undefined {
-    const row = this.db.prepare(
-      "SELECT * FROM core_regression_gate_results WHERE experiment_run_id = ? LIMIT 1",
-    ).get(experimentRunId) as Any;
+    const row = this.db
+      .prepare("SELECT * FROM core_regression_gate_results WHERE experiment_run_id = ? LIMIT 1")
+      .get(experimentRunId) as Any;
     return row ? this.mapRow(row) : undefined;
   }
 

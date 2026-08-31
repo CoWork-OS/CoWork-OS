@@ -104,10 +104,12 @@ describe("AutonomyEngine", () => {
     await engine.triggerEvaluation(workspaceId);
 
     expect(createdTasks.length).toBeGreaterThan(0);
-    expect(engine.listActions(workspaceId).some((action) => action.status === "success")).toBe(true);
-    expect(engine.listDecisions(workspaceId).some((decision) => decision.status === "executed")).toBe(
+    expect(engine.listActions(workspaceId).some((action) => action.status === "success")).toBe(
       true,
     );
+    expect(
+      engine.listDecisions(workspaceId).some((decision) => decision.status === "executed"),
+    ).toBe(true);
   });
 
   it("does not auto-execute local decisions while a manual task is active", async () => {
@@ -149,10 +151,12 @@ describe("AutonomyEngine", () => {
     expect(createdTasks).toHaveLength(0);
     expect(engine.listActions(workspaceId)).toHaveLength(0);
     expect(
-      engine.listDecisions(workspaceId).some(
-        (decision) =>
-          decision.actionType === "organize_work_session" && decision.status === "suggested",
-      ),
+      engine
+        .listDecisions(workspaceId)
+        .some(
+          (decision) =>
+            decision.actionType === "organize_work_session" && decision.status === "suggested",
+        ),
     ).toBe(true);
   });
 });

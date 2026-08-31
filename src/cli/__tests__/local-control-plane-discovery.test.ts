@@ -4,10 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  discoverLocalControlPlane,
-  discoverUserDataDirs,
-} from "../local-control-plane-discovery";
+import { discoverLocalControlPlane, discoverUserDataDirs } from "../local-control-plane-discovery";
 
 const OLD_USER_DATA_DIR = process.env.COWORK_USER_DATA_DIR;
 
@@ -75,7 +72,11 @@ function writeControlPlaneSettings(userDataDir: string, settings: object): void 
   writeSecureSettingsRow(userDataDir, encryptAppSettings(userDataDir, raw), checksum(raw));
 }
 
-function writeSecureSettingsRow(userDataDir: string, encryptedData: string, rowChecksum: string): void {
+function writeSecureSettingsRow(
+  userDataDir: string,
+  encryptedData: string,
+  rowChecksum: string,
+): void {
   fs.mkdirSync(userDataDir, { recursive: true });
   const dbPath = path.join(userDataDir, "cowork-os.db");
   execFileSync("sqlite3", [

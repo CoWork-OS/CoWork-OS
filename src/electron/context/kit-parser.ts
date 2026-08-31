@@ -100,7 +100,11 @@ export function parseKitDocumentFromString(
   };
 }
 
-export function parseKitDocument(absPath: string, contract: KitContract, relPath?: string): ParsedKitDoc | null {
+export function parseKitDocument(
+  absPath: string,
+  contract: KitContract,
+  relPath?: string,
+): ParsedKitDoc | null {
   if (!fs.existsSync(absPath)) return null;
   const stat = fs.statSync(absPath);
   if (!stat.isFile()) return null;

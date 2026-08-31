@@ -55,9 +55,11 @@ describe("BrowserUseCloudClient", () => {
   });
 
   it("uses the Browser Use V4 API by default", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ id: "browser-session-1" }), { status: 201 }),
-    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: "browser-session-1" }), { status: 201 }),
+      );
     const client = new BrowserUseCloudClient("test-key", { fetchImpl: fetchImpl as Any });
 
     await client.createBrowserSession({ proxyCountryCode: "us" });
@@ -94,7 +96,9 @@ describe("BrowserUseCloudClient", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(new Response("busy", { status: 429, headers: { "Retry-After": "3" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "browser-session-1" }), { status: 201 }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "browser-session-1" }), { status: 201 }),
+      );
     const sleep = vi.fn().mockResolvedValue(undefined);
     const client = new BrowserUseCloudClient("test-key", {
       fetchImpl: fetchImpl as Any,
@@ -110,9 +114,9 @@ describe("BrowserUseCloudClient", () => {
   });
 
   it("returns a structured retryable error after exhausting provider retries", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response('{"message":"temporarily unavailable"}', { status: 503 }),
-    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('{"message":"temporarily unavailable"}', { status: 503 }));
     const sleep = vi.fn().mockResolvedValue(undefined);
     const client = new BrowserUseCloudClient("test-key", {
       fetchImpl: fetchImpl as Any,
@@ -120,7 +124,9 @@ describe("BrowserUseCloudClient", () => {
       maxRetries: 2,
     });
 
-    await expect(client.stopBrowserSession("browser-session-1")).rejects.toMatchObject<Partial<BrowserUseApiError>>({
+    await expect(client.stopBrowserSession("browser-session-1")).rejects.toMatchObject<
+      Partial<BrowserUseApiError>
+    >({
       name: "BrowserUseApiError",
       status: 503,
       retryable: true,

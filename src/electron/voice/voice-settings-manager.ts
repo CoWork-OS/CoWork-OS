@@ -358,9 +358,7 @@ export class VoiceSettingsManager {
     }
   }
 
-  private static resolveRepository(
-    db?: Database.Database,
-  ): SecureSettingsRepository | null {
+  private static resolveRepository(db?: Database.Database): SecureSettingsRepository | null {
     if (this.repository) {
       return this.repository;
     }

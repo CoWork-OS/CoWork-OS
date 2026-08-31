@@ -15,7 +15,9 @@ function normalizeFileSrc(src: string): string {
   if (src.startsWith("file://")) {
     const rawPath = src.replace(/^file:\/\//, "");
     try {
-      return decodeURIComponent(rawPath).replace(/^\/([a-zA-Z]:\/)/, "$1").split(/[?#]/)[0];
+      return decodeURIComponent(rawPath)
+        .replace(/^\/([a-zA-Z]:\/)/, "$1")
+        .split(/[?#]/)[0];
     } catch {
       return rawPath.replace(/^\/([a-zA-Z]:\/)/, "$1").split(/[?#]/)[0];
     }
@@ -51,7 +53,9 @@ export function MarkdownImagePreview({
 
   useEffect(() => {
     if (!localPath || !workspacePath) {
-      setDisplaySrc(DATA_IMAGE_RE.test(trimmedSrc) || REMOTE_IMAGE_RE.test(trimmedSrc) ? trimmedSrc : "");
+      setDisplaySrc(
+        DATA_IMAGE_RE.test(trimmedSrc) || REMOTE_IMAGE_RE.test(trimmedSrc) ? trimmedSrc : "",
+      );
       setLoading(false);
       setError(localPath ? "Image preview needs an active workspace." : "");
       setFileName("");

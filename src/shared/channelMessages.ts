@@ -181,7 +181,8 @@ const CHANNEL_UI_COPY: Record<ChannelUiKey, string> = {
   skillNotFound: '❌ Skill "{skillId}" not found.\n\nUse /skills to see available skills.',
   skillToggle: "{emoji} *{skillName}* is now {statusText}",
   debugStatus: "🐛 Debug mode is now {statusText}",
-  shellInvalidOption: "❌ Invalid option. Use `/shell on` or `/shell off`",
+  shellInvalidOption:
+    "🛡️ Command tools are controlled by access profiles, not a workspace shell toggle. Choose Ask for approval, Approve for me, or Full access in the desktop app. Legacy channel tasks keep their existing compatibility policy.",
   workspaceNotFoundForShell: "❌ Workspace not found.",
   responseFailed: "❌ Failed to process response.",
   helpCompact: `📚 *Commands*
@@ -269,7 +270,7 @@ Example: "Add a login form"`,
 
 *Settings*
 /settings - View current settings
-/shell - Enable/disable shell commands
+/shell - Explain command-tool access profiles (legacy compatibility)
 /debug - Toggle debug mode
 /activation [all|mention|commands] - WhatsApp group routing mode
 /selfchat on|off - WhatsApp self-chat mode
@@ -282,9 +283,10 @@ Example: "Add a login form"`,
 
 💬 *Quick Start*
 1. \`/workspaces\` → \`/workspace <name>\`
-2. \`/shell on\` (if needed)
-3. Send your task message
-4. \`/newtask\` to start fresh`,
+2. Send your task message
+3. \`/newtask\` to start fresh
+
+Desktop tasks use the selected access profile. The legacy /shell command no longer changes workspace permissions.`,
 };
 
 const PERSONA_CHANNEL_UI_OVERRIDES: Partial<
@@ -358,7 +360,8 @@ const PERSONA_CHANNEL_UI_OVERRIDES: Partial<
     skillNotFound: 'Skill "{skillId}" not found.\n\nUse /skills to see available skills.',
     skillToggle: "{emoji} *{skillName}* is now {statusText}",
     debugStatus: "Debug mode is now {statusText}",
-    shellInvalidOption: "Invalid option. Use `/shell on` or `/shell off`",
+    shellInvalidOption:
+      "Command tools are controlled by access profiles, not a workspace shell toggle. Choose an access profile in the desktop app. Legacy channel tasks keep their existing compatibility policy.",
     workspaceNotFoundForShell: "I couldn't find that workspace.",
     responseFailed: "I couldn't process that response.",
     helpCompact: `📚 *Commands*
@@ -438,7 +441,7 @@ Example: "Add a login form"`,
 
 *Settings*
 /settings - Current settings
-/shell - Toggle shell access
+/shell - Explain command-tool access profiles (legacy compatibility)
 /debug - Toggle debug mode
 /activation [all|mention|commands] - WhatsApp group routing mode
 /selfchat on|off - WhatsApp self-chat mode
@@ -451,9 +454,10 @@ Example: "Add a login form"`,
 
 💬 *Quick Start*
 1. \`/workspaces\` → \`/workspace <name>\`
-2. \`/shell on\` if needed
-3. Send your task
-4. \`/newtask\` to reset`,
+2. Send your task
+3. \`/newtask\` to reset
+
+Desktop tasks use the selected access profile. The legacy /shell command no longer changes workspace permissions.`,
   },
 };
 

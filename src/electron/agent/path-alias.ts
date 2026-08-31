@@ -62,9 +62,7 @@ export function detectWorkspacePathAlias(
     if (!isExact && !isNested) continue;
 
     const suffix = normalizedInput.slice(normalizedAliasRoot.length).replace(/^\/+/, "");
-    const normalizedAbsolutePath = suffix
-      ? path.resolve(workspaceRoot, suffix)
-      : workspaceRoot;
+    const normalizedAbsolutePath = suffix ? path.resolve(workspaceRoot, suffix) : workspaceRoot;
     if (!isWithinWorkspace(normalizedAbsolutePath, workspaceRoot)) {
       return null;
     }
@@ -101,8 +99,7 @@ export function isWorkspaceAliasFailureMessage(message: string): boolean {
   return (
     /enoent|no such file or directory|path does not exist|search path must be within workspace/i.test(
       lower,
-    ) ||
-    /outside workspace boundary|path traversal outside workspace/i.test(lower)
+    ) || /outside workspace boundary|path traversal outside workspace/i.test(lower)
   );
 }
 
@@ -114,10 +111,7 @@ function normalizeWorkspaceRelativePath(value: string): string {
     .replace(/\/+$/, "");
 }
 
-function isNormalizedPathWithinWorkspace(
-  candidatePath: string,
-  workspaceRoot: string,
-): boolean {
+function isNormalizedPathWithinWorkspace(candidatePath: string, workspaceRoot: string): boolean {
   const absolute = path.resolve(workspaceRoot, candidatePath);
   return isWithinWorkspace(absolute, workspaceRoot);
 }

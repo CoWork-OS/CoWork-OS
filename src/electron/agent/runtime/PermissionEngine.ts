@@ -10,6 +10,7 @@ import type {
   PermissionRuleScope,
   Workspace,
 } from "../../../shared/types";
+import { TOOL_GROUPS } from "../../../shared/types";
 import { isComputerUseToolName } from "../../../shared/computer-use-contract";
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
 import {
@@ -25,7 +26,15 @@ import {
   isArtifactGenerationToolName,
   isFileMutationToolName,
 } from "../tool-semantics";
-import { extractDomainFromUrl, extractUrlFromToolInput } from "../security/export-permission-context";
+import {
+  extractDomainFromUrl,
+  extractUrlFromToolInput,
+} from "../security/export-permission-context";
+import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
+import {
+  evaluateWorkspaceFilesystemAccess,
+  type AccessFilesystemOperation,
+} from "../../security/access-profile-paths";
 
 const SOURCE_PRECEDENCE: Record<string, number> = {
   session: 600,
@@ -70,6 +79,7 @@ type PermissionFacts = {
   isWorkspaceWriteLike: boolean;
   isDeleteLike: boolean;
   isShell: boolean;
+  isExternalFileAccess: boolean;
   isDataExport: boolean;
   isExternalSideEffect: boolean;
   isNetworkAccess: boolean;
@@ -78,7 +88,12 @@ type PermissionFacts = {
   isLocationAccess: boolean;
 };
 
-const NETWORK_READ_TOOLS = new Set(["web_search", "web_fetch"]);
+const NETWORK_READ_TOOLS = new Set(["web_search", "web_fetch", "x_search"]);
+const NETWORK_CAPABLE_TOOLS = new Set(["open_url", "canvas_open_url"]);
+// Keep the runtime permission classifier aligned with the quick workspace
+// policy. A tool can be network-capable even when its implementation does not
+// expose a user-supplied URL (for example image generation or YouTube ingest).
+const NETWORK_TOOL_NAMES = new Set<string>(TOOL_GROUPS["group:network"]);
 const READ_ONLY_BROWSER_TOOLS = new Set([
   "browser_get_content",
   "browser_get_text",
@@ -159,6 +174,57 @@ const SAFE_DANGEROUS_ONLY_COMMAND_PREFIXES = [
   "python3 --version",
 ].map((prefix) => prefix.toLowerCase());
 
+const HARD_FILESYSTEM_BOUNDARY_REASONS = new Set([
+  "access_profile_unavailable",
+  "profile_filesystem_denied",
+  "profile_filesystem_outside",
+  "protected_path",
+]);
+
+const FILESYSTEM_READ_TOOLS = new Set([
+  "read_file",
+  "read_files",
+  "list_directory",
+  "list_directory_with_sizes",
+  "get_file_info",
+  "search_files",
+  "glob",
+  "grep",
+  "parse_document",
+  "analyze_image",
+  "read_pdf_visual",
+  "open_path",
+  "show_in_folder",
+  "edit_document",
+  "edit_pdf_region",
+  "monty_transform_file",
+  "batch_image_process",
+]);
+
+const FILESYSTEM_WRITE_TOOLS = new Set([
+  "write_file",
+  "edit_file",
+  "create_directory",
+  "take_screenshot",
+  "create_spreadsheet",
+  "create_document",
+  "create_presentation",
+  "generate_document",
+  "generate_spreadsheet",
+  "generate_presentation",
+  "generate_epub",
+  "generate_landing_page",
+  "generate_narration_audio",
+  "compile_latex",
+  "organize_folder",
+  "generate_image",
+  "generate_video",
+  "edit_document",
+  "edit_pdf_region",
+  "monty_transform_file",
+  "batch_image_process",
+]);
+
 export class PermissionEngine {
   static evaluate(request: PermissionEngineRequest): PermissionEvaluationResult {
     const facts = this.buildFacts(request);
@@ -205,6 +271,25 @@ export class PermissionEngine {
       };
     }
 
+    // `on-request` is a mandatory approval boundary, but it is not a hard
+    // allow. Evaluate explicit rules first so a narrower deny rule still wins
+    // over the profile's approval requirement.
+    if (
+      request.workspace.permissions.accessNetworkMode === "on-request" &&
+      this.isNetworkBoundaryFact(facts)
+    ) {
+      return {
+        decision: "ask",
+        reason: {
+          type: "workspace_capability",
+          capability: "network",
+          summary: "The active access profile requires approval before internet access.",
+        },
+        suggestions: this.buildSuggestions(request.allowPersistence !== false, facts),
+        scopePreview: this.buildScopePreview(request, facts),
+      };
+    }
+
     const modeDecision = this.evaluateModeDefaults(request.mode, facts);
     const shouldFallback =
       modeDecision.decision === "deny" &&
@@ -241,6 +326,36 @@ export class PermissionEngine {
     facts: PermissionFacts,
   ): { decision: PermissionEffect; reason: PermissionDecisionReason } | null {
     const permissions = request.workspace.permissions || {};
+    const isNetworkBoundaryFact = this.isNetworkBoundaryFact(facts);
+
+    if (permissions.accessProfileUnavailable === true) {
+      return {
+        decision: "deny",
+        reason: {
+          type: "workspace_capability",
+          capability: "workspace",
+          summary:
+            "The selected access profile is unavailable. Choose a valid profile before running this task.",
+        },
+      };
+    }
+
+    const filesystemBoundaryDecision = this.evaluateFilesystemBoundary(request, facts);
+    if (filesystemBoundaryDecision) {
+      return filesystemBoundaryDecision;
+    }
+
+    if (facts.toolName === "run_applescript" && permissions.accessProfileScoped === true) {
+      return {
+        decision: "deny",
+        reason: {
+          type: "workspace_capability",
+          capability: "workspace",
+          summary:
+            "AppleScript is disabled for scoped access profiles because it can bypass filesystem boundaries.",
+        },
+      };
+    }
 
     if (facts.isShell) {
       const blocked = GuardrailManager.isCommandBlocked(facts.normalizedCommand);
@@ -299,10 +414,7 @@ export class PermissionEngine {
       };
     }
 
-    if (
-      (facts.isExternalSideEffect || facts.isNetworkAccess || facts.isMcp || facts.isLocationAccess) &&
-      permissions.network === false
-    ) {
+    if (isNetworkBoundaryFact && permissions.network === false) {
       return {
         decision: "deny",
         reason: {
@@ -313,7 +425,204 @@ export class PermissionEngine {
       };
     }
 
+    if (isNetworkBoundaryFact && permissions.accessNetworkMode === "disabled") {
+      return {
+        decision: "deny",
+        reason: {
+          type: "workspace_capability",
+          capability: "network",
+          summary: "The active access profile disables network and external service access.",
+        },
+      };
+    }
+
     return null;
+  }
+
+  /**
+   * Keep path-boundary denials ahead of mode/rule approval decisions. The
+   * concrete file tools perform the same check immediately before touching
+   * disk, but doing it here prevents a scoped-profile escape from becoming an
+   * unnecessary approval prompt first (and covers high-level artifact tools
+   * whose output path is validated inside their handler).
+   */
+  private static evaluateFilesystemBoundary(
+    request: PermissionEngineRequest,
+    facts: PermissionFacts,
+  ): { decision: PermissionEffect; reason: PermissionDecisionReason } | null {
+    const operations = this.extractFilesystemOperations(request, facts.toolName);
+    for (const candidate of operations) {
+      const result = evaluateWorkspaceFilesystemAccess(
+        request.workspace,
+        candidate.path,
+        candidate.operation,
+      );
+      if (!HARD_FILESYSTEM_BOUNDARY_REASONS.has(result.reason)) continue;
+
+      return {
+        decision: "deny",
+        reason: {
+          type: "workspace_capability",
+          capability: "workspace",
+          summary: `Filesystem access denied for ${candidate.operation} "${candidate.path}" by the active access boundary.`,
+          metadata: {
+            path: result.path,
+            operation: candidate.operation,
+            policyReason: result.reason,
+          },
+        },
+      };
+    }
+    return null;
+  }
+
+  private static extractFilesystemOperations(
+    request: PermissionEngineRequest,
+    toolName: string,
+  ): Array<{ path: string; operation: AccessFilesystemOperation }> {
+    const input =
+      request.toolInput &&
+      typeof request.toolInput === "object" &&
+      !Array.isArray(request.toolInput)
+        ? (request.toolInput as Record<string, unknown>)
+        : {};
+    const operations: Array<{ path: string; operation: AccessFilesystemOperation }> = [];
+    const add = (value: unknown, operation: AccessFilesystemOperation): void => {
+      if (typeof value !== "string" || !value.trim()) return;
+      const normalized = value.trim().replace(/^!+/, "").trim();
+      if (!normalized) return;
+      operations.push({ path: normalized, operation });
+    };
+    const addMany = (value: unknown, operation: AccessFilesystemOperation): void => {
+      if (!Array.isArray(value)) return;
+      for (const item of value) add(item, operation);
+    };
+    const firstString = (...values: unknown[]): string | undefined => {
+      for (const value of values) {
+        if (typeof value === "string" && value.trim()) return value;
+      }
+      return undefined;
+    };
+
+    switch (toolName) {
+      case "copy_file":
+        add(input.sourcePath, "read");
+        add(input.destPath, "write");
+        break;
+      case "rename_file":
+        add(input.oldPath, "delete");
+        add(input.newPath, "write");
+        break;
+      case "delete_file":
+        add(firstString(request.path, input.path, input.filePath), "delete");
+        break;
+      case "write_file":
+      case "edit_file":
+      case "create_directory":
+      case "take_screenshot":
+        add(
+          firstString(
+            request.path,
+            input.path,
+            input.file_path,
+            input.filePath,
+            input.outputPath,
+            input.output_path,
+            input.filename,
+          ),
+          "write",
+        );
+        break;
+      case "edit_document": {
+        const sourcePath = firstString(request.path, input.sourcePath, input.path);
+        add(sourcePath, "read");
+        const isReadOnlyAction = input.action === "list_sections";
+        add(firstString(input.destPath, isReadOnlyAction ? undefined : sourcePath), "write");
+        break;
+      }
+      case "edit_pdf_region":
+        add(firstString(request.path, input.sourcePath, input.path), "read");
+        add(firstString(input.destPath, input.outputPath), "write");
+        break;
+      case "read_files":
+        add(input.path, "read");
+        addMany(input.patterns, "read");
+        break;
+      case "monty_transform_file":
+        add(firstString(input.inputPath, input.path), "read");
+        add(input.outputPath, "write");
+        break;
+      case "batch_image_process":
+        addMany(input.inputPaths, "read");
+        add(firstString(input.outputDir, input.outputPath), "write");
+        if (Array.isArray(input.operations)) {
+          for (const operation of input.operations) {
+            if (operation && typeof operation === "object") {
+              add((operation as Record<string, unknown>).path, "read");
+            }
+          }
+        }
+        break;
+      default:
+        if (FILESYSTEM_READ_TOOLS.has(toolName)) {
+          add(
+            firstString(
+              request.path,
+              input.path,
+              input.filePath,
+              input.file_path,
+              input.targetPath,
+            ),
+            "read",
+          );
+          // Absolute glob patterns and explicit multi-read paths need their
+          // own checks; a relative pattern remains naturally workspace-local.
+          addMany(input.paths, "read");
+          addMany(input.patterns, "read");
+        }
+        if (FILESYSTEM_WRITE_TOOLS.has(toolName)) {
+          add(
+            firstString(
+              request.path,
+              input.outputPath,
+              input.output_path,
+              input.destPath,
+              input.dest_path,
+              input.filename,
+              input.filePath,
+              input.file_path,
+              input.path,
+            ),
+            "write",
+          );
+        }
+        break;
+    }
+
+    // Approval requests can arrive with only the top-level path populated.
+    // Preserve that compatibility for the known operation class without
+    // treating arbitrary network-tool `path` fields as local filesystem paths.
+    if (operations.length === 0 && typeof request.path === "string" && request.path.trim()) {
+      if (request.approvalType === "external_file_access") {
+        add(request.path, "write");
+      }
+    }
+
+    return operations;
+  }
+
+  private static isNetworkBoundaryFact(facts: PermissionFacts): boolean {
+    // Connector actions, MCP calls, location access, and data exports all
+    // cross the local execution boundary even when they do not carry a URL.
+    // External filesystem approval is deliberately separate: it is governed
+    // by the path grant and must not be mislabeled as network access.
+    return (
+      facts.isNetworkAccess ||
+      facts.isMcp ||
+      facts.isLocationAccess ||
+      facts.isExternalSideEffect ||
+      facts.isDataExport
+    );
   }
 
   private static evaluateModeDefaults(
@@ -322,7 +631,12 @@ export class PermissionEngine {
   ): { decision: PermissionEffect; reason: PermissionDecisionReason } {
     switch (mode) {
       case "plan":
-        if (facts.isReadOnly && !facts.isExternalSideEffect && !facts.isMcp) {
+        if (
+          facts.isReadOnly &&
+          !facts.isExternalSideEffect &&
+          !facts.isExternalFileAccess &&
+          !facts.isMcp
+        ) {
           return {
             decision: "allow",
             reason: {
@@ -345,6 +659,7 @@ export class PermissionEngine {
           facts.isShell ||
           facts.isDeleteLike ||
           facts.isExternalSideEffect ||
+          facts.isExternalFileAccess ||
           facts.isNonWorkspaceInteraction ||
           facts.isMcp
         ) {
@@ -387,34 +702,45 @@ export class PermissionEngine {
               "Dangerous-only mode allows safe reads, edits, and non-destructive commands automatically.",
           },
         };
-	      case "dont_ask":
-	        if (facts.isDataExport) {
-	          return {
-	            decision: "ask",
-	            reason: {
-	              type: "mode",
+      case "dont_ask":
+        if (facts.isDataExport) {
+          return {
+            decision: "ask",
+            reason: {
+              type: "mode",
               mode,
               summary: "Data export always requires an explicit prompt, even in bypass modes.",
             },
-	          };
-	        }
-	        return {
-	          decision: "allow",
-	          reason: {
+          };
+        }
+        return {
+          decision: "allow",
+          reason: {
             type: "mode",
             mode,
             summary: "Mode allows the action unless a higher-precedence hard policy blocks it.",
-	          },
-	        };
-	      case "bypass_permissions":
-	        return {
-	          decision: "allow",
-	          reason: {
-	            type: "mode",
-	            mode,
-	            summary: "Bypass-permissions mode allows the action unless a higher-precedence hard policy blocks it.",
-	          },
-	        };
+          },
+        };
+      case "bypass_permissions":
+        if (facts.isDataExport) {
+          return {
+            decision: "ask",
+            reason: {
+              type: "mode",
+              mode,
+              summary: "Data export always requires an explicit prompt, even in bypass modes.",
+            },
+          };
+        }
+        return {
+          decision: "allow",
+          reason: {
+            type: "mode",
+            mode,
+            summary:
+              "Bypass-permissions mode allows the action unless a higher-precedence hard policy blocks it.",
+          },
+        };
       case "default":
       default:
         if (
@@ -446,7 +772,9 @@ export class PermissionEngine {
   private static buildFacts(request: PermissionEngineRequest): PermissionFacts {
     const toolName = canonicalizeToolName(String(request.toolName || "").trim());
     const approvalType = request.approvalType;
-    const normalizedCommand = normalizeCommandPrefix(request.command || this.extractCommand(request.toolInput));
+    const normalizedCommand = normalizeCommandPrefix(
+      request.command || this.extractCommand(request.toolInput),
+    );
     const normalizedPath = this.normalizePathAgainstWorkspace(
       request.workspace.path,
       request.path || this.extractPath(request.toolInput),
@@ -455,6 +783,7 @@ export class PermissionEngine {
     const normalizedDomain = extractDomainFromUrl(extractUrlFromToolInput(request.toolInput)) || "";
     const isHttpRequestReadOnly = this.isReadOnlyHttpRequest(request.toolInput, toolName);
     const isShell = approvalType === "run_command" || toolName === "run_command";
+    const isExternalFileAccess = approvalType === "external_file_access";
     const isDeleteLike =
       approvalType === "delete_file" ||
       approvalType === "delete_multiple" ||
@@ -464,22 +793,33 @@ export class PermissionEngine {
       toolName === "analyze_image" ||
       toolName === "read_pdf_visual" ||
       (toolName === "http_request" && !isHttpRequestReadOnly);
-    const isLocationAccess = approvalType === "location_access" || toolName === "get_current_location";
+    const isLocationAccess =
+      approvalType === "location_access" || toolName === "get_current_location";
+    const isWorkspaceWriteLike = this.isWorkspaceWriteTool(toolName);
     const isExternalSideEffect =
-      approvalType === "external_service" ||
+      (approvalType === "external_service" && !isWorkspaceWriteLike) ||
       isLocationAccess ||
       isDataExport ||
       toolName.endsWith("_action") ||
       toolName === "voice_call";
+    const isCodeExecutionNetworkAccess =
+      toolName === "execute_code" &&
+      !!request.toolInput &&
+      typeof request.toolInput === "object" &&
+      (request.toolInput as Record<string, unknown>).allow_network === true;
     const isNetworkAccess =
       approvalType === "network_access" ||
       NETWORK_READ_TOOLS.has(toolName) ||
-      (toolName === "http_request" && isHttpRequestReadOnly);
+      NETWORK_CAPABLE_TOOLS.has(toolName) ||
+      NETWORK_TOOL_NAMES.has(toolName) ||
+      (toolName === "http_request" && isHttpRequestReadOnly) ||
+      isCodeExecutionNetworkAccess ||
+      (isShell && isLikelyNetworkShellCommand(normalizedCommand));
     const isNonWorkspaceInteraction = this.isNonWorkspaceInteractionTool(toolName, approvalType);
     const isMcp = toolName.startsWith("mcp_");
-    const isWorkspaceWriteLike = this.isWorkspaceWriteTool(toolName);
     const isMutatingTool = this.isMutatingTool(toolName);
-    const isWriteLike = isDeleteLike || isShell || isExternalSideEffect || isMutatingTool;
+    const isWriteLike =
+      isDeleteLike || isShell || isExternalSideEffect || isExternalFileAccess || isMutatingTool;
     const isReadOnly = !isWriteLike;
 
     return {
@@ -493,6 +833,7 @@ export class PermissionEngine {
       isWorkspaceWriteLike,
       isDeleteLike,
       isShell,
+      isExternalFileAccess,
       isDataExport,
       isExternalSideEffect,
       isNetworkAccess,
@@ -504,10 +845,22 @@ export class PermissionEngine {
 
   private static isWorkspaceWriteTool(toolName: string): boolean {
     const canonicalToolName = canonicalizeToolName(toolName);
-    if (isArtifactGenerationToolName(canonicalToolName) || isFileMutationToolName(canonicalToolName)) {
+    if (
+      isArtifactGenerationToolName(canonicalToolName) ||
+      isFileMutationToolName(canonicalToolName)
+    ) {
       return true;
     }
-    return canonicalToolName === "take_screenshot";
+    return [
+      "take_screenshot",
+      "git_commit",
+      "git_merge_to_base",
+      "memory_curate",
+      "skill_create",
+      "skill_duplicate",
+      "skill_update",
+      "skill_delete",
+    ].includes(canonicalToolName);
   }
 
   private static isMutatingTool(toolName: string): boolean {
@@ -535,10 +888,15 @@ export class PermissionEngine {
       "type_text",
       "keypress",
       "wait",
+      "git_commit",
+      "git_merge_to_base",
     ].includes(canonicalToolName);
   }
 
-  private static isNonWorkspaceInteractionTool(toolName: string, approvalType?: ApprovalType): boolean {
+  private static isNonWorkspaceInteractionTool(
+    toolName: string,
+    approvalType?: ApprovalType,
+  ): boolean {
     const canonicalToolName = canonicalizeToolName(toolName);
     if (approvalType === "computer_use") return true;
     if (canonicalToolName.startsWith("browser_")) return true;
@@ -556,7 +914,8 @@ export class PermissionEngine {
   }
 
   private static extractHttpMethod(toolInput: unknown): string {
-    const obj = toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
+    const obj =
+      toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
     const rawMethod = typeof obj?.method === "string" ? obj.method.trim() : "";
     return rawMethod ? rawMethod.toUpperCase() : "GET";
   }
@@ -573,9 +932,7 @@ export class PermissionEngine {
     }
 
     // Composite shell expressions can hide side effects that are hard to classify safely.
-    if (
-      /&&|\|\||;|`|\$\(|>>?|<<?|\bchmod\b|\bchown\b|\bsudo\b|\btee\b/i.test(normalized)
-    ) {
+    if (/&&|\|\||;|`|\$\(|>>?|<<?|\bchmod\b|\bchown\b|\bsudo\b|\btee\b/i.test(normalized)) {
       return false;
     }
 
@@ -605,6 +962,9 @@ export class PermissionEngine {
     if (facts.isExternalSideEffect || facts.isMcp) {
       return true;
     }
+    if (facts.isExternalFileAccess) {
+      return true;
+    }
     if (facts.isNonWorkspaceInteraction) {
       return true;
     }
@@ -612,12 +972,14 @@ export class PermissionEngine {
   }
 
   private static extractCommand(toolInput: unknown): string {
-    const obj = toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
+    const obj =
+      toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
     return typeof obj?.command === "string" ? obj.command : "";
   }
 
   private static extractPath(toolInput: unknown): string {
-    const obj = toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
+    const obj =
+      toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
     if (typeof obj?.path === "string") return obj.path;
     if (typeof obj?.filePath === "string") return obj.filePath;
     if (typeof obj?.targetPath === "string") return obj.targetPath;
@@ -627,10 +989,15 @@ export class PermissionEngine {
   private static normalizePathAgainstWorkspace(workspacePath: string, rawPath: string): string {
     const trimmed = String(rawPath || "").trim();
     if (!trimmed) return "";
-    return normalizePermissionPath(path.isAbsolute(trimmed) ? trimmed : path.join(workspacePath, trimmed));
+    return normalizePermissionPath(
+      path.isAbsolute(trimmed) ? trimmed : path.join(workspacePath, trimmed),
+    );
   }
 
-  private static findBestRule(rules: PermissionRule[], facts: PermissionFacts): PermissionRule | undefined {
+  private static findBestRule(
+    rules: PermissionRule[],
+    facts: PermissionFacts,
+  ): PermissionRule | undefined {
     const candidates = rules
       .filter((rule) => this.ruleMatches(rule, facts))
       .map((rule) => ({

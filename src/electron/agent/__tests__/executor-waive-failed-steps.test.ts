@@ -13,7 +13,9 @@ function getWaivableStepIds(
   const executor = Object.create(TaskExecutor.prototype) as Any;
   executor.plan = { description: "Plan", steps };
   executor.budgetConstrainedFailedStepIds = new Set(opts?.budgetConstrainedFailedStepIds || []);
-  executor.blockingVerificationFailedStepIds = new Set(opts?.blockingVerificationFailedStepIds || []);
+  executor.blockingVerificationFailedStepIds = new Set(
+    opts?.blockingVerificationFailedStepIds || [],
+  );
   executor.nonBlockingVerificationFailedStepIds = new Set(
     opts?.nonBlockingVerificationFailedStepIds || [],
   );
@@ -141,7 +143,12 @@ describe("TaskExecutor getWaivableFailedStepIdsAtCompletion", () => {
         { id: "1", description: "Collect Reddit findings", status: "failed", kind: "primary" },
         { id: "2", description: "Collect X findings", status: "completed", kind: "primary" },
         { id: "3", description: "Draft report", status: "completed", kind: "primary" },
-        { id: "5", description: "Collect tech news findings", status: "completed", kind: "primary" },
+        {
+          id: "5",
+          description: "Collect tech news findings",
+          status: "completed",
+          kind: "primary",
+        },
         {
           id: "4",
           description: "Verify completeness and accuracy before marking complete",
@@ -259,7 +266,10 @@ describe("TaskExecutor verification terminal status mapping", () => {
     executor.terminalStatus = "ok";
     executor.failureClass = undefined;
 
-    (TaskExecutor as Any).prototype.finalizeTaskBestEffort.call(executor, "Budget constrained summary");
+    (TaskExecutor as Any).prototype.finalizeTaskBestEffort.call(
+      executor,
+      "Budget constrained summary",
+    );
 
     expect(executor.task.terminalStatus).toBe("partial_success");
     expect(executor.task.failureClass).toBe("budget_exhausted");

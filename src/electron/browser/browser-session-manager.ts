@@ -1,4 +1,7 @@
 import * as path from "path";
+import type { AccessDomainRule } from "../../shared/access-profiles";
+import { evaluateNetworkPolicy } from "../security/network-policy";
+import { isLocalHtmlFileUrl, normalizeWebviewUrl } from "./webview-url-policy";
 
 type Any = any;
 
@@ -73,6 +76,12 @@ interface ElectronWorkbenchSessionRegistration {
   title?: string;
 }
 
+export interface BrowserSessionAccessPolicy {
+  networkEnabled: boolean;
+  accessNetworkMode?: "disabled" | "on-request" | "enabled";
+  profileDomainRules?: AccessDomainRule[];
+}
+
 interface BrowserSessionRecord {
   taskId: string;
   sessionId: string;
@@ -140,11 +149,7 @@ function isSensitiveStorageKey(key: string): boolean {
   return SECRET_STORAGE_KEY_PATTERN.test(normalized);
 }
 
-export function redactBrowserStoragePayload(
-  value: unknown,
-  keyHint = "",
-  depth = 0,
-): unknown {
+export function redactBrowserStoragePayload(value: unknown, keyHint = "", depth = 0): unknown {
   if (keyHint && isSensitiveStorageKey(keyHint)) {
     return "[REDACTED]";
   }
@@ -248,6 +253,67 @@ function boundsFromBoxModel(model: Any): BrowserBounds | undefined {
 export class BrowserSessionManager {
   private sessions = new Map<string, BrowserSessionRecord>();
   private debuggerHandlers = new Map<number, (...args: Any[]) => void>();
+  private accessPolicies = new Map<string, BrowserSessionAccessPolicy>();
+  private accessGuardHandlers = new Map<
+    number,
+    { contents: Any; willNavigate: Any; willRedirect: Any }
+  >();
+  private guardedWebRequestSessions = new WeakSet<object>();
+  private allowedLocalPreviewUrls = new Map<string, number>();
+
+  private static readonly LOCAL_PREVIEW_TTL_MS = 5 * 60_000;
+
+  setAccessPolicy(taskId: string, policy: BrowserSessionAccessPolicy, sessionId?: unknown): void {
+    this.accessPolicies.set(sessionKey(taskId, sessionId), {
+      networkEnabled: policy.networkEnabled === true,
+      accessNetworkMode: policy.accessNetworkMode,
+      profileDomainRules: policy.profileDomainRules ? [...policy.profileDomainRules] : undefined,
+    });
+  }
+
+  clearAccessPolicy(taskId: string, sessionId?: unknown): void {
+    this.accessPolicies.delete(sessionKey(taskId, sessionId));
+  }
+
+  /**
+   * Permit one explicitly requested local HTML preview. Local file URLs are
+   * never allowed merely because they have a valid `.html` extension: the
+   * renderer must first register the exact URL it intends to display.
+   */
+  allowLocalPreviewUrl(rawUrl: string): void {
+    if (!isLocalHtmlFileUrl(rawUrl)) return;
+    const normalized = normalizeWebviewUrl(rawUrl);
+    if (!normalized) return;
+    this.allowedLocalPreviewUrls.set(
+      normalized,
+      Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS,
+    );
+  }
+
+  private isAllowedLocalPreviewUrl(rawUrl: string): boolean {
+    const normalized = normalizeWebviewUrl(rawUrl);
+    if (!normalized) return false;
+    const expiresAt = this.allowedLocalPreviewUrls.get(normalized);
+    if (!expiresAt) return false;
+    if (expiresAt <= Date.now()) {
+      this.allowedLocalPreviewUrls.delete(normalized);
+      return false;
+    }
+    this.allowedLocalPreviewUrls.set(
+      normalized,
+      Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS,
+    );
+    return true;
+  }
+
+  assertUrlAllowed(taskId: string, rawUrl: string, sessionId?: unknown): void {
+    const key = sessionKey(taskId, sessionId);
+    const session = this.sessions.get(key);
+    const policy = session ? this.getAccessPolicy(session) : this.accessPolicies.get(key);
+    if (!this.isUrlAllowedWithPolicy(policy, rawUrl)) {
+      throw new Error(`Browser access denied for "${rawUrl}" by the active access profile.`);
+    }
+  }
 
   registerElectronWorkbenchSession(registration: ElectronWorkbenchSessionRegistration): void {
     const sessionId = normalizeSessionId(registration.sessionId);
@@ -280,6 +346,13 @@ export class BrowserSessionManager {
       return;
     }
     this.sessions.delete(key);
+    this.accessPolicies.delete(key);
+    const handlers = this.accessGuardHandlers.get(existing.webContentsId);
+    if (handlers) {
+      handlers.contents.removeListener?.("will-navigate", handlers.willNavigate);
+      handlers.contents.removeListener?.("will-redirect", handlers.willRedirect);
+      this.accessGuardHandlers.delete(existing.webContentsId);
+    }
   }
 
   updateSession(input: {
@@ -313,14 +386,19 @@ export class BrowserSessionManager {
     ];
   }
 
-  async snapshot(input: { taskId: string; sessionId?: unknown }): Promise<BrowserSnapshotResult | null> {
+  async snapshot(input: {
+    taskId: string;
+    sessionId?: unknown;
+  }): Promise<BrowserSnapshotResult | null> {
     const session = this.sessions.get(sessionKey(input.taskId, input.sessionId));
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
 
     const snapshotId = `snap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const response = await this.sendCommand(contents, "Accessibility.getFullAXTree").catch(() => ({ nodes: [] }));
+    const response = await this.sendCommand(contents, "Accessibility.getFullAXTree").catch(() => ({
+      nodes: [],
+    }));
     const axNodes = Array.isArray(response?.nodes) ? response.nodes : [];
     const refs = new Map<string, BrowserRefTarget>();
     const nodes: BrowserSnapshotNode[] = [];
@@ -339,7 +417,9 @@ export class BrowserSessionManager {
         name: redactBrowserText(getAxValue(axNode.name), 280),
         value: redactBrowserText(getAxValue(axNode.value), 280) || undefined,
         text: redactBrowserText(getAxValue(axNode.description), 280) || undefined,
-        bounds: backendNodeId ? await this.getBounds(contents, backendNodeId).catch(() => undefined) : undefined,
+        bounds: backendNodeId
+          ? await this.getBounds(contents, backendNodeId).catch(() => undefined)
+          : undefined,
         disabled: getAxProperty(axNode, "disabled") === true || undefined,
         focused: getAxProperty(axNode, "focused") === true || undefined,
         selected: getAxProperty(axNode, "selected") === true || undefined,
@@ -470,7 +550,12 @@ export class BrowserSessionManager {
     if (!session || !contents || !target) return null;
     await this.focusRefTarget(contents, target, true);
     await this.sendCommand(contents, "Input.insertText", { text: String(input.value ?? "") });
-    return { success: true, ref: input.ref, value: input.value, url: contents.getURL?.() || session.url };
+    return {
+      success: true,
+      ref: input.ref,
+      value: input.value,
+      url: contents.getURL?.() || session.url,
+    };
   }
 
   async typeRef(input: {
@@ -486,18 +571,30 @@ export class BrowserSessionManager {
     return { success: true, ref: input.ref, url: contents.getURL?.() || session.url };
   }
 
-  async getTextRef(input: { taskId: string; sessionId?: unknown; ref: string }): Promise<Any | null> {
+  async getTextRef(input: {
+    taskId: string;
+    sessionId?: unknown;
+    ref: string;
+  }): Promise<Any | null> {
     const { contents, target } = await this.resolveFreshRef(input);
     if (!contents || !target) return null;
     if (!target.backendNodeId) {
       return { success: true, ref: input.ref, text: target.node.name || target.node.value || "" };
     }
-    const result = await this.callOnBackendNode(contents, target.backendNodeId, `
+    const result = await this.callOnBackendNode(
+      contents,
+      target.backendNodeId,
+      `
       function() {
         return String(this.innerText || this.textContent || this.value || this.getAttribute('aria-label') || '').trim();
       }
-    `);
-    return { success: true, ref: input.ref, text: redactBrowserText(result?.result?.value || "", 4000) };
+    `,
+    );
+    return {
+      success: true,
+      ref: input.ref,
+      text: redactBrowserText(result?.result?.value || "", 4000),
+    };
   }
 
   async uploadFile(input: {
@@ -525,7 +622,10 @@ export class BrowserSessionManager {
     }
 
     if (!backendNodeId && !nodeId) {
-      return { success: false, error: "Upload target not found. Provide a fresh snapshot ref or selector." };
+      return {
+        success: false,
+        error: "Upload target not found. Provide a fresh snapshot ref or selector.",
+      };
     }
 
     await this.sendCommand(contents, "DOM.setFileInputFiles", {
@@ -553,19 +653,28 @@ export class BrowserSessionManager {
     return { success: true };
   }
 
-  getConsole(taskId: string, sessionId?: unknown): { success: true; entries: BrowserConsoleEntry[] } | null {
+  getConsole(
+    taskId: string,
+    sessionId?: unknown,
+  ): { success: true; entries: BrowserConsoleEntry[] } | null {
     const session = this.sessions.get(sessionKey(taskId, sessionId));
     if (!session) return null;
     return { success: true, entries: session.consoleEntries.slice(-MAX_DIAGNOSTIC_ENTRIES) };
   }
 
-  getNetwork(taskId: string, sessionId?: unknown): { success: true; entries: BrowserNetworkEntry[] } | null {
+  getNetwork(
+    taskId: string,
+    sessionId?: unknown,
+  ): { success: true; entries: BrowserNetworkEntry[] } | null {
     const session = this.sessions.get(sessionKey(taskId, sessionId));
     if (!session) return null;
     return { success: true, entries: session.networkEntries.slice(-MAX_DIAGNOSTIC_ENTRIES) };
   }
 
-  getDownloads(taskId: string, sessionId?: unknown): { success: true; entries: BrowserNetworkEntry[] } | null {
+  getDownloads(
+    taskId: string,
+    sessionId?: unknown,
+  ): { success: true; entries: BrowserNetworkEntry[] } | null {
     const session = this.sessions.get(sessionKey(taskId, sessionId));
     if (!session) return null;
     return { success: true, entries: session.downloads.slice(-MAX_DIAGNOSTIC_ENTRIES) };
@@ -643,7 +752,11 @@ export class BrowserSessionManager {
     await this.ensureDebugger(session, contents);
     await this.sendCommand(contents, "Tracing.end");
     session.traceActive = false;
-    return { success: true, message: "Trace stopped. Recent trace events were consumed by the browser diagnostics stream." };
+    return {
+      success: true,
+      message:
+        "Trace stopped. Recent trace events were consumed by the browser diagnostics stream.",
+    };
   }
 
   private async resolveFreshRef(input: {
@@ -672,13 +785,17 @@ export class BrowserSessionManager {
     return target;
   }
 
-  private async getTargetCenter(contents: Any, target: BrowserRefTarget): Promise<{ x: number; y: number }> {
-    const bounds =
-      target.backendNodeId
-        ? await this.getBounds(contents, target.backendNodeId).catch(() => target.node.bounds)
-        : target.node.bounds;
+  private async getTargetCenter(
+    contents: Any,
+    target: BrowserRefTarget,
+  ): Promise<{ x: number; y: number }> {
+    const bounds = target.backendNodeId
+      ? await this.getBounds(contents, target.backendNodeId).catch(() => target.node.bounds)
+      : target.node.bounds;
     if (!bounds) {
-      throw new Error("Browser ref has no visible bounds. Call browser_snapshot after scrolling it into view.");
+      throw new Error(
+        "Browser ref has no visible bounds. Call browser_snapshot after scrolling it into view.",
+      );
     }
     return {
       x: Math.round(bounds.x + bounds.width / 2),
@@ -686,9 +803,16 @@ export class BrowserSessionManager {
     };
   }
 
-  private async focusRefTarget(contents: Any, target: BrowserRefTarget, clear: boolean): Promise<void> {
+  private async focusRefTarget(
+    contents: Any,
+    target: BrowserRefTarget,
+    clear: boolean,
+  ): Promise<void> {
     if (!target.backendNodeId) throw new Error("Browser ref cannot be focused.");
-    await this.callOnBackendNode(contents, target.backendNodeId, `
+    await this.callOnBackendNode(
+      contents,
+      target.backendNodeId,
+      `
       function(clear) {
         this.focus();
         if (clear && 'value' in this) {
@@ -699,7 +823,9 @@ export class BrowserSessionManager {
         if (clear && typeof this.select === 'function') this.select();
         return true;
       }
-    `, [{ value: clear }]);
+    `,
+      [{ value: clear }],
+    );
   }
 
   private async callOnBackendNode(
@@ -720,16 +846,23 @@ export class BrowserSessionManager {
     });
   }
 
-  private async resolveSelector(contents: Any, selector: string): Promise<{ nodeId?: number; backendNodeId?: number } | null> {
+  private async resolveSelector(
+    contents: Any,
+    selector: string,
+  ): Promise<{ nodeId?: number; backendNodeId?: number } | null> {
     await this.ensureDebuggerForContents(contents);
-    const document = await this.sendCommand(contents, "DOM.getDocument", { depth: 1, pierce: true });
+    const document = await this.sendCommand(contents, "DOM.getDocument", {
+      depth: 1,
+      pierce: true,
+    });
     const rootNodeId = document?.root?.nodeId;
     if (!rootNodeId) return null;
     const queried = await this.sendCommand(contents, "DOM.querySelector", {
       nodeId: rootNodeId,
       selector,
     });
-    const nodeId = typeof queried?.nodeId === "number" && queried.nodeId > 0 ? queried.nodeId : undefined;
+    const nodeId =
+      typeof queried?.nodeId === "number" && queried.nodeId > 0 ? queried.nodeId : undefined;
     if (!nodeId) return null;
     const described = await this.sendCommand(contents, "DOM.describeNode", { nodeId });
     return {
@@ -738,7 +871,10 @@ export class BrowserSessionManager {
     };
   }
 
-  private async getBounds(contents: Any, backendNodeId: number): Promise<BrowserBounds | undefined> {
+  private async getBounds(
+    contents: Any,
+    backendNodeId: number,
+  ): Promise<BrowserBounds | undefined> {
     await this.ensureDebuggerForContents(contents);
     const model = await this.sendCommand(contents, "DOM.getBoxModel", { backendNodeId });
     return boundsFromBoxModel(model);
@@ -773,7 +909,11 @@ export class BrowserSessionManager {
     }
   }
 
-  private async sendCommand(contents: Any, method: string, params?: Record<string, unknown>): Promise<Any> {
+  private async sendCommand(
+    contents: Any,
+    method: string,
+    params?: Record<string, unknown>,
+  ): Promise<Any> {
     return await contents.debugger.sendCommand(method, params || {});
   }
 
@@ -852,7 +992,9 @@ export class BrowserSessionManager {
     return null;
   }
 
-  private async getWebContents(session: BrowserSessionRecord | null | undefined): Promise<Any | null> {
+  private async getWebContents(
+    session: BrowserSessionRecord | null | undefined,
+  ): Promise<Any | null> {
     if (!session) return null;
     const electron = await import("electron");
     const contents = (electron as Any).webContents?.fromId?.(session.webContentsId);
@@ -860,7 +1002,93 @@ export class BrowserSessionManager {
       this.unregisterSession(session);
       return null;
     }
+    this.attachAccessGuards(session, contents);
+    this.assertCurrentUrlAllowed(session, contents.getURL?.() || session.url || "");
     return contents;
+  }
+
+  private getAccessPolicy(session: BrowserSessionRecord): BrowserSessionAccessPolicy | undefined {
+    return this.accessPolicies.get(sessionKey(session.taskId, session.sessionId));
+  }
+
+  private isUrlAllowed(session: BrowserSessionRecord, rawUrl: string): boolean {
+    return this.isUrlAllowedWithPolicy(this.getAccessPolicy(session), rawUrl);
+  }
+
+  private isUrlAllowedWithPolicy(
+    policy: BrowserSessionAccessPolicy | undefined,
+    rawUrl: string,
+  ): boolean {
+    const url = String(rawUrl || "").trim();
+    if (!url || url === "about:blank") return true;
+
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return false;
+    }
+
+    if (parsed.protocol === "file:") return this.isAllowedLocalPreviewUrl(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+
+    if (!policy) return true;
+    return (
+      evaluateNetworkPolicy({
+        url,
+        toolName: "browser_workbench_request",
+        networkEnabled: policy.networkEnabled,
+        accessNetworkMode: policy.accessNetworkMode,
+        profileDomainRules: policy.profileDomainRules,
+      }).action === "allow"
+    );
+  }
+
+  private assertCurrentUrlAllowed(session: BrowserSessionRecord, url: string): void {
+    if (!this.isUrlAllowed(session, url)) {
+      throw new Error(`Browser access denied for "${url}" by the active access profile.`);
+    }
+  }
+
+  private attachAccessGuards(session: BrowserSessionRecord, contents: Any): void {
+    const webContentsId = contents.id;
+    if (typeof webContentsId !== "number") return;
+
+    if (!this.accessGuardHandlers.has(webContentsId)) {
+      const willNavigate = (event: Any, url: string) => {
+        const currentSession = this.findSessionByWebContentsId(webContentsId);
+        if (currentSession && !this.isUrlAllowed(currentSession, url)) {
+          event.preventDefault?.();
+        }
+      };
+      const willRedirect = (event: Any, url: string) => {
+        const currentSession = this.findSessionByWebContentsId(webContentsId);
+        if (currentSession && !this.isUrlAllowed(currentSession, url)) {
+          event.preventDefault?.();
+        }
+      };
+      contents.on?.("will-navigate", willNavigate);
+      contents.on?.("will-redirect", willRedirect);
+      this.accessGuardHandlers.set(webContentsId, { contents, willNavigate, willRedirect });
+    }
+
+    const webRequest = contents.session?.webRequest;
+    if (!webRequest || typeof webRequest.onBeforeRequest !== "function") return;
+    if (this.guardedWebRequestSessions.has(webRequest as object)) return;
+    this.guardedWebRequestSessions.add(webRequest as object);
+    webRequest.onBeforeRequest(
+      { urls: ["http://*/*", "https://*/*"] },
+      (details: Any, callback: (response: { cancel?: boolean }) => void) => {
+        const matchingSession = Array.from(this.sessions.values()).find(
+          (candidate) => candidate.webContentsId === details.webContentsId,
+        );
+        if (!matchingSession || this.isUrlAllowed(matchingSession, details.url)) {
+          callback({});
+          return;
+        }
+        callback({ cancel: true });
+      },
+    );
   }
 }
 

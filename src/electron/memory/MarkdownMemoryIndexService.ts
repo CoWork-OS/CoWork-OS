@@ -33,6 +33,13 @@ const IGNORED_DIRS = new Set([
   "release",
 ]);
 
+/**
+ * Optional task-scoped read boundary for markdown indexing and recall.
+ * The index is shared across tasks, so callers must filter both new reads and
+ * already-indexed results when a task has a narrower filesystem profile.
+ */
+export type MarkdownMemoryReadGuard = (candidatePath: string) => boolean;
+
 const STOP_WORDS = new Set([
   "a",
   "an",
@@ -382,18 +389,24 @@ export class MarkdownMemoryIndexService {
     workspacePath: string,
     query: string,
     limit = 10,
+    readGuard?: MarkdownMemoryReadGuard,
   ): MemorySearchResult[] {
     if (limit <= 0) return [];
     const trimmed = query.trim();
     if (!trimmed) return [];
 
-    this.scheduleSync(workspaceId, workspacePath);
+    // A scoped task explicitly syncs with its guard before searching. Do not
+    // schedule an unguarded background read from a scoped recall call.
+    if (!readGuard) {
+      this.scheduleSync(workspaceId, workspacePath);
+    }
 
     const candidateLimit = Math.max(limit, limit * SEARCH_CANDIDATE_MULTIPLIER);
     const keyword = this.searchKeyword(workspaceId, trimmed, candidateLimit);
     const vector = this.searchVector(workspaceId, trimmed, candidateLimit);
 
     return this.mergeAndRerank(trimmed, keyword, vector)
+      .filter((candidate) => this.isReadableIndexedPath(workspacePath, candidate.path, readGuard))
       .slice(0, limit)
       .map((candidate) => ({
         id: `md:${candidate.id}`,
@@ -408,9 +421,16 @@ export class MarkdownMemoryIndexService {
       }));
   }
 
-  getRecentSnippets(workspaceId: string, workspacePath: string, limit = 3): MemorySearchResult[] {
+  getRecentSnippets(
+    workspaceId: string,
+    workspacePath: string,
+    limit = 3,
+    readGuard?: MarkdownMemoryReadGuard,
+  ): MemorySearchResult[] {
     if (limit <= 0) return [];
-    this.scheduleSync(workspaceId, workspacePath);
+    if (!readGuard) {
+      this.scheduleSync(workspaceId, workspacePath);
+    }
 
     const files = this.db
       .prepare(`
@@ -420,7 +440,10 @@ export class MarkdownMemoryIndexService {
         ORDER BY mtime DESC
         LIMIT ?
       `)
-      .all(workspaceId, limit) as Array<{ path: string; mtime: number }>;
+      .all(workspaceId, Math.max(limit * 8, limit + 16)) as Array<{
+      path: string;
+      mtime: number;
+    }>;
 
     const getFirstChunk = this.db.prepare(`
       SELECT id, path, start_line, end_line, text, mtime
@@ -432,6 +455,7 @@ export class MarkdownMemoryIndexService {
 
     const results: MemorySearchResult[] = [];
     for (const file of files) {
+      if (!this.isReadableIndexedPath(workspacePath, file.path, readGuard)) continue;
       const chunk = getFirstChunk.get(workspaceId, file.path) as
         | {
             id: string;
@@ -454,11 +478,17 @@ export class MarkdownMemoryIndexService {
         startLine: chunk.start_line,
         endLine: chunk.end_line,
       });
+      if (results.length >= limit) break;
     }
     return results;
   }
 
-  scheduleSync(workspaceId: string, workspacePath: string, force = false): void {
+  scheduleSync(
+    workspaceId: string,
+    workspacePath: string,
+    force = false,
+    readGuard?: MarkdownMemoryReadGuard,
+  ): void {
     if (!workspacePath || !fs.existsSync(workspacePath)) {
       return;
     }
@@ -483,7 +513,7 @@ export class MarkdownMemoryIndexService {
 
     const timer = setTimeout(() => {
       this.scheduledSyncByWorkspace.delete(workspaceId);
-      this.enqueueSync(workspaceId, workspacePath, force, generation);
+      this.enqueueSync(workspaceId, workspacePath, force, generation, readGuard);
     }, delay);
     this.scheduledSyncByWorkspace.set(workspaceId, timer);
   }
@@ -493,6 +523,7 @@ export class MarkdownMemoryIndexService {
     workspacePath: string,
     force = false,
     generation?: number,
+    readGuard?: MarkdownMemoryReadGuard,
   ): Promise<void> {
     if (generation !== undefined && generation !== this.getSyncGeneration(workspaceId)) {
       return;
@@ -509,7 +540,7 @@ export class MarkdownMemoryIndexService {
     this.lastSyncByWorkspace.set(workspaceId, now);
 
     try {
-      const discoveredFiles = await this.listMarkdownFiles(workspacePath);
+      const discoveredFiles = await this.listMarkdownFiles(workspacePath, readGuard);
       if (generation !== undefined && generation !== this.getSyncGeneration(workspaceId)) {
         return;
       }
@@ -784,7 +815,10 @@ export class MarkdownMemoryIndexService {
     return details;
   }
 
-  private async listMarkdownFiles(workspacePath: string): Promise<MarkdownFileEntry[]> {
+  private async listMarkdownFiles(
+    workspacePath: string,
+    readGuard?: MarkdownMemoryReadGuard,
+  ): Promise<MarkdownFileEntry[]> {
     const entries: MarkdownFileEntry[] = [];
     const stack: string[] = [workspacePath];
 
@@ -802,10 +836,13 @@ export class MarkdownMemoryIndexService {
 
         if (entry.isDirectory()) {
           if (IGNORED_DIRS.has(entry.name)) continue;
+          if (readGuard && !this.isReadablePath(absPath, readGuard)) continue;
           stack.push(absPath);
           continue;
         }
         if (!entry.isFile()) continue;
+
+        if (readGuard && !this.isReadablePath(absPath, readGuard)) continue;
 
         const ext = path.extname(entry.name).toLowerCase();
         if (!MARKDOWN_EXTENSIONS.has(ext)) continue;
@@ -1202,6 +1239,7 @@ export class MarkdownMemoryIndexService {
     workspacePath: string,
     force: boolean,
     generation: number,
+    readGuard?: MarkdownMemoryReadGuard,
   ): void {
     if (this.pendingSyncByWorkspace.has(workspaceId)) {
       return;
@@ -1212,7 +1250,7 @@ export class MarkdownMemoryIndexService {
         if (generation !== this.getSyncGeneration(workspaceId)) {
           return;
         }
-        await this.syncWorkspace(workspaceId, workspacePath, force, generation);
+        await this.syncWorkspace(workspaceId, workspacePath, force, generation, readGuard);
       })
       .finally(() => {
         this.pendingSyncByWorkspace.delete(workspaceId);
@@ -1306,5 +1344,23 @@ export class MarkdownMemoryIndexService {
       return candidate;
     }
     return null;
+  }
+
+  private isReadablePath(candidatePath: string, readGuard: MarkdownMemoryReadGuard): boolean {
+    try {
+      return readGuard(candidatePath) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private isReadableIndexedPath(
+    workspacePath: string,
+    relativePath: string,
+    readGuard?: MarkdownMemoryReadGuard,
+  ): boolean {
+    if (!readGuard) return true;
+    const absolutePath = this.resolveWorkspaceFilePath(workspacePath, relativePath);
+    return absolutePath ? this.isReadablePath(absolutePath, readGuard) : false;
   }
 }

@@ -23,15 +23,9 @@ describe("settings-llm-helpers", () => {
   });
 
   it("keeps the persisted Claude model when the refreshed list still includes it", () => {
-    expect(
-      selectClaudeModelKey(
-        [
-          { key: "sonnet-4-6" },
-          { key: "opus-4-6" },
-        ],
-        "opus-4-6",
-      ),
-    ).toBe("opus-4-6");
+    expect(selectClaudeModelKey([{ key: "sonnet-4-6" }, { key: "opus-4-6" }], "opus-4-6")).toBe(
+      "opus-4-6",
+    );
   });
 
   it("falls back to API-key auth when no subscription token is present", () => {

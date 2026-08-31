@@ -7,7 +7,8 @@ const nextAllowedAtByHost = new Map<string, number>();
 const queueByHost = new Map<string, Promise<void>>();
 
 export function getScrapingRequestDelayMs(requestsPerMinute: unknown): number {
-  const numeric = typeof requestsPerMinute === "number" ? requestsPerMinute : Number(requestsPerMinute);
+  const numeric =
+    typeof requestsPerMinute === "number" ? requestsPerMinute : Number(requestsPerMinute);
   if (!Number.isFinite(numeric)) return 0;
   const bounded = Math.max(1, Math.min(120, numeric));
   return Math.ceil(60_000 / bounded);
@@ -30,11 +31,13 @@ export function waitForScrapingSlot(
   if (!intervalMs) return Promise.resolve();
 
   const previous = queueByHost.get(host) || Promise.resolve();
-  const next = previous.catch(() => {}).then(async () => {
-    const delayMs = Math.max(0, (nextAllowedAtByHost.get(host) || 0) - Date.now());
-    if (delayMs > 0) await sleep(delayMs);
-    nextAllowedAtByHost.set(host, Date.now() + intervalMs);
-  });
+  const next = previous
+    .catch(() => {})
+    .then(async () => {
+      const delayMs = Math.max(0, (nextAllowedAtByHost.get(host) || 0) - Date.now());
+      if (delayMs > 0) await sleep(delayMs);
+      nextAllowedAtByHost.set(host, Date.now() + intervalMs);
+    });
 
   let queued: Promise<void>;
   queued = next.finally(() => {

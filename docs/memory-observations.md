@@ -97,6 +97,16 @@ must not be mirrored. When Memory Write Approval is enabled for external or back
 eligible mirror attempts are staged for review before leaving the device. Sensitive external-memory
 payloads are blocked before they can be stored in the pending approval queue.
 
+## Access profile boundary
+
+Memory search, observation details, durable-context recall, and background
+memory reads remain subject to the effective task [access
+profile](access-profiles.md), workspace scope, and tool restrictions. Memory
+tools cannot use a recall request to widen filesystem, network, command-tool,
+or cross-task access. Memory writes also remain subject to the separate Memory
+Write Approval policy; an access profile cannot turn a blocked or unavailable
+write into an allowed one.
+
 ## Backfill And Migration
 
 Backfill is deterministic and local. It derives titles, narratives, facts, concepts, and file paths

@@ -128,11 +128,19 @@ import {
   isManagedScheduledWorkspacePath,
 } from "./cron/workspace-context";
 import { MemoryService } from "./memory/MemoryService";
+import { BoxBrainService } from "./memory/BoxBrainService";
 import { CuratedMemoryService } from "./memory/CuratedMemoryService";
 import { MemoryWriteGate } from "./memory/MemoryWriteGate";
 import { DreamingRepository } from "./memory/DreamingRepository";
 import { DreamingService } from "./memory/DreamingService";
 import { MemoryPressureService } from "./memory/MemoryPressureService";
+import { loadPolicies } from "./admin/policies";
+import { evaluateWorkspaceFilesystemAccess } from "./security/access-profile-paths";
+import {
+  applyAccessProfileToWorkspace,
+  resolveEffectiveAccessProfile,
+} from "./security/access-profile-resolver";
+import { PermissionSettingsManager } from "./security/permission-settings-manager";
 import {
   ChronicleCaptureService,
   ChronicleMemoryService,
@@ -165,6 +173,7 @@ import {
   shouldTrustControlPlaneProxyFromEnv,
 } from "./utils/runtime-mode";
 import { getActiveProfileId, getUserDataDir, hasNonDefaultProfile } from "./utils/user-data-dir";
+import type { AccessProfileId } from "../shared/access-profiles";
 // Live Canvas feature
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from "./canvas";
 import { setupCanvasHandlers, cleanupCanvasHandlers } from "./ipc/canvas-handlers";
@@ -213,6 +222,7 @@ import { AwarenessService } from "./awareness/AwarenessService";
 import { AutonomyEngine } from "./awareness/AutonomyEngine";
 import { SubconsciousLoopService } from "./subconscious/SubconsciousLoopService";
 import { ManagedSessionService } from "./managed/ManagedSessionService";
+import { WorkContextService } from "./workspaces/WorkContextService";
 import { createLogger } from "./utils/logger";
 import { registerMediaProtocol, registerMediaScheme } from "./media";
 import { rememberApprovedImportFiles } from "./security/file-import-approvals";
@@ -1669,6 +1679,14 @@ if (isCliDirectRunMode()) {
       }
 
       try {
+        BoxBrainService.initialize(dbManager.getDatabase());
+        logger.info("Box Brain Service initialized");
+      } catch (error) {
+        logger.error("Failed to initialize Box Brain Service:", error);
+        // Box Brain is optional and must not block app startup.
+      }
+
+      try {
         const chronicleSettings = ChronicleSettingsManager.loadSettings();
         await ChronicleCaptureService.getInstance().applySettings(chronicleSettings);
         ChronicleMemoryService.getInstance().applySettings(chronicleSettings);
@@ -1827,13 +1845,22 @@ if (isCliDirectRunMode()) {
       const initializeMcpClientManager = async (): Promise<void> => {
         const mcpInitStartedAt = Date.now();
         const mcpClientManager = MCPClientManager.getInstance();
-        await mcpClientManager.initialize();
-        const mcpStartupSummary = mcpClientManager.getStartupStats();
-        logger.info(
-          `MCP summary: enabled=${mcpStartupSummary.enabled}, attempted=${mcpStartupSummary.attempted}, connected=${mcpStartupSummary.connected}, failed=${mcpStartupSummary.failed}`,
-        );
-        logger.info("MCP Client Manager initialized");
-        logPhase("mcp-init", mcpInitStartedAt);
+        try {
+          await mcpClientManager.initialize();
+          const mcpStartupSummary = mcpClientManager.getStartupStats();
+          logger.info(
+            `MCP summary: enabled=${mcpStartupSummary.enabled}, attempted=${mcpStartupSummary.attempted}, connected=${mcpStartupSummary.connected}, failed=${mcpStartupSummary.failed}`,
+          );
+          logger.info("MCP Client Manager initialized");
+          logPhase("mcp-init", mcpInitStartedAt);
+        } finally {
+          try {
+            BoxBrainService.getInstance().start();
+            logger.info("Box Brain background sync started");
+          } catch (error) {
+            logger.warn("Failed to start Box Brain background sync:", error);
+          }
+        }
       };
 
       // Initialize MCP Client Manager in the background for desktop startup.
@@ -1979,11 +2006,11 @@ if (isCliDirectRunMode()) {
               workspacePath: workspace.path,
             };
           },
-          executeWorkflow: async ({ routineId, jobId, runAtMs }) => {
+          executeWorkflow: async ({ routineId, jobId, runAtMs, agentConfig }) => {
             if (!routineService) {
               throw new Error("Routine service has not finished starting.");
             }
-            return routineService.runScheduledWorkflow(routineId, jobId, runAtMs);
+            return routineService.runScheduledWorkflow(routineId, jobId, runAtMs, agentConfig);
           },
           createTask: async (params) => {
             const isManagedBriefing =
@@ -2563,6 +2590,33 @@ if (isCliDirectRunMode()) {
             const workspace = workspaceRepo.findById(workspaceId);
             return workspace?.path;
           },
+          getWorkspaceMemoryReadGuard: (workspaceId: string) => {
+            const workspace = workspaceRepo.findById(workspaceId);
+            if (!workspace) return () => false;
+
+            try {
+              const profile = resolveEffectiveAccessProfile({
+                workspace,
+                settings: PermissionSettingsManager.loadSettings(),
+                adminPolicies: loadPolicies(),
+              });
+              const effectiveWorkspace = applyAccessProfileToWorkspace(workspace, profile);
+              return (candidatePath: string) => {
+                try {
+                  return (
+                    evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "read")
+                      .decision === "allow"
+                  );
+                } catch {
+                  return false;
+                }
+              };
+            } catch {
+              // Background memory maintenance must fail closed if settings or
+              // profile resolution is unavailable during startup/migration.
+              return () => false;
+            }
+          },
           hasActiveForegroundTask,
           recordActivity: ({ workspaceId, agentRoleId, title, description, metadata }) => {
             activityRepo.create({
@@ -2610,9 +2664,10 @@ if (isCliDirectRunMode()) {
             reason,
             signalCount,
             heartbeatRunId,
+            readGuard,
           }) => {
             const pressureInstructions = MemoryPressureService.buildCompactionInstructions(
-              await MemoryPressureService.analyze(workspacePath),
+              await MemoryPressureService.analyze(workspacePath, readGuard),
             );
             const result = await new DreamingService(
               new DreamingRepository(dbManager.getDatabase()),
@@ -2627,6 +2682,7 @@ if (isCliDirectRunMode()) {
               ]
                 .filter(Boolean)
                 .join("\n\n"),
+              readGuard,
             });
             return {
               id: result.run.id,
@@ -3205,7 +3261,9 @@ if (isCliDirectRunMode()) {
         });
         void syncMcpTriggerSubscriptions();
         setupTriggerHandlers(currentTriggerService, syncMcpTriggerSubscriptions);
-        const managedSessionService = new ManagedSessionService(db, agentDaemon);
+        const managedSessionService = new ManagedSessionService(db, agentDaemon, {
+          workContextService: new WorkContextService(db),
+        });
         const routineTaskRepo = new TaskRepository(db);
         const executeWorkflowAction = createRoutineWorkflowActionExecutor({
           createAgentTask: async (params) => {
@@ -3213,6 +3271,9 @@ if (isCliDirectRunMode()) {
               title: params.title,
               prompt: params.prompt,
               workspaceId: params.workspaceId,
+              ...(params.accessProfileId
+                ? { agentConfig: { accessProfileId: params.accessProfileId } }
+                : {}),
               source: "api",
             });
             return { id: task.id };
@@ -3292,7 +3353,7 @@ if (isCliDirectRunMode()) {
             return {
               status: task.status,
               error: task.error || undefined,
-              resultSummary: task.resultSummary || task.semanticSummary || undefined,
+              resultSummary: task.resultSummary || undefined,
               terminalStatus: task.terminalStatus || undefined,
               completedAt: task.completedAt || undefined,
             };
@@ -3612,10 +3673,15 @@ if (isCliDirectRunMode()) {
                   typeof payload.title === "string" && payload.title.trim().length > 0
                     ? payload.title.trim()
                     : "Web Access Task";
+                const accessProfileId =
+                  typeof payload.accessProfileId === "string" && payload.accessProfileId.trim()
+                    ? (payload.accessProfileId.trim() as AccessProfileId)
+                    : undefined;
                 return agentDaemon.createTask({
                   title,
                   prompt,
                   workspaceId,
+                  ...(accessProfileId ? { agentConfig: { accessProfileId } } : {}),
                   source: "api",
                 });
               }
@@ -3637,7 +3703,7 @@ if (isCliDirectRunMode()) {
                 let options:
                   | Pick<
                       import("../shared/types").TaskFollowUpInput,
-                      "permissionMode" | "shellAccess" | "integrationMentions"
+                      "permissionMode" | "shellAccess" | "accessProfileId" | "integrationMentions"
                     >
                   | undefined;
                 try {
@@ -3652,6 +3718,9 @@ if (isCliDirectRunMode()) {
                       : {}),
                     ...(sanitized.shellAccess !== undefined
                       ? { shellAccess: sanitized.shellAccess }
+                      : {}),
+                    ...(sanitized.accessProfileId
+                      ? { accessProfileId: sanitized.accessProfileId }
                       : {}),
                     ...(sanitized.integrationMentions !== undefined
                       ? { integrationMentions: sanitized.integrationMentions }
@@ -3950,6 +4019,11 @@ if (isCliDirectRunMode()) {
 
       // Disconnect all MCP servers
       try {
+        BoxBrainService.getInstance().stop();
+      } catch (error) {
+        console.error("[Main] Failed to stop Box Brain Service:", error);
+      }
+      try {
         const mcpClientManager = MCPClientManager.getInstance();
         await mcpClientManager.shutdown();
       } catch (error) {
@@ -4034,10 +4108,17 @@ if (isCliDirectRunMode()) {
       if (!data || typeof data.taskId !== "string" || typeof data.workspacePath !== "string") {
         return { success: false, error: "Invalid browser screenshot request" };
       }
+      const effectiveWorkspace = agentDaemon.getEffectiveWorkspaceForTask(data.taskId);
+      if (!effectiveWorkspace) {
+        return { success: false, error: "Task workspace is unavailable" };
+      }
       const result = await getBrowserWorkbenchService().screenshot({
         taskId: data.taskId,
         sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
-        workspacePath: data.workspacePath,
+        // The task's live workspace is authoritative. Never let renderer input
+        // select an arbitrary directory for a screenshot write.
+        workspacePath: effectiveWorkspace.path,
+        workspacePermissions: effectiveWorkspace.permissions,
         filename: typeof data.filename === "string" ? data.filename : undefined,
         includeDataUrl: data.includeDataUrl === true,
         fullPage: data.fullPage === true,
@@ -4259,8 +4340,10 @@ if (isCliDirectRunMode()) {
     const showOpenDialogWithLogging = async (
       dialogKind: "folder" | "files",
       options: Electron.OpenDialogOptions,
+      ownerWindow?: BrowserWindow | null,
     ) => {
       const startedAt = Date.now();
+      const parentWindow = ownerWindow && !ownerWindow.isDestroyed() ? ownerWindow : null;
       const slowLogTimer = setTimeout(() => {
         logger.warn(`[Dialog:${dialogKind}] showOpenDialog still pending`, {
           defaultPath: options.defaultPath ?? null,
@@ -4272,13 +4355,15 @@ if (isCliDirectRunMode()) {
 
       logger.info(`[Dialog:${dialogKind}] showOpenDialog requested`, {
         defaultPath: options.defaultPath ?? null,
-        parentWindow: false,
+        parentWindow: Boolean(parentWindow),
         properties: options.properties ?? [],
         title: options.title ?? null,
       });
 
       try {
-        const result = await dialog.showOpenDialog(options);
+        const result = parentWindow
+          ? await dialog.showOpenDialog(parentWindow, options)
+          : await dialog.showOpenDialog(options);
         clearTimeout(slowLogTimer);
         logger.info(`[Dialog:${dialogKind}] showOpenDialog resolved`, {
           canceled: result.canceled,
@@ -4297,29 +4382,42 @@ if (isCliDirectRunMode()) {
     };
 
     // Handle folder selection
-    ipcMain.handle(IPC_CHANNELS.DIALOG_SELECT_FOLDER, async (_, defaultPath?: string | null) => {
-      const resolvedDefaultPath = await resolveDialogDefaultPath(defaultPath);
-      const result = await showOpenDialogWithLogging("folder", {
-        // Allow creating folders directly from the native picker when supported.
-        properties: ["openDirectory", "createDirectory"],
-        title: "Select Workspace Folder",
-        defaultPath: resolvedDefaultPath,
-      });
+    ipcMain.handle(
+      IPC_CHANNELS.DIALOG_SELECT_FOLDER,
+      async (event, defaultPath?: string | null) => {
+        const resolvedDefaultPath = await resolveDialogDefaultPath(defaultPath);
+        const ownerWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+        const result = await showOpenDialogWithLogging(
+          "folder",
+          {
+            // Allow creating folders directly from the native picker when supported.
+            properties: ["openDirectory", "createDirectory"],
+            title: "Select Workspace Folder",
+            defaultPath: resolvedDefaultPath,
+          },
+          ownerWindow,
+        );
 
-      if (!result.canceled && result.filePaths.length > 0) {
-        return result.filePaths[0];
-      }
-      return null;
-    });
+        if (!result.canceled && result.filePaths.length > 0) {
+          return result.filePaths[0];
+        }
+        return null;
+      },
+    );
 
     // Handle file selection (attachments)
-    ipcMain.handle(IPC_CHANNELS.DIALOG_SELECT_FILES, async (_, defaultPath?: string | null) => {
+    ipcMain.handle(IPC_CHANNELS.DIALOG_SELECT_FILES, async (event, defaultPath?: string | null) => {
       const resolvedDefaultPath = await resolveDialogDefaultPath(defaultPath);
-      const result = await showOpenDialogWithLogging("files", {
-        properties: ["openFile", "multiSelections"],
-        title: "Select Files to Upload",
-        defaultPath: resolvedDefaultPath,
-      });
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+      const result = await showOpenDialogWithLogging(
+        "files",
+        {
+          properties: ["openFile", "multiSelections"],
+          title: "Select Files to Upload",
+          defaultPath: resolvedDefaultPath,
+        },
+        ownerWindow,
+      );
 
       if (result.canceled || result.filePaths.length === 0) {
         return [];

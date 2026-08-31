@@ -211,10 +211,10 @@ export function uniqueOnboardingIds<T extends string>(values: T[]): T[] {
   return Array.from(new Set(values));
 }
 
-export function parseOnboardingSlashCommand(
-  value: string,
-): { matched: boolean; command?: string } {
-  const trimmed = String(value || "").trim().toLowerCase();
+export function parseOnboardingSlashCommand(value: string): { matched: boolean; command?: string } {
+  const trimmed = String(value || "")
+    .trim()
+    .toLowerCase();
   if (!trimmed.startsWith("/")) return { matched: false };
   const [command, ...rest] = trimmed.split(/\s+/);
   if (!ONBOARDING_SLASH_COMMANDS.has(command)) return { matched: false };
@@ -324,21 +324,11 @@ function listSelectedTitles<T extends string>(
 }
 
 export function getTimeDrainTitles(data: OnboardingProfileData): string[] {
-  return listSelectedTitles(
-    ONBOARDING_TIME_DRAINS,
-    data.timeDrains,
-    "other",
-    data.timeDrainsOther,
-  );
+  return listSelectedTitles(ONBOARDING_TIME_DRAINS, data.timeDrains, "other", data.timeDrainsOther);
 }
 
 export function getPriorityTitles(data: OnboardingProfileData): string[] {
-  return listSelectedTitles(
-    ONBOARDING_PRIORITIES,
-    data.priorities,
-    "other",
-    data.prioritiesOther,
-  );
+  return listSelectedTitles(ONBOARDING_PRIORITIES, data.priorities, "other", data.prioritiesOther);
 }
 
 export function buildOnboardingUserSummary(data: OnboardingProfileData): string {
@@ -362,9 +352,7 @@ export function buildOnboardingUserSummary(data: OnboardingProfileData): string 
   return parts.join(" ");
 }
 
-export function buildOnboardingProfileFacts(
-  data: OnboardingProfileData,
-): AddUserFactRequest[] {
+export function buildOnboardingProfileFacts(data: OnboardingProfileData): AddUserFactRequest[] {
   const facts: AddUserFactRequest[] = [];
   const userName = data.userName.trim();
   const userContext = data.userContext.trim();

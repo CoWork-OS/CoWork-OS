@@ -30,7 +30,7 @@ CoWork OS is a free, open-source, GUI-first, CLI-capable local AI super app, eve
 - **Local persistence**: SQLite, local files, curated hot-memory entries, archive memory rows and summaries, transcript spans/checkpoints with structured summaries + verbatim evidence packets, Dreaming runs/candidates for reviewable memory curation, knowledge graph state including temporal edge validity, run records, structured workflow versions/runs/steps/event inbox/event samples/starter cursors, orchestration graph nodes/events, ACP agent registrations and ACP task state, usage telemetry, feedback events, `session_runtime_v2` task snapshots, managed-agent tables (`managed_agents`, `managed_agent_versions`, `managed_environments`, `managed_sessions`, `managed_session_events`), `.cowork/memory/topics`, and workspace-kit contracts in `.cowork/`
 - **Artifact preview layer**: file preview IPC resolves workspace-contained outputs, extracts document content, and enriches artifacts with renderer-ready previews. Spreadsheet previews are extracted in Electron into shared sheet structures (`spreadsheetPreview`) for sheet names, used bounds, display values, formulas, styles, and column widths; workbook formats use `exceljs`, while CSV/TSV use a delimited parser and save back with the original delimiter. Native/app-owned spreadsheet formats such as Numbers and Google Sheets shortcuts are recognized as artifacts but open externally. Word-style document previews are extracted into `documentPreview`; DOCX-like files use Mammoth plus editable block metadata, RTF and ODT/OTT use best-effort local text extraction, legacy DOC attempts local converter fallback, and Pages is recognized for external handling. Web page previews are extracted into `webPreview`; HTML/HTM files and built React output entrypoints return sandbox-ready iframe HTML with local assets inlined where possible, while React-style projects without build output return a structured preview-unavailable state. Existing `content` and `htmlContent` fallbacks remain for compatibility. PPTX previews use `presentationPreview` with fast text/notes extraction, cached `imageUrl` slide PNGs, background full rendering through Codex `@oai/artifact-tool`, local `soffice` + `pdftoppm` fallback, in-flight render dedupe, and text-only fallback when image rendering is unavailable.
 - **Browser V2 workbench layer**: interactive browser-use tools target a renderer-owned Electron webview by default, with main-process automation owned by `BrowserSessionManager` and routed through Electron `webContents.debugger` / CDP. The main process maps `{ taskId, sessionId }` to the webview's `webContentsId`; browser tools route navigation, accessibility snapshots, ref-aware click/fill/type/read/hover/drag/upload actions, dialogs, downloads, diagnostics, emulation, tracing, and screenshots to that visible session. The renderer opens the resizable right-sidebar/fullscreen Browser Workbench on demand and carries status, screenshot capture, annotation handoff, diagnostics UI, snapshot overlay state, cursor events, and viewport events so users can see agent movement and responsive breakpoint changes over the page. The embedded session uses a persistent per-workspace partition isolated from system Chrome; explicit forced-headless, profile, browser-channel, Chrome DevTools attach, and Browser Use Cloud provider options keep Playwright/local, external-CDP, and remote stealth-browser fallback paths available when explicitly needed. Real-browser profile control requires explicit consent, and Browser Use Cloud is explicit opt-in for public HTTP(S) targets with private/local target blocking and remote-session stop handling. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
-- **Permission engine**: layered tool approval decisions combine workspace capabilities, explicit rules, hard guardrails, session grants, workspace-local policy files, and mode defaults including `dangerous_only`, with workspace rule browsing/removal in Settings
+- **Permission engine**: access profiles are resolved first and then layered tool approval decisions combine workspace capabilities, explicit rules, hard guardrails, session grants, workspace-local policy files, legacy modes, and mode defaults including `dangerous_only`, with workspace rule browsing/removal in Settings. New tasks derive command-tool availability from the profile rather than a separate shell toggle.
 - **Runtime visibility surfaces**: the task runtime emits learning progression, unified recall, persistent shell, live terminal tabs, routing events, semantic tool-batch summaries, curated external progress relays for text-first channels, session-checklist events, and follow-up completion events into Mission Control and the renderer so operator state stays visible instead of hidden in services
 - **Everything Workbench artifact surfaces**: completion cards, timeline details, and Files panels share output metadata so generated docs, sheets, decks, web pages, PDFs, previews, and live browser sessions stay attached to the task that produced or used them. Spreadsheet outputs render as compact cards; editable workbook/CSV/TSV files open into a sidebar/fullscreen artifact workbench with editable grid state, persisted sidebar width, and fullscreen follow-up context, while native app formats keep external-app/folder actions. Word-style document outputs render as compact cards; DOCX opens into a direct-edit sidebar/fullscreen document workbench with Google Docs-style controls, save/copy actions, persisted sidebar width, fullscreen follow-up context, and preview refresh after follow-up edits, while non-editable document formats keep best-effort preview and external-app/folder actions. Presentation outputs render as compact cards; PPTX opens into a sidebar/fullscreen presentation workbench with thumbnails, navigation, zoom, speaker notes, cached slide rendering, persisted sidebar width, and deferred refresh after follow-up completion, while legacy PowerPoint formats keep external actions. Web page outputs render as compact cards; generated HTML/HTM and built React output open into a sandboxed sidebar/fullscreen iframe workbench with browser/folder/copy actions, persisted sidebar width, and deferred refresh after follow-up completion, while React-style projects without build output show a build-output-needed state instead of starting a dev server. Live website testing opens a browser workbench in the same right-sidebar/fullscreen model so the agent can interact with a visible page and validate responsive breakpoints without launching an external browser. LaTeX PDFs compiled through `compile_latex` carry `sourcePath` metadata so the renderer can pair the editable `.tex` source with the generated PDF in one artifact workbench.
 - **Lifecycle reconciliation**: completion persists terminal task state before emitting terminal events, and resume paths re-derive canonical persisted status before writing `executing`, so late approval or follow-up resumes cannot reopen completed tasks
@@ -44,6 +44,22 @@ CoWork supports multiple app profiles so one install can keep separate operating
 - profile export/import moves a complete app profile bundle without merging it into another profile implicitly
 - workspaces still live outside the app profile, but the profile controls the credentials, automations, channels, and runtime state that operate on those workspaces
 - profile switching is an app-level concern, separate from personality export/import or workspace-kit files
+
+## Access Profiles
+
+Access profiles are task-level policy objects and are separate from app profiles. They combine the
+logical sandbox (`read-only`, `workspace-write`, or `danger-full-access`), approval and reviewer
+policy, network posture, and optional filesystem/domain scope. The selected profile is applied to
+the task workspace before tool registry filtering and per-request permission evaluation.
+
+The shared contract is implemented by `src/shared/access-profiles.ts`, resolved by
+`src/electron/security/access-profile-resolver.ts`, and enforced for paths by
+`src/electron/security/access-profile-paths.ts`. Profile settings are validated and persisted by
+the encrypted permission-settings manager. Custom profiles can inherit only from a policy that is
+at least as broad; child tasks, managed sessions, automations, remote dispatch, and worktrees keep
+the same ceiling. Missing or invalid named profiles fail closed as unavailable read-only profiles.
+
+See [Access Profiles](access-profiles.md) for the product, API, migration, and edge-case contract.
 
 ## Heartbeat V3
 
@@ -117,6 +133,8 @@ MCP transport disconnects that classify as auth failures stop at `error` rather 
 - `bin/cowork-cli.js`: npm binary launcher for the `cowork` command
 - `src/renderer/components/RightPanel.tsx`: renderer-side read-only projection of the latest session checklist state
 - `src/electron/agent/runtime/PermissionEngine.ts`: layered tool-approval evaluation, rule matching, and fallback escalation
+- `src/electron/security/access-profile-resolver.ts`: named-profile resolution, legacy mapping, admin constraints, and workspace projection
+- `src/electron/security/access-profile-paths.ts`: canonical path resolution, profile filesystem rules, protected roots, and one-shot external-file approvals
 - `src/renderer/`: React UI and settings surfaces
 - `src/shared/`: shared contracts and types
 - `docs/`: product and architecture documentation
@@ -148,7 +166,11 @@ Terminal tabs are implemented with a renderer/main split:
 - `src/electron/terminal/TerminalPtyManager.ts` owns `node-pty` processes, replay buffers, cwd/status metadata, PTY resize, and tab lifecycle.
 - `src/electron/ipc/handlers.ts`, `src/electron/preload.ts`, and `src/shared/types.ts` expose typed channels for create/list/write/resize/stop/close/output.
 
-The design keeps structured shell tools available for agent-run commands while giving humans a real terminal work surface in the same task workspace. This is the terminal counterpart to the Everything Workbench and Browser Workbench: direct CLI work no longer has to leave CoWork OS. Product behavior and QA guidance are documented in [Terminal Tabs](terminal-tabs.md).
+The design keeps profile-gated structured command tools available for agent-run commands while
+giving humans a real terminal work surface in the same task workspace. This is the terminal
+counterpart to the Everything Workbench and Browser Workbench: direct CLI work no longer has to
+leave CoWork OS. Product behavior and QA guidance are documented in [Terminal Tabs](terminal-tabs.md)
+and [Access Profiles](access-profiles.md#network-and-command-behavior).
 
 ## CoWork CLI
 
@@ -159,7 +181,11 @@ The standalone `cowork` CLI is implemented separately from in-app terminal tabs:
 - `src/cli/direct-run.ts` owns one-shot local task execution once the app runtime has initialized.
 - `src/electron/main.ts` recognizes `--cowork-cli-direct-run` and starts a hidden Electron runner without opening the desktop window.
 
-The local path is intentionally not a Control Plane dependency. It initializes the local database, settings manager, provider routing, workspace state, skill registry, MCP manager, and `AgentDaemon`, then creates and waits on a task. The daemon is started with startup recovery disabled in CLI direct-run mode so a short-lived terminal process does not recover or rewrite GUI-owned tasks.
+The local path is intentionally not a Control Plane dependency. It initializes the local database,
+settings manager, provider routing, workspace state, skill registry, MCP manager, and `AgentDaemon`,
+then resolves the selected access profile before creating and waiting on a task. The daemon is
+started with startup recovery disabled in CLI direct-run mode so a short-lived terminal process
+does not recover or rewrite GUI-owned tasks.
 
 Use `cowork run ... --remote` for the token-gated Control Plane client path. Product behavior and first-run guidance are documented in [CoWork OS CLI](cli.md).
 

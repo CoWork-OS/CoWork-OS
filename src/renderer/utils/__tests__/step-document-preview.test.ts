@@ -6,11 +6,7 @@ import {
   getStepCompletionPreviewPath,
 } from "../step-document-preview";
 
-function makeStepEvent(
-  type: TaskEvent["type"],
-  description: string,
-  message?: string,
-): TaskEvent {
+function makeStepEvent(type: TaskEvent["type"], description: string, message?: string): TaskEvent {
   return {
     id: `event-${type}`,
     taskId: "task-1",

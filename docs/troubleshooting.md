@@ -142,6 +142,22 @@ Local one-shot CLI runs prefer a hidden Electron app-entry mode so OS-encrypted 
 
 See [CoWork OS CLI](cli.md) for the full local-vs-remote model.
 
+## Access profile issues
+
+If the composer shows **Unavailable access profile**, the named profile is
+missing, malformed, or cannot be represented by the active sandbox backend.
+Choose **Ask for approval** or another valid profile, or repair the custom
+profile under **Settings > System & Security > Permissions**. The task remains
+read-only and paused until a valid profile is selected; an approval prompt or
+legacy permission mode cannot widen it.
+
+If a command tool is not available, confirm that the selected profile exposes
+command tools and that the task is not in Chat, Analyze, Side Chat, or another
+read-only execution path. Existing tasks may retain legacy `permissionMode` or
+`shellAccess` behavior until a profile is explicitly selected. New tasks do not
+have a separate shell enable/disable switch. See [Access Profiles](access-profiles.md)
+and [Permission System](permission-system.md).
+
 ## OpenAI or MoA fails on a corporate Mac with Zscaler
 
 Corporate TLS inspection tools such as Zscaler can install a company root certificate that macOS trusts, while Electron/Node provider calls still fail with errors such as `fetch failed`. This can show up most clearly when OpenAI is used inside a Mixture of Agents preset, because MoA performs multiple provider calls in one task.

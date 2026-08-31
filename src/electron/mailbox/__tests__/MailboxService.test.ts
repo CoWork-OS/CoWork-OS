@@ -38,7 +38,12 @@ describeWithSqlite("MailboxService", () => {
     previousUserDataDir = process.env.COWORK_USER_DATA_DIR;
     process.env.COWORK_USER_DATA_DIR = tmpDir;
 
-    const [{ DatabaseManager }, { MailboxService }, { ControlPlaneCoreService }, { AgentRoleRepository }] = await Promise.all([
+    const [
+      { DatabaseManager },
+      { MailboxService },
+      { ControlPlaneCoreService },
+      { AgentRoleRepository },
+    ] = await Promise.all([
       import("../../database/schema"),
       import("../MailboxService"),
       import("../../control-plane/ControlPlaneCoreService"),
@@ -144,7 +149,6 @@ describeWithSqlite("MailboxService", () => {
       now,
       now,
     );
-
   });
 
   afterEach(() => {
@@ -224,20 +228,26 @@ describeWithSqlite("MailboxService", () => {
 
     const detail = await service.getThread("gmail-thread:alpha");
     expect(detail?.drafts.map((entry) => entry.id)).not.toContain(draft?.id);
-    expect(detail?.proposals.some((proposal) => proposal.type === "reply" && proposal.status === "suggested")).toBe(false);
+    expect(
+      detail?.proposals.some(
+        (proposal) => proposal.type === "reply" && proposal.status === "suggested",
+      ),
+    ).toBe(false);
   });
 
   it("queues compose sends, preserves the undo window, and drains Gmail sends with attachments", async () => {
     const gmailApi = await import("../../utils/gmail-api");
-    const gmailRequestSpy = vi.spyOn(gmailApi, "gmailRequest").mockImplementation(async (_settings, request) => {
-      if (request.path === "/users/me/drafts") {
-        return { data: { id: "provider-draft-1" } } as never;
-      }
-      if (request.path === "/users/me/drafts/send") {
-        return { data: { id: "provider-message-1" } } as never;
-      }
-      return { data: {} } as never;
-    });
+    const gmailRequestSpy = vi
+      .spyOn(gmailApi, "gmailRequest")
+      .mockImplementation(async (_settings, request) => {
+        if (request.path === "/users/me/drafts") {
+          return { data: { id: "provider-draft-1" } } as never;
+        }
+        if (request.path === "/users/me/drafts/send") {
+          return { data: { id: "provider-message-1" } } as never;
+        }
+        return { data: {} } as never;
+      });
     const attachmentPath = path.join(tmpDir, "launch-plan.txt");
     fs.writeFileSync(attachmentPath, "Launch plan attachment");
     db.prepare(
@@ -266,11 +276,16 @@ describeWithSqlite("MailboxService", () => {
 
       const outgoing = await service.sendMailboxDraft(draft.id);
       const queuedAction = db
-        .prepare("SELECT id FROM mailbox_queued_actions WHERE draft_id = ? AND action_type = 'send'")
+        .prepare(
+          "SELECT id FROM mailbox_queued_actions WHERE draft_id = ? AND action_type = 'send'",
+        )
         .get(draft.id) as { id: string };
       expect(outgoing.status).toBe("queued");
 
-      db.prepare("UPDATE mailbox_queued_actions SET next_attempt_at = ? WHERE id = ?").run(Date.now() - 1000, queuedAction.id);
+      db.prepare("UPDATE mailbox_queued_actions SET next_attempt_at = ? WHERE id = ?").run(
+        Date.now() - 1000,
+        queuedAction.id,
+      );
       const result = await service.processMailboxQueue();
       expect(result.succeeded).toBe(1);
 
@@ -284,9 +299,13 @@ describeWithSqlite("MailboxService", () => {
         .get(outgoing.id) as { status: string; provider_message_id: string | null };
       expect(sentOutgoing).toEqual({ status: "sent", provider_message_id: "provider-message-1" });
 
-      const createDraftCall = gmailRequestSpy.mock.calls.find(([, request]) => request.path === "/users/me/drafts");
+      const createDraftCall = gmailRequestSpy.mock.calls.find(
+        ([, request]) => request.path === "/users/me/drafts",
+      );
       const raw = (createDraftCall?.[1].body as Any)?.message?.raw as string;
-      const decoded = Buffer.from(raw.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+      const decoded = Buffer.from(raw.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(
+        "utf8",
+      );
       expect(decoded).toContain("launch-plan.txt");
       expect(decoded).toContain(Buffer.from("Launch plan attachment").toString("base64"));
     } finally {
@@ -408,9 +427,14 @@ describeWithSqlite("MailboxService", () => {
       });
       await service.sendMailboxDraft(draft.id);
       const queuedAction = db
-        .prepare("SELECT id FROM mailbox_queued_actions WHERE draft_id = ? AND action_type = 'send'")
+        .prepare(
+          "SELECT id FROM mailbox_queued_actions WHERE draft_id = ? AND action_type = 'send'",
+        )
         .get(draft.id) as { id: string };
-      db.prepare("UPDATE mailbox_queued_actions SET next_attempt_at = ? WHERE id = ?").run(Date.now() - 1000, queuedAction.id);
+      db.prepare("UPDATE mailbox_queued_actions SET next_attempt_at = ? WHERE id = ?").run(
+        Date.now() - 1000,
+        queuedAction.id,
+      );
 
       const failed = await service.processMailboxQueue();
       expect(failed.failed).toBe(1);
@@ -420,11 +444,16 @@ describeWithSqlite("MailboxService", () => {
       expect(failedRow.status).toBe("queued");
       expect(failedRow.latest_error).toContain("temporary provider failure");
 
-      db.prepare("UPDATE mailbox_queued_actions SET next_attempt_at = ? WHERE id = ?").run(Date.now() - 1000, queuedAction.id);
+      db.prepare("UPDATE mailbox_queued_actions SET next_attempt_at = ? WHERE id = ?").run(
+        Date.now() - 1000,
+        queuedAction.id,
+      );
       const retried = await service.processMailboxQueue();
       expect(retried.succeeded).toBe(1);
       const sentOutgoing = db
-        .prepare("SELECT status, provider_message_id FROM mailbox_outgoing_messages WHERE draft_id = ?")
+        .prepare(
+          "SELECT status, provider_message_id FROM mailbox_outgoing_messages WHERE draft_id = ?",
+        )
         .get(draft.id) as { status: string; provider_message_id: string | null };
       expect(sentOutgoing.status).toBe("sent");
       expect(sentOutgoing.provider_message_id).toBe("provider-message-retry");
@@ -488,11 +517,15 @@ describeWithSqlite("MailboxService", () => {
     );
 
     const gmailApi = await import("../../utils/gmail-api");
-    const gmailRequestSpy = vi.spyOn(gmailApi, "gmailRequest").mockResolvedValue({ data: {} } as never);
+    const gmailRequestSpy = vi
+      .spyOn(gmailApi, "gmailRequest")
+      .mockResolvedValue({ data: {} } as never);
 
     try {
       const cleanupQueue = await service.reviewBulkAction({ type: "cleanup", limit: 10 });
-      const cleanupProposal = cleanupQueue.proposals.find((proposal) => proposal.threadId === "gmail-thread:cleanup");
+      const cleanupProposal = cleanupQueue.proposals.find(
+        (proposal) => proposal.threadId === "gmail-thread:cleanup",
+      );
 
       expect(cleanupProposal).toBeTruthy();
 
@@ -505,7 +538,9 @@ describeWithSqlite("MailboxService", () => {
       expect(gmailRequestSpy).not.toHaveBeenCalled();
 
       const hiddenRow = db
-        .prepare("SELECT handled, cleanup_candidate, local_inbox_hidden FROM mailbox_threads WHERE id = ?")
+        .prepare(
+          "SELECT handled, cleanup_candidate, local_inbox_hidden FROM mailbox_threads WHERE id = ?",
+        )
         .get("gmail-thread:cleanup") as {
         handled: number;
         cleanup_candidate: number;
@@ -520,7 +555,9 @@ describeWithSqlite("MailboxService", () => {
       expect(inboxAfterCleanup.map((thread) => thread.id)).not.toContain("gmail-thread:cleanup");
 
       const cleanupQueueAfterApply = await service.reviewBulkAction({ type: "cleanup", limit: 10 });
-      expect(cleanupQueueAfterApply.proposals.map((proposal) => proposal.threadId)).not.toContain("gmail-thread:cleanup");
+      expect(cleanupQueueAfterApply.proposals.map((proposal) => proposal.threadId)).not.toContain(
+        "gmail-thread:cleanup",
+      );
 
       await (service as Any).upsertThread({
         id: "gmail-thread:cleanup",
@@ -703,7 +740,10 @@ describeWithSqlite("MailboxService", () => {
       .mockResolvedValue(Buffer.from("ignored"));
     const extractAttachmentTextSpy = vi
       .spyOn(service as Any, "extractTextFromAttachmentBytes")
-      .mockResolvedValue({ text: "Executed renewal clause for the launch agreement.", mode: "plain-text" });
+      .mockResolvedValue({
+        text: "Executed renewal clause for the launch agreement.",
+        mode: "plain-text",
+      });
 
     await service.extractMailboxAttachmentText("att-alpha-contract");
 
@@ -847,7 +887,9 @@ describeWithSqlite("MailboxService", () => {
     });
     expect(paymentAsk.results[0]?.thread.id).toBe("gmail-thread:qnb-statement");
     expect(paymentAsk.results[0]?.searchSources).toEqual(expect.arrayContaining(["local_fts"]));
-    expect(paymentAsk.results[0]?.evidenceSnippets?.join(" ")).toContain("Son Odeme Tarihi 11/05/2026");
+    expect(paymentAsk.results[0]?.evidenceSnippets?.join(" ")).toContain(
+      "Son Odeme Tarihi 11/05/2026",
+    );
   });
 
   it("creates prioritized follow-up drafts for sent threads without replies", async () => {
@@ -1094,7 +1136,10 @@ describeWithSqlite("MailboxService", () => {
       now,
     );
 
-    const dismissedAccepted = await service.updateCommitmentState(dismissedCommitmentId, "accepted");
+    const dismissedAccepted = await service.updateCommitmentState(
+      dismissedCommitmentId,
+      "accepted",
+    );
     expect(dismissedAccepted?.followUpTaskId).toBeTruthy();
     await service.updateCommitmentState(dismissedCommitmentId, "dismissed");
     expect(taskRepo.findById(dismissedAccepted?.followUpTaskId || "")?.status).toBe("cancelled");
@@ -1269,9 +1314,7 @@ describeWithSqlite("MailboxService", () => {
     ]);
 
     expect(normalized).toHaveLength(1);
-    expect(normalized[0]?.id).toBe(
-      "imap-thread:message:3090ad3d96cdf4b4925a38b1",
-    );
+    expect(normalized[0]?.id).toBe("imap-thread:message:3090ad3d96cdf4b4925a38b1");
     expect(normalized[0]?.participants).toEqual([
       {
         email: "account-security-noreply@accountprotection.microsoft.com",
@@ -1355,7 +1398,10 @@ describeWithSqlite("MailboxService", () => {
 
     expect(normalized).toHaveLength(1);
     expect(normalized[0]?.id).toBe("imap-thread:conversation:7988c5c046ac0d336fdf3502");
-    expect(normalized[0]?.messages.map((message: any) => message.providerMessageId)).toEqual(["901", "902"]);
+    expect(normalized[0]?.messages.map((message: any) => message.providerMessageId)).toEqual([
+      "901",
+      "902",
+    ]);
   });
 
   it("recovers a legacy IMAP message-id and marks the thread read", async () => {
@@ -1442,9 +1488,11 @@ describeWithSqlite("MailboxService", () => {
       },
     } as never);
     const markMessageIdAsRead = vi.fn().mockResolvedValue(901);
-    const createStandardEmailClientSpy = vi.spyOn(service as Any, "createStandardEmailClient").mockReturnValue({
-      markMessageIdAsRead,
-    } as never);
+    const createStandardEmailClientSpy = vi
+      .spyOn(service as Any, "createStandardEmailClient")
+      .mockReturnValue({
+        markMessageIdAsRead,
+      } as never);
 
     try {
       await expect(
@@ -1556,10 +1604,14 @@ describeWithSqlite("MailboxService", () => {
       enabled: true,
       config: { protocol: "imap-smtp" },
     } as never);
-    const markMessageIdAsRead = vi.fn().mockRejectedValue(new AggregateError([], "Unknown system error -64534"));
-    const createStandardEmailClientSpy = vi.spyOn(service as Any, "createStandardEmailClient").mockReturnValue({
-      markMessageIdAsRead,
-    } as never);
+    const markMessageIdAsRead = vi
+      .fn()
+      .mockRejectedValue(new AggregateError([], "Unknown system error -64534"));
+    const createStandardEmailClientSpy = vi
+      .spyOn(service as Any, "createStandardEmailClient")
+      .mockReturnValue({
+        markMessageIdAsRead,
+      } as never);
 
     try {
       try {
@@ -1570,7 +1622,9 @@ describeWithSqlite("MailboxService", () => {
         throw new Error("Expected mark_read to fail");
       } catch (error) {
         expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toContain("Mailbox provider connection failed while applying mark_read");
+        expect((error as Error).message).toContain(
+          "Mailbox provider connection failed while applying mark_read",
+        );
         expect((error as Any).cause).toBeUndefined();
       }
 
@@ -1621,7 +1675,9 @@ describeWithSqlite("MailboxService", () => {
         oauthTenant: "consumers",
       },
     } as never);
-    const updateSpy = vi.spyOn((service as Any).channelRepo, "update").mockReturnValue(undefined as never);
+    const updateSpy = vi
+      .spyOn((service as Any).channelRepo, "update")
+      .mockReturnValue(undefined as never);
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       text: async () =>
@@ -1930,94 +1986,105 @@ describeWithSqlite("MailboxService", () => {
       from: "kdp-noreply@amazon.com",
       body: "Hello, we are sending this update to let you know your account settings have changed. This inbox is not monitored.",
     },
-  ])("does not classify transactional Amazon notifications as reply-needed", async ({ threadId, subject, from, body }) => {
-    const normalized = (service as any).normalizeGmailThread(
-      "gmail:test@example.com",
-      "test@example.com",
-      {
-        id: threadId,
-        messages: [
-          {
-            id: `${threadId}-message`,
-            internalDate: String(now - 2 * 60 * 60 * 1000),
-            snippet: body.slice(0, 80),
-            labelIds: [],
-            payload: {
-              mimeType: "text/plain",
-              headers: [
-                { name: "Subject", value: subject },
-                { name: "From", value: `Amazon <${from}>` },
-                { name: "To", value: "Test User <test@example.com>" },
-              ],
-              body: {
-                data: Buffer.from(body)
-                  .toString("base64")
-                  .replace(/\+/g, "-")
-                  .replace(/\//g, "_")
-                  .replace(/=+$/, ""),
+  ])(
+    "does not classify transactional Amazon notifications as reply-needed",
+    async ({ threadId, subject, from, body }) => {
+      const normalized = (service as any).normalizeGmailThread(
+        "gmail:test@example.com",
+        "test@example.com",
+        {
+          id: threadId,
+          messages: [
+            {
+              id: `${threadId}-message`,
+              internalDate: String(now - 2 * 60 * 60 * 1000),
+              snippet: body.slice(0, 80),
+              labelIds: [],
+              payload: {
+                mimeType: "text/plain",
+                headers: [
+                  { name: "Subject", value: subject },
+                  { name: "From", value: `Amazon <${from}>` },
+                  { name: "To", value: "Test User <test@example.com>" },
+                ],
+                body: {
+                  data: Buffer.from(body)
+                    .toString("base64")
+                    .replace(/\+/g, "-")
+                    .replace(/\//g, "_")
+                    .replace(/=+$/, ""),
+                },
               },
             },
-          },
-        ],
-      },
-    );
+          ],
+        },
+      );
 
-    expect(normalized.needsReply).toBe(false);
-    expect(normalized.category).toBe("other");
-    expect(normalized.staleFollowup).toBe(false);
-  });
+      expect(normalized.needsReply).toBe(false);
+      expect(normalized.category).toBe("other");
+      expect(normalized.staleFollowup).toBe(false);
+    },
+  );
 
   it("persists LLM mailbox classifications and stores their provenance", async () => {
     const factoryModule = await import("../../agent/llm/provider-factory");
-    const loadSettingsSpy = vi.spyOn(factoryModule.LLMProviderFactory, "loadSettings").mockReturnValue({
-      providerType: "openai",
-      modelKey: "gpt-4o-mini",
-      openai: {
-        model: "gpt-4o-mini",
-        automatedTaskModelKey: "gpt-4o-mini",
+    const loadSettingsSpy = vi
+      .spyOn(factoryModule.LLMProviderFactory, "loadSettings")
+      .mockReturnValue({
+        providerType: "openai",
+        modelKey: "gpt-4o-mini",
+        openai: {
+          model: "gpt-4o-mini",
+          automatedTaskModelKey: "gpt-4o-mini",
+          cheapModelKey: "gpt-4o-mini",
+        },
+      } as never);
+    const routingSpy = vi
+      .spyOn(factoryModule.LLMProviderFactory, "getProviderRoutingSettings")
+      .mockReturnValue({
+        profileRoutingEnabled: true,
+        preferStrongForVerification: false,
+        strongModelKey: "gpt-4o",
         cheapModelKey: "gpt-4o-mini",
-      },
-    } as never);
-    const routingSpy = vi.spyOn(factoryModule.LLMProviderFactory, "getProviderRoutingSettings").mockReturnValue({
-      profileRoutingEnabled: true,
-      preferStrongForVerification: false,
-      strongModelKey: "gpt-4o",
-      cheapModelKey: "gpt-4o-mini",
-      automatedTaskModelKey: "gpt-4o-mini",
-    });
-    const resolveSpy = vi.spyOn(factoryModule.LLMProviderFactory, "resolveTaskModelSelection").mockReturnValue({
-      providerType: "openai",
-      modelId: "gpt-4o-mini",
-      modelKey: "gpt-4o-mini",
-      llmProfileUsed: "cheap",
-      resolvedModelKey: "gpt-4o-mini",
-      modelSource: "profile_model",
-      warnings: [],
-    });
-    const createProviderSpy = vi.spyOn(factoryModule.LLMProviderFactory, "createProvider").mockReturnValue({
-      type: "openai",
-      createMessage: async () => ({
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              category: "updates",
-              needsReply: false,
-              priorityScore: 12,
-              urgencyScore: 4,
-              staleFollowup: false,
-              cleanupCandidate: false,
-              handled: true,
-              confidence: 0.94,
-              rationale: "Transactional notice with no reply requested.",
-              labels: ["transactional", "account"],
-            }),
-          },
-        ],
-        stopReason: "end_turn",
-        usage: { inputTokens: 100, outputTokens: 30 },
-      }),
-    } as never);
+        automatedTaskModelKey: "gpt-4o-mini",
+      });
+    const resolveSpy = vi
+      .spyOn(factoryModule.LLMProviderFactory, "resolveTaskModelSelection")
+      .mockReturnValue({
+        providerType: "openai",
+        modelId: "gpt-4o-mini",
+        modelKey: "gpt-4o-mini",
+        llmProfileUsed: "cheap",
+        resolvedModelKey: "gpt-4o-mini",
+        modelSource: "profile_model",
+        warnings: [],
+      });
+    const createProviderSpy = vi
+      .spyOn(factoryModule.LLMProviderFactory, "createProvider")
+      .mockReturnValue({
+        type: "openai",
+        createMessage: async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                category: "updates",
+                needsReply: false,
+                priorityScore: 12,
+                urgencyScore: 4,
+                staleFollowup: false,
+                cleanupCandidate: false,
+                handled: true,
+                confidence: 0.94,
+                rationale: "Transactional notice with no reply requested.",
+                labels: ["transactional", "account"],
+              }),
+            },
+          ],
+          stopReason: "end_turn",
+          usage: { inputTokens: 100, outputTokens: 30 },
+        }),
+      } as never);
 
     try {
       const result = await service.reclassifyThread("gmail-thread:alpha");
@@ -2085,19 +2152,21 @@ describeWithSqlite("MailboxService", () => {
 
   it("uses the configured cheap profile model for ChatGPT subscription mailbox classifications", async () => {
     const factoryModule = await import("../../agent/llm/provider-factory");
-    const loadSettingsSpy = vi.spyOn(factoryModule.LLMProviderFactory, "loadSettings").mockReturnValue({
-      providerType: "openai",
-      modelKey: "gpt-5.5",
-      openai: {
-        authMethod: "oauth",
-        accessToken: "access-token",
-        refreshToken: "refresh-token",
-        model: "gpt-5.5",
-        profileRoutingEnabled: true,
-        strongModelKey: "gpt-5.5",
-        cheapModelKey: "gpt-5.4-mini",
-      },
-    } as never);
+    const loadSettingsSpy = vi
+      .spyOn(factoryModule.LLMProviderFactory, "loadSettings")
+      .mockReturnValue({
+        providerType: "openai",
+        modelKey: "gpt-5.5",
+        openai: {
+          authMethod: "oauth",
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          model: "gpt-5.5",
+          profileRoutingEnabled: true,
+          strongModelKey: "gpt-5.5",
+          cheapModelKey: "gpt-5.4-mini",
+        },
+      } as never);
     const createMessage = vi.fn(async () => ({
       content: [
         {
@@ -2121,19 +2190,25 @@ describeWithSqlite("MailboxService", () => {
       stopReason: "end_turn",
       usage: { inputTokens: 80, outputTokens: 24 },
     }));
-    const createProviderSpy = vi.spyOn(factoryModule.LLMProviderFactory, "createProvider").mockReturnValue({
-      type: "openai",
-      createMessage,
-    } as never);
+    const createProviderSpy = vi
+      .spyOn(factoryModule.LLMProviderFactory, "createProvider")
+      .mockReturnValue({
+        type: "openai",
+        createMessage,
+      } as never);
 
     try {
       const result = await service.reclassifyThread("gmail-thread:alpha");
       expect(result.reclassifiedThreads).toBe(1);
-      expect(createProviderSpy).toHaveBeenCalledWith(expect.objectContaining({
-        type: "openai",
-        model: "gpt-5.4-mini",
-      }));
-      expect(createMessage).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.4-mini" }));
+      expect(createProviderSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "openai",
+          model: "gpt-5.4-mini",
+        }),
+      );
+      expect(createMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "gpt-5.4-mini" }),
+      );
 
       const row = db
         .prepare(
@@ -2151,15 +2226,17 @@ describeWithSqlite("MailboxService", () => {
 
   it("falls back conservatively when the model output is low confidence", async () => {
     const factoryModule = await import("../../agent/llm/provider-factory");
-    const loadSettingsSpy = vi.spyOn(factoryModule.LLMProviderFactory, "loadSettings").mockReturnValue({
-      providerType: "openai",
-      modelKey: "gpt-4o-mini",
-      openai: {
-        model: "gpt-4o-mini",
-        automatedTaskModelKey: "gpt-4o-mini",
-        cheapModelKey: "gpt-4o-mini",
-      },
-    } as never);
+    const loadSettingsSpy = vi
+      .spyOn(factoryModule.LLMProviderFactory, "loadSettings")
+      .mockReturnValue({
+        providerType: "openai",
+        modelKey: "gpt-4o-mini",
+        openai: {
+          model: "gpt-4o-mini",
+          automatedTaskModelKey: "gpt-4o-mini",
+          cheapModelKey: "gpt-4o-mini",
+        },
+      } as never);
     vi.spyOn(factoryModule.LLMProviderFactory, "getProviderRoutingSettings").mockReturnValue({
       profileRoutingEnabled: true,
       preferStrongForVerification: false,
@@ -2230,15 +2307,17 @@ describeWithSqlite("MailboxService", () => {
 
   it("does not auto-reclassify already classified threads during sync", async () => {
     const factoryModule = await import("../../agent/llm/provider-factory");
-    const loadSettingsSpy = vi.spyOn(factoryModule.LLMProviderFactory, "loadSettings").mockReturnValue({
-      providerType: "openai",
-      modelKey: "gpt-4o-mini",
-      openai: {
-        model: "gpt-4o-mini",
-        automatedTaskModelKey: "gpt-4o-mini",
-        cheapModelKey: "gpt-4o-mini",
-      },
-    } as never);
+    const loadSettingsSpy = vi
+      .spyOn(factoryModule.LLMProviderFactory, "loadSettings")
+      .mockReturnValue({
+        providerType: "openai",
+        modelKey: "gpt-4o-mini",
+        openai: {
+          model: "gpt-4o-mini",
+          automatedTaskModelKey: "gpt-4o-mini",
+          cheapModelKey: "gpt-4o-mini",
+        },
+      } as never);
     vi.spyOn(factoryModule.LLMProviderFactory, "getProviderRoutingSettings").mockReturnValue({
       profileRoutingEnabled: true,
       preferStrongForVerification: false,
@@ -2338,7 +2417,11 @@ describeWithSqlite("MailboxService", () => {
                   { name: "To", value: "Test User <test@example.com>" },
                 ],
                 body: {
-                  data: Buffer.from("Can you review and approve the draft?").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+                  data: Buffer.from("Can you review and approve the draft?")
+                    .toString("base64")
+                    .replace(/\+/g, "-")
+                    .replace(/\//g, "_")
+                    .replace(/=+$/, ""),
                 },
               },
             },
@@ -2374,12 +2457,15 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("syncs Gmail and Email channel accounts in the same run", async () => {
-    const { GoogleWorkspaceSettingsManager } = await import("../../settings/google-workspace-manager");
-    const loadSettingsSpy = vi.spyOn(GoogleWorkspaceSettingsManager, "loadSettings").mockReturnValue({
-      enabled: true,
-      accessToken: "token",
-      timeoutMs: 20_000,
-    } as never);
+    const { GoogleWorkspaceSettingsManager } =
+      await import("../../settings/google-workspace-manager");
+    const loadSettingsSpy = vi
+      .spyOn(GoogleWorkspaceSettingsManager, "loadSettings")
+      .mockReturnValue({
+        enabled: true,
+        accessToken: "token",
+        timeoutMs: 20_000,
+      } as never);
     const syncGmailSpy = vi.spyOn(service as Any, "syncGmail").mockResolvedValue({
       account: {
         id: "gmail:test@example.com",
@@ -2470,15 +2556,20 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("downgrades transient Gmail fetch failures without throwing mailbox sync", async () => {
-    const { GoogleWorkspaceSettingsManager } = await import("../../settings/google-workspace-manager");
-    const loadSettingsSpy = vi.spyOn(GoogleWorkspaceSettingsManager, "loadSettings").mockReturnValue({
-      enabled: true,
-      accessToken: "token",
-      refreshToken: "refresh-token",
-      tokenExpiresAt: now + 60_000,
-      timeoutMs: 20_000,
-    } as never);
-    const syncGmailSpy = vi.spyOn(service as Any, "syncGmail").mockRejectedValue(new TypeError("fetch failed"));
+    const { GoogleWorkspaceSettingsManager } =
+      await import("../../settings/google-workspace-manager");
+    const loadSettingsSpy = vi
+      .spyOn(GoogleWorkspaceSettingsManager, "loadSettings")
+      .mockReturnValue({
+        enabled: true,
+        accessToken: "token",
+        refreshToken: "refresh-token",
+        tokenExpiresAt: now + 60_000,
+        timeoutMs: 20_000,
+      } as never);
+    const syncGmailSpy = vi
+      .spyOn(service as Any, "syncGmail")
+      .mockRejectedValue(new TypeError("fetch failed"));
 
     try {
       const result = await service.sync(25);
@@ -2503,15 +2594,20 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("backs off autosync after a transient Gmail fetch failure", async () => {
-    const { GoogleWorkspaceSettingsManager } = await import("../../settings/google-workspace-manager");
-    const loadSettingsSpy = vi.spyOn(GoogleWorkspaceSettingsManager, "loadSettings").mockReturnValue({
-      enabled: true,
-      accessToken: "token",
-      refreshToken: "refresh-token",
-      tokenExpiresAt: now + 60_000,
-      timeoutMs: 20_000,
-    } as never);
-    const syncGmailSpy = vi.spyOn(service as Any, "syncGmail").mockRejectedValue(new TypeError("fetch failed"));
+    const { GoogleWorkspaceSettingsManager } =
+      await import("../../settings/google-workspace-manager");
+    const loadSettingsSpy = vi
+      .spyOn(GoogleWorkspaceSettingsManager, "loadSettings")
+      .mockReturnValue({
+        enabled: true,
+        accessToken: "token",
+        refreshToken: "refresh-token",
+        tokenExpiresAt: now + 60_000,
+        timeoutMs: 20_000,
+      } as never);
+    const syncGmailSpy = vi
+      .spyOn(service as Any, "syncGmail")
+      .mockRejectedValue(new TypeError("fetch failed"));
 
     try {
       await expect(service.sync(25, { source: "auto" })).resolves.toMatchObject({
@@ -2533,9 +2629,9 @@ describeWithSqlite("MailboxService", () => {
   it("creates a Mission Control issue from a mailbox thread and deduplicates active handoffs", async () => {
     const company = core.getDefaultCompany();
     const operator =
-      agentRoleRepo.findByCompanyId(company.id, false).find((role) =>
-        /customer ops|founder office|growth|planner/i.test(role.displayName),
-      ) ||
+      agentRoleRepo
+        .findByCompanyId(company.id, false)
+        .find((role) => /customer ops|founder office|growth|planner/i.test(role.displayName)) ||
       agentRoleRepo.findByCompanyId(company.id, false)[0] ||
       agentRoleRepo.create({
         name: `mailbox-operator-${company.id.slice(0, 8)}`,
@@ -2650,17 +2746,7 @@ describeWithSqlite("MailboxService", () => {
       `INSERT INTO channel_users
         (id, channel_id, channel_user_id, display_name, username, allowed, pairing_attempts, created_at, last_seen_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      whatsappUserDbId,
-      whatsappChannelId,
-      "351912345678",
-      "Alex",
-      null,
-      1,
-      0,
-      now,
-      now,
-    );
+    ).run(whatsappUserDbId, whatsappChannelId, "351912345678", "Alex", null, 1, 0, now, now);
 
     db.prepare(
       `INSERT INTO channel_messages
@@ -2736,11 +2822,17 @@ describeWithSqlite("MailboxService", () => {
     ).toBe(true);
 
     const research = await service.researchContact("gmail-thread:alpha");
-    expect(research?.linkedChannels?.some((channel) => channel.channelType === "whatsapp")).toBe(true);
-    expect(research?.linkedChannels?.some((channel) => channel.channelType === "slack")).toBe(false);
+    expect(research?.linkedChannels?.some((channel) => channel.channelType === "whatsapp")).toBe(
+      true,
+    );
+    expect(research?.linkedChannels?.some((channel) => channel.channelType === "slack")).toBe(
+      false,
+    );
     expect(research?.unifiedTimeline?.some((event) => event.source === "whatsapp")).toBe(true);
 
-    const slackCandidate = resolution?.candidates.find((candidate) => candidate.channelType === "slack");
+    const slackCandidate = resolution?.candidates.find(
+      (candidate) => candidate.channelType === "slack",
+    );
     expect(slackCandidate).toBeTruthy();
     await service.confirmIdentityLink(slackCandidate!.id);
 
@@ -2807,7 +2899,9 @@ describeWithSqlite("MailboxService", () => {
 
     const replyTargets = await service.getReplyTargets("gmail-thread:alpha");
     expect(replyTargets.some((target) => target.channelType === "signal")).toBe(true);
-    expect(replyTargets.find((target) => target.channelType === "signal")?.chatId).toBe("signal-chat-1");
+    expect(replyTargets.find((target) => target.channelType === "signal")?.chatId).toBe(
+      "signal-chat-1",
+    );
 
     const afterUnlink = await service.getRelationshipTimeline({
       contactIdentityId: resolution?.identity?.id,
@@ -2838,7 +2932,9 @@ describeWithSqlite("MailboxService", () => {
     });
 
     const rows = db
-      .prepare(`SELECT thread_id FROM mailbox_saved_view_threads WHERE view_id = ? ORDER BY thread_id`)
+      .prepare(
+        `SELECT thread_id FROM mailbox_saved_view_threads WHERE view_id = ? ORDER BY thread_id`,
+      )
       .all(view.id) as { thread_id: string }[];
     expect(rows.map((r) => r.thread_id)).toEqual(["gmail-thread:alpha"]);
   });
@@ -2933,7 +3029,9 @@ describeWithSqlite("MailboxService", () => {
     });
 
     const rows = db
-      .prepare(`SELECT thread_id FROM mailbox_saved_view_threads WHERE view_id = ? ORDER BY thread_id`)
+      .prepare(
+        `SELECT thread_id FROM mailbox_saved_view_threads WHERE view_id = ? ORDER BY thread_id`,
+      )
       .all(view.id) as { thread_id: string }[];
     expect(rows.map((r) => r.thread_id)).toEqual(["gmail-thread:alpha"]);
   });
@@ -2952,11 +3050,13 @@ describeWithSqlite("MailboxService", () => {
       JSON.stringify({ read: true, write: true, delete: false, network: true, shell: false }),
     );
 
-    await expect(service.createMailboxSavedView({
-      name: "Bucket",
-      instructions: "Test bucket",
-      threadIds: ["not-a-real-thread"],
-    })).rejects.toThrow("Saved views need at least one valid thread");
+    await expect(
+      service.createMailboxSavedView({
+        name: "Bucket",
+        instructions: "Test bucket",
+        threadIds: ["not-a-real-thread"],
+      }),
+    ).rejects.toThrow("Saved views need at least one valid thread");
   });
 
   it("hides threads from the main inbox when a saved view opts out, unless also linked to a show-in-inbox view", async () => {
@@ -2967,10 +3067,9 @@ describeWithSqlite("MailboxService", () => {
       `INSERT INTO mailbox_saved_views (id, workspace_id, name, instructions, seed_thread_id, show_in_inbox, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
     ).run(viewHide, workspaceId, "Hidden bucket", "x", "gmail-thread:alpha", now, now);
-    db.prepare(`INSERT INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, 1)`).run(
-      viewHide,
-      "gmail-thread:alpha",
-    );
+    db.prepare(
+      `INSERT INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, 1)`,
+    ).run(viewHide, "gmail-thread:alpha");
 
     const inboxHidden = await service.listThreads({ mailboxView: "inbox" });
     expect(inboxHidden.map((t) => t.id)).not.toContain("gmail-thread:alpha");
@@ -2980,10 +3079,9 @@ describeWithSqlite("MailboxService", () => {
       `INSERT INTO mailbox_saved_views (id, workspace_id, name, instructions, seed_thread_id, show_in_inbox, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
     ).run(viewShow, workspaceId, "Visible bucket", "y", null, now, now);
-    db.prepare(`INSERT INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, 1)`).run(
-      viewShow,
-      "gmail-thread:alpha",
-    );
+    db.prepare(
+      `INSERT INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, 1)`,
+    ).run(viewShow, "gmail-thread:alpha");
 
     const inboxShown = await service.listThreads({ mailboxView: "inbox" });
     expect(inboxShown.map((t) => t.id)).toContain("gmail-thread:alpha");
@@ -2997,10 +3095,9 @@ describeWithSqlite("MailboxService", () => {
       `INSERT INTO mailbox_saved_views (id, workspace_id, name, instructions, seed_thread_id, show_in_inbox, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
     ).run(hiddenViewId, workspaceId, "Hidden bucket", "x", "gmail-thread:alpha", now, now);
-    db.prepare(`INSERT INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, 1)`).run(
-      hiddenViewId,
-      "gmail-thread:alpha",
-    );
+    db.prepare(
+      `INSERT INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, 1)`,
+    ).run(hiddenViewId, "gmail-thread:alpha");
 
     const syncHidden = await service.getSyncStatus();
     const digestHidden = await service.getMailboxDigest(workspaceId);
@@ -3014,10 +3111,9 @@ describeWithSqlite("MailboxService", () => {
       `INSERT INTO mailbox_saved_views (id, workspace_id, name, instructions, seed_thread_id, show_in_inbox, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
     ).run(visibleViewId, workspaceId, "Visible bucket", "y", null, now, now);
-    db.prepare(`INSERT INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, 1)`).run(
-      visibleViewId,
-      "gmail-thread:alpha",
-    );
+    db.prepare(
+      `INSERT INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, 1)`,
+    ).run(visibleViewId, "gmail-thread:alpha");
 
     const syncShown = await service.getSyncStatus();
     const digestShown = await service.getMailboxDigest(workspaceId);

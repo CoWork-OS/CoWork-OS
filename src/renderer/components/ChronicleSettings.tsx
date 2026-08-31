@@ -191,9 +191,7 @@ export function ChronicleSettingsCard() {
         <div className="computer-use-status-card">
           <div className="computer-use-status-title">Accessibility</div>
           <div
-            className={`computer-use-status-value ${
-              status?.accessibilityTrusted ? "ok" : "bad"
-            }`}
+            className={`computer-use-status-value ${status?.accessibilityTrusted ? "ok" : "bad"}`}
           >
             {status?.accessibilityTrusted ? "Trusted" : "Not granted"}
           </div>

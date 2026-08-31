@@ -21,6 +21,7 @@ The Node daemon (`coworkd-node`) wires up:
 - WebSocket Control Plane + minimal HTTP UI (`/` + `/health`)
 - optional channel gateway (Telegram/Discord/Slack/etc)
 - optional MCP + cron (best-effort)
+- access-profile resolution and fail-closed enforcement shared with the desktop runtime
 
 ## Recommended Install (Packaged Server Release)
 
@@ -79,9 +80,16 @@ node bin/coworkctl.js call config.get
 node bin/coworkctl.js call llm.configure '{"providerType":"openai","apiKey":"sk-...","model":"gpt-4o-mini"}'
 node bin/coworkctl.js call llm.configure '{"providerType":"openrouter","apiKey":"sk-or-...","model":"openrouter/pareto-code","settings":{"paretoMinCodingScore":0.8}}'
 node bin/coworkctl.js call workspace.create '{"name":"main","path":"/srv/cowork/workspace"}'
-node bin/coworkctl.js call task.create '{"workspaceId":"...","title":"Test","prompt":"Say hi"}'
+node bin/coworkctl.js call task.create '{"workspaceId":"...","title":"Test","prompt":"Say hi","agentConfig":{"accessProfileId":"ask_for_approval"}}'
 node bin/coworkctl.js watch --event task.event
 ```
+
+Headless tasks use the same [access profiles](access-profiles.md) as desktop tasks. Pass
+`agentConfig.accessProfileId` for a task-specific choice, or configure the default profile through
+the target node's settings. The daemon resolves the profile on the target, applies its sandbox,
+command-tool, filesystem, network, domain, and approval boundaries, and fails closed if a named
+profile is missing or invalid. `shellAccess` and legacy `permissionMode` values remain compatibility
+inputs only.
 
 ## Headless Limitations (Expected)
 

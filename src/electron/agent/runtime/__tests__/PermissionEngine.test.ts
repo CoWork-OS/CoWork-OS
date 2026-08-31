@@ -185,47 +185,47 @@ describe("PermissionEngine", () => {
       }).decision,
     ).toBe("allow");
 
-	    expect(
-	      evaluate({
-	        toolName: "http_request",
-	        approvalType: "data_export",
-	        mode: "dont_ask",
+    expect(
+      evaluate({
+        toolName: "http_request",
+        approvalType: "data_export",
+        mode: "dont_ask",
         toolInput: {
           url: "https://api.example.com/export",
           method: "POST",
           body: "payload",
         },
-	      }).decision,
-	    ).toBe("ask");
-	  });
+      }).decision,
+    ).toBe("ask");
+  });
 
-	  it("allows approval-gated actions in bypass-permissions mode", () => {
-	    const cases = [
-	      evaluate({
-	        toolName: "run_command",
-	        approvalType: "run_command",
-	        command: "npm run build",
-	        mode: "bypass_permissions",
-	      }),
-	      evaluate({
-	        toolName: "gmail_action",
-	        approvalType: "external_service",
-	        mode: "bypass_permissions",
-	      }),
-	      evaluate({
-	        toolName: "http_request",
-	        approvalType: "data_export",
-	        mode: "bypass_permissions",
-	        toolInput: {
-	          url: "https://api.example.com/export",
-	          method: "POST",
-	          body: "payload",
-	        },
-	      }),
-	    ];
+  it("allows approval-gated actions in bypass-permissions mode", () => {
+    const cases = [
+      evaluate({
+        toolName: "run_command",
+        approvalType: "run_command",
+        command: "npm run build",
+        mode: "bypass_permissions",
+      }),
+      evaluate({
+        toolName: "gmail_action",
+        approvalType: "external_service",
+        mode: "bypass_permissions",
+      }),
+      evaluate({
+        toolName: "http_request",
+        approvalType: "data_export",
+        mode: "bypass_permissions",
+        toolInput: {
+          url: "https://api.example.com/export",
+          method: "POST",
+          body: "payload",
+        },
+      }),
+    ];
 
-	    expect(cases.map((result) => result.decision)).toEqual(["allow", "allow", "allow"]);
-	  });
+    expect(cases.map((result) => result.decision)).toEqual(["allow", "allow", "ask"]);
+  });
 
   it("allows safe commands and read-only tools in dangerous_only mode", () => {
     expect(
@@ -321,6 +321,15 @@ describe("PermissionEngine", () => {
         mode: "dangerous_only",
       }).decision,
     ).toBe("ask");
+
+    expect(
+      evaluate({
+        toolName: "file_tools",
+        approvalType: "external_file_access",
+        mode: "dangerous_only",
+        path: "/tmp/external-output.txt",
+      }).decision,
+    ).toBe("ask");
   });
 
   it("allows read-only network tools in default mode when network permission is enabled", () => {
@@ -406,6 +415,98 @@ describe("PermissionEngine", () => {
     expect(result.reason.summary).toContain("network");
   });
 
+  it("requires approval for every external surface when the profile is on-request", () => {
+    for (const toolName of ["web_search", "x_search", "open_url", "mcp_fetch_issue"]) {
+      const result = evaluate({
+        toolName,
+        mode: "bypass_permissions",
+        workspace: {
+          ...workspace,
+          permissions: { ...workspace.permissions, accessNetworkMode: "on-request" },
+        },
+        toolInput:
+          toolName === "open_url"
+            ? { url: "https://example.com" }
+            : toolName === "web_search"
+              ? { query: "example" }
+              : undefined,
+      });
+
+      expect(result.decision, toolName).toBe("ask");
+      expect(result.reason.type, toolName).toBe("workspace_capability");
+    }
+  });
+
+  it("keeps an explicit network deny ahead of an on-request profile boundary", () => {
+    const result = evaluate({
+      toolName: "web_fetch",
+      mode: "bypass_permissions",
+      workspace: {
+        ...workspace,
+        permissions: { ...workspace.permissions, accessNetworkMode: "on-request" },
+      },
+      rules: [
+        {
+          source: "profile",
+          effect: "deny",
+          scope: { kind: "tool", toolName: "web_fetch" },
+        },
+      ],
+    });
+
+    expect(result.decision).toBe("deny");
+    expect(result.reason.type).toBe("rule");
+  });
+
+  it("classifies network-capable tool groups as network access", () => {
+    for (const toolName of [
+      "generate_image",
+      "generate_video",
+      "scrape_page",
+      "youtube_ingest_video",
+    ]) {
+      const result = evaluate({
+        toolName,
+        mode: "bypass_permissions",
+        workspace: {
+          ...workspace,
+          permissions: { ...workspace.permissions, accessNetworkMode: "on-request" },
+        },
+      });
+
+      expect(result.decision, toolName).toBe("ask");
+      expect(result.reason.type, toolName).toBe("workspace_capability");
+    }
+  });
+
+  it("treats execute_code allow_network as a network capability request", () => {
+    const onRequest = evaluate({
+      toolName: "execute_code",
+      approvalType: "network_access",
+      mode: "default",
+      toolInput: { language: "javascript", code: "fetch(url)", allow_network: true },
+      workspace: {
+        ...workspace,
+        permissions: { ...workspace.permissions, accessNetworkMode: "on-request" },
+      },
+    });
+    expect(onRequest.decision).toBe("ask");
+    expect(onRequest.reason.type).toBe("workspace_capability");
+
+    const disabled = evaluate({
+      toolName: "execute_code",
+      approvalType: "network_access",
+      mode: "bypass_permissions",
+      toolInput: { language: "javascript", code: "fetch(url)", allow_network: true },
+      workspace: {
+        ...workspace,
+        permissions: { ...workspace.permissions, accessNetworkMode: "disabled" },
+      },
+    });
+    expect(disabled.decision).toBe("deny");
+    expect(disabled.reason.type).toBe("workspace_capability");
+  });
+
   it("treats GET http_request as read-only network access in default mode", () => {
     const result = evaluate({
       toolName: "http_request",
@@ -468,14 +569,16 @@ describe("PermissionEngine", () => {
       ],
     });
 
-    expect(PermissionEngine.inferScope({
-      workspace,
-      toolName: "web_fetch",
-      approvalType: "network_access",
-      mode: "default",
-      rules: [],
-      toolInput: { url: "https://docs.example.com/page" },
-    })).toEqual({
+    expect(
+      PermissionEngine.inferScope({
+        workspace,
+        toolName: "web_fetch",
+        approvalType: "network_access",
+        mode: "default",
+        rules: [],
+        toolInput: { url: "https://docs.example.com/page" },
+      }),
+    ).toEqual({
       kind: "domain",
       toolName: "web_fetch",
       domain: "docs.example.com",
@@ -528,14 +631,16 @@ describe("PermissionEngine", () => {
   });
 
   it("infers browser domain approvals as browser-only domain rules", () => {
-    expect(PermissionEngine.inferScope({
-      workspace,
-      toolName: "browser_navigate",
-      approvalType: "network_access",
-      mode: "default",
-      rules: [],
-      toolInput: { url: "https://github.com/openai/codex" },
-    })).toEqual({
+    expect(
+      PermissionEngine.inferScope({
+        workspace,
+        toolName: "browser_navigate",
+        approvalType: "network_access",
+        mode: "default",
+        rules: [],
+        toolInput: { url: "https://github.com/openai/codex" },
+      }),
+    ).toEqual({
       kind: "domain",
       domain: "github.com",
       toolPrefix: "browser_",
@@ -644,6 +749,57 @@ describe("PermissionEngine", () => {
 
     expect(result.decision).toBe("ask");
     expect(result.reason.type).toBe("mode");
+  });
+
+  it("hard-denies scoped filesystem escapes before they can become approval prompts", () => {
+    const scopedWorkspace = {
+      ...workspace,
+      permissions: {
+        ...workspace.permissions,
+        accessProfileId: "project_sources",
+        accessProfileScoped: true,
+        accessFilesystemScoped: true,
+        accessWorkspaceRoots: ["."],
+      },
+    };
+
+    for (const input of [
+      { toolName: "read_file", toolInput: { path: "../outside.txt" } },
+      {
+        toolName: "write_file",
+        approvalType: "external_file_access" as const,
+        toolInput: { path: "../outside.txt" },
+      },
+      { toolName: "create_document", toolInput: { filename: "../outside.docx" } },
+    ]) {
+      const result = evaluate({
+        workspace: scopedWorkspace,
+        mode: "default",
+        ...input,
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.reason.type).toBe("workspace_capability");
+      expect(result.reason.summary).toContain("Filesystem access denied");
+      expect(result.reason.metadata).toEqual(
+        expect.objectContaining({ policyReason: "profile_filesystem_outside" }),
+      );
+    }
+  });
+
+  it("hard-denies protected mutation paths without asking for approval", () => {
+    const result = evaluate({
+      toolName: "write_file",
+      approvalType: "external_file_access",
+      mode: "dont_ask",
+      toolInput: { path: "/etc/cowork-edge-case.conf" },
+    });
+
+    expect(result.decision).toBe("deny");
+    expect(result.reason.type).toBe("workspace_capability");
+    expect(result.reason.metadata).toEqual(
+      expect.objectContaining({ policyReason: "protected_path" }),
+    );
   });
 
   it("switches repeated soft denials into explicit prompts", () => {

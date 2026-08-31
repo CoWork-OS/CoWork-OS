@@ -466,10 +466,7 @@ export function normalizeAnthropicModelKey(modelKey: string): string {
 export function isRetiredAnthropicModelReference(model: string): boolean {
   const normalized = model.trim();
   return (
-    Object.prototype.hasOwnProperty.call(
-      RETIRED_ANTHROPIC_MODEL_KEYS,
-      normalized,
-    ) ||
+    Object.prototype.hasOwnProperty.call(RETIRED_ANTHROPIC_MODEL_KEYS, normalized) ||
     Object.prototype.hasOwnProperty.call(RETIRED_ANTHROPIC_MODEL_IDS, normalized)
   );
 }

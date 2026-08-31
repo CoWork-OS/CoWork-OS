@@ -90,6 +90,15 @@ Example:
 
 Composer integration mentions are separate from skill application. `integrationMentions` can add soft routing guidance such as "prefer Gmail tools", but it does not apply a skill, grant permissions, or become `allowedTools`. See [Composer Mentions](composer-mentions.md).
 
+### Access profile boundary
+
+Skills and plugin packs are not permission grants. A skill's `allowedTools`,
+`toolRestrictions`, artifact directory, connector, or script guidance is
+merged only inside the task's effective [access profile](access-profiles.md)
+and administrator/tool-policy ceiling. Skills may narrow or guide execution,
+but they cannot add command tools, widen filesystem or network scope, bypass an
+approval, or recover a missing/invalid profile.
+
 ### Reuse Guard
 
 If the same skill is already applied with the same parameters, the executor does not reapply it. Instead it emits a reuse event so repeated planner/model invocations do not keep stacking identical skill context.

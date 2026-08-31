@@ -10,6 +10,12 @@ The current product shape is:
 - **`@Inbox` from the main composer routes mailbox questions into Inbox Agent** without starting a normal task run.
 - **Provider state is authoritative** for read/unread and supported server actions; the local database is the cache plus agent metadata.
 
+Inbox reads, attachment extraction, drafts, sends, forwards, and linked-channel
+actions remain subject to the task's [access profile](access-profiles.md),
+provider scopes, and approval/export rules. Mailbox access or an `@Inbox` route
+does not grant command tools, broader filesystem access, or unrestricted
+external sending.
+
 <p align="center">
   <img src="../resources/branding/images/cowork-os-5.webp" alt="Inbox Agent workspace" width="700">
   <br><em>Inbox Agent keeps mailbox triage, thread evidence, drafts, and next actions in one workspace.</em>

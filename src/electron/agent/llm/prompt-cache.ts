@@ -61,7 +61,9 @@ export function normalizePromptCachingSettings(
 }
 
 export function hashPromptCacheValue(value: unknown): string {
-  return createHash("sha256").update(String(value ?? "")).digest("hex");
+  return createHash("sha256")
+    .update(String(value ?? ""))
+    .digest("hex");
 }
 
 export function buildSystemBlock(
@@ -123,7 +125,9 @@ export function mergeStableSystemBlocks(
   return merged;
 }
 
-export function computeToolSchemaHash(tools: Pick<LLMTool, "name" | "description" | "input_schema">[]): string {
+export function computeToolSchemaHash(
+  tools: Pick<LLMTool, "name" | "description" | "input_schema">[],
+): string {
   const normalized = [...tools]
     .map((tool) => ({
       name: String(tool?.name || ""),
@@ -201,7 +205,9 @@ export function computePromptCacheKey(params: {
 }
 
 function isLikelyOpenAIModelId(modelId: string): boolean {
-  const trimmed = String(modelId || "").trim().toLowerCase();
+  const trimmed = String(modelId || "")
+    .trim()
+    .toLowerCase();
   if (!trimmed) return false;
 
   const parts = trimmed.split("/");
@@ -300,7 +306,11 @@ export function applyAnthropicExplicitCacheControl<T extends Record<string, Any>
   let used = 0;
 
   if (includeSystem && messages[0]?.role === "system" && used < maxBreakpoints) {
-    applyAnthropicCacheMarker(messages[0] as Record<string, Any>, marker, opts.nativeAnthropic === true);
+    applyAnthropicCacheMarker(
+      messages[0] as Record<string, Any>,
+      marker,
+      opts.nativeAnthropic === true,
+    );
     used += 1;
   }
 
@@ -313,13 +323,19 @@ export function applyAnthropicExplicitCacheControl<T extends Record<string, Any>
     .map((entry) => entry.index);
 
   for (const index of nonSystemIndexes.slice(-remaining)) {
-    applyAnthropicCacheMarker(messages[index] as Record<string, Any>, marker, opts.nativeAnthropic === true);
+    applyAnthropicCacheMarker(
+      messages[index] as Record<string, Any>,
+      marker,
+      opts.nativeAnthropic === true,
+    );
   }
 
   return messages;
 }
 
-export function extractAnthropicUsage(usage: Any):
+export function extractAnthropicUsage(
+  usage: Any,
+):
   | { inputTokens: number; outputTokens: number; cachedTokens?: number; cacheWriteTokens?: number }
   | undefined {
   if (!usage || typeof usage !== "object") return undefined;
@@ -368,9 +384,7 @@ export function mapPromptCacheTtlToOpenAIRetention(
   return ttl === "1h" ? "24h" : undefined;
 }
 
-export function buildOpenAIPromptCacheFields(
-  promptCache?: LLMPromptCacheConfig,
-): {
+export function buildOpenAIPromptCacheFields(promptCache?: LLMPromptCacheConfig): {
   prompt_cache_key?: string;
   prompt_cache_retention?: "24h";
 } {
@@ -392,9 +406,7 @@ export function buildOpenAIPromptCacheFields(
 export function buildLegacySystemBlocks(system: string): LLMSystemBlock[] {
   const text = String(system || "").trim();
   if (!text) return [];
-  return [
-    buildSystemBlock(`legacy_system:${hashPromptCacheValue(text)}`, text, "session", true),
-  ];
+  return [buildSystemBlock(`legacy_system:${hashPromptCacheValue(text)}`, text, "session", true)];
 }
 
 export function normalizeSystemBlocks(
@@ -422,7 +434,9 @@ export function splitSystemBlocksForOpenAIPrefix(
 } {
   const allBlocks = normalizeSystemBlocks(system, systemBlocks);
   const stableBlocks = allBlocks.filter((block) => block.scope === "session" && block.cacheable);
-  const volatileBlocks = allBlocks.filter((block) => !(block.scope === "session" && block.cacheable));
+  const volatileBlocks = allBlocks.filter(
+    (block) => !(block.scope === "session" && block.cacheable),
+  );
 
   return {
     allBlocks,
@@ -431,7 +445,10 @@ export function splitSystemBlocksForOpenAIPrefix(
   };
 }
 
-export function convertSystemBlocksToTextParts(system: string, systemBlocks?: LLMSystemBlock[]): Array<{
+export function convertSystemBlocksToTextParts(
+  system: string,
+  systemBlocks?: LLMSystemBlock[],
+): Array<{
   type: "text";
   text: string;
   cache_control?: ReturnType<typeof buildAnthropicCacheMarker>;
@@ -443,7 +460,11 @@ export function convertSystemBlocksToTextParts(system: string, systemBlocks?: LL
 }
 
 export function applyExplicitSystemBlockMarker(
-  textParts: Array<{ type: "text"; text: string; cache_control?: ReturnType<typeof buildAnthropicCacheMarker> }>,
+  textParts: Array<{
+    type: "text";
+    text: string;
+    cache_control?: ReturnType<typeof buildAnthropicCacheMarker>;
+  }>,
   systemBlocks: LLMSystemBlock[],
   ttl: LLMPromptCacheConfig["ttl"],
 ): void {
@@ -451,19 +472,28 @@ export function applyExplicitSystemBlockMarker(
   const cacheableIndexes = systemBlocks
     .map((block, index) => (block.cacheable ? index : -1))
     .filter((index) => index >= 0);
-  const targetIndex = cacheableIndexes.length > 0 ? cacheableIndexes[cacheableIndexes.length - 1] : -1;
+  const targetIndex =
+    cacheableIndexes.length > 0 ? cacheableIndexes[cacheableIndexes.length - 1] : -1;
   if (targetIndex < 0 || !textParts[targetIndex]) return;
   textParts[targetIndex].cache_control = buildAnthropicCacheMarker(ttl);
 }
 
-export function isPromptCacheAutoUnsupportedError(status: number | undefined, message: string): boolean {
+export function isPromptCacheAutoUnsupportedError(
+  status: number | undefined,
+  message: string,
+): boolean {
   const normalizedStatus = Number(status || 0);
   const lower = String(message || "").toLowerCase();
   if (!lower) return false;
   if (!/cache[_\s-]?control|prompt cach|automatic cach|cache breakpoint|ephemeral/.test(lower)) {
     return false;
   }
-  return normalizedStatus === 400 || normalizedStatus === 404 || normalizedStatus === 422 || normalizedStatus === 501;
+  return (
+    normalizedStatus === 400 ||
+    normalizedStatus === 404 ||
+    normalizedStatus === 422 ||
+    normalizedStatus === 501
+  );
 }
 
 export function countCacheBreakpoints(messages: LLMMessage[]): number {

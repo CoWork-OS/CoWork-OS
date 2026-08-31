@@ -208,8 +208,8 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] web_fetch - Fetch and parse web pages
 - [x] http_request - Full HTTP client (curl-like)
 
-#### Shell Tools
-- [x] execute_command - Shell command execution (requires approval)
+#### Command Tools
+- [x] execute_command - Command-tool execution (profile-governed and approval-aware)
 
 #### System Tools
 - [x] take_screenshot - Full screen or specific windows
@@ -314,7 +314,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Dangerous command blocking
 - [x] Auto-approve trusted commands
 - [x] File size limits
-- [x] Domain allowlist for browser
+- [x] Profile and legacy domain rules for browser
 
 #### Goal Mode & Re-planning
 - [x] Success criteria (shell commands or file checks)
@@ -425,21 +425,25 @@ cowork-os/
 
 ### Permission Model
 
-```
-Workspace Permissions:
-├── Read: Enabled by default
-├── Write: Enabled by default
-├── Delete: Enabled, requires approval
-├── Network: Enabled (for web search)
-└── Shell: Requires approval
+Access profiles are now the task-level source of truth:
 
-Operations Requiring Approval:
-├── Delete file
-├── Delete multiple files
-├── Bulk rename (>10 files)
-├── Shell command execution
-└── External service calls
-```
+| Profile | Default posture |
+|---|---|
+| Ask for approval | Workspace-write sandbox, on-request approvals, user review, on-request network |
+| Approve for me | Workspace-write sandbox, on-request approvals, automatic safety review, on-request network |
+| Full access | Danger-full-access sandbox, no normal approval prompt, enabled network, still subject to hard guardrails and administrator policy |
+| Custom | Validated named combination of sandbox, approval, reviewer, network, filesystem, and domain rules |
+
+Command tools are derived from the selected profile. There is no separate shell enable/disable
+control for new tasks. Legacy `shellAccess`, workspace permission booleans, `allowedPaths`, and
+permission modes remain only to preserve older tasks and integrations. Profile denies, protected
+paths, finite filesystem/domain scopes, export approval, and location consent cannot be widened by
+later rules or an approval shortcut.
+
+Operations that may still require explicit approval include deletes, ambiguous or risky command
+tools, external writes, `data_export`, native computer-use actions, location access, and actions
+that cross an unprofiled workspace boundary. A missing or invalid named profile fails closed as an
+unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Permission System](permission-system.md).
 
 ## What's NOT Implemented (Planned)
 

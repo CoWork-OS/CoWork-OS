@@ -179,7 +179,9 @@ describeWithSqlite("AgentCompaniesService", () => {
     expect(preview.graph.manifests).toHaveLength(8);
     expect(preview.graph.nodes).toHaveLength(8);
     expect(preview.warnings).toEqual([]);
-    expect(preview.items.some((item) => item.manifestKind === "company" && item.action === "create")).toBe(true);
+    expect(
+      preview.items.some((item) => item.manifestKind === "company" && item.action === "create"),
+    ).toBe(true);
     expect(preview.graph.edges.map((edge) => edge.kind)).toEqual(
       expect.arrayContaining([
         "contains",
@@ -209,7 +211,10 @@ describeWithSqlite("AgentCompaniesService", () => {
     expect(firstImport.updatedCount).toBe(0);
     expect(firstImport.linkedCount).toBe(5);
 
-    const companyProjects = core.listProjects({ companyId: firstImport.company.id, includeArchived: true });
+    const companyProjects = core.listProjects({
+      companyId: firstImport.company.id,
+      includeArchived: true,
+    });
     const companyIssues = core.listIssues({ companyId: firstImport.company.id, limit: 20 });
     const companyRoles = agentRoleRepo.findByCompanyId(firstImport.company.id, true);
     const syncStates = service.listSyncStates(firstImport.company.id);
@@ -234,7 +239,9 @@ describeWithSqlite("AgentCompaniesService", () => {
     expect(secondImport.company.id).toBe(firstImport.company.id);
     expect(secondImport.createdCount).toBe(0);
     expect(secondImport.updatedCount).toBe(5);
-    expect(core.listProjects({ companyId: firstImport.company.id, includeArchived: true })).toHaveLength(1);
+    expect(
+      core.listProjects({ companyId: firstImport.company.id, includeArchived: true }),
+    ).toHaveLength(1);
     expect(core.listIssues({ companyId: firstImport.company.id, limit: 20 })).toHaveLength(1);
     expect(agentRoleRepo.findByCompanyId(firstImport.company.id, true)).toHaveLength(3);
   });
@@ -274,7 +281,9 @@ describeWithSqlite("AgentCompaniesService", () => {
     expect(imported.createdCount).toBe(5);
     expect(imported.updatedCount).toBe(0);
     expect(agentRoleRepo.findByCompanyId(existingCompany.id, true)).toHaveLength(4);
-    expect(core.listProjects({ companyId: existingCompany.id, includeArchived: true })).toHaveLength(2);
+    expect(
+      core.listProjects({ companyId: existingCompany.id, includeArchived: true }),
+    ).toHaveLength(2);
     expect(core.listIssues({ companyId: existingCompany.id, limit: 20 })).toHaveLength(2);
   });
 
@@ -357,7 +366,9 @@ describeWithSqlite("AgentCompaniesService", () => {
     });
 
     const graph = service.getResolvedGraph(imported.company.id);
-    const staffNode = graph.nodes.find((node) => node.kind === "agent" && node.slug === "staff-engineer");
+    const staffNode = graph.nodes.find(
+      (node) => node.kind === "agent" && node.slug === "staff-engineer",
+    );
     expect(staffNode).toBeTruthy();
 
     const overrideRole = agentRoleRepo.create({
@@ -378,7 +389,9 @@ describeWithSqlite("AgentCompaniesService", () => {
 
     const staffMappings = service
       .listSyncStates(imported.company.id)
-      .filter((state) => state.orgNodeId === staffNode!.id && state.runtimeEntityKind === "agent_role");
+      .filter(
+        (state) => state.orgNodeId === staffNode!.id && state.runtimeEntityKind === "agent_role",
+      );
     expect(staffMappings).toHaveLength(1);
     expect(staffMappings[0]?.runtimeEntityId).toBe(overrideRole.id);
   });

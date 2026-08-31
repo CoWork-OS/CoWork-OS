@@ -24,7 +24,11 @@ describe("ExaProvider", () => {
     } as Response);
 
     const provider = new ExaProvider({ type: "exa", exaApiKey: "exa-test-key" });
-    const response = await provider.search({ query: "example query", searchType: "news", maxResults: 3 });
+    const response = await provider.search({
+      query: "example query",
+      searchType: "news",
+      maxResults: 3,
+    });
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(response.provider).toBe("exa");

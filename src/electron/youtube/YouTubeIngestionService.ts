@@ -4,6 +4,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { buildYouTubeWatchUrl, extractYouTubeVideoId } from "./url";
 import { YouTubeTranscriptStore } from "./YouTubeTranscriptStore";
+import type { YouTubeIngestionOptions } from "./access";
 import type {
   YouTubeChapter,
   YouTubeIngestResult,
@@ -151,10 +152,15 @@ export class YouTubeIngestionService {
   constructor(
     private readonly workspaceId: string,
     private readonly workspacePath: string,
+    private readonly options: YouTubeIngestionOptions = {},
   ) {}
 
   private cacheDir(videoId: string): string {
     return path.join(this.workspacePath, ".cowork", "youtube", videoId);
+  }
+
+  private assertCacheAccess(requestedPath: string, operation: "read" | "write"): string {
+    return this.options.assertFilesystemAccess?.(requestedPath, operation) || requestedPath;
   }
 
   private async runYtDlp(args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -198,12 +204,14 @@ export class YouTubeIngestionService {
     videoId: string,
     source: YouTubeTranscriptSegment["source"],
     language: string,
+    directory = this.cacheDir(videoId),
   ): Promise<YouTubeTranscriptSegment[]> {
-    const dir = this.cacheDir(videoId);
+    const dir = this.assertCacheAccess(directory, "read");
     const files = await fs.readdir(dir).catch(() => []);
     const json3 = files.find((file) => file.endsWith(".json3"));
     if (!json3) return [];
-    const raw = await fs.readFile(path.join(dir, json3), "utf8");
+    const transcriptPath = this.assertCacheAccess(path.join(dir, json3), "read");
+    const raw = await fs.readFile(transcriptPath, "utf8");
     return parseJson3Transcript(videoId, raw, source, language);
   }
 
@@ -212,9 +220,12 @@ export class YouTubeIngestionService {
     language: string,
     auto: boolean,
   ): Promise<YouTubeTranscriptSegment[]> {
-    const dir = this.cacheDir(videoId);
-    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
-    await fs.mkdir(dir, { recursive: true });
+    const cacheDir = this.assertCacheAccess(this.cacheDir(videoId), "write");
+    await fs.mkdir(cacheDir, { recursive: true });
+    // Use a fresh run directory instead of deleting an existing cache. The
+    // latter would turn a normal transcript refresh into an implicit delete
+    // capability and would also race with concurrent reads.
+    const dir = this.assertCacheAccess(await fs.mkdtemp(path.join(cacheDir, ".run-")), "write");
     const url = buildYouTubeWatchUrl(videoId);
     const output = path.join(dir, "%(id)s");
     await this.runYtDlp([
@@ -225,11 +236,12 @@ export class YouTubeIngestionService {
       "json3",
       "--skip-download",
       "--no-warnings",
+      "--no-cache-dir",
       "-o",
       output,
       url,
     ]);
-    return this.readFirstJson3Transcript(videoId, auto ? "auto" : "manual", language);
+    return this.readFirstJson3Transcript(videoId, auto ? "auto" : "manual", language, dir);
   }
 
   private async fetchTranscriptWithPython(
@@ -267,6 +279,10 @@ print(json.dumps([{"text": x.text, "start": x.start, "duration": x.duration} for
     const lockKey = `${this.workspaceId}:${videoId}`;
     const existingLock = YouTubeIngestionService.ingestLocks.get(lockKey);
     if (existingLock) return existingLock;
+    if (this.options.assertFilesystemAccess) {
+      this.assertCacheAccess(this.cacheDir(videoId), "read");
+      this.assertCacheAccess(this.cacheDir(videoId), "write");
+    }
     const locked = this.ingestUnlocked(input, videoId).finally(() => {
       if (YouTubeIngestionService.ingestLocks.get(lockKey) === locked) {
         YouTubeIngestionService.ingestLocks.delete(lockKey);
@@ -329,7 +345,9 @@ print(json.dumps([{"text": x.text, "start": x.start, "duration": x.duration} for
       video,
       segments,
       warnings,
-      ...(segments.length ? {} : { error: "No transcript segments were available for this video." }),
+      ...(segments.length
+        ? {}
+        : { error: "No transcript segments were available for this video." }),
     };
   }
 }

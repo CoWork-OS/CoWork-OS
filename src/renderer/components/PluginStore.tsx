@@ -24,10 +24,7 @@ interface PluginStoreProps {
   onInstalled?: () => void;
 }
 
-function installMessage(
-  outcome: InstallSecurityOutcome | undefined,
-  fallback: string,
-): string {
+function installMessage(outcome: InstallSecurityOutcome | undefined, fallback: string): string {
   if (!outcome) {
     return fallback;
   }
@@ -112,7 +109,12 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
     setInstallResult(null);
 
     try {
-      let result: { success: boolean; packName?: string; error?: string; security?: InstallSecurityOutcome };
+      let result: {
+        success: boolean;
+        packName?: string;
+        error?: string;
+        security?: InstallSecurityOutcome;
+      };
 
       if (entry.gitUrl) {
         result = await window.electronAPI.installPluginPackFromGit(entry.gitUrl);
@@ -151,7 +153,12 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
 
     try {
       const isGit = isGitPluginUrl(installUrl);
-      let result: { success: boolean; packName?: string; error?: string; security?: InstallSecurityOutcome };
+      let result: {
+        success: boolean;
+        packName?: string;
+        error?: string;
+        security?: InstallSecurityOutcome;
+      };
 
       if (isGit) {
         result = await window.electronAPI.installPluginPackFromGit(installUrl);

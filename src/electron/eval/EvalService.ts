@@ -12,7 +12,10 @@ import type {
 
 interface EvalSuiteSummary extends EvalSuite {
   caseCount: number;
-  latestRun?: Pick<EvalRun, "id" | "status" | "startedAt" | "completedAt" | "passCount" | "failCount">;
+  latestRun?: Pick<
+    EvalRun,
+    "id" | "status" | "startedAt" | "completedAt" | "passCount" | "failCount"
+  >;
 }
 
 function safeJsonParse<T>(value: unknown, fallback: T): T {
@@ -41,7 +44,10 @@ function sanitizeCorpusText(raw: string): string {
   return output;
 }
 
-function normalizeTerminalStatus(task: { status?: string; terminal_status?: string | null }): Task["terminalStatus"] {
+function normalizeTerminalStatus(task: {
+  status?: string;
+  terminal_status?: string | null;
+}): Task["terminalStatus"] {
   const terminal = (task.terminal_status || "").trim();
   if (
     terminal === "ok" ||
@@ -171,7 +177,9 @@ export class EvalService {
   }
 
   private addCaseToSuite(suiteId: string, caseId: string): void {
-    const row = this.db.prepare("SELECT case_ids FROM eval_suites WHERE id = ?").get(suiteId) as Any;
+    const row = this.db
+      .prepare("SELECT case_ids FROM eval_suites WHERE id = ?")
+      .get(suiteId) as Any;
     if (!row) return;
     const current = safeJsonParse<string[]>(row.case_ids, []);
     if (current.includes(caseId)) return;
@@ -254,7 +262,12 @@ export class EvalService {
       throw new Error(`Task not found: ${taskId}`);
     }
 
-    const promptSource = (taskRow.raw_prompt || taskRow.user_prompt || taskRow.prompt || "").toString();
+    const promptSource = (
+      taskRow.raw_prompt ||
+      taskRow.user_prompt ||
+      taskRow.prompt ||
+      ""
+    ).toString();
     const sanitizedPrompt = sanitizeCorpusText(promptSource);
     const now = Date.now();
     const id = uuidv4();
@@ -438,8 +451,7 @@ export class EvalService {
 
     const executedCount = passCount + failCount;
     const completedAt = Date.now();
-    const status: EvalRun["status"] =
-      failCount > 0 || executedCount === 0 ? "failed" : "completed";
+    const status: EvalRun["status"] = failCount > 0 || executedCount === 0 ? "failed" : "completed";
 
     this.db
       .prepare(
@@ -493,7 +505,9 @@ export class EvalService {
     }
 
     const summary = (taskRow.result_summary || "").toString();
-    const mustContainAll = Array.isArray(assertions.mustContainAll) ? assertions.mustContainAll : [];
+    const mustContainAll = Array.isArray(assertions.mustContainAll)
+      ? assertions.mustContainAll
+      : [];
     for (const needle of mustContainAll) {
       if (!needle) continue;
       if (!summary.toLowerCase().includes(needle.toLowerCase())) {
@@ -501,7 +515,9 @@ export class EvalService {
       }
     }
 
-    const mustCreatePaths = Array.isArray(assertions.mustCreatePaths) ? assertions.mustCreatePaths : [];
+    const mustCreatePaths = Array.isArray(assertions.mustCreatePaths)
+      ? assertions.mustCreatePaths
+      : [];
     if (mustCreatePaths.length > 0) {
       const eventRows = this.db
         .prepare(
@@ -547,7 +563,9 @@ export class EvalService {
   }
 
   getBaselineMetrics(windowDays = 30): EvalBaselineMetrics {
-    const clampedDays = Number.isFinite(windowDays) ? Math.min(Math.max(Math.round(windowDays), 1), 365) : 30;
+    const clampedDays = Number.isFinite(windowDays)
+      ? Math.min(Math.max(Math.round(windowDays), 1), 365)
+      : 30;
     const end = Date.now();
     const start = end - clampedDays * 24 * 60 * 60 * 1000;
 
@@ -596,19 +614,28 @@ export class EvalService {
       `,
       )
       .all(start) as Any[];
-    const verificationPassed = verificationEventRows.filter((row) => row.type === "verification_passed").length;
-    const verificationFailed = verificationEventRows.filter((row) => row.type === "verification_failed").length;
+    const verificationPassed = verificationEventRows.filter(
+      (row) => row.type === "verification_passed",
+    ).length;
+    const verificationFailed = verificationEventRows.filter(
+      (row) => row.type === "verification_failed",
+    ).length;
     const verificationDenominator = verificationPassed + verificationFailed;
     const verificationPassRate =
       verificationDenominator > 0 ? verificationPassed / verificationDenominator : 0;
 
     const terminalTasks = taskRows.filter(
-      (task) => task.status === "completed" || task.status === "failed" || task.status === "cancelled",
+      (task) =>
+        task.status === "completed" || task.status === "failed" || task.status === "cancelled",
     );
     const terminalTotal = terminalTasks.length;
-    const coreOkCount = terminalTasks.filter((task) => normalizeTerminalStatus(task) === "ok").length;
+    const coreOkCount = terminalTasks.filter(
+      (task) => normalizeTerminalStatus(task) === "ok",
+    ).length;
     const corePartialCount = terminalTasks.filter(
-      (task) => normalizeTerminalStatus(task) === "partial_success" || normalizeTerminalStatus(task) === "needs_user_action",
+      (task) =>
+        normalizeTerminalStatus(task) === "partial_success" ||
+        normalizeTerminalStatus(task) === "needs_user_action",
     ).length;
     const dependencyIssueCount = terminalTasks.filter((task) =>
       /dependency_unavailable|external_unknown|tool_error|provider_quota/i.test(
@@ -623,7 +650,8 @@ export class EvalService {
         String(task.failure_class || ""),
       ),
     ).length;
-    const agentCoreSuccessRate = terminalTotal > 0 ? (coreOkCount + corePartialCount) / terminalTotal : 0;
+    const agentCoreSuccessRate =
+      terminalTotal > 0 ? (coreOkCount + corePartialCount) / terminalTotal : 0;
     const dependencyAvailabilityRate =
       terminalTotal > 0 ? (terminalTotal - dependencyIssueCount) / terminalTotal : 0;
     const verificationBlockRate = terminalTotal > 0 ? verificationBlockCount / terminalTotal : 0;
@@ -655,9 +683,13 @@ export class EvalService {
         tool,
         calls: counts.calls,
         failures: counts.failures,
-        failureRate: counts.calls > 0 ? counts.failures / counts.calls : counts.failures > 0 ? 1 : 0,
+        failureRate:
+          counts.calls > 0 ? counts.failures / counts.calls : counts.failures > 0 ? 1 : 0,
       }))
-      .sort((a, b) => b.failureRate - a.failureRate || b.failures - a.failures || a.tool.localeCompare(b.tool));
+      .sort(
+        (a, b) =>
+          b.failureRate - a.failureRate || b.failures - a.failures || a.tool.localeCompare(b.tool),
+      );
 
     return {
       generatedAt: end,

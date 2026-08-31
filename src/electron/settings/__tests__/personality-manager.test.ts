@@ -382,7 +382,9 @@ describe("PersonalityManager - personality prompt content", () => {
 
     const prompt = PersonalityManager.getPersonalityPrompt();
 
-    expect(prompt.toLowerCase()).toMatch(/technical|detailed|professional|straight to the point|assertive/);
+    expect(prompt.toLowerCase()).toMatch(
+      /technical|detailed|professional|straight to the point|assertive/,
+    );
   });
 
   it("casual personality should emphasize relaxed tone", () => {
@@ -963,7 +965,6 @@ describe("PersonalityManager - relationship", () => {
 
       expect((mockStoredSettings.relationship as Any)?.userName).toBe("Mary Jane Watson Parker");
     });
-
   });
 
   describe("getUserName", () => {
@@ -1316,7 +1317,19 @@ describe("PersonalityManager - resetToDefaults", () => {
   });
 
   it("should increment write count", () => {
-    mockStoredSettings = { version: 2, agentName: "CoWork", traits: [], rules: [], style: {}, expertise: [], examples: [], customInstructions: {}, contextOverrides: [], quirks: {}, relationship: {} };
+    mockStoredSettings = {
+      version: 2,
+      agentName: "CoWork",
+      traits: [],
+      rules: [],
+      style: {},
+      expertise: [],
+      examples: [],
+      customInstructions: {},
+      contextOverrides: [],
+      quirks: {},
+      relationship: {},
+    };
     PersonalityManager.clearCache();
 
     PersonalityManager.resetToDefaults();
@@ -1444,7 +1457,19 @@ describe("PersonalityManager - atomic writes", () => {
   });
 
   it("should persist settings via SecureSettingsRepository", () => {
-    mockStoredSettings = { version: 2, agentName: "CoWork", traits: [], rules: [], style: {}, expertise: [], examples: [], customInstructions: {}, contextOverrides: [], quirks: {}, relationship: {} };
+    mockStoredSettings = {
+      version: 2,
+      agentName: "CoWork",
+      traits: [],
+      rules: [],
+      style: {},
+      expertise: [],
+      examples: [],
+      customInstructions: {},
+      contextOverrides: [],
+      quirks: {},
+      relationship: {},
+    };
     PersonalityManager.clearCache();
 
     const settings = PersonalityManager.loadSettings();

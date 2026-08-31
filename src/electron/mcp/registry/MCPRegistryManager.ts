@@ -100,6 +100,76 @@ const BASE_BUILTIN_SERVERS: MCPRegistryEntry[] = [
     category: "testing",
     verified: true,
   },
+  {
+    id: "box",
+    name: "Box",
+    description:
+      "Official Box hosted MCP server for files, folders, search, Box AI, Hubs, collaboration, and document workflows. Requires Box OAuth.",
+    version: "1.0.0",
+    author: "Box",
+    homepage: "https://developer.box.com/guides/box-mcp",
+    repository: "https://github.com/box/box-for-ai",
+    installMethod: "manual",
+    transport: "streamable-http",
+    defaultUrl: "https://mcp.box.com",
+    tools: [
+      { name: "who_am_i", description: "Get the authenticated Box user" },
+      { name: "get_file_content", description: "Read content from a Box file" },
+      {
+        name: "get_file_details",
+        description: "Get Box file metadata, permissions, and versions",
+      },
+      { name: "get_folder_details", description: "Get Box folder metadata and permissions" },
+      {
+        name: "list_folder_content_by_folder_id",
+        description: "List items in a Box folder",
+      },
+      { name: "search_files_keyword", description: "Search Box files by keyword" },
+      { name: "search_files_metadata", description: "Search Box files by metadata filters" },
+      { name: "search_folders_by_name", description: "Search Box folders by name" },
+      {
+        name: "ai_qa_single_file",
+        description: "Ask Box AI about one file with citations when available",
+      },
+      {
+        name: "ai_qa_multi_file",
+        description: "Ask Box AI about multiple files with citations when available",
+      },
+      {
+        name: "ai_qa_hub",
+        description: "Ask Box AI about a Hub with citations when available",
+      },
+      { name: "ai_extract_freeform", description: "Extract insights from Box files with Box AI" },
+      { name: "list_hubs", description: "List Box Hubs accessible to the user" },
+      { name: "get_hub_details", description: "Get details for a Box Hub" },
+      { name: "get_hub_items", description: "List content associated with a Box Hub" },
+      { name: "add_items_to_hub", description: "Add files, folders, or links to a Hub" },
+      { name: "create_hub", description: "Create a Box Hub" },
+      { name: "update_hub", description: "Update a Box Hub title or description" },
+      { name: "create_folder", description: "Create a folder in Box" },
+      { name: "upload_file", description: "Upload a file to Box" },
+      { name: "upload_file_version", description: "Upload a new version of a Box file" },
+      { name: "move_file", description: "Move a Box file" },
+      { name: "move_folder", description: "Move a Box folder" },
+      {
+        name: "update_file_properties",
+        description: "Update Box file name, description, tags, or collections",
+      },
+      { name: "list_file_comments", description: "List comments on a Box file" },
+      { name: "create_file_comment", description: "Create a comment on a Box file" },
+      {
+        name: "add_file_shared_link",
+        description: "Create or update a shared link for a Box file",
+      },
+      { name: "create_collaboration", description: "Invite a user or group to a Box item" },
+      { name: "get_download_url", description: "Get a temporary URL for downloading a Box file" },
+      { name: "get_upload_url", description: "Get a temporary URL for uploading to Box" },
+    ],
+    tags: ["box", "files", "content", "box-ai", "hubs", "oauth", "streamable-http"],
+    category: "productivity",
+    verified: true,
+    featured: true,
+  },
 ];
 
 const LOCAL_CONNECTOR_VERSION = "0.1.0";
@@ -679,30 +749,72 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       tools: [
         { name: "google-workspace.health", description: "Check connector health and auth status" },
         { name: "google-workspace.sheets_create", description: "Create a new Google Spreadsheet" },
-        { name: "google-workspace.sheets_get", description: "Get spreadsheet metadata and sheet list" },
-        { name: "google-workspace.sheets_values_get", description: "Read cell values from a range" },
+        {
+          name: "google-workspace.sheets_get",
+          description: "Get spreadsheet metadata and sheet list",
+        },
+        {
+          name: "google-workspace.sheets_values_get",
+          description: "Read cell values from a range",
+        },
         { name: "google-workspace.sheets_values_update", description: "Write values to a range" },
-        { name: "google-workspace.sheets_values_append", description: "Append rows to a spreadsheet" },
+        {
+          name: "google-workspace.sheets_values_append",
+          description: "Append rows to a spreadsheet",
+        },
         { name: "google-workspace.docs_create", description: "Create a new Google Document" },
         { name: "google-workspace.docs_get", description: "Get document content and structure" },
         { name: "google-workspace.docs_append_text", description: "Append text to a document" },
         { name: "google-workspace.chat_spaces_list", description: "List Google Chat spaces" },
-        { name: "google-workspace.chat_messages_list", description: "List messages in a Chat space" },
-        { name: "google-workspace.chat_messages_create", description: "Send a message to a Chat space" },
+        {
+          name: "google-workspace.chat_messages_list",
+          description: "List messages in a Chat space",
+        },
+        {
+          name: "google-workspace.chat_messages_create",
+          description: "Send a message to a Chat space",
+        },
         { name: "google-workspace.drive_files_list", description: "List or search Drive files" },
         { name: "google-workspace.drive_files_get", description: "Get Drive file metadata" },
         { name: "google-workspace.calendar_calendars_list", description: "List Google calendars" },
-        { name: "google-workspace.calendar_events_list", description: "List or search Google Calendar events" },
+        {
+          name: "google-workspace.calendar_events_list",
+          description: "List or search Google Calendar events",
+        },
         { name: "google-workspace.calendar_event_get", description: "Get a Google Calendar event" },
-        { name: "google-workspace.calendar_events_batch_get", description: "Get multiple Google Calendar events" },
-        { name: "google-workspace.calendar_availability_get", description: "Look up Google Calendar busy windows" },
-        { name: "google-workspace.calendar_event_create", description: "Create a Google Calendar event" },
-        { name: "google-workspace.calendar_event_update", description: "Update a Google Calendar event" },
-        { name: "google-workspace.calendar_event_delete", description: "Delete a Google Calendar event" },
+        {
+          name: "google-workspace.calendar_events_batch_get",
+          description: "Get multiple Google Calendar events",
+        },
+        {
+          name: "google-workspace.calendar_availability_get",
+          description: "Look up Google Calendar busy windows",
+        },
+        {
+          name: "google-workspace.calendar_event_create",
+          description: "Create a Google Calendar event",
+        },
+        {
+          name: "google-workspace.calendar_event_update",
+          description: "Update a Google Calendar event",
+        },
+        {
+          name: "google-workspace.calendar_event_delete",
+          description: "Delete a Google Calendar event",
+        },
         { name: "google-workspace.tasks_lists_list", description: "List Google Tasks task lists" },
-        { name: "google-workspace.tasks_lists_create", description: "Create a Google Tasks task list" },
-        { name: "google-workspace.tasks_lists_update", description: "Update a Google Tasks task list" },
-        { name: "google-workspace.tasks_lists_delete", description: "Delete a Google Tasks task list" },
+        {
+          name: "google-workspace.tasks_lists_create",
+          description: "Create a Google Tasks task list",
+        },
+        {
+          name: "google-workspace.tasks_lists_update",
+          description: "Update a Google Tasks task list",
+        },
+        {
+          name: "google-workspace.tasks_lists_delete",
+          description: "Delete a Google Tasks task list",
+        },
         { name: "google-workspace.tasks_list", description: "List tasks in a task list" },
         { name: "google-workspace.tasks_get", description: "Get a task" },
         { name: "google-workspace.tasks_create", description: "Create a task" },
@@ -712,15 +824,38 @@ function getConnectorEntries(): MCPRegistryEntry[] {
         { name: "google-workspace.tasks_move", description: "Move a task within a list" },
         { name: "google-workspace.tasks_delete", description: "Delete a task" },
         { name: "google-workspace.tasks_clear_completed", description: "Clear completed tasks" },
-        { name: "google-workspace.slides_create", description: "Create a new Google Slides presentation" },
-        { name: "google-workspace.slides_get", description: "Get Google Slides presentation structure" },
+        {
+          name: "google-workspace.slides_create",
+          description: "Create a new Google Slides presentation",
+        },
+        {
+          name: "google-workspace.slides_get",
+          description: "Get Google Slides presentation structure",
+        },
         { name: "google-workspace.slides_create_slide", description: "Create a slide" },
         { name: "google-workspace.slides_delete_slide", description: "Delete a slide" },
         { name: "google-workspace.slides_add_text_box", description: "Add a text box to a slide" },
-        { name: "google-workspace.slides_replace_all_text", description: "Replace text in a presentation" },
-        { name: "google-workspace.slides_batch_update", description: "Run raw Slides batchUpdate requests" },
+        {
+          name: "google-workspace.slides_replace_all_text",
+          description: "Replace text in a presentation",
+        },
+        {
+          name: "google-workspace.slides_batch_update",
+          description: "Run raw Slides batchUpdate requests",
+        },
       ],
-      tags: ["google", "workspace", "sheets", "docs", "slides", "tasks", "chat", "drive", "enterprise", "connector"],
+      tags: [
+        "google",
+        "workspace",
+        "sheets",
+        "docs",
+        "slides",
+        "tasks",
+        "chat",
+        "drive",
+        "enterprise",
+        "connector",
+      ],
       category: "enterprise",
       verified: true,
       featured: true,
@@ -1010,7 +1145,10 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       },
       tools: [
         { name: "rhino.health", description: "Check Rhino bridge availability" },
-        { name: "rhino.create_project", description: "Create a Rhino architecture project workspace" },
+        {
+          name: "rhino.create_project",
+          description: "Create a Rhino architecture project workspace",
+        },
         { name: "rhino.import_site_image", description: "Import site/reference imagery" },
         { name: "rhino.generate_massing", description: "Generate building massing" },
         { name: "rhino.generate_floor_plan", description: "Generate room layouts and labels" },
@@ -1042,7 +1180,10 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       tools: [
         { name: "blender.health", description: "Check Blender bridge availability" },
         { name: "blender.import_model", description: "Import a Rhino-exported model" },
-        { name: "blender.assign_materials_by_layer", description: "Assign materials using layer/object names" },
+        {
+          name: "blender.assign_materials_by_layer",
+          description: "Assign materials using layer/object names",
+        },
         { name: "blender.setup_camera", description: "Create or update a render camera" },
         { name: "blender.render_view", description: "Render a camera view" },
       ],
@@ -1074,7 +1215,10 @@ function getConnectorEntries(): MCPRegistryEntry[] {
         { name: "comfyui.health", description: "Check ComfyUI API availability" },
         { name: "comfyui.list_workflows", description: "List local workflow JSON files" },
         { name: "comfyui.submit_workflow", description: "Submit a ComfyUI workflow graph" },
-        { name: "comfyui.submit_flux_photoreal_pass", description: "Submit a Flux-style photoreal workflow graph" },
+        {
+          name: "comfyui.submit_flux_photoreal_pass",
+          description: "Submit a Flux-style photoreal workflow graph",
+        },
         { name: "comfyui.collect_outputs", description: "Collect generated output images" },
       ],
       tags: ["comfyui", "flux", "image-generation", "architecture", "connector"],
@@ -1112,7 +1256,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "supabase",
       name: "Supabase",
-      description: "Manage databases, authentication, and storage. Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+      description:
+        "Manage databases, authentication, and storage. Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
       version: "0.7.0",
       author: "Supabase",
       homepage: "https://supabase.com",
@@ -1165,7 +1310,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "stripe",
       name: "Stripe",
-      description: "Payment processing and financial infrastructure tools. Requires STRIPE_SECRET_KEY.",
+      description:
+        "Payment processing and financial infrastructure tools. Requires STRIPE_SECRET_KEY.",
       version: "0.3.1",
       author: "Stripe",
       homepage: "https://stripe.com",
@@ -1192,7 +1338,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "huggingface",
       name: "Hugging Face",
-      description: "Access the Hugging Face Hub and thousands of Gradio Apps. Requires HUGGINGFACE_API_KEY.",
+      description:
+        "Access the Hugging Face Hub and thousands of Gradio Apps. Requires HUGGINGFACE_API_KEY.",
       version: "0.3.5",
       author: "Hugging Face",
       homepage: "https://huggingface.co",
@@ -1295,7 +1442,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "make",
       name: "Make",
-      description: "Run Make scenarios and manage your Make account. Optional MAKE_API_KEY for deployment.",
+      description:
+        "Run Make scenarios and manage your Make account. Optional MAKE_API_KEY for deployment.",
       version: "1.4.0",
       author: "Daniel Shashko",
       homepage: "https://make.com",
@@ -1323,7 +1471,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "clinical-trials",
       name: "Clinical Trials",
-      description: "Access ClinicalTrials.gov data. Search trials, compare studies, match patients.",
+      description:
+        "Access ClinicalTrials.gov data. Search trials, compare studies, match patients.",
       version: "1.9.2",
       author: "Cyanheads",
       homepage: "https://clinicaltrials.gov",
@@ -1598,7 +1747,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "tavily",
       name: "Tavily",
-      description: "Connect your AI agents to the web. Real-time search, extract, map, and crawl. Requires TAVILY_API_KEY.",
+      description:
+        "Connect your AI agents to the web. Real-time search, extract, map, and crawl. Requires TAVILY_API_KEY.",
       version: "0.2.18",
       author: "Tavily",
       homepage: "https://tavily.com",
@@ -1626,7 +1776,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "tldraw",
       name: "tldraw",
-      description: "Manage local tldraw canvas files (.tldr). Read, write, search, and create diagrams. Optional TLDRAW_DIR.",
+      description:
+        "Manage local tldraw canvas files (.tldr). Read, write, search, and create diagrams. Optional TLDRAW_DIR.",
       version: "0.1.1",
       author: "Talha Orak",
       homepage: "https://tldraw.com",
@@ -1654,7 +1805,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "amplitude",
       name: "Amplitude",
-      description: "Search, access, and get insights on your Amplitude analytics data. Requires AMPLITUDE_API_KEY.",
+      description:
+        "Search, access, and get insights on your Amplitude analytics data. Requires AMPLITUDE_API_KEY.",
       version: "1.0.2",
       author: "Ciara Adkins",
       homepage: "https://amplitude.com",
@@ -1683,7 +1835,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "clerk",
       name: "Clerk",
-      description: "Add authentication, organizations, and billing. Manage users and sessions. Requires CLERK_API_KEY.",
+      description:
+        "Add authentication, organizations, and billing. Manage users and sessions. Requires CLERK_API_KEY.",
       version: "0.0.13",
       author: "Clerk",
       homepage: "https://clerk.com",
@@ -1711,7 +1864,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "mem",
       name: "Mem",
-      description: "The AI notebook for everything on your mind. Notes, collections, and search. Requires MEM_API_KEY.",
+      description:
+        "The AI notebook for everything on your mind. Notes, collections, and search. Requires MEM_API_KEY.",
       version: "0.2.0",
       author: "hskksk",
       homepage: "https://mem.ai",
@@ -1739,7 +1893,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "grafana",
       name: "Grafana",
-      description: "Access Grafana dashboards, datasources, alerting, and incidents. Requires GRAFANA_URL and token.",
+      description:
+        "Access Grafana dashboards, datasources, alerting, and incidents. Requires GRAFANA_URL and token.",
       version: "1.0.3",
       author: "Leval AI",
       homepage: "https://grafana.com",
@@ -1796,7 +1951,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "socket",
       name: "Socket",
-      description: "MCP server for scanning dependencies. Check security scores for npm, PyPI, and more. Optional SOCKET_API_KEY.",
+      description:
+        "MCP server for scanning dependencies. Check security scores for npm, PyPI, and more. Optional SOCKET_API_KEY.",
       version: "0.0.17",
       author: "Socket",
       homepage: "https://socket.dev",
@@ -1811,9 +1967,7 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       defaultEnv: {
         SOCKET_API_KEY: "",
       },
-      tools: [
-        { name: "depscore", description: "Query dependency security scores" },
-      ],
+      tools: [{ name: "depscore", description: "Query dependency security scores" }],
       tags: ["socket", "security", "dependencies", "npm"],
       category: "devtools",
       verified: true,
@@ -1821,7 +1975,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "metabase",
       name: "Metabase",
-      description: "High-performance MCP server for Metabase analytics. Requires METABASE_URL and METABASE_API_KEY.",
+      description:
+        "High-performance MCP server for Metabase analytics. Requires METABASE_URL and METABASE_API_KEY.",
       version: "1.0.14",
       author: "CognitionAI",
       homepage: "https://metabase.com",
@@ -1873,7 +2028,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "growthbook",
       name: "GrowthBook",
-      description: "Feature flags and A/B testing. Create experiments, manage SDK connections. Requires GB_API_KEY and GB_EMAIL.",
+      description:
+        "Feature flags and A/B testing. Create experiments, manage SDK connections. Requires GB_API_KEY and GB_EMAIL.",
       version: "1.8.1",
       author: "GrowthBook",
       homepage: "https://growthbook.io",
@@ -1900,7 +2056,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "drafts",
       name: "Drafts",
-      description: "MCP server for the Drafts app on macOS. Create, search, and manage drafts via AppleScript.",
+      description:
+        "MCP server for the Drafts app on macOS. Create, search, and manage drafts via AppleScript.",
       version: "1.0.5",
       author: "Agile Tortoise",
       homepage: "https://getdrafts.com",
@@ -1950,7 +2107,8 @@ function getConnectorEntries(): MCPRegistryEntry[] {
     {
       id: "tomba",
       name: "Tomba",
-      description: "MCP server for Tomba email finder and verification API. Requires TOMBA_API_KEY and TOMBA_SECRET_KEY.",
+      description:
+        "MCP server for Tomba email finder and verification API. Requires TOMBA_API_KEY and TOMBA_SECRET_KEY.",
       version: "1.6.0",
       author: "Tomba.io",
       homepage: "https://tomba.io",
@@ -2321,7 +2479,10 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       tools: [
         { name: "morningstar.health", description: "Check connector health and auth status" },
         { name: "morningstar.search", description: "Search Morningstar data" },
-        { name: "morningstar.get_company_profile", description: "Get company or fund profile data" },
+        {
+          name: "morningstar.get_company_profile",
+          description: "Get company or fund profile data",
+        },
         { name: "morningstar.get_market_data", description: "Get market data" },
         { name: "morningstar.get_financials", description: "Get financial data" },
       ],
@@ -2447,7 +2608,10 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       tools: [
         { name: "chronograph.health", description: "Check connector health and auth status" },
         { name: "chronograph.search", description: "Search portfolio or fund data" },
-        { name: "chronograph.get_company_profile", description: "Get portfolio company profile data" },
+        {
+          name: "chronograph.get_company_profile",
+          description: "Get portfolio company profile data",
+        },
         { name: "chronograph.get_financials", description: "Get portfolio company financials" },
         { name: "chronograph.get_documents", description: "Get support documents" },
       ],
@@ -2557,7 +2721,7 @@ export function getBuiltinRegistryServer(serverId: string): MCPRegistryEntry | u
 }
 
 function mergeLocalConnectors(registry: MCPRegistry): MCPRegistry {
-  const localConnectors = getConnectorEntries();
+  const localConnectors = [...BASE_BUILTIN_SERVERS, ...getConnectorEntries()];
   const existingIds = new Set(registry.servers.map((s) => s.id));
   const existingNames = new Set(registry.servers.map((s) => s.name.toLowerCase()));
   const mergedServers = [...registry.servers];
@@ -2577,6 +2741,17 @@ function mergeLocalConnectors(registry: MCPRegistry): MCPRegistry {
 
 function validateManualEntry(entry: MCPRegistryEntry): void {
   if (entry.installMethod !== "manual") return;
+
+  if (entry.transport !== "stdio") {
+    if (!entry.defaultUrl) {
+      throw new Error(`Remote server ${entry.name} is missing a URL`);
+    }
+    const url = new URL(entry.defaultUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error(`Remote server ${entry.name} must use an http:// or https:// URL`);
+    }
+    return;
+  }
 
   const command = entry.defaultCommand || entry.installCommand;
   if (!command) {
@@ -2627,18 +2802,13 @@ function isValidNpmPackageName(packageName: string): boolean {
 
 function npmViewVersion(packageName: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
-      "npm",
-      ["view", packageName, "version"],
-      { timeout: 15000 },
-      (error, stdout) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(stdout);
-      },
-    );
+    execFile("npm", ["view", packageName, "version"], { timeout: 15000 }, (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
   });
 }
 
@@ -2812,7 +2982,10 @@ export class MCPRegistryManager {
     // Check if already installed
     const settings = MCPSettingsManager.loadSettings();
     const existingIndex = settings.servers.findIndex(
-      (s) => s.name === entry.name || (entry.packageName && s.command?.includes(entry.packageName)),
+      (s) =>
+        s.registryId === entry.id ||
+        s.name === entry.name ||
+        (entry.packageName && s.command?.includes(entry.packageName)),
     );
 
     if (existingIndex !== -1) {
@@ -2843,9 +3016,14 @@ export class MCPRegistryManager {
       // Manual/local connectors usually require credentials first.
       enabled: enabledByDefault,
       transport: entry.transport,
-      command: entry.defaultCommand || entry.installCommand,
-      args: [...(entry.defaultArgs || []), ...(extraArgs || [])],
-      env: entry.defaultEnv,
+      ...(entry.transport === "stdio"
+        ? {
+            command: entry.defaultCommand || entry.installCommand,
+            args: [...(entry.defaultArgs || []), ...(extraArgs || [])],
+            env: entry.defaultEnv,
+          }
+        : { url: entry.defaultUrl }),
+      registryId: entry.id,
       version: entry.version,
       author: entry.author,
       homepage: entry.homepage,
@@ -2883,6 +3061,7 @@ export class MCPRegistryManager {
     const checkPromises = settings.servers.map(async (installed) => {
       const entry = registry.servers.find(
         (e) =>
+          e.id === installed.registryId ||
           e.name === installed.name ||
           (e.packageName && installed.command?.includes(e.packageName)),
       );
@@ -2944,7 +3123,9 @@ export class MCPRegistryManager {
     const registry = await this.fetchRegistry(true);
     const entry = registry.servers.find(
       (e) =>
-        e.name === installed.name || (e.packageName && installed.command?.includes(e.packageName)),
+        e.id === installed.registryId ||
+        e.name === installed.name ||
+        (e.packageName && installed.command?.includes(e.packageName)),
     );
 
     if (!entry) {
@@ -2961,11 +3142,21 @@ export class MCPRegistryManager {
       }
     }
 
-    const updatedConfig: Partial<MCPServerConfig> = {
-      version,
-      command: entry.defaultCommand || entry.installCommand,
-      args: entry.defaultArgs,
-    };
+    const updatedConfig: Partial<MCPServerConfig> =
+      entry.transport === "stdio"
+        ? {
+            version,
+            command: entry.defaultCommand || entry.installCommand,
+            args: entry.defaultArgs,
+          }
+        : {
+            version,
+            transport: entry.transport,
+            url: entry.defaultUrl,
+            command: undefined,
+            args: undefined,
+            env: undefined,
+          };
 
     const result = MCPSettingsManager.updateServer(serverId, updatedConfig);
     if (!result) {

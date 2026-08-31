@@ -33,7 +33,9 @@ describe("buildApprovalCommandPreview", () => {
   });
 
   it("caps extremely long previews", () => {
-    const preview = buildApprovalCommandPreview(Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"));
+    const preview = buildApprovalCommandPreview(
+      Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"),
+    );
 
     expect(preview.truncated).toBe(true);
     expect(preview.text).toContain("[preview truncated:");

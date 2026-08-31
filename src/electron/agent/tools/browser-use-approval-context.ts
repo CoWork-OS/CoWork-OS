@@ -60,7 +60,9 @@ export function resolveBrowserUseApprovalTarget({
   input,
   currentUrl,
 }: BrowserUseApprovalTargetArgs): { url: string; origin: string; domain: string } | null {
-  const normalizedToolName = String(toolName || "").trim().toLowerCase();
+  const normalizedToolName = String(toolName || "")
+    .trim()
+    .toLowerCase();
   if (!isBrowserUseToolName(normalizedToolName)) return null;
   if (normalizedToolName === "browser_navigate") {
     return parseHttpTarget(readString(input, "url"));

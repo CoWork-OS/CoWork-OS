@@ -364,13 +364,7 @@ export class KnowledgeGraphRepository {
          OR (source_entity_id = ? AND target_entity_id = ?))
       ${validity.clause}
     `);
-    const rows = stmt.all(
-      entityId1,
-      entityId2,
-      entityId2,
-      entityId1,
-      ...validity.params,
-    ) as Any[];
+    const rows = stmt.all(entityId1, entityId2, entityId2, entityId1, ...validity.params) as Any[];
     return rows.map((r) => this.mapEdge(r));
   }
 
@@ -467,7 +461,12 @@ export class KnowledgeGraphRepository {
 
   // ─── Graph Traversal ──────────────────────────────────────────────
 
-  getNeighbors(entityId: string, depth = 1, edgeTypes?: string[], asOf?: number): KGNeighborResult[] {
+  getNeighbors(
+    entityId: string,
+    depth = 1,
+    edgeTypes?: string[],
+    asOf?: number,
+  ): KGNeighborResult[] {
     const maxDepth = Math.min(Math.max(1, depth), 3);
     const results: KGNeighborResult[] = [];
     const visited = new Set<string>([entityId]);

@@ -3,6 +3,7 @@ import {
   getAliasesForCanonicalTool,
   getToolSemantics,
   canonicalizeToolName,
+  isFileMutationToolName,
 } from "../tool-semantics";
 
 describe("tool-semantics artifact coverage", () => {
@@ -37,5 +38,11 @@ describe("tool-semantics artifact coverage", () => {
     expect(getAliasesForCanonicalTool("create_presentation")).toEqual(
       expect.arrayContaining(["create_presentation", "generate_presentation"]),
     );
+  });
+
+  it("classifies structural file operations as mutations", () => {
+    expect(isFileMutationToolName("rename_file")).toBe(true);
+    expect(isFileMutationToolName("delete_file")).toBe(true);
+    expect(isFileMutationToolName("create_directory")).toBe(true);
   });
 });

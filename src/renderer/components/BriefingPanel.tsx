@@ -207,7 +207,9 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
           Workspace
         </label>
         {workspacesLoading ? (
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Loading workspaces...</div>
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            Loading workspaces...
+          </div>
         ) : workspaces.length > 0 ? (
           <select
             value={effectiveWorkspaceId}
@@ -260,7 +262,10 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
               fontSize: 13,
             }}
           >
-            <Sun size={32} style={{ opacity: 0.4, marginBottom: 12, color: "var(--color-text-muted)" }} />
+            <Sun
+              size={32}
+              style={{ opacity: 0.4, marginBottom: 12, color: "var(--color-text-muted)" }}
+            />
             <div style={{ color: "var(--color-text)" }}>No briefing yet</div>
             <div style={{ fontSize: 11, marginTop: 4, color: "var(--color-text-muted)" }}>
               {effectiveWorkspaceId

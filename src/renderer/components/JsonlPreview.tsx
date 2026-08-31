@@ -75,13 +75,7 @@ export function parseJsonlPreview(content: string): JsonlRecord[] | null {
   return records.length > 0 ? records : null;
 }
 
-export function JsonlPreview({
-  content,
-  truncated,
-}: {
-  content: string;
-  truncated?: boolean;
-}) {
+export function JsonlPreview({ content, truncated }: { content: string; truncated?: boolean }) {
   const records = parseJsonlPreview(content);
   if (!records) return null;
 
@@ -90,7 +84,9 @@ export function JsonlPreview({
       <div className="jsonl-preview-header">
         <div className="jsonl-preview-title">
           <span className="jsonl-preview-kicker">JSONL</span>
-          <span>{records.length} record{records.length === 1 ? "" : "s"}</span>
+          <span>
+            {records.length} record{records.length === 1 ? "" : "s"}
+          </span>
         </div>
         {truncated ? <span className="jsonl-preview-note">Preview truncated</span> : null}
       </div>
@@ -101,12 +97,15 @@ export function JsonlPreview({
               ? (record.value as Record<string, unknown>)
               : null;
           const level = objectRecord ? readStringField(objectRecord, ["level", "severity"]) : "";
-          const timestamp = objectRecord ? readStringField(objectRecord, ["timestamp", "time", "ts"]) : "";
+          const timestamp = objectRecord
+            ? readStringField(objectRecord, ["timestamp", "time", "ts"])
+            : "";
           const component = objectRecord
             ? readStringField(objectRecord, ["component", "source", "logger", "name"])
             : "";
           const message = objectRecord
-            ? readStringField(objectRecord, ["message", "msg", "text", "event"]) || toDisplayText(record.value)
+            ? readStringField(objectRecord, ["message", "msg", "text", "event"]) ||
+              toDisplayText(record.value)
             : toDisplayText(record.value);
           const details = objectRecord
             ? Object.entries(objectRecord).filter(([key]) => !SUMMARY_KEYS.has(key.toLowerCase()))

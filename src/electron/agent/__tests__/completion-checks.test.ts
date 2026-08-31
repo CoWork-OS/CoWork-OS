@@ -14,21 +14,36 @@ describe("evaluateDomainCompletion", () => {
   // ── Not-last-step: always passes ────────────────────────────────────
   it("passes when isLastStep=false regardless of text", () => {
     expect(
-      evaluateDomainCompletion({ domain: "research", isLastStep: false, assistantText: "", hadAnyToolSuccess: false }),
+      evaluateDomainCompletion({
+        domain: "research",
+        isLastStep: false,
+        assistantText: "",
+        hadAnyToolSuccess: false,
+      }),
     ).toEqual({ failed: false });
   });
 
   // ── Code/operations: always passes ──────────────────────────────────
   it("passes for code domain with no text and no tool success", () => {
     expect(
-      evaluateDomainCompletion({ domain: "code", isLastStep: true, assistantText: "", hadAnyToolSuccess: false }),
+      evaluateDomainCompletion({
+        domain: "code",
+        isLastStep: true,
+        assistantText: "",
+        hadAnyToolSuccess: false,
+      }),
     ).toEqual({ failed: false });
   });
 
   // ── No tool success, no text ─────────────────────────────────────────
   it("passes for non-code domain with no text and no tool success (graceful)", () => {
     expect(
-      evaluateDomainCompletion({ domain: "general", isLastStep: true, assistantText: "", hadAnyToolSuccess: false }),
+      evaluateDomainCompletion({
+        domain: "general",
+        isLastStep: true,
+        assistantText: "",
+        hadAnyToolSuccess: false,
+      }),
     ).toEqual({ failed: false });
   });
 

@@ -102,7 +102,15 @@ describeWithSqlite("DatabaseManager legacy_type migration", () => {
         `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run("task-1", "Payload maintenance", "Sanitize event", "completed", "ws-1", Date.now(), Date.now());
+      .run(
+        "task-1",
+        "Payload maintenance",
+        "Sanitize event",
+        "completed",
+        "ws-1",
+        Date.now(),
+        Date.now(),
+      );
     seedDb
       .prepare(
         `

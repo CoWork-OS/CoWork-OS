@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { LLMMessage } from "../../llm";
-import {
-  FileOperationTracker,
-  ToolFailureTracker,
-} from "../../executor-helpers";
+import { FileOperationTracker, ToolFailureTracker } from "../../executor-helpers";
 import {
   SessionRuntime,
   type SessionRuntimeDeps,
@@ -652,7 +649,9 @@ describe("SessionRuntime", () => {
 
     harness.runtime.saveSnapshot({ description: "Plan summary" });
 
-    const snapshotEvent = harness.emittedEvents.find((event) => event.type === "conversation_snapshot");
+    const snapshotEvent = harness.emittedEvents.find(
+      (event) => event.type === "conversation_snapshot",
+    );
     expect(snapshotEvent?.payload.schema).toBe("session_runtime_v2");
     expect(snapshotEvent?.payload.version).toBe(2);
     expect(snapshotEvent?.payload.messageCount).toBe(2);
@@ -681,7 +680,9 @@ describe("SessionRuntime", () => {
 
     harness.runtime.saveSnapshot();
 
-    const snapshotEvent = harness.emittedEvents.find((event) => event.type === "conversation_snapshot");
+    const snapshotEvent = harness.emittedEvents.find(
+      (event) => event.type === "conversation_snapshot",
+    );
     expect(snapshotEvent?.payload.promptCache).toEqual({
       stableSystemBlocks: [
         {
@@ -755,9 +756,9 @@ describe("SessionRuntime", () => {
     expect(String(restoredFirstMessage?.content || "")).toContain("PREVIOUS TASK CONTEXT:");
     expect(harness.runtime.state.usage.totalInputTokens).toBe(12);
     expect(harness.runtime.state.usage.totalOutputTokens).toBe(8);
-    expect(
-      harness.emittedEvents.some((event) => event.type === "conversation_snapshot"),
-    ).toBe(true);
+    expect(harness.emittedEvents.some((event) => event.type === "conversation_snapshot")).toBe(
+      true,
+    );
   });
 
   it("prefers a V2 snapshot over a legacy checkpoint payload when restoring", () => {
@@ -807,9 +808,13 @@ describe("SessionRuntime", () => {
     harness.runtime.setVerificationAgentState({ verdict: "PASS" });
 
     expect(harness.runtime.getVerificationState().verificationEvidenceEntries).toHaveLength(1);
-    expect(harness.runtime.getVerificationState().blockingVerificationFailedStepIds.has("step-1")).toBe(true);
+    expect(
+      harness.runtime.getVerificationState().blockingVerificationFailedStepIds.has("step-1"),
+    ).toBe(true);
     expect(harness.runtime.getVerificationState().dispatchedMentionedAgents).toBe(true);
-    expect(harness.runtime.getVerificationState().verificationAgentState).toEqual({ verdict: "PASS" });
+    expect(harness.runtime.getVerificationState().verificationAgentState).toEqual({
+      verdict: "PASS",
+    });
 
     harness.runtime.resetVerificationState();
 

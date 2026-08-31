@@ -38,11 +38,25 @@ import {
   IntegrationMentionSelection,
 } from "../../../shared/types";
 import type { ChatInlineFrame } from "../../../shared/mailbox";
-import { parseLeadingSkillSlashCommand } from "../../../shared/skill-slash-commands";
 import {
-  parseOnboardingSlashCommand,
-} from "../../../shared/onboarding";
+  BUILTIN_ACCESS_PROFILE_IDS,
+  BUILTIN_ACCESS_PROFILES,
+  getLegacyPermissionModeForAccessProfile,
+  getAccessProfileLabel,
+  hasAccessProfileScope,
+  isFullAccessProfile,
+  resolveAccessProfileDefinition,
+  type AccessProfileDefinition,
+  type AccessProfileId,
+} from "../../../shared/access-profiles";
+import { parseLeadingSkillSlashCommand } from "../../../shared/skill-slash-commands";
+import { parseOnboardingSlashCommand } from "../../../shared/onboarding";
 import { parseLeadingMessageAppShortcut } from "../../../shared/message-shortcuts";
+import {
+  isImageAttachmentMimeType,
+  parseUserMessageAttachmentMetadata,
+  type UserMessageAttachmentMetadata,
+} from "../../../shared/user-message-attachments";
 import {
   buildPersistentGoalAgentConfig,
   buildPersistentGoalPrompt,
@@ -64,7 +78,10 @@ import {
   LLM_WIKI_GUI_PROMPT,
   LLM_WIKI_QUERY_GUI_PROMPT,
 } from "../../../shared/starter-missions";
-import { detectModeSuggestions, type ModeSuggestion } from "../../../shared/mode-suggestion-detection";
+import {
+  detectModeSuggestions,
+  type ModeSuggestion,
+} from "../../../shared/mode-suggestion-detection";
 import { CollaborativeAgentLines } from "../CollaborativeAgentLines";
 import { CollaborativeSummaryPanel } from "../CollaborativeSummaryPanel";
 import { DispatchedAgentsPanel } from "../DispatchedAgentsPanel";
@@ -73,7 +90,11 @@ import { isCliAgentChildTask, resolveCliAgentType } from "../../../shared/cli-ag
 import { MultiLlmSelectionPanel } from "../MultiLlmSelectionPanel";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { AutoMailComposeFrame, MailComposeFrame } from "../MailComposeFrame";
-import type { AgentRoleData, LlmWikiVaultEntry, LlmWikiVaultSummary } from "../../../electron/preload";
+import type {
+  AgentRoleData,
+  LlmWikiVaultEntry,
+  LlmWikiVaultSummary,
+} from "../../../electron/preload";
 import { useVoiceInput } from "../../hooks/useVoiceInput";
 import { useVoiceTalkMode } from "../../hooks/useVoiceTalkMode";
 import { useAgentContext, type AgentContext } from "../../hooks/useAgentContext";
@@ -190,6 +211,7 @@ import {
   isVerificationNoiseEvent,
   shouldRevealInternalAssistantMessageInVerbose,
   getCompletionSummaryText,
+  getAssistantBubbleStatusLabel,
   getAssistantOrCompletionText,
   getUserEventDisplayMessage,
   isLowSignalPauseMessage,
@@ -220,8 +242,10 @@ import {
   MessageForkButton,
   MessageQuoteButton,
   MessageSpeakButton,
+  UserMessageImageGallery,
   UserMessageText,
   getIntegrationMentionsSignature,
+  isLastAssistantMessageEvent,
   normalizeCommitmentText,
   createQuotedAssistantMessage,
   summarizeQuotedAssistantMessage,
@@ -242,7 +266,11 @@ import {
   CARDS_TO_SHOW,
   pickFocusedCards,
 } from "./focused-cards";
-import { TaskAutomationModal, isTurnThisIntoRoutinePrompt, taskCanBecomeRoutineFromFollowUp } from "./TaskAutomationModal";
+import {
+  TaskAutomationModal,
+  isTurnThisIntoRoutinePrompt,
+  taskCanBecomeRoutineFromFollowUp,
+} from "./TaskAutomationModal";
 
 const VISUAL_ATTACHMENT_MIME_SET = new Set([
   "image/jpeg",
@@ -272,6 +300,19 @@ const isVideoVisualAttachmentMimeType = (mimeType: string | undefined): boolean 
 
 const joinWorkspaceRelativePath = (workspacePath: string, relativePath: string): string =>
   `${workspacePath.replace(/[\\/]+$/, "")}/${relativePath.replace(/^[\\/]+/, "")}`;
+
+const getAttachmentNamesWithoutImagePreviews = (
+  names: string[],
+  attachments: UserMessageAttachmentMetadata[],
+): string[] => {
+  const imageNames = new Set(
+    attachments
+      .filter((attachment) => isImageAttachmentMimeType(attachment.mimeType))
+      .map((attachment) => attachment.filename)
+      .filter((filename): filename is string => Boolean(filename)),
+  );
+  return names.filter((name) => !imageNames.has(name));
+};
 
 import {
   type TaskFeedRow,
@@ -378,10 +419,7 @@ function extractInboxAskQuery(
   return query.replace(/\s+/g, " ").trim();
 }
 
-function getIntegrationMentionSearchRank(
-  option: IntegrationMentionOption,
-  query: string,
-): number {
+function getIntegrationMentionSearchRank(option: IntegrationMentionOption, query: string): number {
   if (!query) return 0;
   const label = normalizeMentionSearch(option.label);
   if (label === query) return 0;
@@ -444,6 +482,7 @@ interface MainContentProps {
     options?: {
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
+      accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
     },
   ) => void;
@@ -459,14 +498,13 @@ interface MainContentProps {
     prompt: string,
     options?: CreateTaskOptions,
     images?: ImageAttachment[],
-  ) => void;
+  ) => void | Promise<void>;
   onAskInbox?: (query: string) => void;
   onChangeWorkspace?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
   onOpenSettings?: (tab?: SettingsTab) => void;
   onStopTask?: () => void;
-  onEnableShellForPausedTask?: () => void | Promise<void>;
-  onContinueWithoutShellForPausedTask?: () => void | Promise<void>;
+  onContinueWithoutCommandsForPausedTask?: () => void | Promise<void>;
   onWrapUpTask?: () => void;
   inputRequest?: InputRequest | null;
   pendingInputRequests?: InputRequest[];
@@ -563,9 +601,7 @@ function AgentReasoningPanel(props: {
   const [followStream, setFollowStream] = useState(true);
   const stepLabel = currentStep?.description?.trim() || "";
   const hasStreamText = state.activeStreamText.trim().length > 0;
-  const streamSignature = hasStreamText
-    ? state.activeStreamText
-    : state.recentUpdates.join("\n");
+  const streamSignature = hasStreamText ? state.activeStreamText : state.recentUpdates.join("\n");
 
   const handleScroll = useCallback(() => {
     const element = scrollRef.current;
@@ -757,11 +793,7 @@ function MeasuredTaskFeedRow({
     };
   }, [enabled, visiblePerfEventId]);
 
-  return (
-    <div ref={rowRef}>
-      {children}
-    </div>
-  );
+  return <div ref={rowRef}>{children}</div>;
 }
 
 function getTaskFeedRowsSignature(rows: TaskFeedRow[]): string {
@@ -807,474 +839,489 @@ export function TaskSessionLineageFooter({
   );
 }
 
-const TaskConversationRenderedRows = memo(function TaskConversationRenderedRows({
-  taskId,
-  taskSwitchId,
-  hasMoreTimelineHistory,
-  isLoadingTimelineHistory,
-  timelineHistoryError,
-  onLoadMoreTimelineHistory,
-  rendererPerfLoggingEnabled,
-  visibleFeedRows,
-  isChatTask,
-  isTaskWorking,
-  task,
-  formatTime,
-  isReplayMode,
-  transcriptMode,
-  hiddenLiveFeedRowCount,
-  canReturnToLiveView,
-  onShowFullTimeline,
-  onBackToLiveView,
-  reasoningPanel,
-  reasoningPanelSignature,
-  mainBodyRef,
-  timelineRef,
-  getRenderedFeedRow,
-}: {
-  taskId: string | undefined;
-  taskSwitchId?: string | null;
-  hasMoreTimelineHistory?: boolean;
-  isLoadingTimelineHistory?: boolean;
-  timelineHistoryError?: string | null;
-  onLoadMoreTimelineHistory?: () => void | Promise<void>;
-  rendererPerfLoggingEnabled: boolean;
-  visibleFeedRows: TaskFeedRow[];
-  isChatTask: boolean;
-  isTaskWorking: boolean;
-  task: Task | null | undefined;
-  formatTime: (timestamp: number) => string;
-  isReplayMode: boolean;
-  transcriptMode: TranscriptMode;
-  hiddenLiveFeedRowCount: number;
-  canReturnToLiveView: boolean;
-  onShowFullTimeline: () => void;
-  onBackToLiveView: () => void;
-  reasoningPanel?: React.ReactNode;
-  reasoningPanelSignature: string;
-  mainBodyRef: React.RefObject<HTMLDivElement | null>;
-  timelineRef: React.RefObject<HTMLDivElement | null>;
-  getRenderedFeedRow: (row: TaskFeedRow) => React.ReactNode;
-}) {
-  recordRendererRender(
-    "MainContent.taskConversationFlow",
-    taskId ? `task:${taskId}` : "task:none",
+const TaskConversationRenderedRows = memo(
+  function TaskConversationRenderedRows({
+    taskId,
+    taskSwitchId,
+    hasMoreTimelineHistory,
+    isLoadingTimelineHistory,
+    timelineHistoryError,
+    onLoadMoreTimelineHistory,
     rendererPerfLoggingEnabled,
-  );
-  void reasoningPanelSignature;
-  void hasMoreTimelineHistory;
-  void timelineHistoryError;
-
-  const historyPrependAnchorRef = useRef<{
+    visibleFeedRows,
+    isChatTask,
+    isTaskWorking,
+    task,
+    formatTime,
+    isReplayMode,
+    transcriptMode,
+    hiddenLiveFeedRowCount,
+    canReturnToLiveView,
+    onShowFullTimeline,
+    onBackToLiveView,
+    reasoningPanel,
+    reasoningPanelSignature,
+    mainBodyRef,
+    timelineRef,
+    getRenderedFeedRow,
+  }: {
     taskId: string | undefined;
-    scrollTop: number;
-    scrollHeight: number;
-    rowCount: number;
-    observedLoading: boolean;
-  } | null>(null);
-  const [suppressVirtualAutoScroll, setSuppressVirtualAutoScroll] = useState(false);
-
-  const renderableFeedRows = useMemo(
-    () => visibleFeedRows,
-    [visibleFeedRows],
-  );
-  const handleLoadMoreTimelineHistory = useCallback(() => {
-    const container = mainBodyRef.current;
-    if (container) {
-      historyPrependAnchorRef.current = {
-        taskId,
-        scrollTop: container.scrollTop,
-        scrollHeight: container.scrollHeight,
-        rowCount: renderableFeedRows.length,
-        observedLoading: false,
-      };
-    }
-    setSuppressVirtualAutoScroll(true);
-    void onLoadMoreTimelineHistory?.();
-  }, [mainBodyRef, onLoadMoreTimelineHistory, renderableFeedRows.length, taskId]);
-  const startupRowsMarkedRef = useRef(false);
-  const timelineRowsMarkedTaskIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (startupRowsMarkedRef.current || visibleFeedRows.length === 0) return;
-    startupRowsMarkedRef.current = true;
-    markRendererStartup("first_task_rows_ready", rendererPerfLoggingEnabled, {
-      rows: visibleFeedRows.length,
-      taskId: taskId ?? "none",
-    });
-  }, [rendererPerfLoggingEnabled, taskId, visibleFeedRows.length]);
-  useEffect(() => {
-    const markKey = `${taskId ?? "none"}:${taskSwitchId ?? "initial"}`;
-    if (!taskId || visibleFeedRows.length === 0 || timelineRowsMarkedTaskIdsRef.current.has(markKey)) {
-      return;
-    }
-    timelineRowsMarkedTaskIdsRef.current.add(markKey);
-    markRendererPerfEvent("timeline_first_rows_ready", rendererPerfLoggingEnabled, {
-      rows: visibleFeedRows.length,
-      taskId,
-      switchId: taskSwitchId,
-    });
-  }, [rendererPerfLoggingEnabled, taskId, taskSwitchId, visibleFeedRows.length]);
-  const useVirtualizedFeed =
-    transcriptMode !== "delivery" &&
-    renderableFeedRows.length >= VIRTUALIZED_FEED_ROW_THRESHOLD &&
-    !isReplayMode;
-  const [feedRowHeights, setFeedRowHeights] = useState<Map<string, number>>(() => new Map());
-  const feedRowHeightsRef = useRef<Map<string, number>>(new Map());
-  const feedRowHeightSignaturesRef = useRef<Map<string, string>>(new Map());
-  const pendingFeedRowHeightsRef = useRef<Map<string, number>>(new Map());
-  const feedRowHeightFlushFrameRef = useRef<number | null>(null);
-  const [conversationFlowOffsetTop, setConversationFlowOffsetTop] = useState(0);
-  const conversationFlowRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    feedRowHeightsRef.current = feedRowHeights;
-  }, [feedRowHeights]);
-
-  useEffect(() => {
-    const activeSignatures = new Map(
-      renderableFeedRows.map((row) => [
-        row.key,
-        `${TASK_FEED_MEASUREMENT_LAYOUT_VERSION}:${row.revision}:${row.estimatedHeight}`,
-      ]),
+    taskSwitchId?: string | null;
+    hasMoreTimelineHistory?: boolean;
+    isLoadingTimelineHistory?: boolean;
+    timelineHistoryError?: string | null;
+    onLoadMoreTimelineHistory?: () => void | Promise<void>;
+    rendererPerfLoggingEnabled: boolean;
+    visibleFeedRows: TaskFeedRow[];
+    isChatTask: boolean;
+    isTaskWorking: boolean;
+    task: Task | null | undefined;
+    formatTime: (timestamp: number) => string;
+    isReplayMode: boolean;
+    transcriptMode: TranscriptMode;
+    hiddenLiveFeedRowCount: number;
+    canReturnToLiveView: boolean;
+    onShowFullTimeline: () => void;
+    onBackToLiveView: () => void;
+    reasoningPanel?: React.ReactNode;
+    reasoningPanelSignature: string;
+    mainBodyRef: React.RefObject<HTMLDivElement | null>;
+    timelineRef: React.RefObject<HTMLDivElement | null>;
+    getRenderedFeedRow: (row: TaskFeedRow) => React.ReactNode;
+  }) {
+    recordRendererRender(
+      "MainContent.taskConversationFlow",
+      taskId ? `task:${taskId}` : "task:none",
+      rendererPerfLoggingEnabled,
     );
-    const previousSignatures = feedRowHeightSignaturesRef.current;
-    feedRowHeightSignaturesRef.current = activeSignatures;
-    setFeedRowHeights((prev) => {
-      let changed = false;
-      const next = new Map<string, number>();
-      for (const [key, value] of prev.entries()) {
-        const activeSignature = activeSignatures.get(key);
-        if (!activeSignature || previousSignatures.get(key) !== activeSignature) {
-          changed = true;
-          continue;
-        }
-        next.set(key, value);
-      }
-      if (changed) {
-        feedRowHeightsRef.current = next;
-      }
-      return changed ? next : prev;
-    });
-  }, [renderableFeedRows]);
+    void reasoningPanelSignature;
+    void hasMoreTimelineHistory;
+    void timelineHistoryError;
 
-  useEffect(() => {
-    if (!rendererPerfLoggingEnabled) return;
-    for (const row of renderableFeedRows) {
-      const visiblePerfEventId = getTaskFeedRowVisiblePerfEventId(row);
-      if (!visiblePerfEventId) continue;
-      markTaskEventRenderable({ id: visiblePerfEventId }, rendererPerfLoggingEnabled);
-    }
-  }, [renderableFeedRows, rendererPerfLoggingEnabled]);
+    const historyPrependAnchorRef = useRef<{
+      taskId: string | undefined;
+      scrollTop: number;
+      scrollHeight: number;
+      rowCount: number;
+      observedLoading: boolean;
+    } | null>(null);
+    const [suppressVirtualAutoScroll, setSuppressVirtualAutoScroll] = useState(false);
 
-  const flushFeedRowHeights = useCallback(() => {
-    feedRowHeightFlushFrameRef.current = null;
-    setFeedRowHeights((prev) => {
-      if (pendingFeedRowHeightsRef.current.size === 0) return prev;
-
-      let changed = false;
-      const next = new Map(prev);
-      for (const [itemKey, nextHeight] of pendingFeedRowHeightsRef.current.entries()) {
-        const currentHeight = next.get(itemKey);
-        if (currentHeight !== undefined && Math.abs(currentHeight - nextHeight) < 2) {
-          continue;
-        }
-        next.set(itemKey, nextHeight);
-        changed = true;
+    const renderableFeedRows = useMemo(() => visibleFeedRows, [visibleFeedRows]);
+    const handleLoadMoreTimelineHistory = useCallback(() => {
+      const container = mainBodyRef.current;
+      if (container) {
+        historyPrependAnchorRef.current = {
+          taskId,
+          scrollTop: container.scrollTop,
+          scrollHeight: container.scrollHeight,
+          rowCount: renderableFeedRows.length,
+          observedLoading: false,
+        };
       }
-      pendingFeedRowHeightsRef.current.clear();
-      if (changed) {
-        feedRowHeightsRef.current = next;
-      }
-      return changed ? next : prev;
-    });
-  }, []);
-
-  const handleFeedRowHeightChange = useCallback(
-    (itemKey: string, height: number) => {
-      const pendingHeight = pendingFeedRowHeightsRef.current.get(itemKey);
-      const currentHeight = pendingHeight ?? feedRowHeightsRef.current.get(itemKey);
-      if (currentHeight !== undefined && Math.abs(currentHeight - height) < 2) {
+      setSuppressVirtualAutoScroll(true);
+      void onLoadMoreTimelineHistory?.();
+    }, [mainBodyRef, onLoadMoreTimelineHistory, renderableFeedRows.length, taskId]);
+    const startupRowsMarkedRef = useRef(false);
+    const timelineRowsMarkedTaskIdsRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+      if (startupRowsMarkedRef.current || visibleFeedRows.length === 0) return;
+      startupRowsMarkedRef.current = true;
+      markRendererStartup("first_task_rows_ready", rendererPerfLoggingEnabled, {
+        rows: visibleFeedRows.length,
+        taskId: taskId ?? "none",
+      });
+    }, [rendererPerfLoggingEnabled, taskId, visibleFeedRows.length]);
+    useEffect(() => {
+      const markKey = `${taskId ?? "none"}:${taskSwitchId ?? "initial"}`;
+      if (
+        !taskId ||
+        visibleFeedRows.length === 0 ||
+        timelineRowsMarkedTaskIdsRef.current.has(markKey)
+      ) {
         return;
       }
-      pendingFeedRowHeightsRef.current.set(itemKey, height);
-      if (feedRowHeightFlushFrameRef.current !== null) return;
-      feedRowHeightFlushFrameRef.current = window.requestAnimationFrame(flushFeedRowHeights);
-    },
-    [flushFeedRowHeights],
-  );
+      timelineRowsMarkedTaskIdsRef.current.add(markKey);
+      markRendererPerfEvent("timeline_first_rows_ready", rendererPerfLoggingEnabled, {
+        rows: visibleFeedRows.length,
+        taskId,
+        switchId: taskSwitchId,
+      });
+    }, [rendererPerfLoggingEnabled, taskId, taskSwitchId, visibleFeedRows.length]);
+    const useVirtualizedFeed =
+      transcriptMode !== "delivery" &&
+      renderableFeedRows.length >= VIRTUALIZED_FEED_ROW_THRESHOLD &&
+      !isReplayMode;
+    const [feedRowHeights, setFeedRowHeights] = useState<Map<string, number>>(() => new Map());
+    const feedRowHeightsRef = useRef<Map<string, number>>(new Map());
+    const feedRowHeightSignaturesRef = useRef<Map<string, string>>(new Map());
+    const pendingFeedRowHeightsRef = useRef<Map<string, number>>(new Map());
+    const feedRowHeightFlushFrameRef = useRef<number | null>(null);
+    const [conversationFlowOffsetTop, setConversationFlowOffsetTop] = useState(0);
+    const conversationFlowRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(
-    () => () => {
-      if (feedRowHeightFlushFrameRef.current !== null) {
-        cancelAnimationFrame(feedRowHeightFlushFrameRef.current);
-        feedRowHeightFlushFrameRef.current = null;
-      }
-    },
-    [],
-  );
+    useEffect(() => {
+      feedRowHeightsRef.current = feedRowHeights;
+    }, [feedRowHeights]);
 
-  const setConversationFlowNode = useCallback(
-    (node: HTMLDivElement | null) => {
-      conversationFlowRef.current = node;
-      assignTimelineRef(timelineRef, node);
-    },
-    [timelineRef],
-  );
-
-  useEffect(() => {
-    if (!useVirtualizedFeed) {
-      setConversationFlowOffsetTop(0);
-      return;
-    }
-
-    const flow = conversationFlowRef.current;
-    if (!flow) return;
-
-    let frame = requestAnimationFrame(() => {
-      const nextOffset = Math.max(0, flow.offsetTop);
-      setConversationFlowOffsetTop((prev) =>
-        Math.abs(prev - nextOffset) < 1 ? prev : nextOffset,
+    useEffect(() => {
+      const activeSignatures = new Map(
+        renderableFeedRows.map((row) => [
+          row.key,
+          `${TASK_FEED_MEASUREMENT_LAYOUT_VERSION}:${row.revision}:${row.estimatedHeight}`,
+        ]),
       );
+      const previousSignatures = feedRowHeightSignaturesRef.current;
+      feedRowHeightSignaturesRef.current = activeSignatures;
+      setFeedRowHeights((prev) => {
+        let changed = false;
+        const next = new Map<string, number>();
+        for (const [key, value] of prev.entries()) {
+          const activeSignature = activeSignatures.get(key);
+          if (!activeSignature || previousSignatures.get(key) !== activeSignature) {
+            changed = true;
+            continue;
+          }
+          next.set(key, value);
+        }
+        if (changed) {
+          feedRowHeightsRef.current = next;
+        }
+        return changed ? next : prev;
+      });
+    }, [renderableFeedRows]);
+
+    useEffect(() => {
+      if (!rendererPerfLoggingEnabled) return;
+      for (const row of renderableFeedRows) {
+        const visiblePerfEventId = getTaskFeedRowVisiblePerfEventId(row);
+        if (!visiblePerfEventId) continue;
+        markTaskEventRenderable({ id: visiblePerfEventId }, rendererPerfLoggingEnabled);
+      }
+    }, [renderableFeedRows, rendererPerfLoggingEnabled]);
+
+    const flushFeedRowHeights = useCallback(() => {
+      feedRowHeightFlushFrameRef.current = null;
+      setFeedRowHeights((prev) => {
+        if (pendingFeedRowHeightsRef.current.size === 0) return prev;
+
+        let changed = false;
+        const next = new Map(prev);
+        for (const [itemKey, nextHeight] of pendingFeedRowHeightsRef.current.entries()) {
+          const currentHeight = next.get(itemKey);
+          if (currentHeight !== undefined && Math.abs(currentHeight - nextHeight) < 2) {
+            continue;
+          }
+          next.set(itemKey, nextHeight);
+          changed = true;
+        }
+        pendingFeedRowHeightsRef.current.clear();
+        if (changed) {
+          feedRowHeightsRef.current = next;
+        }
+        return changed ? next : prev;
+      });
+    }, []);
+
+    const handleFeedRowHeightChange = useCallback(
+      (itemKey: string, height: number) => {
+        const pendingHeight = pendingFeedRowHeightsRef.current.get(itemKey);
+        const currentHeight = pendingHeight ?? feedRowHeightsRef.current.get(itemKey);
+        if (currentHeight !== undefined && Math.abs(currentHeight - height) < 2) {
+          return;
+        }
+        pendingFeedRowHeightsRef.current.set(itemKey, height);
+        if (feedRowHeightFlushFrameRef.current !== null) return;
+        feedRowHeightFlushFrameRef.current = window.requestAnimationFrame(flushFeedRowHeights);
+      },
+      [flushFeedRowHeights],
+    );
+
+    useEffect(
+      () => () => {
+        if (feedRowHeightFlushFrameRef.current !== null) {
+          cancelAnimationFrame(feedRowHeightFlushFrameRef.current);
+          feedRowHeightFlushFrameRef.current = null;
+        }
+      },
+      [],
+    );
+
+    const setConversationFlowNode = useCallback(
+      (node: HTMLDivElement | null) => {
+        conversationFlowRef.current = node;
+        assignTimelineRef(timelineRef, node);
+      },
+      [timelineRef],
+    );
+
+    useEffect(() => {
+      if (!useVirtualizedFeed) {
+        setConversationFlowOffsetTop(0);
+        return;
+      }
+
+      const flow = conversationFlowRef.current;
+      if (!flow) return;
+
+      let frame = requestAnimationFrame(() => {
+        const nextOffset = Math.max(0, flow.offsetTop);
+        setConversationFlowOffsetTop((prev) =>
+          Math.abs(prev - nextOffset) < 1 ? prev : nextOffset,
+        );
+      });
+
+      return () => {
+        cancelAnimationFrame(frame);
+      };
+    }, [useVirtualizedFeed, renderableFeedRows.length]);
+
+    const {
+      virtualItems: virtualFeedRows,
+      totalHeight: virtualFeedTotalHeight,
+      visibleStartIndex,
+      isAtBottom,
+    } = useVirtualList({
+      items: renderableFeedRows,
+      containerRef: mainBodyRef as React.RefObject<HTMLElement | null>,
+      getItemHeight: (row) => feedRowHeights.get(row.key) ?? row.estimatedHeight,
+      estimatedItemHeight: 160,
+      overscan: 4,
+      enabled: useVirtualizedFeed,
+      scrollOffsetTop: conversationFlowOffsetTop,
+      suppressAutoScrollOnItemsChange: suppressVirtualAutoScroll,
     });
+    useEffect(() => {
+      if (
+        !useVirtualizedFeed ||
+        !hasMoreTimelineHistory ||
+        isLoadingTimelineHistory ||
+        isAtBottom ||
+        visibleStartIndex > 2
+      ) {
+        return;
+      }
+      handleLoadMoreTimelineHistory();
+    }, [
+      handleLoadMoreTimelineHistory,
+      hasMoreTimelineHistory,
+      isAtBottom,
+      isLoadingTimelineHistory,
+      useVirtualizedFeed,
+      visibleStartIndex,
+    ]);
+    const renderedFeedRows = useMemo(
+      () => (useVirtualizedFeed ? virtualFeedRows.map((row) => row.item) : renderableFeedRows),
+      [useVirtualizedFeed, virtualFeedRows, renderableFeedRows],
+    );
+    const renderedFeedNodeByKey = useMemo(
+      () =>
+        new Map(
+          renderedFeedRows.map((row) => {
+            const node =
+              row.kind === "history-control" ? (
+                <div className="timeline-history-control">
+                  {row.error ? <span className="timeline-history-error">{row.error}</span> : null}
+                  {row.hasMoreHistory ? (
+                    <button
+                      type="button"
+                      className="action-block-show-all-btn"
+                      disabled={row.isLoading}
+                      onClick={handleLoadMoreTimelineHistory}
+                    >
+                      {row.isLoading ? "Loading earlier history..." : "Load earlier history"}
+                    </button>
+                  ) : null}
+                </div>
+              ) : (
+                getRenderedFeedRow(row)
+              );
+            return [row.key, node] as const;
+          }),
+        ),
+      [getRenderedFeedRow, handleLoadMoreTimelineHistory, renderedFeedRows],
+    );
+    useEffect(() => {
+      if (isLoadingTimelineHistory && historyPrependAnchorRef.current) {
+        historyPrependAnchorRef.current.observedLoading = true;
+      }
+    }, [isLoadingTimelineHistory]);
+    useLayoutEffect(() => {
+      if (isLoadingTimelineHistory) return;
+      const anchor = historyPrependAnchorRef.current;
+      const container = mainBodyRef.current;
+      if (!anchor || !container) {
+        if (suppressVirtualAutoScroll) setSuppressVirtualAutoScroll(false);
+        return;
+      }
+      if (!anchor.observedLoading && renderableFeedRows.length === anchor.rowCount) {
+        return;
+      }
+      historyPrependAnchorRef.current = null;
+      if (anchor.taskId !== taskId) {
+        if (suppressVirtualAutoScroll) setSuppressVirtualAutoScroll(false);
+        return;
+      }
 
-    return () => {
-      cancelAnimationFrame(frame);
-    };
-  }, [useVirtualizedFeed, renderableFeedRows.length]);
-
-  const {
-    virtualItems: virtualFeedRows,
-    totalHeight: virtualFeedTotalHeight,
-    visibleStartIndex,
-    isAtBottom,
-  } = useVirtualList({
-    items: renderableFeedRows,
-    containerRef: mainBodyRef as React.RefObject<HTMLElement | null>,
-    getItemHeight: (row) => feedRowHeights.get(row.key) ?? row.estimatedHeight,
-    estimatedItemHeight: 160,
-    overscan: 4,
-    enabled: useVirtualizedFeed,
-    scrollOffsetTop: conversationFlowOffsetTop,
-    suppressAutoScrollOnItemsChange: suppressVirtualAutoScroll,
-  });
-  useEffect(() => {
-    if (
-      !useVirtualizedFeed ||
-      !hasMoreTimelineHistory ||
-      isLoadingTimelineHistory ||
-      isAtBottom ||
-      visibleStartIndex > 2
-    ) {
-      return;
-    }
-    handleLoadMoreTimelineHistory();
-  }, [
-    handleLoadMoreTimelineHistory,
-    hasMoreTimelineHistory,
-    isAtBottom,
-    isLoadingTimelineHistory,
-    useVirtualizedFeed,
-    visibleStartIndex,
-  ]);
-  const renderedFeedRows = useMemo(
-    () => (useVirtualizedFeed ? virtualFeedRows.map((row) => row.item) : renderableFeedRows),
-    [useVirtualizedFeed, virtualFeedRows, renderableFeedRows],
-  );
-  const renderedFeedNodeByKey = useMemo(
-    () =>
-      new Map(
-        renderedFeedRows.map((row) => {
-          const node =
-            row.kind === "history-control" ? (
-              <div className="timeline-history-control">
-                {row.error ? <span className="timeline-history-error">{row.error}</span> : null}
-                {row.hasMoreHistory ? (
-                  <button
-                    type="button"
-                    className="action-block-show-all-btn"
-                    disabled={row.isLoading}
-                    onClick={handleLoadMoreTimelineHistory}
-                  >
-                    {row.isLoading ? "Loading earlier history..." : "Load earlier history"}
-                  </button>
-                ) : null}
-              </div>
-            ) : (
-              getRenderedFeedRow(row)
-            );
-          return [row.key, node] as const;
-        }),
-      ),
-    [getRenderedFeedRow, handleLoadMoreTimelineHistory, renderedFeedRows],
-  );
-  useEffect(() => {
-    if (isLoadingTimelineHistory && historyPrependAnchorRef.current) {
-      historyPrependAnchorRef.current.observedLoading = true;
-    }
-  }, [isLoadingTimelineHistory]);
-  useLayoutEffect(() => {
-    if (isLoadingTimelineHistory) return;
-    const anchor = historyPrependAnchorRef.current;
-    const container = mainBodyRef.current;
-    if (!anchor || !container) {
+      const delta = container.scrollHeight - anchor.scrollHeight;
+      if (delta > 0) {
+        container.scrollTop = anchor.scrollTop + delta;
+      }
       if (suppressVirtualAutoScroll) setSuppressVirtualAutoScroll(false);
-      return;
-    }
-    if (!anchor.observedLoading && renderableFeedRows.length === anchor.rowCount) {
-      return;
-    }
-    historyPrependAnchorRef.current = null;
-    if (anchor.taskId !== taskId) {
-      if (suppressVirtualAutoScroll) setSuppressVirtualAutoScroll(false);
-      return;
-    }
+    }, [
+      isLoadingTimelineHistory,
+      mainBodyRef,
+      renderableFeedRows.length,
+      suppressVirtualAutoScroll,
+      taskId,
+      useVirtualizedFeed,
+      virtualFeedTotalHeight,
+    ]);
+    const showBootstrapProgress = shouldShowBootstrapProgressRow({
+      isTaskWorking,
+      visibleRenderableFeedRowsLength: renderableFeedRows.length,
+      isChatTask,
+    });
+    const bootstrapProgressTitle = getBootstrapProgressTitle(task);
+    const bootstrapProgressTimeLabel =
+      task && typeof task.createdAt === "number" && Number.isFinite(task.createdAt)
+        ? formatTime(task.createdAt)
+        : "";
 
-    const delta = container.scrollHeight - anchor.scrollHeight;
-    if (delta > 0) {
-      container.scrollTop = anchor.scrollTop + delta;
-    }
-    if (suppressVirtualAutoScroll) setSuppressVirtualAutoScroll(false);
-  }, [
-    isLoadingTimelineHistory,
-    mainBodyRef,
-    renderableFeedRows.length,
-    suppressVirtualAutoScroll,
-    taskId,
-    useVirtualizedFeed,
-    virtualFeedTotalHeight,
-  ]);
-  const showBootstrapProgress = shouldShowBootstrapProgressRow({
-    isTaskWorking,
-    visibleRenderableFeedRowsLength: renderableFeedRows.length,
-    isChatTask,
-  });
-  const bootstrapProgressTitle = getBootstrapProgressTitle(task);
-  const bootstrapProgressTimeLabel =
-    task && typeof task.createdAt === "number" && Number.isFinite(task.createdAt)
-      ? formatTime(task.createdAt)
-      : "";
-
-  return (
-    <div className="conversation-flow" ref={setConversationFlowNode}>
-      {transcriptMode === "live" && hiddenLiveFeedRowCount > 0 && (
-        <div
-          style={{
-            marginBottom: 12,
-            padding: "10px 12px",
-            border: "1px solid var(--border-color, rgba(255,255,255,0.12))",
-            borderRadius: 10,
-            background: "var(--surface-secondary, rgba(255,255,255,0.04))",
-            color: "var(--text-secondary, rgba(255,255,255,0.72))",
-            fontSize: 12,
-            lineHeight: 1.45,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <span>
-              Showing the current live work. {hiddenLiveFeedRowCount} earlier
-              {hiddenLiveFeedRowCount === 1 ? " item is" : " items are"} hidden while the task is running.
-            </span>
-            <button type="button" className="action-block-show-all-btn" onClick={onShowFullTimeline}>
-              Show full timeline
+    return (
+      <div className="conversation-flow" ref={setConversationFlowNode}>
+        {transcriptMode === "live" && hiddenLiveFeedRowCount > 0 && (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: "10px 12px",
+              border: "1px solid var(--border-color, rgba(255,255,255,0.12))",
+              borderRadius: 10,
+              background: "var(--surface-secondary, rgba(255,255,255,0.04))",
+              color: "var(--text-secondary, rgba(255,255,255,0.72))",
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <span>
+                Showing the current live work. {hiddenLiveFeedRowCount} earlier
+                {hiddenLiveFeedRowCount === 1 ? " item is" : " items are"} hidden while the task is
+                running.
+              </span>
+              <button
+                type="button"
+                className="action-block-show-all-btn"
+                onClick={onShowFullTimeline}
+              >
+                Show full timeline
+              </button>
+            </div>
+          </div>
+        )}
+        {transcriptMode === "inspect" && canReturnToLiveView && (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: "10px 12px",
+              border: "1px solid var(--border-color, rgba(255,255,255,0.12))",
+              borderRadius: 10,
+              background: "var(--surface-secondary, rgba(255,255,255,0.04))",
+              color: "var(--text-secondary, rgba(255,255,255,0.72))",
+              fontSize: 12,
+              lineHeight: 1.45,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <span>Inspecting the full transcript.</span>
+            <button type="button" className="action-block-show-all-btn" onClick={onBackToLiveView}>
+              Back to live view
             </button>
           </div>
-        </div>
-      )}
-      {transcriptMode === "inspect" && canReturnToLiveView && (
-        <div
-          style={{
-            marginBottom: 12,
-            padding: "10px 12px",
-            border: "1px solid var(--border-color, rgba(255,255,255,0.12))",
-            borderRadius: 10,
-            background: "var(--surface-secondary, rgba(255,255,255,0.04))",
-            color: "var(--text-secondary, rgba(255,255,255,0.72))",
-            fontSize: 12,
-            lineHeight: 1.45,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-          }}
-        >
-          <span>Inspecting the full transcript.</span>
-          <button type="button" className="action-block-show-all-btn" onClick={onBackToLiveView}>
-            Back to live view
-          </button>
-        </div>
-      )}
-      {reasoningPanel}
-      {showBootstrapProgress ? (
-        <StepFeed
-          title={
-            <span className="thinking-title" aria-label={bootstrapProgressTitle}>
-              {bootstrapProgressTitle}
-              <span className="thinking-ellipsis" aria-hidden="true">
-                <span>.</span>
-                <span>.</span>
-                <span>.</span>
+        )}
+        {reasoningPanel}
+        {showBootstrapProgress ? (
+          <StepFeed
+            title={
+              <span className="thinking-title" aria-label={bootstrapProgressTitle}>
+                {bootstrapProgressTitle}
+                <span className="thinking-ellipsis" aria-hidden="true">
+                  <span>.</span>
+                  <span>.</span>
+                  <span>.</span>
+                </span>
               </span>
-            </span>
-          }
-          timeLabel={bootstrapProgressTimeLabel}
-          indicator={{ icon: Loader2, tone: "active", spin: true, label: "In progress" }}
-          expandable={false}
-          expanded={false}
-        />
-      ) : !useVirtualizedFeed ? (
-        renderedFeedRows.map((row) => (
-          <MeasuredTaskFeedRow
-            key={row.key}
-            visiblePerfEventId={getTaskFeedRowVisiblePerfEventId(row)}
-            enabled={Boolean(rendererPerfLoggingEnabled)}
-          >
-            {renderedFeedNodeByKey.get(row.key) ?? null}
-          </MeasuredTaskFeedRow>
-        ))
-      ) : (
-        <div style={{ height: virtualFeedTotalHeight, position: "relative" }}>
-          {virtualFeedRows.map((virtualRow) => (
-            <VirtualizedTaskFeedRow
-              key={virtualRow.item.key}
-              itemKey={virtualRow.item.key}
-              offsetTop={virtualRow.offsetTop}
-              estimatedHeight={virtualRow.height}
-              onHeightChange={handleFeedRowHeightChange}
-              visiblePerfEventId={getTaskFeedRowVisiblePerfEventId(virtualRow.item)}
-              visibilityEnabled={Boolean(rendererPerfLoggingEnabled)}
+            }
+            timeLabel={bootstrapProgressTimeLabel}
+            indicator={{ icon: Loader2, tone: "active", spin: true, label: "In progress" }}
+            expandable={false}
+            expanded={false}
+          />
+        ) : !useVirtualizedFeed ? (
+          renderedFeedRows.map((row) => (
+            <MeasuredTaskFeedRow
+              key={row.key}
+              visiblePerfEventId={getTaskFeedRowVisiblePerfEventId(row)}
+              enabled={Boolean(rendererPerfLoggingEnabled)}
             >
-              {renderedFeedNodeByKey.get(virtualRow.item.key) ?? null}
-            </VirtualizedTaskFeedRow>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}, (prev, next) =>
-  prev.taskId === next.taskId &&
-  prev.taskSwitchId === next.taskSwitchId &&
-  prev.hasMoreTimelineHistory === next.hasMoreTimelineHistory &&
-  prev.isLoadingTimelineHistory === next.isLoadingTimelineHistory &&
-  prev.timelineHistoryError === next.timelineHistoryError &&
-  prev.onLoadMoreTimelineHistory === next.onLoadMoreTimelineHistory &&
-  prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
-  prev.isChatTask === next.isChatTask &&
-  prev.isTaskWorking === next.isTaskWorking &&
-  prev.task?.status === next.task?.status &&
-  prev.task?.createdAt === next.task?.createdAt &&
-  prev.formatTime === next.formatTime &&
-  prev.isReplayMode === next.isReplayMode &&
-  prev.transcriptMode === next.transcriptMode &&
-  prev.hiddenLiveFeedRowCount === next.hiddenLiveFeedRowCount &&
-  prev.canReturnToLiveView === next.canReturnToLiveView &&
-  prev.onShowFullTimeline === next.onShowFullTimeline &&
-  prev.onBackToLiveView === next.onBackToLiveView &&
-  prev.reasoningPanelSignature === next.reasoningPanelSignature &&
-  prev.mainBodyRef === next.mainBodyRef &&
-  prev.timelineRef === next.timelineRef &&
-  prev.getRenderedFeedRow === next.getRenderedFeedRow &&
-  getTaskFeedRowsSignature(prev.visibleFeedRows) ===
-    getTaskFeedRowsSignature(next.visibleFeedRows)
+              {renderedFeedNodeByKey.get(row.key) ?? null}
+            </MeasuredTaskFeedRow>
+          ))
+        ) : (
+          <div style={{ height: virtualFeedTotalHeight, position: "relative" }}>
+            {virtualFeedRows.map((virtualRow) => (
+              <VirtualizedTaskFeedRow
+                key={virtualRow.item.key}
+                itemKey={virtualRow.item.key}
+                offsetTop={virtualRow.offsetTop}
+                estimatedHeight={virtualRow.height}
+                onHeightChange={handleFeedRowHeightChange}
+                visiblePerfEventId={getTaskFeedRowVisiblePerfEventId(virtualRow.item)}
+                visibilityEnabled={Boolean(rendererPerfLoggingEnabled)}
+              >
+                {renderedFeedNodeByKey.get(virtualRow.item.key) ?? null}
+              </VirtualizedTaskFeedRow>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.taskId === next.taskId &&
+    prev.taskSwitchId === next.taskSwitchId &&
+    prev.hasMoreTimelineHistory === next.hasMoreTimelineHistory &&
+    prev.isLoadingTimelineHistory === next.isLoadingTimelineHistory &&
+    prev.timelineHistoryError === next.timelineHistoryError &&
+    prev.onLoadMoreTimelineHistory === next.onLoadMoreTimelineHistory &&
+    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
+    prev.isChatTask === next.isChatTask &&
+    prev.isTaskWorking === next.isTaskWorking &&
+    prev.task?.status === next.task?.status &&
+    prev.task?.createdAt === next.task?.createdAt &&
+    prev.formatTime === next.formatTime &&
+    prev.isReplayMode === next.isReplayMode &&
+    prev.transcriptMode === next.transcriptMode &&
+    prev.hiddenLiveFeedRowCount === next.hiddenLiveFeedRowCount &&
+    prev.canReturnToLiveView === next.canReturnToLiveView &&
+    prev.onShowFullTimeline === next.onShowFullTimeline &&
+    prev.onBackToLiveView === next.onBackToLiveView &&
+    prev.reasoningPanelSignature === next.reasoningPanelSignature &&
+    prev.mainBodyRef === next.mainBodyRef &&
+    prev.timelineRef === next.timelineRef &&
+    prev.getRenderedFeedRow === next.getRenderedFeedRow &&
+    getTaskFeedRowsSignature(prev.visibleFeedRows) ===
+      getTaskFeedRowsSignature(next.visibleFeedRows),
 );
 
 const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
@@ -1335,13 +1382,13 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const onOpenPresentationArtifact = props.onOpenPresentationArtifact as
     | ((path: string) => void)
     | undefined;
-  const onOpenWebArtifact = props.onOpenWebArtifact as
-    | ((path: string) => void)
-    | undefined;
+  const onOpenWebArtifact = props.onOpenWebArtifact as ((path: string) => void) | undefined;
   const parallelGroupsByAnchorEventId = props.parallelGroupsByAnchorEventId as Map<string, any>;
   const rejectMenuOpenFor = props.rejectMenuOpenFor as string | null;
   const rejectMenuRef = props.rejectMenuRef as React.RefObject<HTMLDivElement | null>;
-  const renderCommandOutputs = props.renderCommandOutputs as (sessions?: CommandOutputSession[]) => React.ReactNode;
+  const renderCommandOutputs = props.renderCommandOutputs as (
+    sessions?: CommandOutputSession[],
+  ) => React.ReactNode;
   const setRejectMenuOpenFor = props.setRejectMenuOpenFor as React.Dispatch<
     React.SetStateAction<string | null>
   >;
@@ -1357,13 +1404,18 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const setStepFeedbackText = props.setStepFeedbackText as React.Dispatch<
     React.SetStateAction<string>
   >;
-  const setViewerFilePath = props.setViewerFilePath as React.Dispatch<React.SetStateAction<string | null>>;
+  const setViewerFilePath = props.setViewerFilePath as React.Dispatch<
+    React.SetStateAction<string | null>
+  >;
   const formatTime = props.formatTime as (timestamp: number) => string;
   const shouldRenderTimelineEventInStepFeed = props.shouldRenderTimelineEventInStepFeed as (
     event: TaskEvent,
   ) => boolean;
   const shouldDefaultExpand = props.shouldDefaultExpand as (event: TaskEvent) => boolean;
-  const toolCallPairing = props.toolCallPairing as { completions: Map<string, TaskEvent>; claimedResultIds: Set<string> };
+  const toolCallPairing = props.toolCallPairing as {
+    completions: Map<string, TaskEvent>;
+    claimedResultIds: Set<string>;
+  };
   const hasEventDetails = props.hasEventDetails as (event: TaskEvent) => boolean;
   const isEventExpanded = props.isEventExpanded as (event: TaskEvent) => boolean;
   const showAllActionBlocks = props.showAllActionBlocks as Set<string>;
@@ -1458,8 +1510,12 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
           ? renderableRawIndices.slice(-STEP_WINDOW_SIZE)
           : renderableRawIndices;
       const renderableEvents = renderableRawIndices.map((ri) => blockEvents[ri] as TaskEvent);
-      const visibleBlockEvents = visibleRenderableRawIndices.map((ri) => blockEvents[ri] as TaskEvent);
-      const visibleBlockEventIndices = visibleRenderableRawIndices.map((ri) => blockEventIndices[ri] as number);
+      const visibleBlockEvents = visibleRenderableRawIndices.map(
+        (ri) => blockEvents[ri] as TaskEvent,
+      );
+      const visibleBlockEventIndices = visibleRenderableRawIndices.map(
+        (ri) => blockEventIndices[ri] as number,
+      );
       const commandOutputsForBlock = blockEventIndices.flatMap(
         (eventIndex: number) => commandOutputSessionsByInsertIndex.get(eventIndex) ?? [],
       );
@@ -1513,7 +1569,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
             revision: [
               expanded ? "expanded" : "collapsed",
               stack.artifacts
-                .map((artifact) => `${artifact.path}:${artifact.kind}:${artifact.eventId ?? "none"}`)
+                .map(
+                  (artifact) => `${artifact.path}:${artifact.kind}:${artifact.eventId ?? "none"}`,
+                )
                 .join("|"),
             ].join(":"),
             visiblePerfEventId: null,
@@ -1631,9 +1689,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   defaultExpanded: isLatestActionBlock,
                   toggled: expandedActionBlocks.has(item.blockId),
                 });
-                const visibleEventCount = expanded
-                  ? actionBlockState.visibleBlockEvents.length
-                  : 0;
+                const visibleEventCount = expanded ? actionBlockState.visibleBlockEvents.length : 0;
                 return estimateTaskFeedRowHeight(item, {
                   expanded,
                   visibleEventCount,
@@ -1684,7 +1740,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         if (row.kind !== "timeline") return true;
 
         const { item } = row;
-        if (item.kind === "canvas" || item.kind === "cli-agent-frame" || item.kind === "dispatched-agents") {
+        if (
+          item.kind === "canvas" ||
+          item.kind === "cli-agent-frame" ||
+          item.kind === "dispatched-agents"
+        ) {
           return true;
         }
         if (item.kind === "action_block") {
@@ -1784,7 +1844,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         .map((item: Any) => item.blockId as string),
     );
     if (hasInactiveStringSetEntries(expandedActionBlocks, activeActionBlockIds)) {
-      setExpandedActionBlocks(pruneStringSetToActiveIds(expandedActionBlocks, activeActionBlockIds));
+      setExpandedActionBlocks(
+        pruneStringSetToActiveIds(expandedActionBlocks, activeActionBlockIds),
+      );
     }
     if (hasInactiveStringSetEntries(showAllActionBlocks, activeActionBlockIds)) {
       setShowAllActionBlocks(pruneStringSetToActiveIds(showAllActionBlocks, activeActionBlockIds));
@@ -1803,1162 +1865,1208 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         {/* Conversation Flow - renders all events in order; show when we have events OR collaborative run with child tasks */}
         {(events.length > 0 || (collaborativeRun && childTasks.length > 0) || isTaskWorking) &&
           (() => {
-                const getRowRenderSignature = (row: TaskFeedRow): string => {
-                  if (row.kind === "history-control") {
-                    return row.revision;
-                  }
-                  if (row.kind === "leading-command-outputs") {
-                    return row.revision;
-                  }
-                  if (row.kind === "artifact-stack") {
-                    return row.revision;
-                  }
+            const getRowRenderSignature = (row: TaskFeedRow): string => {
+              if (row.kind === "history-control") {
+                return row.revision;
+              }
+              if (row.kind === "leading-command-outputs") {
+                return row.revision;
+              }
+              if (row.kind === "artifact-stack") {
+                return row.revision;
+              }
 
-                  const { item, timelineIndex } = row;
-                  if (item.kind === "canvas" || item.kind === "cli-agent-frame") {
-                    return row.revision;
-                  }
-                  if (item.kind === "dispatched-agents") {
-                    return `${row.revision}:${wrappingUp ? 1 : 0}`;
-                  }
-                  if (item.kind === "action_block") {
-                    const visibleEventState = item.events
-                      .map((event: TaskEvent) => {
-                        const toggled = toggledEvents.has(event.id) ? 1 : 0;
-                        const parallel = parallelGroupsByAnchorEventId.has(event.id) ? 1 : 0;
-                        const suppressed = suppressedParallelEventIds.has(event.id) ? 1 : 0;
-                        return `${event.id}:${getTaskEventPayloadRenderSignature(event)}:${toggled}:${parallel}:${suppressed}`;
-                      })
-                      .join("|");
-                    return [
-                      row.revision,
-                      expandedActionBlocks.has(item.blockId) ? 1 : 0,
-                      showAllActionBlocks.has(item.blockId) ? 1 : 0,
-                      timelineIndex === lastActionBlockTimelineIndex ? 1 : 0,
-                      isTaskWorking ? 1 : 0,
-                      isReplayMode ? 1 : 0,
-                      verboseSteps ? 1 : 0,
-                      visibleEventState,
-                    ].join(":");
-                  }
+              const { item, timelineIndex } = row;
+              if (item.kind === "canvas" || item.kind === "cli-agent-frame") {
+                return row.revision;
+              }
+              if (item.kind === "dispatched-agents") {
+                return `${row.revision}:${wrappingUp ? 1 : 0}`;
+              }
+              if (item.kind === "action_block") {
+                const visibleEventState = item.events
+                  .map((event: TaskEvent) => {
+                    const toggled = toggledEvents.has(event.id) ? 1 : 0;
+                    const parallel = parallelGroupsByAnchorEventId.has(event.id) ? 1 : 0;
+                    const suppressed = suppressedParallelEventIds.has(event.id) ? 1 : 0;
+                    const isLastAssistant = isLastAssistantMessageEvent(event, lastAssistantMessage)
+                      ? 1
+                      : 0;
+                    return `${event.id}:${getTaskEventPayloadRenderSignature(event)}:${toggled}:${parallel}:${suppressed}:${isLastAssistant}`;
+                  })
+                  .join("|");
+                return [
+                  row.revision,
+                  expandedActionBlocks.has(item.blockId) ? 1 : 0,
+                  showAllActionBlocks.has(item.blockId) ? 1 : 0,
+                  timelineIndex === lastActionBlockTimelineIndex ? 1 : 0,
+                  isTaskWorking ? 1 : 0,
+                  isReplayMode ? 1 : 0,
+                  verboseSteps ? 1 : 0,
+                  visibleEventState,
+                ].join(":");
+              }
 
-                  const event = item.event as TaskEvent;
-                  const effectiveType = getEffectiveTaskEventType(event);
-                  return [
-                    row.revision,
-                    toggledEvents.has(event.id) ? 1 : 0,
-                    rejectMenuOpenFor === event.id ? 1 : 0,
-                    messageFeedbackMap.get(event.id) ?? "none",
-                    lastAssistantMessage?.id === event.id ? 1 : 0,
-                    stepFeedbackOpen ? 1 : 0,
-                    stepFeedbackSending ? 1 : 0,
-                    stepFeedbackText,
-                    currentStep?.description ?? "none",
-                    task.status,
-                    task.terminalStatus ?? "none",
-                    isTaskWorking ? 1 : 0,
-                    verboseSteps ? 1 : 0,
-                    effectiveType,
-                    getTaskEventPayloadRenderSignature(event),
-                    parallelGroupsByAnchorEventId.has(event.id) ? 1 : 0,
-                    suppressedParallelEventIds.has(event.id) ? 1 : 0,
-                  ].join(":");
-                };
+              const event = item.event as TaskEvent;
+              const effectiveType = getEffectiveTaskEventType(event);
+              return [
+                row.revision,
+                toggledEvents.has(event.id) ? 1 : 0,
+                rejectMenuOpenFor === event.id ? 1 : 0,
+                messageFeedbackMap.get(event.id) ?? "none",
+                lastAssistantMessage?.id === event.id ? 1 : 0,
+                stepFeedbackOpen ? 1 : 0,
+                stepFeedbackSending ? 1 : 0,
+                stepFeedbackText,
+                currentStep?.description ?? "none",
+                task.status,
+                task.terminalStatus ?? "none",
+                isTaskWorking ? 1 : 0,
+                verboseSteps ? 1 : 0,
+                effectiveType,
+                getTaskEventPayloadRenderSignature(event),
+                parallelGroupsByAnchorEventId.has(event.id) ? 1 : 0,
+                suppressedParallelEventIds.has(event.id) ? 1 : 0,
+              ].join(":");
+            };
 
-                const renderFeedRow = (row: TaskFeedRow) => {
-                  if (row.kind === "history-control") {
-                    return null;
-                  }
-                  if (row.kind === "leading-command-outputs") {
-                    return renderCommandOutputs(row.sessions);
-                  }
-                  if (row.kind === "artifact-stack") {
-                    if (!workspace?.path) return null;
-                    const expanded = expandedArtifactStacks.has(row.key);
-                    const { visibleArtifacts, hiddenCount } =
-                      getVisibleEndOfTaskArtifactCards(row.artifacts, expanded);
-                    return (
-                      <div className="conversation-artifact-stack assistant-artifact-cards">
-                        {visibleArtifacts.map((artifact) => {
-                          if (artifact.kind === "spreadsheet") {
-                            return (
-                              <SpreadsheetArtifactCard
-                                key={artifact.path}
-                                filePath={artifact.path}
-                                workspacePath={workspace.path}
-                                onOpenViewer={onOpenSpreadsheetArtifact || setViewerFilePath}
-                              />
-                            );
-                          }
-                          if (artifact.kind === "document") {
-                            return (
-                              <DocumentArtifactCard
-                                key={artifact.path}
-                                filePath={artifact.path}
-                                workspacePath={workspace.path}
-                                onOpenViewer={onOpenDocumentArtifact || setViewerFilePath}
-                              />
-                            );
-                          }
-                          if (artifact.kind === "presentation") {
-                            return (
-                              <PresentationArtifactCard
-                                key={artifact.path}
-                                filePath={artifact.path}
-                                workspacePath={workspace.path}
-                                onOpenViewer={onOpenPresentationArtifact || setViewerFilePath}
-                              />
-                            );
-                          }
-                          if (artifact.kind === "html") {
-                            return (
-                              <WebArtifactCard
-                                key={artifact.path}
-                                filePath={artifact.path}
-                                workspacePath={workspace.path}
-                                onOpenViewer={onOpenWebArtifact || setViewerFilePath}
-                              />
-                            );
-                          }
-                          return null;
-                        })}
-                        {hiddenCount > 0 && (
-                          <button
-                            type="button"
-                            className="conversation-artifact-stack-show-more"
-                            onClick={() => expandArtifactStack(row.key)}
-                            aria-label={`Show ${hiddenCount} more generated files`}
-                          >
-                            <span>Show {hiddenCount} more</span>
-                            <ChevronDown size={17} aria-hidden="true" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  }
+            const renderFeedRow = (row: TaskFeedRow) => {
+              if (row.kind === "history-control") {
+                return null;
+              }
+              if (row.kind === "leading-command-outputs") {
+                return renderCommandOutputs(row.sessions);
+              }
+              if (row.kind === "artifact-stack") {
+                if (!workspace?.path) return null;
+                const expanded = expandedArtifactStacks.has(row.key);
+                const { visibleArtifacts, hiddenCount } = getVisibleEndOfTaskArtifactCards(
+                  row.artifacts,
+                  expanded,
+                );
+                return (
+                  <div className="conversation-artifact-stack assistant-artifact-cards">
+                    {visibleArtifacts.map((artifact) => {
+                      if (artifact.kind === "spreadsheet") {
+                        return (
+                          <SpreadsheetArtifactCard
+                            key={artifact.path}
+                            filePath={artifact.path}
+                            workspacePath={workspace.path}
+                            onOpenViewer={onOpenSpreadsheetArtifact || setViewerFilePath}
+                          />
+                        );
+                      }
+                      if (artifact.kind === "document") {
+                        return (
+                          <DocumentArtifactCard
+                            key={artifact.path}
+                            filePath={artifact.path}
+                            workspacePath={workspace.path}
+                            onOpenViewer={onOpenDocumentArtifact || setViewerFilePath}
+                          />
+                        );
+                      }
+                      if (artifact.kind === "presentation") {
+                        return (
+                          <PresentationArtifactCard
+                            key={artifact.path}
+                            filePath={artifact.path}
+                            workspacePath={workspace.path}
+                            onOpenViewer={onOpenPresentationArtifact || setViewerFilePath}
+                          />
+                        );
+                      }
+                      if (artifact.kind === "html") {
+                        return (
+                          <WebArtifactCard
+                            key={artifact.path}
+                            filePath={artifact.path}
+                            workspacePath={workspace.path}
+                            onOpenViewer={onOpenWebArtifact || setViewerFilePath}
+                          />
+                        );
+                      }
+                      return null;
+                    })}
+                    {hiddenCount > 0 && (
+                      <button
+                        type="button"
+                        className="conversation-artifact-stack-show-more"
+                        onClick={() => expandArtifactStack(row.key)}
+                        aria-label={`Show ${hiddenCount} more generated files`}
+                      >
+                        <span>Show {hiddenCount} more</span>
+                        <ChevronDown size={17} aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                );
+              }
 
-                  const { item, timelineIndex } = row;
-                if (item.kind === "canvas") {
-                  return (
-                    <CanvasPreview
-                      session={item.session}
-                      onClose={() => handleCanvasClose(item.session.id)}
-                      forceSnapshot={item.forceSnapshot}
-                      onOpenBrowser={onOpenBrowserView}
-                    />
-                  );
-                }
+              const { item, timelineIndex } = row;
+              if (item.kind === "canvas") {
+                return (
+                  <CanvasPreview
+                    session={item.session}
+                    onClose={() => handleCanvasClose(item.session.id)}
+                    forceSnapshot={item.forceSnapshot}
+                    onOpenBrowser={onOpenBrowserView}
+                  />
+                );
+              }
 
-                if (item.kind === "cli-agent-frame") {
-                  const agentType = resolveCliAgentType(item.childTask, item.childTaskEvents) || "codex-cli";
-                  return (
-                    <CliAgentFrame
-                      task={item.childTask}
-                      events={item.childTaskEvents}
-                      agentType={agentType}
-                      defaultExpanded={item.childTask.status === "executing"}
-                      onOpenAgent={onOpenChildAgentSidebar ?? onSelectChildTask}
-                    />
-                  );
-                }
+              if (item.kind === "cli-agent-frame") {
+                const agentType =
+                  resolveCliAgentType(item.childTask, item.childTaskEvents) || "codex-cli";
+                return (
+                  <CliAgentFrame
+                    task={item.childTask}
+                    events={item.childTaskEvents}
+                    agentType={agentType}
+                    defaultExpanded={item.childTask.status === "executing"}
+                    onOpenAgent={onOpenChildAgentSidebar ?? onSelectChildTask}
+                  />
+                );
+              }
 
-                if (item.kind === "dispatched-agents") {
-                  // Collaborative runs own every child agent in the shared team-run surface.
-                  const nonCliChildTasks = childTasks.filter((t) => !isCliAgentChildTask(t));
-                  const panelTasks = collaborativeRun
-                    ? childTasks
-                    : nonCliChildTasks.length > 0
-                      ? nonCliChildTasks
-                      : childTasks;
-                  const panelEvents = childEvents.filter((e) =>
-                    panelTasks.some((t) => t.id === e.taskId),
-                  );
-                  return (
-                    <div key="dispatched-agents" className="collaborative-thoughts-main">
-                      {collaborativeRun ? (
-                        <CollaborativeSummaryPanel
-                          collaborativeRun={collaborativeRun}
-                          childTasks={panelTasks}
-                          childEvents={panelEvents}
-                          userPrompt={task?.rawPrompt || task?.userPrompt || task?.prompt}
-                          onSelectChildTask={onSelectChildTask}
-                          onOpenChildAgentSidebar={onOpenChildAgentSidebar}
-                          mainTaskCompleted={
-                            !!task &&
-                            ["completed", "failed", "cancelled"].includes(task.status)
-                          }
-                          isWrappingUp={wrappingUp}
-                        />
-                      ) : (
-                        <DispatchedAgentsPanel
-                          parentTaskId={task!.id}
-                          childTasks={panelTasks}
-                          childEvents={panelEvents}
-                          onSelectChildTask={onSelectChildTask}
-                          onOpenChildAgentSidebar={onOpenChildAgentSidebar}
-                        />
-                      )}
-                    </div>
-                  );
-                }
+              if (item.kind === "dispatched-agents") {
+                // Collaborative runs own every child agent in the shared team-run surface.
+                const nonCliChildTasks = childTasks.filter((t) => !isCliAgentChildTask(t));
+                const panelTasks = collaborativeRun
+                  ? childTasks
+                  : nonCliChildTasks.length > 0
+                    ? nonCliChildTasks
+                    : childTasks;
+                const panelEvents = childEvents.filter((e) =>
+                  panelTasks.some((t) => t.id === e.taskId),
+                );
+                return (
+                  <div key="dispatched-agents" className="collaborative-thoughts-main">
+                    {collaborativeRun ? (
+                      <CollaborativeSummaryPanel
+                        collaborativeRun={collaborativeRun}
+                        childTasks={panelTasks}
+                        childEvents={panelEvents}
+                        userPrompt={task?.rawPrompt || task?.userPrompt || task?.prompt}
+                        onSelectChildTask={onSelectChildTask}
+                        onOpenChildAgentSidebar={onOpenChildAgentSidebar}
+                        mainTaskCompleted={
+                          !!task && ["completed", "failed", "cancelled"].includes(task.status)
+                        }
+                        isWrappingUp={wrappingUp}
+                      />
+                    ) : (
+                      <DispatchedAgentsPanel
+                        parentTaskId={task!.id}
+                        childTasks={panelTasks}
+                        childEvents={panelEvents}
+                        onSelectChildTask={onSelectChildTask}
+                        onOpenChildAgentSidebar={onOpenChildAgentSidebar}
+                      />
+                    )}
+                  </div>
+                );
+              }
 
-                if (item.kind === "action_block") {
-                  if (isChatTask) return null;
-                  const isBlockOnlyMinimalCompletions =
-                    !verboseSteps &&
-                    item.events.length > 0 &&
-                    item.events.every((ev: TaskEvent) => {
-                      const t = getEffectiveTaskEventType(ev);
-                      const out = resolveTaskOutputSummaryFromCompletionEvent(ev, events);
-                      return t === "task_completed" && !hasTaskOutputs(out);
-                    });
-                  if (isBlockOnlyMinimalCompletions) {
-                    const indicatorPosition = stepFeedTimelineIndexPosition.get(timelineIndex);
-                    const showConnectorAbove =
-                      typeof indicatorPosition === "number" && indicatorPosition > 0;
-                    const showConnectorBelow =
-                      typeof indicatorPosition === "number" &&
-                      indicatorPosition < stepFeedEventCount - 1;
-                    const commandOutputsForBlock = item.eventIndices.flatMap((ei: number) =>
-                      commandOutputSessionsByInsertIndex.get(ei) ?? [],
-                    );
-                    return (
-                      <Fragment key={item.blockId}>
-                        {item.events.map((event: TaskEvent, idx: number) => {
-                          const eventIndex = item.eventIndices[idx];
-                          if (!shouldRenderTimelineEventInStepFeed(event)) return null;
-                          const isLastChild = idx === item.events.length - 1;
-                          const showChildConnectorAbove = idx === 0 ? showConnectorAbove : true;
-                          const showChildConnectorBelow = !isLastChild || showConnectorBelow;
-                          return (
-                            <div
-                              key={event.id || `event-${eventIndex}`}
-                              className="timeline-event completion-compact"
-                            >
-                              <div className="event-indicator">
-                                {showChildConnectorAbove && (
-                                  <span className="event-connector event-connector-above" aria-hidden="true" />
-                                )}
-                                <span
-                                  className="event-indicator-icon tone-success"
-                                  aria-hidden="true"
-                                  title="Done"
-                                >
-                                  <CheckIcon size={12} strokeWidth={2} />
-                                </span>
-                                {showChildConnectorBelow && (
-                                  <span className="event-connector event-connector-below" aria-hidden="true" />
-                                )}
-                              </div>
-                              <div className="event-content completion-compact-content">
-                                <span className="completion-compact-label">Done</span>
-                                <span className="event-time-muted">{formatTime(event.timestamp)}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {renderCommandOutputs(commandOutputsForBlock)}
-                      </Fragment>
-                    );
-                  }
-                  const isLatestActionBlock = timelineIndex === lastActionBlockTimelineIndex;
-                  const isActive =
-                    isLatestActionBlock && (isTaskWorking || isReplayMode);
-                  const actionBlockState = getActionBlockRenderState(
-                    item.events as TaskEvent[],
-                    item.eventIndices,
-                    item.blockId,
-                  );
-                  const {
-                    renderableCount,
-                    renderableEvents,
-                    visibleBlockEvents,
-                    visibleBlockEventIndices,
-                    hiddenBlockEventCount,
-                    hasBlockCommandOutputs,
-                    commandOutputsForBlock,
-                  } = actionBlockState;
-                  if (renderableCount === 0) {
-                    if (hasBlockCommandOutputs) {
-                      return (
-                        <Fragment key={item.blockId}>
-                          {renderCommandOutputs(commandOutputsForBlock)}
-                        </Fragment>
-                      );
-                    }
-                    return null;
-                  }
-                  const { summary, iconKind, stepCount, toolCallCount, durationMs, outputTokens } = buildActionBlockSummary(
-                    renderableEvents,
-                    events,
-                    { isActive },
-                  );
-                  const expanded = resolveDisclosureExpanded({
-                    forceExpanded: isActive,
-                    defaultExpanded: isLatestActionBlock,
-                    toggled: expandedActionBlocks.has(item.blockId),
+              if (item.kind === "action_block") {
+                if (isChatTask) return null;
+                const isBlockOnlyMinimalCompletions =
+                  !verboseSteps &&
+                  item.events.length > 0 &&
+                  item.events.every((ev: TaskEvent) => {
+                    const t = getEffectiveTaskEventType(ev);
+                    const out = resolveTaskOutputSummaryFromCompletionEvent(ev, events);
+                    return t === "task_completed" && !hasTaskOutputs(out);
                   });
-                  const onToggle = () => {
-                    setExpandedActionBlocks((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(item.blockId)) next.delete(item.blockId);
-                      else next.add(item.blockId);
-                      return next;
-                    });
-                  };
+                if (isBlockOnlyMinimalCompletions) {
                   const indicatorPosition = stepFeedTimelineIndexPosition.get(timelineIndex);
                   const showConnectorAbove =
                     typeof indicatorPosition === "number" && indicatorPosition > 0;
                   const showConnectorBelow =
                     typeof indicatorPosition === "number" &&
                     indicatorPosition < stepFeedEventCount - 1;
-                  const isBlockShowAll = showAllActionBlocks.has(item.blockId);
-                  // Exclude sessions shown inline inside currently visible expanded run_command frames.
-                  // Hidden rows must not suppress their command outputs, or terminals disappear from the windowed feed.
-                  const inlineRunCommandSessionIds = collectInlineRunCommandSessionIds({
-                    events: visibleBlockEvents,
-                    eventIndices: visibleBlockEventIndices,
-                    commandOutputSessionsByInsertIndex,
-                    isEventExpanded,
-                  });
-                  const lastVisibleBlockEvent = visibleBlockEvents[visibleBlockEvents.length - 1];
-                  const lastVisibleRenderEvent = lastVisibleBlockEvent
-                    ? toolCallPairing.completions.get(lastVisibleBlockEvent.id) ?? lastVisibleBlockEvent
-                    : undefined;
-                  const lastStepLabelRaw = lastVisibleRenderEvent
-                    ? renderEventTitle(lastVisibleRenderEvent, workspace?.path, setViewerFilePath, agentContext, { summaryMode: !verboseSteps })
-                    : undefined;
-                  const lastStepLabel =
-                    isActive && typeof lastStepLabelRaw === "string" ? lastStepLabelRaw : undefined;
-                  const isFinishedActionBlockTask =
-                    task.status === "completed" || task.status === "failed" || task.status === "cancelled";
-                  const actionBlockDurationMs =
-                    isLatestActionBlock && (isTaskWorking || isFinishedActionBlockTask) ? 0 : durationMs;
+                  const commandOutputsForBlock = item.eventIndices.flatMap(
+                    (ei: number) => commandOutputSessionsByInsertIndex.get(ei) ?? [],
+                  );
                   return (
                     <Fragment key={item.blockId}>
-                      <ActionBlock
-                        blockId={item.blockId}
-                        summary={summary}
-                        iconKind={iconKind}
-                        stepCount={stepCount}
-                        toolCallCount={toolCallCount}
-                        durationMs={actionBlockDurationMs}
-                        outputTokens={outputTokens}
-                        isActive={isActive}
-                        expanded={expanded}
-                        onToggle={onToggle}
-                        showConnectorAbove={showConnectorAbove}
-                        showConnectorBelow={showConnectorBelow}
-                        lastStepLabel={lastStepLabel}
-                      >
-                        {hiddenBlockEventCount > 0 && (
-                          <button
-                            type="button"
-                            className="action-block-show-all-btn"
-                            onClick={() =>
-                              setShowAllActionBlocks((prev) => {
-                                const next = new Set(prev);
-                                next.add(item.blockId);
-                                return next;
-                              })
-                            }
+                      {item.events.map((event: TaskEvent, idx: number) => {
+                        const eventIndex = item.eventIndices[idx];
+                        if (!shouldRenderTimelineEventInStepFeed(event)) return null;
+                        const isLastChild = idx === item.events.length - 1;
+                        const showChildConnectorAbove = idx === 0 ? showConnectorAbove : true;
+                        const showChildConnectorBelow = !isLastChild || showConnectorBelow;
+                        return (
+                          <div
+                            key={event.id || `event-${eventIndex}`}
+                            className="timeline-event completion-compact"
                           >
-                            ↑ Show all ({renderableCount} steps)
-                          </button>
-                        )}
-                        {isBlockShowAll && (
-                          <button
-                            type="button"
-                            className="action-block-show-all-btn action-block-show-less-btn"
-                            onClick={() =>
-                              setShowAllActionBlocks((prev) => {
-                                const next = new Set(prev);
-                                next.delete(item.blockId);
-                                return next;
-                              })
-                            }
-                          >
-                            Show less
-                          </button>
-                        )}
-                        {(() => {
-                          const nestedParallelEventIds = new Set<string>();
-                          return visibleBlockEvents.map((event: TaskEvent, idx: number) => {
-                            if (nestedParallelEventIds.has(event.id)) return null;
-
-                            const eventIndex = visibleBlockEventIndices[idx];
-                            const parallelGroup = parallelGroupsByAnchorEventId.get(event.id);
-                            if (suppressedParallelEventIds.has(event.id) && !parallelGroup) return null;
-                            if (!parallelGroup && !shouldRenderTimelineEventInStepFeed(event)) {
-                              return null;
-                            }
-                            const isLastChild = idx === visibleBlockEvents.length - 1;
-                            const showChildConnectorAbove = true;
-                            const showChildConnectorBelow = !isLastChild || showConnectorBelow;
-
-                            const perEventCmdSessions = (
-                              commandOutputSessionsByInsertIndex.get(eventIndex) ?? []
-                            ).filter((s: CommandOutputSession) => !inlineRunCommandSessionIds.has(s.id));
-
-                            if (parallelGroup) {
-                              const shouldDefaultExpandGroup =
-                                isLatestActionBlock && idx === visibleBlockEvents.length - 1;
-                              return (
-                                <Fragment key={event.id || `event-${eventIndex}`}>
-                                  <ParallelGroupFeed
-                                    group={parallelGroup}
-                                    timeLabel={formatTime(parallelGroup.startedAt)}
-                                    formatTime={formatTime}
-                                    showConnectorAbove={showChildConnectorAbove}
-                                    showConnectorBelow={showChildConnectorBelow}
-                                    defaultExpanded={isActive || shouldDefaultExpandGroup}
-                                  />
-                                  {renderCommandOutputs(perEventCmdSessions)}
-                                </Fragment>
-                              );
-                            }
-
-                            const nestedParallelChildren: Array<{
-                              event: TaskEvent;
-                              eventIndex: number;
-                              group: Any;
-                            }> = [];
-                            const parentStepId =
-                              canStepEventOwnParallelChildren(event) ? getTimelineEventStepId(event) : null;
-                            if (parentStepId) {
-                              for (let childIdx = idx + 1; childIdx < visibleBlockEvents.length; childIdx += 1) {
-                                const childEvent = visibleBlockEvents[childIdx] as TaskEvent;
-                                const childParallelGroup = parallelGroupsByAnchorEventId.get(childEvent.id);
-                                if (!childParallelGroup) break;
-                                const ownerStepId = getParallelGroupOwnerStepId(childParallelGroup.groupId);
-                                if (!ownerStepId || ownerStepId !== parentStepId) break;
-                                nestedParallelEventIds.add(childEvent.id);
-                                nestedParallelChildren.push({
-                                  event: childEvent,
-                                  eventIndex: visibleBlockEventIndices[childIdx] as number,
-                                  group: childParallelGroup,
-                                });
-                              }
-                            }
-
-                            const effectiveType = getEffectiveTaskEventType(event);
-                            const outputSummary = resolveTaskOutputSummaryFromCompletionEvent(
-                              event,
-                              events,
-                            );
-                            const completionSummaryText = getCompletionSummaryText(event);
-                            const isMinimalCompletion =
-                              !verboseSteps &&
-                              effectiveType === "task_completed" &&
-                              !hasTaskOutputs(outputSummary) &&
-                              completionSummaryText.length === 0;
-                            if (isMinimalCompletion) {
-                              return (
-                                <Fragment key={event.id || `event-${eventIndex}`}>
-                                  <div className="timeline-event completion-compact">
-                                    <div className="event-indicator">
-                                      {showChildConnectorAbove && (
-                                        <span className="event-connector event-connector-above" aria-hidden="true" />
-                                      )}
-                                      <span
-                                        className="event-indicator-icon tone-success"
-                                        aria-hidden="true"
-                                        title="Done"
-                                      >
-                                        <CheckIcon size={12} strokeWidth={2} />
-                                      </span>
-                                      {showChildConnectorBelow && (
-                                        <span className="event-connector event-connector-below" aria-hidden="true" />
-                                      )}
-                                    </div>
-                                    <div className="event-content completion-compact-content">
-                                      <span className="completion-compact-label">Done</span>
-                                      <span className="event-time-muted">{formatTime(event.timestamp)}</span>
-                                    </div>
-                                  </div>
-                                  {renderCommandOutputs(perEventCmdSessions)}
-                                </Fragment>
-                              );
-                            }
-
-                            const hasNestedChildren = nestedParallelChildren.length > 0;
-                            const isExpandable = hasEventDetails(event) || hasNestedChildren;
-                            const shouldDefaultExpandChild =
-                              isExpandable &&
-                              (hasNestedChildren ||
-                                shouldDefaultExpand(event) ||
-                                (isLatestActionBlock && idx === visibleBlockEvents.length - 1));
-                            const isExpanded = resolveDisclosureExpanded({
-                              forceExpanded: isExpandable && isActive,
-                              defaultExpanded: shouldDefaultExpandChild,
-                              toggled: toggledEvents.has(event.id),
-                            });
-                            const toolCallResultEvent = toolCallPairing.completions.get(event.id);
-                            const renderEvent = toolCallResultEvent ?? event;
-                            const eventTitle = renderEventTitle(
-                              renderEvent,
-                              workspace?.path,
-                              setViewerFilePath,
-                              agentContext,
-                              { summaryMode: !verboseSteps },
-                            );
-                            const eventDetails = hasEventDetails(event)
-                              ? renderEventDetails(event, voiceEnabled, markdownComponents, {
-                                  workspacePath: workspace?.path,
-                                  onOpenViewer: setViewerFilePath,
-                                  onOpenSpreadsheetArtifact,
-                                  onOpenDocumentArtifact,
-                                  onOpenPresentationArtifact,
-                                  onOpenWebArtifact,
-                                  onQuoteAssistantMessage,
-                                  onForkTaskSession: onForkTaskSessionFromEvent,
-                                  events,
-                                  onViewOutputs: onViewTaskOutputs,
-                                  hideVerificationSteps: true,
-                                  summaryMode: !verboseSteps,
-                                  task,
-                                  childTasks,
-                                  commandOutputSessions:
-                                    commandOutputSessionsByInsertIndex.get(eventIndex) ?? [],
-                                  renderCommandOutput: renderCommandOutputs,
-                                  deferEndOfTaskArtifactCards: true,
-                                })
-                              : undefined;
-
-                            return (
-                              <Fragment key={event.id || `event-${eventIndex}`}>
-                                <StepFeed
-                                  title={
-                                    typeof eventTitle === "string" ? (
-                                      <DeferredMarkdown components={eventTitleMarkdownComponents}>
-                                        {normalizeTimelineTitleMarkdownForDisplay(eventTitle)}
-                                      </DeferredMarkdown>
-                                    ) : (
-                                      eventTitle
-                                    )
-                                  }
-                                  titleTooltip={typeof eventTitle === "string" ? eventTitle : undefined}
-                                  timeLabel={formatTime(event.timestamp)}
-                                  hideTime
-                                  indicator={resolveTimelineIndicator(renderEvent, {
-                                    isTaskCompleted: !isTaskWorking,
-                                  })}
-                                  showConnectorAbove={showChildConnectorAbove}
-                                  showConnectorBelow={showChildConnectorBelow}
-                                  showBranchStub={shouldShowTimelineBranchStub(event)}
-                                  expandable={isExpandable}
-                                  expanded={isExpanded}
-                                  onToggle={
-                                    isExpandable ? () => toggleEventExpanded(event.id) : undefined
-                                  }
-                                  details={
-                                    isExpanded ? (
-                                      <>
-                                        {hasNestedChildren ? (
-                                          <div className="timeline-step-child-groups">
-                                            {nestedParallelChildren.map((child) => {
-                                              const childCmdSessions = (
-                                                commandOutputSessionsByInsertIndex.get(child.eventIndex) ?? []
-                                              ).filter(
-                                                (s: CommandOutputSession) => !inlineRunCommandSessionIds.has(s.id),
-                                              );
-                                              return (
-                                                <Fragment key={child.event.id || `event-${child.eventIndex}`}>
-                                                  <ParallelGroupFeed
-                                                    group={child.group}
-                                                    timeLabel={formatTime(child.group.startedAt)}
-                                                    formatTime={formatTime}
-                                                  />
-                                                  {renderCommandOutputs(childCmdSessions)}
-                                                </Fragment>
-                                              );
-                                            })}
-                                          </div>
-                                        ) : null}
-                                        {eventDetails}
-                                      </>
-                                    ) : undefined
-                                  }
+                            <div className="event-indicator">
+                              {showChildConnectorAbove && (
+                                <span
+                                  className="event-connector event-connector-above"
+                                  aria-hidden="true"
                                 />
-                                {renderCommandOutputs(perEventCmdSessions)}
-                              </Fragment>
-                            );
-                          });
-                        })()}
-                      </ActionBlock>
-                    </Fragment>
-                  );
-                }
-
-                const event = item.event;
-                const effectiveType = getEffectiveTaskEventType(event);
-                const isUserMessage = effectiveType === "user_message";
-                const isAssistantMessage = effectiveType === "assistant_message";
-                const completionSummaryText = getCompletionSummaryText(event);
-                const isCompletionSummaryMessage = completionSummaryText.length > 0;
-                const commandOutputsAfterEvent = commandOutputSessionsByInsertIndex.get(
-                  item.eventIndex,
-                );
-
-                if (isChatTask && !isUserMessage && !isAssistantMessage && !isCompletionSummaryMessage) {
-                  if (effectiveType === "llm_streaming" && isTaskWorking) {
-                    const streamingText =
-                      typeof event.payload?.text === "string"
-                        ? event.payload.text
-                        : typeof event.payload?.message === "string"
-                          ? event.payload.message
-                          : "";
-                    return (
-                      <Fragment key={event.id || `event-${item.eventIndex}`}>
-                        <div className="chat-message assistant-message">
-                          <div className="chat-bubble assistant-bubble">
-                            <div className="chat-bubble-content markdown-content">
-                              <AssistantMessageContent
-                                message={cleanAssistantMessageForDisplay(streamingText)}
-                                markdownComponents={markdownComponents}
-                                workspacePath={workspace?.path}
-                                onOpenViewer={setViewerFilePath}
-                              />
+                              )}
+                              <span
+                                className="event-indicator-icon tone-success"
+                                aria-hidden="true"
+                                title="Done"
+                              >
+                                <CheckIcon size={12} strokeWidth={2} />
+                              </span>
+                              {showChildConnectorBelow && (
+                                <span
+                                  className="event-connector event-connector-below"
+                                  aria-hidden="true"
+                                />
+                              )}
                             </div>
-                          </div>
-                        </div>
-                      </Fragment>
-                    );
-                  }
-                  if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
-                    return (
-                      <Fragment key={event.id || `event-${item.eventIndex}`}>
-                        {renderCommandOutputs(commandOutputsAfterEvent)}
-                      </Fragment>
-                    );
-                  }
-                  return null;
-                }
-
-                // Render user messages as chat bubbles on the right
-                if (isUserMessage) {
-                  if (
-                    shouldSuppressInitialPromptUserEvent({
-                      event,
-                      initialPromptEventId,
-                      trimmedPrompt,
-                      taskCreatedAt: task?.createdAt,
-                    })
-                  ) {
-                    if (!commandOutputsAfterEvent || commandOutputsAfterEvent.length === 0) {
-                      return null;
-                    }
-                    return (
-                      <Fragment key={event.id || `event-${item.eventIndex}`}>
-                        {renderCommandOutputs(commandOutputsAfterEvent)}
-                      </Fragment>
-                    );
-                  }
-                  const rawMessage = event.payload?.message || "User message";
-                  const messageText =
-                    typeof rawMessage === "string"
-                      ? normalizeInitialPromptText(rawMessage)
-                      : "User message";
-                  const messageIntegrationMentions =
-                    Array.isArray(event.payload?.integrationMentions)
-                      ? (event.payload.integrationMentions as IntegrationMentionSelection[])
-                      : task?.agentConfig?.integrationMentions;
-                  const quotedAssistantMessage = event.payload?.quotedAssistantMessage as
-                    | QuotedAssistantMessage
-                    | undefined;
-                  const attachmentNames = extractAttachmentNames(rawMessage);
-                  return (
-                    <Fragment key={event.id || `event-${item.eventIndex}`}>
-                      <div className="chat-message user-message">
-                        {quotedAssistantMessage?.message ? (
-                          <div className="quoted-follow-up-shell">
-                            <div className="quoted-follow-up-context">
-                              <span className="quoted-follow-up-context-icon">↪</span>
-                              <span className="quoted-follow-up-context-text">
-                                {summarizeQuotedAssistantMessage(quotedAssistantMessage.message, 520)}
+                            <div className="event-content completion-compact-content">
+                              <span className="completion-compact-label">Done</span>
+                              <span className="event-time-muted">
+                                {formatTime(event.timestamp)}
                               </span>
                             </div>
-                            <div className="quoted-follow-up-reply markdown-content">
-                              <UserMessageText
-                                text={messageText}
-                                integrationMentions={messageIntegrationMentions}
-                                markdownComponents={markdownComponents}
-                              />
-                            </div>
-                            {attachmentNames.length > 0 && (
-                              <div className="bubble-attachments quoted-follow-up-attachments">
-                                {attachmentNames.map((name, i) => (
-                                  <span className="bubble-attachment-chip" key={i}>
-                                    <svg
-                                      width="12"
-                                      height="12"
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                    >
-                                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                      <path d="M14 2v6h6" />
-                                    </svg>
-                                    <span className="bubble-attachment-name" title={name}>
-                                      {name}
-                                    </span>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
                           </div>
-                        ) : (
-                          <CollapsibleUserBubble>
-                            <UserMessageText
-                              text={messageText}
-                              integrationMentions={messageIntegrationMentions}
-                              markdownComponents={markdownComponents}
-                            />
-                            {attachmentNames.length > 0 && (
-                              <div className="bubble-attachments">
-                                {attachmentNames.map((name, i) => (
-                                  <span className="bubble-attachment-chip" key={i}>
-                                    <svg
-                                      width="12"
-                                      height="12"
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                    >
-                                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                      <path d="M14 2v6h6" />
-                                    </svg>
-                                    <span className="bubble-attachment-name" title={name}>
-                                      {name}
-                                    </span>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </CollapsibleUserBubble>
-                        )}
-                        <MessageCopyButton text={messageText} />
-                      </div>
-                      {renderCommandOutputs(commandOutputsAfterEvent)}
+                        );
+                      })}
+                      {renderCommandOutputs(commandOutputsForBlock)}
                     </Fragment>
                   );
                 }
-
-                // Render assistant messages as chat bubbles on the left
-                if (isAssistantMessage || isCompletionSummaryMessage) {
-                  const messageText = isCompletionSummaryMessage ? completionSummaryText : event.payload?.message || "";
-                  const cleanedMessageText = cleanAssistantMessageForDisplay(messageText);
-                  const inlineFrames = getTaskEventInlineFrames(event);
-                  const sourceUserMessage = getPreviousUserMessageText(events, item.eventIndex);
-                  const quotedAssistantMessage = createQuotedAssistantMessage(
-                    cleanedMessageText,
-                    event.id,
-                    event.taskId,
-                  );
-                  const isLastAssistant = event === lastAssistantMessage;
-                  return (
-                    <Fragment key={event.id || `event-${item.eventIndex}`}>
-                      <div className="chat-message assistant-message">
-                        <div className="chat-bubble assistant-bubble">
-                          {isLastAssistant && !isChatTask && (
-                            <div className="chat-bubble-header">
-                              {task.status === "completed" && (
-                                <span className="chat-status">
-                                  {task.terminalStatus === "needs_user_action"
-                                    ? "Completed - action required"
-                                    : task.terminalStatus === "partial_success"
-                                      ? "Completed - partial success"
-                                      : agentContext.getMessage("taskComplete")}
-                                </span>
-                              )}
-                              {task.status === "paused" && (
-                                <span className="chat-status">
-                                  {task.awaitingUserInputReasonCode === "skill_parameters"
-                                    ? "Waiting for your skill answer"
-                                    : "Waiting for your direction"}
-                                </span>
-                              )}
-                              {task.status === "blocked" && (
-                                <span className="chat-status">
-                                  {task.terminalStatus === "awaiting_approval"
-                                    ? agentContext.getMessage("taskBlocked") || "Needs approval"
-                                    : "Waiting for your input"}
-                                </span>
-                              )}
-                              {task.status === "interrupted" && task.terminalStatus === "resume_available" && (
-                                <span className="chat-status">Interrupted - resume available</span>
-                              )}
-                            </div>
-                          )}
-                          <div className="chat-bubble-content markdown-content">
-                            <AssistantMessageContent
-                              message={cleanedMessageText}
-                              markdownComponents={markdownComponents}
-                              workspacePath={workspace?.path}
-                              onOpenViewer={setViewerFilePath}
-                            />
-                          </div>
-                        </div>
-                        {(inlineFrames.length > 0 || (isAssistantMessage && event.id)) && (
-                          <div className="chat-inline-frames">
-                            {inlineFrames.map((frame) => (
-                              <MailComposeFrame
-                                key={`${frame.kind}:${frame.draftId}`}
-                                frame={frame}
-                              />
-                            ))}
-                            {inlineFrames.length === 0 && isLastAssistant && !isTaskWorking && (
-                              <AutoMailComposeFrame
-                                eventId={event.id}
-                                taskId={event.taskId}
-                                assistantMessage={cleanedMessageText}
-                                sourceUserMessage={sourceUserMessage}
-                                allowCreate={true}
-                              />
-                            )}
-                          </div>
-                        )}
-                        <div className="message-actions">
-                          <MessageCopyButton text={messageText} />
-                          <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
-                          {quotedAssistantMessage && onQuoteAssistantMessage && (
-                            <MessageQuoteButton
-                              onQuote={() => onQuoteAssistantMessage(quotedAssistantMessage)}
-                            />
-                          )}
-                          {event.id && onForkTaskSessionFromEvent && (
-                            <MessageForkButton onFork={() => onForkTaskSessionFromEvent(event)} />
-                          )}
-                          {event.id && !isTaskWorking && (
-                            <>
-                              <button
-                                className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
-                                title="Helpful"
-                                onClick={() =>
-                                  void handleMessageFeedback({
-                                    messageId: event.id!,
-                                    decision: "accepted",
-                                  })
-                                }
-                              >
-                                👍
-                              </button>
-                              <div
-                                ref={
-                                  rejectMenuOpenFor === event.id
-                                    ? rejectMenuRef
-                                    : undefined
-                                }
-                                className="message-feedback-thumbdown-wrap"
-                              >
-                                <button
-                                  className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
-                                  title="Not helpful"
-                                  onClick={() =>
-                                    setRejectMenuOpenFor((v) =>
-                                      v === event.id ? null : (event.id ?? null),
-                                    )
-                                  }
-                                >
-                                  👎
-                                </button>
-                                {rejectMenuOpenFor === event.id && (
-                                  <div className="message-feedback-menu">
-                                    {(
-                                      [
-                                        ["incorrect", "Incorrect"],
-                                        ["too_verbose", "Too verbose"],
-                                        ["ignored_instructions", "Ignored instructions"],
-                                        ["wrong_tone", "Wrong tone"],
-                                        ["unsafe", "Unsafe / unwanted"],
-                                      ] as const
-                                    ).map(([reason, label]) => (
-                                      <button
-                                        key={reason}
-                                        className="message-feedback-reason"
-                                        onClick={() =>
-                                          void handleMessageFeedback({
-                                            messageId: event.id!,
-                                            decision: "rejected",
-                                            reason,
-                                          })
-                                        }
-                                      >
-                                        {label}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </>
-                          )}
-                          {isLastAssistant && isTaskWorking && (
-                            <button
-                              className="bubble-feedback-toggle"
-                              onClick={() => setStepFeedbackOpen((o) => !o)}
-                              title="Give feedback"
-                            >
-                              <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <circle cx="12" cy="12" r="1" />
-                                <circle cx="19" cy="12" r="1" />
-                                <circle cx="5" cy="12" r="1" />
-                              </svg>
-                            </button>
-                          )}
-                        </div>
-                        {isLastAssistant && stepFeedbackOpen && (
-                          <div className="bubble-feedback-panel">
-                            {currentStep && (
-                              <div className="bubble-feedback-step-label">
-                                {currentStep.description === "Thinking..." ? (
-                                  <span className="thinking-title">
-                                    Thinking
-                                    <span className="thinking-ellipsis">
-                                      <span>.</span>
-                                      <span>.</span>
-                                      <span>.</span>
-                                    </span>
-                                  </span>
-                                ) : (
-                                  currentStep.description
-                                )}
-                              </div>
-                            )}
-                            <div className="bubble-feedback-actions">
-                              {currentStep && (
-                                <>
-                                  <button
-                                    className="bubble-feedback-btn skip"
-                                    disabled={stepFeedbackSending}
-                                    onClick={() => handleStepFeedback("skip")}
-                                  >
-                                    Skip
-                                  </button>
-                                  <button
-                                    className="bubble-feedback-btn retry"
-                                    disabled={stepFeedbackSending}
-                                    onClick={() => handleStepFeedback("retry")}
-                                  >
-                                    Retry
-                                  </button>
-                                </>
-                              )}
-                              <button
-                                className="bubble-feedback-btn stop"
-                                disabled={stepFeedbackSending || !currentStep}
-                                onClick={() => handleStepFeedback("stop")}
-                              >
-                                Stop
-                              </button>
-                            </div>
-                            <div className="bubble-feedback-input-row">
-                              <input
-                                className="bubble-feedback-input"
-                                type="text"
-                                placeholder="Adjust direction…"
-                                value={stepFeedbackText}
-                                onChange={(e) => setStepFeedbackText(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" && stepFeedbackText.trim()) {
-                                    handleStepFeedback("drift", stepFeedbackText.trim());
-                                  }
-                                }}
-                                disabled={stepFeedbackSending}
-                              />
-                              <button
-                                className="bubble-feedback-btn drift"
-                                disabled={stepFeedbackSending || !stepFeedbackText.trim()}
-                                onClick={() => handleStepFeedback("drift", stepFeedbackText.trim())}
-                              >
-                                Send
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      {renderCommandOutputs(commandOutputsAfterEvent)}
-                    </Fragment>
-                  );
-                }
-
-                const parallelGroup = parallelGroupsByAnchorEventId.get(event.id);
-                if (suppressedParallelEventIds.has(event.id) && !parallelGroup) {
-                  if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
+                const isLatestActionBlock = timelineIndex === lastActionBlockTimelineIndex;
+                const isActive = isLatestActionBlock && (isTaskWorking || isReplayMode);
+                const actionBlockState = getActionBlockRenderState(
+                  item.events as TaskEvent[],
+                  item.eventIndices,
+                  item.blockId,
+                );
+                const {
+                  renderableCount,
+                  renderableEvents,
+                  visibleBlockEvents,
+                  visibleBlockEventIndices,
+                  hiddenBlockEventCount,
+                  hasBlockCommandOutputs,
+                  commandOutputsForBlock,
+                } = actionBlockState;
+                if (renderableCount === 0) {
+                  if (hasBlockCommandOutputs) {
                     return (
-                      <Fragment key={event.id || `event-${item.eventIndex}`}>
-                        {renderCommandOutputs(commandOutputsAfterEvent)}
+                      <Fragment key={item.blockId}>
+                        {renderCommandOutputs(commandOutputsForBlock)}
                       </Fragment>
                     );
                   }
                   return null;
                 }
-
-                if (!parallelGroup && !shouldRenderTimelineEventInStepFeed(event)) {
-                  // Even if we're not showing steps, we may still need to render command output.
-                  if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
-                    return (
-                      <Fragment key={event.id || `event-${item.eventIndex}`}>
-                        {renderCommandOutputs(commandOutputsAfterEvent)}
-                      </Fragment>
-                    );
-                  }
-                  return null;
-                }
-
+                const { summary, iconKind, stepCount, toolCallCount, durationMs, outputTokens } =
+                  buildActionBlockSummary(renderableEvents, events, { isActive });
+                const expanded = resolveDisclosureExpanded({
+                  forceExpanded: isActive,
+                  defaultExpanded: isLatestActionBlock,
+                  toggled: expandedActionBlocks.has(item.blockId),
+                });
+                const onToggle = () => {
+                  setExpandedActionBlocks((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(item.blockId)) next.delete(item.blockId);
+                    else next.add(item.blockId);
+                    return next;
+                  });
+                };
                 const indicatorPosition = stepFeedTimelineIndexPosition.get(timelineIndex);
                 const showConnectorAbove =
                   typeof indicatorPosition === "number" && indicatorPosition > 0;
                 const showConnectorBelow =
                   typeof indicatorPosition === "number" &&
                   indicatorPosition < stepFeedEventCount - 1;
+                const isBlockShowAll = showAllActionBlocks.has(item.blockId);
+                // Exclude sessions shown inline inside currently visible expanded run_command frames.
+                // Hidden rows must not suppress their command outputs, or terminals disappear from the windowed feed.
+                const inlineRunCommandSessionIds = collectInlineRunCommandSessionIds({
+                  events: visibleBlockEvents,
+                  eventIndices: visibleBlockEventIndices,
+                  commandOutputSessionsByInsertIndex,
+                  isEventExpanded,
+                });
+                const lastVisibleBlockEvent = visibleBlockEvents[visibleBlockEvents.length - 1];
+                const lastVisibleRenderEvent = lastVisibleBlockEvent
+                  ? (toolCallPairing.completions.get(lastVisibleBlockEvent.id) ??
+                    lastVisibleBlockEvent)
+                  : undefined;
+                const lastStepLabelRaw = lastVisibleRenderEvent
+                  ? renderEventTitle(
+                      lastVisibleRenderEvent,
+                      workspace?.path,
+                      setViewerFilePath,
+                      agentContext,
+                      { summaryMode: !verboseSteps },
+                    )
+                  : undefined;
+                const lastStepLabel =
+                  isActive && typeof lastStepLabelRaw === "string" ? lastStepLabelRaw : undefined;
+                const isFinishedActionBlockTask =
+                  task.status === "completed" ||
+                  task.status === "failed" ||
+                  task.status === "cancelled";
+                const actionBlockDurationMs =
+                  isLatestActionBlock && (isTaskWorking || isFinishedActionBlockTask)
+                    ? 0
+                    : durationMs;
+                return (
+                  <Fragment key={item.blockId}>
+                    <ActionBlock
+                      blockId={item.blockId}
+                      summary={summary}
+                      iconKind={iconKind}
+                      stepCount={stepCount}
+                      toolCallCount={toolCallCount}
+                      durationMs={actionBlockDurationMs}
+                      outputTokens={outputTokens}
+                      isActive={isActive}
+                      expanded={expanded}
+                      onToggle={onToggle}
+                      showConnectorAbove={showConnectorAbove}
+                      showConnectorBelow={showConnectorBelow}
+                      lastStepLabel={lastStepLabel}
+                    >
+                      {hiddenBlockEventCount > 0 && (
+                        <button
+                          type="button"
+                          className="action-block-show-all-btn"
+                          onClick={() =>
+                            setShowAllActionBlocks((prev) => {
+                              const next = new Set(prev);
+                              next.add(item.blockId);
+                              return next;
+                            })
+                          }
+                        >
+                          ↑ Show all ({renderableCount} steps)
+                        </button>
+                      )}
+                      {isBlockShowAll && (
+                        <button
+                          type="button"
+                          className="action-block-show-all-btn action-block-show-less-btn"
+                          onClick={() =>
+                            setShowAllActionBlocks((prev) => {
+                              const next = new Set(prev);
+                              next.delete(item.blockId);
+                              return next;
+                            })
+                          }
+                        >
+                          Show less
+                        </button>
+                      )}
+                      {(() => {
+                        const nestedParallelEventIds = new Set<string>();
+                        return visibleBlockEvents.map((event: TaskEvent, idx: number) => {
+                          if (nestedParallelEventIds.has(event.id)) return null;
 
-                if (parallelGroup) {
+                          const eventIndex = visibleBlockEventIndices[idx];
+                          const parallelGroup = parallelGroupsByAnchorEventId.get(event.id);
+                          if (suppressedParallelEventIds.has(event.id) && !parallelGroup)
+                            return null;
+                          if (!parallelGroup && !shouldRenderTimelineEventInStepFeed(event)) {
+                            return null;
+                          }
+                          const isLastChild = idx === visibleBlockEvents.length - 1;
+                          const showChildConnectorAbove = true;
+                          const showChildConnectorBelow = !isLastChild || showConnectorBelow;
+
+                          const perEventCmdSessions = (
+                            commandOutputSessionsByInsertIndex.get(eventIndex) ?? []
+                          ).filter(
+                            (s: CommandOutputSession) => !inlineRunCommandSessionIds.has(s.id),
+                          );
+
+                          if (parallelGroup) {
+                            const shouldDefaultExpandGroup =
+                              isLatestActionBlock && idx === visibleBlockEvents.length - 1;
+                            return (
+                              <Fragment key={event.id || `event-${eventIndex}`}>
+                                <ParallelGroupFeed
+                                  group={parallelGroup}
+                                  timeLabel={formatTime(parallelGroup.startedAt)}
+                                  formatTime={formatTime}
+                                  showConnectorAbove={showChildConnectorAbove}
+                                  showConnectorBelow={showChildConnectorBelow}
+                                  defaultExpanded={isActive || shouldDefaultExpandGroup}
+                                />
+                                {renderCommandOutputs(perEventCmdSessions)}
+                              </Fragment>
+                            );
+                          }
+
+                          const nestedParallelChildren: Array<{
+                            event: TaskEvent;
+                            eventIndex: number;
+                            group: Any;
+                          }> = [];
+                          const parentStepId = canStepEventOwnParallelChildren(event)
+                            ? getTimelineEventStepId(event)
+                            : null;
+                          if (parentStepId) {
+                            for (
+                              let childIdx = idx + 1;
+                              childIdx < visibleBlockEvents.length;
+                              childIdx += 1
+                            ) {
+                              const childEvent = visibleBlockEvents[childIdx] as TaskEvent;
+                              const childParallelGroup = parallelGroupsByAnchorEventId.get(
+                                childEvent.id,
+                              );
+                              if (!childParallelGroup) break;
+                              const ownerStepId = getParallelGroupOwnerStepId(
+                                childParallelGroup.groupId,
+                              );
+                              if (!ownerStepId || ownerStepId !== parentStepId) break;
+                              nestedParallelEventIds.add(childEvent.id);
+                              nestedParallelChildren.push({
+                                event: childEvent,
+                                eventIndex: visibleBlockEventIndices[childIdx] as number,
+                                group: childParallelGroup,
+                              });
+                            }
+                          }
+
+                          const effectiveType = getEffectiveTaskEventType(event);
+                          const outputSummary = resolveTaskOutputSummaryFromCompletionEvent(
+                            event,
+                            events,
+                          );
+                          const completionSummaryText = getCompletionSummaryText(event);
+                          const isMinimalCompletion =
+                            !verboseSteps &&
+                            effectiveType === "task_completed" &&
+                            !hasTaskOutputs(outputSummary) &&
+                            completionSummaryText.length === 0;
+                          if (isMinimalCompletion) {
+                            return (
+                              <Fragment key={event.id || `event-${eventIndex}`}>
+                                <div className="timeline-event completion-compact">
+                                  <div className="event-indicator">
+                                    {showChildConnectorAbove && (
+                                      <span
+                                        className="event-connector event-connector-above"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                    <span
+                                      className="event-indicator-icon tone-success"
+                                      aria-hidden="true"
+                                      title="Done"
+                                    >
+                                      <CheckIcon size={12} strokeWidth={2} />
+                                    </span>
+                                    {showChildConnectorBelow && (
+                                      <span
+                                        className="event-connector event-connector-below"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                  </div>
+                                  <div className="event-content completion-compact-content">
+                                    <span className="completion-compact-label">Done</span>
+                                    <span className="event-time-muted">
+                                      {formatTime(event.timestamp)}
+                                    </span>
+                                  </div>
+                                </div>
+                                {renderCommandOutputs(perEventCmdSessions)}
+                              </Fragment>
+                            );
+                          }
+
+                          const hasNestedChildren = nestedParallelChildren.length > 0;
+                          const isExpandable = hasEventDetails(event) || hasNestedChildren;
+                          const shouldDefaultExpandChild =
+                            isExpandable &&
+                            (hasNestedChildren ||
+                              shouldDefaultExpand(event) ||
+                              (isLatestActionBlock && idx === visibleBlockEvents.length - 1));
+                          const isExpanded = resolveDisclosureExpanded({
+                            forceExpanded: isExpandable && isActive,
+                            defaultExpanded: shouldDefaultExpandChild,
+                            toggled: toggledEvents.has(event.id),
+                          });
+                          const toolCallResultEvent = toolCallPairing.completions.get(event.id);
+                          const renderEvent = toolCallResultEvent ?? event;
+                          const eventTitle = renderEventTitle(
+                            renderEvent,
+                            workspace?.path,
+                            setViewerFilePath,
+                            agentContext,
+                            { summaryMode: !verboseSteps },
+                          );
+                          const eventDetails = hasEventDetails(event)
+                            ? renderEventDetails(event, voiceEnabled, markdownComponents, {
+                                workspacePath: workspace?.path,
+                                onOpenViewer: setViewerFilePath,
+                                onOpenSpreadsheetArtifact,
+                                onOpenDocumentArtifact,
+                                onOpenPresentationArtifact,
+                                onOpenWebArtifact,
+                                onQuoteAssistantMessage,
+                                onForkTaskSession: onForkTaskSessionFromEvent,
+                                isLastAssistantMessage: isLastAssistantMessageEvent(
+                                  event,
+                                  lastAssistantMessage,
+                                ),
+                                events,
+                                onViewOutputs: onViewTaskOutputs,
+                                hideVerificationSteps: true,
+                                summaryMode: !verboseSteps,
+                                task,
+                                childTasks,
+                                commandOutputSessions:
+                                  commandOutputSessionsByInsertIndex.get(eventIndex) ?? [],
+                                renderCommandOutput: renderCommandOutputs,
+                                deferEndOfTaskArtifactCards: true,
+                              })
+                            : undefined;
+
+                          return (
+                            <Fragment key={event.id || `event-${eventIndex}`}>
+                              <StepFeed
+                                title={
+                                  typeof eventTitle === "string" ? (
+                                    <DeferredMarkdown components={eventTitleMarkdownComponents}>
+                                      {normalizeTimelineTitleMarkdownForDisplay(eventTitle)}
+                                    </DeferredMarkdown>
+                                  ) : (
+                                    eventTitle
+                                  )
+                                }
+                                titleTooltip={
+                                  typeof eventTitle === "string" ? eventTitle : undefined
+                                }
+                                timeLabel={formatTime(event.timestamp)}
+                                hideTime
+                                indicator={resolveTimelineIndicator(renderEvent, {
+                                  isTaskCompleted: !isTaskWorking,
+                                })}
+                                showConnectorAbove={showChildConnectorAbove}
+                                showConnectorBelow={showChildConnectorBelow}
+                                showBranchStub={shouldShowTimelineBranchStub(event)}
+                                expandable={isExpandable}
+                                expanded={isExpanded}
+                                onToggle={
+                                  isExpandable ? () => toggleEventExpanded(event.id) : undefined
+                                }
+                                details={
+                                  isExpanded ? (
+                                    <>
+                                      {hasNestedChildren ? (
+                                        <div className="timeline-step-child-groups">
+                                          {nestedParallelChildren.map((child) => {
+                                            const childCmdSessions = (
+                                              commandOutputSessionsByInsertIndex.get(
+                                                child.eventIndex,
+                                              ) ?? []
+                                            ).filter(
+                                              (s: CommandOutputSession) =>
+                                                !inlineRunCommandSessionIds.has(s.id),
+                                            );
+                                            return (
+                                              <Fragment
+                                                key={child.event.id || `event-${child.eventIndex}`}
+                                              >
+                                                <ParallelGroupFeed
+                                                  group={child.group}
+                                                  timeLabel={formatTime(child.group.startedAt)}
+                                                  formatTime={formatTime}
+                                                />
+                                                {renderCommandOutputs(childCmdSessions)}
+                                              </Fragment>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : null}
+                                      {eventDetails}
+                                    </>
+                                  ) : undefined
+                                }
+                              />
+                              {renderCommandOutputs(perEventCmdSessions)}
+                            </Fragment>
+                          );
+                        });
+                      })()}
+                    </ActionBlock>
+                  </Fragment>
+                );
+              }
+
+              const event = item.event;
+              const effectiveType = getEffectiveTaskEventType(event);
+              const isUserMessage = effectiveType === "user_message";
+              const isAssistantMessage = effectiveType === "assistant_message";
+              const completionSummaryText = getCompletionSummaryText(event);
+              const isCompletionSummaryMessage = completionSummaryText.length > 0;
+              const commandOutputsAfterEvent = commandOutputSessionsByInsertIndex.get(
+                item.eventIndex,
+              );
+
+              if (
+                isChatTask &&
+                !isUserMessage &&
+                !isAssistantMessage &&
+                !isCompletionSummaryMessage
+              ) {
+                if (effectiveType === "llm_streaming" && isTaskWorking) {
+                  const streamingText =
+                    typeof event.payload?.text === "string"
+                      ? event.payload.text
+                      : typeof event.payload?.message === "string"
+                        ? event.payload.message
+                        : "";
                   return (
                     <Fragment key={event.id || `event-${item.eventIndex}`}>
-                      <ParallelGroupFeed
-                        group={parallelGroup}
-                        timeLabel={formatTime(parallelGroup.startedAt)}
-                        formatTime={formatTime}
-                        showConnectorAbove={showConnectorAbove}
-                        showConnectorBelow={showConnectorBelow}
-                      />
+                      <div className="chat-message assistant-message">
+                        <div className="chat-bubble assistant-bubble">
+                          <div className="chat-bubble-content markdown-content">
+                            <AssistantMessageContent
+                              message={cleanAssistantMessageForDisplay(streamingText)}
+                              markdownComponents={markdownComponents}
+                              workspacePath={workspace?.path}
+                              onOpenViewer={setViewerFilePath}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </Fragment>
+                  );
+                }
+                if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
                       {renderCommandOutputs(commandOutputsAfterEvent)}
                     </Fragment>
                   );
                 }
+                return null;
+              }
 
-                const isExpandable = hasEventDetails(event);
-                const isExpanded = isEventExpanded(event);
-                const toolCallResultEvent2 = toolCallPairing.completions.get(event.id);
-                const renderEvent2 = toolCallResultEvent2 ?? event;
-                const eventTitle = renderEventTitle(
-                  renderEvent2,
-                  workspace?.path,
-                  setViewerFilePath,
-                  agentContext,
-                  { summaryMode: !verboseSteps },
+              // Render user messages as chat bubbles on the right
+              if (isUserMessage) {
+                if (
+                  shouldSuppressInitialPromptUserEvent({
+                    event,
+                    initialPromptEventId,
+                    trimmedPrompt,
+                    taskCreatedAt: task?.createdAt,
+                  })
+                ) {
+                  if (!commandOutputsAfterEvent || commandOutputsAfterEvent.length === 0) {
+                    return null;
+                  }
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      {renderCommandOutputs(commandOutputsAfterEvent)}
+                    </Fragment>
+                  );
+                }
+                const rawMessage = event.payload?.message || "User message";
+                const messageText =
+                  typeof rawMessage === "string"
+                    ? normalizeInitialPromptText(rawMessage)
+                    : "User message";
+                const messageIntegrationMentions = Array.isArray(event.payload?.integrationMentions)
+                  ? (event.payload.integrationMentions as IntegrationMentionSelection[])
+                  : task?.agentConfig?.integrationMentions;
+                const quotedAssistantMessage = event.payload?.quotedAssistantMessage as
+                  | QuotedAssistantMessage
+                  | undefined;
+                const attachmentNames = extractAttachmentNames(rawMessage);
+                const attachmentMetadata = parseUserMessageAttachmentMetadata(
+                  event.payload?.images,
                 );
-
+                const nonImageAttachmentNames = getAttachmentNamesWithoutImagePreviews(
+                  attachmentNames,
+                  attachmentMetadata,
+                );
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
-                    <StepFeed
-                      title={
-                        typeof eventTitle === "string" ? (
-                          <DeferredMarkdown components={eventTitleMarkdownComponents}>
-                            {normalizeTimelineTitleMarkdownForDisplay(eventTitle)}
-                          </DeferredMarkdown>
-                        ) : (
-                          eventTitle
-                        )
-                      }
-                      titleTooltip={typeof eventTitle === "string" ? eventTitle : undefined}
-                      timeLabel={formatTime(event.timestamp)}
-                      hideTime
-                      indicator={resolveTimelineIndicator(renderEvent2, {
-                        isTaskCompleted: !isTaskWorking,
-                      })}
-                      showConnectorAbove={showConnectorAbove}
-                      showConnectorBelow={showConnectorBelow}
-                      showBranchStub={shouldShowTimelineBranchStub(event)}
-                      expandable={isExpandable}
-                      expanded={isExpanded}
-                      onToggle={isExpandable ? () => toggleEventExpanded(event.id) : undefined}
-                      details={
-                        isExpanded
-                          ? renderEventDetails(event, voiceEnabled, markdownComponents, {
-                              workspacePath: workspace?.path,
-                              onOpenViewer: setViewerFilePath,
-                              onOpenSpreadsheetArtifact,
-                              onOpenDocumentArtifact,
-                              onOpenPresentationArtifact,
-                              onOpenWebArtifact,
-                              onQuoteAssistantMessage,
-                              events,
-                              onViewOutputs: onViewTaskOutputs,
-                              hideVerificationSteps: true,
-                              summaryMode: !verboseSteps,
-                              task,
-                              childTasks,
-                              commandOutputSessions: commandOutputsAfterEvent ?? [],
-                              renderCommandOutput: renderCommandOutputs,
-                              deferEndOfTaskArtifactCards: true,
-                            })
-                          : undefined
-                      }
-                    />
-                    {renderCommandOutputs(
-                      isExpanded &&
-                        effectiveType === "tool_call" &&
-                        event.payload?.tool === "run_command" &&
-                        commandOutputsAfterEvent &&
-                        commandOutputsAfterEvent.length > 0
-                        ? []
-                        : commandOutputsAfterEvent ?? [],
-                    )}
+                    <div className="chat-message user-message">
+                      <UserMessageImageGallery
+                        attachments={attachmentMetadata}
+                        workspacePath={workspace?.path}
+                        onOpenViewer={setViewerFilePath}
+                      />
+                      {quotedAssistantMessage?.message ? (
+                        <div className="quoted-follow-up-shell">
+                          <div className="quoted-follow-up-context">
+                            <span className="quoted-follow-up-context-icon">↪</span>
+                            <span className="quoted-follow-up-context-text">
+                              {summarizeQuotedAssistantMessage(quotedAssistantMessage.message, 520)}
+                            </span>
+                          </div>
+                          <div className="quoted-follow-up-reply markdown-content">
+                            <UserMessageText
+                              text={messageText}
+                              integrationMentions={messageIntegrationMentions}
+                              markdownComponents={markdownComponents}
+                            />
+                          </div>
+                          {nonImageAttachmentNames.length > 0 && (
+                            <div className="bubble-attachments quoted-follow-up-attachments">
+                              {nonImageAttachmentNames.map((name, i) => (
+                                <span className="bubble-attachment-chip" key={i}>
+                                  <svg
+                                    width="12"
+                                    height="12"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                  >
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                    <path d="M14 2v6h6" />
+                                  </svg>
+                                  <span className="bubble-attachment-name" title={name}>
+                                    {name}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <CollapsibleUserBubble>
+                          <UserMessageText
+                            text={messageText}
+                            integrationMentions={messageIntegrationMentions}
+                            markdownComponents={markdownComponents}
+                          />
+                          {nonImageAttachmentNames.length > 0 && (
+                            <div className="bubble-attachments">
+                              {nonImageAttachmentNames.map((name, i) => (
+                                <span className="bubble-attachment-chip" key={i}>
+                                  <svg
+                                    width="12"
+                                    height="12"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                  >
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                    <path d="M14 2v6h6" />
+                                  </svg>
+                                  <span className="bubble-attachment-name" title={name}>
+                                    {name}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </CollapsibleUserBubble>
+                      )}
+                      <MessageCopyButton text={messageText} />
+                    </div>
+                    {renderCommandOutputs(commandOutputsAfterEvent)}
                   </Fragment>
                 );
-                };
+              }
 
-                const getRenderedFeedRow = (row: TaskFeedRow) => {
-                  const signature = getRowRenderSignature(row);
-                  const cached = feedRowRenderCacheRef.current.get(row.key);
-                  if (cached && cached.signature === signature) {
-                    return cached.node;
-                  }
-
-                  recordRendererRender(
-                    "MainContent.feedRow",
-                    row.key,
-                    rendererPerfLoggingEnabled,
-                  );
-                  const node = renderFeedRow(row);
-                  feedRowRenderCacheRef.current.set(row.key, { signature, node });
-                  return node;
-                };
-
-                return (
-                  <TaskConversationRenderedRows
-                    taskId={task?.id}
-                    taskSwitchId={taskSwitchId}
-                    hasMoreTimelineHistory={Boolean(hasMoreTimelineHistory)}
-                    isLoadingTimelineHistory={Boolean(isLoadingTimelineHistory)}
-                    timelineHistoryError={timelineHistoryError}
-                    onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
-                    rendererPerfLoggingEnabled={Boolean(rendererPerfLoggingEnabled)}
-                    visibleFeedRows={visibleFeedRows}
-                    isChatTask={isChatTask}
-                    isTaskWorking={isTaskWorking}
-                    task={task}
-                    formatTime={formatTime}
-                    isReplayMode={isReplayMode}
-                    transcriptMode={transcriptMode}
-                    hiddenLiveFeedRowCount={hiddenLiveFeedRowCount}
-                    canReturnToLiveView={defaultTranscriptMode === "live"}
-                    onShowFullTimeline={showFullTimeline}
-                    onBackToLiveView={returnToDefaultTranscript}
-                    reasoningPanel={
-                      showReasoningPanel ? (
-                        <AgentReasoningPanel currentStep={currentStep} state={reasoningPanelState} />
-                      ) : null
-                    }
-                    reasoningPanelSignature={reasoningPanelSignature}
-                    mainBodyRef={mainBodyRef}
-                    timelineRef={timelineRef}
-                    getRenderedFeedRow={getRenderedFeedRow}
-                  />
+              // Render assistant messages as chat bubbles on the left
+              if (isAssistantMessage || isCompletionSummaryMessage) {
+                const messageText = isCompletionSummaryMessage
+                  ? completionSummaryText
+                  : event.payload?.message || "";
+                const cleanedMessageText = cleanAssistantMessageForDisplay(messageText);
+                const inlineFrames = getTaskEventInlineFrames(event);
+                const sourceUserMessage = getPreviousUserMessageText(events, item.eventIndex);
+                const quotedAssistantMessage = createQuotedAssistantMessage(
+                  cleanedMessageText,
+                  event.id,
+                  event.taskId,
                 );
-              })()}
+                const isLastAssistant = isLastAssistantMessageEvent(event, lastAssistantMessage);
+                const assistantStatusLabel =
+                  isLastAssistant && !isChatTask
+                    ? getAssistantBubbleStatusLabel(
+                        task,
+                        agentContext.getMessage("taskBlocked") || "Needs approval",
+                      )
+                    : "";
+                return (
+                  <Fragment key={event.id || `event-${item.eventIndex}`}>
+                    <div className="chat-message assistant-message">
+                      <div className="chat-bubble assistant-bubble">
+                        {assistantStatusLabel && (
+                          <div className="chat-bubble-header">
+                            <span className="chat-status">{assistantStatusLabel}</span>
+                          </div>
+                        )}
+                        <div className="chat-bubble-content markdown-content">
+                          <AssistantMessageContent
+                            message={cleanedMessageText}
+                            markdownComponents={markdownComponents}
+                            workspacePath={workspace?.path}
+                            onOpenViewer={setViewerFilePath}
+                          />
+                        </div>
+                      </div>
+                      {(inlineFrames.length > 0 || (isAssistantMessage && event.id)) && (
+                        <div className="chat-inline-frames">
+                          {inlineFrames.map((frame) => (
+                            <MailComposeFrame
+                              key={`${frame.kind}:${frame.draftId}`}
+                              frame={frame}
+                            />
+                          ))}
+                          {inlineFrames.length === 0 && isLastAssistant && !isTaskWorking && (
+                            <AutoMailComposeFrame
+                              eventId={event.id}
+                              taskId={event.taskId}
+                              assistantMessage={cleanedMessageText}
+                              sourceUserMessage={sourceUserMessage}
+                              allowCreate={true}
+                            />
+                          )}
+                        </div>
+                      )}
+                      <div className="message-actions">
+                        <MessageCopyButton text={messageText} />
+                        <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
+                        {quotedAssistantMessage && onQuoteAssistantMessage && (
+                          <MessageQuoteButton
+                            onQuote={() => onQuoteAssistantMessage(quotedAssistantMessage)}
+                          />
+                        )}
+                        {event.id && onForkTaskSessionFromEvent && isLastAssistant && (
+                          <MessageForkButton onFork={() => onForkTaskSessionFromEvent(event)} />
+                        )}
+                        {isLastAssistant && event.id && !isTaskWorking && (
+                          <>
+                            <button
+                              className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
+                              title="Helpful"
+                              onClick={() =>
+                                void handleMessageFeedback({
+                                  messageId: event.id!,
+                                  decision: "accepted",
+                                })
+                              }
+                            >
+                              👍
+                            </button>
+                            <div
+                              ref={rejectMenuOpenFor === event.id ? rejectMenuRef : undefined}
+                              className="message-feedback-thumbdown-wrap"
+                            >
+                              <button
+                                className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
+                                title="Not helpful"
+                                onClick={() =>
+                                  setRejectMenuOpenFor((v) =>
+                                    v === event.id ? null : (event.id ?? null),
+                                  )
+                                }
+                              >
+                                👎
+                              </button>
+                              {rejectMenuOpenFor === event.id && (
+                                <div className="message-feedback-menu">
+                                  {(
+                                    [
+                                      ["incorrect", "Incorrect"],
+                                      ["too_verbose", "Too verbose"],
+                                      ["ignored_instructions", "Ignored instructions"],
+                                      ["wrong_tone", "Wrong tone"],
+                                      ["unsafe", "Unsafe / unwanted"],
+                                    ] as const
+                                  ).map(([reason, label]) => (
+                                    <button
+                                      key={reason}
+                                      className="message-feedback-reason"
+                                      onClick={() =>
+                                        void handleMessageFeedback({
+                                          messageId: event.id!,
+                                          decision: "rejected",
+                                          reason,
+                                        })
+                                      }
+                                    >
+                                      {label}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                        {isLastAssistant && isTaskWorking && (
+                          <button
+                            className="bubble-feedback-toggle"
+                            onClick={() => setStepFeedbackOpen((o) => !o)}
+                            title="Give feedback"
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <circle cx="12" cy="12" r="1" />
+                              <circle cx="19" cy="12" r="1" />
+                              <circle cx="5" cy="12" r="1" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                      {isLastAssistant && stepFeedbackOpen && (
+                        <div className="bubble-feedback-panel">
+                          {currentStep && (
+                            <div className="bubble-feedback-step-label">
+                              {currentStep.description === "Thinking..." ? (
+                                <span className="thinking-title">
+                                  Thinking
+                                  <span className="thinking-ellipsis">
+                                    <span>.</span>
+                                    <span>.</span>
+                                    <span>.</span>
+                                  </span>
+                                </span>
+                              ) : (
+                                currentStep.description
+                              )}
+                            </div>
+                          )}
+                          <div className="bubble-feedback-actions">
+                            {currentStep && (
+                              <>
+                                <button
+                                  className="bubble-feedback-btn skip"
+                                  disabled={stepFeedbackSending}
+                                  onClick={() => handleStepFeedback("skip")}
+                                >
+                                  Skip
+                                </button>
+                                <button
+                                  className="bubble-feedback-btn retry"
+                                  disabled={stepFeedbackSending}
+                                  onClick={() => handleStepFeedback("retry")}
+                                >
+                                  Retry
+                                </button>
+                              </>
+                            )}
+                            <button
+                              className="bubble-feedback-btn stop"
+                              disabled={stepFeedbackSending || !currentStep}
+                              onClick={() => handleStepFeedback("stop")}
+                            >
+                              Stop
+                            </button>
+                          </div>
+                          <div className="bubble-feedback-input-row">
+                            <input
+                              className="bubble-feedback-input"
+                              type="text"
+                              placeholder="Adjust direction…"
+                              value={stepFeedbackText}
+                              onChange={(e) => setStepFeedbackText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && stepFeedbackText.trim()) {
+                                  handleStepFeedback("drift", stepFeedbackText.trim());
+                                }
+                              }}
+                              disabled={stepFeedbackSending}
+                            />
+                            <button
+                              className="bubble-feedback-btn drift"
+                              disabled={stepFeedbackSending || !stepFeedbackText.trim()}
+                              onClick={() => handleStepFeedback("drift", stepFeedbackText.trim())}
+                            >
+                              Send
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {renderCommandOutputs(commandOutputsAfterEvent)}
+                  </Fragment>
+                );
+              }
+
+              const parallelGroup = parallelGroupsByAnchorEventId.get(event.id);
+              if (suppressedParallelEventIds.has(event.id) && !parallelGroup) {
+                if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      {renderCommandOutputs(commandOutputsAfterEvent)}
+                    </Fragment>
+                  );
+                }
+                return null;
+              }
+
+              if (!parallelGroup && !shouldRenderTimelineEventInStepFeed(event)) {
+                // Even if we're not showing steps, we may still need to render command output.
+                if (commandOutputsAfterEvent && commandOutputsAfterEvent.length > 0) {
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      {renderCommandOutputs(commandOutputsAfterEvent)}
+                    </Fragment>
+                  );
+                }
+                return null;
+              }
+
+              const indicatorPosition = stepFeedTimelineIndexPosition.get(timelineIndex);
+              const showConnectorAbove =
+                typeof indicatorPosition === "number" && indicatorPosition > 0;
+              const showConnectorBelow =
+                typeof indicatorPosition === "number" && indicatorPosition < stepFeedEventCount - 1;
+
+              if (parallelGroup) {
+                return (
+                  <Fragment key={event.id || `event-${item.eventIndex}`}>
+                    <ParallelGroupFeed
+                      group={parallelGroup}
+                      timeLabel={formatTime(parallelGroup.startedAt)}
+                      formatTime={formatTime}
+                      showConnectorAbove={showConnectorAbove}
+                      showConnectorBelow={showConnectorBelow}
+                    />
+                    {renderCommandOutputs(commandOutputsAfterEvent)}
+                  </Fragment>
+                );
+              }
+
+              const isExpandable = hasEventDetails(event);
+              const isExpanded = isEventExpanded(event);
+              const toolCallResultEvent2 = toolCallPairing.completions.get(event.id);
+              const renderEvent2 = toolCallResultEvent2 ?? event;
+              const eventTitle = renderEventTitle(
+                renderEvent2,
+                workspace?.path,
+                setViewerFilePath,
+                agentContext,
+                { summaryMode: !verboseSteps },
+              );
+
+              return (
+                <Fragment key={event.id || `event-${item.eventIndex}`}>
+                  <StepFeed
+                    title={
+                      typeof eventTitle === "string" ? (
+                        <DeferredMarkdown components={eventTitleMarkdownComponents}>
+                          {normalizeTimelineTitleMarkdownForDisplay(eventTitle)}
+                        </DeferredMarkdown>
+                      ) : (
+                        eventTitle
+                      )
+                    }
+                    titleTooltip={typeof eventTitle === "string" ? eventTitle : undefined}
+                    timeLabel={formatTime(event.timestamp)}
+                    hideTime
+                    indicator={resolveTimelineIndicator(renderEvent2, {
+                      isTaskCompleted: !isTaskWorking,
+                    })}
+                    showConnectorAbove={showConnectorAbove}
+                    showConnectorBelow={showConnectorBelow}
+                    showBranchStub={shouldShowTimelineBranchStub(event)}
+                    expandable={isExpandable}
+                    expanded={isExpanded}
+                    onToggle={isExpandable ? () => toggleEventExpanded(event.id) : undefined}
+                    details={
+                      isExpanded
+                        ? renderEventDetails(event, voiceEnabled, markdownComponents, {
+                            workspacePath: workspace?.path,
+                            onOpenViewer: setViewerFilePath,
+                            onOpenSpreadsheetArtifact,
+                            onOpenDocumentArtifact,
+                            onOpenPresentationArtifact,
+                            onOpenWebArtifact,
+                            onQuoteAssistantMessage,
+                            isLastAssistantMessage: isLastAssistantMessageEvent(
+                              event,
+                              lastAssistantMessage,
+                            ),
+                            events,
+                            onViewOutputs: onViewTaskOutputs,
+                            hideVerificationSteps: true,
+                            summaryMode: !verboseSteps,
+                            task,
+                            childTasks,
+                            commandOutputSessions: commandOutputsAfterEvent ?? [],
+                            renderCommandOutput: renderCommandOutputs,
+                            deferEndOfTaskArtifactCards: true,
+                          })
+                        : undefined
+                    }
+                  />
+                  {renderCommandOutputs(
+                    isExpanded &&
+                      effectiveType === "tool_call" &&
+                      event.payload?.tool === "run_command" &&
+                      commandOutputsAfterEvent &&
+                      commandOutputsAfterEvent.length > 0
+                      ? []
+                      : (commandOutputsAfterEvent ?? []),
+                  )}
+                </Fragment>
+              );
+            };
+
+            const getRenderedFeedRow = (row: TaskFeedRow) => {
+              const signature = getRowRenderSignature(row);
+              const cached = feedRowRenderCacheRef.current.get(row.key);
+              if (cached && cached.signature === signature) {
+                return cached.node;
+              }
+
+              recordRendererRender("MainContent.feedRow", row.key, rendererPerfLoggingEnabled);
+              const node = renderFeedRow(row);
+              feedRowRenderCacheRef.current.set(row.key, { signature, node });
+              return node;
+            };
+
+            return (
+              <TaskConversationRenderedRows
+                taskId={task?.id}
+                taskSwitchId={taskSwitchId}
+                hasMoreTimelineHistory={Boolean(hasMoreTimelineHistory)}
+                isLoadingTimelineHistory={Boolean(isLoadingTimelineHistory)}
+                timelineHistoryError={timelineHistoryError}
+                onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
+                rendererPerfLoggingEnabled={Boolean(rendererPerfLoggingEnabled)}
+                visibleFeedRows={visibleFeedRows}
+                isChatTask={isChatTask}
+                isTaskWorking={isTaskWorking}
+                task={task}
+                formatTime={formatTime}
+                isReplayMode={isReplayMode}
+                transcriptMode={transcriptMode}
+                hiddenLiveFeedRowCount={hiddenLiveFeedRowCount}
+                canReturnToLiveView={defaultTranscriptMode === "live"}
+                onShowFullTimeline={showFullTimeline}
+                onBackToLiveView={returnToDefaultTranscript}
+                reasoningPanel={
+                  showReasoningPanel ? (
+                    <AgentReasoningPanel currentStep={currentStep} state={reasoningPanelState} />
+                  ) : null
+                }
+                reasoningPanelSignature={reasoningPanelSignature}
+                mainBodyRef={mainBodyRef}
+                timelineRef={timelineRef}
+                getRenderedFeedRow={getRenderedFeedRow}
+              />
+            );
+          })()}
       </>
     ),
     [
@@ -3018,6 +3126,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       transcriptMode,
       defaultTranscriptMode,
       lastActionBlockTimelineIndex,
+      lastAssistantMessage,
       returnToDefaultTranscript,
       showFullTimeline,
       timelineItems,
@@ -3137,9 +3246,10 @@ function usePrefersReducedMotion(): boolean {
 
 function useTypewriterPlaceholder(phrases: string[], active: boolean): string {
   const prefersReducedMotion = usePrefersReducedMotion();
-  const normalizedPhrases = useMemo(() => phrases.filter((phrase) => phrase.trim().length > 0), [
-    phrases,
-  ]);
+  const normalizedPhrases = useMemo(
+    () => phrases.filter((phrase) => phrase.trim().length > 0),
+    [phrases],
+  );
   const [displayText, setDisplayText] = useState(normalizedPhrases[0] ?? "");
 
   useEffect(() => {
@@ -3248,8 +3358,7 @@ function MainContentComponent({
   onSelectWorkspace,
   onOpenSettings,
   onStopTask,
-  onEnableShellForPausedTask,
-  onContinueWithoutShellForPausedTask,
+  onContinueWithoutCommandsForPausedTask,
   onWrapUpTask,
   inputRequest = null,
   pendingInputRequests = [],
@@ -3286,7 +3395,7 @@ function MainContentComponent({
 }: MainContentProps) {
   recordRendererRender(
     "MainContent",
-    task?.id ? `task:${task.id}` : selectedTaskId ?? "task:none",
+    task?.id ? `task:${task.id}` : (selectedTaskId ?? "task:none"),
     rendererPerfLoggingEnabled,
   );
   const startupMarksRef = useRef<Set<string>>(new Set());
@@ -3320,17 +3429,14 @@ function MainContentComponent({
     sharedTaskEventUi?.projectionMode === "live" && transcriptModeOverride === "inspect"
       ? null
       : sharedTaskEventUi;
-  const events = useMemo(
-    () => {
-      if (effectiveSharedTaskEventUi) {
-        return effectiveSharedTaskEventUi.normalizedEvents;
-      }
-      return measureRendererPerf("MainContent.normalizeEvents", rendererPerfLoggingEnabled, () =>
-        normalizeEventsForTimelineUi(rawEvents),
-      );
-    },
-    [rawEvents, rendererPerfLoggingEnabled, effectiveSharedTaskEventUi],
-  );
+  const events = useMemo(() => {
+    if (effectiveSharedTaskEventUi) {
+      return effectiveSharedTaskEventUi.normalizedEvents;
+    }
+    return measureRendererPerf("MainContent.normalizeEvents", rendererPerfLoggingEnabled, () =>
+      normalizeEventsForTimelineUi(rawEvents),
+    );
+  }, [rawEvents, rendererPerfLoggingEnabled, effectiveSharedTaskEventUi]);
   const childEvents = useMemo(
     () =>
       measureRendererPerf("MainContent.normalizeChildEvents", rendererPerfLoggingEnabled, () =>
@@ -3344,9 +3450,8 @@ function MainContentComponent({
   const [inputValue, setInputValue] = useState("");
   const [activeWelcomeSuggestionDraft, setActiveWelcomeSuggestionDraft] =
     useState<ActiveWelcomeSuggestionDraft | null>(null);
-  const [quotedAssistantMessage, setQuotedAssistantMessage] = useState<QuotedAssistantMessage | null>(
-    null,
-  );
+  const [quotedAssistantMessage, setQuotedAssistantMessage] =
+    useState<QuotedAssistantMessage | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -3356,9 +3461,9 @@ function MainContentComponent({
   const [integrationMentionOptions, setIntegrationMentionOptions] = useState<
     IntegrationMentionOption[]
   >([]);
-  const [integrationMentionSpans, setIntegrationMentionSpans] = useState<
-    IntegrationMentionSpan[]
-  >([]);
+  const [integrationMentionSpans, setIntegrationMentionSpans] = useState<IntegrationMentionSpan[]>(
+    [],
+  );
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionTarget, setMentionTarget] = useState<{ start: number; end: number } | null>(null);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -3377,6 +3482,29 @@ function MainContentComponent({
   } | null>(null);
   const taskHeaderMenuRef = useRef<HTMLDivElement>(null);
   const taskHeaderMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const previousTaskIdRef = useRef<string | undefined>(task?.id);
+
+  // A composer draft belongs to the task it was written for. When the user
+  // presses New (or opens another history row), MainContent is retained and
+  // only its task prop changes; without clearing this state the previous
+  // prompt remains visible in the fresh composer.
+  useEffect(() => {
+    if (previousTaskIdRef.current !== task?.id) {
+      setInputValue("");
+      setPendingAttachments([]);
+      setIntegrationMentionSpans([]);
+      setAttachmentError(null);
+      setMentionOpen(false);
+      setMentionQuery("");
+      setMentionTarget(null);
+      setSlashOpen(false);
+      setSlashQuery("");
+      setSlashTarget(null);
+      setModeSuggestions([]);
+    }
+    previousTaskIdRef.current = task?.id;
+  }, [task?.id]);
+
   // Focused mode card pool - pick random cards on mount
   const focusedCards = useMemo(() => pickFocusedCards(FOCUSED_CARD_POOL, CARDS_TO_SHOW), []);
 
@@ -3528,8 +3656,6 @@ function MainContentComponent({
     };
   }, [workspace?.id]);
 
-  // Shell permission state - tracks current workspace's shell permission
-  const [shellEnabled, setShellEnabled] = useState(workspace?.permissions?.shell ?? false);
   // Track dismissed command outputs by command session ID (persisted in localStorage)
   const [dismissedCommandOutputs, setDismissedCommandOutputs] = useState<Set<string>>(() => {
     try {
@@ -3547,9 +3673,112 @@ function MainContentComponent({
   const [chronicleEnabledForTask, setChronicleEnabledForTask] = useState(true);
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("execute");
   const [defaultPermissionAccessMode, setDefaultPermissionAccessMode] =
-    useState<PermissionAccessMode>("default");
-  const [permissionAccessMode, setPermissionAccessMode] =
-    useState<PermissionAccessMode>("default");
+    useState<PermissionAccessMode>(BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
+  const [permissionAccessMode, setPermissionAccessMode] = useState<PermissionAccessMode>(
+    BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+  );
+  // Older settings may have only a legacy permission mode. Keep the profile
+  // selector visual while omitting an explicit profile from new tasks until
+  // the user chooses a profile, so migration does not silently change the
+  // legacy defaultMode semantics.
+  const [newTaskUsesLegacyPermissionMode, setNewTaskUsesLegacyPermissionMode] = useState(true);
+  const [defaultUsesLegacyPermissionMode, setDefaultUsesLegacyPermissionMode] = useState(true);
+  const [selectedTaskAccessProfileOverride, setSelectedTaskAccessProfileOverride] = useState<
+    AccessProfileId | null | undefined
+  >(undefined);
+  const [permissionSettingsLoaded, setPermissionSettingsLoaded] = useState(false);
+  const [adminRuntimePolicy, setAdminRuntimePolicy] = useState<{
+    allowedPermissionModes?: PermissionMode[];
+    allowedSandboxTypes?: Array<"macos" | "docker" | "none">;
+    requireSandboxForShell?: boolean;
+    allowUnsandboxedShell?: boolean;
+    network?: {
+      defaultAction?: "allow" | "deny";
+      allowedDomains?: string[];
+      blockedDomains?: string[];
+      allowShellNetwork?: boolean;
+    };
+  } | null>(null);
+  const newTaskAccessProfileId = newTaskUsesLegacyPermissionMode ? undefined : permissionAccessMode;
+  const taskAccessProfileId = task?.id
+    ? (selectedTaskAccessProfileOverride ?? undefined)
+    : newTaskUsesLegacyPermissionMode
+      ? undefined
+      : permissionAccessMode;
+  const selectedProfileId = task?.id
+    ? (selectedTaskAccessProfileOverride ?? undefined)
+    : newTaskUsesLegacyPermissionMode
+      ? undefined
+      : permissionAccessMode;
+  const [accessProfiles, setAccessProfiles] = useState<AccessProfileDefinition[]>([]);
+  const selectedAccessProfile = useMemo(() => {
+    const found = [...BUILTIN_ACCESS_PROFILES, ...accessProfiles].find(
+      (profile) => profile.id === selectedProfileId,
+    );
+    if (found) return found;
+    if (selectedProfileId) {
+      return {
+        id: selectedProfileId,
+        label: "Unavailable access profile",
+        description: "This profile is no longer available.",
+        sandbox: "read-only" as const,
+        approval: "on-request" as const,
+        reviewer: "user" as const,
+        network: "disabled" as const,
+        shellAccess: false,
+      } satisfies AccessProfileDefinition;
+    }
+    return BUILTIN_ACCESS_PROFILES[0];
+  }, [accessProfiles, selectedProfileId]);
+  const selectedAccessProfileLabel =
+    task?.id && selectedTaskAccessProfileOverride === null
+      ? `Legacy mode${task.agentConfig?.permissionMode ? ` · ${task.agentConfig.permissionMode}` : ""}`
+      : selectedAccessProfile.label;
+  const profileConstraintNotice = useMemo(() => {
+    const notices: string[] = [];
+    if (selectedProfileId && selectedAccessProfile.label === "Unavailable access profile") {
+      return "This access profile is unavailable; execution will remain paused until you choose a valid profile.";
+    }
+
+    if (
+      selectedProfileId &&
+      isFullAccessProfile(selectedAccessProfile) &&
+      hasAccessProfileScope(selectedAccessProfile)
+    ) {
+      notices.push("Scoped rules force this profile to use a sandboxed execution boundary.");
+    }
+
+    const adminRuntime = adminRuntimePolicy;
+    const selectedLegacyMode = getLegacyPermissionModeForAccessProfile(selectedAccessProfile);
+    if (
+      selectedProfileId &&
+      Array.isArray(adminRuntime?.allowedPermissionModes) &&
+      adminRuntime.allowedPermissionModes.length > 0 &&
+      !adminRuntime.allowedPermissionModes.includes(selectedLegacyMode)
+    ) {
+      notices.push(
+        "Administrator policy will constrain this profile to an allowed permission mode.",
+      );
+    }
+    if (
+      selectedProfileId &&
+      adminRuntime?.requireSandboxForShell === true &&
+      isFullAccessProfile(selectedAccessProfile) &&
+      selectedAccessProfile.shellAccess !== false
+    ) {
+      notices.push("Administrator policy requires sandboxing for shell commands.");
+    }
+    if (
+      selectedProfileId &&
+      selectedAccessProfile.network !== "disabled" &&
+      adminRuntime?.network?.defaultAction === "deny"
+    ) {
+      notices.push(
+        "Administrator policy denies network access unless a domain is explicitly allowed.",
+      );
+    }
+    return notices.length > 0 ? notices.join(" ") : null;
+  }, [adminRuntimePolicy, selectedAccessProfile, selectedProfileId]);
   const [modeSuggestions, setModeSuggestions] = useState<ModeSuggestion[]>([]);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const modeSuggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3646,19 +3875,23 @@ function MainContentComponent({
   // Talk Mode hook - continuous voice conversation
   const talkMode = useVoiceTalkMode({
     onSendMessage: (text) => {
-      if (shouldCreateFreshTaskForSend({
-        executionMode,
-        selectedTaskId,
-        selectedTaskExecutionMode: task?.agentConfig?.executionMode,
-      }) && onCreateTask) {
+      if (
+        shouldCreateFreshTaskForSend({
+          executionMode,
+          selectedTaskId,
+          selectedTaskExecutionMode: task?.agentConfig?.executionMode,
+        }) &&
+        onCreateTask
+      ) {
         const title = text.length > 60 ? text.slice(0, 57) + "..." : text;
-        onCreateTask(
-          title,
-          text,
-          executionMode === "chat" ? { executionMode } : undefined,
-        );
+        onCreateTask(title, text, {
+          ...(executionMode === "chat" ? { executionMode } : {}),
+          ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
+        });
       } else {
-        onSendMessage(text);
+        onSendMessage(text, undefined, undefined, {
+          ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
+        });
       }
     },
     onError: (error) => {
@@ -3865,11 +4098,7 @@ function MainContentComponent({
     const loadWelcomeTaskSuggestions = async () => {
       const workspaceIds = validWorkspaceId
         ? [validWorkspaceId]
-        : (
-            await window.electronAPI
-              .listWorkspaces()
-              .catch(() => [] as Workspace[])
-          )
+        : (await window.electronAPI.listWorkspaces().catch(() => [] as Workspace[]))
             .filter((item) => !item.isTemp && !isTempWorkspaceId(item.id))
             .map((item) => item.id)
             .slice(0, 8);
@@ -3886,23 +4115,18 @@ function MainContentComponent({
 
       const rawSuggestions = await loadStoredSuggestions();
 
-      const [
-        dueSoonCommitments,
-        openCommitments,
-        profile,
-        recentMemories,
-        notifications,
-      ] = await Promise.all([
-        window.electronAPI.getDueSoonCommitments(96).catch(() => ({ items: [] })),
-        window.electronAPI.getOpenCommitments(8).catch(() => []),
-        window.electronAPI.getUserProfile().catch(() => null as UserProfile | null),
-        validWorkspaceId
-          ? window.electronAPI
-              .getRecentMemories({ workspaceId: validWorkspaceId, limit: 3 })
-              .catch(() => [])
-          : Promise.resolve([]),
-        window.electronAPI.listNotifications().catch(() => [] as AppNotification[]),
-      ]);
+      const [dueSoonCommitments, openCommitments, profile, recentMemories, notifications] =
+        await Promise.all([
+          window.electronAPI.getDueSoonCommitments(96).catch(() => ({ items: [] })),
+          window.electronAPI.getOpenCommitments(8).catch(() => []),
+          window.electronAPI.getUserProfile().catch(() => null as UserProfile | null),
+          validWorkspaceId
+            ? window.electronAPI
+                .getRecentMemories({ workspaceId: validWorkspaceId, limit: 3 })
+                .catch(() => [])
+            : Promise.resolve([]),
+          window.electronAPI.listNotifications().catch(() => [] as AppNotification[]),
+        ]);
 
       const collected: WelcomeTaskSuggestion[] = [];
       pendingInputRequests
@@ -3951,10 +4175,7 @@ function MainContentComponent({
         })
         .slice(0, 3)
         .forEach((item, index) => {
-          const suggestion = buildMemoryCommitmentSuggestion(
-            item,
-            index + commitmentItems.length,
-          );
+          const suggestion = buildMemoryCommitmentSuggestion(item, index + commitmentItems.length);
           if (suggestion) collected.push(suggestion);
         });
 
@@ -4050,8 +4271,9 @@ function MainContentComponent({
   const modeDropdownRef = useRef<HTMLDivElement>(null);
   const [showDomainDropdown, setShowDomainDropdown] = useState(false);
   const domainDropdownRef = useRef<HTMLDivElement>(null);
-  const [guardrailDefaultMaxAutoContinuations, setGuardrailDefaultMaxAutoContinuations] =
-    useState<number | null>(null);
+  const [guardrailDefaultMaxAutoContinuations, setGuardrailDefaultMaxAutoContinuations] = useState<
+    number | null
+  >(null);
   // Filter events based on verbose mode
   const filteredEvents = useMemo(() => {
     if (!verboseSteps && effectiveSharedTaskEventUi) {
@@ -4096,8 +4318,8 @@ function MainContentComponent({
           event.payload && typeof event.payload === "object"
             ? (event.payload as Record<string, unknown>)
             : {};
-        const fingerprint =
-          (typeof payload.terminal_failure_fingerprint === "string"
+        const fingerprint = (
+          typeof payload.terminal_failure_fingerprint === "string"
             ? payload.terminal_failure_fingerprint
             : typeof payload.terminalFailureFingerprint === "string"
               ? payload.terminalFailureFingerprint
@@ -4107,8 +4329,8 @@ function MainContentComponent({
                   ? payload.message
                   : typeof payload.error === "string"
                     ? payload.error
-                    : "")
-            .trim();
+                    : ""
+        ).trim();
         if (!fingerprint) return true;
         const previousTimestamp = lastErrorByFingerprint.get(fingerprint);
         if (
@@ -4132,17 +4354,14 @@ function MainContentComponent({
   // Build projection from raw events so tool_call/tool_result data embedded
   // in timeline_step_updated (which is filtered for display) still populates
   // lane titles with URLs/results.
-  const parallelGroupProjection = useMemo(
-    () => {
-      if (effectiveSharedTaskEventUi) return effectiveSharedTaskEventUi.parallelGroupProjection;
-      return measureRendererPerf(
-        "MainContent.parallelGroupProjection",
-        rendererPerfLoggingEnabled,
-        () => buildParallelGroupProjection(events),
-      );
-    },
-    [events, effectiveSharedTaskEventUi, rendererPerfLoggingEnabled],
-  );
+  const parallelGroupProjection = useMemo(() => {
+    if (effectiveSharedTaskEventUi) return effectiveSharedTaskEventUi.parallelGroupProjection;
+    return measureRendererPerf(
+      "MainContent.parallelGroupProjection",
+      rendererPerfLoggingEnabled,
+      () => buildParallelGroupProjection(events),
+    );
+  }, [events, effectiveSharedTaskEventUi, rendererPerfLoggingEnabled]);
   const parallelGroupsByAnchorEventId = parallelGroupProjection.groupsByAnchorEventId;
   const suppressedParallelEventIds = parallelGroupProjection.suppressedEventIds;
 
@@ -4206,10 +4425,11 @@ function MainContentComponent({
 
   const hasActiveChildren = useMemo(
     () =>
-      childTasks.some((childTask) =>
-        childTask.status === "executing" ||
-        childTask.status === "planning" ||
-        childTask.status === "interrupted",
+      childTasks.some(
+        (childTask) =>
+          childTask.status === "executing" ||
+          childTask.status === "planning" ||
+          childTask.status === "interrupted",
       ),
     [childTasks],
   );
@@ -4286,11 +4506,7 @@ function MainContentComponent({
   }, [rejectMenuOpenFor]);
 
   const handleMessageFeedback = useCallback(
-    async (payload: {
-      messageId: string;
-      decision: "accepted" | "rejected";
-      reason?: string;
-    }) => {
+    async (payload: { messageId: string; decision: "accepted" | "rejected"; reason?: string }) => {
       setMessageFeedbackMap((prev) => new Map(prev).set(payload.messageId, payload.decision));
       setRejectMenuOpenFor(null);
       try {
@@ -4401,7 +4617,11 @@ function MainContentComponent({
       }
     }
 
-    if (continuationWindow <= 1 && !latestDecisionEvent && typeof task.lastProgressScore !== "number") {
+    if (
+      continuationWindow <= 1 &&
+      !latestDecisionEvent &&
+      typeof task.lastProgressScore !== "number"
+    ) {
       return null;
     }
 
@@ -4423,8 +4643,8 @@ function MainContentComponent({
           : !deepWorkMode && typeof guardrailDefaultMaxAutoContinuations === "number"
             ? Math.max(0, Math.floor(guardrailDefaultMaxAutoContinuations))
             : deepWorkMode
-          ? 7
-          : 3;
+              ? 7
+              : 3;
     const maxWindow = Math.max(1, maxAutoContinuations + 1, continuationWindow);
     const progressScoreRaw =
       typeof payload.progressScore === "number"
@@ -4460,13 +4680,16 @@ function MainContentComponent({
     if (!verboseSteps && effectiveSharedTaskEventUi) {
       return effectiveSharedTaskEventUi.baseTimelineItems;
     }
-    return measureRendererPerf("MainContent.baseTimelineItems", rendererPerfLoggingEnabled, () =>
-      deriveSharedTaskEventUiState({
-        rawEvents,
-        task,
-        workspace,
-        verboseSteps,
-      }).baseTimelineItems,
+    return measureRendererPerf(
+      "MainContent.baseTimelineItems",
+      rendererPerfLoggingEnabled,
+      () =>
+        deriveSharedTaskEventUiState({
+          rawEvents,
+          task,
+          workspace,
+          verboseSteps,
+        }).baseTimelineItems,
     );
   }, [
     rawEvents,
@@ -4479,107 +4702,106 @@ function MainContentComponent({
 
   const timelineItems = useMemo(() => {
     return measureRendererPerf("MainContent.timelineItems", rendererPerfLoggingEnabled, () => {
-    type CanvasItem = {
-      kind: "canvas";
-      session: (typeof canvasSessions)[number];
-      timestamp: number;
-      forceSnapshot: boolean;
-    };
-    type DispatchedItem = { kind: "dispatched-agents"; timestamp: number };
-    type CliAgentFrameItem = {
-      kind: "cli-agent-frame";
-      timestamp: number;
-      childTask: Task;
-      childTaskEvents: TaskEvent[];
-    };
-    type TimelineItem =
-      | BaseTimelineItem
-      | CanvasItem
-      | DispatchedItem
-      | CliAgentFrameItem;
+      type CanvasItem = {
+        kind: "canvas";
+        session: (typeof canvasSessions)[number];
+        timestamp: number;
+        forceSnapshot: boolean;
+      };
+      type DispatchedItem = { kind: "dispatched-agents"; timestamp: number };
+      type CliAgentFrameItem = {
+        kind: "cli-agent-frame";
+        timestamp: number;
+        childTask: Task;
+        childTaskEvents: TaskEvent[];
+      };
+      type TimelineItem = BaseTimelineItem | CanvasItem | DispatchedItem | CliAgentFrameItem;
 
-    const eventItems = baseTimelineItems;
+      const eventItems = baseTimelineItems;
 
-    const freezeBefore = latestUserMessageTimestamp;
-    const canvasItems: CanvasItem[] = canvasSessions
-      .map((session) => ({
-        kind: "canvas" as const,
-        session,
-        timestamp: session.createdAt,
-        forceSnapshot: Boolean(
-          (freezeBefore && session.createdAt < freezeBefore) ||
-          (latestCanvasSessionId && session.id !== latestCanvasSessionId),
-        ),
-      }))
-      .sort((a, b) => a.timestamp - b.timestamp);
+      const freezeBefore = latestUserMessageTimestamp;
+      const canvasItems: CanvasItem[] = canvasSessions
+        .map((session) => ({
+          kind: "canvas" as const,
+          session,
+          timestamp: session.createdAt,
+          forceSnapshot: Boolean(
+            (freezeBefore && session.createdAt < freezeBefore) ||
+            (latestCanvasSessionId && session.id !== latestCanvasSessionId),
+          ),
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
 
-    // Build a sorted list of special items (canvas + dispatched agents) to merge in
-    const specialItems: TimelineItem[] = [...canvasItems];
+      // Build a sorted list of special items (canvas + dispatched agents) to merge in
+      const specialItems: TimelineItem[] = [...canvasItems];
 
-    // Insert child task panels at the chronological position of the first child task.
-    // Collaborative runs use the shared team-run surface for every child task.
-    // Show for both collaborative and non-collaborative runs so main area shows sub-agent steps.
-    if (childTasks.length > 0) {
-      const childEventsByTaskId = new Map<string, TaskEvent[]>();
-      for (const event of childEvents) {
-        const existing = childEventsByTaskId.get(event.taskId) || [];
-        existing.push(event);
-        childEventsByTaskId.set(event.taskId, existing);
-      }
-      if (collaborativeRun) {
-        const firstChildTimestamp = Math.min(...childTasks.map((t) => t.createdAt));
-        specialItems.push({ kind: "dispatched-agents" as const, timestamp: firstChildTimestamp });
-      } else {
-        const cliChildTasks = childTasks.filter((t) =>
-          isCliAgentChildTask(t, childEventsByTaskId.get(t.id) || []),
-        );
-        const nonCliChildTasks = childTasks.filter(
-          (t) => !isCliAgentChildTask(t, childEventsByTaskId.get(t.id) || []),
-        );
+      // Insert child task panels at the chronological position of the first child task.
+      // Collaborative runs use the shared team-run surface for every child task.
+      // Show for both collaborative and non-collaborative runs so main area shows sub-agent steps.
+      if (childTasks.length > 0) {
+        const childEventsByTaskId = new Map<string, TaskEvent[]>();
+        for (const event of childEvents) {
+          const existing = childEventsByTaskId.get(event.taskId) || [];
+          existing.push(event);
+          childEventsByTaskId.set(event.taskId, existing);
+        }
+        if (collaborativeRun) {
+          const firstChildTimestamp = Math.min(...childTasks.map((t) => t.createdAt));
+          specialItems.push({ kind: "dispatched-agents" as const, timestamp: firstChildTimestamp });
+        } else {
+          const cliChildTasks = childTasks.filter((t) =>
+            isCliAgentChildTask(t, childEventsByTaskId.get(t.id) || []),
+          );
+          const nonCliChildTasks = childTasks.filter(
+            (t) => !isCliAgentChildTask(t, childEventsByTaskId.get(t.id) || []),
+          );
 
-        if (cliChildTasks.length > 0) {
-          // Each CLI agent gets its own frame in the timeline
-          for (const ct of cliChildTasks) {
+          if (cliChildTasks.length > 0) {
+            // Each CLI agent gets its own frame in the timeline
+            for (const ct of cliChildTasks) {
+              specialItems.push({
+                kind: "cli-agent-frame" as const,
+                timestamp: ct.createdAt,
+                childTask: ct,
+                childTaskEvents: childEventsByTaskId.get(ct.id) || [],
+              });
+            }
+          }
+
+          if (nonCliChildTasks.length > 0 || cliChildTasks.length === 0) {
+            // Non-CLI child tasks (or if none are CLI) use the existing dispatched agents panel
+            const tasksForPanel = nonCliChildTasks.length > 0 ? nonCliChildTasks : childTasks;
+            const firstChildTimestamp = Math.min(...tasksForPanel.map((t) => t.createdAt));
             specialItems.push({
-              kind: "cli-agent-frame" as const,
-              timestamp: ct.createdAt,
-              childTask: ct,
-              childTaskEvents: childEventsByTaskId.get(ct.id) || [],
+              kind: "dispatched-agents" as const,
+              timestamp: firstChildTimestamp,
             });
           }
         }
-
-        if (nonCliChildTasks.length > 0 || cliChildTasks.length === 0) {
-          // Non-CLI child tasks (or if none are CLI) use the existing dispatched agents panel
-          const tasksForPanel = nonCliChildTasks.length > 0 ? nonCliChildTasks : childTasks;
-          const firstChildTimestamp = Math.min(...tasksForPanel.map((t) => t.createdAt));
-          specialItems.push({ kind: "dispatched-agents" as const, timestamp: firstChildTimestamp });
-        }
       }
-    }
 
-    specialItems.sort((a, b) => a.timestamp - b.timestamp);
+      specialItems.sort((a, b) => a.timestamp - b.timestamp);
 
-    if (specialItems.length === 0) return eventItems;
+      if (specialItems.length === 0) return eventItems;
 
-    const merged: TimelineItem[] = [];
-    let specialIndex = 0;
+      const merged: TimelineItem[] = [];
+      let specialIndex = 0;
 
-    for (const eventItem of eventItems) {
-      while (
-        specialIndex < specialItems.length &&
-        specialItems[specialIndex].timestamp <= eventItem.timestamp
-      ) {
+      for (const eventItem of eventItems) {
+        while (
+          specialIndex < specialItems.length &&
+          specialItems[specialIndex].timestamp <= eventItem.timestamp
+        ) {
+          merged.push(specialItems[specialIndex]);
+          specialIndex += 1;
+        }
+        merged.push(eventItem);
+      }
+
+      while (specialIndex < specialItems.length) {
         merged.push(specialItems[specialIndex]);
         specialIndex += 1;
       }
-      merged.push(eventItem);
-    }
-
-    while (specialIndex < specialItems.length) {
-      merged.push(specialItems[specialIndex]);
-      specialIndex += 1;
-    }
 
       return merged;
     });
@@ -4613,84 +4835,89 @@ function MainContentComponent({
     if (effectiveSharedTaskEventUi) {
       return effectiveSharedTaskEventUi.commandOutputSessions;
     }
-    return measureRendererPerf("MainContent.commandOutputSessions", rendererPerfLoggingEnabled, () => {
-      const commandOutputEvents = events.filter(
-        (event) => getEffectiveTaskEventType(event) === "command_output",
-      );
-      if (commandOutputEvents.length === 0) return [];
+    return measureRendererPerf(
+      "MainContent.commandOutputSessions",
+      rendererPerfLoggingEnabled,
+      () => {
+        const commandOutputEvents = events.filter(
+          (event) => getEffectiveTaskEventType(event) === "command_output",
+        );
+        if (commandOutputEvents.length === 0) return [];
 
-      const sessions: CommandOutputSession[] = [];
-      let currentSession: CommandOutputSession | null = null;
-      let syntheticIdCounter = 0;
+        const sessions: CommandOutputSession[] = [];
+        let currentSession: CommandOutputSession | null = null;
+        let syntheticIdCounter = 0;
 
-      const finalizeCurrentSession = () => {
-        if (!currentSession) return;
-        sessions.push(currentSession);
-        currentSession = null;
-      };
+        const finalizeCurrentSession = () => {
+          if (!currentSession) return;
+          sessions.push(currentSession);
+          currentSession = null;
+        };
 
-      for (const event of commandOutputEvents) {
-        const payload =
-          event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
-            ? (event.payload as Record<string, unknown>)
-            : {};
-        const payloadType = typeof payload.type === "string" ? payload.type : "";
-        const payloadCommand = typeof payload.command === "string" ? payload.command : "";
-        const payloadOutput = typeof payload.output === "string" ? payload.output : "";
-        const payloadCwd = typeof payload.cwd === "string" ? payload.cwd : undefined;
+        for (const event of commandOutputEvents) {
+          const payload =
+            event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+              ? (event.payload as Record<string, unknown>)
+              : {};
+          const payloadType = typeof payload.type === "string" ? payload.type : "";
+          const payloadCommand = typeof payload.command === "string" ? payload.command : "";
+          const payloadOutput = typeof payload.output === "string" ? payload.output : "";
+          const payloadCwd = typeof payload.cwd === "string" ? payload.cwd : undefined;
 
-        if (payloadType === "start") {
-          finalizeCurrentSession();
-          currentSession = {
-            id: event.id || `command-${event.timestamp}-${syntheticIdCounter++}`,
-            command: payloadCommand,
-            output: payloadOutput,
-            isRunning: true,
-            exitCode: null,
-            startTimestamp: event.timestamp,
-            cwd: payloadCwd,
-          };
-          continue;
+          if (payloadType === "start") {
+            finalizeCurrentSession();
+            currentSession = {
+              id: event.id || `command-${event.timestamp}-${syntheticIdCounter++}`,
+              command: payloadCommand,
+              output: payloadOutput,
+              isRunning: true,
+              exitCode: null,
+              startTimestamp: event.timestamp,
+              cwd: payloadCwd,
+            };
+            continue;
+          }
+
+          if (!currentSession) {
+            currentSession = {
+              id: event.id || `command-${event.timestamp}-${syntheticIdCounter++}`,
+              command: payloadCommand,
+              output: "",
+              isRunning: payloadType !== "end",
+              exitCode: null,
+              startTimestamp: event.timestamp,
+              cwd: payloadCwd,
+            };
+          } else {
+            if (payloadCommand) currentSession.command = payloadCommand;
+            if (payloadCwd) currentSession.cwd = payloadCwd;
+          }
+
+          if (
+            payloadType === "stdout" ||
+            payloadType === "stderr" ||
+            payloadType === "stdin" ||
+            payloadType === "error"
+          ) {
+            currentSession.output = appendCommandOutputTail(currentSession.output, payloadOutput);
+            continue;
+          }
+
+          if (payloadType === "end") {
+            currentSession.isRunning = false;
+            currentSession.exitCode =
+              typeof payload.exitCode === "number" ? payload.exitCode : null;
+            finalizeCurrentSession();
+          }
         }
 
-        if (!currentSession) {
-          currentSession = {
-            id: event.id || `command-${event.timestamp}-${syntheticIdCounter++}`,
-            command: payloadCommand,
-            output: "",
-            isRunning: payloadType !== "end",
-            exitCode: null,
-            startTimestamp: event.timestamp,
-            cwd: payloadCwd,
-          };
-        } else {
-          if (payloadCommand) currentSession.command = payloadCommand;
-          if (payloadCwd) currentSession.cwd = payloadCwd;
+        if (currentSession) {
+          sessions.push(currentSession);
         }
 
-        if (
-          payloadType === "stdout" ||
-          payloadType === "stderr" ||
-          payloadType === "stdin" ||
-          payloadType === "error"
-        ) {
-          currentSession.output = appendCommandOutputTail(currentSession.output, payloadOutput);
-          continue;
-        }
-
-        if (payloadType === "end") {
-          currentSession.isRunning = false;
-          currentSession.exitCode = typeof payload.exitCode === "number" ? payload.exitCode : null;
-          finalizeCurrentSession();
-        }
-      }
-
-      if (currentSession) {
-        sessions.push(currentSession);
-      }
-
-      return limitCommandOutputSessions(sessions);
-    });
+        return limitCommandOutputSessions(sessions);
+      },
+    );
   }, [events, effectiveSharedTaskEventUi, rendererPerfLoggingEnabled]);
 
   const visibleCommandOutputSessions = useMemo(
@@ -4867,9 +5094,7 @@ function MainContentComponent({
       ? packs.flatMap((pack) => {
           if (!pack?.enabled || !Array.isArray(pack.slashCommands)) return [];
           const packEnabledSkills = new Set(
-            (pack.skills || [])
-              .filter((skill) => skill.enabled !== false)
-              .map((skill) => skill.id),
+            (pack.skills || []).filter((skill) => skill.enabled !== false).map((skill) => skill.id),
           );
           return pack.slashCommands
             .filter(
@@ -5096,23 +5321,38 @@ function MainContentComponent({
     );
   }, [customSkills, skillsSearchQuery]);
 
-  // Sync shell permission state when workspace changes
-  useEffect(() => {
-    setShellEnabled(workspace?.permissions?.shell ?? false);
-  }, [workspace?.id, workspace?.permissions?.shell]);
-
   useEffect(() => {
     let cancelled = false;
 
     const applyPermissionDefaults = (
-      permissionSettings: { defaultPermissionAccess?: "default" | "full" },
+      permissionSettings: {
+        defaultPermissionAccess?: "default" | "full";
+        defaultAccessProfileId?: AccessProfileId;
+        accessProfiles?: AccessProfileDefinition[];
+      },
       forceSelection = false,
     ) => {
       const nextDefault: PermissionAccessMode =
-        permissionSettings.defaultPermissionAccess === "full" ? "full" : "default";
+        permissionSettings.defaultAccessProfileId ||
+        (permissionSettings.defaultPermissionAccess === "full"
+          ? BUILTIN_ACCESS_PROFILE_IDS.fullAccess
+          : BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
+      const nextProfiles = Array.isArray(permissionSettings.accessProfiles)
+        ? permissionSettings.accessProfiles
+        : [];
+      const hasNamedDefault =
+        typeof permissionSettings.defaultAccessProfileId === "string" &&
+        permissionSettings.defaultAccessProfileId.trim().length > 0;
       setDefaultPermissionAccessMode(nextDefault);
+      setAccessProfiles(nextProfiles);
+      setDefaultUsesLegacyPermissionMode(!hasNamedDefault);
+      setNewTaskUsesLegacyPermissionMode(!hasNamedDefault);
       setPermissionAccessMode((current) =>
-        forceSelection || current === "default" ? nextDefault : current,
+        forceSelection ||
+        current === BUILTIN_ACCESS_PROFILE_IDS.askForApproval ||
+        ![...BUILTIN_ACCESS_PROFILES, ...nextProfiles].some((profile) => profile.id === current)
+          ? nextDefault
+          : current,
       );
     };
 
@@ -5123,6 +5363,21 @@ function MainContentComponent({
         applyPermissionDefaults(permissionSettings);
       } catch (error) {
         console.error("Failed to load permission defaults:", error);
+      } finally {
+        if (!cancelled) setPermissionSettingsLoaded(true);
+      }
+    };
+
+    const loadAdminRuntimePolicy = async () => {
+      const getAdminPolicies = window.electronAPI?.getAdminPolicies;
+      if (typeof getAdminPolicies !== "function") return;
+      try {
+        const policies = await getAdminPolicies();
+        if (!cancelled) setAdminRuntimePolicy(policies?.runtime ?? null);
+      } catch (error) {
+        // Admin policy access is optional for regular local workspaces. Keep
+        // the profile picker usable when the policy service is unavailable.
+        console.debug("Failed to load admin runtime policy:", error);
       }
     };
 
@@ -5134,6 +5389,7 @@ function MainContentComponent({
     };
 
     void loadPermissionDefaults();
+    void loadAdminRuntimePolicy();
     window.addEventListener("cowork:permission-settings-updated", handlePermissionSettingsUpdated);
 
     return () => {
@@ -5145,27 +5401,17 @@ function MainContentComponent({
     };
   }, []);
 
-  // Toggle shell permission for current workspace
-  const handleShellToggle = async () => {
-    if (!workspace) return;
-    const newValue = !shellEnabled;
-    setShellEnabled(newValue);
-    try {
-      const updatedWorkspace = await window.electronAPI.updateWorkspacePermissions(workspace.id, {
-        shell: newValue,
-      });
-      if (updatedWorkspace) {
-        setShellEnabled(updatedWorkspace?.permissions?.shell ?? newValue);
-        onSelectWorkspace?.(updatedWorkspace);
-        setWorkspacesList((prev) =>
-          prev.map((item) => (item.id === updatedWorkspace.id ? updatedWorkspace : item)),
-        );
-      }
-    } catch (err) {
-      console.error("Failed to update shell permission:", err);
-      setShellEnabled(!newValue); // Revert on error
+  // Capture the task's profile once when selection changes. Subsequent global
+  // settings updates must not rewrite a selected task's access contract.
+  useEffect(() => {
+    const taskProfileId = task?.agentConfig?.accessProfileId;
+    if (!task?.id) {
+      setSelectedTaskAccessProfileOverride(undefined);
+      return;
     }
-  };
+    const normalized = typeof taskProfileId === "string" ? taskProfileId.trim() : "";
+    setSelectedTaskAccessProfileOverride(normalized ? (normalized as AccessProfileId) : null);
+  }, [task?.id]);
 
   // Close skills menu on click outside
   useEffect(() => {
@@ -5505,12 +5751,16 @@ function MainContentComponent({
         const commandName = modalState.commandName || modalState.skill.id;
         const slashPrompt = buildSlashSkillPrompt(commandName, values);
         const title = buildTaskTitle(`Run /${commandName}`);
-        onCreateTask(title, slashPrompt);
+        onCreateTask(title, slashPrompt, {
+          ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
+        });
         return;
       }
       const expandedPrompt = expandSkillPrompt(modalState.skill, values);
       const title = buildTaskTitle(expandedPrompt);
-      onCreateTask(title, expandedPrompt);
+      onCreateTask(title, expandedPrompt, {
+        ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
+      });
     }
   };
 
@@ -5521,7 +5771,9 @@ function MainContentComponent({
     const commandName = modalState.commandName || modalState.skill.id;
     const slashPrompt = buildSlashSkillPrompt(commandName, values);
     const title = buildTaskTitle(`Run /${commandName}`);
-    onCreateTask(title, slashPrompt);
+    onCreateTask(title, slashPrompt, {
+      ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
+    });
   };
 
   const handleSkillParamCancel = () => {
@@ -5529,24 +5781,27 @@ function MainContentComponent({
   };
 
   // Toggle an event's expanded state using its ID
-  const toggleEventExpanded = useCallback((eventId: string) => {
-    const event = events.find((candidate) => candidate.id === eventId);
-    const detailId = event
-      ? getTruncatedTaskEventDetailId(event) || event.eventId || event.id
-      : null;
-    const wasExpanded = toggledEvents.has(eventId);
-    setToggledEvents((current) => {
-      const next = new Set(current);
-      if (wasExpanded) next.delete(eventId);
-      else next.add(eventId);
-      return next;
-    });
-    if (!detailId || !task?.id) return;
-    if (wasExpanded) onReleaseTaskEventDetail?.(detailId, task.id);
-    else if (getTruncatedTaskEventDetailId(event!)) {
-      void onLoadTaskEventDetail?.(detailId, task.id);
-    }
-  }, [events, onLoadTaskEventDetail, onReleaseTaskEventDetail, task?.id, toggledEvents]);
+  const toggleEventExpanded = useCallback(
+    (eventId: string) => {
+      const event = events.find((candidate) => candidate.id === eventId);
+      const detailId = event
+        ? getTruncatedTaskEventDetailId(event) || event.eventId || event.id
+        : null;
+      const wasExpanded = toggledEvents.has(eventId);
+      setToggledEvents((current) => {
+        const next = new Set(current);
+        if (wasExpanded) next.delete(eventId);
+        else next.add(eventId);
+        return next;
+      });
+      if (!detailId || !task?.id) return;
+      if (wasExpanded) onReleaseTaskEventDetail?.(detailId, task.id);
+      else if (getTruncatedTaskEventDetailId(event!)) {
+        void onLoadTaskEventDetail?.(detailId, task.id);
+      }
+    },
+    [events, onLoadTaskEventDetail, onReleaseTaskEventDetail, task?.id, toggledEvents],
+  );
 
   const isImageFileEvent = useCallback((event: TaskEvent): boolean => {
     return getInlinePreviewKindForTaskEvent(event) === "image";
@@ -5572,193 +5827,110 @@ function MainContentComponent({
     return getInlinePreviewKindForTaskEvent(event) === "presentation";
   }, []);
 
-  const shouldExposeEndOfTaskArtifactCard = useCallback((event: TaskEvent): boolean => {
-    const previewKind = getInlinePreviewKindForTaskEvent(event);
-    if (!previewKind || !END_OF_TASK_ARTIFACT_KINDS.has(previewKind)) return true;
-    const artifactPath = getTaskEventArtifactPaths(event, events)
-      .find((path) => {
+  const shouldExposeEndOfTaskArtifactCard = useCallback(
+    (event: TaskEvent): boolean => {
+      const previewKind = getInlinePreviewKindForTaskEvent(event);
+      if (!previewKind || !END_OF_TASK_ARTIFACT_KINDS.has(previewKind)) return true;
+      const artifactPath = getTaskEventArtifactPaths(event, events).find((path) => {
         const kind = getInlinePreviewKindForGeneratedFile({ path });
         return Boolean(kind && END_OF_TASK_ARTIFACT_KINDS.has(kind));
       });
-    return Boolean(
-      artifactPath &&
+      return Boolean(
+        artifactPath &&
         shouldRenderOpenArtifactCardAtEvent({
           path: artifactPath,
           event,
           eventStream: events,
         }),
-    );
-  }, [events]);
+      );
+    },
+    [events],
+  );
 
-  const shouldRenderTimelineEventInStepFeed = useCallback((event: TaskEvent): boolean => {
-    const effectiveType = getEffectiveTaskEventType(event);
-    if (effectiveType === "user_message" || effectiveType === "assistant_message") {
-      return false;
-    }
-    if (shouldHideApprovalEventInStepFeed(event)) {
-      return false;
-    }
-    if (isRedundantTimelineEvidenceEvent(event, events)) {
-      return false;
-    }
-    // Suppress tool_result events that are paired with their tool_call (shown inline)
-    if (effectiveType === "tool_result" && toolCallPairing.claimedResultIds.has(event.id)) {
-      return false;
-    }
-    if (!shouldShowTaskEventInStepFeed(event, { verboseSteps })) {
-      return false;
-    }
-    return true;
-  }, [
-    toolCallPairing.claimedResultIds,
-    events,
-    verboseSteps,
-  ]);
+  const shouldRenderTimelineEventInStepFeed = useCallback(
+    (event: TaskEvent): boolean => {
+      const effectiveType = getEffectiveTaskEventType(event);
+      if (effectiveType === "user_message" || effectiveType === "assistant_message") {
+        return false;
+      }
+      if (shouldHideApprovalEventInStepFeed(event)) {
+        return false;
+      }
+      if (isRedundantTimelineEvidenceEvent(event, events)) {
+        return false;
+      }
+      // Suppress tool_result events that are paired with their tool_call (shown inline)
+      if (effectiveType === "tool_result" && toolCallPairing.claimedResultIds.has(event.id)) {
+        return false;
+      }
+      if (!shouldShowTaskEventInStepFeed(event, { verboseSteps })) {
+        return false;
+      }
+      return true;
+    },
+    [toolCallPairing.claimedResultIds, events, verboseSteps],
+  );
 
   // Check if an event has details to show
-  const hasEventDetails = useCallback((event: TaskEvent): boolean => {
-    const effectiveType = getEffectiveTaskEventType(event);
-    if (getTruncatedTaskEventDetailId(event)) return true;
-    if (isImageFileEvent(event)) return true;
-    if (isHtmlFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-    if (isVideoFileEvent(event)) return true;
-    if (isSpreadsheetFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-    if (isDocumentFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-    if (isPresentationFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-    if (workspace?.path && getStepCompletionPreviewPath(event)) return true;
-    if (effectiveType === "follow_up_completed") return true;
-    if (effectiveType === "task_completed") {
-      return (
-        hasTaskOutputs(resolveTaskOutputSummaryFromCompletionEvent(event, events)) ||
-        event.payload?.terminalStatus === "needs_user_action" ||
-        event.payload?.terminalStatus === "partial_success"
-      );
-    }
-    if (shouldHideApprovalEventInStepFeed(event)) {
-      return false;
-    }
-    if (
-      !verboseSteps &&
-      (event.type === "timeline_group_started" || event.type === "timeline_group_finished")
-    ) {
-      return false;
-    }
-    if (
-      event.type === "timeline_group_started" ||
-      event.type === "timeline_group_finished" ||
-      event.type === "timeline_evidence_attached" ||
-      event.type === "timeline_error"
-    ) {
-      return true;
-    }
-    if (effectiveType === "diagram_created") return true;
-    if (
-      (event.type === "timeline_artifact_emitted" || effectiveType === "artifact_created") &&
-      typeof event.payload?.path === "string"
-    ) {
-      const artifactPreviewKind = getInlinePreviewKindForGeneratedFile({
-        path: event.payload.path,
-        mimeType: event.payload?.mimeType,
-        type: event.payload?.type,
-      });
+  const hasEventDetails = useCallback(
+    (event: TaskEvent): boolean => {
+      const effectiveType = getEffectiveTaskEventType(event);
+      if (getTruncatedTaskEventDetailId(event)) return true;
+      if (isImageFileEvent(event)) return true;
+      if (isHtmlFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
+      if (isVideoFileEvent(event)) return true;
+      if (isSpreadsheetFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
+      if (isDocumentFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
+      if (isPresentationFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
+      if (workspace?.path && getStepCompletionPreviewPath(event)) return true;
+      if (effectiveType === "follow_up_completed") return true;
+      if (effectiveType === "task_completed") {
+        return (
+          hasTaskOutputs(resolveTaskOutputSummaryFromCompletionEvent(event, events)) ||
+          event.payload?.terminalStatus === "needs_user_action" ||
+          event.payload?.terminalStatus === "partial_success"
+        );
+      }
+      if (shouldHideApprovalEventInStepFeed(event)) {
+        return false;
+      }
       if (
-        artifactPreviewKind &&
-        END_OF_TASK_ARTIFACT_KINDS.has(artifactPreviewKind) &&
-        !shouldRenderOpenArtifactCardAtEvent({
+        !verboseSteps &&
+        (event.type === "timeline_group_started" || event.type === "timeline_group_finished")
+      ) {
+        return false;
+      }
+      if (
+        event.type === "timeline_group_started" ||
+        event.type === "timeline_group_finished" ||
+        event.type === "timeline_evidence_attached" ||
+        event.type === "timeline_error"
+      ) {
+        return true;
+      }
+      if (effectiveType === "diagram_created") return true;
+      if (
+        (event.type === "timeline_artifact_emitted" || effectiveType === "artifact_created") &&
+        typeof event.payload?.path === "string"
+      ) {
+        const artifactPreviewKind = getInlinePreviewKindForGeneratedFile({
           path: event.payload.path,
-          event,
-          eventStream: events,
-        })
-      ) {
-        return false;
+          mimeType: event.payload?.mimeType,
+          type: event.payload?.type,
+        });
+        if (
+          artifactPreviewKind &&
+          END_OF_TASK_ARTIFACT_KINDS.has(artifactPreviewKind) &&
+          !shouldRenderOpenArtifactCardAtEvent({
+            path: event.payload.path,
+            event,
+            eventStream: events,
+          })
+        ) {
+          return false;
+        }
+        return true;
       }
-      return true;
-    }
-    if (
-      effectiveType === "file_created" &&
-      (event.payload?.contentPreview || event.payload?.copiedFrom)
-    )
-      return true;
-    if (
-      effectiveType === "file_modified" &&
-      (event.payload?.oldPreview || event.payload?.action === "rename")
-    )
-      return true;
-    if (effectiveType === "tool_result") {
-      const result = event.payload?.result;
-      const failed =
-        result &&
-        typeof result === "object" &&
-        ((result as Any).success === false || Boolean((result as Any).error));
-      return verboseSteps || Boolean(failed);
-    }
-    return [
-      "plan_created",
-      "tool_call",
-      "assistant_message",
-      "error",
-      "step_failed",
-      "approval_requested",
-    ].includes(effectiveType);
-  }, [
-    events,
-    isHtmlFileEvent,
-    isImageFileEvent,
-    isDocumentFileEvent,
-    isPresentationFileEvent,
-    isSpreadsheetFileEvent,
-    isVideoFileEvent,
-    shouldExposeEndOfTaskArtifactCard,
-    verboseSteps,
-    workspace?.path,
-  ]);
-
-  // Determine if an event should be expanded by default
-  // Important events (plan, assistant responses, errors) should be expanded
-  // Verbose events (tool calls/results) should be collapsed
-  const shouldDefaultExpand = useCallback((event: TaskEvent): boolean => {
-    const effectiveType = getEffectiveTaskEventType(event);
-    if (isImageFileEvent(event)) return true;
-    if (isHtmlFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-    if (isVideoFileEvent(event)) return true;
-    if (isSpreadsheetFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-    if (isDocumentFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-    if (isPresentationFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-    if (workspace?.path && getStepCompletionPreviewPath(event)) return true;
-    if (effectiveType === "follow_up_completed") return true;
-    if (effectiveType === "task_completed") return hasEventDetails(event);
-    if (shouldHideApprovalEventInStepFeed(event)) return false;
-    if (effectiveType === "artifact_created") {
-      const artifactPath = typeof event.payload?.path === "string" ? event.payload.path : "";
-      const artifactPreviewKind = getInlinePreviewKindForGeneratedFile({
-        path: artifactPath,
-        mimeType: event.payload?.mimeType,
-        type: event.payload?.type,
-      });
-      if (
-        artifactPreviewKind &&
-        END_OF_TASK_ARTIFACT_KINDS.has(artifactPreviewKind) &&
-        !shouldRenderOpenArtifactCardAtEvent({
-          path: artifactPath,
-          event,
-          eventStream: events,
-        })
-      ) {
-        return false;
-      }
-      return true;
-    }
-    if (
-      effectiveType === "diagram_created" ||
-      event.type === "timeline_evidence_attached" ||
-      event.type === "timeline_error"
-    )
-      return true;
-    if (effectiveType === "approval_requested") {
-      return isRunCommandApproval(getApprovalPayload(event));
-    }
-    // Code previews: expand by default unless user opted for collapsed
-    if (codePreviewsExpanded) {
       if (
         effectiveType === "file_created" &&
         (event.payload?.contentPreview || event.payload?.copiedFrom)
@@ -5769,29 +5941,122 @@ function MainContentComponent({
         (event.payload?.oldPreview || event.payload?.action === "rename")
       )
         return true;
-    }
-    return ["plan_created", "assistant_message", "error", "step_failed"].includes(effectiveType);
-  }, [
-    codePreviewsExpanded,
-    hasEventDetails,
-    isHtmlFileEvent,
-    isImageFileEvent,
-    isDocumentFileEvent,
-    isPresentationFileEvent,
-    isSpreadsheetFileEvent,
-    isVideoFileEvent,
-    shouldExposeEndOfTaskArtifactCard,
-    workspace?.path,
-  ]);
+      if (effectiveType === "tool_result") {
+        const result = event.payload?.result;
+        const failed =
+          result &&
+          typeof result === "object" &&
+          ((result as Any).success === false || Boolean((result as Any).error));
+        return verboseSteps || Boolean(failed);
+      }
+      return [
+        "plan_created",
+        "tool_call",
+        "assistant_message",
+        "error",
+        "step_failed",
+        "approval_requested",
+      ].includes(effectiveType);
+    },
+    [
+      events,
+      isHtmlFileEvent,
+      isImageFileEvent,
+      isDocumentFileEvent,
+      isPresentationFileEvent,
+      isSpreadsheetFileEvent,
+      isVideoFileEvent,
+      shouldExposeEndOfTaskArtifactCard,
+      verboseSteps,
+      workspace?.path,
+    ],
+  );
+
+  // Determine if an event should be expanded by default
+  // Important events (plan, assistant responses, errors) should be expanded
+  // Verbose events (tool calls/results) should be collapsed
+  const shouldDefaultExpand = useCallback(
+    (event: TaskEvent): boolean => {
+      const effectiveType = getEffectiveTaskEventType(event);
+      if (isImageFileEvent(event)) return true;
+      if (isHtmlFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
+      if (isVideoFileEvent(event)) return true;
+      if (isSpreadsheetFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
+      if (isDocumentFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
+      if (isPresentationFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
+      if (workspace?.path && getStepCompletionPreviewPath(event)) return true;
+      if (effectiveType === "follow_up_completed") return true;
+      if (effectiveType === "task_completed") return hasEventDetails(event);
+      if (shouldHideApprovalEventInStepFeed(event)) return false;
+      if (effectiveType === "artifact_created") {
+        const artifactPath = typeof event.payload?.path === "string" ? event.payload.path : "";
+        const artifactPreviewKind = getInlinePreviewKindForGeneratedFile({
+          path: artifactPath,
+          mimeType: event.payload?.mimeType,
+          type: event.payload?.type,
+        });
+        if (
+          artifactPreviewKind &&
+          END_OF_TASK_ARTIFACT_KINDS.has(artifactPreviewKind) &&
+          !shouldRenderOpenArtifactCardAtEvent({
+            path: artifactPath,
+            event,
+            eventStream: events,
+          })
+        ) {
+          return false;
+        }
+        return true;
+      }
+      if (
+        effectiveType === "diagram_created" ||
+        event.type === "timeline_evidence_attached" ||
+        event.type === "timeline_error"
+      )
+        return true;
+      if (effectiveType === "approval_requested") {
+        return isRunCommandApproval(getApprovalPayload(event));
+      }
+      // Code previews: expand by default unless user opted for collapsed
+      if (codePreviewsExpanded) {
+        if (
+          effectiveType === "file_created" &&
+          (event.payload?.contentPreview || event.payload?.copiedFrom)
+        )
+          return true;
+        if (
+          effectiveType === "file_modified" &&
+          (event.payload?.oldPreview || event.payload?.action === "rename")
+        )
+          return true;
+      }
+      return ["plan_created", "assistant_message", "error", "step_failed"].includes(effectiveType);
+    },
+    [
+      codePreviewsExpanded,
+      hasEventDetails,
+      isHtmlFileEvent,
+      isImageFileEvent,
+      isDocumentFileEvent,
+      isPresentationFileEvent,
+      isSpreadsheetFileEvent,
+      isVideoFileEvent,
+      shouldExposeEndOfTaskArtifactCard,
+      workspace?.path,
+    ],
+  );
 
   // Check if an event is currently expanded using its ID
   // If the event should default expand, clicking toggles it to collapsed (and vice versa)
-  const isEventExpanded = useCallback((event: TaskEvent): boolean => {
-    return resolveDisclosureExpanded({
-      defaultExpanded: shouldDefaultExpand(event),
-      toggled: toggledEvents.has(event.id),
-    });
-  }, [shouldDefaultExpand, toggledEvents]);
+  const isEventExpanded = useCallback(
+    (event: TaskEvent): boolean => {
+      return resolveDisclosureExpanded({
+        defaultExpanded: shouldDefaultExpand(event),
+        toggled: toggledEvents.has(event.id),
+      });
+    },
+    [shouldDefaultExpand, toggledEvents],
+  );
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const mainBodyRef = useRef<HTMLDivElement>(null);
@@ -5804,6 +6069,7 @@ function MainContentComponent({
   const cliInputWrapperRef = useRef<HTMLDivElement>(null);
   const [cursorLeft, setCursorLeft] = useState<number>(0);
   const [isCliInputFocused, setIsCliInputFocused] = useState(false);
+  const [hasCliInputDomContent, setHasCliInputDomContent] = useState(false);
 
   // Auto-resize textarea; prefer direct event-path resizing to avoid an extra
   // effect/layout cycle on every keypress in long sessions.
@@ -5825,13 +6091,16 @@ function MainContentComponent({
     };
   }, []);
 
-  const handleQuoteAssistantMessage = useCallback((quote: QuotedAssistantMessage) => {
-    setQuotedAssistantMessage(quote);
-    const input = promptInputRef.current;
-    input?.focus();
-    const cursorPosition = inputValue.length;
-    input?.setSelectionRange(cursorPosition, cursorPosition);
-  }, [inputValue.length]);
+  const handleQuoteAssistantMessage = useCallback(
+    (quote: QuotedAssistantMessage) => {
+      setQuotedAssistantMessage(quote);
+      const input = promptInputRef.current;
+      input?.focus();
+      const cursorPosition = inputValue.length;
+      input?.setSelectionRange(cursorPosition, cursorPosition);
+    },
+    [inputValue.length],
+  );
 
   // Programmatic input updates still need a resize pass.
   useEffect(() => {
@@ -5842,8 +6111,9 @@ function MainContentComponent({
 
   // Active placeholder: rotating prompt when available, personality fallback otherwise
   const personalityPlaceholder = agentContext.getPlaceholder();
-  const showCliPlaceholder = !inputValue && !isCliInputFocused;
-  const showCliEmptyCursor = !inputValue && isCliInputFocused;
+  const hasCliInputContent = inputValue.length > 0 || hasCliInputDomContent;
+  const showCliPlaceholder = !hasCliInputContent && !isCliInputFocused;
+  const showCliEmptyCursor = !hasCliInputContent && isCliInputFocused;
   const placeholderPlaylist = useMemo(
     () => (rotatingPlaceholders.length > 0 ? rotatingPlaceholders : [personalityPlaceholder]),
     [personalityPlaceholder, rotatingPlaceholders],
@@ -5922,7 +6192,10 @@ function MainContentComponent({
         container.scrollTop = nextTargetTop;
         incrementRendererPerfCounter("task-scroll.follow_write_count", rendererPerfLoggingEnabled);
       } else {
-        incrementRendererPerfCounter("task-scroll.follow_skipped_count", rendererPerfLoggingEnabled);
+        incrementRendererPerfCounter(
+          "task-scroll.follow_skipped_count",
+          rendererPerfLoggingEnabled,
+        );
       }
     });
     return () => {
@@ -6189,6 +6462,10 @@ function MainContentComponent({
   };
 
   const handleSend = async () => {
+    if (!permissionSettingsLoaded) {
+      setAttachmentError("Loading access profiles. Try again in a moment.");
+      return;
+    }
     if (isUploadingAttachments || isPreparingMessage) {
       return;
     }
@@ -6336,22 +6613,21 @@ function MainContentComponent({
       // executor can read stable paths and process images/video frames.
       const nativeVisualAttachments: ImageAttachment[] =
         workspace?.path && importedAttachments.length > 0
-          ? importedAttachments
-              .flatMap((attachment): ImageAttachment[] => {
-                const mimeType = guessVisualAttachmentMimeType(
-                  attachment.fileName,
-                  attachment.mimeType,
-                );
-                if (!mimeType) return [];
-                return [
-                  {
-                    filePath: joinWorkspaceRelativePath(workspace.path, attachment.relativePath),
-                    mimeType: mimeType as ImageAttachment["mimeType"],
-                    filename: attachment.fileName,
-                    sizeBytes: attachment.size,
-                  },
-                ];
-              })
+          ? importedAttachments.flatMap((attachment): ImageAttachment[] => {
+              const mimeType = guessVisualAttachmentMimeType(
+                attachment.fileName,
+                attachment.mimeType,
+              );
+              if (!mimeType) return [];
+              return [
+                {
+                  filePath: joinWorkspaceRelativePath(workspace.path, attachment.relativePath),
+                  mimeType: mimeType as ImageAttachment["mimeType"],
+                  filename: attachment.fileName,
+                  sizeBytes: attachment.size,
+                },
+              ];
+            })
           : [];
       const imagePayload = nativeVisualAttachments.length > 0 ? nativeVisualAttachments : undefined;
       const textPromptAttachments = importedAttachments.filter((attachment) => {
@@ -6402,13 +6678,14 @@ function MainContentComponent({
         );
         const prompt = buildPersistentGoalPrompt(objective, hasAttachments ? message : undefined);
         const title = buildTaskTitle(`/goal ${objective}`);
-        onCreateTask(
+        await onCreateTask(
           title,
           prompt,
           {
             executionMode: "execute",
             taskDomain,
             agentConfig: goalAgentConfig,
+            ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
             ...createIntegrationMentionOptions,
           },
           imagePayload,
@@ -6432,6 +6709,7 @@ function MainContentComponent({
         setMultiLlmModeEnabled(false);
         setChronicleEnabledForTask(true);
         setPermissionAccessMode(defaultPermissionAccessMode);
+        setNewTaskUsesLegacyPermissionMode(defaultUsesLegacyPermissionMode);
         setMultiLlmConfig(null);
         setVerificationAgentEnabled(false);
         return;
@@ -6452,7 +6730,10 @@ function MainContentComponent({
           sendFailed = true;
           return;
         }
-        if (shortcut.action === "review" && (!workspace || workspace.isTemp || isTempWorkspaceId(workspace.id))) {
+        if (
+          shortcut.action === "review" &&
+          (!workspace || workspace.isTemp || isTempWorkspaceId(workspace.id))
+        ) {
           setAttachmentError("/review requires a regular workspace folder.");
           sendFailed = true;
           return;
@@ -6465,16 +6746,21 @@ function MainContentComponent({
               ? `Estimate the likely token usage, model cost, runtime, and risk for this task without executing it:\n\n${promptText}`
               : shortcut.action === "review"
                 ? `Review the current workspace using the background-agent review workflow. Focus on bugs, regressions, security issues, missing tests, and concrete follow-up actions. Do not modify files unless I explicitly ask.\n\nReview scope:\n${promptText || "Review the current uncommitted changes and any open pull request context you can derive from this workspace."}`
-              : shortcut.name === "doctor"
-                ? `Run a CoWork OS diagnostic for this workspace. Check available app state, integrations, permissions, skills, commands, and obvious setup issues. Do not make changes unless I explicitly ask.\n\nAdditional context:\n${promptText || "No additional context."}`
-                : shortcut.name === "undo"
-                  ? `Review the latest task or workspace changes and prepare a safe undo plan. Do not modify files, delete data, or run rollback commands unless I explicitly approve.\n\nContext:\n${promptText || "Use the current workspace and recent task context."}`
-                  : `Create a compact continuation brief for this context. Preserve goals, decisions, open questions, constraints, and next actions without executing new work.\n\nContext:\n${promptText || "Use the current conversation and workspace context."}`;
+                : shortcut.name === "doctor"
+                  ? `Run a CoWork OS diagnostic for this workspace. Check available app state, integrations, permissions, skills, commands, and obvious setup issues. Do not make changes unless I explicitly ask.\n\nAdditional context:\n${promptText || "No additional context."}`
+                  : shortcut.name === "undo"
+                    ? `Review the latest task or workspace changes and prepare a safe undo plan. Do not modify files, delete data, or run rollback commands unless I explicitly approve.\n\nContext:\n${promptText || "Use the current workspace and recent task context."}`
+                    : `Create a compact continuation brief for this context. Preserve goals, decisions, open questions, constraints, and next actions without executing new work.\n\nContext:\n${promptText || "Use the current conversation and workspace context."}`;
 
         const title = buildTaskTitle(`/${shortcut.name} ${appSlashCommand.args || ""}`.trim());
         const options: CreateTaskOptions =
           shortcut.action === "plan"
-            ? { executionMode: "plan", taskDomain, ...createIntegrationMentionOptions }
+            ? {
+                executionMode: "plan",
+                taskDomain,
+                ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
+                ...createIntegrationMentionOptions,
+              }
             : shortcut.action === "review"
               ? {
                   executionMode: "analyze",
@@ -6483,12 +6769,23 @@ function MainContentComponent({
                   multitaskMode: true,
                   multitaskLaneCount: 4,
                   multitaskAssignmentMode: "auto_split",
+                  ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
                   ...createIntegrationMentionOptions,
                 }
-            : shortcut.action === "cost" || shortcut.action === "diagnostic"
-              ? { executionMode: "analyze", taskDomain, ...createIntegrationMentionOptions }
-              : { executionMode: "plan", taskDomain, ...createIntegrationMentionOptions };
-        onCreateTask(title, prompt, options, imagePayload);
+              : shortcut.action === "cost" || shortcut.action === "diagnostic"
+                ? {
+                    executionMode: "analyze",
+                    taskDomain,
+                    ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
+                    ...createIntegrationMentionOptions,
+                  }
+                : {
+                    executionMode: "plan",
+                    taskDomain,
+                    ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
+                    ...createIntegrationMentionOptions,
+                  };
+        await onCreateTask(title, prompt, options, imagePayload);
 
         pendingProgrammaticResizeRef.current = true;
         setInputValue("");
@@ -6507,15 +6804,13 @@ function MainContentComponent({
 
       // Chat mode reuses the current chat task when one exists, but creates a new
       // task for the first message or when the selected task is not a chat session.
-      const shouldCreateFreshTask =
-        shouldCreateFreshTaskForSend({
-          executionMode,
-          selectedTaskId,
-          selectedTaskExecutionMode: task?.agentConfig?.executionMode,
-          forceFreshTask:
-            appSlashCommand.shortcut?.name === "schedule" ||
-            goalSlashCommand.action === "start",
-        });
+      const shouldCreateFreshTask = shouldCreateFreshTaskForSend({
+        executionMode,
+        selectedTaskId,
+        selectedTaskExecutionMode: task?.agentConfig?.executionMode,
+        forceFreshTask:
+          appSlashCommand.shortcut?.name === "schedule" || goalSlashCommand.action === "start",
+      });
 
       if (shouldCreateFreshTask && onCreateTask) {
         // Fresh task - create new task with optional autonomy enabled.
@@ -6532,9 +6827,7 @@ function MainContentComponent({
             ? { agentConfig: { humanInputPolicy: "legacy_interactive" as const } }
             : {}),
           ...createIntegrationMentionOptions,
-          ...(permissionAccessMode === "full"
-            ? { permissionMode: "bypass_permissions", shellAccess: true }
-            : {}),
+          ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
         };
         const baseOptions: CreateTaskOptions =
           multiLlmModeEnabled && multiLlmConfig
@@ -6547,28 +6840,22 @@ function MainContentComponent({
         const options: CreateTaskOptions = verificationAgentEnabled
           ? { ...baseOptions, verificationAgent: true }
           : baseOptions;
-        onCreateTask(title, message, options, imagePayload);
+        await onCreateTask(title, message, options, imagePayload);
         // Reset task mode state
         setAutonomousModeEnabled(false);
         setCollaborativeModeEnabled(false);
         setMultiLlmModeEnabled(false);
         setChronicleEnabledForTask(true);
         setPermissionAccessMode(defaultPermissionAccessMode);
+        setNewTaskUsesLegacyPermissionMode(defaultUsesLegacyPermissionMode);
         setMultiLlmConfig(null);
         setVerificationAgentEnabled(false);
       } else {
         // Task is selected (even if not in current list) - send follow-up message
-        onSendMessage(
-          message,
-          imagePayload,
-          quotedAssistantMessage ?? undefined,
-          {
-            integrationMentions: selectedIntegrationMentions,
-            ...(permissionAccessMode === "full"
-              ? { permissionMode: "bypass_permissions", shellAccess: true }
-              : {}),
-          },
-        );
+        onSendMessage(message, imagePayload, quotedAssistantMessage ?? undefined, {
+          integrationMentions: selectedIntegrationMentions,
+          ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
+        });
       }
 
       const submittedWelcomeSuggestionDraft = activeWelcomeSuggestionDraft;
@@ -6933,7 +7220,11 @@ function MainContentComponent({
       // Don't suggest the currently active execution mode
       excludeModes.push(executionMode);
       if (collaborativeModeEnabled) excludeModes.push("collaborative");
-      const suggestions = detectModeSuggestions(value, { excludeModes, maxResults: 2, threshold: 0.3 });
+      const suggestions = detectModeSuggestions(value, {
+        excludeModes,
+        maxResults: 2,
+        threshold: 0.3,
+      });
       setModeSuggestions(suggestions);
       if (suggestions.length > 0) setSuggestionsDismissed(false);
     }, 300);
@@ -7033,7 +7324,16 @@ function MainContentComponent({
           onClick={() => setSuggestionsDismissed(true)}
           title="Dismiss"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </button>
@@ -7128,7 +7428,7 @@ function MainContentComponent({
             }}
             onMouseEnter={() => setSlashSelectedIndex(index)}
           >
-              <span className="mention-autocomplete-icon slash-command-icon">{option.icon}</span>
+            <span className="mention-autocomplete-icon slash-command-icon">{option.icon}</span>
             <div className="mention-autocomplete-details">
               <span className="mention-autocomplete-name">/{option.commandName}</span>
               {option.description && (
@@ -7288,66 +7588,66 @@ function MainContentComponent({
           <span className="welcome-next-actions-title">Next actions</span>
         </div>
         <div className="welcome-next-actions-list">
-        {welcomeTaskSuggestions.map((suggestion) => {
-          const Icon = iconForWelcomeAction(suggestion);
-          const actionLabel = labelForWelcomeAction(suggestion.action);
-          const title = [suggestion.title, suggestion.whyNow, suggestion.description]
-            .concat(suggestion.evidence?.slice(0, 3) || [])
-            .filter(Boolean)
-            .join("\n");
-          const metaChips = [
-            actionLabel,
-            ...formatWelcomeModules(suggestion.modules),
-            typeof suggestion.confidence === "number"
-              ? `${Math.round(suggestion.confidence * 100)}%`
-              : null,
-            suggestion.evidence?.length ? `${suggestion.evidence.length} signals` : null,
-          ].filter((value): value is string => Boolean(value));
-          return (
-            <div
-              key={suggestion.id}
-              className={`welcome-next-action suggestion-${suggestion.source}`}
-            >
-              <button
-                type="button"
-                className="welcome-next-action-main"
-                onClick={() => handleWelcomeTaskSuggestion(suggestion)}
-                title={title}
+          {welcomeTaskSuggestions.map((suggestion) => {
+            const Icon = iconForWelcomeAction(suggestion);
+            const actionLabel = labelForWelcomeAction(suggestion.action);
+            const title = [suggestion.title, suggestion.whyNow, suggestion.description]
+              .concat(suggestion.evidence?.slice(0, 3) || [])
+              .filter(Boolean)
+              .join("\n");
+            const metaChips = [
+              actionLabel,
+              ...formatWelcomeModules(suggestion.modules),
+              typeof suggestion.confidence === "number"
+                ? `${Math.round(suggestion.confidence * 100)}%`
+                : null,
+              suggestion.evidence?.length ? `${suggestion.evidence.length} signals` : null,
+            ].filter((value): value is string => Boolean(value));
+            return (
+              <div
+                key={suggestion.id}
+                className={`welcome-next-action suggestion-${suggestion.source}`}
               >
-                <Icon className="welcome-next-action-icon" size={16} aria-hidden="true" />
-                <span className="welcome-next-action-copy">
-                  <span className="welcome-next-action-title">{suggestion.title}</span>
-                  <span className="welcome-next-action-why">{suggestion.whyNow}</span>
-                </span>
-                <span className="welcome-next-action-modules" aria-hidden="true">
-                  {metaChips.slice(0, 4).map((module) => (
-                    <span key={module} className="welcome-next-action-module">
-                      {module}
-                    </span>
-                  ))}
-                </span>
-              </button>
-              <button
-                type="button"
-                className="welcome-next-action-snooze"
-                onClick={(event) => handleSnoozeWelcomeTaskSuggestion(event, suggestion)}
-                aria-label={`Snooze ${suggestion.title}`}
-                title="Snooze for a day"
-              >
-                <Clock size={14} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="welcome-next-action-dismiss"
-                onClick={(event) => handleDismissWelcomeTaskSuggestion(event, suggestion)}
-                aria-label={`Dismiss ${suggestion.title}`}
-                title="Dismiss"
-              >
-                <X size={14} aria-hidden="true" />
-              </button>
-            </div>
-          );
-        })}
+                <button
+                  type="button"
+                  className="welcome-next-action-main"
+                  onClick={() => handleWelcomeTaskSuggestion(suggestion)}
+                  title={title}
+                >
+                  <Icon className="welcome-next-action-icon" size={16} aria-hidden="true" />
+                  <span className="welcome-next-action-copy">
+                    <span className="welcome-next-action-title">{suggestion.title}</span>
+                    <span className="welcome-next-action-why">{suggestion.whyNow}</span>
+                  </span>
+                  <span className="welcome-next-action-modules" aria-hidden="true">
+                    {metaChips.slice(0, 4).map((module) => (
+                      <span key={module} className="welcome-next-action-module">
+                        {module}
+                      </span>
+                    ))}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="welcome-next-action-snooze"
+                  onClick={(event) => handleSnoozeWelcomeTaskSuggestion(event, suggestion)}
+                  aria-label={`Snooze ${suggestion.title}`}
+                  title="Snooze for a day"
+                >
+                  <Clock size={14} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="welcome-next-action-dismiss"
+                  onClick={(event) => handleDismissWelcomeTaskSuggestion(event, suggestion)}
+                  aria-label={`Dismiss ${suggestion.title}`}
+                  title="Dismiss"
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       </section>
     );
@@ -7363,11 +7663,7 @@ function MainContentComponent({
   }, []);
 
   const renderVaultEntryGroup = useCallback(
-    (
-      title: string,
-      entries: LlmWikiVaultEntry[],
-      emptyLabel: string,
-    ) => (
+    (title: string, entries: LlmWikiVaultEntry[], emptyLabel: string) => (
       <div className="vault-browser-group">
         <div className="vault-browser-group-title">{title}</div>
         {entries.length === 0 ? (
@@ -7406,35 +7702,55 @@ function MainContentComponent({
 
     const summary = llmWikiVaultSummary;
     const rootIndexFile =
-      summary?.rootFiles.find((entry) => entry.path.endsWith("/index.md") || entry.path === "research/wiki/index.md") ||
-      summary?.rootFiles.find((entry) => entry.path.endsWith("index.md"));
+      summary?.rootFiles.find(
+        (entry) => entry.path.endsWith("/index.md") || entry.path === "research/wiki/index.md",
+      ) || summary?.rootFiles.find((entry) => entry.path.endsWith("index.md"));
 
     return (
       <section className="vault-browser-panel" aria-label="Research vault">
         <div className="vault-browser-header">
           <div>
             <div className="vault-browser-kicker">Research vault</div>
-            <h2 className="vault-browser-heading">
-              {summary?.displayPath || "research/wiki"}
-            </h2>
+            <h2 className="vault-browser-heading">{summary?.displayPath || "research/wiki"}</h2>
             <p className="vault-browser-copy">
-              Durable markdown notes, immutable raw captures, and generated outputs that stay in the workspace.
+              Durable markdown notes, immutable raw captures, and generated outputs that stay in the
+              workspace.
             </p>
           </div>
           <div className="vault-browser-actions">
-            <button type="button" className="vault-browser-action" onClick={() => handleQuickAction(LLM_WIKI_GUI_PROMPT)}>
+            <button
+              type="button"
+              className="vault-browser-action"
+              onClick={() => handleQuickAction(LLM_WIKI_GUI_PROMPT)}
+            >
               Ingest
             </button>
-            <button type="button" className="vault-browser-action" onClick={() => handleQuickAction(LLM_WIKI_QUERY_GUI_PROMPT)}>
+            <button
+              type="button"
+              className="vault-browser-action"
+              onClick={() => handleQuickAction(LLM_WIKI_QUERY_GUI_PROMPT)}
+            >
               Query
             </button>
-            <button type="button" className="vault-browser-action" onClick={() => handleQuickAction(LLM_WIKI_AUDIT_GUI_PROMPT)}>
+            <button
+              type="button"
+              className="vault-browser-action"
+              onClick={() => handleQuickAction(LLM_WIKI_AUDIT_GUI_PROMPT)}
+            >
               Audit
             </button>
-            <button type="button" className="vault-browser-action" onClick={() => handleQuickAction(LLM_WIKI_EXPLORE_GUI_PROMPT)}>
+            <button
+              type="button"
+              className="vault-browser-action"
+              onClick={() => handleQuickAction(LLM_WIKI_EXPLORE_GUI_PROMPT)}
+            >
               Explore
             </button>
-            <button type="button" className="vault-browser-action" onClick={() => handleQuickAction(LLM_WIKI_BRIEF_GUI_PROMPT)}>
+            <button
+              type="button"
+              className="vault-browser-action"
+              onClick={() => handleQuickAction(LLM_WIKI_BRIEF_GUI_PROMPT)}
+            >
               Brief
             </button>
             {rootIndexFile && (
@@ -7473,18 +7789,35 @@ function MainContentComponent({
             </div>
 
             <div className="vault-browser-groups">
-              {renderVaultEntryGroup("Core files", summary.rootFiles, "Initialize the vault to create index, inbox, log, and schema files.")}
+              {renderVaultEntryGroup(
+                "Core files",
+                summary.rootFiles,
+                "Initialize the vault to create index, inbox, log, and schema files.",
+              )}
               {renderVaultEntryGroup("Recent notes", summary.recentPages, "No durable notes yet.")}
-              {renderVaultEntryGroup("Recent queries", summary.recentQueries, "No filed queries yet.")}
-              {renderVaultEntryGroup("Recent outputs", summary.recentOutputs, "No slide decks or charts yet.")}
-              {renderVaultEntryGroup("Recent raw captures", summary.recentRawSources, "No raw source captures yet.")}
+              {renderVaultEntryGroup(
+                "Recent queries",
+                summary.recentQueries,
+                "No filed queries yet.",
+              )}
+              {renderVaultEntryGroup(
+                "Recent outputs",
+                summary.recentOutputs,
+                "No slide decks or charts yet.",
+              )}
+              {renderVaultEntryGroup(
+                "Recent raw captures",
+                summary.recentRawSources,
+                "No raw source captures yet.",
+              )}
             </div>
           </>
         ) : (
           <div className="vault-browser-empty-state">
             <div className="vault-browser-empty-title">No research vault yet</div>
             <div className="vault-browser-empty-copy">
-              Start with a normal prompt. CoWork will create the vault in this workspace and keep it durable.
+              Start with a normal prompt. CoWork will create the vault in this workspace and keep it
+              durable.
             </div>
           </div>
         )}
@@ -7537,11 +7870,7 @@ function MainContentComponent({
   const taskMarkdown = useMemo(() => {
     if (!task) return "";
     const promptText =
-      cleanedDisplayPrompt ||
-      task.userPrompt ||
-      task.rawPrompt ||
-      task.prompt ||
-      "";
+      cleanedDisplayPrompt || task.userPrompt || task.rawPrompt || task.prompt || "";
     return [
       `# ${task.title}`,
       "",
@@ -7584,33 +7913,39 @@ function MainContentComponent({
     }
   }, []);
 
-  const handleTaskHeaderMenuKeyDown = useCallback((event: React.KeyboardEvent) => {
-    const menu = taskHeaderMenuRef.current;
-    if (!menu) return;
+  const handleTaskHeaderMenuKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      const menu = taskHeaderMenuRef.current;
+      if (!menu) return;
 
-    if (event.key === "Escape") {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeTaskHeaderMenu();
+        taskHeaderMenuButtonRef.current?.focus();
+        return;
+      }
+
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+
       event.preventDefault();
-      closeTaskHeaderMenu();
-      taskHeaderMenuButtonRef.current?.focus();
-      return;
-    }
-
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-
-    event.preventDefault();
-    const options = Array.from(
-      menu.querySelectorAll<HTMLButtonElement>("button[data-task-header-menu-option]:not(:disabled)"),
-    );
-    if (options.length === 0) return;
-    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
-    const offset = event.key === "ArrowDown" ? 1 : -1;
-    const nextIndex = currentIndex >= 0
-      ? (currentIndex + offset + options.length) % options.length
-      : event.key === "ArrowDown"
-        ? 0
-        : options.length - 1;
-    options[nextIndex]?.focus();
-  }, [closeTaskHeaderMenu]);
+      const options = Array.from(
+        menu.querySelectorAll<HTMLButtonElement>(
+          "button[data-task-header-menu-option]:not(:disabled)",
+        ),
+      );
+      if (options.length === 0) return;
+      const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
+      const offset = event.key === "ArrowDown" ? 1 : -1;
+      const nextIndex =
+        currentIndex >= 0
+          ? (currentIndex + offset + options.length) % options.length
+          : event.key === "ArrowDown"
+            ? 0
+            : options.length - 1;
+      options[nextIndex]?.focus();
+    },
+    [closeTaskHeaderMenu],
+  );
 
   const handleTaskHeaderMenuButtonKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
@@ -7713,13 +8048,7 @@ function MainContentComponent({
     if (!task || remoteSession || !workspace?.path || !onOpenBrowserWorkbenchSidebar) return;
     closeTaskHeaderMenu();
     onOpenBrowserWorkbenchSidebar();
-  }, [
-    closeTaskHeaderMenu,
-    onOpenBrowserWorkbenchSidebar,
-    remoteSession,
-    task,
-    workspace?.path,
-  ]);
+  }, [closeTaskHeaderMenu, onOpenBrowserWorkbenchSidebar, remoteSession, task, workspace?.path]);
 
   const initialPromptEventId = useMemo(() => {
     if (!trimmedPrompt) return null;
@@ -7733,6 +8062,12 @@ function MainContentComponent({
     return null;
   }, [events, trimmedPrompt]);
 
+  const initialPromptAttachmentMetadata = useMemo(() => {
+    if (!initialPromptEventId) return [];
+    const initialPromptEvent = events.find((event) => event.id === initialPromptEventId);
+    return parseUserMessageAttachmentMetadata(initialPromptEvent?.payload?.images);
+  }, [events, initialPromptEventId]);
+
   const latestPauseEvent = useMemo(() => {
     for (let i = events.length - 1; i >= 0; i -= 1) {
       if (getEffectiveTaskEventType(events[i]) === "task_paused") {
@@ -7743,21 +8078,68 @@ function MainContentComponent({
   }, [events]);
   const effectivePauseReasonCode =
     task?.awaitingUserInputReasonCode ||
-    (typeof latestPauseEvent?.payload?.reason === "string" ? latestPauseEvent.payload.reason : undefined);
+    (typeof latestPauseEvent?.payload?.reason === "string"
+      ? latestPauseEvent.payload.reason
+      : undefined);
   const effectivePauseMessage = useMemo(() => {
     const pauseMessage =
-      typeof latestPauseEvent?.payload?.message === "string" ? latestPauseEvent.payload.message.trim() : "";
+      typeof latestPauseEvent?.payload?.message === "string"
+        ? latestPauseEvent.payload.message.trim()
+        : "";
     if (!isLowSignalPauseMessage(pauseMessage, effectivePauseReasonCode)) {
       return pauseMessage;
     }
     const assistantFallback = getAssistantOrCompletionText(lastAssistantMessage);
-    if (assistantFallback && !isLowSignalPauseMessage(assistantFallback, effectivePauseReasonCode)) {
+    if (
+      assistantFallback &&
+      !isLowSignalPauseMessage(assistantFallback, effectivePauseReasonCode)
+    ) {
       return assistantFallback;
     }
     const eventFallback = buildPauseDecisionFallbackFromRecentEvents(events, latestPauseEvent);
     if (eventFallback) return eventFallback;
     return isLowSignalPauseMessage(pauseMessage, effectivePauseReasonCode) ? "" : pauseMessage;
   }, [effectivePauseReasonCode, events, lastAssistantMessage, latestPauseEvent]);
+  const handlePermissionProfileSelect = useCallback(
+    (profileId: AccessProfileId) => {
+      const profile = [...BUILTIN_ACCESS_PROFILES, ...accessProfiles].find(
+        (candidate) => candidate.id === profileId,
+      );
+      if (!profile) return;
+
+      if (task?.id) {
+        setSelectedTaskAccessProfileOverride(profileId);
+      } else {
+        setNewTaskUsesLegacyPermissionMode(false);
+        setPermissionAccessMode(profileId as PermissionAccessMode);
+      }
+      setShowPermissionDropdown(false);
+
+      // Selecting a profile from the shell-recovery banner is an explicit
+      // approval to resume the paused task. Keep ordinary composer changes
+      // non-invasive: they only affect the next send.
+      const waitingForCommandTools =
+        task?.status === "paused" &&
+        (effectivePauseReasonCode === "shell_permission_required" ||
+          effectivePauseReasonCode === "shell_permission_still_disabled");
+      const resolvedProfile = resolveAccessProfileDefinition(profile.id, accessProfiles);
+      if (waitingForCommandTools && resolvedProfile.shellAccess !== false) {
+        void onSendMessage(
+          `Please continue using the ${resolvedProfile.label} access profile.`,
+          undefined,
+          undefined,
+          { accessProfileId: resolvedProfile.id },
+        );
+      }
+    },
+    [accessProfiles, effectivePauseReasonCode, onSendMessage, task?.id, task?.status],
+  );
+  const handleOpenAccessProfilePicker = useCallback(() => {
+    setShowPermissionDropdown(true);
+    window.requestAnimationFrame(() => {
+      permissionDropdownRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    });
+  }, []);
   const latestApprovalEvent = useMemo(() => {
     for (let i = events.length - 1; i >= 0; i -= 1) {
       const event = events[i];
@@ -7793,17 +8175,26 @@ function MainContentComponent({
   const initialPromptBubble = useMemo(() => {
     if (!trimmedPrompt) return null;
     const initialIntegrationMentions = task?.agentConfig?.integrationMentions;
+    const nonImageAttachmentNames = getAttachmentNamesWithoutImagePreviews(
+      promptAttachmentNames,
+      initialPromptAttachmentMetadata,
+    );
     return (
       <div className="chat-message user-message">
+        <UserMessageImageGallery
+          attachments={initialPromptAttachmentMetadata}
+          workspacePath={workspace?.path}
+          onOpenViewer={setViewerFilePath}
+        />
         <CollapsibleUserBubble>
           <UserMessageText
             text={cleanedDisplayPrompt}
             integrationMentions={initialIntegrationMentions}
             markdownComponents={markdownComponents}
           />
-          {promptAttachmentNames.length > 0 && (
+          {nonImageAttachmentNames.length > 0 && (
             <div className="bubble-attachments">
-              {promptAttachmentNames.map((name, i) => (
+              {nonImageAttachmentNames.map((name, i) => (
                 <span className="bubble-attachment-chip" key={i}>
                   <svg
                     width="12"
@@ -7829,20 +8220,24 @@ function MainContentComponent({
     );
   }, [
     cleanedDisplayPrompt,
+    initialPromptAttachmentMetadata,
     markdownComponents,
     promptAttachmentNames,
+    setViewerFilePath,
     task?.agentConfig?.integrationMentions,
     trimmedPrompt,
+    workspace?.path,
   ]);
   const hasActiveStructuredInputRequest = Boolean(
     task &&
-      inputRequest &&
-      inputRequest.taskId === task.id &&
-      onSubmitInputRequest &&
-      onDismissInputRequest,
+    inputRequest &&
+    inputRequest.taskId === task.id &&
+    onSubmitInputRequest &&
+    onDismissInputRequest,
   );
-  const [dismissedLegalWorkflowTaskId, setDismissedLegalWorkflowTaskId] =
-    useState<string | null>(null);
+  const [dismissedLegalWorkflowTaskId, setDismissedLegalWorkflowTaskId] = useState<string | null>(
+    null,
+  );
   const legalWorkflowInvocation = useMemo(
     () => parseLegalWorkflowSlashPrompt(trimmedPrompt),
     [trimmedPrompt],
@@ -7852,18 +8247,19 @@ function MainContentComponent({
       events.some((event) => {
         if (getEffectiveTaskEventType(event) !== "user_message") return false;
         if (initialPromptEventId && event.id === initialPromptEventId) return false;
-        const message = typeof event.payload?.message === "string" ? event.payload.message.trim() : "";
+        const message =
+          typeof event.payload?.message === "string" ? event.payload.message.trim() : "";
         return message.length > 0;
       }),
     [events, initialPromptEventId],
   );
   const showLegalWorkflowCard = Boolean(
     task &&
-      legalWorkflowInvocation.matched &&
-      !hasActiveStructuredInputRequest &&
-      !hasUserFollowUpAfterInitialPrompt &&
-      dismissedLegalWorkflowTaskId !== task.id &&
-      !["failed", "cancelled"].includes(task.status),
+    legalWorkflowInvocation.matched &&
+    !hasActiveStructuredInputRequest &&
+    !hasUserFollowUpAfterInitialPrompt &&
+    dismissedLegalWorkflowTaskId !== task.id &&
+    !["failed", "cancelled"].includes(task.status),
   );
 
   // Welcome/Empty state
@@ -8201,13 +8597,11 @@ function MainContentComponent({
               >
                 <span className="cli-input-prompt">~$</span>
                 <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
-                  {showCliPlaceholder && (
-                    <TypewriterPlaceholder phrases={placeholderPlaylist} />
-                  )}
+                  {showCliPlaceholder && <TypewriterPlaceholder phrases={placeholderPlaylist} />}
                   <PromptComposerInput
                     ref={promptInputRef}
                     className={`welcome-input cli-input input-textarea${
-                      !inputValue ? " input-textarea-empty-placeholder" : ""
+                      !hasCliInputContent ? " input-textarea-empty-placeholder" : ""
                     }`}
                     value={inputValue}
                     mentions={integrationMentionSpans}
@@ -8215,6 +8609,7 @@ function MainContentComponent({
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
                     onPaste={handlePaste}
+                    onContentPresenceChange={setHasCliInputDomContent}
                     onFocus={() => setIsCliInputFocused(true)}
                     onBlur={() => setIsCliInputFocused(false)}
                     onCursorChange={handleInputCursorChange}
@@ -8242,63 +8637,112 @@ function MainContentComponent({
                     <button
                       type="button"
                       className={`permission-access-btn ${
-                        permissionAccessMode === "full" ? "full" : ""
+                        selectedProfileId === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? "full" : ""
                       }`}
                       onClick={() => setShowPermissionDropdown((open) => !open)}
                       aria-haspopup="menu"
                       aria-expanded={showPermissionDropdown}
-                      aria-label="Permission access mode"
+                      aria-label={`Permission access mode: ${selectedAccessProfileLabel}`}
                       title={
-                        permissionAccessMode === "full"
-                          ? "Full access"
-                          : "Default permissions"
+                        profileConstraintNotice
+                          ? `${selectedAccessProfileLabel} — ${profileConstraintNotice}`
+                          : selectedAccessProfileLabel
                       }
                     >
-                      {permissionAccessMode === "full" ? (
+                      {selectedProfileId === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? (
                         <ShieldAlert size={18} aria-hidden="true" />
                       ) : (
                         <ShieldCheck size={18} aria-hidden="true" />
                       )}
-                      <span>
-                        {permissionAccessMode === "full" ? "Full access" : "Default permissions"}
-                      </span>
+                      <span>{selectedAccessProfileLabel}</span>
                       <ChevronDown size={16} aria-hidden="true" />
                     </button>
+                    {profileConstraintNotice && (
+                      <span className="permission-access-constraint" role="status">
+                        {profileConstraintNotice}
+                      </span>
+                    )}
                     {showPermissionDropdown && (
                       <div
                         className="permission-access-dropdown"
                         role="menu"
-                        aria-label="Permission access mode"
+                        aria-label="Permission access profiles"
                       >
+                        {BUILTIN_ACCESS_PROFILES.map((profile) => (
+                          <button
+                            key={profile.id}
+                            type="button"
+                            className={`permission-access-option ${
+                              profile.id === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? "danger" : ""
+                            } ${selectedProfileId === profile.id ? "active" : ""}`}
+                            onClick={() => {
+                              handlePermissionProfileSelect(profile.id);
+                            }}
+                            role="menuitemradio"
+                            aria-checked={selectedProfileId === profile.id}
+                            title={profile.description}
+                          >
+                            {profile.id === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? (
+                              <ShieldAlert size={16} aria-hidden="true" />
+                            ) : (
+                              <ShieldCheck size={16} aria-hidden="true" />
+                            )}
+                            <span className="permission-access-option-copy">
+                              <span className="permission-access-option-title">
+                                {profile.label}
+                              </span>
+                              <span className="permission-access-option-description">
+                                {profile.description}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                        {accessProfiles.length > 0 && (
+                          <div className="permission-access-custom-label">Custom profiles</div>
+                        )}
+                        {accessProfiles.map((profile) => (
+                          <button
+                            key={profile.id}
+                            type="button"
+                            className={`permission-access-option ${
+                              selectedProfileId === profile.id ? "active" : ""
+                            }`}
+                            onClick={() => {
+                              handlePermissionProfileSelect(profile.id);
+                            }}
+                            role="menuitemradio"
+                            aria-checked={selectedProfileId === profile.id}
+                            title={profile.description}
+                          >
+                            <SlidersHorizontal size={16} aria-hidden="true" />
+                            <span className="permission-access-option-copy">
+                              <span className="permission-access-option-title">
+                                {profile.label || getAccessProfileLabel(profile.id)}
+                              </span>
+                              <span className="permission-access-option-description">
+                                {profile.description}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
                         <button
                           type="button"
-                          className={`permission-access-option ${
-                            permissionAccessMode === "default" ? "active" : ""
-                          }`}
+                          className="permission-access-option"
                           onClick={() => {
-                            setPermissionAccessMode("default");
                             setShowPermissionDropdown(false);
+                            onOpenSettings?.("system");
                           }}
-                          role="menuitemradio"
-                          aria-checked={permissionAccessMode === "default"}
+                          role="menuitem"
                         >
-                          <ShieldCheck size={16} aria-hidden="true" />
-                          <span>Default permissions</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`permission-access-option danger ${
-                            permissionAccessMode === "full" ? "active" : ""
-                          }`}
-                          onClick={() => {
-                            setPermissionAccessMode("full");
-                            setShowPermissionDropdown(false);
-                          }}
-                          role="menuitemradio"
-                          aria-checked={permissionAccessMode === "full"}
-                        >
-                          <ShieldAlert size={16} aria-hidden="true" />
-                          <span>Full access</span>
+                          <SlidersHorizontal size={16} aria-hidden="true" />
+                          <span className="permission-access-option-copy">
+                            <span className="permission-access-option-title">
+                              Configure custom profiles
+                            </span>
+                            <span className="permission-access-option-description">
+                              Define sandbox, filesystem, network, and approval rules in Settings.
+                            </span>
+                          </span>
                         </button>
                       </div>
                     )}
@@ -8429,38 +8873,6 @@ function MainContentComponent({
                             aria-label="More options"
                             onKeyDown={handleOverflowMenuKeyDown}
                           >
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
-                                onClick={() => {
-                                  setOverflowSubmenu(null);
-                                  handleShellToggle();
-                                  setShowOverflowMenu(false);
-                                }}
-                                role="menuitemcheckbox"
-                                aria-checked={shellEnabled}
-                                aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
-                                data-overflow-menu-item
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                >
-                                  <path d="M4 17l6-6-6-6M12 19h8" />
-                                </svg>
-                                <span>Shell</span>
-                                <span
-                                  className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`}
-                                  aria-hidden="true"
-                                >
-                                  <span className="goal-mode-switch-thumb" />
-                                </span>
-                              </button>
-                            </div>
                             <div className="overflow-menu-item" role="none">
                               <button
                                 className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
@@ -8650,7 +9062,16 @@ function MainContentComponent({
                             : collaborativeModeEnabled
                               ? "Collab"
                               : EXECUTION_MODE_LABEL[executionMode]}
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
                             <path d="M18 6L6 18M6 6l12 12" />
                           </svg>
                         </button>
@@ -8716,6 +9137,8 @@ function MainContentComponent({
                           isUploadingAttachments ||
                           isPreparingMessage
                         }
+                        aria-label="Send message"
+                        title="Send message"
                       >
                         <ArrowUp size={16} aria-hidden="true" />
                       </button>
@@ -8858,6 +9281,8 @@ function MainContentComponent({
                           isUploadingAttachments ||
                           isPreparingMessage
                         }
+                        aria-label="Send message"
+                        title="Send message"
                       >
                         <ArrowUp size={16} aria-hidden="true" />
                       </button>
@@ -8962,36 +9387,6 @@ function MainContentComponent({
                       </div>
                     )}
                   </div>
-                  <button
-                    className={`input-status-shell ${shellEnabled ? "enabled" : ""}`}
-                    onClick={handleShellToggle}
-                    role="switch"
-                    aria-checked={shellEnabled}
-                    aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
-                    title={
-                      shellEnabled
-                        ? "Shell commands enabled - click to disable"
-                        : "Shell commands disabled - click to enable"
-                    }
-                  >
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M4 17l6-6-6-6M12 19h8" />
-                    </svg>
-                    <span>Shell</span>
-                    <span
-                      className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`}
-                      aria-hidden="true"
-                    >
-                      <span className="goal-mode-switch-thumb" />
-                    </span>
-                  </button>
                 </div>
                 <div className="input-status-right">
                   <div className="input-status-mode-wrap" ref={modeDropdownRef}>
@@ -9287,7 +9682,6 @@ function MainContentComponent({
     />
   );
 
-
   // Task view
   return (
     <div className="main-content">
@@ -9347,7 +9741,11 @@ function MainContentComponent({
                     disabled={Boolean(remoteSession)}
                     onClick={handleTaskHeaderPin}
                   >
-                    {task.pinned ? <PinOff size={17} aria-hidden="true" /> : <Pin size={17} aria-hidden="true" />}
+                    {task.pinned ? (
+                      <PinOff size={17} aria-hidden="true" />
+                    ) : (
+                      <Pin size={17} aria-hidden="true" />
+                    )}
                     <span>{task.pinned ? "Unpin task" : "Pin task"}</span>
                   </button>
                   <button
@@ -9378,7 +9776,9 @@ function MainContentComponent({
                     className="main-header-task-menu-item"
                     role="menuitem"
                     data-task-header-menu-option
-                    disabled={Boolean(remoteSession) || !workspace?.path || !onOpenBrowserWorkbenchSidebar}
+                    disabled={
+                      Boolean(remoteSession) || !workspace?.path || !onOpenBrowserWorkbenchSidebar
+                    }
                     onClick={handleTaskHeaderOpenBrowser}
                   >
                     <Globe size={17} aria-hidden="true" />
@@ -9500,8 +9900,8 @@ function MainContentComponent({
         <div className="task-content">
           {/* Always anchor the initial user prompt above the timeline. */}
           {initialPromptBubble}
-          {showLegalWorkflowCard && (
-            legalWorkflowInvocation.kind === "demand-intake" ? (
+          {showLegalWorkflowCard &&
+            (legalWorkflowInvocation.kind === "demand-intake" ? (
               <LegalDemandIntakePromptCard
                 prompt={trimmedPrompt}
                 onSubmit={(message) => {
@@ -9519,12 +9919,9 @@ function MainContentComponent({
                 }}
                 onDismiss={() => setDismissedLegalWorkflowTaskId(task.id)}
               />
-            )
-          )}
+            ))}
 
-          {task?.agentConfig?.executionMode === "debug" && (
-            <DebugSessionPanel events={events} />
-          )}
+          {task?.agentConfig?.executionMode === "debug" && <DebugSessionPanel events={events} />}
 
           {researchWorkflowEnabled && (
             <div
@@ -9584,11 +9981,15 @@ function MainContentComponent({
                     {continuationStatusChip.progress && (
                       <span className="header-continuation-chip-sep">·</span>
                     )}
-                    {continuationStatusChip.progress && <span>{continuationStatusChip.progress}</span>}
+                    {continuationStatusChip.progress && (
+                      <span>{continuationStatusChip.progress}</span>
+                    )}
                     {continuationStatusChip.loopRisk && (
                       <span className="header-continuation-chip-sep">·</span>
                     )}
-                    {continuationStatusChip.loopRisk && <span>{continuationStatusChip.loopRisk}</span>}
+                    {continuationStatusChip.loopRisk && (
+                      <span>{continuationStatusChip.loopRisk}</span>
+                    )}
                   </span>
                 )}
               </div>
@@ -9679,23 +10080,29 @@ function MainContentComponent({
       {/* Footer with Input */}
       <div className="main-footer">
         {/* Scroll to bottom button — only when there is actually content above the fold */}
-        {!autoScroll && task && mainBodyRef.current && (mainBodyRef.current.scrollHeight - mainBodyRef.current.scrollTop - mainBodyRef.current.clientHeight > 20) && (
-          <button
-            className="scroll-to-bottom-btn"
-            onClick={() => {
-              if (mainBodyRef.current) {
-                mainBodyRef.current.scrollTo({
-                  top: mainBodyRef.current.scrollHeight,
-                  behavior: "smooth",
-                });
-                setAutoScroll(true);
-              }
-            }}
-            title="Scroll to bottom"
-          >
-            ↓
-          </button>
-        )}
+        {!autoScroll &&
+          task &&
+          mainBodyRef.current &&
+          mainBodyRef.current.scrollHeight -
+            mainBodyRef.current.scrollTop -
+            mainBodyRef.current.clientHeight >
+            20 && (
+            <button
+              className="scroll-to-bottom-btn"
+              onClick={() => {
+                if (mainBodyRef.current) {
+                  mainBodyRef.current.scrollTo({
+                    top: mainBodyRef.current.scrollHeight,
+                    behavior: "smooth",
+                  });
+                  setAutoScroll(true);
+                }
+              }}
+              title="Scroll to bottom"
+            >
+              ↓
+            </button>
+          )}
         {renderAttachmentPanel()}
         <div
           className={`input-container ${isDraggingFiles ? "drag-over" : ""} ${collaborativeRun && (onOpenChildAgentSidebar || onSelectChildTask) ? "input-container-with-agents" : ""}`}
@@ -9710,12 +10117,9 @@ function MainContentComponent({
               collaborativeRun={collaborativeRun}
               childTasks={childTasks}
               childEvents={childEvents}
-              onOpenAgent={(taskId) =>
-                (onOpenChildAgentSidebar ?? onSelectChildTask)?.(taskId)
-              }
+              onOpenAgent={(taskId) => (onOpenChildAgentSidebar ?? onSelectChildTask)?.(taskId)}
               mainTaskCompleted={
-                !!task &&
-                ["completed", "failed", "cancelled"].includes(task.status)
+                !!task && ["completed", "failed", "cancelled"].includes(task.status)
               }
               onWrapUp={
                 onWrapUpTask
@@ -9738,21 +10142,21 @@ function MainContentComponent({
                   {routineCreationNotice.name} is saved with {routineCreationNotice.triggerSummary}.
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => onOpenSettings?.("scheduled")}
-              >
+              <button type="button" onClick={() => onOpenSettings?.("scheduled")}>
                 View
               </button>
             </div>
           )}
-          {hasActiveStructuredInputRequest && inputRequest && onSubmitInputRequest && onDismissInputRequest && (
-            <StructuredInputPromptCard
-              request={inputRequest}
-              onSubmit={(answers) => onSubmitInputRequest(inputRequest.id, answers)}
-              onDismiss={() => onDismissInputRequest(inputRequest.id)}
-            />
-          )}
+          {hasActiveStructuredInputRequest &&
+            inputRequest &&
+            onSubmitInputRequest &&
+            onDismissInputRequest && (
+              <StructuredInputPromptCard
+                request={inputRequest}
+                onSubmit={(answers) => onSubmitInputRequest(inputRequest.id, answers)}
+                onDismiss={() => onDismissInputRequest(inputRequest.id)}
+              />
+            )}
           {showVoiceNotConfigured && (
             <div className="voice-not-configured-banner">
               <svg
@@ -9801,7 +10205,8 @@ function MainContentComponent({
               <div className="task-status-banner-content">
                 <strong>Remote session view</strong>
                 <span className="task-status-banner-detail">
-                  You are inspecting the live task history from {remoteSession.deviceName}, not the current device.
+                  You are inspecting the live task history from {remoteSession.deviceName}, not the
+                  current device.
                 </span>
               </div>
             </div>
@@ -9812,8 +10217,10 @@ function MainContentComponent({
               reasonCode={effectivePauseReasonCode}
               markdownComponents={markdownComponents}
               onStopTask={onWrapUpTask ?? onStopTask}
-              onEnableShell={remoteSession ? undefined : onEnableShellForPausedTask}
-              onContinueWithoutShell={remoteSession ? undefined : onContinueWithoutShellForPausedTask}
+              onOpenAccessProfilePicker={remoteSession ? undefined : handleOpenAccessProfilePicker}
+              onContinueWithoutCommands={
+                remoteSession ? undefined : onContinueWithoutCommandsForPausedTask
+              }
             />
           )}
           {task.status === "blocked" && (
@@ -9824,11 +10231,22 @@ function MainContentComponent({
                     ? "Blocked - needs approval"
                     : "Blocked - waiting on you"}
                 </strong>
-                {latestApprovalEvent?.payload?.approval?.description && task.terminalStatus === "awaiting_approval" && (
-                  <span className="task-status-banner-detail">
-                    {latestApprovalEvent.payload.approval.description}
-                  </span>
-                )}
+                {latestApprovalEvent?.payload?.approval?.description &&
+                  task.terminalStatus === "awaiting_approval" && (
+                    <span className="task-status-banner-detail">
+                      {latestApprovalEvent.payload.approval.description}
+                    </span>
+                  )}
+              </div>
+            </div>
+          )}
+          {task.status === "cancelled" && (
+            <div className="task-status-banner task-status-banner-cancelled">
+              <div className="task-status-banner-content">
+                <strong>Cancelled</strong>
+                <span className="task-status-banner-detail">
+                  The task was stopped by you. No further work is running.
+                </span>
               </div>
             </div>
           )}
@@ -9845,18 +10263,18 @@ function MainContentComponent({
           {task.status === "completed" &&
             task.terminalStatus === "needs_user_action" &&
             showPersistentNeedsUserActionBanner && (
-            <div className="task-status-banner task-status-banner-blocked">
-              <div className="task-status-banner-content">
-                <strong>Completed - action required</strong>
-                <span className="task-status-banner-detail">
-                  {typeof latestCompletionEvent?.payload?.verificationMessage === "string" &&
-                  latestCompletionEvent.payload.verificationMessage.trim().length > 0
-                    ? latestCompletionEvent.payload.verificationMessage
-                    : "Verification is pending user evidence before this can be fully marked done."}
-                </span>
+              <div className="task-status-banner task-status-banner-blocked">
+                <div className="task-status-banner-content">
+                  <strong>Completed - action required</strong>
+                  <span className="task-status-banner-detail">
+                    {typeof latestCompletionEvent?.payload?.verificationMessage === "string" &&
+                    latestCompletionEvent.payload.verificationMessage.trim().length > 0
+                      ? latestCompletionEvent.payload.verificationMessage
+                      : "Verification is pending user evidence before this can be fully marked done."}
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
           {quotedAssistantMessage && (
             <div className="composer-quoted-assistant">
               <div className="composer-quoted-assistant-copy">
@@ -9897,18 +10315,33 @@ function MainContentComponent({
             </button>
             {uiDensity === "focused" && (
               <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
-                  {showWorkspaceDropdown && (
-                    <div className="workspace-dropdown">
-                      {workspacesList.length > 0 && (
-                        <>
-                          <div className="workspace-dropdown-header">Recent Folders</div>
-                          <div className="workspace-dropdown-list">
-                            {workspacesList.slice(0, 10).map((w) => (
-                              <button
-                                key={w.id}
-                                className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
-                                onClick={() => handleWorkspaceSelect(w)}
+                {showWorkspaceDropdown && (
+                  <div className="workspace-dropdown">
+                    {workspacesList.length > 0 && (
+                      <>
+                        <div className="workspace-dropdown-header">Recent Folders</div>
+                        <div className="workspace-dropdown-list">
+                          {workspacesList.slice(0, 10).map((w) => (
+                            <button
+                              key={w.id}
+                              className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
+                              onClick={() => handleWorkspaceSelect(w)}
+                            >
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
                               >
+                                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                              </svg>
+                              <div className="workspace-item-info">
+                                <span className="workspace-item-name">{w.name}</span>
+                                <span className="workspace-item-path">{w.path}</span>
+                              </div>
+                              {workspace?.id === w.id && (
                                 <svg
                                   width="14"
                                   height="14"
@@ -9916,48 +10349,36 @@ function MainContentComponent({
                                   fill="none"
                                   stroke="currentColor"
                                   strokeWidth="2"
+                                  className="check-icon"
                                 >
-                                  <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                                  <path d="M20 6L9 17l-5-5" />
                                 </svg>
-                                <div className="workspace-item-info">
-                                  <span className="workspace-item-name">{w.name}</span>
-                                  <span className="workspace-item-path">{w.path}</span>
-                                </div>
-                                {workspace?.id === w.id && (
-                                  <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    className="check-icon"
-                                  >
-                                    <path d="M20 6L9 17l-5-5" />
-                                  </svg>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="workspace-dropdown-divider" />
-                        </>
-                      )}
-                      <button className="workspace-dropdown-item new-folder" onClick={handleSelectNewFolder}>
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path d="M12 5v14M5 12h14" />
-                        </svg>
-                        <span>Work in another folder...</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="workspace-dropdown-divider" />
+                      </>
+                    )}
+                    <button
+                      className="workspace-dropdown-item new-folder"
+                      onClick={handleSelectNewFolder}
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                      <span>Work in another folder...</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
             <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
               <PromptComposerInput
@@ -10017,12 +10438,7 @@ function MainContentComponent({
                     <path d="M12 6v6l4 2" />
                   </svg>
                 ) : voiceInput.state === "recording" ? (
-                  <Square
-                    size={12}
-                    fill="currentColor"
-                    strokeWidth={0}
-                    aria-hidden="true"
-                  />
+                  <Square size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />
                 ) : (
                   <Mic size={16} aria-hidden="true" />
                 )}
@@ -10035,7 +10451,12 @@ function MainContentComponent({
               </button>
               {isTaskWorking && onStopTask ? (
                 <div className="task-control-buttons">
-                  <button className="stop-btn-simple" onClick={onStopTask} title="Stop task">
+                  <button
+                    className="stop-btn-simple"
+                    onClick={onStopTask}
+                    aria-label="Stop task"
+                    title="Stop task"
+                  >
                     <Square size={16} aria-hidden="true" />
                   </button>
                 </div>
@@ -10048,6 +10469,7 @@ function MainContentComponent({
                     isUploadingAttachments ||
                     isPreparingMessage
                   }
+                  aria-label="Send message"
                   title="Send message"
                 >
                   <ArrowUp size={16} aria-hidden="true" />
@@ -10164,36 +10586,6 @@ function MainContentComponent({
                     </div>
                   )}
                 </div>
-                <button
-                  className={`shell-toggle ${shellEnabled ? "enabled" : ""}`}
-                  onClick={handleShellToggle}
-                  role="switch"
-                  aria-checked={shellEnabled}
-                  aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
-                  title={
-                    shellEnabled
-                      ? "Shell commands enabled - click to disable"
-                      : "Shell commands disabled - click to enable"
-                  }
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M4 17l6-6-6-6M12 19h8" />
-                  </svg>
-                  <span>Shell</span>
-                  <span
-                    className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`}
-                    aria-hidden="true"
-                  >
-                    <span className="goal-mode-switch-thumb" />
-                  </span>
-                </button>
               </>
             )}
             <span className="keyboard-hint">
@@ -10229,36 +10621,6 @@ function MainContentComponent({
               </svg>
               <span className="input-status-workspace-path">
                 {getWorkspaceStatusFolderLabel(workspace)}
-              </span>
-            </button>
-            <button
-              className={`input-status-shell ${shellEnabled ? "enabled" : ""}`}
-              onClick={handleShellToggle}
-              role="switch"
-              aria-checked={shellEnabled}
-              aria-label={`Shell commands ${shellEnabled ? "on" : "off"}`}
-              title={
-                shellEnabled
-                  ? "Shell commands enabled - click to disable"
-                  : "Shell commands disabled - click to enable"
-              }
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M4 17l6-6-6-6M12 19h8" />
-              </svg>
-              <span>Shell</span>
-              <span
-                className={`goal-mode-switch-track ${shellEnabled ? "on" : ""}`}
-                aria-hidden="true"
-              >
-                <span className="goal-mode-switch-thumb" />
               </span>
             </button>
           </div>
@@ -10371,10 +10733,9 @@ function MainContentComponent({
           onCreated={async (routine) => {
             await onTasksChanged?.();
             const triggers = Array.isArray(routine?.triggers) ? routine.triggers : [];
-            const triggerSummary =
-              triggers.some((trigger: Any) => trigger?.type === "schedule")
-                ? "scheduled and manual triggers"
-                : "manual trigger";
+            const triggerSummary = triggers.some((trigger: Any) => trigger?.type === "schedule")
+              ? "scheduled and manual triggers"
+              : "manual trigger";
             if (task) {
               setRoutineCreationNotice({
                 taskId: task.id,
@@ -10431,7 +10792,9 @@ function getMainContentTaskSignature(task: Task | undefined): string {
   ].join(":");
 }
 
-function getMainContentInputRequestSignature(inputRequest: InputRequest | null | undefined): string {
+function getMainContentInputRequestSignature(
+  inputRequest: InputRequest | null | undefined,
+): string {
   if (!inputRequest) return "none";
   return [
     inputRequest.id,
@@ -10493,7 +10856,8 @@ function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps
     prev.onLoadMoreTimelineHistory === next.onLoadMoreTimelineHistory &&
     prev.onLoadTaskEventDetail === next.onLoadTaskEventDetail &&
     prev.onReleaseTaskEventDetail === next.onReleaseTaskEventDetail &&
-    getRemoteSessionSignature(prev.remoteSession) === getRemoteSessionSignature(next.remoteSession) &&
+    getRemoteSessionSignature(prev.remoteSession) ===
+      getRemoteSessionSignature(next.remoteSession) &&
     prev.replayControls === next.replayControls &&
     prev.onOpenSpreadsheetArtifact === next.onOpenSpreadsheetArtifact &&
     prev.onOpenDocumentArtifact === next.onOpenDocumentArtifact &&

@@ -14,13 +14,9 @@
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { PlaywrightQAService } from "../qa/playwright-qa-service";
-import {
-  QARunConfig,
-  QACheckType,
-  QAInteractionStep,
-  DEFAULT_QA_CONFIG,
-} from "../qa/types";
+import { QARunConfig, QACheckType, QAInteractionStep, DEFAULT_QA_CONFIG } from "../qa/types";
 import { LLMTool } from "../llm/types";
+import { createWorkspaceFilesystemApprovalHandlers } from "../../security/access-profile-paths";
 
 type Any = any;
 
@@ -32,12 +28,34 @@ export class QATools {
     private daemon: AgentDaemon,
     private taskId: string,
   ) {
-    this.qaService = new PlaywrightQAService(workspace);
+    this.qaService = this.createQAService(workspace);
   }
 
   setWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
-    this.qaService = new PlaywrightQAService(workspace);
+    this.qaService = this.createQAService(workspace);
+  }
+
+  private createQAService(workspace: Workspace): PlaywrightQAService {
+    return new PlaywrightQAService(
+      workspace,
+      undefined,
+      async (command, cwd) =>
+        await this.daemon.requestApproval(
+          this.taskId,
+          "run_command",
+          `Approve the QA server command: ${command}`,
+          {
+            tool: "qa_run",
+            command,
+            cwd,
+            path: cwd,
+            approvalMode: "qa_server",
+          },
+          { allowAutoApprove: false },
+        ),
+      createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "qa"),
+    );
   }
 
   static getToolDefinitions(): LLMTool[] {
@@ -71,7 +89,8 @@ export class QATools {
             },
             server_port: {
               type: "number",
-              description: "Port to wait for before starting tests. Auto-detected from URL if omitted.",
+              description:
+                "Port to wait for before starting tests. Auto-detected from URL if omitted.",
             },
             checks: {
               type: "array",
@@ -92,7 +111,8 @@ export class QATools {
             },
             headless: {
               type: "boolean",
-              description: "Run browser in headless mode (default: true). Set false to see the browser.",
+              description:
+                "Run browser in headless mode (default: true). Set false to see the browser.",
             },
             auto_fix: {
               type: "boolean",
@@ -162,7 +182,8 @@ export class QATools {
           properties: {
             label: {
               type: "string",
-              description: "Label for the screenshot (e.g., 'homepage', 'after-login', 'dark-mode')",
+              description:
+                "Label for the screenshot (e.g., 'homepage', 'after-login', 'dark-mode')",
             },
             full_page: {
               type: "boolean",
@@ -212,8 +233,7 @@ export class QATools {
       {
         name: "qa_cleanup",
         description:
-          "Tear down the QA browser and dev server. " +
-          "Call this when QA testing is complete.",
+          "Tear down the QA browser and dev server. " + "Call this when QA testing is complete.",
         input_schema: {
           type: "object" as const,
           properties: {},
@@ -293,9 +313,7 @@ export class QATools {
     if (run.issues.length > 0) {
       lines.push(`### Issues Found (${run.issues.length})`);
       for (const issue of run.issues) {
-        lines.push(
-          `- [${issue.severity.toUpperCase()}] ${issue.title}`,
-        );
+        lines.push(`- [${issue.severity.toUpperCase()}] ${issue.title}`);
         if (issue.description !== issue.title) {
           lines.push(`  ${issue.description}`);
         }
@@ -348,13 +366,17 @@ export class QATools {
     // Get page report
     const report = await this.qaService.getPageReport();
 
-    return JSON.stringify({
-      navigation: {
-        success: result.success,
-        error: result.error,
+    return JSON.stringify(
+      {
+        navigation: {
+          success: result.success,
+          error: result.error,
+        },
+        page: report,
       },
-      page: report,
-    }, null, 2);
+      null,
+      2,
+    );
   }
 
   private async handleQAInteract(input: Record<string, Any>): Promise<string> {
@@ -382,13 +404,17 @@ export class QATools {
       result.screenshotPath = ssResult.screenshotPath;
     }
 
-    return JSON.stringify({
-      action: result.action,
-      success: result.success,
-      error: result.error,
-      screenshotPath: result.screenshotPath,
-      durationMs: result.durationMs,
-    }, null, 2);
+    return JSON.stringify(
+      {
+        action: result.action,
+        success: result.success,
+        error: result.error,
+        screenshotPath: result.screenshotPath,
+        durationMs: result.durationMs,
+      },
+      null,
+      2,
+    );
   }
 
   private async handleQAScreenshot(input: Record<string, Any>): Promise<string> {
@@ -410,11 +436,15 @@ export class QATools {
       // best effort
     }
 
-    return JSON.stringify({
-      screenshotPath: result.screenshotPath,
-      success: result.success,
-      page: report,
-    }, null, 2);
+    return JSON.stringify(
+      {
+        screenshotPath: result.screenshotPath,
+        success: result.success,
+        page: report,
+      },
+      null,
+      2,
+    );
   }
 
   private async handleQACheck(input: Record<string, Any>): Promise<string> {
@@ -432,22 +462,26 @@ export class QATools {
       return JSON.stringify({ error: `Check ${checkType} did not produce results` });
     }
 
-    return JSON.stringify({
-      success: check.passed,
-      check: {
-        type: check.type,
-        label: check.label,
-        passed: check.passed,
-        issueCount: check.issues.length,
-        issues: check.issues.map((i) => ({
-          severity: i.severity,
-          title: i.title,
-          description: i.description,
-        })),
-        screenshotPath: check.screenshotPath,
-        durationMs: check.durationMs,
+    return JSON.stringify(
+      {
+        success: check.passed,
+        check: {
+          type: check.type,
+          label: check.label,
+          passed: check.passed,
+          issueCount: check.issues.length,
+          issues: check.issues.map((i) => ({
+            severity: i.severity,
+            title: i.title,
+            description: i.description,
+          })),
+          screenshotPath: check.screenshotPath,
+          durationMs: check.durationMs,
+        },
       },
-    }, null, 2);
+      null,
+      2,
+    );
   }
 
   private async handleQAReport(): Promise<string> {
@@ -456,28 +490,32 @@ export class QATools {
       return JSON.stringify({ error: "No QA run active. Use qa_run first." });
     }
 
-    return JSON.stringify({
-      id: run.id,
-      status: run.status,
-      summary: run.summary,
-      checksRun: run.checks.length,
-      checksPassed: run.checks.filter((c) => c.passed).length,
-      totalIssues: run.issues.length,
-      criticalIssues: run.issues.filter((i) => i.severity === "critical").length,
-      majorIssues: run.issues.filter((i) => i.severity === "major").length,
-      minorIssues: run.issues.filter((i) => i.severity === "minor").length,
-      issues: run.issues.map((i) => ({
-        severity: i.severity,
-        type: i.type,
-        title: i.title,
-        description: i.description,
-        fixed: i.fixed,
-        screenshotPath: i.screenshotPath,
-      })),
-      interactionSteps: run.interactionLog.length,
-      durationMs: run.durationMs,
-      finalScreenshot: run.finalScreenshotPath,
-    }, null, 2);
+    return JSON.stringify(
+      {
+        id: run.id,
+        status: run.status,
+        summary: run.summary,
+        checksRun: run.checks.length,
+        checksPassed: run.checks.filter((c) => c.passed).length,
+        totalIssues: run.issues.length,
+        criticalIssues: run.issues.filter((i) => i.severity === "critical").length,
+        majorIssues: run.issues.filter((i) => i.severity === "major").length,
+        minorIssues: run.issues.filter((i) => i.severity === "minor").length,
+        issues: run.issues.map((i) => ({
+          severity: i.severity,
+          type: i.type,
+          title: i.title,
+          description: i.description,
+          fixed: i.fixed,
+          screenshotPath: i.screenshotPath,
+        })),
+        interactionSteps: run.interactionLog.length,
+        durationMs: run.durationMs,
+        finalScreenshot: run.finalScreenshotPath,
+      },
+      null,
+      2,
+    );
   }
 
   private async handleQACleanup(): Promise<string> {

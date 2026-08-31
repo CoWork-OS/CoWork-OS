@@ -136,7 +136,9 @@ class FakeDb {
       const row = this.agents.find((agent) => agent.id === args[0]);
       return row ? { name: row.name } : undefined;
     }
-    if (normalized.includes("select * from managed_agent_versions where agent_id = ? and version = ?")) {
+    if (
+      normalized.includes("select * from managed_agent_versions where agent_id = ? and version = ?")
+    ) {
       return this.versions.find((row) => row.agent_id === args[0] && row.version === args[1]);
     }
     if (normalized.includes("select * from managed_environments where id = ?")) {
@@ -277,7 +279,10 @@ class FakeDb {
       const duplicate = this.receipts.find(
         (row) => row.profile_id === args[1] && row.idempotency_key === args[14],
       );
-      if (duplicate) throw new Error("UNIQUE constraint failed: everyday_agent_receipts.profile_id, everyday_agent_receipts.idempotency_key");
+      if (duplicate)
+        throw new Error(
+          "UNIQUE constraint failed: everyday_agent_receipts.profile_id, everyday_agent_receipts.idempotency_key",
+        );
       this.receipts.push({
         id: args[0],
         profile_id: args[1],
@@ -380,10 +385,16 @@ class FakeDb {
     if (normalized.includes("delete from everyday_agent_task_links where profile_id = ?")) {
       return this.deleteRows(this.taskLinks, (row) => row.profile_id === args[0]);
     }
-    if (normalized.includes("delete from everyday_agent_browser_profile_metadata where profile_id = ?")) {
+    if (
+      normalized.includes(
+        "delete from everyday_agent_browser_profile_metadata where profile_id = ?",
+      )
+    ) {
       return this.deleteRows(this.browserProfileMetadata, (row) => row.profile_id === args[0]);
     }
-    if (normalized.includes("delete from everyday_agent_connector_summaries where profile_id = ?")) {
+    if (
+      normalized.includes("delete from everyday_agent_connector_summaries where profile_id = ?")
+    ) {
       return this.deleteRows(this.connectorSummaries, (row) => row.profile_id === args[0]);
     }
     if (normalized.includes("delete from everyday_agent_routine_provenance where profile_id = ?")) {
@@ -543,9 +554,7 @@ describe("EverydayAgentService", () => {
       },
     }));
 
-    expect(() => service.approveAction({ previewId: preview.id })).toThrow(
-      /calendar is disabled/i,
-    );
+    expect(() => service.approveAction({ previewId: preview.id })).toThrow(/calendar is disabled/i);
     expect(db.previews.find((row) => row.id === preview.id)).toMatchObject({
       status: "blocked",
     });

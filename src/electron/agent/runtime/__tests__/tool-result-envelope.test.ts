@@ -48,8 +48,7 @@ describe("buildToolResultEnvelope", () => {
 
     expect(JSON.parse(envelope.modelPayload)).toMatchObject({
       verificationNudgeNeeded: true,
-      _modelReminder:
-        "CHECKLIST REMINDER:\n- Add a verification item before finishing.",
+      _modelReminder: "CHECKLIST REMINDER:\n- Add a verification item before finishing.",
     });
   });
 });

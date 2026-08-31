@@ -217,10 +217,27 @@ export function descriptionHasStrongWriteIntent(text: string): boolean {
   return STRONG_WRITE_VERB_REGEX.test(desc) || PASSIVE_ARTIFACT_WRITE_CUE_REGEX.test(desc);
 }
 
+export function descriptionHasProtectiveConstraintIntent(text: string): boolean {
+  const desc = String(text || "").toLowerCase();
+  return (
+    /\bexclude\b[^!?\n]{0,200}\bfrom\s+(?:consideration|scope|the\s+task)\b/.test(desc) ||
+    /\b(?:do\s+not|don't|must\s+not|never)\s+(?:touch|modify|move|edit|change|write|delete|remove|rename)\b/.test(
+      desc,
+    ) ||
+    // Keep dots that are part of a filename (for example `notes.txt`) while
+    // still stopping at an actual sentence boundary before the constraint.
+    /\bleave\b(?:[^!?\n.]|\.(?=[A-Za-z0-9_/-])){0,160}\b(?:untouched|unchanged)\b/.test(desc) ||
+    /\b(?:was|were|is|are)\s+not\s+(?:modified|moved|edited|changed|touched)\b/.test(desc)
+  );
+}
+
 export function descriptionHasReadOnlyIntent(text: string): boolean {
   const desc = String(text || "").toLowerCase();
-  return /\b(read|search|fetch|retrieve|browse|visit|analy[sz]e|review|understand|examine|inspect|check|parse|extract|summarize|study|explore|investigate|look)\b/.test(
-    desc,
+  return (
+    descriptionHasProtectiveConstraintIntent(desc) ||
+    /\b(read|search|fetch|retrieve|browse|visit|analy[sz]e|review|understand|examine|inspect|check|parse|extract|summarize|study|explore|investigate|look)\b/.test(
+      desc,
+    )
   );
 }
 

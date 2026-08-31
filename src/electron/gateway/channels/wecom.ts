@@ -76,7 +76,11 @@ function removePkcs7Padding(buffer: Buffer): Buffer {
   return buffer.subarray(0, buffer.length - padding);
 }
 
-function decryptWeComMessage(encryptedBase64: string, encodingAESKey: string, corpId: string): string {
+function decryptWeComMessage(
+  encryptedBase64: string,
+  encodingAESKey: string,
+  corpId: string,
+): string {
   const aesKey = Buffer.from(`${encodingAESKey}=`, "base64");
   const encrypted = Buffer.from(encryptedBase64, "base64");
   const iv = aesKey.subarray(0, 16);

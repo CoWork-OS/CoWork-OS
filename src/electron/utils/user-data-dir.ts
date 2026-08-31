@@ -51,7 +51,11 @@ function getElectronDefaultUserDataRoot(): string | null {
 }
 
 function normalizeProfileId(input: string): string {
-  const normalized = input.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-");
+  const normalized = input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-");
   const compact = normalized.replace(/^[-_.]+|[-_.]+$/g, "").slice(0, 64);
   return compact || DEFAULT_PROFILE_ID;
 }

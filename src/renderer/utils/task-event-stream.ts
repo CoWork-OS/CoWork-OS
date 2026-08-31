@@ -56,8 +56,11 @@ export function mergeTaskEventsByIdentity(
       const next = [...existing];
       next[existingIndex] = incomingEvent;
       // Skip sort if replacement maintains order relative to neighbors
-      const prevOk = existingIndex === 0 || compareTaskEventOrder(next[existingIndex - 1], incomingEvent) <= 0;
-      const nextOk = existingIndex === next.length - 1 || compareTaskEventOrder(incomingEvent, next[existingIndex + 1]) <= 0;
+      const prevOk =
+        existingIndex === 0 || compareTaskEventOrder(next[existingIndex - 1], incomingEvent) <= 0;
+      const nextOk =
+        existingIndex === next.length - 1 ||
+        compareTaskEventOrder(incomingEvent, next[existingIndex + 1]) <= 0;
       if (prevOk && nextOk) return next;
       return next.sort(compareTaskEventOrder);
     }

@@ -248,7 +248,7 @@ export class SignalClient extends EventEmitter {
       });
       const version = result.trim().split("\n")[0];
       return { installed: true, version };
-    } catch  {
+    } catch {
       return {
         installed: false,
         error: `signal-cli not found at ${this.options.cliPath}. Install with: brew install signal-cli (macOS) or download from GitHub.`,

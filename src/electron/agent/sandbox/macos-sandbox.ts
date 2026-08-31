@@ -13,7 +13,18 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import { Workspace } from "../../../shared/types";
-import { ISandbox, SandboxType, SandboxOptions, SandboxResult } from "./sandbox-factory";
+import {
+  ISandbox,
+  SandboxType,
+  SandboxOptions,
+  SandboxResult,
+  SandboxedProcess,
+} from "./sandbox-factory";
+import {
+  evaluateWorkspaceFilesystemAccess,
+  hasEffectiveFilesystemScope,
+  resolveAccessControlledPath,
+} from "../../security/access-profile-paths";
 import {
   createSecureTempFile,
   escapeSandboxProfileString,
@@ -50,6 +61,7 @@ export class MacOSSandbox implements ISandbox {
   readonly type: SandboxType = "macos";
   private workspace: Workspace;
   private sandboxProfile?: string;
+  private runtimeTempDir?: string;
 
   constructor(workspace: Workspace) {
     this.workspace = workspace;
@@ -74,7 +86,18 @@ export class MacOSSandbox implements ISandbox {
   ): Promise<SandboxResult> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
     const cwd = opts.cwd || this.workspace.path;
-    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true);
+    const networkError = this.getNetworkAccessError(opts.allowNetwork === true);
+    if (networkError) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: networkError,
+        killed: false,
+        timedOut: false,
+        error: "Network access denied",
+      };
+    }
+    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts);
 
     // Validate working directory is within allowed paths
     if (!this.isPathAllowed(cwd, "read")) {
@@ -175,6 +198,46 @@ export class MacOSSandbox implements ISandbox {
   }
 
   /**
+   * Start a command under the same seatbelt profile used by execute(). This is
+   * deliberately separate from execute() so callers cannot accidentally
+   * leave a child process running without retaining a cleanup handle.
+   */
+  spawnProcess(
+    command: string,
+    args: string[] = [],
+    options: SandboxOptions = {},
+  ): SandboxedProcess {
+    const opts = { ...DEFAULT_OPTIONS, ...options };
+    const cwd = opts.cwd || this.workspace.path;
+    const networkError = this.getNetworkAccessError(opts.allowNetwork === true);
+    if (networkError) throw new Error(networkError);
+    if (!this.isPathAllowed(cwd, "read")) {
+      throw new Error(`Working directory not allowed: ${cwd}`);
+    }
+
+    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts);
+    const { profilePath, cleanup: cleanupProfile } = this.writeTempProfile();
+    const env = this.buildSafeEnvironment(opts.envPassthrough);
+    const proc = spawn("sandbox-exec", ["-f", profilePath, command, ...args], {
+      cwd,
+      env,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    opts.onProcess?.(proc);
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      cleanupProfile();
+    };
+    proc.once("close", cleanup);
+    proc.once("error", cleanup);
+    return { process: proc, cleanup };
+  }
+
+  /**
    * Execute code in sandbox
    */
   async executeCode(code: string, language: "python" | "javascript"): Promise<SandboxResult> {
@@ -186,6 +249,7 @@ export class MacOSSandbox implements ISandbox {
       return await this.execute(interpreter, [filePath], {
         timeout: 60 * 1000,
         allowNetwork: false,
+        allowedReadPaths: [filePath],
       });
     } finally {
       cleanup();
@@ -197,6 +261,14 @@ export class MacOSSandbox implements ISandbox {
    */
   cleanup(): void {
     this.sandboxProfile = undefined;
+    if (this.runtimeTempDir) {
+      try {
+        fs.rmSync(this.runtimeTempDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup; the directory is private to this sandbox.
+      }
+      this.runtimeTempDir = undefined;
+    }
   }
 
   private getMacOSPathAliases(targetPath: string): string[] {
@@ -252,6 +324,21 @@ export class MacOSSandbox implements ISandbox {
     return next;
   }
 
+  private appendDenySubpathRules(profile: string, pathsToDeny: string[]): string {
+    let next = profile;
+    for (const pathToDeny of pathsToDeny) {
+      try {
+        validatePathForSandboxProfile(pathToDeny);
+        const escaped = escapeSandboxProfileString(pathToDeny);
+        next += `(deny file-read* (subpath "${escaped}"))\n`;
+        next += `(deny file-write* (subpath "${escaped}"))\n`;
+      } catch (err) {
+        console.warn(`[MacOSSandbox] Skipping unsafe denied path: ${pathToDeny}`, err);
+      }
+    }
+    return next;
+  }
+
   /**
    * Check if a path is allowed based on workspace permissions
    * Resolves symlinks to prevent symlink-based path traversal attacks
@@ -262,49 +349,22 @@ export class MacOSSandbox implements ISandbox {
       return false;
     }
 
-    // Resolve symlinks to get real path (if it exists)
-    let realTarget: string;
-    try {
-      realTarget = fs.existsSync(targetPath)
-        ? fs.realpathSync(targetPath)
-        : path.resolve(targetPath);
-    } catch {
+    const access = evaluateWorkspaceFilesystemAccess(this.workspace, targetPath, mode);
+    if (access.decision === "allow") return true;
+    if (
+      access.reason === "profile_filesystem_denied" ||
+      access.reason === "profile_filesystem_outside" ||
+      access.reason === "protected_path"
+    ) {
       return false;
     }
 
-    // Resolve workspace path (with symlinks resolved)
-    let realWorkspace: string;
-    try {
-      realWorkspace = fs.existsSync(this.workspace.path)
-        ? fs.realpathSync(this.workspace.path)
-        : path.resolve(this.workspace.path);
-    } catch {
-      realWorkspace = path.resolve(this.workspace.path);
-    }
+    if (this.isRuntimeTemporaryPath(targetPath)) return true;
 
-    // Always allow paths within workspace
-    if (realTarget.startsWith(realWorkspace + path.sep) || realTarget === realWorkspace) {
-      return true;
-    }
-
-    // Check unrestricted access
-    if (this.workspace.permissions.unrestrictedFileAccess) {
-      return true;
-    }
-
-    // Check allowed paths (with symlink resolution)
-    const allowedPaths = this.workspace.permissions.allowedPaths || [];
-    for (const allowed of allowedPaths) {
-      try {
-        const realAllowed = fs.existsSync(allowed)
-          ? fs.realpathSync(allowed)
-          : path.resolve(allowed);
-        if (realTarget.startsWith(realAllowed + path.sep) || realTarget === realAllowed) {
-          return true;
-        }
-      } catch {
-        // Skip invalid allowed paths
-      }
+    // A finite profile gets a private implementation temp directory below;
+    // the host temp tree must not become an implicit shell escape hatch.
+    if (hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)) {
+      return false;
     }
 
     // System paths for read-only access
@@ -318,7 +378,8 @@ export class MacOSSandbox implements ISandbox {
         os.tmpdir(),
       ];
       for (const sysPath of systemReadPaths) {
-        if (realTarget.startsWith(sysPath + path.sep) || realTarget === sysPath) {
+        const resolvedTarget = path.resolve(targetPath);
+        if (this.isPathWithin(sysPath, resolvedTarget)) {
           return true;
         }
       }
@@ -344,7 +405,7 @@ export class MacOSSandbox implements ISandbox {
     safeEnv.SHELL = process.env.SHELL || "/bin/bash";
     safeEnv.TERM = "xterm-256color";
     safeEnv.LANG = process.env.LANG || "en_US.UTF-8";
-    safeEnv.TMPDIR = os.tmpdir();
+    safeEnv.TMPDIR = this.getRuntimeTempDirIfScoped();
 
     safeEnv.PATH = [
       "/opt/homebrew/bin",
@@ -363,9 +424,10 @@ export class MacOSSandbox implements ISandbox {
    * Generate macOS sandbox-exec profile
    * Paths are escaped to prevent sandbox profile injection attacks
    */
-  private generateSandboxProfile(allowNetwork: boolean): string {
+  private generateSandboxProfile(allowNetwork: boolean, options: SandboxOptions = {}): string {
     const permissions = this.workspace.permissions;
-    const tempDir = os.tmpdir();
+    const finiteFilesystemScope = hasEffectiveFilesystemScope(this.workspace.path, permissions);
+    const tempDir = finiteFilesystemScope ? this.getRuntimeTempDir() : os.tmpdir();
 
     // Validate and escape workspace path
     validatePathForSandboxProfile(this.workspace.path);
@@ -373,6 +435,12 @@ export class MacOSSandbox implements ISandbox {
     const tempAliases = this.getMacOSPathAliases(tempDir);
     const escapedWorkspace = escapeSandboxProfileString(this.workspace.path);
     const escapedTempDir = escapeSandboxProfileString(tempDir);
+    const tempReadRules = finiteFilesystemScope
+      ? tempAliases.map((alias) => `  (subpath "${escapeSandboxProfileString(alias)}")`).join("\n")
+      : `  (subpath "/private/tmp")\n  (subpath "${escapedTempDir}")`;
+    const tempWriteRules = finiteFilesystemScope
+      ? tempAliases.map((alias) => `  (subpath "${escapeSandboxProfileString(alias)}")`).join("\n")
+      : `  (subpath "/private/tmp")\n  (subpath "${escapedTempDir}")\n  (subpath "/private/var/folders")`;
 
     let profile = `(version 1)
 (deny default)
@@ -387,6 +455,10 @@ export class MacOSSandbox implements ISandbox {
 
 ; Allow reading system libraries and binaries
 (allow file-read*
+  ; Current macOS /bin/sh resolves the working directory from the filesystem
+  ; root before running even shell built-ins such as pwd. Keep this literal so
+  ; it does not grant recursive access outside the configured workspace.
+  (literal "/")
   (subpath "/usr/lib")
   (subpath "/usr/bin")
   (subpath "/bin")
@@ -395,21 +467,41 @@ export class MacOSSandbox implements ISandbox {
   (subpath "/Library/Frameworks")
   (subpath "/Applications/Xcode.app")
   (subpath "/private/var/db")
+  (subpath "/private/var/select")
   (literal "/dev/null")
   (literal "/dev/urandom")
   (literal "/dev/random")
-  (subpath "/private/tmp")
-  (subpath "${escapedTempDir}")
+${tempReadRules}
 )
 
 ; Allow homebrew on macOS
-(allow file-read* (subpath "/opt/homebrew"))
+(allow file-read*
+  ; Homebrew's Python launcher resolves /opt before following the
+  ; /opt/homebrew symlink tree. Permit the mount point itself without granting
+  ; recursive access to unrelated /opt contents.
+  (literal "/opt")
+  (subpath "/opt/homebrew")
+)
 
+`;
+    if (permissions.read) {
+      profile += `
 ; Allow reading workspace
 (allow file-read* (subpath "${escapedWorkspace}"))
 `;
-    profile = this.appendReadSubpathRules(profile, workspaceAliases);
+      profile = this.appendReadSubpathRules(profile, workspaceAliases);
+    }
     profile = this.appendReadSubpathRules(profile, tempAliases);
+
+    // Named profile roots are allowed in addition to the workspace. Resolve
+    // aliases before emitting seatbelt rules so /var and /private/var paths
+    // are treated consistently on macOS.
+    for (const root of permissions.accessWorkspaceRoots || []) {
+      const resolvedRoot = this.resolvePolicyPath(root);
+      if (this.isPathAllowed(resolvedRoot, "read")) {
+        profile = this.appendReadSubpathRules(profile, this.getMacOSPathAliases(resolvedRoot));
+      }
+    }
 
     // Allow writing to workspace if permitted
     if (permissions.write) {
@@ -435,12 +527,17 @@ export class MacOSSandbox implements ISandbox {
     profile += `
 ; Allow writing to temp directories
 (allow file-write*
-  (subpath "/private/tmp")
-  (subpath "${escapedTempDir}")
-  (subpath "/private/var/folders")
+${tempWriteRules}
 )
 `;
     profile = this.appendWriteSubpathRules(profile, tempAliases);
+
+    for (const root of permissions.accessWorkspaceRoots || []) {
+      const resolvedRoot = this.resolvePolicyPath(root);
+      if (permissions.write && this.isPathAllowed(resolvedRoot, "write")) {
+        profile = this.appendWriteSubpathRules(profile, this.getMacOSPathAliases(resolvedRoot));
+      }
+    }
 
     // Allow network if permitted
     if (allowNetwork) {
@@ -457,11 +554,55 @@ export class MacOSSandbox implements ISandbox {
     }
 
     // Allow additional read paths (with validation and escaping)
-    const allowedPaths = permissions.allowedPaths || [];
+    const allowedPaths = finiteFilesystemScope ? [] : permissions.allowedPaths || [];
     for (const allowedPath of allowedPaths) {
-      const allowedPathAliases = this.getMacOSPathAliases(allowedPath);
-      profile = this.appendReadSubpathRules(profile, allowedPathAliases);
-      if (permissions.write) profile = this.appendWriteSubpathRules(profile, allowedPathAliases);
+      const resolvedAllowedPath = this.resolvePolicyPath(allowedPath);
+      const allowedPathAliases = this.getMacOSPathAliases(resolvedAllowedPath);
+      if (this.isPathAllowed(resolvedAllowedPath, "read")) {
+        profile = this.appendReadSubpathRules(profile, allowedPathAliases);
+      }
+      if (permissions.write && this.isPathAllowed(resolvedAllowedPath, "write")) {
+        profile = this.appendWriteSubpathRules(profile, allowedPathAliases);
+      }
+    }
+
+    for (const rule of permissions.accessFilesystemRules || []) {
+      const resolvedRulePath = this.resolvePolicyPath(rule.path);
+      const aliases = this.getMacOSPathAliases(resolvedRulePath);
+      if (rule.access === "deny") {
+        profile = this.appendDenySubpathRules(profile, aliases);
+      } else if (this.isPathAllowed(resolvedRulePath, "read")) {
+        profile = this.appendReadSubpathRules(profile, aliases);
+        if (
+          rule.access === "write" &&
+          permissions.write &&
+          this.isPathAllowed(resolvedRulePath, "write")
+        ) {
+          profile = this.appendWriteSubpathRules(profile, aliases);
+        }
+      }
+    }
+
+    // Callers use these paths for short-lived script inputs and generated
+    // outputs. They are still subject to the same evaluator; only the
+    // sandbox's private temp area is exempted as an implementation detail.
+    for (const readPath of options.allowedReadPaths || []) {
+      const resolvedPath = this.resolvePolicyPath(readPath);
+      if (
+        this.isPathAllowed(resolvedPath, "read") ||
+        this.isExplicitTemporaryOptionPath(resolvedPath, options.allowedReadPaths)
+      ) {
+        profile = this.appendReadSubpathRules(profile, this.getMacOSPathAliases(resolvedPath));
+      }
+    }
+    for (const writePath of options.allowedWritePaths || []) {
+      const resolvedPath = this.resolvePolicyPath(writePath);
+      if (
+        this.isPathAllowed(resolvedPath, "write") ||
+        this.isExplicitTemporaryOptionPath(resolvedPath, options.allowedWritePaths)
+      ) {
+        profile = this.appendWriteSubpathRules(profile, this.getMacOSPathAliases(resolvedPath));
+      }
     }
 
     // Allow essential mach services
@@ -477,6 +618,72 @@ export class MacOSSandbox implements ISandbox {
 `;
 
     return profile;
+  }
+
+  private resolvePolicyPath(rawPath: string): string {
+    return resolveAccessControlledPath(this.workspace.path, rawPath);
+  }
+
+  private isPathWithin(parentPath: string, candidatePath: string): boolean {
+    const relative = path.relative(path.resolve(parentPath), path.resolve(candidatePath));
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  }
+
+  private getRuntimeTempDirIfScoped(): string {
+    return hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)
+      ? this.getRuntimeTempDir()
+      : os.tmpdir();
+  }
+
+  private getRuntimeTempDir(): string {
+    if (!this.runtimeTempDir) {
+      this.runtimeTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-sandbox-"));
+    }
+    return this.runtimeTempDir;
+  }
+
+  private isExplicitTemporaryOptionPath(
+    targetPath: string,
+    candidates: readonly string[] | undefined,
+  ): boolean {
+    if (!hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)) return false;
+    if (!candidates || candidates.length === 0) return false;
+    const target = path.resolve(targetPath);
+    const tempAliases = this.getMacOSPathAliases(os.tmpdir());
+    if (!tempAliases.some((alias) => this.isPathWithin(alias, target))) return false;
+    return candidates.some((candidate) => {
+      const resolvedCandidate = this.resolvePolicyPath(candidate);
+      return resolvedCandidate && this.isPathWithin(resolvedCandidate, target);
+    });
+  }
+
+  private isRuntimeTemporaryPath(targetPath: string): boolean {
+    if (this.isPathWithin(this.workspace.path, targetPath)) return false;
+    const runtimeTempDir = hasEffectiveFilesystemScope(
+      this.workspace.path,
+      this.workspace.permissions,
+    )
+      ? this.runtimeTempDir
+      : os.tmpdir();
+    if (!runtimeTempDir) return false;
+    return this.getMacOSPathAliases(runtimeTempDir).some((alias) =>
+      this.isPathWithin(alias, targetPath),
+    );
+  }
+
+  private getNetworkAccessError(allowNetwork: boolean): string | undefined {
+    if (!allowNetwork) return undefined;
+    const permissions = this.workspace.permissions;
+    if (permissions.network !== true) {
+      return "Network access is disabled for this workspace.";
+    }
+    if (permissions.accessNetworkMode === "disabled") {
+      return "Network access is disabled by the active access profile.";
+    }
+    if ((permissions.accessDomainRules || []).length > 0) {
+      return "The macOS process sandbox cannot enforce domain-scoped network rules for arbitrary shell code.";
+    }
+    return undefined;
   }
 
   /**

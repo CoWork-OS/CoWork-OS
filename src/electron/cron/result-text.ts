@@ -1,4 +1,5 @@
 import type { TaskEvent } from "../../shared/types";
+import { formatUserFacingCompletionSummary } from "../../shared/task-completion";
 
 type Any = Record<string, unknown>;
 
@@ -95,7 +96,6 @@ export function resolveTaskResultText(opts: {
   events?: TaskEvent[] | null;
 }): string | undefined {
   const summary = normalizeText(opts.summary);
-  const semanticSummary = normalizeText(opts.semanticSummary);
   const verificationVerdict = normalizeText(opts.verificationVerdict);
   const verificationReport = normalizeText(opts.verificationReport);
   const events = Array.isArray(opts.events) ? opts.events : [];
@@ -109,30 +109,22 @@ export function resolveTaskResultText(opts: {
   let bestInternalCandidate = "";
   let completionEventSummary = "";
   let bestArtifactPreview = "";
-  const explicitCompletionSummary = [summary, semanticSummary].filter((value) => value.length > 0).join("\n\n");
-  const explicitVerificationSummary =
-    verificationVerdict || verificationReport
-      ? [
-          verificationVerdict ? `Verification: ${verificationVerdict}` : "",
-          verificationReport || "",
-        ]
-          .filter((value) => value.length > 0)
-          .join("\n")
-      : "";
+  const explicitCompletionSummary = formatUserFacingCompletionSummary({
+    resultSummary: summary,
+    verificationVerdict,
+    verificationReport,
+  });
 
   for (let i = events.length - 1; i >= 0; i--) {
     const evt = events[i];
     const payload = ((evt?.payload as Any) || {}) as Any;
 
     if (evt.type === "task_completed") {
-      const rs = [normalizeText(payload.resultSummary), normalizeText(payload.semanticSummary)]
-        .filter((value) => value.length > 0)
-        .join("\n\n");
-      const verdict = normalizeText(payload.verificationVerdict);
-      const report = normalizeText(payload.verificationReport);
-      const composed = [rs, verdict ? `Verification: ${verdict}` : "", report || ""]
-        .filter((value) => value.length > 0)
-        .join("\n\n");
+      const composed = formatUserFacingCompletionSummary({
+        resultSummary: payload.resultSummary,
+        verificationVerdict: payload.verificationVerdict,
+        verificationReport: payload.verificationReport,
+      });
       if (composed.length > completionEventSummary.length) {
         completionEventSummary = composed;
       }
@@ -189,8 +181,7 @@ export function resolveTaskResultText(opts: {
     pickBestCandidate(candidateBucket) ||
     bestInternalCandidate ||
     completionEventSummary ||
-    explicitCompletionSummary ||
-    explicitVerificationSummary;
+    explicitCompletionSummary;
 
   if (bestArtifactPreview) {
     if (
@@ -203,12 +194,12 @@ export function resolveTaskResultText(opts: {
   }
 
   if (summary && eventResult) {
-    const completionSummary = [summary, semanticSummary].filter((value) => value.length > 0).join("\n\n");
+    const completionSummary = formatUserFacingCompletionSummary({ resultSummary: summary });
     if (isFailureLike(summary) && !isFailureLike(eventResult) && eventResult.length >= 200) {
       return eventResult;
     }
     return eventResult.length > completionSummary.length ? eventResult : completionSummary;
   }
 
-  return eventResult || explicitCompletionSummary || explicitVerificationSummary || summary || undefined;
+  return eventResult || explicitCompletionSummary || summary || undefined;
 }

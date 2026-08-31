@@ -351,8 +351,6 @@ describe("AgentDaemon.forkTaskSession", () => {
     expect(result?.sideChatTurnContext).toContain("Parent runtime state: running");
     expect(result?.sideChatTurnContext).toContain("Active timeline stage: BUILD");
     expect(result?.sideChatTurnContext).toContain("Running ping test now");
-    expect(result?.sideChatTurnContext).toContain(
-      "do not use them as the current parent status",
-    );
+    expect(result?.sideChatTurnContext).toContain("do not use them as the current parent status");
   });
 });

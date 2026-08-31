@@ -181,7 +181,11 @@ export class SupermemoryService {
 
   static isConfigured(): boolean {
     const settings = this.loadSettings();
-    return settings.enabled === true && typeof settings.apiKey === "string" && settings.apiKey.trim().length > 0;
+    return (
+      settings.enabled === true &&
+      typeof settings.apiKey === "string" &&
+      settings.apiKey.trim().length > 0
+    );
   }
 
   static async testConnection(): Promise<{ success: boolean; error?: string }> {
@@ -256,7 +260,10 @@ export class SupermemoryService {
       staticFacts: Array.isArray(profile.static) ? profile.static.filter(Boolean) : [],
       dynamicFacts: Array.isArray(profile.dynamic) ? profile.dynamic.filter(Boolean) : [],
       results,
-      total: typeof response?.searchResults?.total === "number" ? response.searchResults.total : results.length,
+      total:
+        typeof response?.searchResults?.total === "number"
+          ? response.searchResults.total
+          : results.length,
     };
   }
 
@@ -349,9 +356,7 @@ export class SupermemoryService {
         },
         proposedValue: args.content,
         reason:
-          typeof args.metadata?.source === "string"
-            ? `source:${args.metadata.source}`
-            : undefined,
+          typeof args.metadata?.source === "string" ? `source:${args.metadata.source}` : undefined,
       });
       if (!gate.allowed) {
         if ("blocked" in gate) {
@@ -620,10 +625,7 @@ export class SupermemoryService {
     );
   }
 
-  private static pickResultText(item: {
-    memory?: string;
-    chunk?: string;
-  }): string {
+  private static pickResultText(item: { memory?: string; chunk?: string }): string {
     return String(item?.memory || item?.chunk || "").trim();
   }
 

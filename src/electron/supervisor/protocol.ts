@@ -1,7 +1,4 @@
-import type {
-  SupervisorProtocolIntent,
-  DiscordSupervisorConfig,
-} from "../../shared/types";
+import type { SupervisorProtocolIntent, DiscordSupervisorConfig } from "../../shared/types";
 
 const MARKER_TO_INTENT: Record<string, SupervisorProtocolIntent> = {
   CW_STATUS_REQUEST: "status_request",
@@ -28,13 +25,13 @@ export interface ParsedSupervisorProtocolMessage {
 
 const EXCHANGE_TOKEN_REGEX = /\[CW_EXCHANGE:([0-9a-fA-F-]{36})\]/;
 
-const PROMPT_INJECTION_PATTERNS = /^(?:rules:|system:|instructions:|you are|ignore previous|disregard|\[cw_|<@)/i;
+const PROMPT_INJECTION_PATTERNS =
+  /^(?:rules:|system:|instructions:|you are|ignore previous|disregard|\[cw_|<@)/i;
 const PROMPT_MAX_INCOMING_CHARS = 1500;
 
 export function sanitizeForPrompt(text: string): string {
-  const truncated = text.length > PROMPT_MAX_INCOMING_CHARS
-    ? `${text.slice(0, PROMPT_MAX_INCOMING_CHARS)}…`
-    : text;
+  const truncated =
+    text.length > PROMPT_MAX_INCOMING_CHARS ? `${text.slice(0, PROMPT_MAX_INCOMING_CHARS)}…` : text;
   return truncated
     .split("\n")
     .filter((line) => !PROMPT_INJECTION_PATTERNS.test(line.trim()))

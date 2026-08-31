@@ -1,6 +1,10 @@
 import fs from "fs/promises";
 import path from "path";
-import { TranscriptStore, type TranscriptSearchResult } from "./TranscriptStore";
+import {
+  TranscriptStore,
+  type TranscriptReadGuard,
+  type TranscriptSearchResult,
+} from "./TranscriptStore";
 
 export interface SessionRecallResult {
   taskId: string;
@@ -51,6 +55,7 @@ export class SessionRecallService {
     taskId?: string;
     limit?: number;
     includeCheckpoints?: boolean;
+    readGuard?: TranscriptReadGuard;
   }): Promise<SessionRecallResult[]> {
     const query = String(params.query || "").trim();
     if (!query) return [];
@@ -62,6 +67,7 @@ export class SessionRecallService {
         query,
         taskId: params.taskId,
         limit,
+        readGuard: params.readGuard,
       })
     ).map(mapSpanResult);
 
@@ -74,11 +80,10 @@ export class SessionRecallService {
       query,
       taskId: params.taskId,
       limit: limit - transcriptResults.length,
+      readGuard: params.readGuard,
     });
 
-    return [...transcriptResults, ...checkpointResults]
-      .sort(compareRecallResults)
-      .slice(0, limit);
+    return [...transcriptResults, ...checkpointResults].sort(compareRecallResults).slice(0, limit);
   }
 
   private static async searchCheckpoints(params: {
@@ -86,9 +91,20 @@ export class SessionRecallService {
     query: string;
     taskId?: string;
     limit: number;
+    readGuard?: TranscriptReadGuard;
   }): Promise<SessionRecallResult[]> {
     const query = params.query.toLowerCase();
     const dir = checkpointsDir(params.workspacePath);
+    if (params.readGuard && !params.taskId) {
+      try {
+        if (!params.readGuard(dir)) return [];
+      } catch {
+        return [];
+      }
+    }
+    if (params.taskId && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(params.taskId)) {
+      return [];
+    }
     const taskIds = params.taskId
       ? [`${params.taskId}.json`]
       : (await fs.readdir(dir).catch(() => [])).filter((name) => name.endsWith(".json"));
@@ -96,6 +112,13 @@ export class SessionRecallService {
     const results: SessionRecallResult[] = [];
     for (const fileName of taskIds) {
       const filePath = path.join(dir, fileName);
+      if (params.readGuard) {
+        try {
+          if (!params.readGuard(filePath)) continue;
+        } catch {
+          continue;
+        }
+      }
       const raw = await fs.readFile(filePath, "utf8").catch(() => "");
       if (!raw || !raw.toLowerCase().includes(query)) continue;
       try {

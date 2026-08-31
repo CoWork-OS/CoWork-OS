@@ -8,7 +8,9 @@ describe("HookSessionRepository", () => {
     sessions: Map<string, { taskId: string; createdAt: number }>;
     locks: Map<string, { createdAt: number; expiresAt: number }>;
     prepare: (sql: string) => {
-      get?: (sessionKey: string) => { session_key: string; task_id: string; created_at: number } | undefined;
+      get?: (
+        sessionKey: string,
+      ) => { session_key: string; task_id: string; created_at: number } | undefined;
       run?: (...args: Any[]) => { changes: number };
     };
   };

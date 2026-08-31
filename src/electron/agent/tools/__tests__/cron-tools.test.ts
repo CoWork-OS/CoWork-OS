@@ -107,6 +107,33 @@ describe("CronTools.schedule_create workspace behavior", () => {
     expect(result.job?.workspaceId).toBe(workspaceId);
   });
 
+  it("inherits the active task access profile into a newly scheduled job", async () => {
+    const daemon = {
+      ...makeDaemonStub(),
+      getTask: vi.fn(() => ({
+        agentConfig: { accessProfileId: "ask_for_approval" },
+      })),
+    } as Any;
+    const workspace: Workspace = {
+      id: "ws-profile",
+      name: "Profile Workspace",
+      path: "/tmp/profile-workspace",
+      createdAt: 0,
+      permissions: { read: true, write: true, delete: false, network: true, shell: true },
+    };
+
+    const tools = new CronTools(workspace, daemon, "task-profile");
+    const result = await tools.createJob({
+      name: "Profile-aware follow-up",
+      prompt: "Continue with the same access boundary.",
+      schedule: { type: "interval", every: "1h" },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.job?.accessProfileId).toBe("ask_for_approval");
+    expect(result.job?.taskAgentConfig).toBeUndefined();
+  });
+
   it("creates current-thread jobs as thread follow-ups", async () => {
     const daemon = makeDaemonStub();
     const workspaceId = "ws-5678";

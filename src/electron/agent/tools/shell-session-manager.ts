@@ -65,7 +65,9 @@ export interface ShellRunRequest {
   sessionId?: string;
   timeoutMs: number;
   onOutput?: (event: { stream: "stdout" | "stderr"; output: string }) => void;
-  fallbackRunner: () => Promise<Omit<ShellCommandResult, "usedPersistentSession" | "sessionId" | "sessionEvent">>;
+  fallbackRunner: () => Promise<
+    Omit<ShellCommandResult, "usedPersistentSession" | "sessionId" | "sessionEvent">
+  >;
 }
 
 const STATE_FILE = path.join(getUserDataDir(), "shell-sessions.json");
@@ -90,7 +92,10 @@ function quoteForPosixShell(value: string): string {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
-function terminateProcessTree(child: ChildProcess | null, signal: NodeJS.Signals = "SIGTERM"): void {
+function terminateProcessTree(
+  child: ChildProcess | null,
+  signal: NodeJS.Signals = "SIGTERM",
+): void {
   if (!child?.pid) return;
   if (process.platform === "win32") {
     try {
@@ -146,7 +151,9 @@ function stripShellControlCodes(text: string): string {
 }
 
 export function isLikelyInteractiveCommand(command: string): boolean {
-  const text = String(command || "").trim().toLowerCase();
+  const text = String(command || "")
+    .trim()
+    .toLowerCase();
   if (!text) return false;
   return /(^|\s)(vim|nvim|nano|less|more|top|htop|ssh|scp|sftp|telnet|ftp|python\s+-i|node\s+-i|mysql|psql|sqlite3|ipython|fzf|man|watch)\b/.test(
     text,
@@ -232,7 +239,10 @@ function parseEnvLine(line: string): [string, string] | null {
   return [key, line.slice(idx + 1)];
 }
 
-function diffSnapshot(previous: ShellSnapshot, next: ShellSnapshot): {
+function diffSnapshot(
+  previous: ShellSnapshot,
+  next: ShellSnapshot,
+): {
   cwd: string;
   env: Record<string, string | null>;
   aliases: Record<string, string | null>;
@@ -609,7 +619,9 @@ export class ShellSessionManager {
       runtime.busy = false;
       this.emitTerminalOutput(runtime, {
         stream: "stderr",
-        output: signal ? `\n[terminal exited: ${signal}]\n` : `\n[terminal exited: ${code ?? "unknown"}]\n`,
+        output: signal
+          ? `\n[terminal exited: ${signal}]\n`
+          : `\n[terminal exited: ${code ?? "unknown"}]\n`,
       });
       this.updateRuntimeInfo(runtime, {
         status: nextStatus,
@@ -689,7 +701,10 @@ export class ShellSessionManager {
     });
   }
 
-  private async ensureShellReady(runtime: ShellSessionRuntime, workspacePath: string): Promise<void> {
+  private async ensureShellReady(
+    runtime: ShellSessionRuntime,
+    workspacePath: string,
+  ): Promise<void> {
     if (runtime.process && !runtime.process.killed) return;
     this.spawnProcess(runtime, workspacePath);
     if (!runtime.process?.stdin) {
@@ -713,11 +728,7 @@ export class ShellSessionManager {
     exitCode: number | null;
   } {
     const doneMatch = raw.match(/__COWORK_DONE__:(.+?):(\d+|null)\s*$/m);
-    const exitCode = doneMatch
-      ? doneMatch[2] === "null"
-        ? null
-        : Number(doneMatch[2])
-      : null;
+    const exitCode = doneMatch ? (doneMatch[2] === "null" ? null : Number(doneMatch[2])) : null;
 
     const stateStart = raw.indexOf("__COWORK_STATE_START__");
     const stateEnd = raw.indexOf("__COWORK_ENV_END__");
@@ -729,7 +740,10 @@ export class ShellSessionManager {
     const aliases = { ...runtime.snapshot.aliases };
 
     if (stateBlock) {
-      const lines = stateBlock.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      const lines = stateBlock
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
       const cwdLine =
         lines.find((line) => line.includes("__COWORK_CWD__:")) ||
         lines.find((line) => !line.startsWith("__COWORK_") && line.length > 0);
@@ -786,9 +800,7 @@ export class ShellSessionManager {
       }
     }
 
-    const cleanedVisible = visible
-      .replace(/__COWORK_[A-Z_]+__.*/g, "")
-      .replace(/^\s+|\s+$/g, "");
+    const cleanedVisible = visible.replace(/__COWORK_[A-Z_]+__.*/g, "").replace(/^\s+|\s+$/g, "");
 
     return {
       visible: cleanedVisible,
@@ -820,8 +832,12 @@ export class ShellSessionManager {
     this.activeSessionRuns.add(runKey);
 
     const commandId = `${session.info.id}:${++session.cmdSeq}`;
-    const commandTimeoutMaxMs = request.scope === "tab" ? TAB_COMMAND_TIMEOUT_MAX_MS : COMMAND_TIMEOUT_MAX_MS;
-    const commandTimeoutMs = Math.min(Math.max(request.timeoutMs || COMMAND_TIMEOUT_FALLBACK_MS, 1_000), commandTimeoutMaxMs);
+    const commandTimeoutMaxMs =
+      request.scope === "tab" ? TAB_COMMAND_TIMEOUT_MAX_MS : COMMAND_TIMEOUT_MAX_MS;
+    const commandTimeoutMs = Math.min(
+      Math.max(request.timeoutMs || COMMAND_TIMEOUT_FALLBACK_MS, 1_000),
+      commandTimeoutMaxMs,
+    );
 
     const firstCommand = !session.process || session.process.killed;
     if (firstCommand) {
@@ -859,7 +875,7 @@ export class ShellSessionManager {
       request.command,
       heredocMarker,
       ")",
-      "eval \"$__COWORK_COMMAND\"",
+      'eval "$__COWORK_COMMAND"',
       "__cowork_exit_code=$?",
       "printf '\\n__COWORK_STATE_START__\\n'",
       "printf '__COWORK_CWD__:%s\\n' \"$(pwd -P)\"",
@@ -912,7 +928,10 @@ export class ShellSessionManager {
   }): Promise<ShellSessionInfo> {
     await this.ensureStateLoaded();
     const existingTabs = Array.from(this.sessions.values())
-      .filter((session) => session.info.workspaceId === params.workspaceId && session.info.scope === "tab")
+      .filter(
+        (session) =>
+          session.info.workspaceId === params.workspaceId && session.info.scope === "tab",
+      )
       .sort((a, b) => a.info.updatedAt - b.info.updatedAt);
     let tabCount = existingTabs.length;
     for (const tab of existingTabs) {
@@ -922,7 +941,9 @@ export class ShellSessionManager {
       tabCount -= 1;
     }
     if (tabCount >= MAX_TERMINAL_TABS_PER_WORKSPACE) {
-      throw new Error(`Terminal tabs are limited to ${MAX_TERMINAL_TABS_PER_WORKSPACE} per workspace.`);
+      throw new Error(
+        `Terminal tabs are limited to ${MAX_TERMINAL_TABS_PER_WORKSPACE} per workspace.`,
+      );
     }
     const now = Date.now();
     const tabToken = `tab-${now}-${crypto.randomUUID().slice(0, 8)}`;
@@ -1072,7 +1093,13 @@ export class ShellSessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) return null;
     for (const pending of session.pending) {
-      pending.resolve({ stdout: "", stderr: "", exitCode: null, success: false, usedPersistentSession: true });
+      pending.resolve({
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        success: false,
+        usedPersistentSession: true,
+      });
     }
     session.pending = [];
     terminateProcessTree(session.process);
@@ -1082,7 +1109,11 @@ export class ShellSessionManager {
     return { ...session.info, status: "ended" };
   }
 
-  getSessionInfo(taskId: string, workspaceId: string, scope: ShellSessionScope = "task"): ShellSessionInfo | null {
+  getSessionInfo(
+    taskId: string,
+    workspaceId: string,
+    scope: ShellSessionScope = "task",
+  ): ShellSessionInfo | null {
     const session = this.sessions.get(this.getSessionKey(taskId, workspaceId, scope));
     return session ? { ...session.info } : null;
   }
@@ -1097,7 +1128,11 @@ export class ShellSessionManager {
       .map((session) => ({ ...session.info }));
   }
 
-  async resetSession(taskId: string, workspaceId: string, scope: ShellSessionScope = "task"): Promise<ShellSessionInfo | null> {
+  async resetSession(
+    taskId: string,
+    workspaceId: string,
+    scope: ShellSessionScope = "task",
+  ): Promise<ShellSessionInfo | null> {
     await this.ensureStateLoaded();
     const key = this.getSessionKey(taskId, workspaceId, scope);
     const session = this.sessions.get(key);
@@ -1120,7 +1155,11 @@ export class ShellSessionManager {
     return { ...session.info };
   }
 
-  async closeSession(taskId: string, workspaceId: string, scope: ShellSessionScope = "task"): Promise<ShellSessionInfo | null> {
+  async closeSession(
+    taskId: string,
+    workspaceId: string,
+    scope: ShellSessionScope = "task",
+  ): Promise<ShellSessionInfo | null> {
     await this.ensureStateLoaded();
     const key = this.getSessionKey(taskId, workspaceId, scope);
     const session = this.sessions.get(key);

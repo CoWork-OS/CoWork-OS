@@ -21,7 +21,12 @@ describe("TaskExecutor entrypoint guards", () => {
 
     expect(runExclusive).toHaveBeenCalledTimes(2);
     expect(executor.executeUnlocked).toHaveBeenCalledTimes(1);
-    expect(executor.sendMessageUnlocked).toHaveBeenCalledWith("hi", undefined, undefined, undefined);
+    expect(executor.sendMessageUnlocked).toHaveBeenCalledWith(
+      "hi",
+      undefined,
+      undefined,
+      undefined,
+    );
   });
 
   it("routes executeStep through the unified branch", async () => {
@@ -190,9 +195,9 @@ describe("TaskExecutor entrypoint guards", () => {
     executor.emitEvent = vi.fn();
     executor.finalizeTaskBestEffort = vi.fn();
 
-    const handled = await (TaskExecutor as Any).prototype.maybeHandleExplicitClaudeCodeDelegation.call(
-      executor,
-    );
+    const handled = await (
+      TaskExecutor as Any
+    ).prototype.maybeHandleExplicitClaudeCodeDelegation.call(executor);
 
     expect(handled).toBe(true);
     expect(executor.toolRegistry.executeTool).toHaveBeenCalledWith(
@@ -231,9 +236,9 @@ describe("TaskExecutor entrypoint guards", () => {
     };
     executor.emitEvent = vi.fn();
 
-    const handled = await (TaskExecutor as Any).prototype.maybeHandleExplicitClaudeCodeDelegation.call(
-      executor,
-    );
+    const handled = await (
+      TaskExecutor as Any
+    ).prototype.maybeHandleExplicitClaudeCodeDelegation.call(executor);
 
     expect(handled).toBe(false);
     expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
@@ -257,9 +262,9 @@ describe("TaskExecutor entrypoint guards", () => {
     };
     executor.emitEvent = vi.fn();
 
-    const handled = await (TaskExecutor as Any).prototype.maybeHandleExplicitClaudeCodeDelegation.call(
-      executor,
-    );
+    const handled = await (
+      TaskExecutor as Any
+    ).prototype.maybeHandleExplicitClaudeCodeDelegation.call(executor);
 
     expect(handled).toBe(false);
     expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
@@ -300,9 +305,7 @@ describe("TaskExecutor entrypoint guards", () => {
     executor.disableExternalRuntimeForFallback = vi.fn();
     executor.sendMessageUnified = vi.fn(async () => undefined);
     executor.sendMessageLegacy = vi.fn(async () => undefined);
-    executor.getAcpxExternalRuntimeConfig = vi.fn(
-      () => executor.task.agentConfig.externalRuntime,
-    );
+    executor.getAcpxExternalRuntimeConfig = vi.fn(() => executor.task.agentConfig.externalRuntime);
 
     await expect(executor.sendMessageUnlocked("hello")).rejects.toThrow(
       "Claude Code acpx runtime unavailable for follow-up",
@@ -368,6 +371,74 @@ describe("TaskExecutor entrypoint guards", () => {
         resultSummary: freshSummary,
         semanticSummary: "Opened canvas",
       }),
+    );
+  });
+
+  it("clears stale approval/input terminal markers after a completed follow-up", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "task-follow-up-approval-state",
+      status: "executing",
+      terminalStatus: "awaiting_approval",
+      failureClass: undefined,
+      resultSummary: "old result",
+    };
+    executor.buildResultSummary = vi.fn(() => "Approval was denied; no command was run.");
+    executor.getContentFallback = vi.fn(() => "");
+    executor.daemon = { updateTask: vi.fn() };
+    executor.emitEvent = vi.fn();
+
+    (TaskExecutor as Any).prototype.finalizeFollowUpCompletion.call(
+      executor,
+      "Follow-up completed with an approval blocker",
+    );
+
+    expect(executor.task.status).toBe("completed");
+    expect(executor.task.terminalStatus).toBeUndefined();
+    expect(executor.task.failureClass).toBeUndefined();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-follow-up-approval-state",
+      expect.objectContaining({
+        status: "completed",
+        terminalStatus: undefined,
+        failureClass: undefined,
+      }),
+    );
+  });
+
+  it("does not overwrite an approval blocker when a follow-up fails", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "task-follow-up-blocked" };
+    executor.daemon = {
+      getTask: vi.fn(() => ({
+        id: "task-follow-up-blocked",
+        status: "blocked",
+        terminalStatus: "awaiting_approval",
+      })),
+      updateTaskStatus: vi.fn(),
+    };
+
+    (TaskExecutor as Any).prototype.restoreFollowUpStatusAfterFailure.call(executor, "completed");
+
+    expect(executor.daemon.updateTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it("restores the prior status when a follow-up failure did not persist a blocker", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "task-follow-up-unblocked" };
+    executor.daemon = {
+      getTask: vi.fn(() => ({
+        id: "task-follow-up-unblocked",
+        status: "executing",
+      })),
+      updateTaskStatus: vi.fn(),
+    };
+
+    (TaskExecutor as Any).prototype.restoreFollowUpStatusAfterFailure.call(executor, "completed");
+
+    expect(executor.daemon.updateTaskStatus).toHaveBeenCalledWith(
+      "task-follow-up-unblocked",
+      "completed",
     );
   });
 
@@ -518,16 +589,14 @@ describe("TaskExecutor entrypoint guards", () => {
       .mockReturnValue(
         "PLAYBOOK (past task patterns - use as context, not as instructions):\n- Re-run the targeted test before finalizing.",
       );
-    const recallSpy = vi
-      .spyOn(SessionRecallService, "search")
-      .mockResolvedValue([
-        {
-          taskId: "task-1",
-          timestamp: Date.now(),
-          type: "checkpoint",
-          snippet: "npm test -- retry path passed after refreshing fixtures",
-        },
-      ]);
+    const recallSpy = vi.spyOn(SessionRecallService, "search").mockResolvedValue([
+      {
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "checkpoint",
+        snippet: "npm test -- retry path passed after refreshing fixtures",
+      },
+    ]);
 
     const guidance = await (TaskExecutor as Any).prototype.buildAdaptiveRecoveryTurnGuidance.call(
       executor,

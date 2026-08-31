@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../../shared/access-profiles";
 import type {
   AgentConfig,
   AgentBuilderCreateRequest,
@@ -77,6 +78,13 @@ import { getBuiltinRegistryServer } from "../mcp/registry/MCPRegistryManager";
 import { ManagedAccountManager } from "../accounts/managed-account-manager";
 import { getVoiceService } from "../voice/VoiceService";
 import { ImageGenProfileService } from "./ImageGenProfileService";
+import type { WorkContextService } from "../workspaces/WorkContextService";
+import {
+  applyAccessProfileToWorkspace,
+  resolveEffectiveAccessProfile,
+} from "../security/access-profile-resolver";
+import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { createLogger } from "../utils/logger";
 import type { RoutineService } from "../routines/service";
 import type { Routine, RoutineCreate, RoutineTrigger } from "../routines/types";
 import {
@@ -86,6 +94,29 @@ import {
   ManagedSessionEventRepository,
   ManagedSessionRepository,
 } from "./repositories";
+
+const workContextLogger = createLogger("ManagedSessionWorkContext");
+
+const TEAM_STEERING_MARKER = "\n\nTEAM USER STEERING:\n";
+const MAX_TEAM_STEERING_CHARS = 20_000;
+
+function appendTeamSteering(rootPrompt: string, message: string): string {
+  const markerIndex = rootPrompt.indexOf(TEAM_STEERING_MARKER);
+  const basePrompt = markerIndex >= 0 ? rootPrompt.slice(0, markerIndex) : rootPrompt;
+  const previousSteering =
+    markerIndex >= 0 ? rootPrompt.slice(markerIndex + TEAM_STEERING_MARKER.length) : "";
+  const entries = previousSteering
+    .split("\n\n---\n\n")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  entries.push(message.trim());
+
+  let steering = entries.join("\n\n---\n\n");
+  if (steering.length > MAX_TEAM_STEERING_CHARS) {
+    steering = steering.slice(-MAX_TEAM_STEERING_CHARS).trimStart();
+  }
+  return `${basePrompt}${TEAM_STEERING_MARKER}${steering}`;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -173,9 +204,7 @@ function toMemoryToolRestrictions(
   };
 }
 
-function toManagedApprovalTypes(
-  approvalPolicy?: ManagedAgentApprovalPolicy,
-): ApprovalType[] {
+function toManagedApprovalTypes(approvalPolicy?: ManagedAgentApprovalPolicy): ApprovalType[] {
   const requested = new Set(approvalPolicy?.requireApprovalFor || []);
   const allowed = new Set<ApprovalType>();
 
@@ -253,7 +282,10 @@ export function sanitizeManagedEventPayload(value: unknown, depth = 0, key?: str
     const out: Record<string, unknown> = {};
     const keys = Object.keys(obj);
     for (const nextKey of keys.slice(0, MANAGED_EVENT_MAX_OBJECT_KEYS)) {
-      if (MANAGED_EVENT_ALWAYS_REDACT_KEY_RE.test(nextKey) || MANAGED_EVENT_SENSITIVE_KEY_RE.test(nextKey)) {
+      if (
+        MANAGED_EVENT_ALWAYS_REDACT_KEY_RE.test(nextKey) ||
+        MANAGED_EVENT_SENSITIVE_KEY_RE.test(nextKey)
+      ) {
         out[nextKey] = "[REDACTED]";
         continue;
       }
@@ -363,6 +395,38 @@ function buildMissingMcpServerRequirement(
   };
 }
 
+function normalizeManagedAccessProfileId(value: unknown): AccessProfileId | undefined {
+  return typeof value === "string" && value.trim() ? (value.trim() as AccessProfileId) : undefined;
+}
+
+function getDefaultManagedAccessProfileId(): AccessProfileId {
+  const configured = normalizeManagedAccessProfileId(
+    PermissionSettingsManager.loadSettings().defaultAccessProfileId,
+  );
+  return configured || BUILTIN_ACCESS_PROFILE_IDS.askForApproval;
+}
+
+function isLegacyManagedShellConfig(
+  config: ManagedEnvironment["config"],
+): config is ManagedEnvironment["config"] & { enableShell: boolean } {
+  return (
+    !normalizeManagedAccessProfileId(config.accessProfileId) &&
+    typeof config.enableShell === "boolean"
+  );
+}
+
+function normalizeManagedEnvironmentConfig(
+  config: ManagedEnvironment["config"],
+): ManagedEnvironment["config"] {
+  const accessProfileId = normalizeManagedAccessProfileId(config.accessProfileId);
+  if (accessProfileId) return { ...config, accessProfileId };
+  // Keep already-persisted legacy environments stable until they are edited.
+  // Every new environment created by the UI/API has no shell toggle and gets
+  // an explicit profile, so command tools are controlled by that profile.
+  if (isLegacyManagedShellConfig(config)) return { ...config };
+  return { ...config, accessProfileId: getDefaultManagedAccessProfileId() };
+}
+
 export function resolveManagedMcpToolAccess(
   environmentConfig: Pick<ManagedEnvironment["config"], "allowedMcpServerIds">,
 ): ManagedMcpToolAccessResolution {
@@ -383,9 +447,10 @@ export function resolveManagedMcpToolAccess(
   for (const serverId of serverIds) {
     const server = MCPSettingsManager.getServer(serverId);
     const registryServer = getBuiltinRegistryServer(serverId);
-    const tools = Array.isArray(server?.tools) && server.tools.length > 0
-      ? server.tools
-      : registryServer?.tools;
+    const tools =
+      Array.isArray(server?.tools) && server.tools.length > 0
+        ? server.tools
+        : registryServer?.tools;
     if (!server && !registryServer) {
       missingConnections.push(
         buildMissingMcpServerRequirement(
@@ -421,11 +486,27 @@ function cloneWorkspaceForManagedEnvironment(
   workspace: Workspace,
   environment: ManagedEnvironment,
 ): Workspace {
+  const accessProfileId = normalizeManagedAccessProfileId(environment.config.accessProfileId);
+  if (accessProfileId) {
+    const settings = PermissionSettingsManager.loadSettings();
+    const profile = resolveEffectiveAccessProfile({
+      task: { agentConfig: { accessProfileId } },
+      workspace,
+      settings,
+    });
+    return applyAccessProfileToWorkspace(workspace, profile);
+  }
+
+  // Compatibility for environments written before access profiles replaced
+  // the separate shell flag. New environments never take this branch.
   return {
     ...workspace,
     permissions: {
       ...workspace.permissions,
-      shell: Boolean(workspace.permissions.shell && environment.config.enableShell),
+      shell: Boolean(
+        workspace.permissions.shell &&
+        (!isLegacyManagedShellConfig(environment.config) || environment.config.enableShell),
+      ),
     },
   };
 }
@@ -527,6 +608,11 @@ function isToolEnabledForManagedEnvironment(
   if (tool.name.startsWith("mcp_") && hasMcpServerAllowlist && !allowedMcpTools.has(tool.name)) {
     return false;
   }
+  // Command tools are a security capability of the active access profile, not
+  // a second managed-agent checkbox. Tool-family selections can still narrow
+  // the agent's functional surface, but they must not override the profile's
+  // command-tool decision.
+  if (toolMatchesManagedFamily(tool, "shell")) return true;
   const allowedFamilies = environment.config.allowedToolFamilies || [];
   if (allowedFamilies.length === 0) return true;
   return allowedFamilies.some((family) => toolMatchesManagedFamily(tool, family));
@@ -682,6 +768,7 @@ export class ManagedSessionService {
     private readonly agentDaemon: AgentDaemon,
     private readonly options: {
       getRoutineService?: () => RoutineService | null;
+      workContextService?: WorkContextService;
     } = {},
   ) {
     this.ensureGovernanceSchema();
@@ -752,7 +839,9 @@ export class ManagedSessionService {
       const environment = this.getEnvironment(environmentId);
       if (environment?.config.workspaceId) return environment.config.workspaceId;
     }
-    const latestSession = this.listSessions({ limit: 200 }).find((session) => session.agentId === agentId);
+    const latestSession = this.listSessions({ limit: 200 }).find(
+      (session) => session.agentId === agentId,
+    );
     return latestSession?.workspaceId;
   }
 
@@ -841,20 +930,22 @@ export class ManagedSessionService {
         this.ensureWorkspaceMembershipSeeded(workspace.id);
       }
     }
-    const rows = (workspaceId
-      ? this.db
-          .prepare(
-            `SELECT * FROM agent_workspace_memberships
+    const rows = (
+      workspaceId
+        ? this.db
+            .prepare(
+              `SELECT * FROM agent_workspace_memberships
              WHERE workspace_id = ?
              ORDER BY updated_at DESC`,
-          )
-          .all(workspaceId)
-      : this.db
-          .prepare(
-            `SELECT * FROM agent_workspace_memberships
+            )
+            .all(workspaceId)
+        : this.db
+            .prepare(
+              `SELECT * FROM agent_workspace_memberships
              ORDER BY updated_at DESC`,
-          )
-          .all()) as Any[];
+            )
+            .all()
+    ) as Any[];
     return rows.map((row) => ({
       id: String(row.id),
       workspaceId: String(row.workspace_id),
@@ -896,7 +987,9 @@ export class ManagedSessionService {
         existing?.created_at ? Number(existing.created_at) : now,
         now,
       );
-    const membership = this.listWorkspaceMemberships(input.workspaceId).find((entry) => entry.id === id);
+    const membership = this.listWorkspaceMemberships(input.workspaceId).find(
+      (entry) => entry.id === id,
+    );
     if (!membership) {
       throw new Error("Failed to persist workspace membership");
     }
@@ -970,11 +1063,17 @@ export class ManagedSessionService {
     return entry;
   }
 
-  listAgents(params?: { limit?: number; offset?: number; status?: ManagedAgent["status"] }): ManagedAgent[] {
+  listAgents(params?: {
+    limit?: number;
+    offset?: number;
+    status?: ManagedAgent["status"];
+  }): ManagedAgent[] {
     return this.managedAgentRepo.list(params);
   }
 
-  getAgent(agentId: string): { agent: ManagedAgent; currentVersion?: ManagedAgentVersion } | undefined {
+  getAgent(
+    agentId: string,
+  ): { agent: ManagedAgent; currentVersion?: ManagedAgentVersion } | undefined {
     const agent = this.managedAgentRepo.findById(agentId);
     if (!agent) return undefined;
     return {
@@ -1077,16 +1176,18 @@ export class ManagedSessionService {
     const studio = getStudioConfig(detail.currentVersion);
     const environmentId = studio?.defaultEnvironmentId;
     if (!environmentId) {
-      throw new Error("Managed agent needs a default environment before routines can be configured");
+      throw new Error(
+        "Managed agent needs a default environment before routines can be configured",
+      );
     }
     const environment = this.getEnvironment(environmentId);
     if (!environment) {
       throw new Error(`Managed environment not found: ${environmentId}`);
     }
     this.assertWorkspacePermission(environment.config.workspaceId, "canManageRoutines");
-    const trigger = ("trigger" in request && request.trigger
-      ? request.trigger
-      : undefined) as ManagedAgentRoutineTriggerConfig | undefined;
+    const trigger = ("trigger" in request && request.trigger ? request.trigger : undefined) as
+      | ManagedAgentRoutineTriggerConfig
+      | undefined;
     if (!trigger?.type) {
       throw new Error("Routine trigger type is required");
     }
@@ -1218,7 +1319,10 @@ export class ManagedSessionService {
 
   private updateCurrentStudioConfig(
     agentId: string,
-    mutate: (studio: ManagedAgentStudioConfig, version: ManagedAgentVersion) => ManagedAgentStudioConfig,
+    mutate: (
+      studio: ManagedAgentStudioConfig,
+      version: ManagedAgentVersion,
+    ) => ManagedAgentStudioConfig,
   ): ManagedAgentVersion {
     const detail = this.getAgent(agentId);
     if (!detail?.currentVersion) {
@@ -1258,9 +1362,9 @@ export class ManagedSessionService {
   }
 
   private setRoutineEnabledInDb(routineId: string, enabled: boolean): void {
-    const row = this.db
-      .prepare("SELECT * FROM automation_routines WHERE id = ?")
-      .get(routineId) as Any | undefined;
+    const row = this.db.prepare("SELECT * FROM automation_routines WHERE id = ?").get(routineId) as
+      | Any
+      | undefined;
     if (!row) return;
     const definition = safeJsonParse<Routine | null>(row.definition_json, null);
     if (!definition) {
@@ -1295,7 +1399,9 @@ export class ManagedSessionService {
     }
     const version = agentDetail.currentVersion;
     if (!version) {
-      throw new Error(`Managed agent version missing: ${agentId}@${agentDetail.agent.currentVersion}`);
+      throw new Error(
+        `Managed agent version missing: ${agentId}@${agentDetail.agent.currentVersion}`,
+      );
     }
     const studio = getStudioConfig(version);
     const environmentId = studio?.defaultEnvironmentId;
@@ -1337,7 +1443,7 @@ export class ManagedSessionService {
             environment,
             allowedMcpTools,
             mcpToolAccess.hasMcpServerAllowlist,
-          )
+          ),
         );
       return tools.map((tool) =>
         mapRuntimeToolCatalogEntry(
@@ -1395,10 +1501,10 @@ export class ManagedSessionService {
     };
     this.managedAgentVersionRepo.create(version);
     const syncedVersion = this.syncLegacyMirror(agent, version);
-    const workspaceId =
-      getStudioConfig(syncedVersion)?.defaultEnvironmentId
-        ? this.getEnvironment(getStudioConfig(syncedVersion)?.defaultEnvironmentId || "")?.config.workspaceId
-        : undefined;
+    const workspaceId = getStudioConfig(syncedVersion)?.defaultEnvironmentId
+      ? this.getEnvironment(getStudioConfig(syncedVersion)?.defaultEnvironmentId || "")?.config
+          .workspaceId
+      : undefined;
     if (workspaceId) {
       this.appendAudit({
         agentId: agent.id,
@@ -1421,7 +1527,9 @@ export class ManagedSessionService {
       (requirement) => requirement.required && !requirement.selectedOptionId,
     );
     if (unresolvedRequirement) {
-      throw new Error(`${unresolvedRequirement.title || "Builder choice"} must be selected before creating an agent`);
+      throw new Error(
+        `${unresolvedRequirement.title || "Builder choice"} must be selected before creating an agent`,
+      );
     }
     const workspace = request.workspaceId
       ? this.workspaceRepo.findById(request.workspaceId)
@@ -1436,9 +1544,13 @@ export class ManagedSessionService {
         .map((server) => server.id),
     );
     const selectedMcpServers = Array.from(
-      new Set((plan.selectedMcpServers || []).filter((serverId) => enabledMcpServers.has(serverId))),
+      new Set(
+        (plan.selectedMcpServers || []).filter((serverId) => enabledMcpServers.has(serverId)),
+      ),
     );
-    const selectedToolFamilies = Array.from(new Set(plan.selectedToolFamilies || []));
+    const selectedToolFamilies = Array.from(
+      new Set((plan.selectedToolFamilies || []).filter((family) => family !== "shell")),
+    );
     const missingConnections =
       plan.missingConnections?.length > 0
         ? plan.missingConnections
@@ -1446,25 +1558,28 @@ export class ManagedSessionService {
     const approvalPolicy: ManagedAgentApprovalPolicy = {
       ...plan.approvalPolicy,
       autoApproveReadOnly: true,
-      requireApprovalFor:
-        plan.approvalPolicy?.requireApprovalFor?.length
-          ? plan.approvalPolicy.requireApprovalFor
-          : [
-              "send email",
-              "post message",
-              "edit spreadsheet",
-              "create calendar event",
-              "file external ticket",
-            ],
+      requireApprovalFor: plan.approvalPolicy?.requireApprovalFor?.length
+        ? plan.approvalPolicy.requireApprovalFor
+        : [
+            "send email",
+            "post message",
+            "edit spreadsheet",
+            "create calendar event",
+            "file external ticket",
+          ],
     };
-    const scheduleConfig: ManagedAgentScheduleConfig =
-      plan.scheduleConfig || { enabled: false, mode: "manual" };
+    const scheduleConfig: ManagedAgentScheduleConfig = plan.scheduleConfig || {
+      enabled: false,
+      mode: "manual",
+    };
 
     const environment = this.createEnvironment({
       name: `${plan.name} Environment`,
       config: {
         workspaceId: workspace.id,
-        enableShell: plan.enableShell,
+        accessProfileId:
+          normalizeManagedAccessProfileId(plan.accessProfileId) ||
+          getDefaultManagedAccessProfileId(),
         enableBrowser: plan.enableBrowser !== false,
         enableComputerUse: plan.enableComputerUse,
         allowedMcpServerIds: selectedMcpServers,
@@ -1559,7 +1674,9 @@ export class ManagedSessionService {
 
     const detail = this.getAgent(created.agent.id);
     if (!detail?.currentVersion) {
-      throw new Error(`Managed agent version missing: ${created.agent.id}@${created.agent.currentVersion}`);
+      throw new Error(
+        `Managed agent version missing: ${created.agent.id}@${created.agent.currentVersion}`,
+      );
     }
     return {
       agent: detail.agent,
@@ -1728,18 +1845,19 @@ export class ManagedSessionService {
     kind?: ManagedEnvironment["kind"];
     config: ManagedEnvironment["config"];
   }): ManagedEnvironment {
-    if (!this.workspaceRepo.findById(input.config.workspaceId)) {
-      throw new Error(`Workspace not found: ${input.config.workspaceId}`);
+    const config = normalizeManagedEnvironmentConfig(input.config);
+    if (!this.workspaceRepo.findById(config.workspaceId)) {
+      throw new Error(`Workspace not found: ${config.workspaceId}`);
     }
-    this.assertWorkspacePermission(input.config.workspaceId, "canManageEnvironments");
-    this.validateManagedAccountRefs(input.config.managedAccountRefs);
+    this.assertWorkspacePermission(config.workspaceId, "canManageEnvironments");
+    this.validateManagedAccountRefs(config.managedAccountRefs);
     return this.managedEnvironmentRepo.create({
       id: randomUUID(),
       name: input.name,
       kind: input.kind || "cowork_local",
       revision: 1,
       status: "active",
-      config: input.config,
+      config,
     });
   }
 
@@ -1749,7 +1867,9 @@ export class ManagedSessionService {
   ): ManagedEnvironment | undefined {
     const existing = this.managedEnvironmentRepo.findById(environmentId);
     if (!existing) return undefined;
-    const nextConfig = input.config ? { ...existing.config, ...input.config } : undefined;
+    const nextConfig = input.config
+      ? normalizeManagedEnvironmentConfig({ ...existing.config, ...input.config })
+      : undefined;
     if (nextConfig?.workspaceId && !this.workspaceRepo.findById(nextConfig.workspaceId)) {
       throw new Error(`Workspace not found: ${nextConfig.workspaceId}`);
     }
@@ -1782,7 +1902,8 @@ export class ManagedSessionService {
       throw new Error(`Managed agent is archived and cannot be run: ${agent.name}`);
     }
     const version = this.managedAgentVersionRepo.find(agent.id, agent.currentVersion);
-    if (!version) throw new Error(`Managed agent version missing: ${agent.id}@${agent.currentVersion}`);
+    if (!version)
+      throw new Error(`Managed agent version missing: ${agent.id}@${agent.currentVersion}`);
     const environment = this.managedEnvironmentRepo.findById(input.environmentId);
     if (!environment) throw new Error(`Managed environment not found: ${input.environmentId}`);
     const workspace = this.workspaceRepo.findById(environment.config.workspaceId);
@@ -1813,10 +1934,7 @@ export class ManagedSessionService {
       },
       reviewCheckpoints: this.buildReviewCheckpoints(studio),
       approvalPauses: studio?.approvalPolicy?.requireApprovalFor || [],
-      missingConnections: [
-        ...(studio?.missingConnections || []),
-        ...missingConnections,
-      ],
+      missingConnections: [...(studio?.missingConnections || []), ...missingConnections],
     };
 
     if (version.executionMode === "team") {
@@ -1860,6 +1978,7 @@ export class ManagedSessionService {
           ...sessionTemplatePayload,
         },
       });
+      this.registerWorkContext(session);
       if (input.initialEvent?.type === "user.message") {
         this.managedSessionEventRepo.create({
           sessionId: session.id,
@@ -1928,6 +2047,7 @@ export class ManagedSessionService {
         ...sessionTemplatePayload,
       },
     });
+    this.registerWorkContext(session);
     if (input.initialEvent?.type === "user.message") {
       this.managedSessionEventRepo.create({
         sessionId: session.id,
@@ -2011,11 +2131,84 @@ export class ManagedSessionService {
     return this.sendEvent(sessionId, { type: "user.message", content });
   }
 
+  private registerWorkContext(session: ManagedSession): void {
+    try {
+      this.options.workContextService?.ensureForManagedSession(session);
+    } catch (error) {
+      // WorkContext is continuity metadata; a failure must not prevent the
+      // underlying managed session from starting.
+      workContextLogger.warn("Failed to register managed session WorkContext:", error);
+    }
+  }
+
+  private async steerManagedTeamSession(
+    session: ManagedSession,
+    content: ManagedSessionInputContent[],
+  ): Promise<void> {
+    const teamRun = session.backingTeamRunId
+      ? this.teamRunRepo.findById(session.backingTeamRunId)
+      : undefined;
+    if (!teamRun) {
+      throw new Error(`Managed team run not found: ${session.backingTeamRunId}`);
+    }
+    if (
+      teamRun.status === "completed" ||
+      teamRun.status === "failed" ||
+      teamRun.status === "cancelled"
+    ) {
+      throw new Error("Team session is terminal; fork the session to continue.");
+    }
+
+    const teamOrchestrator = this.agentDaemon.getTeamOrchestrator();
+    if (!teamOrchestrator?.tickRun) {
+      throw new Error("Team orchestrator is not initialized");
+    }
+
+    const rootTaskId = session.backingTaskId;
+    if (!rootTaskId) {
+      throw new Error(`Backing team task not found for session: ${session.id}`);
+    }
+    const rootTask = this.taskRepo.findById(rootTaskId);
+    if (!rootTask) {
+      throw new Error(`Backing team task not found: ${session.backingTaskId}`);
+    }
+    const message = this.materializeContent(content).trim();
+    if (!message) {
+      throw new Error("Team steering message cannot be empty");
+    }
+
+    // Team-mode managed sessions are orchestrator-backed rather than executor-backed:
+    // the root task is the durable source of context used by future team items and
+    // synthesis. Persist the steering in both the root task timeline and its prompt
+    // context, then tick the run so pending work observes it immediately.
+    this.taskRepo.update(rootTask.id, {
+      prompt: appendTeamSteering(rootTask.prompt, message),
+    });
+    this.taskEventRepo.create({
+      taskId: rootTask.id,
+      timestamp: Date.now(),
+      type: "user_message",
+      schemaVersion: 2,
+      payload: {
+        message,
+        source: "managed_session_team_steering",
+        managedSessionId: session.id,
+        teamRunId: teamRun.id,
+      },
+    });
+    await teamOrchestrator.tickRun(teamRun.id, "managed_session_user_steering");
+  }
+
   async sendEvent(
     sessionId: string,
     event:
       | { type: "user.message"; content: ManagedSessionInputContent[] }
-      | { type: "input.received"; requestId: string; answers?: InputRequestResponse["answers"]; status?: InputRequestResponse["status"] },
+      | {
+          type: "input.received";
+          requestId: string;
+          answers?: InputRequestResponse["answers"];
+          status?: InputRequestResponse["status"];
+        },
   ): Promise<ManagedSession | undefined> {
     const session = this.managedSessionRepo.findById(sessionId);
     if (!session?.backingTaskId) return undefined;
@@ -2026,7 +2219,18 @@ export class ManagedSessionService {
 
     if (event.type === "user.message") {
       if (session.backingTeamRunId) {
-        throw new Error("user.message is not supported for team-mode managed sessions yet");
+        await this.steerManagedTeamSession(session, event.content);
+        this.managedSessionEventRepo.create({
+          sessionId,
+          timestamp: Date.now(),
+          type: "user.message",
+          payload: {
+            content: event.content,
+            routing: "team_root",
+            teamRunId: session.backingTeamRunId,
+          },
+        });
+        return this.refreshSession(sessionId);
       }
       const message = this.materializeContent(event.content);
       this.managedSessionEventRepo.create({
@@ -2075,14 +2279,9 @@ export class ManagedSessionService {
     }
     const { currentVersion } = this.getAgent(session.agentId) || {};
     const studio = currentVersion ? getStudioConfig(currentVersion) : undefined;
-    const style =
-      input?.style ||
-      studio?.audioSummaryConfig?.style ||
-      "executive-briefing";
+    const style = input?.style || studio?.audioSummaryConfig?.style || "executive-briefing";
     const title =
-      input?.title ||
-      studio?.audioSummaryConfig?.title ||
-      `${session.title} audio summary`;
+      input?.title || studio?.audioSummaryConfig?.title || `${session.title} audio summary`;
     const script = this.buildAudioSummaryScript(session, style);
     const audioBuffer = await getVoiceService().speak(script);
     if (!audioBuffer) {
@@ -2155,7 +2354,10 @@ export class ManagedSessionService {
       if (page.length < pageSize) break;
     }
     const completedDurations = sessions
-      .filter((session) => session.completedAt && session.startedAt && session.completedAt >= session.startedAt)
+      .filter(
+        (session) =>
+          session.completedAt && session.startedAt && session.completedAt >= session.startedAt,
+      )
       .map((session) => (session.completedAt || 0) - (session.startedAt || 0));
     const totalDuration = completedDurations.reduce((sum, value) => sum + value, 0);
     const toolCounts = new Map<string, number>();
@@ -2238,7 +2440,10 @@ export class ManagedSessionService {
         .map(([toolName, count]) => ({ toolName, count }))
         .sort((left, right) => right.count - left.count)
         .slice(0, 5),
-      triggerBreakdown: Array.from(triggerBreakdown.entries()).map(([key, count]) => ({ key, count })),
+      triggerBreakdown: Array.from(triggerBreakdown.entries()).map(([key, count]) => ({
+        key,
+        count,
+      })),
       deploymentSurfaceBreakdown: Array.from(deploymentBreakdown.entries()).map(([key, count]) => ({
         key,
         count,
@@ -2250,13 +2455,17 @@ export class ManagedSessionService {
     };
   }
 
-  getSlackDeploymentHealth(agentId: string): import("../../shared/types").ManagedAgentSlackDeploymentHealth {
+  getSlackDeploymentHealth(
+    agentId: string,
+  ): import("../../shared/types").ManagedAgentSlackDeploymentHealth {
     const detail = this.getAgent(agentId);
     if (!detail?.agent || !detail.currentVersion) {
       throw new Error(`Managed agent not found: ${agentId}`);
     }
     const studio = getStudioConfig(detail.currentVersion);
-    const targets = (studio?.channelTargets || []).filter((target) => target.channelType === "slack");
+    const targets = (studio?.channelTargets || []).filter(
+      (target) => target.channelType === "slack",
+    );
     const healthTargets = targets.map((target) => {
       const channel = this.channelRepo.findById(target.channelId);
       const status = channel?.status || "disconnected";
@@ -2275,7 +2484,9 @@ export class ManagedSessionService {
       .filter((row) => row.surface === "slack")
       .map((row) => row.run);
     const lastSuccessful = slackRuns.find((run) => this.isSuccessfulSlackRun(run));
-    const failedRun = slackRuns.find((run) => run.status === "failed" || run.outputStatus === "failed");
+    const failedRun = slackRuns.find(
+      (run) => run.status === "failed" || run.outputStatus === "failed",
+    );
     return {
       agentId,
       connectedCount: healthTargets.filter((target) => target.connected).length,
@@ -2365,9 +2576,12 @@ export class ManagedSessionService {
     };
   }
 
-  convertAgentRoleToManagedAgent(
-    request: ConvertAgentRoleToManagedAgentRequest,
-  ): Omit<ManagedAgentConversionResult, "routines"> & { routineDrafts: CreateManagedAgentRoutineRequest[] } {
+  convertAgentRoleToManagedAgent(request: ConvertAgentRoleToManagedAgentRequest): Omit<
+    ManagedAgentConversionResult,
+    "routines"
+  > & {
+    routineDrafts: CreateManagedAgentRoutineRequest[];
+  } {
     const role = this.agentRoleRepo.findById(request.agentRoleId);
     if (!role) {
       throw new Error(`Agent role not found: ${request.agentRoleId}`);
@@ -2381,13 +2595,13 @@ export class ManagedSessionService {
     const parsedSoul = safeJsonParse<Record<string, unknown>>(role.soul || undefined, {});
     const capabilityFamilies: ManagedAgentToolFamily[] = [];
     if (role.capabilities.includes("research")) capabilityFamilies.push("search", "communication");
-    if (role.capabilities.includes("code")) capabilityFamilies.push("files", "shell");
+    if (role.capabilities.includes("code")) capabilityFamilies.push("files");
     if (role.capabilities.includes("document")) capabilityFamilies.push("documents");
     const environment = this.createEnvironment({
       name: `${role.displayName} Environment`,
       config: {
         workspaceId: workspace.id,
-        enableShell: role.capabilities.includes("code"),
+        accessProfileId: getDefaultManagedAccessProfileId(),
         enableBrowser: true,
         enableComputerUse: false,
         allowedToolFamilies: Array.from(new Set(capabilityFamilies)),
@@ -2398,9 +2612,7 @@ export class ManagedSessionService {
         workflowBrief: role.description || role.displayName,
         instructions: {
           operatingNotes:
-            typeof parsedSoul.operatorMandate === "string"
-              ? parsedSoul.operatorMandate
-              : undefined,
+            typeof parsedSoul.operatorMandate === "string" ? parsedSoul.operatorMandate : undefined,
         },
         apps: {
           allowedToolFamilies: Array.from(new Set(capabilityFamilies)),
@@ -2433,10 +2645,13 @@ export class ManagedSessionService {
       description: role.description,
       systemPrompt: role.systemPrompt || `Act as ${role.displayName}.`,
       executionMode: "solo",
-      model: role.providerType || role.modelKey ? {
-        providerType: role.providerType,
-        modelKey: role.modelKey,
-      } : undefined,
+      model:
+        role.providerType || role.modelKey
+          ? {
+              providerType: role.providerType,
+              modelKey: role.modelKey,
+            }
+          : undefined,
       metadata,
     });
     this.agentRoleRepo.update({
@@ -2466,7 +2681,9 @@ export class ManagedSessionService {
 
   convertAutomationProfileToManagedAgent(
     request: ConvertAutomationProfileToManagedAgentRequest,
-  ): Omit<ManagedAgentConversionResult, "routines"> & { routineDrafts: CreateManagedAgentRoutineRequest[] } {
+  ): Omit<ManagedAgentConversionResult, "routines"> & {
+    routineDrafts: CreateManagedAgentRoutineRequest[];
+  } {
     const profile = this.automationProfileRepo.findById(request.automationProfileId);
     if (!profile) {
       throw new Error(`Automation profile not found: ${request.automationProfileId}`);
@@ -2537,7 +2754,10 @@ export class ManagedSessionService {
   ): { session?: ManagedSession; appended?: ManagedSessionEvent } {
     const session = this.managedSessionRepo.findByBackingTaskId(taskId);
     if (!session) return {};
-    if (taskEvent.eventId && this.managedSessionEventRepo.hasSourceTaskEvent(session.id, taskEvent.eventId)) {
+    if (
+      taskEvent.eventId &&
+      this.managedSessionEventRepo.hasSourceTaskEvent(session.id, taskEvent.eventId)
+    ) {
       return { session: this.refreshSession(session.id) || session };
     }
     const appended = this.managedSessionEventRepo.create({
@@ -2565,21 +2785,29 @@ export class ManagedSessionService {
       const run = this.teamRunRepo.findByRootTaskId(nextSession.backingTaskId);
       if (run) {
         nextSession =
-          this.managedSessionRepo.update(nextSession.id, { backingTeamRunId: run.id }) || nextSession;
+          this.managedSessionRepo.update(nextSession.id, { backingTeamRunId: run.id }) ||
+          nextSession;
       }
     }
 
-    const task = nextSession.backingTaskId ? this.taskRepo.findById(nextSession.backingTaskId) : undefined;
-    const pendingInputs =
-      nextSession.backingTaskId ? this.inputRequestRepo.findPendingByTaskId(nextSession.backingTaskId) : [];
+    const task = nextSession.backingTaskId
+      ? this.taskRepo.findById(nextSession.backingTaskId)
+      : undefined;
+    const pendingInputs = nextSession.backingTaskId
+      ? this.inputRequestRepo.findPendingByTaskId(nextSession.backingTaskId)
+      : [];
     const nextStatus = toManagedSessionStatus(task, pendingInputs.length > 0);
     const latestSummary =
       task?.resultSummary ||
-      (nextSession.backingTeamRunId ? this.teamRunRepo.findById(nextSession.backingTeamRunId)?.summary : undefined) ||
+      (nextSession.backingTeamRunId
+        ? this.teamRunRepo.findById(nextSession.backingTeamRunId)?.summary
+        : undefined) ||
       nextSession.latestSummary;
     const completedAt =
       task?.completedAt ||
-      (nextSession.backingTeamRunId ? this.teamRunRepo.findById(nextSession.backingTeamRunId)?.completedAt : undefined) ||
+      (nextSession.backingTeamRunId
+        ? this.teamRunRepo.findById(nextSession.backingTeamRunId)?.completedAt
+        : undefined) ||
       nextSession.completedAt;
 
     const updates: Partial<ManagedSession> = {};
@@ -2648,14 +2876,19 @@ export class ManagedSessionService {
       promptParts.push("", "Reference files:", ...fileRefs.map((filePath) => `- ${filePath}`));
     }
     if (studio?.memoryConfig?.mode === "disabled") {
-      promptParts.push("", "Memory policy:", "Avoid relying on long-term memory tools unless the user re-enables them.");
+      promptParts.push(
+        "",
+        "Memory policy:",
+        "Avoid relying on long-term memory tools unless the user re-enables them.",
+      );
     } else if (studio?.memoryConfig?.sources?.length) {
-      promptParts.push("", "Preferred memory sources:", ...studio.memoryConfig.sources.map((source) => `- ${source}`));
+      promptParts.push(
+        "",
+        "Preferred memory sources:",
+        ...studio.memoryConfig.sources.map((source) => `- ${source}`),
+      );
     }
-    const allMissingConnections = [
-      ...(studio?.missingConnections || []),
-      ...missingConnections,
-    ];
+    const allMissingConnections = [...(studio?.missingConnections || []), ...missingConnections];
     if (allMissingConnections.length > 0) {
       promptParts.push(
         "",
@@ -2689,9 +2922,14 @@ export class ManagedSessionService {
     return lines.join("\n\n").trim();
   }
 
-  private buildAgentConfig(environment: ManagedEnvironment, version: ManagedAgentVersion): AgentConfig {
+  private buildAgentConfig(
+    environment: ManagedEnvironment,
+    version: ManagedAgentVersion,
+  ): AgentConfig {
     const runtimeDefaults = version.runtimeDefaults || {};
     const studio = getStudioConfig(version);
+    const accessProfileId = normalizeManagedAccessProfileId(environment.config.accessProfileId);
+    const legacyShellConfig = isLegacyManagedShellConfig(environment.config);
     const agentConfig: AgentConfig = {
       ...(version.model?.providerType ? { providerType: version.model.providerType } : {}),
       ...(version.model?.modelKey ? { modelKey: version.model.modelKey } : {}),
@@ -2705,9 +2943,19 @@ export class ManagedSessionService {
       ...(runtimeDefaults.allowUserInput !== undefined
         ? { allowUserInput: runtimeDefaults.allowUserInput }
         : {}),
-      ...(environment.config.enableShell ? { shellAccess: true } : {}),
-      ...(typeof runtimeDefaults.maxTurns === "number" ? { maxTurns: runtimeDefaults.maxTurns } : {}),
-      ...(runtimeDefaults.webSearchMode ? { webSearchMode: runtimeDefaults.webSearchMode as Any } : {}),
+      ...(accessProfileId
+        ? { accessProfileId }
+        : !legacyShellConfig
+          ? { accessProfileId: getDefaultManagedAccessProfileId() }
+          : environment.config.enableShell
+            ? { shellAccess: true }
+            : {}),
+      ...(typeof runtimeDefaults.maxTurns === "number"
+        ? { maxTurns: runtimeDefaults.maxTurns }
+        : {}),
+      ...(runtimeDefaults.webSearchMode
+        ? { webSearchMode: runtimeDefaults.webSearchMode as Any }
+        : {}),
       ...(runtimeDefaults.toolRestrictions?.length
         ? { toolRestrictions: [...runtimeDefaults.toolRestrictions] }
         : {}),
@@ -2777,7 +3025,10 @@ export class ManagedSessionService {
       name: `ManagedAgent-${agent.name}-${Date.now()}`,
       description: `Managed team for agent ${agent.name}`,
       leadAgentRoleId,
-      maxParallelAgents: Math.max(1, template.maxParallelAgents || template.memberAgentRoleIds?.length || 1),
+      maxParallelAgents: Math.max(
+        1,
+        template.maxParallelAgents || template.memberAgentRoleIds?.length || 1,
+      ),
       persistent: false,
     });
     for (const [index, roleId] of (template.memberAgentRoleIds || []).entries()) {
@@ -2870,15 +3121,14 @@ export class ManagedSessionService {
         const namedRole = this.agentRoleRepo.findByName(managedMirrorRoleBaseName(agent.name));
         return roleMirrorsManagedAgent(namedRole, agent.id) ? namedRole : undefined;
       })();
-    const heartbeatPolicy =
-      studio.scheduleConfig?.enabled
-        ? {
-            enabled: true,
-            cadenceMinutes: Math.max(15, studio.scheduleConfig.cadenceMinutes || 180),
-            activeHours: studio.scheduleConfig.activeHours ?? null,
-            profile: "operator" as const,
-          }
-        : undefined;
+    const heartbeatPolicy = studio.scheduleConfig?.enabled
+      ? {
+          enabled: true,
+          cadenceMinutes: Math.max(15, studio.scheduleConfig.cadenceMinutes || 180),
+          activeHours: studio.scheduleConfig.activeHours ?? null,
+          profile: "operator" as const,
+        }
+      : undefined;
     const sourceTemplateVersion =
       typeof version.version === "number" ? String(version.version) : undefined;
     const autonomyPolicy = toManagedAutonomyPolicy(studio.approvalPolicy);
@@ -2979,10 +3229,7 @@ export class ManagedSessionService {
     );
   }
 
-  private createLegacyMirrorRole(
-    agent: ManagedAgent,
-    request: CreateAgentRoleRequest,
-  ): AgentRole {
+  private createLegacyMirrorRole(agent: ManagedAgent, request: CreateAgentRoleRequest): AgentRole {
     const reservedNames = new Set<string>();
     let lastConstraintError: unknown;
 
@@ -3006,8 +3253,7 @@ export class ManagedSessionService {
       }
     }
 
-    const detail =
-      lastConstraintError instanceof Error ? `: ${lastConstraintError.message}` : "";
+    const detail = lastConstraintError instanceof Error ? `: ${lastConstraintError.message}` : "";
     throw new Error(
       `Unable to allocate legacy mirror role name for managed agent: ${agent.name}${detail}`,
     );
@@ -3127,7 +3373,9 @@ export class ManagedSessionService {
         id: String(row.id),
         routineId: String(row.routine_id),
         triggerId: String(row.trigger_id),
-        triggerType: String(row.trigger_type || "manual") as import("../routines/types").RoutineRun["triggerType"],
+        triggerType: String(
+          row.trigger_type || "manual",
+        ) as import("../routines/types").RoutineRun["triggerType"],
         status: String(row.status || "queued") as import("../routines/types").RoutineRun["status"],
         startedAt: Number(row.started_at || 0),
         finishedAt: row.finished_at ? Number(row.finished_at) : undefined,
@@ -3136,7 +3384,9 @@ export class ManagedSessionService {
         backingManagedSessionId: row.backing_managed_session_id
           ? String(row.backing_managed_session_id)
           : undefined,
-        outputStatus: String(row.output_status || "none") as import("../routines/types").RoutineRun["outputStatus"],
+        outputStatus: String(
+          row.output_status || "none",
+        ) as import("../routines/types").RoutineRun["outputStatus"],
         errorSummary: row.error_summary ? String(row.error_summary) : undefined,
         artifactsSummary: row.artifacts_summary ? String(row.artifacts_summary) : undefined,
         createdAt: Number(row.created_at || 0),
@@ -3238,7 +3488,9 @@ export class ManagedSessionService {
         return [
           `Executive briefing for ${session.title}.`,
           latestSummary || "No final summary was recorded yet.",
-          ...(assistantHighlights.length > 0 ? ["Key supporting details:", ...assistantHighlights] : []),
+          ...(assistantHighlights.length > 0
+            ? ["Key supporting details:", ...assistantHighlights]
+            : []),
           "Next recommended action: review the agent run and decide whether to continue, publish, or adjust the configuration.",
         ]
           .filter(Boolean)

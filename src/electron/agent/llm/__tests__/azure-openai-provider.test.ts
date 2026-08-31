@@ -478,9 +478,7 @@ describe("AzureOpenAIProvider", () => {
     const [, responsesOptions] = mockFetch.mock.calls[2];
     const body = JSON.parse(responsesOptions.body);
     const functionCall = body.input.find((item: Any) => item.type === "function_call");
-    const functionOutput = body.input.find(
-      (item: Any) => item.type === "function_call_output",
-    );
+    const functionOutput = body.input.find((item: Any) => item.type === "function_call_output");
 
     expect(functionCall.call_id).not.toBe(longId);
     expect(functionCall.call_id.length).toBeLessThanOrEqual(64);
@@ -495,12 +493,8 @@ describe("AzureOpenAIProvider", () => {
       },
     };
     mockFetch
-      .mockResolvedValueOnce(
-        createErrorResponse(400, "Bad Request", unsupportedToolsWithReasoning),
-      )
-      .mockResolvedValueOnce(
-        createErrorResponse(400, "Bad Request", unsupportedToolsWithReasoning),
-      )
+      .mockResolvedValueOnce(createErrorResponse(400, "Bad Request", unsupportedToolsWithReasoning))
+      .mockResolvedValueOnce(createErrorResponse(400, "Bad Request", unsupportedToolsWithReasoning))
       .mockResolvedValueOnce(
         createOkResponse({
           output: [{ type: "message", content: [{ type: "output_text", text: "planned" }] }],
@@ -819,7 +813,9 @@ describe("AzureOpenAIProvider", () => {
   it("marks Azure 500 API failures as retryable", async () => {
     mockFetch.mockResolvedValue(
       createErrorResponse(500, "Internal Server Error", {
-        error: { message: "The server had an error while processing your request. Sorry about that!" },
+        error: {
+          message: "The server had an error while processing your request. Sorry about that!",
+        },
       }),
     );
 

@@ -13,6 +13,7 @@ import { MessageRouter, RouterConfig } from "./router";
 import { SecurityManager } from "./security";
 import { SessionManager } from "./session";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { formatUserFacingCompletionSummary } from "../../shared/task-completion";
 import {
   ChannelAdapter,
   ChannelType,
@@ -58,10 +59,7 @@ import {
   Channel,
 } from "../database/repositories";
 import { AgentDaemon } from "../agent/daemon";
-import {
-  HookAgentIngress,
-  initializeHookAgentIngress,
-} from "../hooks/agent-ingress";
+import { HookAgentIngress, initializeHookAgentIngress } from "../hooks/agent-ingress";
 import { PersonalityManager } from "../settings/personality-manager";
 import { buildMentionTaskPrompt, type ParsedMentionCommand } from "../x-mentions/parser";
 import {
@@ -251,7 +249,6 @@ export class ChannelGateway {
     const onTaskCompleted = (data: {
       taskId: string;
       resultSummary?: string;
-      semanticSummary?: string;
       verificationVerdict?: string;
       verificationReport?: string;
       message?: string;
@@ -260,10 +257,7 @@ export class ChannelGateway {
         typeof data.message === "string" && data.message.trim() !== "Task completed successfully"
           ? data.message.trim()
           : undefined;
-      const resultSummary =
-        typeof data.resultSummary === "string" ? data.resultSummary.trim() : "";
-      const semanticSummary =
-        typeof data.semanticSummary === "string" ? data.semanticSummary.trim() : "";
+      const resultSummary = typeof data.resultSummary === "string" ? data.resultSummary.trim() : "";
       const verificationVerdict =
         typeof data.verificationVerdict === "string" ? data.verificationVerdict.trim() : "";
       const verificationReport =
@@ -271,9 +265,6 @@ export class ChannelGateway {
       const lastAssistantMessage = (lastMessages.get(data.taskId) || "").trim();
       const fallbackMessage = lastAssistantMessage || messageResult || "";
       const isTextOnlyChannel = this.router.isPendingTaskTextOnlyChannel(data.taskId);
-      const summaryPieces = [resultSummary, semanticSummary].filter(
-        (value): value is string => Boolean(value && value.length > 0),
-      );
       let result = "";
 
       if (isTextOnlyChannel) {
@@ -281,21 +272,16 @@ export class ChannelGateway {
         // semantic run summaries that can look like planning debris.
         result = fallbackMessage || resultSummary;
       } else {
-        result = summaryPieces.join("\n\n").trim();
+        result = formatUserFacingCompletionSummary({
+          resultSummary,
+          verificationVerdict,
+          verificationReport,
+        });
         if (!result) {
           result = fallbackMessage;
         }
       }
 
-      if (!isTextOnlyChannel && (verificationVerdict || verificationReport)) {
-        const verificationLines = [
-          verificationVerdict ? `Verification: ${verificationVerdict}` : "",
-          verificationReport ? verificationReport : "",
-        ]
-          .filter((value) => value.length > 0)
-          .join("\n");
-        result = [result, verificationLines].filter((value) => value.length > 0).join("\n\n").trim();
-      }
       if (!result) {
         result = fallbackMessage;
       }
@@ -417,7 +403,8 @@ export class ChannelGateway {
     const onArtifactCreated = (data: { taskId: string; path?: string; label?: string }) => {
       const path = typeof data.path === "string" ? data.path.trim() : "";
       if (!path) return;
-      const label = typeof data.label === "string" && data.label.trim().length > 0 ? data.label : path;
+      const label =
+        typeof data.label === "string" && data.label.trim().length > 0 ? data.label : path;
       this.router.sendTaskUpdate(data.taskId, `📎 Artifact: ${label}\n${path}`);
     };
 
@@ -444,13 +431,15 @@ export class ChannelGateway {
 
       const claimLines =
         keyClaims.length > 0
-          ? `Key claims:\n${keyClaims.slice(0, 3).map((claim) => `- ${claim}`).join("\n")}\n\n`
+          ? `Key claims:\n${keyClaims
+              .slice(0, 3)
+              .map((claim) => `- ${claim}`)
+              .join("\n")}\n\n`
           : "";
       const sourceLines = evidenceRefs
         .slice(0, 5)
         .map((ref, index) => {
-          const snippet =
-            ref.snippet.length > 0 ? ` — ${ref.snippet.slice(0, 120)}` : "";
+          const snippet = ref.snippet.length > 0 ? ` — ${ref.snippet.slice(0, 120)}` : "";
           return `${index + 1}. ${ref.sourceUrlOrPath}${snippet}`;
         })
         .join("\n");
@@ -501,7 +490,6 @@ export class ChannelGateway {
           onTaskCompleted({
             taskId,
             resultSummary: payload.resultSummary as string,
-            semanticSummary: payload.semanticSummary as string,
             verificationVerdict: payload.verificationVerdict as string,
             verificationReport: payload.verificationReport as string,
             message: payload.message as string,
@@ -700,10 +688,7 @@ export class ChannelGateway {
    * Fetch recent messages from a Discord channel via live API (not local log).
    * For agent tools; requires Discord channel to be configured and connected.
    */
-  async fetchDiscordMessages(
-    chatId: string,
-    limit = 100,
-  ): Promise<DiscordMessage[]> {
+  async fetchDiscordMessages(chatId: string, limit = 100): Promise<DiscordMessage[]> {
     const adapter = this.router.getAdapter("discord") as DiscordAdapter | undefined;
     if (!adapter || adapter.status !== "connected") {
       throw new Error("Discord channel is not configured or not connected");
@@ -1666,7 +1651,10 @@ export class ChannelGateway {
       adapter.onStatusChange((status, error) => {
         console.log(`WhatsApp status changed to: ${status}`);
         if (!mainWindow.isDestroyed()) {
-          mainWindow.webContents.send(IPC_CHANNELS.WHATSAPP_STATUS, { status, error: error?.message });
+          mainWindow.webContents.send(IPC_CHANNELS.WHATSAPP_STATUS, {
+            status,
+            error: error?.message,
+          });
           if (status === "connected") {
             mainWindow.webContents.send(IPC_CHANNELS.WHATSAPP_CONNECTED);
             // Update channel status in database
@@ -1753,12 +1741,7 @@ export class ChannelGateway {
       await this.disableChannel(channelId);
     }
 
-    // Delete associated data first (to avoid foreign key constraint errors)
-    this.messageRepo.deleteByChannelId(channelId);
-    this.sessionRepo.deleteByChannelId(channelId);
-    this.userRepo.deleteByChannelId(channelId);
-
-    // Now delete the channel
+    // Delete the channel and all associated records atomically.
     this.channelRepo.delete(channelId);
     this.router.unregisterAdapter(channelId);
   }
@@ -1877,13 +1860,17 @@ export class ChannelGateway {
       idempotencyKey?: string;
     },
   ): Promise<string> {
-    return this.router.sendMessage(channelType, {
-      chatId,
-      text,
-      idempotencyKey: options?.idempotencyKey,
-      replyTo: options?.replyTo,
-      parseMode: options?.parseMode,
-    }, options?.channelDbId);
+    return this.router.sendMessage(
+      channelType,
+      {
+        chatId,
+        text,
+        idempotencyKey: options?.idempotencyKey,
+        replyTo: options?.replyTo,
+        parseMode: options?.parseMode,
+      },
+      options?.channelDbId,
+    );
   }
 
   /**
@@ -1906,12 +1893,16 @@ export class ChannelGateway {
       return null;
     }
 
-    return this.router.sendMessage(channel.type as ChannelType, {
-      chatId: session.chatId,
-      text,
-      replyTo: options?.replyTo,
-      parseMode: options?.parseMode,
-    }, channel.id);
+    return this.router.sendMessage(
+      channel.type as ChannelType,
+      {
+        chatId: session.chatId,
+        text,
+        replyTo: options?.replyTo,
+        parseMode: options?.parseMode,
+      },
+      channel.id,
+    );
   }
 
   /**
@@ -2100,10 +2091,7 @@ export class ChannelGateway {
     }
 
     if (!oauthClientId || !refreshToken) {
-      if (
-        accessToken &&
-        (!tokenExpiresAt || Date.now() < tokenExpiresAt - 2 * 60 * 1000)
-      ) {
+      if (accessToken && (!tokenExpiresAt || Date.now() < tokenExpiresAt - 2 * 60 * 1000)) {
         await this.probeMicrosoftGraphReadAccess(accessToken, options);
         return;
       }
@@ -2219,7 +2207,9 @@ export class ChannelGateway {
       ...channel.config,
       accessToken: refreshed.accessToken,
       refreshToken: refreshed.refreshToken || refreshToken,
-      tokenExpiresAt: refreshed.expiresIn ? Date.now() + refreshed.expiresIn * 1000 : tokenExpiresAt,
+      tokenExpiresAt: refreshed.expiresIn
+        ? Date.now() + refreshed.expiresIn * 1000
+        : tokenExpiresAt,
       scopes: normalizeMicrosoftEmailReadScopes(
         refreshed.scopes || (channel.config.scopes as string[] | undefined),
       ),
@@ -2364,7 +2354,9 @@ export class ChannelGateway {
           password: channel.config.password as string,
           webhookPort: channel.config.webhookPort as number | undefined,
           webhookPath: channel.config.webhookPath as string | undefined,
-          webhookSecret: (channel.config.webhookSecret as string | undefined) || (channel.config.password as string),
+          webhookSecret:
+            (channel.config.webhookSecret as string | undefined) ||
+            (channel.config.password as string),
           pollInterval: channel.config.pollInterval as number | undefined,
           allowedContacts: channel.config.allowedContacts as string[] | undefined,
           responsePrefix: channel.config.responsePrefix as string | undefined,

@@ -64,8 +64,7 @@ function createExchange(overrides: Partial<SupervisorExchange> = {}): Supervisor
     sourceChannelId: overrides.sourceChannelId,
     sourceMessageId: overrides.sourceMessageId,
     sourcePeerUserId: overrides.sourcePeerUserId || "111",
-    workerAgentRoleId:
-      overrides.workerAgentRoleId || "550e8400-e29b-41d4-a716-446655440000",
+    workerAgentRoleId: overrides.workerAgentRoleId || "550e8400-e29b-41d4-a716-446655440000",
     supervisorAgentRoleId:
       overrides.supervisorAgentRoleId || "550e8400-e29b-41d4-a716-446655440001",
     linkedTaskId: overrides.linkedTaskId,
@@ -148,7 +147,9 @@ function createService(overrides?: {
     },
     findById: (id: string) => exchanges.get(id),
     findBySourceMessageId: (sourceMessageId: string) =>
-      Array.from(exchanges.values()).find((exchange) => exchange.sourceMessageId === sourceMessageId),
+      Array.from(exchanges.values()).find(
+        (exchange) => exchange.sourceMessageId === sourceMessageId,
+      ),
     findByDiscordMessageId: (discordMessageId: string) => {
       const message = Array.from(messages.values()).find(
         (entry) => entry.discordMessageId === discordMessageId,
@@ -258,7 +259,9 @@ describe("DiscordSupervisorService", () => {
         resolution: "Handled by operator.",
         mirrorToDiscord: true,
       }),
-    ).rejects.toThrow("Discord mirror delivery is unavailable because no Discord adapter is active");
+    ).rejects.toThrow(
+      "Discord mirror delivery is unavailable because no Discord adapter is active",
+    );
 
     expect(exchanges.get(exchange.id)?.status).toBe("escalated");
   });

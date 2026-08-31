@@ -57,7 +57,7 @@ interface NodeRow {
   workflow_phase_id: string | null;
   acp_task_id: string | null;
   metadata: string | null;
-    verification_verdict: VerificationVerdict | null;
+  verification_verdict: VerificationVerdict | null;
   verification_report: string | null;
   semantic_summary: string | null;
   created_at: number;
@@ -153,11 +153,13 @@ export class OrchestrationGraphRepository {
       createdAt?: number;
       updatedAt?: number;
     };
-    nodes: Array<Omit<OrchestrationGraphNode, "runId" | "createdAt" | "updatedAt"> & {
-      id?: string;
-      createdAt?: number;
-      updatedAt?: number;
-    }>;
+    nodes: Array<
+      Omit<OrchestrationGraphNode, "runId" | "createdAt" | "updatedAt"> & {
+        id?: string;
+        createdAt?: number;
+        updatedAt?: number;
+      }
+    >;
     edges?: OrchestrationGraphEdgeInsert[];
   }): OrchestrationGraphSnapshot {
     const now = Date.now();
@@ -268,11 +270,13 @@ export class OrchestrationGraphRepository {
 
   appendNodes(input: {
     runId: string;
-    nodes: Array<Omit<OrchestrationGraphNode, "runId" | "createdAt" | "updatedAt"> & {
-      id?: string;
-      createdAt?: number;
-      updatedAt?: number;
-    }>;
+    nodes: Array<
+      Omit<OrchestrationGraphNode, "runId" | "createdAt" | "updatedAt"> & {
+        id?: string;
+        createdAt?: number;
+        updatedAt?: number;
+      }
+    >;
     edges?: OrchestrationGraphEdgeInsert[];
   }): OrchestrationGraphSnapshot | undefined {
     const existing = this.findSnapshotByRunId(input.runId);
@@ -466,7 +470,9 @@ export class OrchestrationGraphRepository {
 
   updateRun(
     runId: string,
-    updates: Partial<Pick<OrchestrationGraphRun, "status" | "maxParallel" | "metadata" | "completedAt">>,
+    updates: Partial<
+      Pick<OrchestrationGraphRun, "status" | "maxParallel" | "metadata" | "completedAt">
+    >,
   ): OrchestrationGraphRun | undefined {
     const existing = this.findSnapshotByRunId(runId)?.run;
     if (!existing) return undefined;
@@ -623,22 +629,28 @@ export class OrchestrationGraphRepository {
          ORDER BY n.updated_at ASC`,
       )
       .all(runId) as Array<{
-        node_id: string;
-        task_id: string | null;
-        remote_task_id: string | null;
-        public_handle: string | null;
-        status: OrchestrationNodeNotification["status"];
-        summary: string | null;
-        output: string | null;
-        error: string | null;
-        dispatch_target: OrchestrationNodeNotification["target"];
-        worker_role: WorkerRoleKind | null;
-        semantic_summary: string | null;
-        verification_verdict: VerificationVerdict | null;
-        verification_report: string | null;
-      }>;
+      node_id: string;
+      task_id: string | null;
+      remote_task_id: string | null;
+      public_handle: string | null;
+      status: OrchestrationNodeNotification["status"];
+      summary: string | null;
+      output: string | null;
+      error: string | null;
+      dispatch_target: OrchestrationNodeNotification["target"];
+      worker_role: WorkerRoleKind | null;
+      semantic_summary: string | null;
+      verification_verdict: VerificationVerdict | null;
+      verification_report: string | null;
+    }>;
     return rows
-      .filter((row) => row.status === "running" || row.status === "completed" || row.status === "failed" || row.status === "cancelled")
+      .filter(
+        (row) =>
+          row.status === "running" ||
+          row.status === "completed" ||
+          row.status === "failed" ||
+          row.status === "cancelled",
+      )
       .map((row) => ({
         runId,
         nodeId: row.node_id,
@@ -652,7 +664,9 @@ export class OrchestrationGraphRepository {
         target: row.dispatch_target,
         workerRole: row.worker_role ?? undefined,
         semanticSummary: row.semantic_summary ?? undefined,
-        verificationVerdict: (row.verification_verdict as OrchestrationNodeNotification["verificationVerdict"]) ?? undefined,
+        verificationVerdict:
+          (row.verification_verdict as OrchestrationNodeNotification["verificationVerdict"]) ??
+          undefined,
         verificationReport: row.verification_report ?? undefined,
       }));
   }

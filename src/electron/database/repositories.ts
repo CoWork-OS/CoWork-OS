@@ -264,11 +264,7 @@ export class TaskSessionMetadataRepository {
 
   findBySessionIds(sessionIds: string[]): Map<string, TaskSessionMetadata> {
     const normalizedSessionIds = Array.from(
-      new Set(
-        sessionIds
-          .map((id) => (typeof id === "string" ? id.trim() : ""))
-          .filter(Boolean),
-      ),
+      new Set(sessionIds.map((id) => (typeof id === "string" ? id.trim() : "")).filter(Boolean)),
     );
     const out = new Map<string, TaskSessionMetadata>();
     if (normalizedSessionIds.length === 0) return out;
@@ -292,21 +288,22 @@ export class TaskSessionMetadataRepository {
     return out;
   }
 
-  upsert(sessionId: string, updates: { name?: string | null; archivedAt?: number | null }): TaskSessionMetadata {
+  upsert(
+    sessionId: string,
+    updates: { name?: string | null; archivedAt?: number | null },
+  ): TaskSessionMetadata {
     const normalizedSessionId = String(sessionId || "").trim();
     if (!normalizedSessionId) {
       throw new Error("Session id is required.");
     }
     const now = Date.now();
     const existing = this.findBySessionId(normalizedSessionId);
-    const name =
-      Object.prototype.hasOwnProperty.call(updates, "name")
-        ? normalizeOptionalSessionMetadataText(updates.name)
-        : existing?.name ?? null;
-    const archivedAt =
-      Object.prototype.hasOwnProperty.call(updates, "archivedAt")
-        ? normalizeOptionalSessionMetadataNumber(updates.archivedAt)
-        : existing?.archivedAt ?? null;
+    const name = Object.prototype.hasOwnProperty.call(updates, "name")
+      ? normalizeOptionalSessionMetadataText(updates.name)
+      : (existing?.name ?? null);
+    const archivedAt = Object.prototype.hasOwnProperty.call(updates, "archivedAt")
+      ? normalizeOptionalSessionMetadataNumber(updates.archivedAt)
+      : (existing?.archivedAt ?? null);
 
     this.db
       .prepare(`
@@ -319,13 +316,7 @@ export class TaskSessionMetadataRepository {
           archived_at = excluded.archived_at,
           updated_at = excluded.updated_at
       `)
-      .run(
-        normalizedSessionId,
-        name,
-        archivedAt,
-        existing?.createdAt ?? now,
-        now,
-      );
+      .run(normalizedSessionId, name, archivedAt, existing?.createdAt ?? now, now);
 
     const metadata = this.findBySessionId(normalizedSessionId);
     if (!metadata) {
@@ -630,6 +621,7 @@ export class TaskRepository {
 
   // Whitelist of allowed update fields to prevent SQL injection
   private static readonly ALLOWED_UPDATE_FIELDS = new Set([
+    "prompt",
     "title",
     "status",
     "error",
@@ -843,7 +835,9 @@ export class TaskRepository {
       `
       : "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id DESC";
     const excludedSources = Array.isArray(options?.excludeSources)
-      ? options.excludeSources.filter((source): source is NonNullable<Task["source"]> => Boolean(source))
+      ? options.excludeSources.filter((source): source is NonNullable<Task["source"]> =>
+          Boolean(source),
+        )
       : [];
     const includeArchivedSessions = options?.includeArchivedSessions !== false;
     const cursor = options?.prioritizeSidebar
@@ -875,6 +869,43 @@ export class TaskRepository {
     return rows.map((row) => this.mapRowToTask(row));
   }
 
+  search(
+    query: string,
+    options?: { workspaceId?: string; limit?: number; includeArchivedSessions?: boolean },
+  ): Task[] {
+    const normalizedQuery = typeof query === "string" ? query.trim().slice(0, 120) : "";
+    if (!normalizedQuery) return [];
+
+    const limit = Math.min(100, Math.max(1, Math.floor(options?.limit || 20)));
+    const escapedQuery = normalizedQuery.replace(/[\\%_]/g, (character) => `\\${character}`);
+    const like = `%${escapedQuery}%`;
+    const conditions = [
+      `(title LIKE ? ESCAPE '\\' OR prompt LIKE ? ESCAPE '\\' OR COALESCE(raw_prompt, '') LIKE ? ESCAPE '\\' OR COALESCE(result_summary, '') LIKE ? ESCAPE '\\' OR COALESCE(semantic_summary, '') LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR COALESCE(session_id, '') LIKE ? ESCAPE '\\')`,
+    ];
+    const args: Any[] = [like, like, like, like, like, like, like];
+    if (options?.workspaceId) {
+      conditions.push("workspace_id = ?");
+      args.push(options.workspaceId);
+    }
+    if (options?.includeArchivedSessions === false) {
+      conditions.push(`NOT EXISTS (
+        SELECT 1 FROM task_session_metadata
+        WHERE task_session_metadata.session_id = COALESCE(NULLIF(tasks.session_id, ''), tasks.id)
+          AND task_session_metadata.archived_at IS NOT NULL
+      )`);
+    }
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM tasks
+         WHERE ${conditions.join(" AND ")}
+         ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id DESC
+         LIMIT ?`,
+      )
+      .all(...args, limit) as Any[];
+    return rows.map((row) => this.mapRowToTask(row));
+  }
+
   findSidebarSummaries(
     limit = 100,
     offset = 0,
@@ -902,7 +933,9 @@ export class TaskRepository {
       `
       : "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id DESC";
     const excludedSources = Array.isArray(options?.excludeSources)
-      ? options.excludeSources.filter((source): source is NonNullable<Task["source"]> => Boolean(source))
+      ? options.excludeSources.filter((source): source is NonNullable<Task["source"]> =>
+          Boolean(source),
+        )
       : [];
     const includeArchivedSessions = options?.includeArchivedSessions !== false;
     const cursor = options?.prioritizeSidebar
@@ -1075,20 +1108,24 @@ export class TaskRepository {
       const safeLimit = Math.max(1, Math.floor(limit));
       const safeOffset =
         typeof offset === "number" && Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
-      const rows = this.db.prepare(`
+      const rows = this.db
+        .prepare(`
         SELECT * FROM tasks
         WHERE session_id = ?
         ORDER BY created_at ASC
         LIMIT ? OFFSET ?
-      `).all(normalizedSessionId, safeLimit, safeOffset) as Any[];
+      `)
+        .all(normalizedSessionId, safeLimit, safeOffset) as Any[];
       return rows.map((row) => this.mapRowToTask(row));
     }
 
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(`
       SELECT * FROM tasks
       WHERE session_id = ?
       ORDER BY created_at ASC
-    `).all(normalizedSessionId) as Any[];
+    `)
+      .all(normalizedSessionId) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -1237,9 +1274,7 @@ export class TaskRepository {
       clearManagedSessionBackingTeamRun.run(taskId);
 
       // Delete agent_team_runs where this task is the root (cascades to items/thoughts)
-      const deleteTeamRuns = this.db.prepare(
-        "DELETE FROM agent_team_runs WHERE root_task_id = ?",
-      );
+      const deleteTeamRuns = this.db.prepare("DELETE FROM agent_team_runs WHERE root_task_id = ?");
       deleteTeamRuns.run(taskId);
 
       // Nullify source_task_id in agent_team_items (for runs we did not delete)
@@ -1255,7 +1290,9 @@ export class TaskRepository {
       clearTeamThoughtSource.run(taskId);
 
       // Preserve cross-system/task analytics history while dropping the task row.
-      const clearIssueTaskId = this.db.prepare("UPDATE issues SET task_id = NULL WHERE task_id = ?");
+      const clearIssueTaskId = this.db.prepare(
+        "UPDATE issues SET task_id = NULL WHERE task_id = ?",
+      );
       clearIssueTaskId.run(taskId);
 
       const clearHeartbeatRunTaskId = this.db.prepare(
@@ -1380,7 +1417,9 @@ export class TaskRepository {
       try {
         const quotedColumn = quoteSqlIdentifier(columnName);
         this.db
-          .prepare(`UPDATE ${quotedTasksTable} SET ${quotedColumn} = NULL WHERE ${quotedColumn} = ?`)
+          .prepare(
+            `UPDATE ${quotedTasksTable} SET ${quotedColumn} = NULL WHERE ${quotedColumn} = ?`,
+          )
           .run(taskId);
       } catch {
         // Older databases may not have every self-reference column.
@@ -1490,8 +1529,7 @@ export class TaskRepository {
       projectId: row.project_id || undefined,
       issueId: row.issue_id || undefined,
       heartbeatRunId: row.heartbeat_run_id || undefined,
-      requestDepth:
-        typeof row.request_depth === "number" ? row.request_depth : undefined,
+      requestDepth: typeof row.request_depth === "number" ? row.request_depth : undefined,
       billingCode: row.billing_code || undefined,
       semanticSummary: row.semantic_summary || undefined,
       targetNodeId: row.target_node_id || undefined,
@@ -1502,7 +1540,12 @@ export class TaskRepository {
     type SidebarAgentConfig = NonNullable<Task["agentConfig"]>;
     const agentConfig: SidebarAgentConfig = {};
     const setBooleanAgentConfig = (
-      key: "videoGenerationMode" | "multitaskMode" | "collaborativeMode" | "multiLlmMode" | "autonomousMode",
+      key:
+        | "videoGenerationMode"
+        | "multitaskMode"
+        | "collaborativeMode"
+        | "multiLlmMode"
+        | "autonomousMode",
       value: unknown,
     ): void => {
       if (value === null || value === undefined) return;
@@ -1578,8 +1621,7 @@ export class TaskRepository {
       issueId: row.issue_id || undefined,
       heartbeatRunId: row.heartbeat_run_id || undefined,
       targetNodeId: row.target_node_id || undefined,
-      requestDepth:
-        typeof row.request_depth === "number" ? row.request_depth : undefined,
+      requestDepth: typeof row.request_depth === "number" ? row.request_depth : undefined,
       billingCode: row.billing_code || undefined,
       semanticSummary: row.semantic_summary || undefined,
     });
@@ -1635,9 +1677,7 @@ export class TaskRepository {
       ),
     );
 
-    const where: string[] = [
-      `target_node_id IN (${normalizedNodeIds.map(() => "?").join(", ")})`,
-    ];
+    const where: string[] = [`target_node_id IN (${normalizedNodeIds.map(() => "?").join(", ")})`];
     const args: Any[] = [...normalizedNodeIds];
 
     if (typeof createdAtGte === "number" && Number.isFinite(createdAtGte)) {
@@ -1810,8 +1850,7 @@ export class TaskEventRepository {
     TASK_TIMELINE_SINGLE_EVENT_BYTE_LIMIT;
   private static readonly MAX_TIMELINE_SINGLE_EVENT_BYTE_LIMIT =
     TASK_TIMELINE_MAX_SINGLE_EVENT_BYTE_LIMIT;
-  private static readonly TRUNCATED_PAYLOAD_PREVIEW_CHARS =
-    TASK_TIMELINE_PAYLOAD_PREVIEW_CHARS;
+  private static readonly TRUNCATED_PAYLOAD_PREVIEW_CHARS = TASK_TIMELINE_PAYLOAD_PREVIEW_CHARS;
   private static readonly TIMELINE_ADDITIONAL_TASK_ID_CHUNK_SIZE = 500;
 
   constructor(private db: Database.Database) {}
@@ -1822,7 +1861,8 @@ export class TaskEventRepository {
     min: number,
     max: number,
   ): number {
-    const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : fallback;
+    const numeric =
+      typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : fallback;
     return Math.min(max, Math.max(min, numeric));
   }
 
@@ -2013,7 +2053,9 @@ export class TaskEventRepository {
         LIMIT 1
       `)
       .get(normalizedTaskId) as Any;
-    return row ? this.mapRowsToEvents([row], { persistMigrations: false }).events[0] ?? null : null;
+    return row
+      ? (this.mapRowsToEvents([row], { persistMigrations: false }).events[0] ?? null)
+      : null;
   }
 
   findEventCursorById(taskId: string, eventId: string): TaskTimelinePageCursor | null {
@@ -2142,10 +2184,7 @@ export class TaskEventRepository {
     );
     const additionalTaskEventTypes = Array.from(
       new Set(
-        (Array.isArray(request.additionalTaskEventTypes)
-          ? request.additionalTaskEventTypes
-          : []
-        )
+        (Array.isArray(request.additionalTaskEventTypes) ? request.additionalTaskEventTypes : [])
           .map((value) => (typeof value === "string" ? value.trim() : ""))
           .filter((value) => value.length > 0),
       ),
@@ -2340,7 +2379,8 @@ export class TaskEventRepository {
     const selectedRowsForEvents = planContextRow ? [...selectedRows, planContextRow] : selectedRows;
     if (planContextRow) {
       const planPayloadBytes =
-        typeof planContextRow.payload_bytes === "number" && Number.isFinite(planContextRow.payload_bytes)
+        typeof planContextRow.payload_bytes === "number" &&
+        Number.isFinite(planContextRow.payload_bytes)
           ? planContextRow.payload_bytes
           : Buffer.byteLength(String(planContextRow.payload ?? ""), "utf8");
       payloadBytes += Math.min(planPayloadBytes, singleEventByteLimit);
@@ -2376,11 +2416,16 @@ export class TaskEventRepository {
       persistMigrations: false,
     }).events;
     const hasMoreHistory =
-      stoppedByByteLimit || rows.length > safeLimit || selectedRows.length < Math.min(rows.length, safeLimit);
+      stoppedByByteLimit ||
+      rows.length > safeLimit ||
+      selectedRows.length < Math.min(rows.length, safeLimit);
     const nextCursor =
       hasMoreHistory && oldestSelected
         ? {
-            order: Number(oldestSelected.timeline_order ?? oldestSelected.seq ?? oldestSelected.timestamp) || 0,
+            order:
+              Number(
+                oldestSelected.timeline_order ?? oldestSelected.seq ?? oldestSelected.timestamp,
+              ) || 0,
             timestamp: Number(oldestSelected.timestamp) || 0,
             id: typeof oldestSelected.id === "string" ? oldestSelected.id : undefined,
           }
@@ -2403,7 +2448,12 @@ export class TaskEventRepository {
         databaseReadBytesEstimate: hydratedPayloadBytes,
         ...this.deriveTimelinePageSummary(events),
       },
-      warnings: this.buildTimelinePageWarnings(taskId, payloadBytes, largestEventPayloadBytes, truncatedEventCount),
+      warnings: this.buildTimelinePageWarnings(
+        taskId,
+        payloadBytes,
+        largestEventPayloadBytes,
+        truncatedEventCount,
+      ),
     };
   }
 
@@ -2515,7 +2565,9 @@ export class TaskEventRepository {
       }
     } else {
       row = this.db
-        .prepare("SELECT *, LENGTH(CAST(COALESCE(payload, '') AS BLOB)) AS payload_bytes FROM task_events WHERE id = ? OR event_id = ? LIMIT 1")
+        .prepare(
+          "SELECT *, LENGTH(CAST(COALESCE(payload, '') AS BLOB)) AS payload_bytes FROM task_events WHERE id = ? OR event_id = ? LIMIT 1",
+        )
         .get(normalizedEventId, normalizedEventId) as Any;
     }
     if (!row) return { event: null, payloadBytes: 0 };
@@ -2604,7 +2656,9 @@ export class TaskEventRepository {
     };
   }
 
-  private deriveTimelinePageSummary(events: TaskEvent[]): Partial<TaskTimelinePageResult["summary"]> {
+  private deriveTimelinePageSummary(
+    events: TaskEvent[],
+  ): Partial<TaskTimelinePageResult["summary"]> {
     let planStepCount: number | undefined;
     let hasChecklist = false;
     let outputEventCount = 0;
@@ -2660,9 +2714,7 @@ export class TaskEventRepository {
       );
     }
     if (largestEventPayloadBytes > 1024 * 1024) {
-      warnings.push(
-        `task ${taskId} has a ${largestEventPayloadBytes} byte timeline event payload`,
-      );
+      warnings.push(`task ${taskId} has a ${largestEventPayloadBytes} byte timeline event payload`);
     }
     if (truncatedEventCount > 0) {
       warnings.push(`task ${taskId} returned ${truncatedEventCount} truncated timeline events`);
@@ -2907,7 +2959,8 @@ export class TaskEventRepository {
    * Returns true if a vacuum was performed.
    */
   vacuumIfNeeded(thresholdMB: number = 500): boolean {
-    const freelistCount = (this.db.pragma("freelist_count") as { freelist_count: number }[])[0]?.freelist_count ?? 0;
+    const freelistCount =
+      (this.db.pragma("freelist_count") as { freelist_count: number }[])[0]?.freelist_count ?? 0;
     const pageSize = (this.db.pragma("page_size") as { page_size: number }[])[0]?.page_size ?? 4096;
     const freelistMB = (freelistCount * pageSize) / (1024 * 1024);
     if (freelistMB < thresholdMB) return false;
@@ -2956,7 +3009,9 @@ export class TaskTraceRepository {
       siblingRuns: buildTaskTraceSiblingRuns(siblingTasks),
       metrics: buildTaskTraceMetrics(task, rawEvents),
       rawEvents,
-      semanticTimeline: normalizeTaskEvents([...rawEvents].sort((a, b) => a.timestamp - b.timestamp)),
+      semanticTimeline: normalizeTaskEvents(
+        [...rawEvents].sort((a, b) => a.timestamp - b.timestamp),
+      ),
     };
   }
 
@@ -3040,7 +3095,10 @@ const ANNOTATION_STATUSES: AnnotationStatus[] = [
   "dismissed",
 ];
 
-function normalizeAnnotationStatus(value: unknown, fallback: AnnotationStatus = "open"): AnnotationStatus {
+function normalizeAnnotationStatus(
+  value: unknown,
+  fallback: AnnotationStatus = "open",
+): AnnotationStatus {
   return ANNOTATION_STATUSES.includes(value as AnnotationStatus)
     ? (value as AnnotationStatus)
     : fallback;
@@ -3103,7 +3161,9 @@ export class AnnotationRepository {
     const current = this.findById(id);
     if (!current) return undefined;
 
-    const nextStatus = patch.status ? normalizeAnnotationStatus(patch.status, current.status) : current.status;
+    const nextStatus = patch.status
+      ? normalizeAnnotationStatus(patch.status, current.status)
+      : current.status;
     const now = Date.now();
     const nextStylePatchJson =
       patch.stylePatch === null
@@ -3140,7 +3200,9 @@ export class AnnotationRepository {
         JSON.stringify(patch.targetRef || current.targetRef),
         nextStylePatchJson,
         patch.artifactId === null ? null : patch.artifactId || current.artifactId || null,
-        patch.screenshotPath === null ? null : patch.screenshotPath || current.screenshotPath || null,
+        patch.screenshotPath === null
+          ? null
+          : patch.screenshotPath || current.screenshotPath || null,
         now,
         resolvedAt,
         patch.resolvedByEventId === null
@@ -3257,9 +3319,13 @@ export class AnnotationRepository {
       surfaceId: row.surface_id || undefined,
       body: row.body || "",
       status,
-      targetRef: safeJsonParse(row.target_ref_json, {
-        surfaceType: row.surface_type || "browser",
-      } as Annotation["targetRef"], "annotation.target_ref_json"),
+      targetRef: safeJsonParse(
+        row.target_ref_json,
+        {
+          surfaceType: row.surface_type || "browser",
+        } as Annotation["targetRef"],
+        "annotation.target_ref_json",
+      ),
       stylePatch: row.style_patch_json
         ? safeJsonParse(row.style_patch_json, undefined, "annotation.style_patch_json")
         : undefined,
@@ -3364,9 +3430,9 @@ export class WorkspacePermissionRuleRepository {
   }
 
   findById(id: string): PersistedPermissionRule | null {
-    const row = this.db
-      .prepare(`SELECT * FROM workspace_permission_rules WHERE id = ?`)
-      .get(id) as Any | undefined;
+    const row = this.db.prepare(`SELECT * FROM workspace_permission_rules WHERE id = ?`).get(id) as
+      | Any
+      | undefined;
     return row ? this.mapRowToRule(row) : null;
   }
 
@@ -3741,6 +3807,8 @@ export class LLMModelRepository {
 
 const channelRepoLogger = createLogger("ChannelRepository");
 const CHANNEL_CONFIG_ENCRYPTED_PREFIX = "enc:";
+const CHANNEL_CONFIG_DECRYPT_WARNING_INTERVAL_MS = 60_000;
+let lastChannelConfigDecryptUnavailableLogAt = Number.NEGATIVE_INFINITY;
 
 interface ChannelConfigReadResult {
   json: string;
@@ -3783,6 +3851,7 @@ function decryptChannelConfig(value: string): ChannelConfigReadResult {
   try {
     const safeStorage = getSafeStorage();
     if (safeStorage?.isEncryptionAvailable()) {
+      lastChannelConfigDecryptUnavailableLogAt = Number.NEGATIVE_INFINITY;
       const buf = Buffer.from(value.slice(CHANNEL_CONFIG_ENCRYPTED_PREFIX.length), "base64");
       return {
         json: safeStorage.decryptString(buf),
@@ -3791,7 +3860,14 @@ function decryptChannelConfig(value: string): ChannelConfigReadResult {
     }
     const readError =
       "Channel configuration is encrypted with OS secure storage and cannot be decrypted in this environment.";
-    channelRepoLogger.error(readError);
+    const now = Date.now();
+    if (
+      now - lastChannelConfigDecryptUnavailableLogAt >=
+      CHANNEL_CONFIG_DECRYPT_WARNING_INTERVAL_MS
+    ) {
+      channelRepoLogger.error(readError);
+      lastChannelConfigDecryptUnavailableLogAt = now;
+    }
     return {
       json: "{}",
       encrypted: true,
@@ -3989,8 +4065,96 @@ export class ChannelRepository {
   }
 
   delete(id: string): void {
-    const stmt = this.db.prepare("DELETE FROM channels WHERE id = ?");
-    stmt.run(id);
+    const deleteChannel = this.db.transaction((channelId: string) => {
+      // Delete children explicitly because the original channel tables predate
+      // ON DELETE CASCADE. Keep this in one transaction so a failed cleanup
+      // cannot leave a partially removed channel behind.
+      const tableNames = new Set(
+        (
+          this.db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .all(
+              "channel_messages",
+              "channel_sessions",
+              "channel_users",
+              "context_policies",
+              "channel_specializations",
+              "communication_commitments",
+              "communication_actions",
+              "communication_participants",
+              "communication_messages",
+              "communication_threads",
+              "communication_search_fts",
+            ) as Array<{ name: string }>
+        ).map((row) => row.name),
+      );
+
+      // Messages reference sessions and users, so they must be removed first.
+      if (tableNames.has("channel_messages")) {
+        this.db.prepare("DELETE FROM channel_messages WHERE channel_id = ?").run(channelId);
+      }
+      if (tableNames.has("channel_sessions")) {
+        this.db.prepare("DELETE FROM channel_sessions WHERE channel_id = ?").run(channelId);
+      }
+      if (tableNames.has("channel_users")) {
+        this.db.prepare("DELETE FROM channel_users WHERE channel_id = ?").run(channelId);
+      }
+
+      // These newer tables may have ON DELETE CASCADE, but explicit cleanup
+      // also supports databases created before those constraints were added.
+      if (tableNames.has("context_policies")) {
+        this.db.prepare("DELETE FROM context_policies WHERE channel_id = ?").run(channelId);
+      }
+      if (tableNames.has("channel_specializations")) {
+        this.db.prepare("DELETE FROM channel_specializations WHERE channel_id = ?").run(channelId);
+      }
+      if (tableNames.has("communication_commitments") && tableNames.has("communication_threads")) {
+        this.db
+          .prepare(
+            "DELETE FROM communication_commitments WHERE thread_id IN (SELECT id FROM communication_threads WHERE channel_id = ?)",
+          )
+          .run(channelId);
+      }
+      if (tableNames.has("communication_actions") && tableNames.has("communication_threads")) {
+        this.db
+          .prepare(
+            "DELETE FROM communication_actions WHERE thread_id IN (SELECT id FROM communication_threads WHERE channel_id = ?)",
+          )
+          .run(channelId);
+      }
+      if (tableNames.has("communication_participants") && tableNames.has("communication_threads")) {
+        this.db
+          .prepare(
+            "DELETE FROM communication_participants WHERE thread_id IN (SELECT id FROM communication_threads WHERE channel_id = ?)",
+          )
+          .run(channelId);
+      }
+      if (tableNames.has("communication_messages") && tableNames.has("communication_threads")) {
+        this.db
+          .prepare(
+            "DELETE FROM communication_messages WHERE thread_id IN (SELECT id FROM communication_threads WHERE channel_id = ?)",
+          )
+          .run(channelId);
+      }
+      if (tableNames.has("communication_search_fts") && tableNames.has("communication_threads")) {
+        this.db
+          .prepare(
+            "DELETE FROM communication_search_fts WHERE thread_id IN (SELECT id FROM communication_threads WHERE channel_id = ?)",
+          )
+          .run(channelId);
+      }
+      if (tableNames.has("communication_threads")) {
+        // Older mailbox databases stored channel projections here without a
+        // cascade constraint, which otherwise prevents deleting the channel.
+        this.db.prepare("DELETE FROM communication_threads WHERE channel_id = ?").run(channelId);
+      }
+
+      this.db.prepare("DELETE FROM channels WHERE id = ?").run(channelId);
+    });
+
+    deleteChannel(id);
   }
 
   private mapRowToChannel(row: Record<string, unknown>): Channel {
@@ -4449,7 +4613,8 @@ export class ChannelSpecializationRepository {
     };
 
     if ("chatId" in request) push("chat_id", this.cleanOptionalString(request.chatId) ?? null);
-    if ("threadId" in request) push("thread_id", this.cleanOptionalString(request.threadId) ?? null);
+    if ("threadId" in request)
+      push("thread_id", this.cleanOptionalString(request.threadId) ?? null);
     if ("name" in request) push("name", this.cleanOptionalString(request.name) ?? null);
     if ("workspaceId" in request)
       push("workspace_id", this.cleanOptionalString(request.workspaceId) ?? null);
@@ -4458,7 +4623,10 @@ export class ChannelSpecializationRepository {
     if ("systemGuidance" in request)
       push("system_guidance", this.cleanOptionalString(request.systemGuidance) ?? null);
     if ("toolRestrictions" in request)
-      push("tool_restrictions", JSON.stringify(this.cleanToolRestrictions(request.toolRestrictions)));
+      push(
+        "tool_restrictions",
+        JSON.stringify(this.cleanToolRestrictions(request.toolRestrictions)),
+      );
     if ("allowSharedContextMemory" in request)
       push("allow_shared_context_memory", request.allowSharedContextMemory ? 1 : 0);
     if ("enabled" in request) push("enabled", request.enabled ? 1 : 0);
@@ -4479,9 +4647,9 @@ export class ChannelSpecializationRepository {
   }
 
   findById(id: string): ChannelSpecialization | undefined {
-    const row = this.db
-      .prepare("SELECT * FROM channel_specializations WHERE id = ?")
-      .get(id) as Record<string, unknown> | undefined;
+    const row = this.db.prepare("SELECT * FROM channel_specializations WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined;
     return row ? this.mapRow(row) : undefined;
   }
 
@@ -5628,8 +5796,10 @@ export class MemoryRepository {
       let rows: Record<string, unknown>[] = [];
       if (tryRaw) {
         try {
-          rows = this.runMemoryFtsQuery("local-raw", raw, () =>
-            stmt.all(raw, workspaceId, limit),
+          rows = this.runMemoryFtsQuery(
+            "local-raw",
+            raw,
+            () => stmt.all(raw, workspaceId, limit),
             ftsM,
           ) as Record<string, unknown>[];
         } catch {
@@ -5641,8 +5811,10 @@ export class MemoryRepository {
       // If raw query was too strict (common) or failed, retry with relaxed query.
       if (rows.length === 0 && tokenized) {
         try {
-          rows = this.runMemoryFtsQuery("local-relaxed", tokenized, () =>
-            stmt.all(tokenized, workspaceId, limit),
+          rows = this.runMemoryFtsQuery(
+            "local-relaxed",
+            tokenized,
+            () => stmt.all(tokenized, workspaceId, limit),
             ftsM,
           ) as Record<string, unknown>[];
         } catch {
@@ -5724,8 +5896,10 @@ export class MemoryRepository {
       let rows: Record<string, unknown>[] = [];
       if (tryRaw) {
         try {
-          rows = this.runMemoryFtsQuery("imported-raw", raw, () =>
-            stmt.all(raw, limit),
+          rows = this.runMemoryFtsQuery(
+            "imported-raw",
+            raw,
+            () => stmt.all(raw, limit),
             ftsM,
           ) as Record<string, unknown>[];
         } catch {
@@ -5735,8 +5909,10 @@ export class MemoryRepository {
 
       if (rows.length === 0 && tokenized) {
         try {
-          rows = this.runMemoryFtsQuery("imported-relaxed", tokenized, () =>
-            stmt.all(tokenized, limit),
+          rows = this.runMemoryFtsQuery(
+            "imported-relaxed",
+            tokenized,
+            () => stmt.all(tokenized, limit),
             ftsM,
           ) as Record<string, unknown>[];
         } catch {
@@ -5830,9 +6006,7 @@ export class MemoryRepository {
       const mapRows = (rows: Record<string, unknown>[]) =>
         rows.map((row) => ({
           id: row.id as string,
-          snippet:
-            (row.summary as string) ||
-            this.truncateToSnippet(row.content as string, 200),
+          snippet: (row.summary as string) || this.truncateToSnippet(row.content as string, 200),
           content: row.content as string,
           type: row.type as MemoryType,
           relevanceScore: Math.abs(row.score as number),
@@ -5845,8 +6019,10 @@ export class MemoryRepository {
       let rows: Record<string, unknown>[] = [];
       if (tryRaw) {
         try {
-          rows = this.runMemoryFtsQuery("prompt-recall-raw", raw, () =>
-            stmt.all(raw, workspaceId, limit),
+          rows = this.runMemoryFtsQuery(
+            "prompt-recall-raw",
+            raw,
+            () => stmt.all(raw, workspaceId, limit),
             ftsM,
           ) as Record<string, unknown>[];
         } catch {
@@ -5856,8 +6032,10 @@ export class MemoryRepository {
 
       if (rows.length === 0 && tokenized) {
         try {
-          rows = this.runMemoryFtsQuery("prompt-recall-relaxed", tokenized, () =>
-            stmt.all(tokenized, workspaceId, limit),
+          rows = this.runMemoryFtsQuery(
+            "prompt-recall-relaxed",
+            tokenized,
+            () => stmt.all(tokenized, workspaceId, limit),
             ftsM,
           ) as Record<string, unknown>[];
         } catch {
@@ -5896,9 +6074,7 @@ export class MemoryRepository {
     const rows = stmt.all(...params) as Record<string, unknown>[];
     return rows.map((row) => ({
       id: row.id as string,
-      snippet:
-        (row.summary as string) ||
-        this.truncateToSnippet(row.content as string, 200),
+      snippet: (row.summary as string) || this.truncateToSnippet(row.content as string, 200),
       content: row.content as string,
       type: row.type as MemoryType,
       relevanceScore: 1,
@@ -5913,17 +6089,11 @@ export class MemoryRepository {
    * For background callers that search for known content prefixes/markers
    * (e.g. "[SUGGESTION]", "[PLAYBOOK] Task succeeded").
    */
-  searchByContentMarker(
-    workspaceId: string,
-    marker: string,
-    limit = 50,
-  ): MemorySearchResult[] {
+  searchByContentMarker(workspaceId: string, marker: string, limit = 50): MemorySearchResult[] {
     const mapRows = (rows: Record<string, unknown>[]) =>
       rows.map((row) => ({
         id: row.id as string,
-        snippet:
-          (row.summary as string) ||
-          this.truncateToSnippet(row.content as string, 200),
+        snippet: (row.summary as string) || this.truncateToSnippet(row.content as string, 200),
         type: row.type as MemoryType,
         relevanceScore: 1,
         createdAt: row.created_at as number,
@@ -6378,9 +6548,9 @@ export class CuratedMemoryRepository {
   }
 
   findById(id: string): CuratedMemoryEntryRecord | undefined {
-    const row = this.db
-      .prepare("SELECT * FROM curated_memory_entries WHERE id = ?")
-      .get(id) as Record<string, unknown> | undefined;
+    const row = this.db.prepare("SELECT * FROM curated_memory_entries WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined;
     return row ? this.mapRow(row) : undefined;
   }
 
@@ -6920,17 +7090,19 @@ export class PendingMemoryWriteRepository {
   }
 
   findById(id: string): PendingMemoryWrite | undefined {
-    const row = this.db
-      .prepare("SELECT * FROM pending_memory_writes WHERE id = ?")
-      .get(id) as Record<string, unknown> | undefined;
+    const row = this.db.prepare("SELECT * FROM pending_memory_writes WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined;
     return row ? this.mapRow(row) : undefined;
   }
 
-  list(params: {
-    workspaceId?: string;
-    status?: PendingMemoryWriteStatus;
-    limit?: number;
-  } = {}): PendingMemoryWrite[] {
+  list(
+    params: {
+      workspaceId?: string;
+      status?: PendingMemoryWriteStatus;
+      limit?: number;
+    } = {},
+  ): PendingMemoryWrite[] {
     const clauses: string[] = [];
     const values: unknown[] = [];
     if (params.workspaceId) {
@@ -6957,7 +7129,9 @@ export class PendingMemoryWriteRepository {
   countPending(workspaceId?: string): number {
     if (workspaceId) {
       const row = this.db
-        .prepare("SELECT COUNT(*) AS count FROM pending_memory_writes WHERE workspace_id = ? AND status = 'pending'")
+        .prepare(
+          "SELECT COUNT(*) AS count FROM pending_memory_writes WHERE workspace_id = ? AND status = 'pending'",
+        )
         .get(workspaceId) as { count?: number } | undefined;
       return Number(row?.count || 0);
     }
@@ -6994,7 +7168,14 @@ export class PendingMemoryWriteRepository {
          SET status = ?, reviewed_at = ?, reviewed_by = ?, resolution = ?
          WHERE id = ? AND status = ?`,
       )
-      .run(status, Date.now(), details.reviewedBy || null, details.resolution || null, id, expectedStatus);
+      .run(
+        status,
+        Date.now(),
+        details.reviewedBy || null,
+        details.resolution || null,
+        id,
+        expectedStatus,
+      );
     return result.changes > 0 ? this.findById(id) : undefined;
   }
 

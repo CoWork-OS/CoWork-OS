@@ -40,7 +40,9 @@ describe("task event detail cache helpers", () => {
   it("measures UTF-8 payload bytes and matches either persisted id", () => {
     const value = event({ payload: { text: "€" } });
 
-    expect(estimateTaskEventPayloadBytes(value)).toBe(new TextEncoder().encode('{"text":"€"}').length);
+    expect(estimateTaskEventPayloadBytes(value)).toBe(
+      new TextEncoder().encode('{"text":"€"}').length,
+    );
     expect(eventMatchesDetailId(value, "row-1")).toBe(true);
     expect(eventMatchesDetailId(value, "event-1")).toBe(true);
   });

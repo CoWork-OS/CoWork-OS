@@ -41,6 +41,8 @@ All messaging channels use the same core gateway model:
 - Use `/commands` for the command catalog.
 - Use `/skills` to see enabled skills and `/<skill-slug> args` to run one where the platform delivers typed slash text.
 - Scheduled results, final answers, approvals, cancellations, and task progress are delivered back through the same channel delivery path.
+- New tasks use the target workspace's [access profile](access-profiles.md); command tools,
+  sandboxing, filesystem scope, network/domain scope, and approvals follow that profile.
 
 Best practices for every channel:
 
@@ -52,6 +54,8 @@ Best practices for every channel:
 - Use `/stop` when the current task should not continue.
 - Use `/queue <message>` or `/steer <guidance>` when an active task needs explicit direction.
 - Keep high-risk approvals in direct messages or private channels.
+- Do not treat a channel message or approval response as a way to widen a finite access-profile
+  scope. Start a fresh task after selecting a different profile.
 
 ## WhatsApp
 

@@ -40,6 +40,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Open Multi-Provider Harness**: Supported provider accounts, APIs, compatible gateways, cloud credentials, and local models can use the same CoWork tools, skills, memory, agents, approvals, artifacts, and workflows. CoWork itself is free and MIT-licensed; provider eligibility, limits, and charges remain separate. See [Model Providers](providers.md) and [Compare CoWork OS](comparisons/index.md).
 - **GUI-first Agent Management**: Agents Hub, Mission Control, task timelines, visual boards, Teams, Devices, and Automations let users create reusable agents, spawn many parallel or specialized agents, inspect delegated runs, assign work, review approvals, and monitor outcomes through the desktop operator console.
 - **CoWork CLI**: `cowork` opens an interactive terminal UI for local agent work, and `cowork run "task"` starts one-shot local tasks using the same local profile, providers, workspaces, skills, and MCP configuration as the desktop app. Normal local CLI use does not require a Control Plane token; `--remote` is the explicit remote client path. See [CoWork OS CLI](cli.md).
+- **Governed Access Profiles**: The main composer offers Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles. A profile carries sandbox, approval, reviewer, network, filesystem, and domain policy across desktop, CLI, remote, managed, automation, and child-task surfaces. Command tools are derived from the selected profile; there is no separate new-task shell toggle. See [Access Profiles](access-profiles.md).
 - **Everything Workbench**: Generated documents, spreadsheets, presentations, web pages, PDFs, and previews share one artifact model: compact output card, sidebar open, fullscreen artifact workspace, follow-up composer, and refresh after the agent completes requested edits. This makes CoWork the default place to create, inspect, and revise everyday Word/Excel/PowerPoint-style work while keeping external app actions available for advanced native workflows. See [Everything Workbench](everything-workbench.md).
 - **Terminal Tabs**: CoWork now includes real xterm.js + node-pty terminal tabs inside the workspace, with native macOS login-shell behavior, Windows `cmd.exe` through ConPTY/winpty, keyboard shortcuts, Tab completion, Ctrl+C, interactive prompts, resizing, closeable tabs, and cwd-only prompts. This is a major super-app step because direct CLI work, repository work, agents, artifacts, browser testing, approvals, channels, and automations can stay in one governed workspace. See [Terminal Tabs](terminal-tabs.md).
 - **Browser Workbench / Browser V2**: live website and local-app testing opens in a visible right-sidebar/fullscreen browser by default. Browser-use tools target the same webview the user can see through Browser V2, with responsive viewport testing through `browser_emulate`, accessibility snapshot refs, CDP-backed actions, tabs, diagnostics, screenshots, annotation, and visible cursor movement during agent actions. Explicit fallback modes include local Playwright, external Chrome/Edge CDP attach with consent, and Browser Use Cloud stealth browsers through `browser_provider: "browser-use-cloud"` for public HTTP(S) targets. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
@@ -57,7 +58,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Grok Account Routing**: xAI/Grok can run with either a direct xAI API key or a supported browser OAuth account connection. Available models, limits, and charges depend on xAI and the connected account; token refresh stays inside encrypted profile settings.
 - **Session Checklist Primitive**: execution-style tasks can create a session-local ordered checklist with `task_list_create`, maintain it with `task_list_update`, inspect it with `task_list_list`, and surface it read-only in the task UI. The runtime can issue a non-blocking verification nudge when implementation items are done but no verification item exists yet.
 - **Structured Delegation Briefs**: `spawn_agent` and `orchestrate_agents` resolve a worker role, package parent-step context plus evidence requirements into a structured brief, and apply the corresponding completion/tool contract to the child.
-- **Permission Engine**: layered tool approvals combine explicit modes, per-tool/path/command-prefix/MCP-server rules, session grants, workspace-local rules, profile rules, and hard guardrails; `dangerous_only` adds a lower-friction mode that still prompts on destructive, privacy-sensitive, side-effecting, or ambiguous actions.
+- **Permission Engine**: layered tool approvals combine access-profile boundaries, legacy modes, per-tool/path/command-prefix/MCP-server rules, session grants, workspace-local rules, profile rules, and hard guardrails; `dangerous_only` remains a compatibility mode while access profiles are the primary task-level choice.
 - **Live Terminal Tabs**: Shell work can happen in real PTY-backed terminal tabs. xterm.js handles rendering and keyboard input, node-pty handles OS pseudoterminals, users can create/close tabs, resize the dock, use arrows/Tab/Ctrl+C, and interact with native CLI flows such as `npm login`. See [Terminal Tabs](terminal-tabs.md).
 - **Dynamic Re-Planning**: Agent can revise its plan mid-execution
 - **Bundled and Installable Skills**: GitHub, Slack, Notion, Spotify, Apple Notes, Unity, Unreal, Terraform, Kubernetes, financial analysis, and more. Bundled workflows include [LLM Wiki](llm-wiki.md) for persistent research vaults, [manim-video](skills/manim-video.md) for deterministic technical animation, [architecture-design](skills/architecture-design.md) for Rhino/Blender/ComfyUI concept architecture workflows, [kami](skills/kami.md) for editorial PDFs and slide decks, [react-best-practices](skills/react-best-practices.md) for React and Next.js implementation work, [unbroker](skills/unbroker.md) for consent-gated data-broker cleanup, and `taste-skill` for high-agency frontend design. Optional CLI-based skills (e.g. [aurl](skills/aurl.md) for OpenAPI/GraphQL APIs) appear when the binary is installed.
@@ -217,7 +218,7 @@ CoWork OS now includes a dedicated Devices tab for running and observing work ac
 
 - **Local + remote device inventory**: track the current machine alongside saved remote devices in one view
 - **Connection-aware remote cards**: direct, SSH-tunneled, and Tailscale-backed devices expose connection state, last-seen time, active runs, storage summary, app summary, and attention state
-- **Remote task dispatch**: start a task on a selected remote device, optionally with shell access, execution mode, or multi-LLM options
+- **Remote task dispatch**: start a task on a selected remote device with an access profile, execution mode, or multi-LLM options
 - **Remote file picker**: browse remote workspaces and attach files directly from the target machine before dispatching a task
 - **Remote task feed**: filter tasks for the selected device, all devices, or attention states, then open those tasks in a remote session view
 - **Device overlays**: inspect apps, storage, resource signals, alerts, and observer history without leaving the Devices surface
@@ -382,6 +383,11 @@ The UI exposes a small set of execution modes. Chat mode is separate from task e
 
 These modes are mutually exclusive. Chat is the conversational path; the others are task execution modes.
 
+Execution modes are separate from [access profiles](access-profiles.md). The
+mode selects the task interaction/execution path; the profile selects the
+sandbox, approvals, reviewer, command-tool, filesystem, network, and domain
+boundary. A mode or orchestration toggle cannot widen the selected profile.
+
 > **Note:** Verified mode is strongest when you want execution plus an explicit verification gate. Plan mode shows a confirmation dialog only for structured input requests, not because it bypasses approvals.
 
 ### Task Toggles
@@ -390,14 +396,17 @@ The task creation UI also includes higher-level toggles that change how tasks ar
 
 | Toggle | Behavior |
 |--------|----------|
-| **Autonomous** | Auto-approves all gated actions (shell commands, file deletions, etc.) so the agent runs without pauses. Disables user input prompts. |
+| **Autonomous** | Legacy/reduced-friction task toggle that can auto-approve eligible actions and suppress optional user-input pauses within the effective access profile. It cannot add tools, widen profile scope, or bypass hard guardrails. |
 | **Check-ins** | Opts a fresh task into legacy clarification pauses. Keep this off for Codex/Claude Code-style execution that chooses safe defaults and stops only for hard blockers. |
 | **Collaborative** | Auto-creates an ephemeral team of agents that analyze the task from multiple perspectives, then a leader synthesizes the results. Phases: dispatch → think → synthesize → complete. |
 | **Multitask command** | Type `/multitask [N] <task>` to create a fresh collaborative run that splits the prompt into lane-specific child tasks before synthesis. Defaults to 4 lanes, bounded to 2-8. |
 | **Multi-LLM** | Sends the same task to multiple LLM providers/models in parallel. A designated judge model synthesizes the best result. Requires 2+ providers configured. |
 | **Think With Me** | Socratic brainstorming mode — agent asks follow-up questions and explores trade-offs without executing tools. Read-only tools only. |
 
-> **Note:** Autonomous mode shows a confirmation dialog before enabling, since it bypasses all approval prompts.
+> **Note:** Autonomous mode shows a confirmation dialog before enabling. It is
+> not a replacement for the access selector: choose **Full access** explicitly
+> when a trusted task needs that profile, and remember that export, location,
+> hard-guardrail, administrator, and explicit-deny boundaries still apply.
 
 ### Chat Mode
 
@@ -422,7 +431,7 @@ Side Chat is the right-side companion conversation for an active running session
 - **Hidden parent context**: the side task can inherit read-only parent transcript/runtime context for answering questions without exposing copied events in the panel
 - **Fresh status answers**: status/progress questions receive a live parent-status snapshot for that turn, including current parent task state, active runtime state, timeline/checklist information, recent parent events, and result/error summaries when available
 - **Non-steering boundary**: side questions do not modify parent instructions, approve tools, cancel work, or change the active queue
-- **Read-only chat execution**: side tasks run with chat execution mode, shell access off, worktree creation off, autonomous mode off, and tools denied
+- **Read-only chat execution**: side tasks run with chat execution mode, command tools disabled, worktree creation off, autonomous mode off, and tools denied
 - **Markdown rendering**: side answers render Markdown, including inline code, lists, and fenced code blocks
 
 See [Side Chat](side-chat.md) for the user contract and implementation landmarks.
@@ -1162,7 +1171,7 @@ When disabled, CoWork does not render those cards and skips their home-screen da
 | **Dangerous Command Blocking** | Enabled | On/Off + custom |
 | **Auto-Approve Trusted Commands** | Disabled | On/Off + patterns |
 | **File Size Limit** | 50 MB | 1 - 500 MB |
-| **Domain Allowlist** | Disabled | On/Off + domains |
+| **Domain Rules / Allowlist** | Profile-controlled | Legacy On/Off + domains and named-profile rules |
 
 ---
 
@@ -1662,7 +1671,7 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 - Run standalone scheduled tasks from Settings, or use task view `... > Add automation...` to create a routine that compiles to a scheduled task when it has a schedule trigger
 - Task-sourced scheduled jobs preserve a source task title, task ID, and `cowork://tasks/<taskId>` deeplink in the compiled prompt/description
 - Target modes: create a new task for each run or continue an existing task thread with a scheduled follow-up
-- Run mode presets: `Chat` for no-shell unattended work, `Local` for shell-enabled workspace work; worktree automation is forced to new-task execution instead of continuing a thread
+- Run mode presets: `Chat` for no-command-tool unattended work, `Local` for work governed by the selected access profile; worktree automation is forced to new-task execution instead of continuing a thread
 - Channel delivery to any of the 17 channels through the shared gateway delivery path, with idempotency, formatting, chunking, and outbox retry behavior aligned with normal chat replies
 - Conditional delivery (`deliverOnlyIfResult`)
 - Template variables: `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`

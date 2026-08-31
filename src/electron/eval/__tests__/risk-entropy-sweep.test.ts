@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  deriveEntropySweepDecision,
-  resolveEntropySweepPolicy,
-} from "../risk";
+import { deriveEntropySweepDecision, resolveEntropySweepPolicy } from "../risk";
 
 describe("entropy sweep policy", () => {
   it("resolveEntropySweepPolicy honors explicit value", () => {

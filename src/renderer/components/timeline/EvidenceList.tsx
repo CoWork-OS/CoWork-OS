@@ -11,11 +11,15 @@ function FileEvidenceRow({ item }: { item: Extract<TimelineEvidence, { type: "fi
     edit: "edited",
     delete: "deleted",
   };
-  const label = item.operation ? opLabel[item.operation] ?? item.operation : "accessed";
+  const label = item.operation ? (opLabel[item.operation] ?? item.operation) : "accessed";
   return (
     <div className="evidence-row evidence-file">
-      <span className="evidence-op-badge" data-op={item.operation ?? "read"}>{label}</span>
-      <span className="evidence-path" title={item.path}>{item.path}</span>
+      <span className="evidence-op-badge" data-op={item.operation ?? "read"}>
+        {label}
+      </span>
+      <span className="evidence-path" title={item.path}>
+        {item.path}
+      </span>
       {item.lines && <span className="evidence-lines">{item.lines}</span>}
     </div>
   );
@@ -26,9 +30,7 @@ function CommandEvidenceRow({ item }: { item: Extract<TimelineEvidence, { type: 
     <div className="evidence-row evidence-command">
       <span className="evidence-label">{item.label}</span>
       <code className="evidence-code">{item.command}</code>
-      {item.output && (
-        <pre className="evidence-output">{item.output.slice(0, 300)}</pre>
-      )}
+      {item.output && <pre className="evidence-output">{item.output.slice(0, 300)}</pre>}
     </div>
   );
 }
@@ -46,7 +48,9 @@ function ArtifactEvidenceRow({ item }: { item: Extract<TimelineEvidence, { type:
   return (
     <div className="evidence-row evidence-artifact">
       <span className="evidence-label">{item.label}</span>
-      <span className="evidence-path" title={item.path}>{item.path}</span>
+      <span className="evidence-path" title={item.path}>
+        {item.path}
+      </span>
     </div>
   );
 }
@@ -54,7 +58,9 @@ function ArtifactEvidenceRow({ item }: { item: Extract<TimelineEvidence, { type:
 function ApprovalEvidenceRow({ item }: { item: Extract<TimelineEvidence, { type: "approval" }> }) {
   return (
     <div className="evidence-row evidence-approval">
-      <span className={`evidence-risk-badge risk-${item.risk ?? "low"}`}>{item.risk ?? "low"} risk</span>
+      <span className={`evidence-risk-badge risk-${item.risk ?? "low"}`}>
+        {item.risk ?? "low"} risk
+      </span>
       <span className="evidence-label">{item.label}</span>
     </div>
   );
@@ -64,12 +70,18 @@ function UrlEvidenceRow({ item }: { item: Extract<TimelineEvidence, { type: "url
   return (
     <div className="evidence-row evidence-url">
       <span className="evidence-label">{item.label}</span>
-      <span className="evidence-url-value" title={item.url}>{item.url}</span>
+      <span className="evidence-url-value" title={item.url}>
+        {item.url}
+      </span>
     </div>
   );
 }
 
-function RuntimeLogEvidenceRow({ item }: { item: Extract<TimelineEvidence, { type: "runtime_log" }> }) {
+function RuntimeLogEvidenceRow({
+  item,
+}: {
+  item: Extract<TimelineEvidence, { type: "runtime_log" }>;
+}) {
   return (
     <div className="evidence-row evidence-command">
       <span className="evidence-label">{item.label}</span>

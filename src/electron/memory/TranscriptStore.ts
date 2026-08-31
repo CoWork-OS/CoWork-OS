@@ -26,11 +26,9 @@ export interface TranscriptSearchResult {
 
 type TranscriptDatabase = Pick<import("better-sqlite3").Database, "exec" | "prepare">;
 
-export type TranscriptCheckpointKind =
-  | "snapshot"
-  | "pre_compaction"
-  | "periodic"
-  | "completion";
+export type TranscriptReadGuard = (candidatePath: string) => boolean;
+
+export type TranscriptCheckpointKind = "snapshot" | "pre_compaction" | "periodic" | "completion";
 
 export interface TranscriptCheckpointStructuredSummary {
   source: "snapshot" | "compaction_summary" | "completion" | "fallback";
@@ -109,6 +107,19 @@ function taskSpanPath(workspacePath: string, taskId: string): string {
 
 function taskCheckpointPath(workspacePath: string, taskId: string): string {
   return path.join(checkpointsDir(workspacePath), `${taskId}.json`);
+}
+
+function isSafeTaskId(taskId: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(taskId);
+}
+
+function allowsRead(readGuard: TranscriptReadGuard | undefined, candidatePath: string): boolean {
+  if (!readGuard) return true;
+  try {
+    return readGuard(candidatePath) === true;
+  } catch {
+    return false;
+  }
 }
 
 function normalizeWorkspacePath(workspacePath: string): string {
@@ -223,15 +234,23 @@ export class TranscriptStore {
       timestamp: checkpoint.timestamp ?? Date.now(),
       resumeStrategy: checkpoint.resumeStrategy ?? "checkpoint",
     };
-    await fs.writeFile(taskCheckpointPath(workspacePath, taskId), JSON.stringify(payload, null, 2), "utf8");
+    await fs.writeFile(
+      taskCheckpointPath(workspacePath, taskId),
+      JSON.stringify(payload, null, 2),
+      "utf8",
+    );
   }
 
   static async loadCheckpoint(
     workspacePath: string,
     taskId: string,
+    readGuard?: TranscriptReadGuard,
   ): Promise<TranscriptCheckpointPayload | null> {
+    if (!isSafeTaskId(taskId)) return null;
+    const checkpointPath = taskCheckpointPath(workspacePath, taskId);
+    if (!allowsRead(readGuard, checkpointPath)) return null;
     try {
-      const raw = await fs.readFile(taskCheckpointPath(workspacePath, taskId), "utf8");
+      const raw = await fs.readFile(checkpointPath, "utf8");
       const parsed = JSON.parse(raw) as TranscriptCheckpointPayload;
       return parsed && typeof parsed === "object" ? parsed : null;
     } catch {
@@ -242,9 +261,13 @@ export class TranscriptStore {
   static loadCheckpointSync(
     workspacePath: string,
     taskId: string,
+    readGuard?: TranscriptReadGuard,
   ): TranscriptCheckpointPayload | null {
+    if (!isSafeTaskId(taskId)) return null;
+    const checkpointPath = taskCheckpointPath(workspacePath, taskId);
+    if (!allowsRead(readGuard, checkpointPath)) return null;
     try {
-      const raw = fsSync.readFileSync(taskCheckpointPath(workspacePath, taskId), "utf8");
+      const raw = fsSync.readFileSync(checkpointPath, "utf8");
       const parsed = JSON.parse(raw) as TranscriptCheckpointPayload;
       return parsed && typeof parsed === "object" ? parsed : null;
     } catch {
@@ -256,9 +279,13 @@ export class TranscriptStore {
     workspacePath: string,
     taskId: string,
     limit = 40,
+    readGuard?: TranscriptReadGuard,
   ): Promise<TranscriptSpanRecord[]> {
+    if (!isSafeTaskId(taskId)) return [];
+    const spanPath = taskSpanPath(workspacePath, taskId);
+    if (!allowsRead(readGuard, spanPath)) return [];
     try {
-      const raw = await fs.readFile(taskSpanPath(workspacePath, taskId), "utf8");
+      const raw = await fs.readFile(spanPath, "utf8");
       return raw
         .split("\n")
         .filter(Boolean)
@@ -275,22 +302,29 @@ export class TranscriptStore {
     query: string;
     taskId?: string;
     limit?: number;
+    readGuard?: TranscriptReadGuard;
   }): Promise<TranscriptSearchResult[]> {
     const query = params.query.trim().toLowerCase();
     if (!query) return [];
+    if (params.taskId && !isSafeTaskId(params.taskId)) return [];
 
     const limit = Math.max(1, params.limit ?? 10);
     const indexedResults = this.searchIndexedSpans({
       workspacePath: params.workspacePath,
       query,
       taskId: params.taskId,
-      limit,
+      limit: params.readGuard ? Math.min(limit * 4, 120) : limit,
+      readGuard: params.readGuard,
     });
     if (indexedResults.length >= limit) {
       return indexedResults.slice(0, limit);
     }
 
     const results: TranscriptSearchResult[] = [];
+    const spansDirectory = spansDir(params.workspacePath);
+    if (!params.taskId && !allowsRead(params.readGuard, spansDirectory)) {
+      return indexedResults.slice(0, limit);
+    }
     const files = params.taskId
       ? [taskSpanPath(params.workspacePath, params.taskId)]
       : (await fs.readdir(spansDir(params.workspacePath)).catch(() => []))
@@ -298,6 +332,7 @@ export class TranscriptStore {
           .map((name) => path.join(spansDir(params.workspacePath), name));
 
     for (const file of files) {
+      if (!allowsRead(params.readGuard, file)) continue;
       const raw = await fs.readFile(file, "utf8").catch(() => "");
       if (!raw) continue;
       const lines = raw.split("\n").filter(Boolean);
@@ -323,7 +358,8 @@ export class TranscriptStore {
         return (
           all.findIndex(
             (other) =>
-              `${other.taskId}:${other.eventId || ""}:${other.seq ?? ""}:${other.timestamp}:${other.rawLine}` === key,
+              `${other.taskId}:${other.eventId || ""}:${other.seq ?? ""}:${other.timestamp}:${other.rawLine}` ===
+              key,
           ) === index
         );
       })
@@ -428,6 +464,7 @@ export class TranscriptStore {
     query: string;
     taskId?: string;
     limit: number;
+    readGuard?: TranscriptReadGuard;
   }): TranscriptSearchResult[] {
     const db = this.getDatabase();
     if (!db || !this.ensureDbSchema(db)) return [];
@@ -445,8 +482,9 @@ export class TranscriptStore {
 
     try {
       const rows =
-        db.prepare<unknown[], Record<string, unknown>>(
-          `SELECT s.task_id, s.timestamp, s.type, s.payload_json, s.event_id, s.seq, s.raw_line
+        db
+          .prepare<unknown[], Record<string, unknown>>(
+            `SELECT s.task_id, s.timestamp, s.type, s.payload_json, s.event_id, s.seq, s.raw_line
            FROM transcript_spans_fts f
            JOIN transcript_spans s ON s.rowid = f.rowid
            WHERE transcript_spans_fts MATCH ?
@@ -454,7 +492,8 @@ export class TranscriptStore {
              ${whereTask}
            ORDER BY bm25(transcript_spans_fts), s.timestamp DESC
            LIMIT ?`,
-        ).all?.(...values) || [];
+          )
+          .all?.(...values) || [];
 
       return rows
         .map((row) => {
@@ -471,12 +510,20 @@ export class TranscriptStore {
             timestamp: Number(item.timestamp || 0),
             type: String(item.type || ""),
             payload,
-            ...(typeof item.event_id === "string" && item.event_id ? { eventId: item.event_id } : {}),
+            ...(typeof item.event_id === "string" && item.event_id
+              ? { eventId: item.event_id }
+              : {}),
             ...(typeof item.seq === "number" ? { seq: item.seq } : {}),
             rawLine,
           };
         })
-        .filter((entry) => entry.taskId && entry.type && entry.rawLine);
+        .filter(
+          (entry) =>
+            entry.taskId &&
+            entry.type &&
+            entry.rawLine &&
+            allowsRead(params.readGuard, taskSpanPath(params.workspacePath, entry.taskId)),
+        );
     } catch {
       return [];
     }

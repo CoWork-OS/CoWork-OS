@@ -2,7 +2,12 @@ import { chromium, Browser, Page, BrowserContext, Locator } from "playwright";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { Workspace } from "../../../shared/types";
-import { GuardrailManager } from "../../guardrails/guardrail-manager";
+import { normalizeBrowserUrl } from "../../browser/browser-session-manager";
+import { evaluateNetworkPolicy } from "../../security/network-policy";
+import {
+  assertWorkspaceFilesystemAccess,
+  type WorkspaceFilesystemAccessOptions,
+} from "../../security/access-profile-paths";
 
 export interface BrowserOptions {
   headless?: boolean;
@@ -112,6 +117,7 @@ export class BrowserService {
   private workspace: Workspace;
   private options: BrowserOptions;
   private isAttached = false;
+  private configuredPages = new WeakSet<object>();
 
   constructor(workspace: Workspace, options: BrowserOptions = {}) {
     this.workspace = workspace;
@@ -130,6 +136,95 @@ export class BrowserService {
     const normalized = Number(timeoutMs);
     if (!Number.isFinite(normalized) || normalized <= 0) return fallback;
     return Math.round(normalized);
+  }
+
+  private assertNetworkUrlAllowed(rawUrl: string, toolName = "browser_navigate"): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      throw new Error(`Invalid browser URL: "${rawUrl}"`);
+    }
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(
+        `Browser network policy only permits http:// and https:// targets, not ${parsed.protocol}`,
+      );
+    }
+
+    const decision = evaluateNetworkPolicy({
+      url: parsed.toString(),
+      toolName,
+      networkEnabled: this.workspace.permissions?.network,
+      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions?.accessDomainRules,
+    });
+    if (decision.action !== "allow") {
+      throw new Error(`Network access denied for "${parsed.toString()}": ${decision.reason}`);
+    }
+  }
+
+  private assertPageUrlAllowed(url: string): void {
+    if (!url || url === "about:blank") return;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error(`Invalid current browser URL: "${url}"`);
+    }
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      this.assertNetworkUrlAllowed(url, "browser_session");
+      return;
+    }
+    if (parsed.protocol === "data:" || parsed.protocol === "blob:") return;
+    throw new Error(`Browser access denied for unsupported page scheme ${parsed.protocol}`);
+  }
+
+  private async configurePage(page: Page): Promise<void> {
+    if (this.configuredPages.has(page as object)) return;
+    this.configuredPages.add(page as object);
+
+    // Some unit-test adapters and older Playwright-compatible clients do not
+    // expose request interception. Navigation is still checked below; avoid
+    // turning that compatibility gap into a runtime crash.
+    if (typeof (page as Any).route !== "function") return;
+
+    await page.route("**/*", async (route) => {
+      const requestUrl = route.request().url();
+      let parsed: URL;
+      try {
+        parsed = new URL(requestUrl);
+      } catch {
+        await route.abort("blockedbyclient").catch(() => {});
+        return;
+      }
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        try {
+          this.assertNetworkUrlAllowed(requestUrl, "browser_request");
+        } catch {
+          await route.abort("blockedbyclient").catch(() => {});
+          return;
+        }
+      } else if (
+        parsed.protocol !== "data:" &&
+        parsed.protocol !== "blob:" &&
+        parsed.protocol !== "about:"
+      ) {
+        await route.abort("blockedbyclient").catch(() => {});
+        return;
+      }
+      await route.continue().catch(() => {});
+    });
+  }
+
+  private configureContext(context: BrowserContext): void {
+    if (typeof (context as Any).on !== "function") return;
+    context.on("page", (page: Page) => {
+      void this.configurePage(page).catch(() => {
+        // Navigation and current-page checks remain authoritative if request
+        // interception cannot be installed on a newly opened page.
+      });
+    });
   }
 
   private isRetryableBrowserError(error: unknown): boolean {
@@ -284,8 +379,11 @@ export class BrowserService {
         browser = await chromium.connectOverCDP(endpoint);
         const contexts = browser.contexts();
         context = contexts[0] ?? (await browser.newContext({ viewport: this.options.viewport }));
+        this.configureContext(context);
         const page = context.pages()[0] ?? (await context.newPage());
         page.setDefaultTimeout(this.options.timeout!);
+        await this.configurePage(page);
+        this.assertPageUrlAllowed(page.url());
         this.browser = browser;
         this.context = context;
         this.page = page;
@@ -326,8 +424,10 @@ export class BrowserService {
         });
       }
 
+      this.configureContext(context);
       const page = context.pages()[0] ?? (await context.newPage());
       page.setDefaultTimeout(this.options.timeout!);
+      await this.configurePage(page);
 
       // Only assign to instance variables after all operations succeed
       this.browser = browser;
@@ -365,33 +465,24 @@ export class BrowserService {
     url: string,
     waitUntil: "load" | "domcontentloaded" | "networkidle" = "load",
   ): Promise<NavigateResult> {
-    // Check if domain is allowed by guardrails
-    if (!GuardrailManager.isDomainAllowed(url)) {
-      const settings = GuardrailManager.loadSettings();
-      const allowedDomainsStr =
-        settings.allowedDomains.length > 0
-          ? settings.allowedDomains.join(", ")
-          : "(none configured)";
-      throw new Error(
-        `Domain not allowed: "${url}"\n` +
-          `Allowed domains: ${allowedDomainsStr}\n` +
-          `You can modify allowed domains in Settings > Guardrails.`,
-      );
-    }
+    const normalizedUrl = normalizeBrowserUrl(url);
+    if (!normalizedUrl) throw new Error("url is required");
+    this.assertNetworkUrlAllowed(normalizedUrl);
 
     await this.ensurePage();
 
-    const response = await this.page!.goto(url, { waitUntil });
+    const response = await this.page!.goto(normalizedUrl, { waitUntil });
     const status = response?.status() ?? null;
 
     // Validate HTTP status code - warn on client/server errors
     if (status && status >= 400) {
       const statusMessage = status >= 500 ? `Server error (${status})` : `Client error (${status})`;
-      console.warn(`[BrowserService] Navigation to ${url} returned ${statusMessage}`);
+      console.warn(`[BrowserService] Navigation to ${normalizedUrl} returned ${statusMessage}`);
     }
 
     // Auto-dismiss cookie consent popups
     await this.dismissConsentPopups();
+    this.assertPageUrlAllowed(this.page!.url());
 
     return {
       url: this.page!.url(),
@@ -557,11 +648,21 @@ export class BrowserService {
   /**
    * Take a screenshot
    */
-  async screenshot(filename?: string, fullPage: boolean = false): Promise<ScreenshotResult> {
+  async screenshot(
+    filename?: string,
+    fullPage: boolean = false,
+    accessOptions: WorkspaceFilesystemAccessOptions = {},
+  ): Promise<ScreenshotResult> {
     await this.ensurePage();
 
     const screenshotName = filename || `screenshot-${Date.now()}.png`;
-    const screenshotPath = path.join(this.workspace.path, screenshotName);
+    const screenshotPath = assertWorkspaceFilesystemAccess(
+      this.workspace,
+      screenshotName,
+      "write",
+      "screenshot path",
+      accessOptions,
+    );
 
     await this.page!.screenshot({
       path: screenshotPath,
@@ -575,7 +676,7 @@ export class BrowserService {
       : (viewport?.height ?? this.options.viewport!.height);
 
     return {
-      path: screenshotName,
+      path: path.relative(this.workspace.path, screenshotPath) || path.basename(screenshotPath),
       width: viewport?.width ?? this.options.viewport!.width,
       height: pageHeight,
     };
@@ -594,6 +695,7 @@ export class BrowserService {
    */
   async getContent(): Promise<PageContent> {
     await this.ensurePage();
+    this.assertPageUrlAllowed(this.page!.url());
 
     const url = this.page!.url();
     const title = await this.page!.title();
@@ -875,7 +977,7 @@ export class BrowserService {
         await this.page!.uncheck(selector);
       }
       return { success: true, selector, checked };
-    } catch  {
+    } catch {
       return { success: false, selector, checked: false };
     }
   }
@@ -910,7 +1012,7 @@ export class BrowserService {
 
       await this.page!.evaluate(script);
       return { success: true };
-    } catch  {
+    } catch {
       return { success: false };
     }
   }
@@ -920,7 +1022,9 @@ export class BrowserService {
    */
   async goBack(): Promise<NavigateResult> {
     await this.ensurePage();
+    this.assertPageUrlAllowed(this.page!.url());
     await this.page!.goBack();
+    this.assertPageUrlAllowed(this.page!.url());
 
     return {
       url: this.page!.url(),
@@ -934,7 +1038,9 @@ export class BrowserService {
    */
   async goForward(): Promise<NavigateResult> {
     await this.ensurePage();
+    this.assertPageUrlAllowed(this.page!.url());
     await this.page!.goForward();
+    this.assertPageUrlAllowed(this.page!.url());
 
     return {
       url: this.page!.url(),
@@ -948,7 +1054,9 @@ export class BrowserService {
    */
   async reload(): Promise<NavigateResult> {
     await this.ensurePage();
+    this.assertPageUrlAllowed(this.page!.url());
     const response = await this.page!.reload();
+    this.assertPageUrlAllowed(this.page!.url());
 
     return {
       url: this.page!.url(),
@@ -968,15 +1076,24 @@ export class BrowserService {
   /**
    * Save page as PDF
    */
-  async savePdf(filename?: string): Promise<{ path: string }> {
+  async savePdf(
+    filename?: string,
+    accessOptions: WorkspaceFilesystemAccessOptions = {},
+  ): Promise<{ path: string }> {
     await this.ensurePage();
 
     const pdfName = filename || `page-${Date.now()}.pdf`;
-    const pdfPath = path.join(this.workspace.path, pdfName);
+    const pdfPath = assertWorkspaceFilesystemAccess(
+      this.workspace,
+      pdfName,
+      "write",
+      "PDF path",
+      accessOptions,
+    );
 
     await this.page!.pdf({ path: pdfPath, format: "A4" });
 
-    return { path: pdfName };
+    return { path: path.relative(this.workspace.path, pdfPath) || path.basename(pdfPath) };
   }
 
   /**
@@ -1029,6 +1146,7 @@ export class BrowserService {
     if (!this.page) {
       await this.init();
     }
+    this.assertPageUrlAllowed(this.page?.url() || "");
   }
 }
 

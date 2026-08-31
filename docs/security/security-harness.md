@@ -30,6 +30,7 @@ Useful flags:
 The prepare stage only scans changed files that touch high-risk boundaries:
 
 - tool policy and security manager code
+- access-profile resolution, path evaluation, and permission-settings code
 - agent tools and runtime policy code
 - sandbox and process execution code
 - Browser Workbench automation surfaces
@@ -68,6 +69,11 @@ CI and local development can run without needing an app profile.
 
 The harness is not part of the ordinary task verifier path. It does not alter `verified` mode,
 agent step completion, task-list verification, approval policy, or final-answer gates.
+
+When access-profile code changes, pair the harness with the focused profile tests from
+[Access Profiles](../access-profiles.md#implementation-map). The harness can identify a
+changed high-risk boundary; it does not replace tests for profile inheritance, stale-profile
+fail-closed behavior, path canonicalization, or backend representability.
 
 ## Eval Coverage
 

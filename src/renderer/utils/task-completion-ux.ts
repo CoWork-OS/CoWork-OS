@@ -7,7 +7,9 @@ function normalizePathForCompare(raw: string): string {
 }
 
 /** Get all output paths from a summary (created + modifiedFallback) */
-export function getAllOutputPathsFromSummary(summary: TaskOutputSummary | null | undefined): string[] {
+export function getAllOutputPathsFromSummary(
+  summary: TaskOutputSummary | null | undefined,
+): string[] {
   if (!summary) return [];
   const created = Array.isArray(summary.created) ? summary.created : [];
   const modified = Array.isArray(summary.modifiedFallback) ? summary.modifiedFallback : [];
@@ -42,10 +44,16 @@ export function shouldShowPersistentNeedsUserActionBanner(
     | undefined,
 ): boolean {
   if (payload?.terminalStatus !== "needs_user_action") return false;
-  if (Array.isArray(payload.pendingChecklist) && payload.pendingChecklist.some((item) => typeof item === "string")) {
+  if (
+    Array.isArray(payload.pendingChecklist) &&
+    payload.pendingChecklist.some((item) => typeof item === "string")
+  ) {
     return true;
   }
-  if (typeof payload.verificationMessage === "string" && payload.verificationMessage.trim().length > 0) {
+  if (
+    typeof payload.verificationMessage === "string" &&
+    payload.verificationMessage.trim().length > 0
+  ) {
     return true;
   }
   return payload.verificationOutcome === "pending_user_action";
@@ -126,18 +134,20 @@ export function buildCompletionOutputMessage(summary: TaskOutputSummary): string
   }
   if (primaryOutputName) {
     const more = summary.outputCount - 1;
-    return more === 1
-      ? `${primaryOutputName} + 1 more`
-      : `${primaryOutputName} + ${more} more`;
+    return more === 1 ? `${primaryOutputName} + 1 more` : `${primaryOutputName} + ${more} more`;
   }
   return `${summary.outputCount} files created`;
 }
 
-export function shouldTrackUnseenCompletion(context: Pick<CompletionViewContext, "isMainView" | "isSelectedTask">): boolean {
+export function shouldTrackUnseenCompletion(
+  context: Pick<CompletionViewContext, "isMainView" | "isSelectedTask">,
+): boolean {
   return !(context.isMainView && context.isSelectedTask);
 }
 
-export function decideCompletionPanelBehavior(context: CompletionViewContext): CompletionPanelDecision {
+export function decideCompletionPanelBehavior(
+  context: CompletionViewContext,
+): CompletionPanelDecision {
   if (context.isMainView && context.isSelectedTask && context.panelCollapsed) {
     return { autoOpenPanel: true, markUnseenOutput: false };
   }
@@ -155,7 +165,10 @@ export function removeTaskId(taskIds: string[], taskId: string): string[] {
   return taskIds.filter((id) => id !== taskId);
 }
 
-export function shouldClearUnseenOutputBadges(isMainView: boolean, rightPanelCollapsed: boolean): boolean {
+export function shouldClearUnseenOutputBadges(
+  isMainView: boolean,
+  rightPanelCollapsed: boolean,
+): boolean {
   return isMainView && !rightPanelCollapsed;
 }
 
@@ -220,16 +233,19 @@ export function buildTaskCompletionToast(options: {
   const isNeedsUserAction =
     terminalStatus === "needs_user_action" || terminalStatus === "awaiting_approval";
   const isWarningCompletion =
-    isNeedsUserAction || terminalStatus === "partial_success" || terminalStatus === "resume_available";
-  const title = terminalStatus === "awaiting_approval"
-    ? "Task waiting for approval"
-    : terminalStatus === "resume_available"
-      ? "Task paused - resume available"
-      : isNeedsUserAction
-    ? "Task complete - action required"
-    : isWarningCompletion
-      ? "Task complete (warnings)"
-      : "Task complete";
+    isNeedsUserAction ||
+    terminalStatus === "partial_success" ||
+    terminalStatus === "resume_available";
+  const title =
+    terminalStatus === "awaiting_approval"
+      ? "Task waiting for approval"
+      : terminalStatus === "resume_available"
+        ? "Task paused - resume available"
+        : isNeedsUserAction
+          ? "Task complete - action required"
+          : isWarningCompletion
+            ? "Task complete (warnings)"
+            : "Task complete";
   const toastType: ToastNotification["type"] = isWarningCompletion ? "warning" : "success";
 
   if (hasTaskOutputs(outputSummary)) {

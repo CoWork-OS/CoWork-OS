@@ -361,7 +361,9 @@ export function BrowserWorkbenchView({
   const [activeTabId, setActiveTabId] = useState("active");
   const [isLoading, setIsLoading] = useState(false);
   const [webviewSize, setWebviewSize] = useState<{ width: number; height: number } | null>(null);
-  const [controlledViewport, setControlledViewport] = useState<BrowserViewportOverride | null>(null);
+  const [controlledViewport, setControlledViewport] = useState<BrowserViewportOverride | null>(
+    null,
+  );
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [toolbarNotice, setToolbarNotice] = useState("");
@@ -371,8 +373,11 @@ export function BrowserWorkbenchView({
   const [annotationSaving, setAnnotationSaving] = useState(false);
   const [annotationError, setAnnotationError] = useState("");
   const [liveAnnotationMode, setLiveAnnotationMode] = useState(false);
-  const [liveAnnotationHover, setLiveAnnotationHover] = useState<BrowserAnnotationTargetRef | null>(null);
-  const [liveAnnotationTarget, setLiveAnnotationTarget] = useState<BrowserAnnotationTargetRef | null>(null);
+  const [liveAnnotationHover, setLiveAnnotationHover] = useState<BrowserAnnotationTargetRef | null>(
+    null,
+  );
+  const [liveAnnotationTarget, setLiveAnnotationTarget] =
+    useState<BrowserAnnotationTargetRef | null>(null);
   const [liveAnnotationText, setLiveAnnotationText] = useState("");
   const [liveAnnotationSaving, setLiveAnnotationSaving] = useState(false);
   const [liveAnnotationError, setLiveAnnotationError] = useState("");
@@ -399,7 +404,8 @@ export function BrowserWorkbenchView({
   );
   const displayTitle = title || getDomain(activeUrl) || "Browser";
   const tabLabel = title || getDomain(activeUrl) || "about:blank";
-  const fullscreenLabel = mode === "fullscreen" ? "Exit full screen" : "Open browser workbench in full screen";
+  const fullscreenLabel =
+    mode === "fullscreen" ? "Exit full screen" : "Open browser workbench in full screen";
   const webviewKey = `${partition}:${activeTabId}`;
   const visibleWebviewSize =
     activeUrl && viewportSize && viewportSize.width > 0 && viewportSize.height > 0
@@ -411,7 +417,7 @@ export function BrowserWorkbenchView({
   const voiceInput = useVoiceInput({
     onTranscript: (text) => {
       setVoiceNotice("");
-      setMessage((current) => current ? `${current} ${text}` : text);
+      setMessage((current) => (current ? `${current} ${text}` : text));
     },
     onError: (nextMessage) => setVoiceNotice(nextMessage),
     onNotConfigured: () => {
@@ -436,9 +442,7 @@ export function BrowserWorkbenchView({
         const measuredHeight = Math.max(0, Math.floor(surface.clientHeight || rect.height));
         const availableHeight = Math.max(0, Math.floor(window.innerHeight - rect.top));
         const nextHeight =
-          measuredHeight > 360
-            ? measuredHeight
-            : Math.max(measuredHeight, availableHeight);
+          measuredHeight > 360 ? measuredHeight : Math.max(measuredHeight, availableHeight);
         setWebviewSize((current) => {
           if (current?.width === nextWidth && current.height === nextHeight) return current;
           return { width: nextWidth, height: nextHeight };
@@ -487,8 +491,7 @@ export function BrowserWorkbenchView({
     const webview = webviewRef.current;
     const webContentsId = getReadyWebContentsId(webview);
     if (typeof webContentsId !== "number") return;
-    const nextUrl =
-      typeof webview?.getURL === "function" ? webview.getURL() : activeUrlRef.current;
+    const nextUrl = typeof webview?.getURL === "function" ? webview.getURL() : activeUrlRef.current;
     const nextTitle =
       typeof webview?.getTitle === "function" ? webview.getTitle() : titleRef.current;
     void window.electronAPI.updateBrowserWorkbenchStatus?.({
@@ -506,8 +509,7 @@ export function BrowserWorkbenchView({
     const webContentsId = getReadyWebContentsId(webview);
     if (typeof webContentsId !== "number") return;
     registeredWebContentsIdRef.current = webContentsId;
-    const nextUrl =
-      typeof webview?.getURL === "function" ? webview.getURL() : activeUrlRef.current;
+    const nextUrl = typeof webview?.getURL === "function" ? webview.getURL() : activeUrlRef.current;
     const nextTitle =
       typeof webview?.getTitle === "function" ? webview.getTitle() : titleRef.current;
     void window.electronAPI.registerBrowserWorkbenchSession?.({
@@ -520,18 +522,21 @@ export function BrowserWorkbenchView({
     onStatusChangeRef.current?.({ url: nextUrl, title: nextTitle });
   }, [getReadyWebContentsId, sessionId, taskId]);
 
-  const updateActiveTab = useCallback((patch: Partial<BrowserWorkbenchTab>) => {
-    setTabs((current) =>
-      current.map((tab) =>
-        tab.id === activeTabId
-          ? {
-              ...tab,
-              ...patch,
-            }
-          : tab,
-      ),
-    );
-  }, [activeTabId]);
+  const updateActiveTab = useCallback(
+    (patch: Partial<BrowserWorkbenchTab>) => {
+      setTabs((current) =>
+        current.map((tab) =>
+          tab.id === activeTabId
+            ? {
+                ...tab,
+                ...patch,
+              }
+            : tab,
+        ),
+      );
+    },
+    [activeTabId],
+  );
 
   const openTab = useCallback((url = "") => {
     const id = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -554,40 +559,46 @@ export function BrowserWorkbenchView({
     titleRef.current = tab.title;
   }, []);
 
-  const closeTab = useCallback((tabId: string) => {
-    setTabs((current) => {
-      if (current.length <= 1) return current;
-      const next = current.filter((tab) => tab.id !== tabId);
-      if (tabId === activeTabId) {
-        const fallback = next[next.length - 1] || next[0];
-        if (fallback) {
-          setActiveTabId(fallback.id);
-          setUrlText(fallback.url);
-          setActiveUrl(fallback.url);
-          setTitle(fallback.title);
-          activeUrlRef.current = fallback.url;
-          titleRef.current = fallback.title;
+  const closeTab = useCallback(
+    (tabId: string) => {
+      setTabs((current) => {
+        if (current.length <= 1) return current;
+        const next = current.filter((tab) => tab.id !== tabId);
+        if (tabId === activeTabId) {
+          const fallback = next[next.length - 1] || next[0];
+          if (fallback) {
+            setActiveTabId(fallback.id);
+            setUrlText(fallback.url);
+            setActiveUrl(fallback.url);
+            setTitle(fallback.title);
+            activeUrlRef.current = fallback.url;
+            titleRef.current = fallback.title;
+          }
         }
-      }
-      return next;
-    });
-  }, [activeTabId]);
+        return next;
+      });
+    },
+    [activeTabId],
+  );
 
-  const applyWebviewBounds = useCallback((size = visibleWebviewSize) => {
-    const webview = webviewRef.current;
-    if (!webview || !size || size.width <= 0 || size.height <= 0) return;
-    const width = String(size.width);
-    const height = String(size.height);
-    webview.style.width = `${width}px`;
-    webview.style.height = `${height}px`;
-    webview.setAttribute("width", width);
-    webview.setAttribute("height", height);
-    webview.setAttribute("autosize", "true");
-    webview.setAttribute("minwidth", width);
-    webview.setAttribute("maxwidth", width);
-    webview.setAttribute("minheight", height);
-    webview.setAttribute("maxheight", height);
-  }, [visibleWebviewSize]);
+  const applyWebviewBounds = useCallback(
+    (size = visibleWebviewSize) => {
+      const webview = webviewRef.current;
+      if (!webview || !size || size.width <= 0 || size.height <= 0) return;
+      const width = String(size.width);
+      const height = String(size.height);
+      webview.style.width = `${width}px`;
+      webview.style.height = `${height}px`;
+      webview.setAttribute("width", width);
+      webview.setAttribute("height", height);
+      webview.setAttribute("autosize", "true");
+      webview.setAttribute("minwidth", width);
+      webview.setAttribute("maxwidth", width);
+      webview.setAttribute("minheight", height);
+      webview.setAttribute("maxheight", height);
+    },
+    [visibleWebviewSize],
+  );
 
   useEffect(() => {
     applyWebviewBounds();
@@ -645,9 +656,7 @@ export function BrowserWorkbenchView({
       setTitle("");
       updateActiveTab({ url: "", title: "" });
       setToolbarNotice(
-        reason === "clean-exit"
-          ? "Page closed"
-          : "Page crashed — retry or enter another URL",
+        reason === "clean-exit" ? "Page closed" : "Page crashed — retry or enter another URL",
       );
       onStatusChangeRef.current?.({ url: "", title: "" });
     };
@@ -705,19 +714,22 @@ export function BrowserWorkbenchView({
     webviewKey,
   ]);
 
-  const navigate = useCallback((nextUrl = urlText) => {
-    const normalized = normalizeUrl(nextUrl);
-    if (!normalized) {
-      setIsLoading(false);
-      setToolbarNotice("Only http:// and https:// URLs are supported");
-      return;
-    }
-    setToolbarNotice("");
-    activeUrlRef.current = normalized;
-    setUrlText(normalized);
-    setActiveUrl(normalized);
-    updateActiveTab({ url: normalized });
-  }, [updateActiveTab, urlText]);
+  const navigate = useCallback(
+    (nextUrl = urlText) => {
+      const normalized = normalizeUrl(nextUrl);
+      if (!normalized) {
+        setIsLoading(false);
+        setToolbarNotice("Only http:// and https:// URLs are supported");
+        return;
+      }
+      setToolbarNotice("");
+      activeUrlRef.current = normalized;
+      setUrlText(normalized);
+      setActiveUrl(normalized);
+      updateActiveTab({ url: normalized });
+    },
+    [updateActiveTab, urlText],
+  );
 
   const runWebviewCommand = useCallback((command: "goBack" | "goForward" | "reload") => {
     const webview = webviewRef.current;
@@ -792,25 +804,31 @@ export function BrowserWorkbenchView({
     };
   }, []);
 
-  const handleAnnotationPointerDown = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const canvas = event.currentTarget;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    annotationDrawingRef.current = true;
-    canvas.setPointerCapture?.(event.pointerId);
-    const point = getAnnotationPoint(event);
-    context.beginPath();
-    context.moveTo(point.x, point.y);
-  }, [getAnnotationPoint]);
+  const handleAnnotationPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      const canvas = event.currentTarget;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      annotationDrawingRef.current = true;
+      canvas.setPointerCapture?.(event.pointerId);
+      const point = getAnnotationPoint(event);
+      context.beginPath();
+      context.moveTo(point.x, point.y);
+    },
+    [getAnnotationPoint],
+  );
 
-  const handleAnnotationPointerMove = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!annotationDrawingRef.current) return;
-    const context = event.currentTarget.getContext("2d");
-    if (!context) return;
-    const point = getAnnotationPoint(event);
-    context.lineTo(point.x, point.y);
-    context.stroke();
-  }, [getAnnotationPoint]);
+  const handleAnnotationPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      if (!annotationDrawingRef.current) return;
+      const context = event.currentTarget.getContext("2d");
+      if (!context) return;
+      const point = getAnnotationPoint(event);
+      context.lineTo(point.x, point.y);
+      context.stroke();
+    },
+    [getAnnotationPoint],
+  );
 
   const stopAnnotationDrawing = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     annotationDrawingRef.current = false;
@@ -847,97 +865,106 @@ export function BrowserWorkbenchView({
     return output.toDataURL("image/png");
   }, [annotationDraft]);
 
-  const saveAnnotation = useCallback(async (sendToAgent: boolean) => {
-    if (!annotationDraft || !workspaceId || !workspacePath) {
-      setAnnotationError("Open a writable workspace to save an annotation.");
-      return;
-    }
-    setAnnotationSaving(true);
-    setAnnotationError("");
-    try {
-      const dataUrl = await createAnnotatedDataUrl();
-      const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
-      const imported = await window.electronAPI.importDataToWorkspace({
-        workspaceId,
-        files: [
-          {
-            name: `browser-annotation-${Date.now()}.png`,
-            data: base64,
-            mimeType: "image/png",
-          },
-        ],
-      });
-      const saved = imported?.[0];
-      if (!saved) throw new Error("Annotation could not be saved.");
-      const fullPath = `${workspacePath.replace(/\/$/, "")}/${saved.relativePath}`;
-      if (sendToAgent && onSendMessage) {
-        const note =
-          annotationMessage.trim() ||
-          `Please inspect this annotated browser screenshot from ${activeUrlRef.current || activeUrl || "the current page"}.`;
-        await onSendMessage(`${note}\n\nAttached files:\n- ${saved.fileName} (${saved.relativePath})`, [
-          {
-            filePath: fullPath,
-            mimeType: "image/png",
-            filename: saved.fileName,
-            sizeBytes: saved.size,
-          },
-        ]);
+  const saveAnnotation = useCallback(
+    async (sendToAgent: boolean) => {
+      if (!annotationDraft || !workspaceId || !workspacePath) {
+        setAnnotationError("Open a writable workspace to save an annotation.");
+        return;
       }
-      setAnnotationDraft(null);
-      setAnnotationMessage("");
-      setToolbarNotice(sendToAgent ? "Annotation sent" : "Annotation saved");
-    } catch (error) {
-      setAnnotationError(error instanceof Error ? error.message : "Annotation failed");
-    } finally {
-      setAnnotationSaving(false);
-    }
-  }, [
-    activeUrl,
-    annotationDraft,
-    annotationMessage,
-    createAnnotatedDataUrl,
-    onSendMessage,
-    workspaceId,
-    workspacePath,
-  ]);
-
-  const captureScreenshot = useCallback(async (mode: "screenshot" | "annotation") => {
-    if (!workspacePath) {
-      setToolbarNotice("Open a workspace to capture");
-      return;
-    }
-    const prefix = mode === "annotation" ? "browser-annotation-source" : "browser-screenshot";
-    setToolbarNotice(mode === "annotation" ? "Capturing..." : "Saving...");
-    const result = await window.electronAPI.captureBrowserWorkbenchScreenshot?.({
-      taskId,
-      sessionId,
-      workspacePath,
-      filename: `${prefix}-${Date.now()}.png`,
-      includeDataUrl: mode === "annotation",
-    });
-    if (result?.success) {
-      if (mode === "annotation") {
-        if (!result.dataUrl) {
-          setToolbarNotice("Capture failed");
-          return;
-        }
-        setAnnotationDraft({
-          dataUrl: result.dataUrl,
-          sourcePath: result.path,
-          fullPath: result.fullPath,
-          width: result.width || 1,
-          height: result.height || 1,
+      setAnnotationSaving(true);
+      setAnnotationError("");
+      try {
+        const dataUrl = await createAnnotatedDataUrl();
+        const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
+        const imported = await window.electronAPI.importDataToWorkspace({
+          workspaceId,
+          files: [
+            {
+              name: `browser-annotation-${Date.now()}.png`,
+              data: base64,
+              mimeType: "image/png",
+            },
+          ],
         });
+        const saved = imported?.[0];
+        if (!saved) throw new Error("Annotation could not be saved.");
+        const fullPath = `${workspacePath.replace(/\/$/, "")}/${saved.relativePath}`;
+        if (sendToAgent && onSendMessage) {
+          const note =
+            annotationMessage.trim() ||
+            `Please inspect this annotated browser screenshot from ${activeUrlRef.current || activeUrl || "the current page"}.`;
+          await onSendMessage(
+            `${note}\n\nAttached files:\n- ${saved.fileName} (${saved.relativePath})`,
+            [
+              {
+                filePath: fullPath,
+                mimeType: "image/png",
+                filename: saved.fileName,
+                sizeBytes: saved.size,
+              },
+            ],
+          );
+        }
+        setAnnotationDraft(null);
         setAnnotationMessage("");
-        setAnnotationError("");
-        setToolbarNotice("");
-      } else {
-        setToolbarNotice("Screenshot saved");
+        setToolbarNotice(sendToAgent ? "Annotation sent" : "Annotation saved");
+      } catch (error) {
+        setAnnotationError(error instanceof Error ? error.message : "Annotation failed");
+      } finally {
+        setAnnotationSaving(false);
       }
-    } else {
-      setToolbarNotice(result?.error || "Capture failed");
-    }
-  }, [sessionId, taskId, workspacePath]);
+    },
+    [
+      activeUrl,
+      annotationDraft,
+      annotationMessage,
+      createAnnotatedDataUrl,
+      onSendMessage,
+      workspaceId,
+      workspacePath,
+    ],
+  );
+
+  const captureScreenshot = useCallback(
+    async (mode: "screenshot" | "annotation") => {
+      if (!workspacePath) {
+        setToolbarNotice("Open a workspace to capture");
+        return;
+      }
+      const prefix = mode === "annotation" ? "browser-annotation-source" : "browser-screenshot";
+      setToolbarNotice(mode === "annotation" ? "Capturing..." : "Saving...");
+      const result = await window.electronAPI.captureBrowserWorkbenchScreenshot?.({
+        taskId,
+        sessionId,
+        workspacePath,
+        filename: `${prefix}-${Date.now()}.png`,
+        includeDataUrl: mode === "annotation",
+      });
+      if (result?.success) {
+        if (mode === "annotation") {
+          if (!result.dataUrl) {
+            setToolbarNotice("Capture failed");
+            return;
+          }
+          setAnnotationDraft({
+            dataUrl: result.dataUrl,
+            sourcePath: result.path,
+            fullPath: result.fullPath,
+            width: result.width || 1,
+            height: result.height || 1,
+          });
+          setAnnotationMessage("");
+          setAnnotationError("");
+          setToolbarNotice("");
+        } else {
+          setToolbarNotice("Screenshot saved");
+        }
+      } else {
+        setToolbarNotice(result?.error || "Capture failed");
+      }
+    },
+    [sessionId, taskId, workspacePath],
+  );
 
   const loadBrowserAnnotations = useCallback(async () => {
     if (!window.electronAPI.listAnnotations) return;
@@ -950,16 +977,22 @@ export function BrowserWorkbenchView({
       limit: 100,
     });
     const matchingAnnotations = annotations.filter((annotation) => {
-        const target = annotation.targetRef as BrowserAnnotationTargetRef;
-        return (
-          target.surfaceType === "browser" &&
-          (!currentUrlKey || getAnnotationUrlKey(target.url) === currentUrlKey)
-        );
-      });
-    if (!window.electronAPI.resolveBrowserWorkbenchAnnotationTargets || matchingAnnotations.length === 0) {
+      const target = annotation.targetRef as BrowserAnnotationTargetRef;
+      return (
+        target.surfaceType === "browser" &&
+        (!currentUrlKey || getAnnotationUrlKey(target.url) === currentUrlKey)
+      );
+    });
+    if (
+      !window.electronAPI.resolveBrowserWorkbenchAnnotationTargets ||
+      matchingAnnotations.length === 0
+    ) {
       setBrowserAnnotations(
         matchingAnnotations.filter((annotation) =>
-          annotationViewportMatches(annotation.targetRef as BrowserAnnotationTargetRef, visibleWebviewSize),
+          annotationViewportMatches(
+            annotation.targetRef as BrowserAnnotationTargetRef,
+            visibleWebviewSize,
+          ),
         ),
       );
       return;
@@ -967,7 +1000,9 @@ export function BrowserWorkbenchView({
     const resolved = await window.electronAPI.resolveBrowserWorkbenchAnnotationTargets({
       taskId,
       sessionId,
-      targets: matchingAnnotations.map((annotation) => annotation.targetRef as BrowserAnnotationTargetRef),
+      targets: matchingAnnotations.map(
+        (annotation) => annotation.targetRef as BrowserAnnotationTargetRef,
+      ),
     });
     const resolvedByIndex = new Map<number, BrowserAnnotationTargetResolveResult>(
       (resolved.targets || []).map((result) => [result.index, result]),
@@ -1033,54 +1068,60 @@ export function BrowserWorkbenchView({
     [activeUrl, controlledViewport, title, urlText, visibleWebviewSize],
   );
 
-  const inspectLiveAnnotationPoint = useCallback(async (
-    event: ReactPointerEvent<HTMLDivElement>,
-    force = false,
-  ): Promise<BrowserAnnotationTargetRef | null> => {
-    if (!liveAnnotationMode || liveAnnotationTarget) return null;
-    const now = Date.now();
-    if (!force && now - lastAnnotationInspectAtRef.current < 120) return liveAnnotationHover;
-    lastAnnotationInspectAtRef.current = now;
-    const requestId = liveAnnotationInspectRequestIdRef.current + 1;
-    liveAnnotationInspectRequestIdRef.current = requestId;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = clampNumber(event.clientX - rect.left, 0, rect.width);
-    const y = clampNumber(event.clientY - rect.top, 0, rect.height);
-    try {
-      const result = await window.electronAPI.inspectBrowserWorkbenchPoint?.({
-        taskId,
-        sessionId,
-        x,
-        y,
-      });
-      if (!result?.success || !result.target) return null;
-      const nextTarget = buildBrowserAnnotationTarget(result.target);
-      if (requestId !== liveAnnotationInspectRequestIdRef.current) return null;
-      setLiveAnnotationHover(nextTarget);
-      return nextTarget;
-    } catch (error) {
-      setLiveAnnotationError(error instanceof Error ? error.message : "Inspection failed.");
-      return null;
-    }
-  }, [
-    buildBrowserAnnotationTarget,
-    liveAnnotationHover,
-    liveAnnotationMode,
-    liveAnnotationTarget,
-    sessionId,
-    taskId,
-  ]);
+  const inspectLiveAnnotationPoint = useCallback(
+    async (
+      event: ReactPointerEvent<HTMLDivElement>,
+      force = false,
+    ): Promise<BrowserAnnotationTargetRef | null> => {
+      if (!liveAnnotationMode || liveAnnotationTarget) return null;
+      const now = Date.now();
+      if (!force && now - lastAnnotationInspectAtRef.current < 120) return liveAnnotationHover;
+      lastAnnotationInspectAtRef.current = now;
+      const requestId = liveAnnotationInspectRequestIdRef.current + 1;
+      liveAnnotationInspectRequestIdRef.current = requestId;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = clampNumber(event.clientX - rect.left, 0, rect.width);
+      const y = clampNumber(event.clientY - rect.top, 0, rect.height);
+      try {
+        const result = await window.electronAPI.inspectBrowserWorkbenchPoint?.({
+          taskId,
+          sessionId,
+          x,
+          y,
+        });
+        if (!result?.success || !result.target) return null;
+        const nextTarget = buildBrowserAnnotationTarget(result.target);
+        if (requestId !== liveAnnotationInspectRequestIdRef.current) return null;
+        setLiveAnnotationHover(nextTarget);
+        return nextTarget;
+      } catch (error) {
+        setLiveAnnotationError(error instanceof Error ? error.message : "Inspection failed.");
+        return null;
+      }
+    },
+    [
+      buildBrowserAnnotationTarget,
+      liveAnnotationHover,
+      liveAnnotationMode,
+      liveAnnotationTarget,
+      sessionId,
+      taskId,
+    ],
+  );
 
-  const selectLiveAnnotationTarget = useCallback(async (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!liveAnnotationMode || liveAnnotationTarget) return;
-    event.preventDefault();
-    const target = liveAnnotationHover || await inspectLiveAnnotationPoint(event, true);
-    if (!target) return;
-    setLiveAnnotationTarget(target);
-    setLiveAnnotationHover(null);
-    setLiveAnnotationText("");
-    setLiveAnnotationError("");
-  }, [inspectLiveAnnotationPoint, liveAnnotationHover, liveAnnotationMode, liveAnnotationTarget]);
+  const selectLiveAnnotationTarget = useCallback(
+    async (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!liveAnnotationMode || liveAnnotationTarget) return;
+      event.preventDefault();
+      const target = liveAnnotationHover || (await inspectLiveAnnotationPoint(event, true));
+      if (!target) return;
+      setLiveAnnotationTarget(target);
+      setLiveAnnotationHover(null);
+      setLiveAnnotationText("");
+      setLiveAnnotationError("");
+    },
+    [inspectLiveAnnotationPoint, liveAnnotationHover, liveAnnotationMode, liveAnnotationTarget],
+  );
 
   const cancelLiveAnnotationTarget = useCallback(() => {
     setLiveAnnotationTarget(null);
@@ -1089,63 +1130,66 @@ export function BrowserWorkbenchView({
     setLiveAnnotationError("");
   }, []);
 
-  const saveLiveBrowserAnnotation = useCallback(async (sendToAgent: boolean) => {
-    const body = liveAnnotationText.trim();
-    if (!liveAnnotationTarget || !body) {
-      setLiveAnnotationError("Add a note for this annotation.");
-      return;
-    }
-    if (!window.electronAPI.createAnnotation) {
-      setLiveAnnotationError("Annotations are not available in this build.");
-      return;
-    }
-    setLiveAnnotationSaving(true);
-    setLiveAnnotationError("");
-    try {
-      let screenshotPath: string | undefined;
-      if (workspacePath && window.electronAPI.captureBrowserWorkbenchScreenshot) {
-        const capture = await window.electronAPI.captureBrowserWorkbenchScreenshot({
-          taskId,
-          sessionId,
-          workspacePath,
-          filename: `browser-annotation-context-${Date.now()}.png`,
-          includeDataUrl: false,
-        });
-        if (capture?.success) {
-          screenshotPath = capture.fullPath || capture.path;
+  const saveLiveBrowserAnnotation = useCallback(
+    async (sendToAgent: boolean) => {
+      const body = liveAnnotationText.trim();
+      if (!liveAnnotationTarget || !body) {
+        setLiveAnnotationError("Add a note for this annotation.");
+        return;
+      }
+      if (!window.electronAPI.createAnnotation) {
+        setLiveAnnotationError("Annotations are not available in this build.");
+        return;
+      }
+      setLiveAnnotationSaving(true);
+      setLiveAnnotationError("");
+      try {
+        let screenshotPath: string | undefined;
+        if (workspacePath && window.electronAPI.captureBrowserWorkbenchScreenshot) {
+          const capture = await window.electronAPI.captureBrowserWorkbenchScreenshot({
+            taskId,
+            sessionId,
+            workspacePath,
+            filename: `browser-annotation-context-${Date.now()}.png`,
+            includeDataUrl: false,
+          });
+          if (capture?.success) {
+            screenshotPath = capture.fullPath || capture.path;
+          }
         }
+        const created = await window.electronAPI.createAnnotation({
+          taskId,
+          workspaceId,
+          surfaceType: "browser",
+          surfaceId: liveAnnotationTarget.url,
+          body,
+          targetRef: liveAnnotationTarget,
+          screenshotPath,
+        });
+        await loadBrowserAnnotations();
+        cancelLiveAnnotationTarget();
+        setToolbarNotice(sendToAgent ? "Annotation sent" : "Annotation saved");
+        if (sendToAgent && onSendMessage) {
+          await onSendMessage(`Address annotation ${created.id}: ${body}`);
+        }
+      } catch (error) {
+        setLiveAnnotationError(error instanceof Error ? error.message : "Annotation failed.");
+      } finally {
+        setLiveAnnotationSaving(false);
       }
-      const created = await window.electronAPI.createAnnotation({
-        taskId,
-        workspaceId,
-        surfaceType: "browser",
-        surfaceId: liveAnnotationTarget.url,
-        body,
-        targetRef: liveAnnotationTarget,
-        screenshotPath,
-      });
-      await loadBrowserAnnotations();
-      cancelLiveAnnotationTarget();
-      setToolbarNotice(sendToAgent ? "Annotation sent" : "Annotation saved");
-      if (sendToAgent && onSendMessage) {
-        await onSendMessage(`Address annotation ${created.id}: ${body}`);
-      }
-    } catch (error) {
-      setLiveAnnotationError(error instanceof Error ? error.message : "Annotation failed.");
-    } finally {
-      setLiveAnnotationSaving(false);
-    }
-  }, [
-    cancelLiveAnnotationTarget,
-    liveAnnotationTarget,
-    liveAnnotationText,
-    loadBrowserAnnotations,
-    onSendMessage,
-    sessionId,
-    taskId,
-    workspaceId,
-    workspacePath,
-  ]);
+    },
+    [
+      cancelLiveAnnotationTarget,
+      liveAnnotationTarget,
+      liveAnnotationText,
+      loadBrowserAnnotations,
+      onSendMessage,
+      sessionId,
+      taskId,
+      workspaceId,
+      workspacePath,
+    ],
+  );
 
   useEffect(() => {
     if (!toolbarNotice) return;
@@ -1193,7 +1237,7 @@ export function BrowserWorkbenchView({
     if (!browserCursor) return;
     const cursorAt = browserCursor.at;
     const timer = window.setTimeout(() => {
-      setBrowserCursor((current) => current?.at === cursorAt ? null : current);
+      setBrowserCursor((current) => (current?.at === cursorAt ? null : current));
     }, 2400);
     return () => window.clearTimeout(timer);
   }, [browserCursor]);
@@ -1211,37 +1255,40 @@ export function BrowserWorkbenchView({
     }
   }, [message, onSendMessage, sending]);
 
-  const askCurrentYouTubeVideo = useCallback(async (questionOverride?: string) => {
-    const question = (questionOverride || youtubeQuestion).trim();
-    const currentUrl = activeUrlRef.current || activeUrl || urlText;
-    if (!workspaceId) {
-      setYoutubeAskResult({ error: "Open a workspace first." });
-      return;
-    }
-    if (!currentUrl || !getYouTubeVideoId(currentUrl)) {
-      setYoutubeAskResult({ error: "Open a YouTube video first." });
-      return;
-    }
-    if (!question) {
-      setYoutubeAskResult({ error: "Ask a question first." });
-      return;
-    }
-    setYoutubeAskBusy(true);
-    setYoutubeAskResult(null);
-    try {
-      const result = await window.electronAPI.askYouTubeVideo?.({
-        workspaceId,
-        url: currentUrl,
-        question,
-        limit: 8,
-      });
-      setYoutubeAskResult(result || { error: "No result returned." });
-    } catch (error) {
-      setYoutubeAskResult({ error: error instanceof Error ? error.message : "Ask failed." });
-    } finally {
-      setYoutubeAskBusy(false);
-    }
-  }, [activeUrl, urlText, workspaceId, youtubeQuestion]);
+  const askCurrentYouTubeVideo = useCallback(
+    async (questionOverride?: string) => {
+      const question = (questionOverride || youtubeQuestion).trim();
+      const currentUrl = activeUrlRef.current || activeUrl || urlText;
+      if (!workspaceId) {
+        setYoutubeAskResult({ error: "Open a workspace first." });
+        return;
+      }
+      if (!currentUrl || !getYouTubeVideoId(currentUrl)) {
+        setYoutubeAskResult({ error: "Open a YouTube video first." });
+        return;
+      }
+      if (!question) {
+        setYoutubeAskResult({ error: "Ask a question first." });
+        return;
+      }
+      setYoutubeAskBusy(true);
+      setYoutubeAskResult(null);
+      try {
+        const result = await window.electronAPI.askYouTubeVideo?.({
+          workspaceId,
+          url: currentUrl,
+          question,
+          limit: 8,
+        });
+        setYoutubeAskResult(result || { error: "No result returned." });
+      } catch (error) {
+        setYoutubeAskResult({ error: error instanceof Error ? error.message : "Ask failed." });
+      } finally {
+        setYoutubeAskBusy(false);
+      }
+    },
+    [activeUrl, urlText, workspaceId, youtubeQuestion],
+  );
 
   const sendYouTubeAnswerToChat = useCallback(async () => {
     if (!onSendMessage || !youtubeAskResult?.answer) return;
@@ -1273,7 +1320,9 @@ export function BrowserWorkbenchView({
                 onClick={() => switchTab(tab)}
               >
                 <span className="browser-workbench-tab-icon" aria-hidden="true" />
-                <span className="browser-workbench-tab-label">{tab.id === activeTabId ? tabLabel : tab.title || getDomain(tab.url) || "New tab"}</span>
+                <span className="browser-workbench-tab-label">
+                  {tab.id === activeTabId ? tabLabel : tab.title || getDomain(tab.url) || "New tab"}
+                </span>
               </button>
               {tabs.length > 1 && (
                 <button
@@ -1327,14 +1376,41 @@ export function BrowserWorkbenchView({
       </header>
       <div className="browser-workbench-toolbar">
         <div className="browser-workbench-nav-controls">
-          <button type="button" className="browser-workbench-nav-btn" data-symbol="←" onClick={() => runWebviewCommand("goBack")} title="Back">
-            <span className="browser-workbench-glyph" aria-hidden="true">←</span>
+          <button
+            type="button"
+            className="browser-workbench-nav-btn"
+            data-symbol="←"
+            onClick={() => runWebviewCommand("goBack")}
+            title="Back"
+          >
+            <span className="browser-workbench-glyph" aria-hidden="true">
+              ←
+            </span>
           </button>
-          <button type="button" className="browser-workbench-nav-btn" data-symbol="→" onClick={() => runWebviewCommand("goForward")} title="Forward">
-            <span className="browser-workbench-glyph" aria-hidden="true">→</span>
+          <button
+            type="button"
+            className="browser-workbench-nav-btn"
+            data-symbol="→"
+            onClick={() => runWebviewCommand("goForward")}
+            title="Forward"
+          >
+            <span className="browser-workbench-glyph" aria-hidden="true">
+              →
+            </span>
           </button>
-          <button type="button" className="browser-workbench-nav-btn" data-symbol="↻" onClick={() => runWebviewCommand("reload")} title="Reload">
-            <span className={`browser-workbench-glyph ${isLoading ? "is-spinning" : ""}`} aria-hidden="true">↻</span>
+          <button
+            type="button"
+            className="browser-workbench-nav-btn"
+            data-symbol="↻"
+            onClick={() => runWebviewCommand("reload")}
+            title="Reload"
+          >
+            <span
+              className={`browser-workbench-glyph ${isLoading ? "is-spinning" : ""}`}
+              aria-hidden="true"
+            >
+              ↻
+            </span>
           </button>
         </div>
         <form
@@ -1396,7 +1472,9 @@ export function BrowserWorkbenchView({
               {activeUrl.startsWith("https://") ? "https" : "http"}
             </span>
           )}
-          {toolbarNotice && <span className="browser-workbench-toolbar-notice">{toolbarNotice}</span>}
+          {toolbarNotice && (
+            <span className="browser-workbench-toolbar-notice">{toolbarNotice}</span>
+          )}
           {activeIsYouTube && (
             <button
               type="button"
@@ -1405,7 +1483,12 @@ export function BrowserWorkbenchView({
               title="Ask video"
               aria-label="Ask video"
             >
-              <Search className="browser-workbench-lucide-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
+              <Search
+                className="browser-workbench-lucide-icon"
+                size={16}
+                strokeWidth={2.2}
+                aria-hidden="true"
+              />
             </button>
           )}
           <button
@@ -1415,7 +1498,12 @@ export function BrowserWorkbenchView({
             title="Open current page in external browser"
             aria-label="Open current page in external browser"
           >
-            <ExternalLink className="browser-workbench-lucide-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
+            <ExternalLink
+              className="browser-workbench-lucide-icon"
+              size={16}
+              strokeWidth={2.2}
+              aria-hidden="true"
+            />
           </button>
           <button
             type="button"
@@ -1424,7 +1512,12 @@ export function BrowserWorkbenchView({
             title="Snapshot overlay"
             aria-label="Snapshot overlay"
           >
-            <ScanLine className="browser-workbench-lucide-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
+            <ScanLine
+              className="browser-workbench-lucide-icon"
+              size={16}
+              strokeWidth={2.2}
+              aria-hidden="true"
+            />
           </button>
           <button
             type="button"
@@ -1433,7 +1526,12 @@ export function BrowserWorkbenchView({
             title="Diagnostics"
             aria-label="Diagnostics"
           >
-            <Activity className="browser-workbench-lucide-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
+            <Activity
+              className="browser-workbench-lucide-icon"
+              size={16}
+              strokeWidth={2.2}
+              aria-hidden="true"
+            />
           </button>
           <button
             type="button"
@@ -1442,7 +1540,12 @@ export function BrowserWorkbenchView({
             title="Take screenshot"
             aria-label="Take screenshot"
           >
-            <Camera className="browser-workbench-lucide-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
+            <Camera
+              className="browser-workbench-lucide-icon"
+              size={16}
+              strokeWidth={2.2}
+              aria-hidden="true"
+            />
           </button>
           <button
             type="button"
@@ -1455,7 +1558,12 @@ export function BrowserWorkbenchView({
             title="Annotate page element"
             aria-label="Annotate page element"
           >
-            <PencilLine className="browser-workbench-lucide-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
+            <PencilLine
+              className="browser-workbench-lucide-icon"
+              size={16}
+              strokeWidth={2.2}
+              aria-hidden="true"
+            />
           </button>
           <button
             type="button"
@@ -1464,7 +1572,12 @@ export function BrowserWorkbenchView({
             title="Annotate screenshot"
             aria-label="Annotate screenshot"
           >
-            <Plus className="browser-workbench-lucide-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
+            <Plus
+              className="browser-workbench-lucide-icon"
+              size={16}
+              strokeWidth={2.2}
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>
@@ -1665,7 +1778,9 @@ export function BrowserWorkbenchView({
                   >
                     <div className="browser-live-annotation-meta">
                       <span>{liveAnnotationTarget.tagName || "element"}</span>
-                      {liveAnnotationTarget.selector && <code>{liveAnnotationTarget.selector}</code>}
+                      {liveAnnotationTarget.selector && (
+                        <code>{liveAnnotationTarget.selector}</code>
+                      )}
                     </div>
                     <textarea
                       value={liveAnnotationText}
@@ -1698,7 +1813,9 @@ export function BrowserWorkbenchView({
                         type="button"
                         className="browser-annotation-primary browser-live-annotation-send"
                         onClick={() => void saveLiveBrowserAnnotation(true)}
-                        disabled={liveAnnotationSaving || !liveAnnotationText.trim() || !onSendMessage}
+                        disabled={
+                          liveAnnotationSaving || !liveAnnotationText.trim() || !onSendMessage
+                        }
                         title="Send annotation to CoWork OS"
                         aria-label="Send annotation to CoWork OS"
                       >
@@ -1755,8 +1872,12 @@ export function BrowserWorkbenchView({
                         <Icon size={18} strokeWidth={2.2} aria-hidden="true" />
                       </span>
                       <span className="browser-workbench-newtab-tile-text">
-                        <span className="browser-workbench-newtab-tile-label">{capability.label}</span>
-                        <span className="browser-workbench-newtab-tile-hint">{capability.hint}</span>
+                        <span className="browser-workbench-newtab-tile-label">
+                          {capability.label}
+                        </span>
+                        <span className="browser-workbench-newtab-tile-hint">
+                          {capability.hint}
+                        </span>
                       </span>
                     </button>
                   );
@@ -1801,7 +1922,9 @@ export function BrowserWorkbenchView({
       {diagnosticsOpen && (
         <div className="browser-workbench-diagnostics">
           <div className="browser-workbench-diagnostics-tabs">
-            <button type="button" className="is-active">Console</button>
+            <button type="button" className="is-active">
+              Console
+            </button>
             <button type="button">Network</button>
             <button type="button">
               <Download size={13} aria-hidden="true" />
@@ -1817,12 +1940,19 @@ export function BrowserWorkbenchView({
         </div>
       )}
       {annotationDraft && (
-        <div className="browser-annotation-overlay" role="dialog" aria-modal="true" aria-label="Annotate browser screenshot">
+        <div
+          className="browser-annotation-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Annotate browser screenshot"
+        >
           <div className="browser-annotation-panel">
             <div className="browser-annotation-header">
               <div>
                 <div className="browser-annotation-title">Annotate screenshot</div>
-                <div className="browser-annotation-subtitle">Draw over the capture, then save it or send it to the task.</div>
+                <div className="browser-annotation-subtitle">
+                  Draw over the capture, then save it or send it to the task.
+                </div>
               </div>
               <button
                 type="button"
@@ -2006,12 +2136,6 @@ export function BrowserWorkbenchView({
             </div>
             <div className="input-below-actions spreadsheet-viewer-composer-actions">
               <span className="input-status-workspace">Work in a folder</span>
-              <span className="shell-toggle shell-toggle-inline enabled">
-                Shell
-                <span className="goal-mode-switch-track on">
-                  <span className="goal-mode-switch-thumb" />
-                </span>
-              </span>
               <span className="input-status-mode">Execute</span>
               <span className="input-status-mode">Auto</span>
             </div>

@@ -63,7 +63,10 @@ function getRunCommandFromEvent(event: TaskEvent): string {
   return command;
 }
 
-export function collectChangedPaths(events: TaskEvent[], outputSummary?: TaskOutputSummary): Set<string> {
+export function collectChangedPaths(
+  events: TaskEvent[],
+  outputSummary?: TaskOutputSummary,
+): Set<string> {
   const changed = new Set<string>();
   const add = (raw: unknown) => {
     if (typeof raw !== "string") return;
@@ -143,7 +146,9 @@ function detectReliabilityFailureDomains(events: TaskEvent[]): {
       /verification failed|required_verification|platform minimums not met|does \*\*not\*\* pass the completion criteria|missing required/i.test(
         text,
       ) &&
-      (eventType === "verification_failed" || eventType === "step_failed" || eventType === "timeline_error")
+      (eventType === "verification_failed" ||
+        eventType === "step_failed" ||
+        eventType === "timeline_error")
     ) {
       requiredVerificationFailure = true;
     }
@@ -302,9 +307,7 @@ export function listChangedPathsForTask(
   outputSummary?: TaskOutputSummary,
   maxPaths = 80,
 ): string[] {
-  return Array.from(collectChangedPaths(events, outputSummary))
-    .sort()
-    .slice(0, maxPaths);
+  return Array.from(collectChangedPaths(events, outputSummary)).sort().slice(0, maxPaths);
 }
 
 export interface EntropySweepDecision {

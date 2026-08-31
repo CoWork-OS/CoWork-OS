@@ -84,7 +84,7 @@ In short: OpenClaw is closer to a framework/operator layer, while CoWork OS is t
 | **Browser automation** | ✅ Playwright | ✅ Puppeteer | ✅ Built-in | ❌ | ❌ |
 | **File operations** | ✅ Full CRUD + DOCX/PDF/PPTX | ✅ File ops | ✅ File ops | ❌ Limited | ✅ (via nodes) |
 | **Document creation** | ✅ DOCX, PDF, PPTX, Excel | ❌ Limited | ❌ | ❌ | ❌ |
-| **Shell execution** | ✅ Sandboxed + approvals | ✅ Shell access | ✅ Bash/Python | ❌ | ✅ (code nodes) |
+| **Command execution** | ✅ Profile-gated, sandboxed + approvals | ✅ Shell access | ✅ Bash/Python | ❌ | ✅ (code nodes) |
 | **Approval gates** | ✅ Built-in for destructive ops | ⚠️ Depends on workflow/policy setup | ✅ Delete protection | N/A | ❌ |
 | **Scheduled tasks** | ✅ Cron, intervals, one-time | ✅ Via skills | ❌ | ❌ | ✅ Core feature |
 | **Sub-agents / parallel work** | ✅ spawn_agent with nesting | ❌ | ✅ Parallel sub-agents | ❌ | ✅ (parallel branches) |

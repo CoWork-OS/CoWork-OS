@@ -85,18 +85,12 @@ export function buildDiscordSlashCommands(): DiscordSlashCommandDefinition[] {
         break;
       case "commands":
         builder.addStringOption((option) =>
-          option
-            .setName("category")
-            .setDescription("Command category or page")
-            .setRequired(false),
+          option.setName("category").setDescription("Command category or page").setRequired(false),
         );
         break;
       case "workspace":
         builder.addStringOption((option) =>
-          option
-            .setName("name")
-            .setDescription("Workspace name or number")
-            .setRequired(false),
+          option.setName("name").setDescription("Workspace name or number").setRequired(false),
         );
         break;
       case "queue":
@@ -117,18 +111,12 @@ export function buildDiscordSlashCommands(): DiscordSlashCommandDefinition[] {
         break;
       case "background":
         builder.addStringOption((option) =>
-          option
-            .setName("prompt")
-            .setDescription("Background task prompt")
-            .setRequired(true),
+          option.setName("prompt").setDescription("Background task prompt").setRequired(true),
         );
         break;
       case "skill":
         builder.addStringOption((option) =>
-          option
-            .setName("id")
-            .setDescription("Skill id to toggle or inspect")
-            .setRequired(true),
+          option.setName("id").setDescription("Skill id to toggle or inspect").setRequired(true),
         );
         break;
       case "schedule":
@@ -141,18 +129,12 @@ export function buildDiscordSlashCommands(): DiscordSlashCommandDefinition[] {
         break;
       case "brief":
         builder.addStringOption((option) =>
-          option
-            .setName("query")
-            .setDescription("Brief command or scope")
-            .setRequired(false),
+          option.setName("query").setDescription("Brief command or scope").setRequired(false),
         );
         break;
       case "agent":
         builder.addStringOption((option) =>
-          option
-            .setName("name")
-            .setDescription("Agent name, id, or clear")
-            .setRequired(false),
+          option.setName("name").setDescription("Agent name, id, or clear").setRequired(false),
         );
         break;
     }
@@ -184,10 +166,7 @@ export function buildDiscordSlashCommands(): DiscordSlashCommandDefinition[] {
       .setName("provider")
       .setDescription("Change or show current LLM provider")
       .addStringOption((option) =>
-        option
-          .setName("name")
-          .setDescription("Provider name")
-          .setRequired(false),
+        option.setName("name").setDescription("Provider name").setRequired(false),
       ),
   );
   commands.set(
@@ -1021,9 +1000,9 @@ export class DiscordAdapter implements ChannelAdapter {
     }
 
     const capped = Math.min(Math.max(limit, 1), 100);
-    const messages = await (
-      channel as TextChannel | DMChannel | ThreadChannel
-    ).messages.fetch({ limit: capped });
+    const messages = await (channel as TextChannel | DMChannel | ThreadChannel).messages.fetch({
+      limit: capped,
+    });
 
     const out: Array<{
       id: string;
@@ -1091,9 +1070,9 @@ export class DiscordAdapter implements ChannelAdapter {
       throw new Error("Invalid channel");
     }
 
-    const message = await (
-      channel as TextChannel | DMChannel | ThreadChannel
-    ).messages.fetch(messageId);
+    const message = await (channel as TextChannel | DMChannel | ThreadChannel).messages.fetch(
+      messageId,
+    );
 
     if (!message.attachments || message.attachments.size === 0) {
       return [];
@@ -1536,10 +1515,9 @@ export class DiscordAdapter implements ChannelAdapter {
     const peerIds = new Set((supervisor.peerBotUserIds || []).filter(Boolean));
     if (!peerIds.has(message.author.id)) return false;
 
-    const watched = new Set([
-      supervisor.coordinationChannelId,
-      ...(supervisor.watchedChannelIds || []),
-    ].filter(Boolean));
+    const watched = new Set(
+      [supervisor.coordinationChannelId, ...(supervisor.watchedChannelIds || [])].filter(Boolean),
+    );
     return watched.has(message.channelId);
   }
 

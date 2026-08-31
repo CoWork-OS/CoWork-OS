@@ -98,6 +98,9 @@ import { ManagedAccountManager } from "../accounts/managed-account-manager";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
 import { EverydayAgentService } from "../everyday-agent/EverydayAgentService";
 import { normalizeImagesForRemote, sanitizeTaskMessageParams } from "./sanitize";
+import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
+import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import { AgentConfigSchema, validateInput } from "../utils/validation";
 import {
   buildTaskEventDetailForTransport,
@@ -1466,6 +1469,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         images,
         quotedAssistantMessage,
         permissionMode,
+        accessProfileId,
         shellAccess,
         integrationMentions,
       } = sanitizeTaskMessageParams(params);
@@ -1476,6 +1480,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         quotedAssistantMessage,
         {
           ...(permissionMode ? { permissionMode } : {}),
+          ...(accessProfileId ? { accessProfileId } : {}),
           ...(shellAccess !== undefined ? { shellAccess } : {}),
           ...(integrationMentions !== undefined ? { integrationMentions } : {}),
         },
@@ -1648,6 +1653,10 @@ function sanitizeTaskCreateParams(params: unknown): {
   const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
   const assignedAgentRoleId =
     typeof p.assignedAgentRoleId === "string" ? p.assignedAgentRoleId.trim() : "";
+  const accessProfileId =
+    typeof p.accessProfileId === "string" && p.accessProfileId.trim().length > 0
+      ? p.accessProfileId.trim()
+      : undefined;
 
   const budgetTokens =
     typeof p.budgetTokens === "number" && Number.isFinite(p.budgetTokens)
@@ -1657,15 +1666,46 @@ function sanitizeTaskCreateParams(params: unknown): {
     typeof p.budgetCost === "number" && Number.isFinite(p.budgetCost)
       ? Math.max(0, p.budgetCost)
       : undefined;
-  const shellAccess = p.shellAccess === true;
+  const shellAccess = typeof p.shellAccess === "boolean" ? p.shellAccess : undefined;
+
+  let permissionMode: AgentConfig["permissionMode"] | undefined;
+  if (typeof p.permissionMode === "string") {
+    const allowedPermissionModes = new Set<NonNullable<AgentConfig["permissionMode"]>>([
+      "default",
+      "plan",
+      "dangerous_only",
+      "accept_edits",
+      "dont_ask",
+      "bypass_permissions",
+    ]);
+    if (!allowedPermissionModes.has(p.permissionMode)) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "Invalid permissionMode" };
+    }
+    permissionMode = p.permissionMode;
+  }
 
   const agentConfig: AgentConfig | undefined = (() => {
-    if (!p.agentConfig || typeof p.agentConfig !== "object") return undefined;
+    if (!p.agentConfig || typeof p.agentConfig !== "object") {
+      return accessProfileId || permissionMode
+        ? {
+            ...(accessProfileId
+              ? { accessProfileId: accessProfileId as AgentConfig["accessProfileId"] }
+              : {}),
+            ...(permissionMode ? { permissionMode } : {}),
+          }
+        : undefined;
+    }
     const parsed = AgentConfigSchema.safeParse(p.agentConfig);
     if (!parsed.success) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: "agentConfig is invalid" };
     }
-    return parsed.data;
+    return {
+      ...parsed.data,
+      ...(accessProfileId
+        ? { accessProfileId: accessProfileId as AgentConfig["accessProfileId"] }
+        : {}),
+      ...(permissionMode ? { permissionMode } : {}),
+    };
   })();
 
   if (!title) throw { code: ErrorCodes.INVALID_PARAMS, message: "title is required" };
@@ -1680,7 +1720,7 @@ function sanitizeTaskCreateParams(params: unknown): {
     ...(agentConfig ? { agentConfig } : {}),
     ...(budgetTokens !== undefined ? { budgetTokens } : {}),
     ...(budgetCost !== undefined ? { budgetCost } : {}),
-    ...(shellAccess ? { shellAccess } : {}),
+    ...(shellAccess !== undefined ? { shellAccess } : {}),
   };
 }
 
@@ -1797,6 +1837,7 @@ const ManagedAgentBaseSchema = z
 const ManagedEnvironmentConfigSchema = z
   .object({
     workspaceId: z.string().trim().min(1).max(200),
+    accessProfileId: z.string().trim().min(1).max(100).optional(),
     requireWorktree: z.boolean().optional(),
     enableShell: z.boolean().optional(),
     enableBrowser: z.boolean().optional(),
@@ -2826,6 +2867,7 @@ function registerTaskAndWorkspaceMethods(
   const db = deps.dbManager.getDatabase();
   const taskRepo = new TaskRepository(db);
   const workspaceRepo = new WorkspaceRepository(db);
+  const channelRepo = new ChannelRepository(db);
   const approvalRepo = new ApprovalRepository(db);
   const eventRepo = new TaskEventRepository(db);
   const managedSessions = getManagedSessionService(deps);
@@ -3212,18 +3254,29 @@ function registerTaskAndWorkspaceMethods(
       };
     }
 
-    if (validated.shellAccess && !workspace.permissions?.shell) {
-      workspaceRepo.updatePermissions(validated.workspaceId, {
-        ...workspace.permissions,
-        shell: true,
-      });
-    }
+    const hasNamedAccessProfile =
+      typeof validated.agentConfig?.accessProfileId === "string" &&
+      validated.agentConfig.accessProfileId.trim().length > 0;
+    const compatibilityAgentConfig =
+      validated.shellAccess === true && !hasNamedAccessProfile
+        ? {
+            ...(validated.agentConfig || {}),
+            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+          }
+        : validated.agentConfig;
 
     // Create task record
-    const normalizedAgentConfig = validated.agentConfig
+    const normalizedAgentConfig =
+      validated.shellAccess !== undefined
+        ? compatibilityAgentConfig
+        : applyDefaultAccessProfile(
+            compatibilityAgentConfig,
+            PermissionSettingsManager.loadSettings(),
+          );
+    const taskAgentConfig = normalizedAgentConfig
       ? {
-          ...validated.agentConfig,
-          ...(validated.agentConfig.autonomousMode ? { allowUserInput: false } : {}),
+          ...normalizedAgentConfig,
+          ...(normalizedAgentConfig.autonomousMode ? { allowUserInput: false } : {}),
         }
       : undefined;
 
@@ -3234,7 +3287,7 @@ function registerTaskAndWorkspaceMethods(
       userPrompt: validated.prompt,
       status: "pending",
       workspaceId: validated.workspaceId,
-      agentConfig: normalizedAgentConfig,
+      agentConfig: taskAgentConfig,
       budgetTokens: validated.budgetTokens,
       budgetCost: validated.budgetCost,
     });
@@ -3349,11 +3402,13 @@ function registerTaskAndWorkspaceMethods(
       images,
       quotedAssistantMessage,
       permissionMode,
+      accessProfileId,
       shellAccess,
       integrationMentions,
     } = sanitizeTaskMessageParams(params);
     await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
       ...(permissionMode ? { permissionMode } : {}),
+      ...(accessProfileId ? { accessProfileId } : {}),
       ...(shellAccess !== undefined ? { shellAccess } : {}),
       ...(integrationMentions !== undefined ? { integrationMentions } : {}),
     });
@@ -3641,8 +3696,7 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "admin");
     const { channelId } = sanitizeChannelIdParams(params);
     if (!channelGateway) {
-      // Best-effort delete only the channel row. (Associated rows may remain.)
-      db.prepare("DELETE FROM channels WHERE id = ?").run(channelId);
+      channelRepo.delete(channelId);
       return { ok: true, restartRequired: true };
     }
     await channelGateway.removeChannel(channelId);
@@ -4785,6 +4839,7 @@ export function setupControlPlaneHandlers(
         prompt: string;
         workspaceId?: string;
         agentConfig?: Any;
+        accessProfileId?: string;
         shellAccess?: boolean;
       },
     ) => {
@@ -4842,10 +4897,21 @@ export function setupControlPlaneHandlers(
             workspaceId: targetWorkspaceId,
           };
           if (params.agentConfig && Object.keys(params.agentConfig).length > 0) {
-            taskCreateParams.agentConfig = params.agentConfig;
+            taskCreateParams.agentConfig = {
+              ...params.agentConfig,
+              ...(params.accessProfileId ? { accessProfileId: params.accessProfileId } : {}),
+            };
+          } else if (params.accessProfileId) {
+            taskCreateParams.agentConfig = { accessProfileId: params.accessProfileId };
           }
-          if (params.shellAccess === true) {
-            taskCreateParams.shellAccess = true;
+          if (
+            params.shellAccess === true &&
+            typeof taskCreateParams.agentConfig?.accessProfileId !== "string"
+          ) {
+            taskCreateParams.agentConfig = {
+              ...(taskCreateParams.agentConfig || {}),
+              accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+            };
           }
           remoteTaskRes = await remoteClient.request(Methods.TASK_CREATE, taskCreateParams, 15000);
         } catch (error: Any) {

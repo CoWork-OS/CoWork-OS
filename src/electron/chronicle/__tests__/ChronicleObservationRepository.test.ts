@@ -91,7 +91,10 @@ describe("ChronicleObservationRepository", () => {
     const updated = ChronicleObservationRepository.listSync(workspacePath, 10)[0];
     expect(updated?.memoryId).toBe("memory-1");
 
-    const deleted = await ChronicleObservationRepository.deleteObservation(workspacePath, record.id);
+    const deleted = await ChronicleObservationRepository.deleteObservation(
+      workspacePath,
+      record.id,
+    );
     expect(deleted).toBe(true);
     expect(ChronicleObservationRepository.listSync(workspacePath, 10)).toHaveLength(0);
   });

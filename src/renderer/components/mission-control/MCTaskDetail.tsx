@@ -169,7 +169,9 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
 
   if (!task) return <div className="mc-v2-empty">{agentContext.getUiCopy("mcTaskEmpty")}</div>;
 
-  const visibleLearningProgress = [...learningProgress].sort((a, b) => b.completedAt - a.completedAt);
+  const visibleLearningProgress = [...learningProgress].sort(
+    (a, b) => b.completedAt - a.completedAt,
+  );
   const assignedAgent = task.assignedAgentRoleId
     ? agents.find((agent) => agent.id === task.assignedAgentRoleId) || null
     : null;
@@ -182,7 +184,8 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
   const stale = isTaskStale(task);
   const terminal = isTaskTerminal(task);
   const nextMissionColumn = getTaskNextMissionColumn(task);
-  const nextMissionLabel = BOARD_COLUMNS.find((column) => column.id === nextMissionColumn)?.label || "Done";
+  const nextMissionLabel =
+    BOARD_COLUMNS.find((column) => column.id === nextMissionColumn)?.label || "Done";
   const ownerStatus = assignedAgent ? getAgentStatus(assignedAgent.id) : "offline";
 
   return (
@@ -193,7 +196,9 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
           {isAllWorkspacesSelected && (
             <span className="mc-v2-workspace-tag">{getWorkspaceName(task.workspaceId)}</span>
           )}
-          <span className={`mc-v2-status-pill status-${task.status}`}>{task.status.replace("_", " ")}</span>
+          <span className={`mc-v2-status-pill status-${task.status}`}>
+            {task.status.replace("_", " ")}
+          </span>
         </div>
         <div className="mc-v2-detail-updated">
           {agentContext.getUiCopy("mcTaskUpdatedAt", { time: formatRelativeTime(task.updatedAt) })}
@@ -203,13 +208,19 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
 
       <div className="mc-v2-task-action-row">
         {assignedAgent && !terminal && (
-          <button className="mc-v2-task-primary-action" onClick={() => handleTriggerHeartbeat(assignedAgent.id)}>
+          <button
+            className="mc-v2-task-primary-action"
+            onClick={() => handleTriggerHeartbeat(assignedAgent.id)}
+          >
             <Zap size={14} />
             Wake owner
           </button>
         )}
         {!terminal && getMissionColumnForTask(task) !== "done" && (
-          <button className="mc-v2-task-primary-action" onClick={() => handleMoveTask(task.id, nextMissionColumn)}>
+          <button
+            className="mc-v2-task-primary-action"
+            onClick={() => handleMoveTask(task.id, nextMissionColumn)}
+          >
             <ArrowRight size={14} />
             Move to {nextMissionLabel}
           </button>
@@ -233,7 +244,9 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
         <div className="mc-v2-task-summary-item">
           <span>Owner</span>
           <strong>{assignedAgent ? assignedAgent.displayName : "Unassigned"}</strong>
-          {assignedAgent && <small className={`mc-v2-summary-status ${ownerStatus}`}>{ownerStatus}</small>}
+          {assignedAgent && (
+            <small className={`mc-v2-summary-status ${ownerStatus}`}>{ownerStatus}</small>
+          )}
         </div>
         <div className="mc-v2-task-summary-item">
           <span>Priority</span>
@@ -265,16 +278,21 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
             onChange={(e) => handleAssignTask(task.id, e.target.value || null)}
           >
             <option value="">{agentContext.getUiCopy("mcTaskUnassigned")}</option>
-            {agents.filter((agent) => agent.isActive).map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.displayName}
-              </option>
-            ))}
+            {agents
+              .filter((agent) => agent.isActive)
+              .map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.displayName}
+                </option>
+              ))}
           </select>
         </label>
         <label>
           {agentContext.getUiCopy("mcTaskStageLabel")}
-          <select value={getMissionColumnForTask(task)} onChange={(e) => handleMoveTask(task.id, e.target.value)}>
+          <select
+            value={getMissionColumnForTask(task)}
+            onChange={(e) => handleMoveTask(task.id, e.target.value)}
+          >
             {BOARD_COLUMNS.map((column) => (
               <option key={column.id} value={column.id}>
                 {column.label}
@@ -299,7 +317,9 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
           Estimate
           <select
             value={task.estimatedMinutes ? String(task.estimatedMinutes) : ""}
-            onChange={(e) => handleSetTaskEstimate(task.id, e.target.value ? Number(e.target.value) : null)}
+            onChange={(e) =>
+              handleSetTaskEstimate(task.id, e.target.value ? Number(e.target.value) : null)
+            }
           >
             {ESTIMATE_OPTIONS.map((option) => (
               <option key={option.label} value={option.value}>
@@ -356,7 +376,9 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
       <div className="mc-v2-detail-section">
         <div className="mc-v2-section-header">
           <h4>Task controls</h4>
-          <span className="mc-v2-section-hint">Move it forward without leaving the detail panel.</span>
+          <span className="mc-v2-section-hint">
+            Move it forward without leaving the detail panel.
+          </span>
         </div>
         <div className="mc-v2-label-list">
           {currentLabels.length === 0 ? (
@@ -366,7 +388,11 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
               <span
                 key={label.id}
                 className="mc-v2-label-pill"
-                style={{ backgroundColor: `${label.color}22`, borderColor: `${label.color}44`, color: label.color }}
+                style={{
+                  backgroundColor: `${label.color}22`,
+                  borderColor: `${label.color}44`,
+                  color: label.color,
+                }}
               >
                 {label.name}
                 <button
@@ -407,8 +433,12 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
                 <div className="mc-v2-learning-card-header">
                   <div>
                     <div className="mc-v2-learning-outcome">
-                      <span className={`mc-v2-status-pill ${statusTone(progress.outcome)}`}>{progress.outcome.replace("_", " ")}</span>
-                      <span className="mc-v2-learning-time">{formatRelativeTime(progress.completedAt)}</span>
+                      <span className={`mc-v2-status-pill ${statusTone(progress.outcome)}`}>
+                        {progress.outcome.replace("_", " ")}
+                      </span>
+                      <span className="mc-v2-learning-time">
+                        {formatRelativeTime(progress.completedAt)}
+                      </span>
                     </div>
                     <h5>{progress.summary}</h5>
                   </div>
@@ -420,16 +450,25 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
 
                 <div className="mc-v2-learning-steps">
                   {progress.steps.map((step) => (
-                    <section key={`${progress.id}:${step.stage}`} className={`mc-v2-learning-step mc-v2-learning-step-${step.status}`}>
+                    <section
+                      key={`${progress.id}:${step.stage}`}
+                      className={`mc-v2-learning-step mc-v2-learning-step-${step.status}`}
+                    >
                       <div className="mc-v2-learning-step-header">
                         <strong>{step.title}</strong>
-                        <span className={`mc-v2-status-pill ${statusTone(step.status)}`}>{step.status}</span>
+                        <span className={`mc-v2-status-pill ${statusTone(step.status)}`}>
+                          {step.status}
+                        </span>
                       </div>
                       <p>{step.summary}</p>
                       {step.relatedIds && (
                         <div className="mc-v2-learning-related">
-                          {step.relatedIds.memoryId && <span>Memory: {step.relatedIds.memoryId}</span>}
-                          {step.relatedIds.proposalId && <span>Proposal: {step.relatedIds.proposalId}</span>}
+                          {step.relatedIds.memoryId && (
+                            <span>Memory: {step.relatedIds.memoryId}</span>
+                          )}
+                          {step.relatedIds.proposalId && (
+                            <span>Proposal: {step.relatedIds.proposalId}</span>
+                          )}
                           {step.relatedIds.skillId && <span>Skill: {step.relatedIds.skillId}</span>}
                         </div>
                       )}
@@ -437,7 +476,9 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
                         <ul className="mc-v2-learning-evidence">
                           {step.evidenceRefs.map((ref) => (
                             <li key={ref.evidenceId}>
-                              <span className="mc-v2-learning-evidence-source">{ref.sourceType}</span>
+                              <span className="mc-v2-learning-evidence-source">
+                                {ref.sourceType}
+                              </span>
                               <span>{renderEvidenceLabel(ref)}</span>
                             </li>
                           ))}
@@ -450,7 +491,9 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
             ))}
           </div>
         ) : (
-          <div className="mc-v2-empty">No learning progress has been recorded for this task yet.</div>
+          <div className="mc-v2-empty">
+            No learning progress has been recorded for this task yet.
+          </div>
         )}
       </div>
 
@@ -495,14 +538,19 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
         {recallResults.length > 0 ? (
           <div className="mc-v2-recall-results">
             {recallResults.map((result) => (
-              <article key={`${result.sourceType}:${result.objectId}`} className="mc-v2-recall-result">
+              <article
+                key={`${result.sourceType}:${result.objectId}`}
+                className="mc-v2-recall-result"
+              >
                 <div className="mc-v2-recall-result-header">
                   <div>
                     <strong>{result.title || result.sourceLabel || result.sourceType}</strong>
                     <div className="mc-v2-recall-result-meta">
                       <span>{result.sourceLabel || result.sourceType}</span>
                       <span>{formatRelativeTime(result.timestamp)}</span>
-                      {typeof result.rank === "number" && <span>Rank {result.rank.toFixed(2)}</span>}
+                      {typeof result.rank === "number" && (
+                        <span>Rank {result.rank.toFixed(2)}</span>
+                      )}
                     </div>
                   </div>
                   <span className="mc-v2-status-pill status-info">{result.sourceType}</span>
@@ -528,7 +576,13 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
       <div className="mc-v2-detail-section">
         <h4>{agentContext.getUiCopy("mcTaskUpdatesTitle")}</h4>
         {taskWorkspaceId && (
-          <ActivityFeed workspaceId={taskWorkspaceId} taskId={task.id} compact maxItems={20} showFilters={false} />
+          <ActivityFeed
+            workspaceId={taskWorkspaceId}
+            taskId={task.id}
+            compact
+            maxItems={20}
+            showFilters={false}
+          />
         )}
         <div className="mc-v2-comment-box">
           <textarea
@@ -542,7 +596,9 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
             onClick={handlePostComment}
             disabled={postingComment || commentText.trim().length === 0}
           >
-            {postingComment ? agentContext.getUiCopy("mcTaskPosting") : agentContext.getUiCopy("mcTaskPostUpdate")}
+            {postingComment
+              ? agentContext.getUiCopy("mcTaskPosting")
+              : agentContext.getUiCopy("mcTaskPostUpdate")}
           </button>
         </div>
       </div>

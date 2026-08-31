@@ -80,16 +80,20 @@ describe("renderer-perf visibility tracing", () => {
     markTaskEventRenderable(visibleEvent, true);
     markTaskEventVisible(visibleEvent, "measured-row", true);
 
-    const state = (globalThis.window as Window & {
-      __coworkRendererPerfState__?: {
-        metrics: Map<string, { samples: number[] }>;
-        counters: Map<string, { value: number }>;
-      };
-    }).__coworkRendererPerfState__;
+    const state = (
+      globalThis.window as Window & {
+        __coworkRendererPerfState__?: {
+          metrics: Map<string, { samples: number[] }>;
+          counters: Map<string, { value: number }>;
+        };
+      }
+    ).__coworkRendererPerfState__;
     expect(state).toBeDefined();
 
-    const receivedToVisible = state?.metrics.get("task-event.received_to_visible_ms")?.samples ?? [];
-    const appendedToVisible = state?.metrics.get("task-event.appended_to_visible_ms")?.samples ?? [];
+    const receivedToVisible =
+      state?.metrics.get("task-event.received_to_visible_ms")?.samples ?? [];
+    const appendedToVisible =
+      state?.metrics.get("task-event.appended_to_visible_ms")?.samples ?? [];
 
     expect(receivedToVisible.length).toBe(1);
     expect(appendedToVisible.length).toBe(1);
@@ -108,11 +112,13 @@ describe("renderer-perf visibility tracing", () => {
       markTaskEventVisible(visibleEvent, "measured-row", true);
     }
 
-    const state = (globalThis.window as Window & {
-      __coworkRendererPerfState__?: {
-        counters: Map<string, { value: number }>;
-      };
-    }).__coworkRendererPerfState__;
+    const state = (
+      globalThis.window as Window & {
+        __coworkRendererPerfState__?: {
+          counters: Map<string, { value: number }>;
+        };
+      }
+    ).__coworkRendererPerfState__;
 
     expect(state?.counters.get("task-event.visible_drop_no_trace_count")?.value).toBeGreaterThan(0);
   });
@@ -133,11 +139,13 @@ describe("renderer-perf visibility tracing", () => {
     markTaskEventRenderable(event, true);
     markTaskEventVisible(event, "measured-row", true);
 
-    const state = (globalThis.window as Window & {
-      __coworkRendererPerfState__?: {
-        counters: Map<string, { value: number }>;
-      };
-    }).__coworkRendererPerfState__;
+    const state = (
+      globalThis.window as Window & {
+        __coworkRendererPerfState__?: {
+          counters: Map<string, { value: number }>;
+        };
+      }
+    ).__coworkRendererPerfState__;
 
     expect(state?.counters.get("task-event.visible_recorded_count")?.value).toBe(1);
     expect(state?.counters.get("task-event.visible_signal_count")?.value).toBe(1);
@@ -286,7 +294,9 @@ describe("renderer-perf render summaries", () => {
 
       expect(messages).toContain("App renders=1 unique=1 top=[view:main:1]");
       expect(messages.some((message) => message.startsWith("renderer.frame_gap_ms "))).toBe(false);
-      expect(messages.some((message) => message.startsWith("renderer.frame_gap_count "))).toBe(false);
+      expect(messages.some((message) => message.startsWith("renderer.frame_gap_count "))).toBe(
+        false,
+      );
     } finally {
       testWindow.setTimeout = originalSetTimeout;
       testWindow.requestAnimationFrame = originalRequestAnimationFrame;

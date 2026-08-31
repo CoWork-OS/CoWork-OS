@@ -22,15 +22,11 @@ describe("TaskStrategyService deriveLlmProfile", () => {
   });
 
   it("returns strong for strict artifact-length execution tasks", () => {
-    const strategy = TaskStrategyService.derive(
-      makeRoute({ intent: "execution" }),
-      undefined,
-      {
-        title: "Create DOCX",
-        prompt:
-          "Create an exact 1000 characters long word document (.docx) and verify the final character count.",
-      },
-    );
+    const strategy = TaskStrategyService.derive(makeRoute({ intent: "execution" }), undefined, {
+      title: "Create DOCX",
+      prompt:
+        "Create an exact 1000 characters long word document (.docx) and verify the final character count.",
+    });
     expect(strategy.llmProfileHint).toBe("strong");
   });
 

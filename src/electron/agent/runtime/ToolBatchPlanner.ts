@@ -7,13 +7,15 @@ export interface PlannedToolBatch {
 }
 
 export class ToolBatchPlanner {
-  constructor(
-    private readonly toolLookup: (toolName: string) => LLMTool | undefined,
-  ) {}
+  constructor(private readonly toolLookup: (toolName: string) => LLMTool | undefined) {}
 
-  getConcurrencyClass(toolName: string): ReturnType<typeof getDefaultRuntimeToolMetadata>["concurrencyClass"] {
+  getConcurrencyClass(
+    toolName: string,
+  ): ReturnType<typeof getDefaultRuntimeToolMetadata>["concurrencyClass"] {
     const tool = this.toolLookup(toolName);
-    return tool?.runtime?.concurrencyClass || getDefaultRuntimeToolMetadata(toolName).concurrencyClass;
+    return (
+      tool?.runtime?.concurrencyClass || getDefaultRuntimeToolMetadata(toolName).concurrencyClass
+    );
   }
 
   isParallelEligible(toolName: string): boolean {

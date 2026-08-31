@@ -42,10 +42,7 @@ function truncate(value: string | undefined | null, max = 220): string {
 }
 
 function humanize(value?: string | null): string {
-  return (value || "")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (value || "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function hasRawToolShape(activity: ActivityRow): boolean {
@@ -64,7 +61,11 @@ function hasRawToolShape(activity: ActivityRow): boolean {
 
 function activityCategory(activity: ActivityRow): MissionControlCategory {
   const text = `${activity.title} ${activity.description || ""}`.toLowerCase();
-  if (text.includes("what cowork learned") || text.includes(".cowork/") || text.includes("memory")) {
+  if (
+    text.includes("what cowork learned") ||
+    text.includes(".cowork/") ||
+    text.includes("memory")
+  ) {
     return "learnings";
   }
   if (text.includes("heartbeat") || text.includes("background review")) {
@@ -87,7 +88,11 @@ function activitySeverity(activity: ActivityRow): MissionControlSeverity {
   if (activity.activity_type === "error" || text.includes("failed") || text.includes("blocked")) {
     return "failed";
   }
-  if (text.includes("needs review") || text.includes("pending") || activity.activity_type === "mention") {
+  if (
+    text.includes("needs review") ||
+    text.includes("pending") ||
+    activity.activity_type === "mention"
+  ) {
     return "action_needed";
   }
   if (text.includes("no follow-up") || text.includes("no action") || text.includes("monitor")) {
@@ -102,9 +107,7 @@ function activitySeverity(activity: ActivityRow): MissionControlSeverity {
 function signalText(signal?: HeartbeatSignal): string {
   if (!signal) return "background signal";
   return truncate(
-    signal.reason ||
-      signal.signalFamily?.replace(/_/g, " ") ||
-      "background signal",
+    signal.reason || signal.signalFamily?.replace(/_/g, " ") || "background signal",
     160,
   );
 }
@@ -197,17 +200,15 @@ export class MissionControlIntelligenceService {
 
   getBrief(scope: MissionControlScopeRequest = {}): MissionControlBrief {
     const items = this.repo.listItems({ ...scope, limit: 120 });
-    const attention = items.filter((item) => item.severity === "action_needed" || item.severity === "failed");
+    const attention = items.filter(
+      (item) => item.severity === "action_needed" || item.severity === "failed",
+    );
     const activeWork = items.filter((item) => item.category === "work").slice(0, 6);
     const reviewItems = items.filter((item) => item.category === "reviews");
     const learningChanges = items.filter((item) => item.category === "learnings").slice(0, 6);
     const awarenessClusters = items.filter((item) => item.category === "awareness").slice(0, 6);
-    const latestDecisions = items
-      .filter((item) => Boolean(item.decision))
-      .slice(0, 6);
-    const upcomingReviews = reviewItems
-      .filter((item) => item.nextStep)
-      .slice(0, 6);
+    const latestDecisions = items.filter((item) => Boolean(item.decision)).slice(0, 6);
+    const upcomingReviews = reviewItems.filter((item) => item.nextStep).slice(0, 6);
 
     return {
       generatedAt: Date.now(),
@@ -241,9 +242,10 @@ export class MissionControlIntelligenceService {
     };
     const evidence: ReplaceMissionControlEvidenceInput[] = [
       {
-        sourceType: event.type === "signal_merged" || event.type === "signal_received"
-          ? "heartbeat_signal"
-          : "heartbeat_event",
+        sourceType:
+          event.type === "signal_merged" || event.type === "signal_received"
+            ? "heartbeat_signal"
+            : "heartbeat_event",
         sourceId: event.runId,
         title: humanize(event.type) || "Heartbeat event",
         summary: event.signal ? signalText(event.signal) : event.result?.triggerReason,
@@ -254,18 +256,23 @@ export class MissionControlIntelligenceService {
 
     if (event.type === "signal_merged" || event.type === "signal_received") {
       const family = event.signal?.signalFamily || "awareness_signal";
-      const merged = event.signal?.mergedCount && event.signal.mergedCount > 1
-        ? `${event.signal.mergedCount} signals`
-        : "1 signal";
+      const merged =
+        event.signal?.mergedCount && event.signal.mergedCount > 1
+          ? `${event.signal.mergedCount} signals`
+          : "1 signal";
       const source = signalText(event.signal);
       const item = this.repo.upsertItem({
         ...base,
         fingerprint: `heartbeat-signal:${event.agentRoleId}:${family}:${event.signal?.fingerprint || source}`,
         category: family === "memory_drift" ? "learnings" : "awareness",
-        severity: event.signal?.urgency === "critical" || event.signal?.urgency === "high"
-          ? "action_needed"
-          : "monitor_only",
-        title: family === "memory_drift" ? "Learning signal captured" : "Awareness noticed background activity",
+        severity:
+          event.signal?.urgency === "critical" || event.signal?.urgency === "high"
+            ? "action_needed"
+            : "monitor_only",
+        title:
+          family === "memory_drift"
+            ? "Learning signal captured"
+            : "Awareness noticed background activity",
         summary: `${merged}: ${source}`,
         decision: "Grouped as background context until it becomes actionable.",
         nextStep: "Keep monitoring unless a blocker, deadline, or assignment appears.",
@@ -280,13 +287,24 @@ export class MissionControlIntelligenceService {
       ...base,
       fingerprint: `heartbeat-review:${event.runId || `${event.agentRoleId}:${event.type}:${event.timestamp}`}`,
       category: "reviews",
-      severity: event.type === "error" ? "failed" : event.type === "work_found" ? "action_needed" : "monitor_only",
-      title: event.type === "work_found" ? "Background review found pending work" : "Background review completed",
+      severity:
+        event.type === "error"
+          ? "failed"
+          : event.type === "work_found"
+            ? "action_needed"
+            : "monitor_only",
+      title:
+        event.type === "work_found"
+          ? "Background review found pending work"
+          : "Background review completed",
       summary: result
         ? `${result.pendingMentions || 0} mentions, ${result.assignedTasks || 0} assigned tasks detected.`
         : humanize(event.type) || "Review event captured.",
       decision: event.type === "no_work" ? "No action needed." : result?.triggerReason,
-      nextStep: event.type === "work_found" ? "Review the pending work queue." : "Next review will run on schedule or when a signal arrives.",
+      nextStep:
+        event.type === "work_found"
+          ? "Review the pending work queue."
+          : "Next review will run on schedule or when a signal arrives.",
       timestamp: event.timestamp,
     } as UpsertMissionControlItemInput);
     this.repo.replaceEvidence(item.id, evidence);
@@ -337,7 +355,9 @@ export class MissionControlIntelligenceService {
         severity: blocked ? "action_needed" : "monitor_only",
         title: blocked ? `Work needs attention: ${task.title}` : `Active work: ${task.title}`,
         summary: `Status: ${humanize(task.status)}${task.board_column ? ` · ${humanize(task.board_column)}` : ""}`,
-        decision: blocked ? "This work is not moving without review or intervention." : "Work remains in the active queue.",
+        decision: blocked
+          ? "This work is not moving without review or intervention."
+          : "Work remains in the active queue.",
         nextStep: blocked ? "Open the task and resolve the blocker or review request." : undefined,
         agentRoleId: task.assigned_agent_role_id || undefined,
         agentName: task.agent_name || undefined,
@@ -387,7 +407,10 @@ export class MissionControlIntelligenceService {
         category: "attention",
         severity: "action_needed",
         title: "Mention needs a response",
-        summary: truncate(mention.context || `Pending ${humanize(mention.mention_type)} mention`, 180),
+        summary: truncate(
+          mention.context || `Pending ${humanize(mention.mention_type)} mention`,
+          180,
+        ),
         decision: "Cowork is waiting on a response or acknowledgement.",
         nextStep: "Open the related task or mention thread.",
         agentRoleId: mention.to_agent_role_id || undefined,
@@ -443,14 +466,17 @@ export class MissionControlIntelligenceService {
 
       const category = activityCategory(activity);
       const severity = activitySeverity(activity);
-      const text = activity.description ? `${activity.title} — ${activity.description}` : activity.title;
+      const text = activity.description
+        ? `${activity.title} — ${activity.description}`
+        : activity.title;
       const item = this.repo.upsertItem({
         fingerprint: `activity:${activity.id}`,
         category,
         severity,
         title: category === "learnings" ? "Cowork recorded a learning" : activity.title,
         summary: truncate(text, 220),
-        decision: category === "reviews" && severity === "monitor_only" ? "No action needed." : undefined,
+        decision:
+          category === "reviews" && severity === "monitor_only" ? "No action needed." : undefined,
         nextStep: severity === "action_needed" ? "Review this item." : undefined,
         agentRoleId: activity.agent_role_id || undefined,
         agentName: activity.agent_name || undefined,
@@ -476,7 +502,12 @@ export class MissionControlIntelligenceService {
       const toolNames = Array.from(
         new Set(
           group
-            .map((activity) => `${activity.title} ${activity.description || ""}`.match(/(?:tool used|Tool used)\s*[–-]\s*([A-Za-z0-9_:-]+)/)?.[1])
+            .map(
+              (activity) =>
+                `${activity.title} ${activity.description || ""}`.match(
+                  /(?:tool used|Tool used)\s*[–-]\s*([A-Za-z0-9_:-]+)/,
+                )?.[1],
+            )
             .filter(Boolean),
         ),
       ) as string[];
@@ -539,15 +570,24 @@ export class MissionControlIntelligenceService {
         : running
           ? "Background review running"
           : "Background review completed";
-      const summary = truncate(run.summary || run.reason || humanize(run.dispatch_kind || run.run_type), 200);
+      const summary = truncate(
+        run.summary || run.reason || humanize(run.dispatch_kind || run.run_type),
+        200,
+      );
       const item = this.repo.upsertItem({
         fingerprint: `heartbeat-run:${run.id}`,
         category: failed ? "attention" : "reviews",
         severity: failed ? "failed" : running ? "monitor_only" : "successful",
         title,
         summary: summary || `Review ${humanize(run.status)}.`,
-        decision: failed ? run.error || "Review did not complete." : running ? "Review is still in progress." : "Review completed.",
-        nextStep: failed ? "Inspect evidence and retry if needed." : "Next review will run on schedule or when new signals arrive.",
+        decision: failed
+          ? run.error || "Review did not complete."
+          : running
+            ? "Review is still in progress."
+            : "Review completed.",
+        nextStep: failed
+          ? "Inspect evidence and retry if needed."
+          : "Next review will run on schedule or when new signals arrive.",
         agentRoleId: run.agent_role_id || undefined,
         agentName: run.agent_name || undefined,
         workspaceId: run.workspace_id || undefined,
@@ -597,7 +637,9 @@ export class MissionControlIntelligenceService {
         severity: accepted ? "successful" : "monitor_only",
         title: accepted ? "Cowork saved a learning" : "Cowork proposed a learning",
         summary: truncate(candidate.summary, 220),
-        decision: accepted ? "Learning is available for future work." : "Learning is waiting for review or more evidence.",
+        decision: accepted
+          ? "Learning is available for future work."
+          : "Learning is waiting for review or more evidence.",
         nextStep: accepted ? undefined : "Review the learning candidate if it matters.",
         workspaceId: candidate.workspace_id || undefined,
         timestamp: Number(candidate.resolved_at || candidate.created_at),
@@ -628,7 +670,9 @@ export class MissionControlIntelligenceService {
         severity: failed ? "failed" : run.status === "completed" ? "successful" : "monitor_only",
         title: failed ? "Learning distill failed" : "Cowork distilled learnings",
         summary: `${run.candidate_count || 0} candidates, ${run.accepted_count || 0} accepted, ${run.pruned_count || 0} pruned.`,
-        decision: failed ? run.error || "Learning update did not complete." : "Learning state was consolidated.",
+        decision: failed
+          ? run.error || "Learning update did not complete."
+          : "Learning state was consolidated.",
         nextStep: failed ? "Inspect the distill run evidence." : undefined,
         workspaceId: run.workspace_id || undefined,
         timestamp: Number(run.completed_at || run.started_at),

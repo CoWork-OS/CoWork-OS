@@ -1,9 +1,6 @@
 import fs from "fs";
 import { describe, expect, it, vi } from "vitest";
-import {
-  getSystemVoiceCapabilities,
-  NativeSystemVoiceRuntime,
-} from "../system-voice";
+import { getSystemVoiceCapabilities, NativeSystemVoiceRuntime } from "../system-voice";
 
 describe("system voice capabilities", () => {
   it("reports macOS TTS only when the say command is available", () => {

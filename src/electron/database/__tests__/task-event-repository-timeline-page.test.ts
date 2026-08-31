@@ -319,7 +319,10 @@ class FakeTaskEventDb {
     return {
       all: (...args: unknown[]) => this.selectRows(sql, args),
       get: (...args: unknown[]) => {
-        if (sql.includes("WHERE task_id = ?") && sql.includes("COALESCE(legacy_type, type) IN (?)")) {
+        if (
+          sql.includes("WHERE task_id = ?") &&
+          sql.includes("COALESCE(legacy_type, type) IN (?)")
+        ) {
           const taskId = String(args[0] ?? "");
           const type = String(args[1] ?? "");
           return this.rows
@@ -361,9 +364,7 @@ class FakeTaskEventDb {
     const taskIdInCount = countPlaceholders(/task_id IN \(([^)]*)\)/);
     const typeCount = countPlaceholders(/COALESCE\(legacy_type, type\) IN \(([^)]*)\)/);
     const scopedTaskIds =
-      taskIdInCount > 0
-        ? args.slice(0, taskIdInCount).map(String)
-        : [String(args[0] ?? "")];
+      taskIdInCount > 0 ? args.slice(0, taskIdInCount).map(String) : [String(args[0] ?? "")];
     const scopedTypes =
       typeCount > 0 ? args.slice(taskIdInCount, taskIdInCount + typeCount).map(String) : [];
     const cursorStart = taskIdInCount > 0 ? taskIdInCount + typeCount : 1;

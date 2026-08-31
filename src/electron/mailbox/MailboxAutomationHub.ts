@@ -88,7 +88,12 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
       };
     case "thread_classified":
       return {
-        signalFamily: staleFollowup || needsReply || commitmentCount > 0 ? "open_loop_pressure" : cleanupCandidate ? "suggestion_aging" : "awareness_signal",
+        signalFamily:
+          staleFollowup || needsReply || commitmentCount > 0
+            ? "open_loop_pressure"
+            : cleanupCandidate
+              ? "suggestion_aging"
+              : "awareness_signal",
         urgency: staleFollowup || needsReply ? "high" : cleanupCandidate ? "medium" : "low",
         confidence: Number(payload.confidence || 0.66),
         reason: subject || summary || "Thread classified",
@@ -120,7 +125,10 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
       };
     case "commitment_updated":
       return {
-        signalFamily: actionType === "done" || actionType === "dismissed" ? "maintenance" : "open_loop_pressure",
+        signalFamily:
+          actionType === "done" || actionType === "dismissed"
+            ? "maintenance"
+            : "open_loop_pressure",
         urgency: actionType === "done" || actionType === "dismissed" ? "low" : "medium",
         confidence: 0.7,
         reason: `Commitment ${actionType || "updated"}`,
@@ -152,7 +160,9 @@ function buildMailboxFacts(event: MailboxEvent): string[] {
   const facts = [
     event.subject ? `Thread subject: ${event.subject}` : null,
     event.summary ? `Summary: ${event.summary}` : null,
-    asString(payload.primaryContactEmail) ? `Primary contact: ${asString(payload.primaryContactEmail)}` : null,
+    asString(payload.primaryContactEmail)
+      ? `Primary contact: ${asString(payload.primaryContactEmail)}`
+      : null,
     asString(payload.company) ? `Company: ${asString(payload.company)}` : null,
     asString(payload.projectHint) ? `Project: ${asString(payload.projectHint)}` : null,
   ].filter((entry): entry is string => Boolean(entry));

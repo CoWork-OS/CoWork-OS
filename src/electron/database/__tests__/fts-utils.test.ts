@@ -68,9 +68,7 @@ describe("buildRelaxedTokenFtsQuery", () => {
   });
 
   it("filters out FTS5 keywords", () => {
-    expect(buildRelaxedTokenFtsQuery(["not", "hello", "and", "world"])).toBe(
-      '"hello" OR "world"',
-    );
+    expect(buildRelaxedTokenFtsQuery(["not", "hello", "and", "world"])).toBe('"hello" OR "world"');
   });
 
   it("filters out single-char tokens", () => {

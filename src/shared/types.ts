@@ -1,5 +1,6 @@
 import type { UiTimelineEvent } from "./timeline-events";
 import type { ChatInlineFrame } from "./mailbox";
+import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles";
 
 // Core types shared between main and renderer processes
 
@@ -1232,7 +1233,7 @@ export type PermissionDecisionReason =
     }
   | {
       type: "workspace_capability";
-      capability: "read" | "write" | "delete" | "network" | "shell";
+      capability: "workspace" | "read" | "write" | "delete" | "network" | "shell";
       summary: string;
       metadata?: Record<string, unknown>;
     }
@@ -1356,8 +1357,13 @@ export interface PersistedPermissionRule extends PermissionRule {
 export interface PermissionSettingsData {
   version: 1;
   defaultMode: PermissionMode;
+  /** @deprecated Legacy workspace baseline; command tools are profile-controlled. */
   defaultShellEnabled: boolean;
   defaultPermissionAccess: "default" | "full";
+  /** Canonical access profile for new tasks. Legacy fields remain for migration. */
+  defaultAccessProfileId?: AccessProfileId;
+  /** User-defined named access profiles. Built-ins are always available. */
+  accessProfiles?: AccessProfileDefinition[];
   rules: PermissionRule[];
 }
 
@@ -1492,6 +1498,7 @@ export type ToolType =
   | "gmail_bulk_label_matching_emails"
   | "gmail_forward_emails"
   | "mailbox_action"
+  | "email_imap_unread"
   | "calendar_action"
   // Apple Calendar (macOS)
   | "apple_calendar_action"
@@ -1554,7 +1561,9 @@ export type ApprovalType =
   | "delete_file"
   | "delete_multiple"
   | "bulk_rename"
+  | "workspace_write"
   | "network_access"
+  | "external_file_access"
   | "data_export"
   | "external_service"
   | "location_access"
@@ -1594,6 +1603,8 @@ export const TOOL_GROUPS = {
     // Discord live API (fetch messages, download attachments)
     "channel_fetch_discord_messages",
     "channel_download_discord_attachment",
+    // Direct mailbox access (IMAP/SMTP or LOOM)
+    "email_imap_unread",
     // Session scratchpad (read)
     "scratchpad_read",
     "youtube_ask_video",
@@ -1613,6 +1624,12 @@ export const TOOL_GROUPS = {
     "edit_document",
     "create_presentation",
     "organize_folder",
+    // Skill definitions are persisted to managed or workspace storage.
+    "skill_create",
+    "skill_duplicate",
+    "skill_update",
+    "skill_delete",
+    "memory_curate",
     // Monty transform library can write transformed outputs
     "monty_transform_file",
     // Session scratchpad (write)
@@ -1645,6 +1662,12 @@ export const TOOL_GROUPS = {
   ],
   // Network operations - requires network permission
   "group:network": [
+    "http_request",
+    "generate_image",
+    "generate_video",
+    "get_video_generation_job",
+    "cancel_video_generation_job",
+    "canvas_open_url",
     "web_search",
     "youtube_ingest_video",
     "youtube_ask_or_ingest_video",
@@ -1705,6 +1728,15 @@ export const TOOL_GROUPS = {
     "browser_reload",
     "browser_save_pdf",
     "browser_close",
+    "open_url",
+    // External memory and messaging integrations
+    "supermemory_profile",
+    "supermemory_search",
+    "supermemory_remember",
+    "supermemory_forget",
+    "channel_fetch_discord_messages",
+    "channel_download_discord_attachment",
+    "email_imap_unread",
     // Vision (image understanding via external provider)
     "analyze_image",
     "read_pdf_visual",
@@ -1750,6 +1782,7 @@ export const TOOL_GROUPS = {
     "supermemory_forget",
     "search_sessions",
     "memory_topics_load",
+    "email_imap_unread",
   ],
   // Image generation - requires API access
   "group:image": ["generate_image"],
@@ -1865,6 +1898,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   gmail_bulk_label_matching_emails: "network",
   gmail_forward_emails: "network",
   mailbox_action: "network",
+  email_imap_unread: "network",
   calendar_action: "network",
   apple_calendar_action: "network",
   dropbox_action: "network",
@@ -2169,7 +2203,7 @@ export interface AgentConfig {
   humanInputPolicy?: HumanInputPolicy;
   /** Override Chronicle availability for this task. */
   chronicleMode?: ChronicleTaskMode;
-  /** Allow shell tools for this task via an in-memory workspace permission override. */
+  /** @deprecated Legacy task capability override; prefer accessProfileId. */
   shellAccess?: boolean;
   /** Require git worktree isolation for this task and fail fast if unavailable. */
   requireWorktree?: boolean;
@@ -2218,6 +2252,8 @@ export interface AgentConfig {
   autonomousMode?: boolean;
   /** Optional per-task permission mode override. */
   permissionMode?: PermissionMode;
+  /** Canonical access profile requested for this task. */
+  accessProfileId?: AccessProfileId;
   /**
    * Optional response quality loop for final text outputs:
    * - 1: draft only (default)
@@ -3122,6 +3158,8 @@ export interface TaskFollowUpInput {
   quotedAssistantMessage?: QuotedAssistantMessage;
   permissionMode?: PermissionMode;
   shellAccess?: boolean;
+  /** Optional canonical access profile override for this follow-up. */
+  accessProfileId?: AccessProfileId;
   /**
    * Non-persistent runtime config for one automated follow-up. Unlike
    * permissionMode/shellAccess, this must not be written back to the task.
@@ -3146,6 +3184,78 @@ export interface TaskEvent {
   actor?: TimelineEventActor;
   legacyType?: EventType;
   inlineFrames?: ChatInlineFrame[];
+}
+
+export type SessionProgressWaitingKind = "approval" | "input" | "reconnect" | "paused" | "blocked";
+
+export interface SessionProgressWaiting {
+  kind: SessionProgressWaitingKind;
+  reason: string;
+  requestId?: string;
+  requestedAt?: number;
+}
+
+export interface SessionProgressStep {
+  id: string;
+  description: string;
+  status: PlanStep["status"];
+}
+
+export interface SessionProgressArtifact {
+  id: string;
+  path: string;
+  mimeType: string;
+  createdAt: number;
+}
+
+export interface SessionProgressApproval {
+  id: string;
+  type: ApprovalType;
+  description: string;
+  requestedAt: number;
+}
+
+export interface SessionProgressInputRequest {
+  id: string;
+  question: string;
+  requestedAt: number;
+}
+
+/** Compact durable projection used to restore the selected session after reload/reconnect. */
+export interface SessionProgressState {
+  schemaVersion: 1;
+  taskId: string;
+  status: TaskStatus;
+  phase:
+    | "queued"
+    | "planning"
+    | "executing"
+    | "waiting"
+    | "paused"
+    | "blocked"
+    | "stale"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  headline: string;
+  currentStep?: SessionProgressStep;
+  completedSteps: number;
+  totalSteps: number;
+  waiting?: SessionProgressWaiting;
+  activeAgentCount: number;
+  latestArtifact?: SessionProgressArtifact;
+  pendingApprovals: SessionProgressApproval[];
+  pendingInputRequests: SessionProgressInputRequest[];
+  lastEventId?: string;
+  lastEventSeq?: number;
+  resumeFromEventId?: string;
+  connectionState: "connected" | "stale";
+  updatedAt: number;
+}
+
+export interface SessionSearchResult {
+  task: Task;
+  progress: SessionProgressState;
 }
 
 export interface TaskTimelineEventV2 extends TaskEvent {
@@ -4008,6 +4118,21 @@ export interface WorkspacePermissions {
   // Sandbox configuration
   sandboxType?: SandboxType; // Which sandbox to use (auto-detect if not specified)
   dockerConfig?: DockerSandboxConfig; // Docker-specific configuration
+  /** Effective access-profile metadata applied to an agent workspace view. */
+  accessProfileId?: AccessProfileId;
+  accessSandboxMode?: import("./access-profiles").AccessSandboxMode;
+  accessApprovalPolicy?: import("./access-profiles").AccessApprovalPolicy;
+  accessReviewer?: import("./access-profiles").AccessReviewer;
+  accessNetworkMode?: import("./access-profiles").AccessNetworkMode;
+  accessWorkspaceRoots?: string[];
+  accessFilesystemRules?: import("./access-profiles").AccessFilesystemRule[];
+  accessDomainRules?: import("./access-profiles").AccessDomainRule[];
+  /** The selected profile has a finite filesystem/domain boundary. */
+  accessProfileScoped?: boolean;
+  /** The selected profile has a finite filesystem boundary. */
+  accessFilesystemScoped?: boolean;
+  /** The selected named profile could not be resolved; fail closed. */
+  accessProfileUnavailable?: boolean;
 }
 
 /**
@@ -5446,7 +5571,10 @@ export type ManagedEnvironmentStatus = "active" | "archived";
 
 export interface ManagedEnvironmentConfig {
   workspaceId: string;
+  /** Access profile controls command tools, filesystem, network, and approvals. */
+  accessProfileId?: AccessProfileId;
   requireWorktree?: boolean;
+  /** @deprecated Use accessProfileId; kept for persisted/API compatibility. */
   enableShell?: boolean;
   enableBrowser?: boolean;
   enableComputerUse?: boolean;
@@ -5495,6 +5623,73 @@ export interface ManagedSession {
   updatedAt: number;
   startedAt?: number;
   completedAt?: number;
+}
+
+/**
+ * A durable, user-facing container for related work. A WorkContext groups
+ * tasks and managed sessions without replacing either execution primitive.
+ * Task events and SessionRuntime snapshots remain the source of truth for
+ * execution history.
+ */
+export type WorkContextStatus = "active" | "paused" | "completed" | "archived";
+
+export type WorkContextMemberRole = "primary" | "child" | "reviewer" | "scheduled";
+
+export interface WorkContextState {
+  schemaVersion: 1;
+  lastCheckpointId?: string;
+  browserSessionKey?: string;
+  browserTabs?: Array<{
+    id: string;
+    url?: string;
+    title?: string;
+    active?: boolean;
+    viewport?: "desktop" | "tablet" | "mobile";
+  }>;
+  terminalSessionIds?: string[];
+  artifactIds?: string[];
+  childRunIds?: string[];
+  lastActivityKind?: string;
+  lastActivityAt?: number;
+}
+
+export interface WorkContext {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: WorkContextStatus;
+  activeTaskId?: string;
+  activeManagedSessionId?: string;
+  taskIds: string[];
+  managedSessionIds: string[];
+  state: WorkContextState;
+  createdAt: number;
+  updatedAt: number;
+  archivedAt?: number;
+}
+
+export interface WorkContextCreateInput {
+  workspaceId: string;
+  name: string;
+  taskId?: string;
+  managedSessionId?: string;
+  status?: WorkContextStatus;
+}
+
+export interface WorkContextUpdateInput {
+  contextId: string;
+  name?: string;
+  status?: WorkContextStatus;
+  activeTaskId?: string | null;
+  activeManagedSessionId?: string | null;
+  state?: Partial<Omit<WorkContextState, "schemaVersion">>;
+}
+
+export interface WorkContextMemberInput {
+  contextId: string;
+  taskId?: string;
+  managedSessionId?: string;
+  role?: WorkContextMemberRole;
 }
 
 export type ManagedSessionSurface = "runtime" | "agent_panel" | "studio_preview";
@@ -5695,6 +5890,9 @@ export interface AgentBuilderPlan {
   approvalPolicy: ManagedAgentApprovalPolicy;
   sharing: ManagedAgentSharingConfig;
   deployment: ManagedAgentDeploymentConfig;
+  /** Access profile used when this plan is materialized into an environment. */
+  accessProfileId?: AccessProfileId;
+  /** @deprecated Use accessProfileId; retained for older builder plans. */
   enableShell: boolean;
   enableBrowser: boolean;
   enableComputerUse: boolean;
@@ -7545,6 +7743,8 @@ export const IPC_CHANNELS = {
   TASK_LIST_SIDEBAR: "task:listSidebar",
   TASK_TIMELINE_PAGE: "task:timelinePage",
   TASK_EVENT_DETAIL: "task:eventDetail",
+  SESSION_PROGRESS_GET: "session:progressGet",
+  SESSION_SEARCH: "session:search",
   TASK_EXPORT_JSON: "task:exportJSON",
   TASK_PIN: "task:pin",
   TASK_CANCEL: "task:cancel",
@@ -8106,6 +8306,8 @@ export const IPC_CHANNELS = {
   BOX_SAVE_SETTINGS: "box:saveSettings",
   BOX_TEST_CONNECTION: "box:testConnection",
   BOX_GET_STATUS: "box:getStatus",
+  BOX_BRAIN_GET_STATUS: "box:brainGetStatus",
+  BOX_BRAIN_SYNC_NOW: "box:brainSyncNow",
 
   // OneDrive Settings
   ONEDRIVE_GET_SETTINGS: "onedrive:getSettings",
@@ -8415,6 +8617,11 @@ export const IPC_CHANNELS = {
   MANAGED_SESSION_EVENTS_LIST_IPC: "managedSession:eventsListIpc",
   MANAGED_SESSION_WORKPAPER_GET_IPC: "managedSession:workpaperGetIpc",
   MANAGED_SESSION_GENERATE_AUDIO_SUMMARY: "managedSession:generateAudioSummary",
+  WORK_CONTEXT_LIST_IPC: "workContext:listIpc",
+  WORK_CONTEXT_GET_IPC: "workContext:getIpc",
+  WORK_CONTEXT_CREATE_IPC: "workContext:createIpc",
+  WORK_CONTEXT_UPDATE_IPC: "workContext:updateIpc",
+  WORK_CONTEXT_MEMBER_ADD_IPC: "workContext:memberAddIpc",
   AGENT_WORKSPACE_MEMBERSHIP_LIST_IPC: "agentWorkspaceMembership:listIpc",
   AGENT_WORKSPACE_MEMBERSHIP_UPDATE_IPC: "agentWorkspaceMembership:updateIpc",
   AGENT_WORKSPACE_PERMISSION_SNAPSHOT_IPC: "agentWorkspacePermission:snapshotIpc",
@@ -9651,11 +9858,75 @@ export interface NotionConnectionTestResult {
   userId?: string;
 }
 
+export interface BoxBrainSettings {
+  /** Enable the local, background Box knowledge index. */
+  enabled: boolean;
+  /** Workspace that owns the local index; imported memories remain globally searchable. */
+  workspaceId?: string;
+  /** Box folder ID to crawl. Box's root folder is "0". */
+  rootFolderId: string;
+  /** Minimum interval between background sync runs. */
+  syncIntervalMinutes: number;
+  /** Maximum number of files considered in one run. */
+  maxItemsPerRun: number;
+  /** Read text from changed files when the Box MCP tool is available. */
+  includeContent: boolean;
+  /** Ask Box AI for a compact summary of changed files when available. */
+  useBoxAiSummaries: boolean;
+  /** Run the existing reviewable Dreaming pass after new/changed files arrive. */
+  improvementEnabled: boolean;
+  /** Maximum text retained per file in the local index. */
+  maxContentChars: number;
+}
+
+export type BoxBrainItemStatus = "indexed" | "metadata_only" | "skipped" | "error" | "deleted";
+export type BoxBrainRunStatus = "completed" | "partial" | "failed" | "disabled" | "skipped";
+
+export interface BoxBrainStatus {
+  configured: boolean;
+  enabled: boolean;
+  running: boolean;
+  workspaceId?: string;
+  rootFolderId?: string;
+  sourceId?: string;
+  lastRunAt?: number;
+  lastSuccessAt?: number;
+  lastImprovementRunAt?: number;
+  lastError?: string;
+  lastDiscoveredCount: number;
+  lastIndexedCount: number;
+  lastUnchangedCount: number;
+  lastSkippedCount: number;
+  lastDeletedCount: number;
+}
+
+export interface BoxBrainSyncResult {
+  success: boolean;
+  status: "completed" | "partial" | "failed" | "disabled" | "skipped";
+  sourceId?: string;
+  discoveredCount: number;
+  indexedCount: number;
+  unchangedCount: number;
+  skippedCount: number;
+  deletedCount: number;
+  improvementRunId?: string;
+  error?: string;
+}
+
 // Box integration settings
 export interface BoxSettingsData {
   enabled: boolean;
   accessToken?: string;
+  clientId?: string;
+  clientSecret?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: number;
+  scopes?: string[];
+  /** Enable the hosted Box MCP server in addition to the native Box tool. */
+  mcpEnabled?: boolean;
   timeoutMs?: number;
+  /** Optional local company-brain indexing configuration. */
+  brain?: BoxBrainSettings;
 }
 
 export interface BoxConnectionTestResult {

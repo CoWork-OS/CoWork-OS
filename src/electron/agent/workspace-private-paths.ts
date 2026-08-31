@@ -5,10 +5,7 @@ export const COWORK_PRIVATE_ROOT = ".cowork";
 export const COWORK_TASK_TMP_ROOT = ".cowork/tmp";
 export const COWORK_AUTOMATED_OUTPUT_ROOT = ".cowork/automated-outputs";
 
-const DEFAULT_LOCAL_EXCLUDE_PATHS = [
-  COWORK_TASK_TMP_ROOT,
-  COWORK_AUTOMATED_OUTPUT_ROOT,
-];
+const DEFAULT_LOCAL_EXCLUDE_PATHS = [COWORK_TASK_TMP_ROOT, COWORK_AUTOMATED_OUTPUT_ROOT];
 
 const excludeUpdates = new Set<string>();
 
@@ -41,11 +38,15 @@ function resolveGitDir(repoRoot: string, gitPath: string): string | null {
   }
 }
 
-function findGitDir(startPath: string): GitDirInfo | null {
+function findGitDir(
+  startPath: string,
+  canRead?: (candidatePath: string) => boolean,
+): GitDirInfo | null {
   let current = path.resolve(startPath);
 
   while (true) {
     const gitPath = path.join(current, ".git");
+    if (canRead && !canRead(gitPath)) return null;
     const gitDir = resolveGitDir(current, gitPath);
     if (gitDir) {
       return { repoRoot: current, gitDir };
@@ -57,7 +58,11 @@ function findGitDir(startPath: string): GitDirInfo | null {
   }
 }
 
-function buildExcludeEntry(repoRoot: string, workspacePath: string, workspaceRelativePath: string): string | null {
+function buildExcludeEntry(
+  repoRoot: string,
+  workspacePath: string,
+  workspaceRelativePath: string,
+): string | null {
   const absoluteTarget = path.resolve(workspacePath, workspaceRelativePath);
   const relativeToRepo = path.relative(repoRoot, absoluteTarget);
   if (!relativeToRepo || relativeToRepo.startsWith("..") || path.isAbsolute(relativeToRepo)) {
@@ -71,8 +76,12 @@ function buildExcludeEntry(repoRoot: string, workspacePath: string, workspaceRel
 export function ensureCoWorkPrivatePathsExcluded(
   workspacePath: string,
   relativePaths: string[] = DEFAULT_LOCAL_EXCLUDE_PATHS,
+  options: {
+    canRead?: (candidatePath: string) => boolean;
+    canWrite?: (candidatePath: string) => boolean;
+  } = {},
 ): void {
-  const git = findGitDir(workspacePath);
+  const git = findGitDir(workspacePath, options.canRead);
   if (!git) return;
 
   const entries = relativePaths
@@ -84,6 +93,8 @@ export function ensureCoWorkPrivatePathsExcluded(
   if (excludeUpdates.has(cacheKey)) return;
 
   const excludePath = path.join(git.gitDir, "info", "exclude");
+  if (options.canRead && !options.canRead(excludePath)) return;
+  if (options.canWrite && !options.canWrite(excludePath)) return;
 
   try {
     fs.mkdirSync(path.dirname(excludePath), { recursive: true });

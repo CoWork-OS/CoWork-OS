@@ -79,6 +79,8 @@ const EXCLUSIVE_TOOLS = new Set([
   "pause_agent",
   "resume_agent",
   "switch_workspace",
+  "git_commit",
+  "git_merge_to_base",
 ]);
 
 const ALWAYS_EXPOSE_TOOLS = new Set([
@@ -134,14 +136,17 @@ function inferCapabilityTags(toolName: string): RuntimeToolCapabilityTag[] {
 
 function inferConcurrencyClass(toolName: string): RuntimeToolConcurrencyClass {
   if (toolName.startsWith("mcp_")) {
-    return toolName.includes("read") || toolName.includes("search") ? "read_parallel" : "serial_only";
+    return toolName.includes("read") || toolName.includes("search")
+      ? "read_parallel"
+      : "serial_only";
   }
   if (READ_PARALLEL_TOOLS.has(toolName)) return "read_parallel";
   if (EXCLUSIVE_TOOLS.has(toolName)) return "exclusive";
   if (toolName.startsWith("browser_") || toolName.startsWith("canvas_")) return "serial_only";
   if (toolName.endsWith("_action")) return "serial_only";
   if (isComputerUseToolName(toolName)) return "serial_only";
-  if (isArtifactGenerationToolName(toolName) || isFileMutationToolName(toolName)) return "exclusive";
+  if (isArtifactGenerationToolName(toolName) || isFileMutationToolName(toolName))
+    return "exclusive";
   if (
     toolName.startsWith("read_") ||
     toolName.startsWith("list_") ||
@@ -195,7 +200,13 @@ function inferApprovalKind(toolName: string, readOnly: boolean): RuntimeToolAppr
   }
   if (toolName === "run_command") return "shell_sensitive";
   if (toolName === "analyze_image" || toolName === "read_pdf_visual") return "data_export";
-  if (toolName === "delete_file" || toolName.endsWith("_action")) return "destructive";
+  if (
+    toolName === "delete_file" ||
+    toolName === "git_commit" ||
+    toolName === "git_merge_to_base" ||
+    toolName.endsWith("_action")
+  )
+    return "destructive";
   if (toolName.startsWith("mcp_")) return "external_service";
   return readOnly ? "none" : "workspace_policy";
 }
@@ -204,7 +215,11 @@ function inferSideEffectLevel(toolName: string, readOnly: boolean): RuntimeToolS
   if (readOnly) return "none";
   if (toolName === "analyze_image" || toolName === "read_pdf_visual") return "high";
   if (toolName === "delete_file" || toolName.endsWith("_action")) return "high";
-  if (toolName === "run_command" || toolName.startsWith("browser_") || isComputerUseToolName(toolName)) {
+  if (
+    toolName === "run_command" ||
+    toolName.startsWith("browser_") ||
+    isComputerUseToolName(toolName)
+  ) {
     return "medium";
   }
   return "low";
@@ -223,10 +238,18 @@ function inferResultKind(toolName: string): RuntimeToolResultKind {
   ) {
     return "search";
   }
-  if (isArtifactGenerationToolName(toolName) || toolName.startsWith("generate_") || toolName.startsWith("create_")) {
+  if (
+    isArtifactGenerationToolName(toolName) ||
+    toolName.startsWith("generate_") ||
+    toolName.startsWith("create_")
+  ) {
     return "artifact";
   }
-  if (isFileMutationToolName(toolName) || toolName.startsWith("write_") || toolName.startsWith("edit_")) {
+  if (
+    isFileMutationToolName(toolName) ||
+    toolName.startsWith("write_") ||
+    toolName.startsWith("edit_")
+  ) {
     return "mutation";
   }
   if (
@@ -260,7 +283,10 @@ export function getDefaultRuntimeToolMetadata(toolName: string): RuntimeToolMeta
   };
 }
 
-export function withRuntimeToolMetadata(tool: LLMTool, overrides?: Partial<RuntimeToolMetadata>): LLMTool {
+export function withRuntimeToolMetadata(
+  tool: LLMTool,
+  overrides?: Partial<RuntimeToolMetadata>,
+): LLMTool {
   return {
     ...tool,
     runtime: {
@@ -277,5 +303,8 @@ export function withRuntimeToolMetadataList(tools: LLMTool[]): LLMTool[] {
 
 export function isRuntimeToolParallelEligible(tool: Pick<LLMTool, "name" | "runtime">): boolean {
   const metadata = tool.runtime || getDefaultRuntimeToolMetadata(tool.name);
-  return metadata.concurrencyClass === "read_parallel" || metadata.concurrencyClass === "side_effect_parallel";
+  return (
+    metadata.concurrencyClass === "read_parallel" ||
+    metadata.concurrencyClass === "side_effect_parallel"
+  );
 }

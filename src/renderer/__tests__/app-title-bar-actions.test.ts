@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const appPath = fileURLToPath(new URL("../App.tsx", import.meta.url));
+const stylesPath = fileURLToPath(new URL("../styles/index.css", import.meta.url));
 
 describe("App title bar actions", () => {
   it("keeps browser and terminal toggles next to the theme toggle when the right panel is visible", () => {
@@ -37,5 +38,21 @@ describe("App title bar actions", () => {
     expect(source).toContain("setTerminalTabsOpen(false);");
     expect(source).toContain('"App.right_sidebar_toggle_to_paint"');
     expect(source).toContain("rightPanelInput={visibleRightPanelInput}");
+  });
+
+  it("renders the right task inspector as a detached floating surface", () => {
+    const styles = readFileSync(stylesPath, "utf8");
+
+    expect(styles).toContain("FLOATING RIGHT INSPECTOR");
+    expect(styles).toContain("height: fit-content !important;");
+    expect(styles).toContain("max-height: calc(100% - 66px);");
+    expect(styles).toContain("margin: 54px 12px 12px 0;");
+    expect(styles).toContain("background: var(--color-bg-primary) !important;");
+    expect(styles).toContain("border-radius: var(--app-shell-panel-radius);");
+    expect(styles).toContain(".theme-light .app-layout,");
+    expect(styles).toContain(".theme-light .selected-workspace-main-row {");
+    expect(styles).toContain("html:not(.theme-light) .app-layout,");
+    expect(styles).toContain("html:not(.theme-light) .selected-workspace-main-row {");
+    expect(styles).toContain("background: var(--color-bg-primary) !important;");
   });
 });

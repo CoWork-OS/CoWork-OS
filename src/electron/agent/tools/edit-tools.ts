@@ -7,6 +7,10 @@ import {
   getProjectIdFromWorkspaceRelPath,
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
+import {
+  evaluateWorkspaceFilesystemAccess,
+  resolveAccessControlledPath,
+} from "../../security/access-profile-paths";
 import { LLMTool } from "../llm/types";
 
 /**
@@ -99,13 +103,60 @@ export class EditTools {
 
       // Resolve path
       const workspaceRoot = path.resolve(this.workspace.path);
-      const fullPath = path.resolve(workspaceRoot, file_path);
-
-      // Security check - must be within workspace
-      const relToWorkspace = path.relative(workspaceRoot, fullPath);
-      if (relToWorkspace.startsWith("..") || path.isAbsolute(relToWorkspace)) {
-        throw new Error("File path must be within workspace");
+      const requestedFullPath = path.resolve(workspaceRoot, file_path);
+      const candidatePath = resolveAccessControlledPath(this.workspace.path, requestedFullPath);
+      let externalApprovalGranted =
+        typeof (this.daemon as Any)?.consumeExternalFileApproval === "function" &&
+        (this.daemon as Any).consumeExternalFileApproval(this.taskId, candidatePath, "write") ===
+          true;
+      let access = evaluateWorkspaceFilesystemAccess(this.workspace, requestedFullPath, "write", {
+        externalApprovalGranted,
+      });
+      if (access.decision !== "allow") {
+        if (access.reason === "profile_filesystem_denied") {
+          throw new Error(`Path is denied by the active access profile: ${requestedFullPath}`);
+        }
+        if (access.reason === "outside_workspace") {
+          const requester = (this.daemon as Any)?.requestApproval;
+          if (typeof requester !== "function") {
+            throw new Error(
+              "External file access requires the approval system; the path must remain within workspace.",
+            );
+          }
+          const approved =
+            (await requester.call(
+              this.daemon,
+              this.taskId,
+              "external_file_access",
+              `Allow write access to external file: ${candidatePath}`,
+              {
+                path: candidatePath,
+                operation: "write",
+                tool: "edit_file",
+              },
+            )) === true;
+          if (!approved) throw new Error("External file access was not approved.");
+          externalApprovalGranted =
+            typeof (this.daemon as Any)?.consumeExternalFileApproval === "function"
+              ? (this.daemon as Any).consumeExternalFileApproval(
+                  this.taskId,
+                  candidatePath,
+                  "write",
+                ) === true
+              : true;
+          access = evaluateWorkspaceFilesystemAccess(this.workspace, requestedFullPath, "write", {
+            externalApprovalGranted: true,
+          });
+        }
+        if (access.decision !== "allow") {
+          const detail =
+            access.reason === "protected_path"
+              ? " (the target must remain within workspace and cannot be an OS-protected path)"
+              : "";
+          throw new Error(`Write permission not granted: ${access.reason}${detail}`);
+        }
       }
+      const fullPath = access.path;
 
       // Enforce per-project access for `.cowork/projects/*`
       const relPosix = getWorkspaceRelativePosixPath(workspaceRoot, fullPath);
@@ -130,6 +181,19 @@ export class EditTools {
       // Check file exists
       if (!fs.existsSync(fullPath)) {
         throw new Error(`File not found: ${file_path}`);
+      }
+
+      // Apply the same profile rule to the resolved symlink target. This
+      // prevents an in-workspace link from bypassing an external deny rule.
+      const realPath = fs.realpathSync(fullPath);
+      const realAccess = evaluateWorkspaceFilesystemAccess(this.workspace, realPath, "write", {
+        externalApprovalGranted,
+      });
+      if (realAccess.decision !== "allow") {
+        if (realAccess.reason !== "profile_filesystem_denied") {
+          throw new Error("File path resolves outside workspace");
+        }
+        throw new Error(`Path is denied by the active access profile: ${realPath}`);
       }
 
       // Read file

@@ -17,7 +17,10 @@ const mockComputedStyle = {
   }),
 };
 
-vi.stubGlobal("getComputedStyle", vi.fn(() => mockComputedStyle));
+vi.stubGlobal(
+  "getComputedStyle",
+  vi.fn(() => mockComputedStyle),
+);
 vi.stubGlobal("document", {
   documentElement: {},
 });

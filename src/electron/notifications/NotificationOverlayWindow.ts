@@ -41,9 +41,7 @@ export class NotificationOverlayManager {
   // Provider callback so we always get fresh tray bounds (avoids stale-on-init issues)
   private anchorBoundsProvider: (() => Rectangle | null) | null = null;
 
-  private onClickCallback:
-    | ((notificationId: string, taskId?: string) => void)
-    | null = null;
+  private onClickCallback: ((notificationId: string, taskId?: string) => void) | null = null;
 
   static getInstance(): NotificationOverlayManager {
     if (!NotificationOverlayManager.instance) {
@@ -63,9 +61,7 @@ export class NotificationOverlayManager {
     this.anchorBoundsProvider = fn;
   }
 
-  setOnClick(
-    callback: (notificationId: string, taskId?: string) => void,
-  ): void {
+  setOnClick(callback: (notificationId: string, taskId?: string) => void): void {
     this.onClickCallback = callback;
   }
 
@@ -129,9 +125,7 @@ export class NotificationOverlayManager {
     NotificationOverlayManager.instance = null;
   }
 
-  private createOverlayWindow(
-    notification: OverlayNotification,
-  ): BrowserWindow {
+  private createOverlayWindow(notification: OverlayNotification): BrowserWindow {
     const isMac = process.platform === "darwin";
     const { x, y } = this.getPosition(this.activeOverlays.size);
 
@@ -164,9 +158,7 @@ export class NotificationOverlayManager {
       win.setAlwaysOnTop(true, "floating");
     }
 
-    win.loadURL(
-      `data:text/html;charset=utf-8,${encodeURIComponent(this.getHtml(notification))}`,
-    );
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(this.getHtml(notification))}`);
 
     win.once("ready-to-show", () => {
       win.showInactive();
@@ -187,14 +179,10 @@ export class NotificationOverlayManager {
   }
 
   private getPosition(stackIndex: number): { x: number; y: number } {
-    const trayBounds = this.anchorBoundsProvider
-      ? this.anchorBoundsProvider()
-      : null;
+    const trayBounds = this.anchorBoundsProvider ? this.anchorBoundsProvider() : null;
 
     // Use the display that contains the tray so multi-monitor setups get correct edges.
-    const display = trayBounds
-      ? screen.getDisplayMatching(trayBounds)
-      : screen.getPrimaryDisplay();
+    const display = trayBounds ? screen.getDisplayMatching(trayBounds) : screen.getPrimaryDisplay();
     const { workArea } = display;
 
     // Top-right of the work area (standard macOS notification placement). Do not center on the

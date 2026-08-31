@@ -21,6 +21,8 @@ import type { OpenAIOAuthTokens } from "../llm/openai-oauth";
 import { downscaleImage } from "./image-utils";
 import { createLogger } from "../../utils/logger";
 import { buildSensitiveSourceRefForPath } from "../security/export-permission-context";
+import { assertWorkspaceReadableFileAccessWithApproval } from "../../security/access-profile-paths";
+import { evaluateNetworkPolicy } from "../../security/network-policy";
 
 type VisionProvider = "azure" | "openai" | "anthropic" | "bedrock";
 
@@ -53,17 +55,6 @@ function normalizeAzureBaseEndpoint(endpoint: string): string {
   const idx = trimmed.indexOf("/openai/");
   if (idx !== -1) return trimmed.slice(0, idx);
   return trimmed.replace(/\/+$/, "");
-}
-
-function safeResolveWithinWorkspace(
-  workspacePath: string,
-  relPath: string,
-): string | null {
-  const root = path.resolve(workspacePath);
-  const candidate = path.resolve(root, relPath);
-  if (candidate === root) return null;
-  if (candidate.startsWith(root + path.sep)) return candidate;
-  return null;
 }
 
 function guessImageMimeType(filePath: string): string {
@@ -136,6 +127,71 @@ export class VisionTools {
     this.workspace = workspace;
   }
 
+  /**
+   * Vision providers are SDK-backed and therefore do not pass through the
+   * generic browser/fetch tool classifier. Apply the active profile's network
+   * and domain boundary to the concrete provider endpoint before invoking an
+   * SDK or direct fetch.
+   */
+  private assertNetworkAccess(url: string, toolName = "analyze_image"): void {
+    const decision = evaluateNetworkPolicy({
+      url,
+      toolName,
+      networkEnabled: this.workspace.permissions.network,
+      accessNetworkMode: this.workspace.permissions.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions.accessDomainRules,
+    });
+    if (decision.action !== "allow") {
+      throw new Error(`Network access denied for ${decision.url}: ${decision.reason}`);
+    }
+  }
+
+  private async resolveReadablePath(inputPath: string): Promise<string | null> {
+    if (this.workspace.permissions.read === false) return null;
+    try {
+      const daemon = this.daemon as unknown as {
+        requestApproval?: (
+          taskId: string,
+          type: "external_file_access",
+          description: string,
+          details: Record<string, unknown>,
+        ) => Promise<boolean>;
+        consumeExternalFileApproval?: (
+          taskId: string,
+          filePath: string,
+          operation: "read" | "write" | "delete",
+        ) => boolean;
+      };
+      return await assertWorkspaceReadableFileAccessWithApproval(
+        this.workspace,
+        inputPath,
+        "vision input",
+        {
+          ...(typeof daemon.requestApproval === "function"
+            ? {
+                request: ({ path: approvedPath, operation, label }) =>
+                  daemon.requestApproval!(
+                    this.taskId,
+                    "external_file_access",
+                    `Allow ${operation} access to external ${label}: ${approvedPath}`,
+                    { path: approvedPath, operation, tool: "analyze_image" },
+                  ),
+              }
+            : {}),
+          ...(typeof daemon.consumeExternalFileApproval === "function"
+            ? {
+                consume: (approvedPath: string, operation: "read" | "write" | "delete") =>
+                  daemon.consumeExternalFileApproval!(this.taskId, approvedPath, operation),
+              }
+            : {}),
+        },
+      );
+    } catch {
+      // Let the caller produce the normal not-found/permission response.
+      return null;
+    }
+  }
+
   private buildCacheKey(parts: Record<string, unknown>): string {
     const raw = JSON.stringify(parts);
     const digest = createHash("sha1").update(raw).digest("hex");
@@ -171,19 +227,12 @@ export class VisionTools {
       asAny?.cause?.statusCode;
     const status = Number(statusRaw);
     if (Number.isFinite(status)) {
-      if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status))
-        return true;
-      if (
-        [400, 401, 403, 404, 405, 406, 410, 411, 413, 414, 415, 422].includes(
-          status,
-        )
-      )
+      if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+      if ([400, 401, 403, 404, 405, 406, 410, 411, 413, 414, 415, 422].includes(status))
         return false;
     }
 
-    const code = String(
-      asAny?.code || asAny?.name || asAny?.type || "",
-    ).toLowerCase();
+    const code = String(asAny?.code || asAny?.name || asAny?.type || "").toLowerCase();
     if (code) {
       const retryableCodes = [
         "etimedout",
@@ -258,10 +307,7 @@ export class VisionTools {
     return transientPatterns.some((re) => re.test(text));
   }
 
-  private logReadPdfVisualFailure(
-    error: string,
-    details: Record<string, unknown> = {},
-  ): void {
+  private logReadPdfVisualFailure(error: string, details: Record<string, unknown> = {}): void {
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: "read_pdf_visual",
       success: false,
@@ -299,13 +345,11 @@ export class VisionTools {
             provider: {
               type: "string",
               enum: ["azure", "openai", "anthropic", "bedrock"],
-              description:
-                "Optional provider override for a non-Gemini vision provider.",
+              description: "Optional provider override for a non-Gemini vision provider.",
             },
             model: {
               type: "string",
-              description:
-                "Optional model override (provider-specific model ID).",
+              description: "Optional model override (provider-specific model ID).",
             },
             max_tokens: {
               type: "number",
@@ -378,17 +422,10 @@ export class VisionTools {
         ? input.prompt.trim()
         : "Describe this image in detail.";
     const providerOverride =
-      typeof input?.provider === "string"
-        ? input.provider.trim().toLowerCase()
-        : "";
-    const modelOverride =
-      typeof input?.model === "string" ? input.model.trim() : "";
-    const maxTokensRaw =
-      typeof input?.max_tokens === "number" ? input.max_tokens : undefined;
-    const maxTokens = Math.min(
-      Math.max(maxTokensRaw ?? DEFAULT_MAX_TOKENS, 64),
-      4096,
-    );
+      typeof input?.provider === "string" ? input.provider.trim().toLowerCase() : "";
+    const modelOverride = typeof input?.model === "string" ? input.model.trim() : "";
+    const maxTokensRaw = typeof input?.max_tokens === "number" ? input.max_tokens : undefined;
+    const maxTokens = Math.min(Math.max(maxTokensRaw ?? DEFAULT_MAX_TOKENS, 64), 4096);
 
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "analyze_image",
@@ -402,11 +439,11 @@ export class VisionTools {
       return { success: false, error: 'Missing required "path"' };
     }
 
-    const absPath = safeResolveWithinWorkspace(this.workspace.path, relPath);
+    const absPath = await this.resolveReadablePath(relPath);
     if (!absPath) {
       return {
         success: false,
-        error: "Image path must be within the current workspace",
+        error: "Image path is outside the active access profile boundary",
       };
     }
 
@@ -443,9 +480,7 @@ export class VisionTools {
     });
     const cached = this.getCachedResult(cacheKey);
     if (cached) {
-      logger.debug(
-        `[VisionTools] Cache hit for ${relPath} — skipping duplicate vision call`,
-      );
+      logger.debug(`[VisionTools] Cache hit for ${relPath} — skipping duplicate vision call`);
       return cached;
     }
 
@@ -466,10 +501,7 @@ export class VisionTools {
           `[VisionTools] Downscaled image from ${buffer.length} to ${processedBuffer.length} bytes`,
         );
       } catch (err) {
-        logger.warn(
-          `[VisionTools] Image downscale failed, using original:`,
-          err,
-        );
+        logger.warn(`[VisionTools] Image downscale failed, using original:`, err);
       }
     }
 
@@ -542,15 +574,13 @@ export class VisionTools {
     } = args;
 
     const settings = LLMProviderFactory.loadSettings();
-    const rawProviderType = String(
-      (settings as { providerType?: string }).providerType || "",
-    );
+    const rawProviderType = String((settings as { providerType?: string }).providerType || "");
     const normalizedProviderType =
       rawProviderType === "amazon-bedrock" ? "bedrock" : rawProviderType;
     const hasAzureVisionConfig = Boolean(
       settings.azure?.apiKey?.trim() &&
-        settings.azure?.endpoint?.trim() &&
-        settings.azure?.deployment?.trim(),
+      settings.azure?.endpoint?.trim() &&
+      settings.azure?.deployment?.trim(),
     );
     const hasDirectOpenAIVisionConfig = Boolean(settings.openai?.apiKey?.trim());
     const hasOpenAIOAuthVisionConfig = Boolean(
@@ -597,6 +627,7 @@ export class VisionTools {
               "Azure OpenAI vision requires apiKey, endpoint, and deployment to be configured.";
             continue;
           }
+          this.assertNetworkAccess(normalizeAzureBaseEndpoint(endpoint), toolName);
           const model = modelOverride || deployment;
           const text = await this.analyzeWithAzureOpenAI({
             apiKey,
@@ -626,6 +657,10 @@ export class VisionTools {
           const useOAuth = settings.openai?.authMethod === "oauth" && canUseOAuth;
           const model =
             modelOverride || settings.openai?.model || (useOAuth ? "gpt-5.5" : "gpt-4o-mini");
+          this.assertNetworkAccess(
+            useOAuth ? "https://chatgpt.com/backend-api" : "https://api.openai.com/v1",
+            toolName,
+          );
           let text: string;
           if (useOAuth) {
             text = await this.analyzeWithOpenAIOAuth({
@@ -678,8 +713,8 @@ export class VisionTools {
             lastError = "Claude credentials not configured.";
             continue;
           }
-          const defaultModel =
-            MODELS["sonnet-4-6"]?.anthropic || "claude-sonnet-4-6";
+          this.assertNetworkAccess("https://api.anthropic.com/v1", toolName);
+          const defaultModel = MODELS["sonnet-4-6"]?.anthropic || "claude-sonnet-4-6";
           const model = modelOverride || defaultModel;
           const text = await this.analyzeWithAnthropic({
             apiKey,
@@ -700,18 +735,17 @@ export class VisionTools {
 
         if (provider === "bedrock") {
           const hasCredentials =
-            (settings.bedrock?.accessKeyId &&
-              settings.bedrock?.secretAccessKey) ||
+            (settings.bedrock?.accessKeyId && settings.bedrock?.secretAccessKey) ||
             settings.bedrock?.profile ||
             settings.bedrock?.useDefaultCredentials;
           if (!hasCredentials) {
             lastError = "Amazon Bedrock credentials not configured.";
             continue;
           }
-          const defaultModel =
-            MODELS["sonnet-4-6"]?.bedrock || "anthropic.claude-sonnet-4-6";
-          const model =
-            modelOverride || settings.bedrock?.model || defaultModel;
+          const region = settings.bedrock?.region?.trim() || "us-east-1";
+          this.assertNetworkAccess(`https://bedrock-runtime.${region}.amazonaws.com`, toolName);
+          const defaultModel = MODELS["sonnet-4-6"]?.bedrock || "anthropic.claude-sonnet-4-6";
+          const model = modelOverride || settings.bedrock?.model || defaultModel;
           const text = await this.analyzeWithBedrock({
             settings,
             model,
@@ -728,7 +762,6 @@ export class VisionTools {
           });
           return { success: true, provider, model, text };
         }
-
       } catch (error: Any) {
         lastErrorRaw = error;
         lastError = error?.message || String(error);
@@ -741,9 +774,7 @@ export class VisionTools {
     const fallbackError =
       lastError ||
       "The current model cannot analyze images directly. Switch to an image-capable model/provider, then resend the image.";
-    const retryable = this.shouldRetryVisionError(
-      lastErrorRaw ?? fallbackError,
-    );
+    const retryable = this.shouldRetryVisionError(lastErrorRaw ?? fallbackError);
     const configurationMissing =
       /not configured|does not support image analysis here yet|no vision-capable provider configured|vision requires|cannot analyze images directly|switch to an image-capable model/i.test(
         fallbackError,
@@ -790,12 +821,9 @@ export class VisionTools {
       typeof input?.prompt === "string" && input.prompt.trim().length > 0
         ? input.prompt.trim()
         : "Describe the layout, design, content, and visual structure of this document page in detail.";
-    const pagesSpec =
-      typeof input?.pages === "string" ? input.pages.trim() : "1-2";
+    const pagesSpec = typeof input?.pages === "string" ? input.pages.trim() : "1-2";
     const providerOverride =
-      typeof input?.provider === "string"
-        ? input.provider.trim().toLowerCase()
-        : undefined;
+      typeof input?.provider === "string" ? input.provider.trim().toLowerCase() : undefined;
 
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "read_pdf_visual",
@@ -814,11 +842,11 @@ export class VisionTools {
       };
     }
 
-    const absPath = safeResolveWithinWorkspace(this.workspace.path, relPath);
+    const absPath = await this.resolveReadablePath(relPath);
     if (!absPath) {
       return {
         success: false,
-        error: "PDF path must be within the current workspace",
+        error: "PDF path is outside the active access profile boundary",
       };
     }
 
@@ -847,9 +875,7 @@ export class VisionTools {
     });
     const cached = this.getCachedResult(cacheKey);
     if (cached) {
-      logger.debug(
-        `[VisionTools] Cache hit for PDF ${relPath} — skipping duplicate vision call`,
-      );
+      logger.debug(`[VisionTools] Cache hit for PDF ${relPath} — skipping duplicate vision call`);
       return cached;
     }
 
@@ -892,15 +918,12 @@ export class VisionTools {
 
       // Find generated page images
       const files = await fs.readdir(tmpDir);
-      const pageFiles = files
-        .filter((f) => f.startsWith("page-") && f.endsWith(".png"))
-        .sort();
+      const pageFiles = files.filter((f) => f.startsWith("page-") && f.endsWith(".png")).sort();
 
       if (pageFiles.length === 0) {
         return {
           success: false,
-          error:
-            "PDF conversion produced no images. The PDF may be empty or corrupt.",
+          error: "PDF conversion produced no images. The PDF may be empty or corrupt.",
         };
       }
 
@@ -931,9 +954,7 @@ export class VisionTools {
         }
 
         const pagePrompt =
-          pageFiles.length > 1
-            ? `Page ${pageNum} of ${lastPage}: ${prompt}`
-            : prompt;
+          pageFiles.length > 1 ? `Page ${pageNum} of ${lastPage}: ${prompt}` : prompt;
 
         const pageBase64 = pageBuffer.toString("base64");
         let analysisResult = await this.analyzeBuffer({
@@ -970,9 +991,7 @@ export class VisionTools {
       // Requirement: all requested pages must be analyzed successfully.
       // Do not cache partial outputs.
       if (pageFailures.length > 0) {
-        const details = pageFailures
-          .map((f) => `p${f.page}: ${f.error}`)
-          .join(" | ");
+        const details = pageFailures.map((f) => `p${f.page}: ${f.error}`).join(" | ");
         this.logReadPdfVisualFailure(details, {
           pagesAnalyzed: results.length,
           pagesFailed: pageFailures.length,
@@ -1105,11 +1124,7 @@ export class VisionTools {
             {
               type: "image",
               data: args.base64,
-              mimeType: args.mimeType as
-                | "image/jpeg"
-                | "image/png"
-                | "image/gif"
-                | "image/webp",
+              mimeType: args.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
             },
           ],
         },
@@ -1285,11 +1300,7 @@ export class VisionTools {
     }
 
     const client = new BedrockRuntimeClient(clientConfig);
-    const format = args.mimeType.split("/")[1] as
-      | "jpeg"
-      | "png"
-      | "gif"
-      | "webp";
+    const format = args.mimeType.split("/")[1] as "jpeg" | "png" | "gif" | "webp";
 
     const command = new ConverseCommand({
       modelId: args.model,

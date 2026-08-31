@@ -41,7 +41,9 @@ afterEach(async () => {
   for (const db of databases.splice(0)) {
     db.close();
   }
-  await Promise.all(createdDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    createdDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
 });
 
 describe("TranscriptStore", () => {

@@ -131,7 +131,10 @@ describe("UserProfileService", () => {
   });
 
   it("honors explicit requests not to push back", () => {
-    UserProfileService.ingestUserMessage("Please don't push back on small product ideas.", "task-1");
+    UserProfileService.ingestUserMessage(
+      "Please don't push back on small product ideas.",
+      "task-1",
+    );
 
     expect(mocks.storedProfile.facts).toHaveLength(1);
     expect(mocks.storedProfile.facts[0]?.category).toBe("operating");

@@ -13,9 +13,12 @@ import {
 } from "../improvement/ImprovementEligibilityService";
 
 export function setupImprovementHandlers(service: ImprovementLoopService): void {
-  ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_GET_SETTINGS, async (): Promise<ImprovementLoopSettings> => {
-    return service.getSettings();
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.IMPROVEMENT_GET_SETTINGS,
+    async (): Promise<ImprovementLoopSettings> => {
+      return service.getSettings();
+    },
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.IMPROVEMENT_GET_ELIGIBILITY,
@@ -40,9 +43,8 @@ export function setupImprovementHandlers(service: ImprovementLoopService): void 
     },
   );
 
-  ipcMain.handle(
-    IPC_CHANNELS.IMPROVEMENT_LIST_CANDIDATES,
-    async (_event, workspaceId?: string) => service.listCandidates(workspaceId),
+  ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_LIST_CANDIDATES, async (_event, workspaceId?: string) =>
+    service.listCandidates(workspaceId),
   );
 
   ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_LIST_RUNS, async (_event, workspaceId?: string) =>

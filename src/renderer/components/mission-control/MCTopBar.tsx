@@ -17,18 +17,32 @@ const TABS: { id: MCTab; label: string; requiresCompany?: boolean }[] = [
 
 export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
   const {
-    workspaces, selectedWorkspaceId, setSelectedWorkspaceId,
-    companies, selectedCompanyId, setSelectedCompanyId,
-    activeAgentsCount, totalTasksInQueue, pendingMentionsCount,
+    workspaces,
+    selectedWorkspaceId,
+    setSelectedWorkspaceId,
+    companies,
+    selectedCompanyId,
+    setSelectedCompanyId,
+    activeAgentsCount,
+    totalTasksInQueue,
+    pendingMentionsCount,
     queueStatusState,
-    runtimeRunningCount, runtimeQueuedCount, runtimeMaxConcurrent,
-    isRefreshing, handleManualRefresh, selectedWorkspace,
-    setStandupOpen, setTeamsOpen, setReviewsOpen,
-    activeTab, setActiveTab, selectedCompany,
-    currentTime, agentContext,
+    runtimeRunningCount,
+    runtimeQueuedCount,
+    runtimeMaxConcurrent,
+    isRefreshing,
+    handleManualRefresh,
+    selectedWorkspace,
+    setStandupOpen,
+    setTeamsOpen,
+    setReviewsOpen,
+    activeTab,
+    setActiveTab,
+    selectedCompany,
+    currentTime,
+    agentContext,
   } = data;
-  const supportsWorkspaceReports =
-    !!selectedWorkspace && !isTempWorkspaceId(selectedWorkspace.id);
+  const supportsWorkspaceReports = !!selectedWorkspace && !isTempWorkspaceId(selectedWorkspace.id);
   const runtimeStatusValue =
     queueStatusState === "ready"
       ? runtimeMaxConcurrent
@@ -49,17 +63,33 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
         <div className="mc-v2-topbar-left">
           <h1>{agentContext.getUiCopy("mcTitle")}</h1>
           <div className="mc-v2-selector">
-            <span className="mc-v2-selector-label">{agentContext.getUiCopy("mcWorkspaceLabel")}</span>
-            <select value={selectedWorkspaceId || ""} onChange={(e) => setSelectedWorkspaceId(e.target.value)}>
+            <span className="mc-v2-selector-label">
+              {agentContext.getUiCopy("mcWorkspaceLabel")}
+            </span>
+            <select
+              value={selectedWorkspaceId || ""}
+              onChange={(e) => setSelectedWorkspaceId(e.target.value)}
+            >
               <option value={ALL_WORKSPACES_ID}>All Workspaces</option>
-              {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
             </select>
           </div>
           {companies.length > 0 && (
             <div className="mc-v2-selector">
               <span className="mc-v2-selector-label">Company</span>
-              <select value={selectedCompanyId || ""} onChange={(e) => setSelectedCompanyId(e.target.value)}>
-                {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <select
+                value={selectedCompanyId || ""}
+                onChange={(e) => setSelectedCompanyId(e.target.value)}
+              >
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
               </select>
             </div>
           )}
@@ -84,7 +114,10 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
           >
             <strong>{totalTasksInQueue}</strong> board work
           </span>
-          <span className="mc-v2-stat-pill" title="Mentions waiting for acknowledgement, follow-up, or completion.">
+          <span
+            className="mc-v2-stat-pill"
+            title="Mentions waiting for acknowledgement, follow-up, or completion."
+          >
             <strong>{pendingMentionsCount}</strong> mentions
           </span>
         </div>
@@ -96,7 +129,13 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
           >
             {isRefreshing ? "Refreshing..." : "Refresh"}
           </button>
-          <button className="mc-v2-icon-btn" onClick={() => setTeamsOpen(true)} disabled={!selectedWorkspace}>Teams</button>
+          <button
+            className="mc-v2-icon-btn"
+            onClick={() => setTeamsOpen(true)}
+            disabled={!selectedWorkspace}
+          >
+            Teams
+          </button>
           <button
             className="mc-v2-icon-btn"
             onClick={() => setReviewsOpen(true)}
@@ -114,10 +153,24 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
           <button className="mc-v2-icon-btn" onClick={onOpenAgents}>
             Agents Hub
           </button>
-          <span style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--font-mono)", color: "var(--color-text-primary)" }}>
-            {currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              fontFamily: "var(--font-mono)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            {currentTime.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })}
           </span>
-          <span className="mc-v2-online-dot" title={agentContext.getUiCopy("mcStatusOnline")}></span>
+          <span
+            className="mc-v2-online-dot"
+            title={agentContext.getUiCopy("mcStatusOnline")}
+          ></span>
         </div>
       </header>
 

@@ -25,7 +25,10 @@ export class CoreLearningPipelineService {
         relatedClusterId: cluster.id,
         createdAt: Date.now(),
       });
-      const evalCases = this.evalService.syncEvalCasesForProfile(cluster.profileId, cluster.workspaceId);
+      const evalCases = this.evalService.syncEvalCasesForProfile(
+        cluster.profileId,
+        cluster.workspaceId,
+      );
       if (evalCases.some((item) => item.clusterId === cluster.id)) {
         this.learnings.append({
           profileId: cluster.profileId,

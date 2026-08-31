@@ -72,9 +72,11 @@ export class XAdapter implements ChannelAdapter {
       }
 
       const whoami = await runBirdCommand(settings, ["whoami"], { json: true });
-      const payload = (whoami.data && typeof whoami.data === "object" ? whoami.data : null) as
-        | { username?: string; user?: string; handle?: string }
-        | null;
+      const payload = (whoami.data && typeof whoami.data === "object" ? whoami.data : null) as {
+        username?: string;
+        user?: string;
+        handle?: string;
+      } | null;
       this.botHandle =
         payload?.username || payload?.user || payload?.handle || this.extractHandle(whoami.stdout);
 
@@ -163,9 +165,12 @@ export class XAdapter implements ChannelAdapter {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
-    this.pollTimer = setTimeout(() => {
-      void this.pollOnce();
-    }, Math.max(0, delayMs));
+    this.pollTimer = setTimeout(
+      () => {
+        void this.pollOnce();
+      },
+      Math.max(0, delayMs),
+    );
   }
 
   private getPollIntervalMs(): number {
@@ -244,7 +249,9 @@ export class XAdapter implements ChannelAdapter {
 
       const result = await fetchMentionsWithRetry(settings, trigger.fetchCount);
       if (result.jsonFallbackUsed) {
-        throw new Error("bird mentions requires JSON support. Upgrade bird CLI to a newer version.");
+        throw new Error(
+          "bird mentions requires JSON support. Upgrade bird CLI to a newer version.",
+        );
       }
       const mentions = sortMentionsOldestFirst(parseBirdMentions(result.data ?? result.stdout));
 

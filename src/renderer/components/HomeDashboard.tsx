@@ -37,7 +37,11 @@ import {
 } from "../utils/task-outputs";
 import { buildCompletionOutputMessage } from "../utils/task-completion-ux";
 import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
-import { isActiveSessionStatus, isAutomatedSession, shouldShowTaskInSidebarSessions } from "./Sidebar";
+import {
+  isActiveSessionStatus,
+  isAutomatedSession,
+  shouldShowTaskInSidebarSessions,
+} from "./Sidebar";
 import "./MainContent/main-content.css";
 
 interface RecentHubFile {
@@ -56,7 +60,12 @@ type PreviewableFileType = NonNullable<FileViewerResult["data"]>["fileType"];
 
 type HomeFilePreviewState =
   | { status: "loading" }
-  | { status: "ready"; fileType: PreviewableFileType; content: string | null; pdfThumbnailDataUrl?: string }
+  | {
+      status: "ready";
+      fileType: PreviewableFileType;
+      content: string | null;
+      pdfThumbnailDataUrl?: string;
+    }
   | { status: "error" };
 
 interface HomeDashboardProps {
@@ -272,9 +281,7 @@ function HomeFilePreview({
         }
 
         const content =
-          result.data.fileType === "docx"
-            ? result.data.htmlContent || ""
-            : result.data.content;
+          result.data.fileType === "docx" ? result.data.htmlContent || "" : result.data.content;
 
         setPreview({
           status: "ready",
@@ -305,7 +312,9 @@ function HomeFilePreview({
     return (
       <div className="home-file-thumb-preview home-file-thumb-preview-media">
         <img src={preview.content} alt={fileName} className="home-file-thumb-preview-image" />
-        <span className="home-file-thumb-preview-badge">{getPreviewLabel(preview.fileType, filePath)}</span>
+        <span className="home-file-thumb-preview-badge">
+          {getPreviewLabel(preview.fileType, filePath)}
+        </span>
       </div>
     );
   }
@@ -318,7 +327,9 @@ function HomeFilePreview({
           alt={`${fileName} preview`}
           className="home-file-thumb-preview-image"
         />
-        <span className="home-file-thumb-preview-badge">{getPreviewLabel(preview.fileType, filePath)}</span>
+        <span className="home-file-thumb-preview-badge">
+          {getPreviewLabel(preview.fileType, filePath)}
+        </span>
       </div>
     );
   }
@@ -327,7 +338,9 @@ function HomeFilePreview({
   if (preview.status === "ready" && textPreview) {
     return (
       <div className="home-file-thumb-preview home-file-thumb-preview-text">
-        <span className="home-file-thumb-preview-badge">{getPreviewLabel(preview.fileType, filePath)}</span>
+        <span className="home-file-thumb-preview-badge">
+          {getPreviewLabel(preview.fileType, filePath)}
+        </span>
         <p>{textPreview}</p>
       </div>
     );
@@ -366,7 +379,8 @@ function getTaskStatusInfo(task: Task): { icon: "live" | "complete" | "paused"; 
     }
     return { icon: "live", label: "Working" };
   }
-  if (task.status === "paused" || task.status === "blocked") return { icon: "paused", label: "Awaiting reply" };
+  if (task.status === "paused" || task.status === "blocked")
+    return { icon: "paused", label: "Awaiting reply" };
   if (task.status === "completed") return { icon: "complete", label: "Complete" };
   if (task.status === "failed") return { icon: "paused", label: "Needs attention" };
   if (task.status === "cancelled") return { icon: "complete", label: "Cancelled" };
@@ -383,7 +397,8 @@ function getTaskTone(task: Task): "live" | "queued" | "done" | "attention" {
 function getAutomationSender(task: Task): string {
   if (task.heartbeatRunId) return "Heartbeat";
   if (task.source === "cron") return "Scheduled task";
-  if (task.source === "improvement" || task.source === "subconscious") return "Workflow Intelligence";
+  if (task.source === "improvement" || task.source === "subconscious")
+    return "Workflow Intelligence";
   if (task.source === "hook") return "Event trigger";
   if (task.source === "api") return "API";
   return "Manual";
@@ -403,7 +418,8 @@ function getAutomationPreview(task: Task): string {
 function getAutomationTag(task: Task): string {
   if (task.heartbeatRunId) return "Companion";
   if (task.source === "cron") return "Recurring";
-  if (task.source === "improvement" || task.source === "subconscious") return "Workflow Intelligence";
+  if (task.source === "improvement" || task.source === "subconscious")
+    return "Workflow Intelligence";
   if (task.source === "hook") return "Triggered";
   if (task.source === "api") return "API";
   return "Manual";
@@ -486,7 +502,8 @@ export function HomeDashboard({
 
     (async () => {
       try {
-        const profileResult = (await window.electronAPI.everydayAgentGetProfile()) as EverydayAgentProfileResult;
+        const profileResult =
+          (await window.electronAPI.everydayAgentGetProfile()) as EverydayAgentProfileResult;
         const receiptRows = (await window.electronAPI.everydayAgentListReceipts({
           profileId: profileResult.profile.id,
           workspaceId: workspace?.id,
@@ -494,7 +511,8 @@ export function HomeDashboard({
         })) as EverydayActionReceipt[];
         const suggestionRows =
           workspace?.id && window.electronAPI.listSuggestions
-            ? (((await window.electronAPI.listSuggestions(workspace.id)) || []) as ProactiveSuggestion[])
+            ? (((await window.electronAPI.listSuggestions(workspace.id)) ||
+                []) as ProactiveSuggestion[])
             : [];
 
         if (cancelled) return;
@@ -552,9 +570,8 @@ export function HomeDashboard({
         setKnownWorkspaces(visibleWorkspaces as Workspace[]);
 
         const notificationResults = await window.electronAPI.listNotifications();
-        const companionNotifications = (Array.isArray(notificationResults)
-          ? notificationResults
-          : []
+        const companionNotifications = (
+          Array.isArray(notificationResults) ? notificationResults : []
         ).filter((item: CompanionNotification) => item.type === "companion_suggestion");
 
         const suggestionResults = visibleWorkspaces.length
@@ -657,11 +674,7 @@ export function HomeDashboard({
     const workspaceId = suggestion?.workspaceId || workspace?.id;
     if (!workspaceId) return;
     try {
-      await window.electronAPI.snoozeSuggestion(
-        workspaceId,
-        id,
-        Date.now() + 24 * 60 * 60 * 1000,
-      );
+      await window.electronAPI.snoozeSuggestion(workspaceId, id, Date.now() + 24 * 60 * 60 * 1000);
       setCompanionSuggestions((prev) => prev.filter((s) => s.id !== id));
       setSelectedCompanionItemId((current) => (current === id ? null : current));
     } catch {
@@ -722,7 +735,9 @@ export function HomeDashboard({
     () =>
       rootTasks.filter(
         (task) =>
-          isActiveSessionStatus(task.status) || task.status === "paused" || task.status === "blocked",
+          isActiveSessionStatus(task.status) ||
+          task.status === "paused" ||
+          task.status === "blocked",
       ),
     [rootTasks],
   );
@@ -759,7 +774,9 @@ export function HomeDashboard({
           automationTag: getAutomationTag(task),
           terminalLabel: status.label,
           ...(outputLabel ? { outputLabel } : {}),
-          ...(outputSummary ? { outputLocationLabel: formatOutputLocationLabel(outputSummary) } : {}),
+          ...(outputSummary
+            ? { outputLocationLabel: formatOutputLocationLabel(outputSummary) }
+            : {}),
           ...(outputSummary?.outputCount ? { outputCount: outputSummary.outputCount } : {}),
         };
       })
@@ -811,7 +828,10 @@ export function HomeDashboard({
     setAutomationScrollTop(0);
   }, [AUTOMATION_BATCH_SIZE, automatedTasks.length]);
 
-  const automationVisibleStart = Math.max(0, Math.floor(automationScrollTop / AUTOMATION_ROW_PITCH));
+  const automationVisibleStart = Math.max(
+    0,
+    Math.floor(automationScrollTop / AUTOMATION_ROW_PITCH),
+  );
   const automationRenderStart = Math.max(0, automationVisibleStart - AUTOMATION_OVERSCAN);
   const automationRenderEnd = Math.min(
     automationLoadedCount,
@@ -861,7 +881,8 @@ export function HomeDashboard({
       if (!isAutomatedSession(task)) continue;
       if (task.heartbeatRunId) counts.heartbeat += 1;
       else if (task.source === "cron") counts.cron += 1;
-      else if (task.source === "improvement" || task.source === "subconscious") counts.improvement += 1;
+      else if (task.source === "improvement" || task.source === "subconscious")
+        counts.improvement += 1;
       else if (task.source === "hook") counts.hook += 1;
       else if (task.source === "api") counts.api += 1;
     }
@@ -877,7 +898,9 @@ export function HomeDashboard({
       const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
       if (hasOverflow && remaining > 120) return;
     }
-    setAutomationLoadedCount((count) => Math.min(automatedTasks.length, count + AUTOMATION_BATCH_SIZE));
+    setAutomationLoadedCount((count) =>
+      Math.min(automatedTasks.length, count + AUTOMATION_BATCH_SIZE),
+    );
   };
 
   const handleAutomationListScroll = (event: React.UIEvent<HTMLDivElement>) => {
@@ -885,7 +908,6 @@ export function HomeDashboard({
     setAutomationScrollTop(element.scrollTop);
     loadMoreAutomationTasks(element);
   };
-
 
   return (
     <main className="main-content home-main-content">
@@ -962,16 +984,17 @@ export function HomeDashboard({
             <div className="home-automation-inbox-header">
               <div>
                 <h3>Companion Inbox</h3>
-                <p>
-                  Suggestions, summaries, and completed outputs from the automation core.
-                </p>
+                <p>Suggestions, summaries, and completed outputs from the automation core.</p>
               </div>
               <button
                 type="button"
                 className="home-section-link"
                 onClick={() => {
                   if (automationInboxRef.current) {
-                    automationInboxRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+                    automationInboxRef.current.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    });
                   }
                 }}
               >
@@ -997,10 +1020,10 @@ export function HomeDashboard({
                           {isCompanionTaskResultItem(selectedCompanionItem)
                             ? "Completed"
                             : selectedCompanionItem.recommendedDelivery === "nudge"
-                            ? "Nudge"
-                            : selectedCompanionItem.companionStyle === "email"
-                              ? "Inbox"
-                              : "Companion"}
+                              ? "Nudge"
+                              : selectedCompanionItem.companionStyle === "email"
+                                ? "Inbox"
+                                : "Companion"}
                         </span>
                         <div>
                           <strong>
@@ -1025,11 +1048,11 @@ export function HomeDashboard({
                     </div>
                     {!isCompanionTaskResultItem(selectedCompanionItem) &&
                       selectedCompanionItem.actionPrompt && (
-                      <div className="home-automation-inbox-reader-box">
-                        <span>Suggested action</span>
-                        <p>{selectedCompanionItem.actionPrompt}</p>
-                      </div>
-                    )}
+                        <div className="home-automation-inbox-reader-box">
+                          <span>Suggested action</span>
+                          <p>{selectedCompanionItem.actionPrompt}</p>
+                        </div>
+                      )}
                     {isCompanionTaskResultItem(selectedCompanionItem) &&
                       selectedCompanionItem.outputLabel && (
                         <div className="home-automation-inbox-reader-box">
@@ -1079,7 +1102,9 @@ export function HomeDashboard({
                             }
                           }}
                         >
-                          {isCompanionTaskResultItem(selectedCompanionItem) ? "Open task" : "Open related task"}
+                          {isCompanionTaskResultItem(selectedCompanionItem)
+                            ? "Open task"
+                            : "Open related task"}
                         </button>
                       )}
                       {!isCompanionTaskResultItem(selectedCompanionItem) && (
@@ -1087,7 +1112,9 @@ export function HomeDashboard({
                           <button
                             type="button"
                             className="home-automation-inbox-action primary"
-                            onClick={() => void handleActOnCompanionSuggestion(selectedCompanionItem)}
+                            onClick={() =>
+                              void handleActOnCompanionSuggestion(selectedCompanionItem)
+                            }
                             disabled={!selectedCompanionItem.actionPrompt}
                           >
                             Act
@@ -1095,14 +1122,18 @@ export function HomeDashboard({
                           <button
                             type="button"
                             className="home-automation-inbox-action"
-                            onClick={() => void handleSnoozeCompanionSuggestion(selectedCompanionItem.id)}
+                            onClick={() =>
+                              void handleSnoozeCompanionSuggestion(selectedCompanionItem.id)
+                            }
                           >
                             Snooze
                           </button>
                           <button
                             type="button"
                             className="home-automation-inbox-action"
-                            onClick={() => void handleDismissCompanionSuggestion(selectedCompanionItem.id)}
+                            onClick={() =>
+                              void handleDismissCompanionSuggestion(selectedCompanionItem.id)
+                            }
                           >
                             Dismiss
                           </button>
@@ -1128,10 +1159,10 @@ export function HomeDashboard({
                               {isCompanionTaskResultItem(item)
                                 ? "Completed"
                                 : item.recommendedDelivery === "nudge"
-                                ? "Nudge"
-                                : item.companionStyle === "email"
-                                  ? "Inbox"
-                                  : "Companion"}
+                                  ? "Nudge"
+                                  : item.companionStyle === "email"
+                                    ? "Inbox"
+                                    : "Companion"}
                             </span>
                             <strong className="home-automation-inbox-item-sender-name">
                               {item.sourceEntity || item.workspaceName || "Heartbeat"}
@@ -1158,9 +1189,13 @@ export function HomeDashboard({
                             ? "All workspaces"
                             : item.workspaceName || "Current workspace"}
                         </span>
-                        {isCompanionTaskResultItem(item) && item.outputLabel && <span>{item.outputLabel}</span>}
+                        {isCompanionTaskResultItem(item) && item.outputLabel && (
+                          <span>{item.outputLabel}</span>
+                        )}
                         {item.sourceTaskId && <span>Task linked</span>}
-                        {!isCompanionTaskResultItem(item) && item.read === false && <span>Unread</span>}
+                        {!isCompanionTaskResultItem(item) && item.read === false && (
+                          <span>Unread</span>
+                        )}
                       </div>
                     </button>
                   ))}
@@ -1222,10 +1257,7 @@ export function HomeDashboard({
                   {automatedTasks.length} automated task{automatedTasks.length === 1 ? "" : "s"}
                 </span>
               </div>
-              <div
-                className="home-automation-list"
-                onScroll={handleAutomationListScroll}
-              >
+              <div className="home-automation-list" onScroll={handleAutomationListScroll}>
                 {automationTopSpacer > 0 && (
                   <div
                     aria-hidden="true"
@@ -1324,7 +1356,9 @@ export function HomeDashboard({
                 type="button"
                 key={file.id}
                 className="home-file-thumb"
-                onClick={() => void (window as any).electronAPI.openFile(file.path, workspace?.path)}
+                onClick={() =>
+                  void (window as any).electronAPI.openFile(file.path, workspace?.path)
+                }
               >
                 <HomeFilePreview
                   filePath={file.path}

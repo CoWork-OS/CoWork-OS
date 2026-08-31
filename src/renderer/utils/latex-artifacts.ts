@@ -66,7 +66,9 @@ export function findLatexPdfPair(
     ) {
       continue;
     }
-    const eventPath = normalizePath(event.payload?.path || event.payload?.to || event.payload?.from);
+    const eventPath = normalizePath(
+      event.payload?.path || event.payload?.to || event.payload?.from,
+    );
     const sourcePath = normalizePath(event.payload?.sourcePath);
     addPath(eventPath);
     addPath(sourcePath);

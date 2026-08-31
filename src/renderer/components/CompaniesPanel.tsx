@@ -76,13 +76,15 @@ function formatWhen(timestamp?: number): string {
 function actionBadgeClass(action: string): string {
   if (action === "create") return "settings-badge settings-badge--success";
   if (action === "update" || action === "link") return "settings-badge settings-badge--warning";
-  if (action === "conflict" || action === "warning") return "settings-badge settings-badge--warning";
+  if (action === "conflict" || action === "warning")
+    return "settings-badge settings-badge--warning";
   return "settings-badge settings-badge--neutral";
 }
 
 function syncBadgeClass(status: string): string {
   if (status === "in_sync") return "settings-badge settings-badge--success";
-  if (status === "diverged" || status === "local_override") return "settings-badge settings-badge--warning";
+  if (status === "diverged" || status === "local_override")
+    return "settings-badge settings-badge--warning";
   return "settings-badge settings-badge--neutral";
 }
 
@@ -124,7 +126,9 @@ function sortNodes(nodes: CompanyGraphNode[]): CompanyGraphNode[] {
         return 99;
     }
   };
-  return [...nodes].sort((left, right) => weight(left.kind) - weight(right.kind) || left.name.localeCompare(right.name));
+  return [...nodes].sort(
+    (left, right) => weight(left.kind) - weight(right.kind) || left.name.localeCompare(right.name),
+  );
 }
 
 function buildTree(nodes: CompanyGraphNode[]) {
@@ -212,17 +216,16 @@ function renderAgentChartNode(
       </button>
       {directReports.length > 0 && (
         <div className="co-org-branch-children">
-          {directReports.map((child) => renderAgentChartNode(child, children, selectedNodeId, setSelectedNodeId))}
+          {directReports.map((child) =>
+            renderAgentChartNode(child, children, selectedNodeId, setSelectedNodeId),
+          )}
         </div>
       )}
     </div>
   );
 }
 
-export function CompaniesPanel({
-  onOpenMissionControl,
-  onOpenDigitalTwins,
-}: CompaniesPanelProps) {
+export function CompaniesPanel({ onOpenMissionControl, onOpenDigitalTwins }: CompaniesPanelProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [roles, setRoles] = useState<AgentRoleData[]>([]);
   const [sources, setSources] = useState<CompanyPackageSource[]>([]);
@@ -257,7 +260,12 @@ export function CompaniesPanel({
     [graphNodes],
   );
   const syncByOrgNode = useMemo(
-    () => new Map(syncStates.filter((state) => state.orgNodeId).map((state) => [state.orgNodeId as string, state])),
+    () =>
+      new Map(
+        syncStates
+          .filter((state) => state.orgNodeId)
+          .map((state) => [state.orgNodeId as string, state]),
+      ),
     [syncStates],
   );
   const selectedNode = useMemo(
@@ -267,16 +275,29 @@ export function CompaniesPanel({
   const relatedEdges = useMemo(
     () =>
       selectedNode
-        ? graphEdges.filter((edge) => edge.fromNodeId === selectedNode.id || edge.toNodeId === selectedNode.id)
+        ? graphEdges.filter(
+            (edge) => edge.fromNodeId === selectedNode.id || edge.toNodeId === selectedNode.id,
+          )
         : [],
     [graphEdges, selectedNode],
   );
   const tree = useMemo(() => buildTree(graphNodes), [graphNodes]);
-  const agentHierarchy = useMemo(() => buildAgentHierarchy(graphNodes, graphEdges), [graphNodes, graphEdges]);
-  const projects = useMemo(() => graphNodes.filter((node) => node.kind === "project"), [graphNodes]);
+  const agentHierarchy = useMemo(
+    () => buildAgentHierarchy(graphNodes, graphEdges),
+    [graphNodes, graphEdges],
+  );
+  const projects = useMemo(
+    () => graphNodes.filter((node) => node.kind === "project"),
+    [graphNodes],
+  );
   const tasks = useMemo(() => graphNodes.filter((node) => node.kind === "task"), [graphNodes]);
   const linkedRoleIds = useMemo(
-    () => new Set(syncStates.filter((state) => state.runtimeEntityKind === "agent_role").map((state) => state.runtimeEntityId)),
+    () =>
+      new Set(
+        syncStates
+          .filter((state) => state.runtimeEntityKind === "agent_role")
+          .map((state) => state.runtimeEntityId),
+      ),
     [syncStates],
   );
   const selectedCompanyRoles = useMemo(
@@ -318,7 +339,9 @@ export function CompaniesPanel({
       window.electronAPI.listCompanyPackageSources(companyId),
       window.electronAPI.getCompanyGraph(companyId).catch(() => null),
       window.electronAPI.listCompanySyncStates(companyId).catch(() => []),
-      includeOps ? window.electronAPI.getCommandCenterSummary(companyId).catch(() => null) : Promise.resolve(null),
+      includeOps
+        ? window.electronAPI.getCommandCenterSummary(companyId).catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     setSources(loadedSources);
@@ -489,7 +512,8 @@ export function CompaniesPanel({
         <div>
           <h2>Companies</h2>
           <p className="settings-description">
-            Manage company packages, design the org graph, and hand runtime operations to Mission Control.
+            Manage company packages, design the org graph, and hand runtime operations to Mission
+            Control.
           </p>
         </div>
         <button
@@ -523,11 +547,15 @@ export function CompaniesPanel({
                 >
                   <div className="co-v2-company-item-row">
                     <strong>{company.name}</strong>
-                    <span className={companyStatusBadgeClass(company.status)}>{company.status}</span>
+                    <span className={companyStatusBadgeClass(company.status)}>
+                      {company.status}
+                    </span>
                   </div>
                   <div className="co-v2-company-item-meta">
                     {company.slug && <span>{company.slug}</span>}
-                    {company.isDefault && <span className="settings-badge settings-badge--outline">Default</span>}
+                    {company.isDefault && (
+                      <span className="settings-badge settings-badge--outline">Default</span>
+                    )}
                   </div>
                 </button>
               ))}
@@ -634,7 +662,11 @@ export function CompaniesPanel({
                       Import local Agent Companies packages into a Cowork company graph.
                     </p>
                   </div>
-                  <button type="button" className="provider-save-button" onClick={() => void handlePreviewImport()}>
+                  <button
+                    type="button"
+                    className="provider-save-button"
+                    onClick={() => void handlePreviewImport()}
+                  >
                     <Upload size={14} />
                     Preview Import
                   </button>
@@ -647,7 +679,9 @@ export function CompaniesPanel({
                     onClick={() => setImportTargetMode("selected")}
                     disabled={!selectedCompanyId}
                   >
-                    {selectedCompany ? `Import into ${selectedCompany.name}` : "Import into selected company"}
+                    {selectedCompany
+                      ? `Import into ${selectedCompany.name}`
+                      : "Import into selected company"}
                   </button>
                   <button
                     type="button"
@@ -672,7 +706,9 @@ export function CompaniesPanel({
                             <span>{source.trustLevel}</span>
                           </div>
                         </div>
-                        <span className="settings-badge settings-badge--outline">{source.status}</span>
+                        <span className="settings-badge settings-badge--outline">
+                          {source.status}
+                        </span>
                       </div>
                     ))
                   )}
@@ -702,7 +738,8 @@ export function CompaniesPanel({
 
                 {!preview ? (
                   <div className="settings-empty">
-                    Choose a local package folder to preview the company graph, runtime diff, and warnings.
+                    Choose a local package folder to preview the company graph, runtime diff, and
+                    warnings.
                   </div>
                 ) : (
                   <div className="co-v2-preview">
@@ -769,12 +806,15 @@ export function CompaniesPanel({
                 <div className="co-v2-card-header">
                   <div>
                     <h3>Structure</h3>
-                    <p className="co-v2-subtle">Desired-state company graph from imported packages.</p>
+                    <p className="co-v2-subtle">
+                      Desired-state company graph from imported packages.
+                    </p>
                   </div>
                 </div>
                 {graphNodes.length === 0 ? (
                   <div className="settings-empty">
-                    No desired-state graph yet. Import a package from the Library tab to populate the org builder.
+                    No desired-state graph yet. Import a package from the Library tab to populate
+                    the org builder.
                   </div>
                 ) : (
                   <div className="co-v2-tree">
@@ -808,11 +848,18 @@ export function CompaniesPanel({
                   )}
                 </div>
                 {agentHierarchy.roots.length === 0 ? (
-                  <div className="settings-empty">No agent hierarchy found in the imported graph yet.</div>
+                  <div className="settings-empty">
+                    No agent hierarchy found in the imported graph yet.
+                  </div>
                 ) : (
                   <div className="co-v2-org-chart">
                     {agentHierarchy.roots.map((root) =>
-                      renderAgentChartNode(root, agentHierarchy.children, selectedNodeId, setSelectedNodeId),
+                      renderAgentChartNode(
+                        root,
+                        agentHierarchy.children,
+                        selectedNodeId,
+                        setSelectedNodeId,
+                      ),
                     )}
                   </div>
                 )}
@@ -874,7 +921,9 @@ export function CompaniesPanel({
                   )}
                 </div>
                 {!selectedNode ? (
-                  <div className="settings-empty">Select a node to inspect its desired state and runtime linkage.</div>
+                  <div className="settings-empty">
+                    Select a node to inspect its desired state and runtime linkage.
+                  </div>
                 ) : (
                   <div className="co-v2-detail">
                     <div className="co-v2-detail-title">
@@ -896,7 +945,13 @@ export function CompaniesPanel({
                       </div>
                       <div>
                         <span className="co-v2-subtle">Runtime sync</span>
-                        <span className={selectedNodeSync ? syncBadgeClass(selectedNodeSync.syncStatus) : "settings-badge settings-badge--neutral"}>
+                        <span
+                          className={
+                            selectedNodeSync
+                              ? syncBadgeClass(selectedNodeSync.syncStatus)
+                              : "settings-badge settings-badge--neutral"
+                          }
+                        >
                           {selectedNodeSync?.syncStatus || "unlinked"}
                         </span>
                       </div>
@@ -907,15 +962,23 @@ export function CompaniesPanel({
                     <div className="co-v2-detail-section">
                       <h4>Relationships</h4>
                       {relatedEdges.length === 0 ? (
-                        <div className="co-v2-subtle">No graph relationships recorded for this node.</div>
+                        <div className="co-v2-subtle">
+                          No graph relationships recorded for this node.
+                        </div>
                       ) : (
                         <div className="co-v2-rel-list">
                           {relatedEdges.map((edge) => {
                             const target =
-                              graphNodeById.get(edge.fromNodeId === selectedNode.id ? edge.toNodeId : edge.fromNodeId) || null;
+                              graphNodeById.get(
+                                edge.fromNodeId === selectedNode.id
+                                  ? edge.toNodeId
+                                  : edge.fromNodeId,
+                              ) || null;
                             return (
                               <div key={edge.id} className="co-v2-rel-item">
-                                <span className="settings-badge settings-badge--outline">{edge.kind}</span>
+                                <span className="settings-badge settings-badge--outline">
+                                  {edge.kind}
+                                </span>
                                 <span>{target?.name || "Unknown node"}</span>
                               </div>
                             );
@@ -929,7 +992,9 @@ export function CompaniesPanel({
                         <h4>Linked Runtime Operator</h4>
                         <div className="co-v2-linker">
                           <select
-                            value={pendingRoleLinks[selectedNode.id] ?? selectedLinkedRole?.id ?? ""}
+                            value={
+                              pendingRoleLinks[selectedNode.id] ?? selectedLinkedRole?.id ?? ""
+                            }
                             onChange={(event) =>
                               setPendingRoleLinks((current) => ({
                                 ...current,
@@ -956,7 +1021,8 @@ export function CompaniesPanel({
                         </div>
                         {selectedLinkedRole && (
                           <div className="co-v2-subtle">
-                            Linked to {selectedLinkedRole.displayName || selectedLinkedRole.name} · company-scoped operator
+                            Linked to {selectedLinkedRole.displayName || selectedLinkedRole.name} ·
+                            company-scoped operator
                           </div>
                         )}
                       </div>
@@ -987,7 +1053,9 @@ export function CompaniesPanel({
                 </div>
 
                 {!selectedCompany ? (
-                  <div className="settings-empty">Select a company to inspect runtime operations.</div>
+                  <div className="settings-empty">
+                    Select a company to inspect runtime operations.
+                  </div>
                 ) : !activeCompanySummary ? (
                   <div className="settings-empty">Loading runtime operations…</div>
                 ) : (
@@ -1055,14 +1123,20 @@ export function CompaniesPanel({
                           <div key={output.id} className="co-v2-list-row">
                             <div>
                               <strong>{output.title}</strong>
-                              <div className="co-v2-subtle">{output.outputType} · {output.valueReason}</div>
+                              <div className="co-v2-subtle">
+                                {output.outputType} · {output.valueReason}
+                              </div>
                             </div>
                             <span className="settings-badge settings-badge--outline">
-                              {output.reviewRequired ? "review" : output.status || output.outputType}
+                              {output.reviewRequired
+                                ? "review"
+                                : output.status || output.outputType}
                             </span>
                           </div>
                         ))}
-                        {summary.outputs.length === 0 && <div className="settings-empty">No outputs yet.</div>}
+                        {summary.outputs.length === 0 && (
+                          <div className="settings-empty">No outputs yet.</div>
+                        )}
                       </div>
                     </div>
                     <div>
@@ -1079,7 +1153,9 @@ export function CompaniesPanel({
                             </span>
                           </div>
                         ))}
-                        {summary.reviewQueue.length === 0 && <div className="settings-empty">No queued reviews.</div>}
+                        {summary.reviewQueue.length === 0 && (
+                          <div className="settings-empty">No queued reviews.</div>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -110,7 +110,11 @@ export function getVisibleProgressSteps(planSteps: PlanStep[]): ProgressDisplayS
   const activeIndex = planSteps.findIndex((step) => step.status === "in_progress");
   const firstPendingIndex = planSteps.findIndex((step) => step.status === "pending");
   const anchorIndex =
-    activeIndex >= 0 ? activeIndex : firstPendingIndex >= 0 ? firstPendingIndex : planSteps.length - 1;
+    activeIndex >= 0
+      ? activeIndex
+      : firstPendingIndex >= 0
+        ? firstPendingIndex
+        : planSteps.length - 1;
 
   planSteps.forEach((step, index) => {
     if (step.status === "failed") selected.add(index);
@@ -118,7 +122,10 @@ export function getVisibleProgressSteps(planSteps: PlanStep[]): ProgressDisplayS
 
   const completedBeforeAnchor = planSteps
     .map((step, index) => ({ step, index }))
-    .filter(({ step, index }) => index < anchorIndex && (step.status === "completed" || step.status === "skipped"))
+    .filter(
+      ({ step, index }) =>
+        index < anchorIndex && (step.status === "completed" || step.status === "skipped"),
+    )
     .slice(-2);
   completedBeforeAnchor.forEach(({ index }) => selected.add(index));
 
@@ -131,13 +138,21 @@ export function getVisibleProgressSteps(planSteps: PlanStep[]): ProgressDisplayS
   pendingAfterAnchor.forEach(({ index }) => selected.add(index));
 
   if (selected.size < MAX_VISIBLE_PROGRESS_STEPS) {
-    for (let index = 0; index < planSteps.length && selected.size < MAX_VISIBLE_PROGRESS_STEPS; index += 1) {
+    for (
+      let index = 0;
+      index < planSteps.length && selected.size < MAX_VISIBLE_PROGRESS_STEPS;
+      index += 1
+    ) {
       if (planSteps[index]?.status === "pending") selected.add(index);
     }
   }
 
   if (selected.size < MAX_VISIBLE_PROGRESS_STEPS) {
-    for (let index = planSteps.length - 1; index >= 0 && selected.size < MAX_VISIBLE_PROGRESS_STEPS; index -= 1) {
+    for (
+      let index = planSteps.length - 1;
+      index >= 0 && selected.size < MAX_VISIBLE_PROGRESS_STEPS;
+      index -= 1
+    ) {
       selected.add(index);
     }
   }

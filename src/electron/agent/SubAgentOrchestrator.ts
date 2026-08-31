@@ -14,7 +14,11 @@
 
 import { EventEmitter } from "events";
 import Database from "better-sqlite3";
-import { OrchestrationRepository, OrchestrationRun, OrchestrationTask } from "./OrchestrationRepository";
+import {
+  OrchestrationRepository,
+  OrchestrationRun,
+  OrchestrationTask,
+} from "./OrchestrationRepository";
 import type { AgentDaemon } from "./daemon";
 import { getACPRegistry } from "../acp";
 import { RemoteAgentInvoker } from "../acp/remote-invoker";
@@ -105,12 +109,19 @@ export class SubAgentOrchestrator extends EventEmitter {
     while (true) {
       const ready = this.getReadyTasks(current);
       if (ready.length === 0) {
-        const allDone = current.tasks.every((t) => t.status === "completed" || t.status === "failed");
+        const allDone = current.tasks.every(
+          (t) => t.status === "completed" || t.status === "failed",
+        );
         if (allDone) {
           const succeeded = current.tasks.filter((t) => t.status === "completed").length;
           const failed = current.tasks.filter((t) => t.status === "failed").length;
           current = this.setRunStatus(current, "completed");
-          this.emit("run_completed", { type: "run_completed", runId: current.id, succeeded, failed });
+          this.emit("run_completed", {
+            type: "run_completed",
+            runId: current.id,
+            succeeded,
+            failed,
+          });
           return;
         }
         // Wait for a task completion signal instead of busy-polling
@@ -225,9 +236,10 @@ export class SubAgentOrchestrator extends EventEmitter {
       this.emit("task_spawned", { type: "task_spawned", nodeId: task.id, taskId });
 
       // Wait for completion
-      const result = task.acpAgentId && remoteTaskId
-        ? await this.waitForRemoteTask(task.acpAgentId, remoteTaskId, 600)
-        : await this.waitForTask(taskId, 600);
+      const result =
+        task.acpAgentId && remoteTaskId
+          ? await this.waitForRemoteTask(task.acpAgentId, remoteTaskId, 600)
+          : await this.waitForTask(taskId, 600);
 
       if (result.success) {
         const afterDone = this.updateTask(afterSpawn, task.id, {
@@ -281,9 +293,7 @@ export class SubAgentOrchestrator extends EventEmitter {
 
     if (deps.length === 0) return task.prompt;
 
-    const context = deps
-      .map((d) => `### Output from "${d.title}"\n${d.output}`)
-      .join("\n\n");
+    const context = deps.map((d) => `### Output from "${d.title}"\n${d.output}`).join("\n\n");
 
     return `${task.prompt}\n\n---\n## Context from preceding tasks\n\n${context}`;
   }
@@ -304,7 +314,11 @@ export class SubAgentOrchestrator extends EventEmitter {
         if (task.status === "completed") {
           return { success: true, output: task.resultSummary };
         }
-        if (task.status === "failed" || task.status === "cancelled" || task.status === "interrupted") {
+        if (
+          task.status === "failed" ||
+          task.status === "cancelled" ||
+          task.status === "interrupted"
+        ) {
           return { success: false, error: (task.error ?? undefined) || task.status };
         }
       } catch {

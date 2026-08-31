@@ -159,7 +159,10 @@ export function InlinePresentationPreview({
       </div>
       <div className="inline-presentation-body">
         {firstSlide.imageUrl || firstSlide.imageDataUrl ? (
-          <img src={firstSlide.imageUrl || firstSlide.imageDataUrl} alt={`Slide ${firstSlide.index}`} />
+          <img
+            src={firstSlide.imageUrl || firstSlide.imageDataUrl}
+            alt={`Slide ${firstSlide.index}`}
+          />
         ) : (
           <pre>{previewText}</pre>
         )}

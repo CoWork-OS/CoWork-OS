@@ -110,6 +110,8 @@ export function getComputerUseProvider(): ComputerUseProvider {
   return providerFactory?.() ?? ComputerUseHelperRuntime.getInstance();
 }
 
-export function setComputerUseProviderFactoryForTesting(factory: (() => ComputerUseProvider) | null): void {
+export function setComputerUseProviderFactoryForTesting(
+  factory: (() => ComputerUseProvider) | null,
+): void {
   providerFactory = factory;
 }

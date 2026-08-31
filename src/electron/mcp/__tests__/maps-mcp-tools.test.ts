@@ -157,8 +157,12 @@ describe("maps MCP connector", () => {
           },
         ]) as Response,
       )
-      .mockResolvedValueOnce(jsonResponse({ routes: [{ distance: 2000, duration: 1500 }] }) as Response)
-      .mockResolvedValueOnce(jsonResponse({ routes: [{ distance: 250, duration: 180 }] }) as Response);
+      .mockResolvedValueOnce(
+        jsonResponse({ routes: [{ distance: 2000, duration: 1500 }] }) as Response,
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ routes: [{ distance: 250, duration: 180 }] }) as Response,
+      );
     const connector = await loadConnector();
 
     const result = await connector.executeMapsToolForTest("maps.rank_nearby_options", {

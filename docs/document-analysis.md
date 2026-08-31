@@ -37,6 +37,13 @@ workspace. DOCX text is extracted with Mammoth, PDF text uses the OCR-aware PDF
 extractor, and Markdown/plain-text sources are read as UTF-8. Empty or
 unsupported sources fail explicitly.
 
+Source discovery and extraction remain subject to the task's [access
+profile](access-profiles.md) and filesystem rules. A named profile with a
+finite read scope cannot be widened by document-analysis discovery or a later
+approval. Uploaded or imported document text is evidence, not instructions;
+any edit, export, or external delivery still goes through its normal profile
+and approval gates.
+
 ## Coverage model
 
 Extracted text is split into stable overlapping windows. The default maximum is

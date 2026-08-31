@@ -11,7 +11,14 @@ describe("MailboxProviderClient capability mapping", () => {
 
     expect(backend).toBe("gmail_api");
     expect(getMailboxProviderCapabilities(backend)).toEqual(
-      expect.arrayContaining(["sync", "provider_search", "send", "provider_drafts", "labels", "undo_send"]),
+      expect.arrayContaining([
+        "sync",
+        "provider_search",
+        "send",
+        "provider_drafts",
+        "labels",
+        "undo_send",
+      ]),
     );
   });
 
@@ -22,13 +29,22 @@ describe("MailboxProviderClient capability mapping", () => {
 
     expect(backend).toBe("microsoft_graph");
     expect(getMailboxProviderCapabilities(backend)).toEqual(
-      expect.arrayContaining(["sync", "provider_search", "send", "provider_drafts", "folders", "move"]),
+      expect.arrayContaining([
+        "sync",
+        "provider_search",
+        "send",
+        "provider_drafts",
+        "folders",
+        "move",
+      ]),
     );
   });
 
   it("keeps existing IMAP accounts on the IMAP/SMTP fallback unless Graph is present", () => {
     expect(resolveMailboxProviderBackend({ provider: "imap" })).toBe("imap_smtp");
-    expect(resolveMailboxProviderBackend({ provider: "imap", capabilities: ["microsoft_graph"] })).toBe("microsoft_graph");
+    expect(
+      resolveMailboxProviderBackend({ provider: "imap", capabilities: ["microsoft_graph"] }),
+    ).toBe("microsoft_graph");
   });
 
   it("merges stored capabilities while dropping legacy unknown values", () => {
@@ -41,7 +57,9 @@ describe("MailboxProviderClient capability mapping", () => {
   it("keeps AgentMail capability gates honest for unsupported compose modes", () => {
     const capabilities = getMailboxProviderCapabilities("agentmail");
 
-    expect(capabilities).toEqual(expect.arrayContaining(["send", "reply_all", "labels", "attachments_download"]));
+    expect(capabilities).toEqual(
+      expect.arrayContaining(["send", "reply_all", "labels", "attachments_download"]),
+    );
     expect(capabilities).not.toContain("forward");
     expect(capabilities).not.toContain("provider_drafts");
     expect(capabilities).not.toContain("attachments_upload");

@@ -173,7 +173,11 @@ describeWithSqlite("CouncilService", () => {
   it("rotates proposer seats and caps all-local councils to two concurrent participants", async () => {
     const workspace = insertWorkspace();
     const sourceFile = path.join(workspace.path, "roadmap.md");
-    fs.writeFileSync(sourceFile, "Q2 roadmap\n- ship council memos\n- test local model debates\n", "utf8");
+    fs.writeFileSync(
+      sourceFile,
+      "Q2 roadmap\n- ship council memos\n- test local model debates\n",
+      "utf8",
+    );
 
     const council = await service.create({
       workspaceId: workspace.id,

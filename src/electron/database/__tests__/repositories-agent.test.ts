@@ -175,8 +175,7 @@ class MockTaskRepository {
       companyId: stored.companyId || undefined,
       goalId: stored.goalId || undefined,
       projectId: stored.projectId || undefined,
-      requestDepth:
-        typeof stored.requestDepth === "number" ? stored.requestDepth : undefined,
+      requestDepth: typeof stored.requestDepth === "number" ? stored.requestDepth : undefined,
       billingCode: stored.billingCode || undefined,
       targetNodeId: stored.targetNodeId || undefined,
       worktreePath: stored.worktreePath || undefined,

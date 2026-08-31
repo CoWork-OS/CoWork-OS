@@ -1,13 +1,7 @@
 import type { LucideIcon } from "lucide-react";
-import {
-  BookOpen,
-  Bug,
-  ListTodo,
-  MessageCircle,
-  ShieldAlert,
-  Sparkles,
-} from "lucide-react";
+import { BookOpen, Bug, ListTodo, MessageCircle, ShieldAlert, Sparkles } from "lucide-react";
 import type { Task, Workspace } from "../../shared/types";
+import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 
 export type TaskAutomationRunMode = "chat" | "local" | "worktree";
 export type TaskAutomationTargetMode = "new_task" | "thread_follow_up";
@@ -72,7 +66,8 @@ export const TASK_AUTOMATION_TEMPLATES: TaskAutomationTemplate[] = [
   {
     id: "daily-summary",
     name: "Daily summary",
-    prompt: "Summarize yesterday's workspace activity and list the follow-up actions that need attention.",
+    prompt:
+      "Summarize yesterday's workspace activity and list the follow-up actions that need attention.",
     schedulePreset: "daily",
     icon: ListTodo,
   },
@@ -87,28 +82,32 @@ export const TASK_AUTOMATION_TEMPLATES: TaskAutomationTemplate[] = [
   {
     id: "ci-failures",
     name: "CI failure summary",
-    prompt: "Summarize CI failures and flaky tests from the last CI window; suggest the highest-impact fixes.",
+    prompt:
+      "Summarize CI failures and flaky tests from the last CI window; suggest the highest-impact fixes.",
     schedulePreset: "hourly",
     icon: ShieldAlert,
   },
   {
     id: "weekly-update",
     name: "Weekly update",
-    prompt: "Synthesize this week's PRs, rollouts, incidents, and reviews into a concise weekly update.",
+    prompt:
+      "Synthesize this week's PRs, rollouts, incidents, and reviews into a concise weekly update.",
     schedulePreset: "weekly",
     icon: BookOpen,
   },
   {
     id: "inbox-checkin",
     name: "Inbox check-in",
-    prompt: "Check for urgent inbox or integration updates and summarize anything that needs my attention.",
+    prompt:
+      "Check for urgent inbox or integration updates and summarize anything that needs my attention.",
     schedulePreset: "every30m",
     icon: MessageCircle,
   },
   {
     id: "regression-watch",
     name: "Regression watch",
-    prompt: "Compare recent changes to available benchmarks, traces, or logs and flag regressions early.",
+    prompt:
+      "Compare recent changes to available benchmarks, traces, or logs and flag regressions early.",
     schedulePreset: "daily",
     icon: Sparkles,
   },
@@ -247,7 +246,7 @@ export function buildTaskAutomationCronJobCreate({
     name: name.trim(),
     description: `Created from task ${task.id}${deeplink ? ` (${deeplink})` : ""}`,
     enabled: true,
-    shellAccess: runMode === "local",
+    accessProfileId: task.agentConfig?.accessProfileId || BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
     allowUserInput: false,
     deleteAfterRun: false,
     schedule,

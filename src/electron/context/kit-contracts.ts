@@ -1,16 +1,6 @@
-export type KitScope =
-  | "task"
-  | "main-session"
-  | "role"
-  | "company-ops"
-  | "heartbeat"
-  | "bootstrap";
+export type KitScope = "task" | "main-session" | "role" | "company-ops" | "heartbeat" | "bootstrap";
 
-export type KitMutability =
-  | "system_locked"
-  | "user_owned"
-  | "agent_suggested"
-  | "agent_maintained";
+export type KitMutability = "system_locked" | "user_owned" | "agent_suggested" | "agent_maintained";
 
 export type KitParser =
   | "freeform"
@@ -125,12 +115,7 @@ const BASE_CONTRACTS = {
     maxChars: 2500,
     freshnessDays: 90,
     mutability: "system_locked" as KitMutability,
-    belongsHere: [
-      "must",
-      "must not",
-      "requires approval",
-      "default safety behavior",
-    ],
+    belongsHere: ["must", "must not", "requires approval", "default safety behavior"],
     notHere: ["personality", "historical notes", "preferences", "reasons from past incidents"],
   },
   "TOOLS.md": {
@@ -319,7 +304,13 @@ const BASE_CONTRACTS = {
 
 export const WORKSPACE_KIT_CONTRACTS: Record<string, KitContract> = BASE_CONTRACTS;
 
-export const ROLE_KIT_FILES = ["IDENTITY.md", "RULES.md", "SOUL.md", "MEMORY.md", "VIBES.md"] as const;
+export const ROLE_KIT_FILES = [
+  "IDENTITY.md",
+  "RULES.md",
+  "SOUL.md",
+  "MEMORY.md",
+  "VIBES.md",
+] as const;
 
 export const WORKSPACE_PROMPT_ORDER = [
   "IDENTITY.md",

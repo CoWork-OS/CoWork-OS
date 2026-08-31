@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { redactManagedEnvironmentForRead, sanitizeManagedEnvironmentCreateParams } from "../handlers";
+import {
+  redactManagedEnvironmentForRead,
+  sanitizeManagedEnvironmentCreateParams,
+} from "../handlers";
 
 describe("redactManagedEnvironmentForRead", () => {
   it("removes sensitive linkage metadata from renderer-facing config", () => {

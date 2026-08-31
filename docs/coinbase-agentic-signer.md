@@ -9,6 +9,12 @@ Implementation reference:
 
 CoWork OS delegates wallet operations and x402 signing to a remote signer service instead of storing private keys locally in the desktop app.
 
+Signer configuration is separate from task access. The task's [access profile](access-profiles.md)
+and wallet/payment policy must allow the operation before CoWork calls the
+signer; an account ID, signer token, or remote endpoint cannot grant command,
+network, filesystem, payment, or signing authority by itself. Keep signing and
+payment actions behind their explicit confirmation and hard-guardrail paths.
+
 ## Base URL
 
 Configure in **Settings > Infrastructure > Wallet > Signer Endpoint**.

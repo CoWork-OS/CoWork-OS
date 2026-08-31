@@ -31,9 +31,7 @@ export interface DiscordDownloadedAttachment {
 
 let gatewayInstance: ChannelLiveFetchGateway | undefined;
 
-export function registerChannelLiveFetchProvider(
-  gateway: ChannelLiveFetchGateway,
-): void {
+export function registerChannelLiveFetchProvider(gateway: ChannelLiveFetchGateway): void {
   gatewayInstance = gateway;
 }
 

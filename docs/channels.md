@@ -12,6 +12,7 @@ CoWork OS supports messaging and communication channels across chat, community, 
 - **Self-message capture**: Capture your own outgoing messages as context (`captureSelfMessages` on WhatsApp, iMessage, BlueBubbles)
 - **Per-channel routing policy**: Channels can restrict who can talk to the agent, which workspaces/roles they route into, how group/server traffic is filtered, and how much mid-task progress is relayed back into the channel
 - **Channel specialization**: Route a whole channel, one chat/group, or one topic/thread to a specific workspace, agent role, prompt guidance, tool restrictions, and optional shared-memory policy
+- **Access-profile enforcement**: New channel tasks use the target workspace's access profile, while channel/context restrictions can only narrow it. Command tools do not have a separate shell toggle, and invalid profiles fail closed.
 
 See [Gateway Message Lifecycle](gateway-message-lifecycle.md) for the shared routing, command, active-task, skill-slash, delivery, and scheduled-output behavior. For day-to-day usage examples, see [Using CoWork from WhatsApp and Other Channels](gateway-user-guide.md). For per-channel feature and best-practice guides, see [Channel User Guides](channel-user-guides.md) and the [dedicated channel guide index](channel-guides/).
 
@@ -79,6 +80,11 @@ Resolution order is:
 4. existing channel config, session preference, or workspace default behavior
 
 New tasks use the resolved specialization for workspace, agent role, prompt guidance, gateway context, tool restrictions, and shared-memory opt-in. Follow-ups to an active task keep that task's existing workspace and role so a conversation does not switch identity mid-run. After a task completes, fails, cancels, or the chat is reset with `/new`, the next ordinary message re-resolves specialization before a new task starts.
+
+The task also carries the target workspace's effective [access profile](access-profiles.md). A
+channel specialization, context policy, or approval response may reduce what the profile can do,
+but cannot widen its filesystem, command-tool, network, or domain scope. To change profiles, start a
+new task after updating the workspace/profile configuration.
 
 Workspace-local router rules still run per message and can override specialization for that message. Tool restrictions are additive with context policies and channel restrictions, with deny rules taking priority. Shared memory remains off for group/public contexts unless the specialization explicitly enables it.
 

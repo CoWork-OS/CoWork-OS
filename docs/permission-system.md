@@ -5,6 +5,10 @@ The current model separates coarse capability gates from export-sensitive approv
 network reads, raw outbound requests, and provenance-aware prompts can be handled differently
 without flattening everything into one approval bucket.
 
+[Access Profiles](access-profiles.md) are the canonical task-level policy. They replace the need
+for a separate shell enable/disable choice by carrying sandbox, approval, reviewer, network,
+filesystem, and domain boundaries together.
+
 ## What The Engine Decides
 
 Each tool request resolves to one of three outcomes:
@@ -22,7 +26,8 @@ The decision includes:
 
 ## Evaluation Order
 
-Permission evaluation runs in this order:
+The runtime first resolves and applies the task's access profile. Individual tool requests then run
+through this order:
 
 1. hard task restrictions and explicit task denylists
 2. hard guardrails and dangerous-command blocks
@@ -77,9 +82,11 @@ other tool scopes. Location access:
 - cannot be persisted as a session, workspace, or profile rule
 - delegates the actual permission grant to the operating system's native location dialog
 
-## Permission Modes
+## Legacy Permission Modes
 
-Default behavior depends on the selected permission mode:
+Older tasks and API callers may still supply a permission mode. It remains supported as a
+compatibility input, but new task-level access should use [Access Profiles](access-profiles.md).
+Default behavior depends on the selected legacy permission mode:
 
 - `default` - allow safe reads, ask on writes, deletes, shell, data export, external services, and side-effecting MCP tools
 - `plan` - allow read-only tools, deny mutating and external tools by default
@@ -88,10 +95,50 @@ Default behavior depends on the selected permission mode:
 - `dont_ask` - allow anything not hard-blocked or explicitly denied, except `data_export`, which still prompts
 - `bypass_permissions` - skip prompts and ask-rules for normal actions, but still enforce hard guardrails, task restrictions, workspace capability gates, explicit deny rules, and explicit `data_export` prompts
 
-`dangerous_only` is intentionally conservative for shell access. Known read/test commands can run without a prompt, but composite shell expressions and commands with unclear side effects still pause for approval.
+`dangerous_only` is intentionally conservative for command-tool access. Known read/test commands can run without a prompt, but composite shell expressions and commands with unclear side effects still pause for approval.
 
 `dont_ask` and `bypass_permissions` are no longer wildcard escape hatches for outbound transfer.
 If the request is classified as `data_export`, the engine switches back to an explicit approval.
+
+## Access Profiles
+
+The main composer exposes four access choices modeled on Codex's access selector. The complete
+operator and developer contract is in [Access Profiles](access-profiles.md). The short version is:
+an access profile combines the process sandbox boundary, approval behavior, reviewer behavior,
+network boundary, and optional filesystem/domain scope. The reviewer can reduce friction, but it
+cannot widen the sandbox or override an explicit deny rule.
+
+| Access choice | Sandbox | Approval/reviewer | Network |
+|---|---|---|---|
+| **Ask for approval** | Workspace-write | On request / user | On request |
+| **Approve for me** | Workspace-write | On request / automatic safety review | On request |
+| **Full access** | Danger-full-access | No approval / no reviewer | Enabled |
+| **Custom** | Named profile | Named profile | Named profile |
+
+Custom profiles are saved in the encrypted permission settings store rather than a plain-text
+`config.toml`. They can define sandbox, approval, reviewer, network, additional roots, filesystem
+read/write/deny rules, and domain allow/deny rules. Command tools follow the selected profile mode;
+there is no separate shell toggle. A legacy `shellAccess: false` value is retained only as a
+backward-compatible deny for profiles saved by older versions. Deny rules are authoritative and
+are applied before legacy workspace permissions. A custom profile that cannot be represented by a
+backend fails closed instead of silently widening access.
+
+Sandboxing and approval are separate enforcement boundaries. The sandbox limits what a spawned
+process can reach; approval controls whether the action may proceed. macOS and Docker provide a
+coarse network on/off boundary, so arbitrary shell or code execution with domain-scoped network
+rules is denied unless a domain-aware proxy is available. Built-in network tools can still apply
+their domain rules in-process. CoWork also keeps `delete` separate from `write` as an additional
+destructive-operation gate, even though some sandbox systems group those filesystem operations.
+
+The selected profile is carried through desktop task creation, follow-ups, the local CLI
+(`cowork run --access-profile <id>`), remote Control Plane task creation, task resume, and child
+task creation. Child tasks cannot select a profile that widens their parent's sandbox, approval,
+network, or scoped-rule boundary. Existing tasks that only have a legacy `permissionMode` keep
+that mode until the user explicitly selects an access profile.
+
+If a named profile is missing, invalid, or cannot be represented by the active sandbox backend, the
+runtime uses an unavailable read-only profile and pauses the task with an
+`access_profile_unavailable` reason. No later rule, approval, or legacy mode can widen that state.
 
 ## Core Automation Defaults
 
@@ -105,6 +152,10 @@ Instead, core-created automated tasks inherit an autonomy policy that:
 - can also auto-approve `network_access` and `external_service` for trusted operator work when the task or operator policy opts in
 - does not auto-approve `data_export`
 - still preserves hard guardrails, workspace capability denials, and explicit deny rules
+
+Core automation also remains beneath the task's effective access profile. Its auto-approval
+allowlist can reduce interruption for permitted actions, but it cannot add command, filesystem,
+network, or export capability that the profile or administrator policy removed.
 
 This is the default posture for the Workflow Intelligence core runtime because it keeps routine operator work flowing without turning the permission system off.
 
@@ -174,7 +225,8 @@ manifest write fails, the database removal still succeeds and the UI reports the
 Users can manage permission state from two places:
 
 - approval prompts, which can create one-shot or persisted rules
-- Settings > System & Security, which manages default mode, profile rules, and workspace-local rules
+- the main composer access selector, which chooses an access profile for the next task or follow-up
+- Settings > System & Security, which manages default profiles, custom profiles, profile rules, and workspace-local rules
 
 The workspace-rule panel lets users browse and remove workspace-local rules directly without having
 to wait for another approval prompt.
@@ -209,6 +261,7 @@ The always-on automation runtime layers on top of this by spawning tasks with ex
 - [Security Model](security/security-model.md)
 - [Security Configuration](security/configuration-guide.md)
 - [Security Guide](security-guide.md)
+- [Access Profiles](access-profiles.md)
 - [Architecture](architecture.md)
 - [Session Runtime](session-runtime.md)
 - [Features](features.md)

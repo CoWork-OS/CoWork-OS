@@ -104,13 +104,14 @@ export class InfraManager {
 
     return {
       enabled: settings.enabled,
-      wallet: this.walletProviderConnected && this.cachedWalletAddress
-        ? {
-            address: this.cachedWalletAddress,
-            network: this.cachedWalletNetwork,
-            balanceUsdc: this.cachedBalance,
-          }
-        : undefined,
+      wallet:
+        this.walletProviderConnected && this.cachedWalletAddress
+          ? {
+              address: this.cachedWalletAddress,
+              network: this.cachedWalletNetwork,
+              balanceUsdc: this.cachedBalance,
+            }
+          : undefined,
       walletFileExists: undefined, // We no longer write wallet files
       providers: {
         e2b: this.sandboxProvider.hasApiKey() ? "connected" : "not_configured",
@@ -378,14 +379,19 @@ export class InfraManager {
     }
   }
 
-  private getWalletProviderStatus(settings: InfraSettings): "connected" | "disconnected" | "error" | "not_configured" {
+  private getWalletProviderStatus(
+    settings: InfraSettings,
+  ): "connected" | "disconnected" | "error" | "not_configured" {
     if (this.walletProviderError) return "error";
     if (this.walletProviderConnected) return "connected";
     if (!settings.wallet.enabled) return "not_configured";
     if (settings.wallet.provider === "coinbase_agentic" && !settings.wallet.coinbase.enabled) {
       return "not_configured";
     }
-    if (settings.wallet.provider === "coinbase_agentic" && !settings.wallet.coinbase.signerEndpoint) {
+    if (
+      settings.wallet.provider === "coinbase_agentic" &&
+      !settings.wallet.coinbase.signerEndpoint
+    ) {
       return "not_configured";
     }
     return "disconnected";

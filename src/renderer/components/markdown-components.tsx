@@ -441,7 +441,9 @@ function extractDomainFromUrl(raw: string): string {
     );
     return parsed.hostname.replace(/^www\./i, "");
   } catch {
-    return stripHttpScheme(trimmed).split("/")[0].replace(/^www\./i, "");
+    return stripHttpScheme(trimmed)
+      .split("/")[0]
+      .replace(/^www\./i, "");
   }
 }
 
@@ -462,7 +464,8 @@ function isXComLink(raw: string): boolean {
   }
 }
 
-const isUrlLikeLabel = (value: string): boolean => URLISH_TEXT_REGEX.test(String(value || "").trim());
+const isUrlLikeLabel = (value: string): boolean =>
+  URLISH_TEXT_REGEX.test(String(value || "").trim());
 
 function looksLikeLocalFilePath(value: string): boolean {
   const trimmed = value.trim();
@@ -537,10 +540,7 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
   const { workspacePath, onOpenViewer, onOpenWebLinkInSidebar, citations } = options;
   const citationMap = new Map((citations || []).map((citation) => [citation.index, citation]));
   const citationUrlMap = new Map(
-    (citations || []).map((citation) => [
-      citation.url.replace(/\/+$/, "").toLowerCase(),
-      citation,
-    ]),
+    (citations || []).map((citation) => [citation.url.replace(/\/+$/, "").toLowerCase(), citation]),
   );
 
   const MarkdownLink = ({ href, children, ...props }: MarkdownAnchorProps) => {
@@ -772,7 +772,11 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
         if (lastIndex < child.length) {
           parts.push(child.slice(lastIndex));
         }
-        return <>{parts.map((part) => (typeof part === "string" ? replaceEmojisInChildren(part) : part))}</>;
+        return (
+          <>
+            {parts.map((part) => (typeof part === "string" ? replaceEmojisInChildren(part) : part))}
+          </>
+        );
       }
       return child;
     });

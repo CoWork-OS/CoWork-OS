@@ -124,12 +124,14 @@ const DEFAULT_SETTINGS: BuiltinToolsSettings = {
     chronicle: {
       enabled: true,
       priority: "normal",
-      description: "Chronicle screen-context tools (local passive screen recall and disambiguation)",
+      description:
+        "Chronicle screen-context tools (local passive screen recall and disambiguation)",
     },
     computer_use: {
       enabled: true,
       priority: "normal",
-      description: "Computer use tools (native mouse, keyboard, screenshot control — macOS and Windows)",
+      description:
+        "Computer use tools (native mouse, keyboard, screenshot control — macOS and Windows)",
     },
   },
   toolOverrides: {
@@ -320,9 +322,7 @@ export class BuiltinToolsSettingsManager {
         return;
       }
 
-      log.info(
-        "Migrating settings from legacy JSON file to encrypted database...",
-      );
+      log.info("Migrating settings from legacy JSON file to encrypted database...");
 
       // Create backup before migration
       const backupPath = legacyPath + ".migration-backup";

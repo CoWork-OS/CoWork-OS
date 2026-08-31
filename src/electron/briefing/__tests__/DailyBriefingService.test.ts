@@ -93,7 +93,11 @@ describe("DailyBriefingService", () => {
     expect(prioritySection).toBeDefined();
     expect(prioritySection!.title).toBe("Strategic Priorities");
     expect(prioritySection!.items[0].label).toBe("Fix all known P0/P1 bugs");
-    expect(prioritySection!.items.some((item) => item.label.includes("lower-immediacy priorities hidden"))).toBe(true);
+    expect(
+      prioritySection!.items.some((item) =>
+        item.label.includes("lower-immediacy priorities hidden"),
+      ),
+    ).toBe(true);
   });
 
   // ── Task summary section ──────────────────────────────────────
@@ -124,7 +128,11 @@ describe("DailyBriefingService", () => {
       getRecentTasks: () => [
         { id: "t1", title: "Ship macOS packaging fix", status: "completed" },
         { id: "t2", title: "Subconscious: Project Manager", status: "completed" },
-        { id: "t3", title: "Step completed: Review Recent Heartbeat Outcomes", status: "completed" },
+        {
+          id: "t3",
+          title: "Step completed: Review Recent Heartbeat Outcomes",
+          status: "completed",
+        },
       ],
     });
     const svc = new DailyBriefingService(deps);
@@ -135,8 +143,14 @@ describe("DailyBriefingService", () => {
     expect(taskSection).toBeDefined();
     expect(taskSection!.title).toBe("Executive Summary");
     expect(taskSection!.items.some((item) => item.label === "Ship macOS packaging fix")).toBe(true);
-    expect(taskSection!.items.some((item) => item.label.includes("background automation tasks completed"))).toBe(true);
-    expect(taskSection!.items.some((item) => item.label.includes("Subconscious: Project Manager"))).toBe(false);
+    expect(
+      taskSection!.items.some((item) =>
+        item.label.includes("background automation tasks completed"),
+      ),
+    ).toBe(true);
+    expect(
+      taskSection!.items.some((item) => item.label.includes("Subconscious: Project Manager")),
+    ).toBe(false);
   });
 
   // ── Memory highlights section ──────────────────────────────────
@@ -306,10 +320,14 @@ describe("DailyBriefingService", () => {
     expect(awarenessSection).toBeDefined();
     expect(awarenessSection!.title).toBe("Needs Attention Today");
     expect(
-      awarenessSection!.items.some((item) => item.label.includes("Active goal: Ship onboarding redesign")),
+      awarenessSection!.items.some((item) =>
+        item.label.includes("Active goal: Ship onboarding redesign"),
+      ),
     ).toBe(true);
     expect(
-      awarenessSection!.items.some((item) => item.label.includes("Decision needed: Review launch blockers")),
+      awarenessSection!.items.some((item) =>
+        item.label.includes("Decision needed: Review launch blockers"),
+      ),
     ).toBe(true);
   });
 
@@ -355,7 +373,9 @@ describe("DailyBriefingService", () => {
 
     expect(awarenessSection).toBeDefined();
     expect(awarenessSection!.items.some((item) => item.label.includes("Electron"))).toBe(false);
-    expect(awarenessSection!.items.some((item) => item.label.includes("Regression in launch flow"))).toBe(true);
+    expect(
+      awarenessSection!.items.some((item) => item.label.includes("Regression in launch flow")),
+    ).toBe(true);
   });
 
   // ── Config management ─────────────────────────────────────────

@@ -137,9 +137,7 @@ export class MemoryTierService {
     }
 
     if (promoted > 0 || evicted > 0) {
-      logger.info(
-        `[MemoryTierService] Promotion pass: promoted=${promoted}, evicted=${evicted}`,
-      );
+      logger.info(`[MemoryTierService] Promotion pass: promoted=${promoted}, evicted=${evicted}`);
     }
 
     return { promoted, evicted };

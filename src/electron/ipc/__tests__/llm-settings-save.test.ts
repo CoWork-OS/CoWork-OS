@@ -31,9 +31,7 @@ describe("buildSavedLLMSettings", () => {
 
     expect(saved.fallbackProviders).toEqual(validated.fallbackProviders);
     expect(saved.failoverPrimaryRetryCooldownSeconds).toBe(90);
-    expect(saved.cachedOpenRouterModels).toEqual(
-      existingSettings.cachedOpenRouterModels,
-    );
+    expect(saved.cachedOpenRouterModels).toEqual(existingSettings.cachedOpenRouterModels);
   });
 
   it("preserves provider-specific failover settings while merging partial saves", () => {
@@ -184,9 +182,7 @@ describe("buildSavedLLMSettings", () => {
     const validated: LLMSettingsData = {
       providerType: "openai",
       modelKey: "gpt-4.1",
-      fallbackProviders: [
-        { providerType: "anthropic", modelKey: "sonnet-4-5" },
-      ],
+      fallbackProviders: [{ providerType: "anthropic", modelKey: "sonnet-4-5" }],
       openai: {
         model: "gpt-4.1",
       },

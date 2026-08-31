@@ -1,7 +1,11 @@
 import fs from "fs/promises";
 import path from "path";
 import type Database from "better-sqlite3";
-import type { TaskEvent, VerbatimQuoteSearchResult, VerbatimQuoteSourceType } from "../../shared/types";
+import type {
+  TaskEvent,
+  VerbatimQuoteSearchResult,
+  VerbatimQuoteSourceType,
+} from "../../shared/types";
 import {
   TaskEventRepository,
   TaskRepository,
@@ -9,6 +13,7 @@ import {
 } from "../database/repositories";
 import { MemoryService } from "./MemoryService";
 import { TranscriptStore, type TranscriptSearchResult } from "./TranscriptStore";
+import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
 
 const MAX_EVENT_TASKS = 200;
 const MAX_EXCERPT_CHARS = 280;
@@ -164,7 +169,10 @@ function compareQuoteResults(a: VerbatimQuoteSearchResult, b: VerbatimQuoteSearc
   );
 }
 
-function mapTranscriptSpan(entry: TranscriptSearchResult, query: string): VerbatimQuoteSearchResult | null {
+function mapTranscriptSpan(
+  entry: TranscriptSearchResult,
+  query: string,
+): VerbatimQuoteSearchResult | null {
   const text = stringifyPayload(entry.payload) || entry.rawLine;
   const excerpt = buildExcerpt(text, query);
   if (!excerpt) return null;
@@ -175,7 +183,8 @@ function mapTranscriptSpan(entry: TranscriptSearchResult, query: string): Verbat
     timestamp: entry.timestamp,
   });
   const objectId =
-    entry.eventId || `${entry.taskId}:${typeof entry.seq === "number" ? entry.seq : entry.timestamp}`;
+    entry.eventId ||
+    `${entry.taskId}:${typeof entry.seq === "number" ? entry.seq : entry.timestamp}`;
   return {
     id: `quote:transcript:${objectId}`,
     sourceType: "transcript_span",
@@ -202,7 +211,9 @@ function mapTaskEvent(entry: TaskEvent, query: string): VerbatimQuoteSearchResul
     timestamp: entry.timestamp,
   });
   const objectId =
-    entry.eventId || entry.id || `${entry.taskId}:${typeof entry.seq === "number" ? entry.seq : entry.timestamp}`;
+    entry.eventId ||
+    entry.id ||
+    `${entry.taskId}:${typeof entry.seq === "number" ? entry.seq : entry.timestamp}`;
   return {
     id: `quote:event:${objectId}`,
     sourceType: "task_message",
@@ -223,17 +234,27 @@ async function readMarkdownExcerpt(
   filePath: string,
   startLine?: number,
   endLine?: number,
+  readGuard?: MarkdownMemoryReadGuard,
 ): Promise<string> {
   const normalizedPath = filePath.replace(/\\/g, "/");
   const candidatePaths = path.isAbsolute(filePath)
     ? [filePath]
     : [
         path.join(workspacePath, filePath),
-        ...(!normalizedPath.startsWith(".cowork/") ? [path.join(workspacePath, ".cowork", filePath)] : []),
+        ...(!normalizedPath.startsWith(".cowork/")
+          ? [path.join(workspacePath, ".cowork", filePath)]
+          : []),
       ];
 
   let raw = "";
   for (const candidatePath of candidatePaths) {
+    if (readGuard) {
+      try {
+        if (!readGuard(candidatePath)) continue;
+      } catch {
+        continue;
+      }
+    }
     raw = await fs.readFile(candidatePath, "utf8").catch(() => "");
     if (raw) break;
   }
@@ -241,7 +262,10 @@ async function readMarkdownExcerpt(
   const lines = raw.split(/\r?\n/);
   const from = Math.max(0, (startLine || 1) - 1);
   const to = Math.min(lines.length, endLine || from + 8);
-  return lines.slice(from, Math.max(from + 1, to)).join("\n").trim();
+  return lines
+    .slice(from, Math.max(from + 1, to))
+    .join("\n")
+    .trim();
 }
 
 export class QuoteRecallService {
@@ -254,6 +278,7 @@ export class QuoteRecallService {
     limit?: number;
     sourceTypes?: VerbatimQuoteSourceType[];
     includeWorkspaceNotes?: boolean;
+    readGuard?: MarkdownMemoryReadGuard;
   }): Promise<VerbatimQuoteSearchResult[]> {
     const query = normalizeText(params.query);
     if (!query) return [];
@@ -275,6 +300,7 @@ export class QuoteRecallService {
         query,
         taskId: params.taskId,
         limit: candidateLimit,
+        readGuard: params.readGuard,
       });
       for (const hit of transcriptHits) {
         const mapped = mapTranscriptSpan(hit, query);
@@ -290,7 +316,8 @@ export class QuoteRecallService {
       const taskIds = params.taskId
         ? [params.taskId]
         : taskRepo.findByWorkspace(params.workspaceId, MAX_EVENT_TASKS).map((task) => task.id);
-      const events = taskIds.length > 0 ? eventRepo.findByTaskIds(taskIds, [...MESSAGE_EVENT_TYPES]) : [];
+      const events =
+        taskIds.length > 0 ? eventRepo.findByTaskIds(taskIds, [...MESSAGE_EVENT_TYPES]) : [];
       for (const event of events) {
         const text = stringifyPayload(event.payload).toLowerCase();
         const lowerQuery = query.toLowerCase();
@@ -308,7 +335,10 @@ export class QuoteRecallService {
     if (allowSource("memory")) {
       const memoryHits = MemoryService.search(params.workspaceId, query, candidateLimit);
       const fullEntriesById = new Map(
-        MemoryService.getFullDetails(memoryHits.map((entry) => entry.id)).map((entry) => [entry.id, entry]),
+        MemoryService.getFullDetails(memoryHits.map((entry) => entry.id)).map((entry) => [
+          entry.id,
+          entry,
+        ]),
       );
       for (const hit of memoryHits) {
         const full = fullEntriesById.get(hit.id);
@@ -343,6 +373,7 @@ export class QuoteRecallService {
         path.join(params.workspacePath, ".cowork"),
         query,
         candidateLimit,
+        params.readGuard,
       ).filter(
         (entry): entry is Extract<MemorySearchResult, { source: "markdown" }> =>
           entry.source === "markdown",
@@ -354,6 +385,7 @@ export class QuoteRecallService {
           hit.path,
           hit.startLine,
           hit.endLine,
+          params.readGuard,
         );
         const excerpt = buildExcerpt(rawExcerpt || hit.snippet, query);
         if (!excerpt) continue;

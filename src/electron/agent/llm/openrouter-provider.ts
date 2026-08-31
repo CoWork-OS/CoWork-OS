@@ -39,7 +39,9 @@ function normalizeParetoMinCodingScore(value?: number): number | undefined {
 }
 
 function isParetoCodeModel(model: string): boolean {
-  const normalized = String(model || "").trim().toLowerCase();
+  const normalized = String(model || "")
+    .trim()
+    .toLowerCase();
   return normalized.split(":")[0] === OPENROUTER_PARETO_CODE_MODEL;
 }
 
@@ -375,9 +377,7 @@ export class OpenRouterProvider implements LLMProvider {
     if (!isParetoCodeModel(model)) {
       return {};
     }
-    const minCodingScore = normalizeParetoMinCodingScore(
-      this.paretoMinCodingScore,
-    );
+    const minCodingScore = normalizeParetoMinCodingScore(this.paretoMinCodingScore);
     if (typeof minCodingScore !== "number") {
       return {};
     }
@@ -392,16 +392,18 @@ export class OpenRouterProvider implements LLMProvider {
   }
 
   private hasInlineImages(messages: LLMRequest["messages"]): boolean {
-    return messages.some((message) =>
-      Array.isArray(message.content) &&
-      message.content.some((item) => item.type === "image"),
+    return messages.some(
+      (message) =>
+        Array.isArray(message.content) && message.content.some((item) => item.type === "image"),
     );
   }
 
   private isImageInputUnsupportedError(status: number | undefined, detail: string): boolean {
     return (
       status === 404 &&
-      String(detail || "").toLowerCase().includes("no endpoints found that support image input")
+      String(detail || "")
+        .toLowerCase()
+        .includes("no endpoints found that support image input")
     );
   }
 

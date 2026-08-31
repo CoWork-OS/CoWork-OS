@@ -4,7 +4,10 @@ import type { Plan } from "../../../shared/types";
 
 describe("step-intent-alignment", () => {
   it("scoreStepIntentOverlap rewards shared tokens", () => {
-    const a = scoreStepIntentOverlap("Implement user login API with JWT", "Build user login with JWT tokens");
+    const a = scoreStepIntentOverlap(
+      "Implement user login API with JWT",
+      "Build user login with JWT tokens",
+    );
     expect(a).toBeGreaterThan(0.15);
   });
 
@@ -12,7 +15,12 @@ describe("step-intent-alignment", () => {
     const plan: Plan = {
       description: "test",
       steps: [
-        { id: "1", description: "Refactor payment webhook handler", status: "pending", kind: "primary" },
+        {
+          id: "1",
+          description: "Refactor payment webhook handler",
+          status: "pending",
+          kind: "primary",
+        },
         { id: "2", description: "Verify", status: "pending", kind: "verification" },
       ],
     };

@@ -311,7 +311,11 @@ export class AgentMailRealtimeService {
     try {
       const client = new AgentMailClient(AgentMailSettingsManager.loadSettings());
       const thread = await client.getPodThread(inboxRow.pod_id, threadId);
-      await this.mailboxService.ingestAgentMailThread(inboxRow.workspace_id, inboxRow.pod_id, thread);
+      await this.mailboxService.ingestAgentMailThread(
+        inboxRow.workspace_id,
+        inboxRow.pod_id,
+        thread,
+      );
       this.persistRuntimeState({
         realtimeConnected: true,
         connectionState: "connected",

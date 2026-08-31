@@ -88,7 +88,7 @@ describe("cli-agent-detection", () => {
       createEvent({
         payload: {
           tool: "run_command",
-          command: "claude -p \"review this patch\"",
+          command: 'claude -p "review this patch"',
         },
       }),
     ];
@@ -103,7 +103,7 @@ describe("cli-agent-detection", () => {
       createEvent({
         payload: {
           tool: "run_command",
-          command: "codex exec \"review this patch\"",
+          command: 'codex exec "review this patch"',
         },
       }),
     ];

@@ -173,15 +173,10 @@ describe("shouldSuppressInitialPromptUserEvent", () => {
   const initialPrompt = "Research and compare two GitHub repositories.\nStep 1: collect stats.";
 
   it("suppresses a timeline v2 user_message that repeats the anchored task prompt", () => {
-    const event = makeEvent(
-      "user-event",
-      11_000,
-      "timeline_step_updated",
-      {
-        legacyType: "user_message",
-        message: initialPrompt,
-      },
-    );
+    const event = makeEvent("user-event", 11_000, "timeline_step_updated", {
+      legacyType: "user_message",
+      message: initialPrompt,
+    });
 
     expect(
       shouldSuppressInitialPromptUserEvent({
@@ -194,15 +189,10 @@ describe("shouldSuppressInitialPromptUserEvent", () => {
   });
 
   it("keeps later follow-up messages even when they happen to repeat the original prompt", () => {
-    const event = makeEvent(
-      "follow-up",
-      90_000,
-      "timeline_step_updated",
-      {
-        legacyType: "user_message",
-        message: initialPrompt,
-      },
-    );
+    const event = makeEvent("follow-up", 90_000, "timeline_step_updated", {
+      legacyType: "user_message",
+      message: initialPrompt,
+    });
 
     expect(
       shouldSuppressInitialPromptUserEvent({
@@ -269,7 +259,7 @@ describe("task automation creation", () => {
       name: "Review recent failures",
       description: "Created from task task-123 (cowork://tasks/task-123)",
       enabled: true,
-      shellAccess: false,
+      accessProfileId: "ask_for_approval",
       allowUserInput: false,
       deleteAfterRun: false,
       schedule,
@@ -422,7 +412,7 @@ describe("task automation creation", () => {
     });
   });
 
-  it("enables shell access for Local run mode", () => {
+  it("uses the profile selected by the source task for Local run mode", () => {
     const task = makeTask({ workspaceId: "workspace-1" });
     const schedule = buildTaskAutomationSchedule("hourly", "")!;
     const job = buildTaskAutomationCronJobCreate({
@@ -435,7 +425,7 @@ describe("task automation creation", () => {
       deeplink: "cowork://tasks/task-1",
     });
 
-    expect(job.shellAccess).toBe(true);
+    expect(job.accessProfileId).toBe("ask_for_approval");
   });
 
   it("templates provide prompt, name, and schedule defaults", () => {
@@ -514,7 +504,7 @@ describe("task header browser action", () => {
     expect(mainContentSource).toContain("<span>Open browser</span>");
     expect(mainContentSource).toContain("onOpenBrowserWorkbenchSidebar()");
     expect(appSource).toContain("openEmptyBrowserWorkbenchSidebar");
-    expect(appSource).toContain("sessionId: \"default\"");
+    expect(appSource).toContain('sessionId: "default"');
     expect(appSource).toContain("onOpenBrowserWorkbenchSidebar=");
   });
 });
@@ -913,7 +903,9 @@ describe("isTaskActivelyWorking", () => {
 
   it("does not treat generic error events as terminal while the task is still executing", () => {
     const task = makeTask();
-    const events = [makeEvent("tool-side-error", 2_000, "error", { error: "Image generation failed" })];
+    const events = [
+      makeEvent("tool-side-error", 2_000, "error", { error: "Image generation failed" }),
+    ];
 
     expect(isTaskActivelyWorking(task, events, false, 2_500)).toBe(true);
   });
@@ -1025,7 +1017,9 @@ describe("isTaskActivelyWorking", () => {
   });
 
   it("uses task status to label bootstrap progress", () => {
-    expect(getBootstrapProgressTitle(makeTask({ status: "planning" }))).toBe("Planning the approach");
+    expect(getBootstrapProgressTitle(makeTask({ status: "planning" }))).toBe(
+      "Planning the approach",
+    );
     expect(getBootstrapProgressTitle(makeTask({ status: "executing" }))).toBe("Thinking");
     expect(getBootstrapProgressTitle(makeTask({ status: "interrupted" }))).toBe("Resuming work");
   });
@@ -1077,10 +1071,7 @@ describe("isTaskActivelyWorking", () => {
 
     expect(state.activeStreamText).toBe("");
     expect(state.isStreaming).toBe(false);
-    expect(state.recentUpdates).toEqual([
-      "Understanding the request",
-      "Inspecting repository",
-    ]);
+    expect(state.recentUpdates).toEqual(["Understanding the request", "Inspecting repository"]);
   });
 
   it("includes assistant messages in the reasoning fallback window", () => {
@@ -1122,9 +1113,12 @@ describe("isTaskActivelyWorking", () => {
   });
 
   it("prunes action block state down to active ids", () => {
-    expect(
-      [...pruneStringSetToActiveIds(new Set(["block-1", "block-2"]), new Set(["block-2", "block-3"]))],
-    ).toEqual(["block-2"]);
+    expect([
+      ...pruneStringSetToActiveIds(
+        new Set(["block-1", "block-2"]),
+        new Set(["block-2", "block-3"]),
+      ),
+    ]).toEqual(["block-2"]);
   });
 
   it("projects a bounded live transcript row set while preserving hidden count", () => {
@@ -1136,7 +1130,10 @@ describe("isTaskActivelyWorking", () => {
         timelineIndex: 0,
         visiblePerfEventId: "user-1",
         revision: "user-1",
-        item: { kind: "event", event: makeEvent("user-1", 100, "user_message", { message: "User" }) },
+        item: {
+          kind: "event",
+          event: makeEvent("user-1", 100, "user_message", { message: "User" }),
+        },
       },
       {
         kind: "timeline",
@@ -1275,7 +1272,9 @@ describe("isTaskActivelyWorking", () => {
 
     const result = selectVisibleTaskFeedRows(rows, "live");
 
-    expect(result.visibleFeedRows.some((row) => row.key === "timeline-history-control")).toBe(false);
+    expect(result.visibleFeedRows.some((row) => row.key === "timeline-history-control")).toBe(
+      false,
+    );
     expect(result.hiddenLiveFeedRowCount).toBe(
       rows.filter((row) => row.kind !== "history-control").length - result.visibleFeedRows.length,
     );
@@ -1322,7 +1321,10 @@ describe("isTaskActivelyWorking", () => {
         timelineIndex: 0,
         visiblePerfEventId: "user-1",
         revision: "user-1",
-        item: { kind: "event", event: makeEvent("user-1", 100, "user_message", { message: "User" }) },
+        item: {
+          kind: "event",
+          event: makeEvent("user-1", 100, "user_message", { message: "User" }),
+        },
       },
       {
         kind: "timeline",
@@ -1360,7 +1362,9 @@ describe("isTaskActivelyWorking", () => {
         revision: "assistant-1",
         item: {
           kind: "event",
-          event: makeEvent("assistant-1", 400, "assistant_message", { message: "Created sample.xlsx" }),
+          event: makeEvent("assistant-1", 400, "assistant_message", {
+            message: "Created sample.xlsx",
+          }),
         },
       },
       {
@@ -1519,8 +1523,32 @@ describe("isTaskActivelyWorking", () => {
     });
 
     const sessionsByIndex = new Map([
-      [0, [{ id: "cmd-hidden", command: "npm test", output: "ok", isRunning: false, exitCode: 0, startTimestamp: 100 }]],
-      [1, [{ id: "cmd-visible", command: "cat file", output: "ok", isRunning: false, exitCode: 0, startTimestamp: 200 }]],
+      [
+        0,
+        [
+          {
+            id: "cmd-hidden",
+            command: "npm test",
+            output: "ok",
+            isRunning: false,
+            exitCode: 0,
+            startTimestamp: 100,
+          },
+        ],
+      ],
+      [
+        1,
+        [
+          {
+            id: "cmd-visible",
+            command: "cat file",
+            output: "ok",
+            isRunning: false,
+            exitCode: 0,
+            startTimestamp: 200,
+          },
+        ],
+      ],
     ]);
 
     const hiddenIds = collectInlineRunCommandSessionIds({

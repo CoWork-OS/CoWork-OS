@@ -1,7 +1,11 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
-import { buildWorkspaceKitSections, parseHeartbeatChecklist, renderHeartbeatPrompt } from "../context/kit-injection";
+import {
+  buildWorkspaceKitSections,
+  parseHeartbeatChecklist,
+  renderHeartbeatPrompt,
+} from "../context/kit-injection";
 import { getUserDataDir } from "../utils/user-data-dir";
 
 const KIT_DIRNAME = ".cowork";
@@ -60,7 +64,10 @@ function hashId(input: string): string {
   return createHash("sha1").update(input).digest("hex").slice(0, 12);
 }
 
-function getCadence(sectionTitle: string): { cadence: HeartbeatChecklistCadence; cadenceMs: number } {
+function getCadence(sectionTitle: string): {
+  cadence: HeartbeatChecklistCadence;
+  cadenceMs: number;
+} {
   const text = sectionTitle.trim().toLowerCase();
   if (/\b(hourly|hour|every hour)\b/.test(text)) {
     return { cadence: "hourly", cadenceMs: 60 * 60 * 1000 };
@@ -89,7 +96,8 @@ export function readHeartbeatChecklist(
 ): HeartbeatChecklistItem[] {
   const root = typeof workspacePath === "string" ? workspacePath.trim() : "";
   if (!root) return [];
-  const sourcePath = getHeartbeatChecklistPath(root) || path.join(root, KIT_DIRNAME, "HEARTBEAT.md");
+  const sourcePath =
+    getHeartbeatChecklistPath(root) || path.join(root, KIT_DIRNAME, "HEARTBEAT.md");
   const rawText = readTextFile(sourcePath, Number.MAX_SAFE_INTEGER);
   const revisionHash = rawText ? createHash("sha1").update(rawText).digest("hex") : "";
   const cached = checklistCache.get(root);
@@ -117,13 +125,10 @@ export function readHeartbeatChecklist(
       sourcePath,
     };
   });
-  checklistCache.set(
-    root,
-    {
-      revisionHash,
-      items: items.map((item) => ({ ...item, workspaceId: undefined })),
-    },
-  );
+  checklistCache.set(root, {
+    revisionHash,
+    items: items.map((item) => ({ ...item, workspaceId: undefined })),
+  });
   return items.map((item) => ({ ...item, workspaceId }));
 }
 

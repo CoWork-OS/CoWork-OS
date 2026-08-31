@@ -2,9 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const stylesPath = fileURLToPath(
-  new URL("../MainContent/main-content.css", import.meta.url),
-);
+const stylesPath = fileURLToPath(new URL("../MainContent/main-content.css", import.meta.url));
 
 describe("Model dropdown styles", () => {
   it("gives model browsing enough width for model metadata and controls", () => {

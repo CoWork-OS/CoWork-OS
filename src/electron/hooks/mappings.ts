@@ -333,7 +333,6 @@ function mergeAction(
     });
   }
 
-
   if (kind === "workflow") {
     const baseWorkflow = base.kind === "workflow" ? base : undefined;
     return validateAction({

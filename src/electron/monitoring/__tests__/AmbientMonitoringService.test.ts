@@ -60,8 +60,9 @@ describe("AmbientMonitoringService", () => {
       }),
       close: vi.fn().mockResolvedValue(undefined),
     });
-    execFileMock.mockImplementation((_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
-      cb(null, { stdout: "" }),
+    execFileMock.mockImplementation(
+      (_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
+        cb(null, { stdout: "" }),
     );
 
     const recordActivity = vi.fn();
@@ -101,8 +102,9 @@ describe("AmbientMonitoringService", () => {
       on: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     });
-    execFileMock.mockImplementation((_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
-      cb(null, { stdout: "" }),
+    execFileMock.mockImplementation(
+      (_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
+        cb(null, { stdout: "" }),
     );
     execFileMock
       .mockImplementationOnce(
@@ -178,8 +180,9 @@ describe("AmbientMonitoringService", () => {
       on: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     });
-    execFileMock.mockImplementation((_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
-      cb(null, { stdout: "" }),
+    execFileMock.mockImplementation(
+      (_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
+        cb(null, { stdout: "" }),
     );
     loadGoogleSettingsMock.mockReturnValue({ enabled: true });
     googleCalendarRequestMock
@@ -221,8 +224,9 @@ describe("AmbientMonitoringService", () => {
       on: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     });
-    execFileMock.mockImplementation((_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
-      cb(null, { stdout: "" }),
+    execFileMock.mockImplementation(
+      (_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
+        cb(null, { stdout: "" }),
     );
 
     const log = vi.fn();
@@ -230,8 +234,16 @@ describe("AmbientMonitoringService", () => {
     const projectPath = createWorkspaceDir("eligible-project");
     const service = new AmbientMonitoringService({
       listWorkspaces: () => [
-        { workspaceId: "downloads", workspacePath: path.join(os.homedir(), "Downloads"), name: "Downloads" },
-        { workspaceId: "desktop", workspacePath: path.join(os.homedir(), "Desktop"), name: "Desktop" },
+        {
+          workspaceId: "downloads",
+          workspacePath: path.join(os.homedir(), "Downloads"),
+          name: "Downloads",
+        },
+        {
+          workspaceId: "desktop",
+          workspacePath: path.join(os.homedir(), "Desktop"),
+          name: "Desktop",
+        },
         { workspaceId: "project", workspacePath: projectPath, name: "Project" },
       ],
       getDefaultWorkspaceId: () => "project",
@@ -248,9 +260,7 @@ describe("AmbientMonitoringService", () => {
       [path.join(projectPath, "src")],
       expect.objectContaining({ ignoreInitial: true }),
     );
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("Skipped 2 broad workspace root(s)"),
-    );
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Skipped 2 broad workspace root(s)"));
 
     await service.stop();
   });
@@ -260,8 +270,9 @@ describe("AmbientMonitoringService", () => {
       on: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     });
-    execFileMock.mockImplementation((_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
-      cb(null, { stdout: "" }),
+    execFileMock.mockImplementation(
+      (_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
+        cb(null, { stdout: "" }),
     );
 
     const log = vi.fn();
@@ -297,15 +308,18 @@ describe("AmbientMonitoringService", () => {
       on: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     });
-    execFileMock.mockImplementation((_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
-      cb(null, { stdout: "" }),
+    execFileMock.mockImplementation(
+      (_cmd, _args, _opts, cb: (err: null, result: { stdout: string }) => void) =>
+        cb(null, { stdout: "" }),
     );
 
     const log = vi.fn();
     const emptyWorkspace = createWorkspaceDir("empty-workspace", []);
     const { AmbientMonitoringService } = await import("../AmbientMonitoringService");
     const service = new AmbientMonitoringService({
-      listWorkspaces: () => [{ workspaceId: "empty", workspacePath: emptyWorkspace, name: "Empty" }],
+      listWorkspaces: () => [
+        { workspaceId: "empty", workspacePath: emptyWorkspace, name: "Empty" },
+      ],
       getDefaultWorkspaceId: () => "empty",
       recordActivity: vi.fn(),
       emitTrigger: vi.fn(),

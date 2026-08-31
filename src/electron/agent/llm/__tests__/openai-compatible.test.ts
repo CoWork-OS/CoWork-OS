@@ -370,12 +370,16 @@ describe("toOpenAICompatibleMessages", () => {
       },
       {
         role: "user" as const,
-        content: [{ type: "tool_result" as const, tool_use_id: "call_1", content: "only one result" }],
+        content: [
+          { type: "tool_result" as const, tool_use_id: "call_1", content: "only one result" },
+        ],
       },
       { role: "assistant" as const, content: "Recovered later." },
     ];
 
-    expect(sanitizeToolCallHistory(input)).toEqual([{ role: "assistant", content: "Recovered later." }]);
+    expect(sanitizeToolCallHistory(input)).toEqual([
+      { role: "assistant", content: "Recovered later." },
+    ]);
     expect(toOpenAICompatibleMessages(input)).toEqual([
       { role: "assistant", content: "Recovered later." },
     ]);

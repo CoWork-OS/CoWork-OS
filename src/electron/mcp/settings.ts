@@ -23,7 +23,7 @@ const logger = createLogger("MCP Settings");
 function getElectronApp(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     const app = electron?.app;
     if (app && typeof app === "object") return app;
@@ -160,6 +160,8 @@ function encryptServerAuth(auth?: MCPAuthConfig): MCPAuthConfig | undefined {
     token: encryptSecret(auth.token),
     apiKey: encryptSecret(auth.apiKey),
     password: encryptSecret(auth.password),
+    refreshToken: encryptSecret(auth.refreshToken),
+    clientSecret: encryptSecret(auth.clientSecret),
   };
 }
 
@@ -174,6 +176,8 @@ function decryptServerAuth(auth?: MCPAuthConfig): MCPAuthConfig | undefined {
     token: decryptSecret(auth.token),
     apiKey: decryptSecret(auth.apiKey),
     password: decryptSecret(auth.password),
+    refreshToken: decryptSecret(auth.refreshToken),
+    clientSecret: decryptSecret(auth.clientSecret),
   };
 }
 
@@ -331,7 +335,9 @@ export class MCPSettingsManager {
             this.saveSettings(this.cachedSettings);
           }
 
-          logger.debug(`Loaded ${this.cachedSettings.servers.length} server(s) from encrypted database`);
+          logger.debug(
+            `Loaded ${this.cachedSettings.servers.length} server(s) from encrypted database`,
+          );
           return this.cachedSettings;
         }
       }
@@ -547,6 +553,8 @@ export class MCPSettingsManager {
               token: server.auth.token ? MASKED_VALUE : undefined,
               apiKey: server.auth.apiKey ? MASKED_VALUE : undefined,
               password: server.auth.password ? MASKED_VALUE : undefined,
+              refreshToken: server.auth.refreshToken ? MASKED_VALUE : undefined,
+              clientSecret: server.auth.clientSecret ? MASKED_VALUE : undefined,
             }
           : undefined,
       })),

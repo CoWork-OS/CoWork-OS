@@ -20,11 +20,18 @@ function classifyCategory(text: string): CoreFailureCategory {
   if (text.includes("active hours") || text.includes("outside active hours")) return "wake_timing";
   if (text.includes("budget") || text.includes("dispatch budget")) return "budget_policy_mismatch";
   if (text.includes("duplicate") || text.includes("redundant")) return "subconscious_duplication";
-  if (text.includes("no evidence") || text.includes("low signal") || text.includes("insufficient evidence")) {
+  if (
+    text.includes("no evidence") ||
+    text.includes("low signal") ||
+    text.includes("insufficient evidence")
+  ) {
     return "subconscious_low_signal";
   }
   if (text.includes("stale")) return "memory_staleness";
-  if (text.includes("memory") && (text.includes("noise") || text.includes("merged") || text.includes("novelty"))) {
+  if (
+    text.includes("memory") &&
+    (text.includes("noise") || text.includes("merged") || text.includes("novelty"))
+  ) {
     return "memory_noise";
   }
   if (text.includes("routing") || text.includes("wrong target") || text.includes("notify-only")) {
@@ -45,7 +52,8 @@ function classifyCategory(text: string): CoreFailureCategory {
 function classifySeverity(trace: CoreTrace, text: string): CoreFailureSeverity {
   if (trace.status === "failed") return "high";
   if (text.includes("critical")) return "critical";
-  if (text.includes("blocked") || text.includes("no evidence") || text.includes("duplicate")) return "medium";
+  if (text.includes("blocked") || text.includes("no evidence") || text.includes("duplicate"))
+    return "medium";
   return "low";
 }
 

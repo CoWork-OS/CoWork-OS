@@ -58,18 +58,15 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
     keyFeatures: [
       {
         title: "List and inspect deployments",
-        description:
-          "View deployment history, status, and logs for each project and branch.",
+        description: "View deployment history, status, and logs for each project and branch.",
       },
       {
         title: "Manage projects",
-        description:
-          "Get project details, domains, and configuration without leaving the app.",
+        description: "Get project details, domains, and configuration without leaving the app.",
       },
       {
         title: "Debug build failures",
-        description:
-          "Fetch build logs and deployment metadata to diagnose failed deployments.",
+        description: "Fetch build logs and deployment metadata to diagnose failed deployments.",
       },
     ],
     examples: [
@@ -90,8 +87,7 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
     keyFeatures: [
       {
         title: "List and search boards",
-        description:
-          "Browse your monday.com workspace and find boards by name or type.",
+        description: "Browse your monday.com workspace and find boards by name or type.",
       },
       {
         title: "Create and update items",
@@ -100,8 +96,7 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
       },
       {
         title: "Query board structure",
-        description:
-          "Get board metadata, columns, and item details for automation and reporting.",
+        description: "Get board metadata, columns, and item details for automation and reporting.",
       },
     ],
     examples: [
@@ -127,13 +122,11 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
       },
       {
         title: "Create and update issues",
-        description:
-          "Create new issues, add comments, transition status, and update fields.",
+        description: "Create new issues, add comments, transition status, and update fields.",
       },
       {
         title: "List projects and sprints",
-        description:
-          "Browse projects, boards, and sprint backlogs for planning and reporting.",
+        description: "Browse projects, boards, and sprint backlogs for planning and reporting.",
       },
     ],
     examples: [
@@ -154,18 +147,15 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
     keyFeatures: [
       {
         title: "Search and list issues",
-        description:
-          "Find issues by title, status, assignee, or project with flexible queries.",
+        description: "Find issues by title, status, assignee, or project with flexible queries.",
       },
       {
         title: "Create and update issues",
-        description:
-          "Add new issues, set labels, assignees, and update workflow state.",
+        description: "Add new issues, set labels, assignees, and update workflow state.",
       },
       {
         title: "Manage cycles and projects",
-        description:
-          "List cycles, projects, and teams for sprint planning and reporting.",
+        description: "List cycles, projects, and teams for sprint planning and reporting.",
       },
     ],
     examples: [
@@ -737,18 +727,15 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
     keyFeatures: [
       {
         title: "Search CRM objects",
-        description:
-          "Find contacts, companies, and deals by name, email, or custom properties.",
+        description: "Find contacts, companies, and deals by name, email, or custom properties.",
       },
       {
         title: "Create and update records",
-        description:
-          "Add contacts, create companies, update deal stages, and log activities.",
+        description: "Add contacts, create companies, update deal stages, and log activities.",
       },
       {
         title: "Object metadata",
-        description:
-          "Describe object schemas and properties for accurate data mapping.",
+        description: "Describe object schemas and properties for accurate data mapping.",
       },
     ],
     examples: [
@@ -1171,6 +1158,8 @@ export const CONNECTOR_PROFILES: Record<string, ConnectorProfile> = {
 };
 
 export function getConnectorProfile(connectorId: string): ConnectorProfile | undefined {
-  const key = String(connectorId || "").trim().toLowerCase();
+  const key = String(connectorId || "")
+    .trim()
+    .toLowerCase();
   return CONNECTOR_PROFILES[key];
 }

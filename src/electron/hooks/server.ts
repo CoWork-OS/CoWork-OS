@@ -243,7 +243,9 @@ export class HooksServer {
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     // Restrict CORS to localhost origins only — webhooks should not be called from external browsers
     const origin = req.headers.origin || "";
-    const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/.test(origin);
+    const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/.test(
+      origin,
+    );
     res.setHeader("Access-Control-Allow-Origin", isLocalOrigin ? origin : "http://localhost");
     res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CoWork-Token");
@@ -401,7 +403,11 @@ export class HooksServer {
       try {
         const result = await this.handlers.onAgent(agentPayload);
         // Return 202 Accepted for async operation
-        this.sendJsonResponse(res, result.statusCode ?? 202, result.body ?? { success: true, taskId: result.taskId });
+        this.sendJsonResponse(
+          res,
+          result.statusCode ?? 202,
+          result.body ?? { success: true, taskId: result.taskId },
+        );
       } catch (error) {
         log.error("Agent handler error:", error);
         this.sendJsonResponse(res, 500, { success: false, error: String(error) });
@@ -455,7 +461,8 @@ export class HooksServer {
       this.sendJsonResponse(res, 202, { success: true });
     } catch (error) {
       const statusCode =
-        typeof (error as Error & { statusCode?: unknown })?.statusCode === "number" && Number.isFinite((error as Error & { statusCode?: unknown }).statusCode)
+        typeof (error as Error & { statusCode?: unknown })?.statusCode === "number" &&
+        Number.isFinite((error as Error & { statusCode?: unknown }).statusCode)
           ? (error as Error & { statusCode: number }).statusCode
           : 500;
       log.error("Task message handler error:", error);
@@ -650,22 +657,21 @@ export class HooksServer {
             payload: action.payload,
             metadata: action.metadata,
           });
-          this.sendJsonResponse(
-            res,
-            action.response?.statusCode ?? 202,
-            {
-              success: true,
-              status: result.status,
-              runId: result.runId,
-              ...(action.response?.message ? { message: action.response.message } : {}),
-            },
-          );
+          this.sendJsonResponse(res, action.response?.statusCode ?? 202, {
+            success: true,
+            status: result.status,
+            runId: result.runId,
+            ...(action.response?.message ? { message: action.response.message } : {}),
+          });
         } catch (error) {
           log.error("Workflow handler error:", error);
           this.sendJsonResponse(res, 500, { success: false, error: String(error) });
         }
       } else {
-        this.sendJsonResponse(res, 503, { success: false, error: "Workflow handler not configured" });
+        this.sendJsonResponse(res, 503, {
+          success: false,
+          error: "Workflow handler not configured",
+        });
       }
     } else if (action.kind === "task_message") {
       if (this.handlers.onTaskMessage) {
@@ -688,7 +694,8 @@ export class HooksServer {
           );
         } catch (error) {
           const statusCode =
-            typeof (error as Error & { statusCode?: unknown })?.statusCode === "number" && Number.isFinite((error as Error & { statusCode?: unknown }).statusCode)
+            typeof (error as Error & { statusCode?: unknown })?.statusCode === "number" &&
+            Number.isFinite((error as Error & { statusCode?: unknown }).statusCode)
               ? (error as Error & { statusCode: number }).statusCode
               : 500;
           log.error("Task message handler error:", error);

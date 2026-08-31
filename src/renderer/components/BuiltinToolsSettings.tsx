@@ -106,7 +106,8 @@ const CATEGORY_INFO: Record<
   computer_use: {
     name: "Computer Use (macOS)",
     icon: <MousePointer2 {...IC} />,
-    description: "Native desktop control — mouse, keyboard, screenshots (last resort vs browser/shell)",
+    description:
+      "Native desktop control — mouse, keyboard, screenshots (last resort vs browser/shell)",
   },
 };
 
@@ -153,7 +154,9 @@ export function BuiltinToolsSettings() {
         window.electronAPI.getBuiltinToolsSettings(),
         window.electronAPI.getBuiltinToolsCategories(),
       ]);
-      const mergedCategories = { ...loadedSettings.categories } as BuiltinToolsSettingsData["categories"];
+      const mergedCategories = {
+        ...loadedSettings.categories,
+      } as BuiltinToolsSettingsData["categories"];
       for (const key of CATEGORY_ORDER) {
         if (!mergedCategories[key]) {
           mergedCategories[key] = {
@@ -529,16 +532,14 @@ export function BuiltinToolsSettings() {
                     <div className="builtin-tool-advanced-text">
                       <div className="builtin-tool-advanced-label">Codex runtime</div>
                       <div className="builtin-tool-advanced-hint">
-                        Native uses CoWork&apos;s current shell path. ACP routes explicit Codex child
-                        tasks through acpx with structured session output.
+                        Native uses CoWork&apos;s current shell path. ACP routes explicit Codex
+                        child tasks through acpx with structured session output.
                       </div>
                     </div>
                     <select
                       className="builtin-tool-mode-select"
                       value={settings.codexRuntimeMode}
-                      onChange={(e) =>
-                        handleCodexRuntimeMode(e.target.value as "native" | "acpx")
-                      }
+                      onChange={(e) => handleCodexRuntimeMode(e.target.value as "native" | "acpx")}
                       disabled={!config.enabled}
                     >
                       <option value="native">Native</option>
@@ -640,9 +641,7 @@ export function BuiltinToolsSettings() {
                 <div className="builtin-tool-list">
                   {tools.map((tool) => {
                     const toolOverride = settings.toolOverrides?.[tool];
-                    const toolEnabled = toolOverride
-                      ? toolOverride.enabled
-                      : config.enabled;
+                    const toolEnabled = toolOverride ? toolOverride.enabled : config.enabled;
 
                     return (
                       <div key={tool} className="builtin-tool-item">

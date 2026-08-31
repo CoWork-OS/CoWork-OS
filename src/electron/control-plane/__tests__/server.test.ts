@@ -205,9 +205,7 @@ describe("ControlPlaneServer security boundaries", () => {
     const { ControlPlaneServer } = await import("../server");
     const server = new ControlPlaneServer({ token: "operator-token" });
 
-    expect((server as Any).isOriginAllowed("http://127.0.0.1:18789", "127.0.0.1:18789")).toBe(
-      true,
-    );
+    expect((server as Any).isOriginAllowed("http://127.0.0.1:18789", "127.0.0.1:18789")).toBe(true);
   });
 
   it("allows explicitly configured browser origins", async () => {

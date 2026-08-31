@@ -106,6 +106,47 @@ describe("parallel-group-projection", () => {
     expect(projection.suppressedEventIds.has("evt-8")).toBe(true);
   });
 
+  it("preserves cancellation status for a tool batch that is stopped while running", () => {
+    const groupId = "tools:step:build:cancelled";
+    const events: TaskEvent[] = [
+      makeEvent("timeline_group_started", "evt-1", {
+        groupId,
+        groupLabel: "Tool batch (1)",
+      }),
+      makeEvent("timeline_step_started", "evt-2", {
+        groupId,
+        step: { id: "tool_lane:step:use-1", description: "Running run_command" },
+        status: "in_progress",
+      }),
+      makeEvent(
+        "timeline_step_finished",
+        "evt-3",
+        {
+          groupId,
+          step: { id: "tool_lane:step:use-1", description: "run_command" },
+          status: "cancelled",
+          message: "Task was cancelled",
+        },
+        { status: "cancelled" },
+      ),
+      makeEvent(
+        "timeline_group_finished",
+        "evt-4",
+        {
+          groupId,
+          groupLabel: "Run command",
+          status: "cancelled",
+        },
+        { status: "cancelled" },
+      ),
+    ];
+
+    const projection = buildParallelGroupProjection(events);
+    const group = projection.groupsByAnchorEventId.get("evt-1");
+    expect(group?.status).toBe("cancelled");
+    expect(group?.lanes[0]?.status).toBe("cancelled");
+  });
+
   it("suppresses orphaned tool results that match a lane by toolUseId", () => {
     const groupId = "tools:step:build:1";
     const events: TaskEvent[] = [
@@ -185,7 +226,10 @@ describe("parallel-group-projection", () => {
         tool: "search_files",
         toolUseId: "use-1",
         toolCallIndex: 1,
-        result: { matches: [{ path: "src/electron/agent/runtime/SessionRuntime.ts" }], totalFound: 1 },
+        result: {
+          matches: [{ path: "src/electron/agent/runtime/SessionRuntime.ts" }],
+          totalFound: 1,
+        },
       }),
       makeEvent("timeline_step_finished", "evt-4", {
         groupId,

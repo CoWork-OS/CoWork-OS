@@ -2,12 +2,9 @@ import fs from "fs/promises";
 import { DailyLogSummarizer } from "./DailyLogSummarizer";
 import { LayeredMemoryIndexService } from "./LayeredMemoryIndexService";
 import { TranscriptStore } from "./TranscriptStore";
+import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
 
-export type MemoryConsolidationPhase =
-  | "orient"
-  | "gather_signal"
-  | "consolidate"
-  | "prune_index";
+export type MemoryConsolidationPhase = "orient" | "gather_signal" | "consolidate" | "prune_index";
 
 export interface MemoryConsolidationResult {
   ok: boolean;
@@ -29,9 +26,38 @@ export class MemoryConsolidator {
     workspacePath: string;
     taskId?: string;
     taskPrompt: string;
+    readGuard?: MarkdownMemoryReadGuard;
+    writeGuard?: (candidatePath: string) => boolean;
   }): Promise<MemoryConsolidationResult> {
     const lockPath = LayeredMemoryIndexService.resolveLockPath(params.workspacePath);
-    await LayeredMemoryIndexService.ensureLayout(params.workspacePath);
+    const canWrite = (candidatePath: string): boolean => {
+      if (!params.writeGuard) return true;
+      try {
+        return params.writeGuard(candidatePath) === true;
+      } catch {
+        return false;
+      }
+    };
+    if (!canWrite(lockPath)) {
+      return {
+        ok: true,
+        phases: [],
+        skipped: true,
+        reason: "access_profile_write_denied",
+      };
+    }
+    const layoutReady = await LayeredMemoryIndexService.ensureLayout(
+      params.workspacePath,
+      params.writeGuard,
+    );
+    if (!layoutReady) {
+      return {
+        ok: true,
+        phases: [],
+        skipped: true,
+        reason: "access_profile_write_denied",
+      };
+    }
 
     let lockHandle: fs.FileHandle | null = null;
     const phases: MemoryConsolidationPhase[] = [];
@@ -50,7 +76,12 @@ export class MemoryConsolidator {
     try {
       phases.push("orient");
       const recentSpans = params.taskId
-        ? await TranscriptStore.loadRecentSpans(params.workspacePath, params.taskId, 20)
+        ? await TranscriptStore.loadRecentSpans(
+            params.workspacePath,
+            params.taskId,
+            20,
+            params.readGuard,
+          )
         : [];
 
       phases.push("gather_signal");
@@ -60,6 +91,7 @@ export class MemoryConsolidator {
             taskId: params.taskId,
             query: params.taskPrompt,
             limit: 8,
+            readGuard: params.readGuard,
           })
         : [];
 
@@ -84,7 +116,12 @@ export class MemoryConsolidator {
         .filter(Boolean)
         .join("\n");
 
-      await DailyLogSummarizer.writeSummary(params.workspacePath, todayIso(), summaryBody);
+      await DailyLogSummarizer.writeSummary(
+        params.workspacePath,
+        todayIso(),
+        summaryBody,
+        params.writeGuard,
+      );
       const summaryPath = DailyLogSummarizer.resolveSummaryPath(params.workspacePath, todayIso());
 
       phases.push("prune_index");
@@ -92,6 +129,8 @@ export class MemoryConsolidator {
         workspaceId: params.workspaceId,
         workspacePath: params.workspacePath,
         taskPrompt: params.taskPrompt,
+        readGuard: params.readGuard,
+        writeGuard: params.writeGuard,
       });
 
       return {

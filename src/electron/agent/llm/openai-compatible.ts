@@ -260,9 +260,7 @@ export function toOpenAICompatibleTools(
       name: tool.name,
       description: tool.description,
       parameters: tool.input_schema,
-      ...(typeof options?.functionStrict === "boolean"
-        ? { strict: options.functionStrict }
-        : {}),
+      ...(typeof options?.functionStrict === "boolean" ? { strict: options.functionStrict } : {}),
     },
   }));
 }

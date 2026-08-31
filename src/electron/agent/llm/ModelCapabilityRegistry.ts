@@ -25,8 +25,10 @@ const CAPABILITY_SIGNALS: Record<ModelCapability, RegExp> = {
   vision: /\b(image|screenshot|photo|picture|diagram|chart|visual|figure|ocr|annotate)\b/i,
   code: /\b(code|bug|debug|function|class|refactor|test|typescript|javascript|python|rust|go|kotlin|swift|compile|lint|diff|patch|implement|algorithm)\b/i,
   math: /\b(math|equation|formula|calculate|solve|integral|derivative|probability|statistics|proof|algebra|geometry|calculus)\b/i,
-  research: /\b(research|summarize|survey|literature|compare|analyze|review|report|investigate|background)\b/i,
-  long_context: /\b(entire file|full codebase|whole repo|all files|read through|scan all|large document|book|transcript)\b/i,
+  research:
+    /\b(research|summarize|survey|literature|compare|analyze|review|report|investigate|background)\b/i,
+  long_context:
+    /\b(entire file|full codebase|whole repo|all files|read through|scan all|large document|book|transcript)\b/i,
   fast: /\b(quickly|fast|brief|short|simple|tiny|small|quick|one-liner|trivial)\b/i,
 };
 
@@ -86,8 +88,7 @@ export class ModelCapabilityRegistry {
   ): "cheaper" | "smarter" | "sonnet" {
     const candidates = PROFILES.filter(
       (p) =>
-        p.capabilities.includes(capability) &&
-        (costBudget === "any" || p.costTier === "cheap"),
+        p.capabilities.includes(capability) && (costBudget === "any" || p.costTier === "cheap"),
     );
     // Return cheapest matching profile
     for (const tier of ["cheap", "balanced", "strong"] as const) {
@@ -138,7 +139,10 @@ export class ModelCapabilityRegistry {
   static inferCapabilities(taskText: string): ModelCapability[] {
     const text = String(taskText || "");
     const result: ModelCapability[] = [];
-    for (const [cap, pattern] of Object.entries(CAPABILITY_SIGNALS) as [ModelCapability, RegExp][]) {
+    for (const [cap, pattern] of Object.entries(CAPABILITY_SIGNALS) as [
+      ModelCapability,
+      RegExp,
+    ][]) {
       if (pattern.test(text)) {
         result.push(cap);
       }

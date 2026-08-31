@@ -52,6 +52,18 @@ Dreaming reads bounded evidence from existing sources:
 
 It does not create a new memory store. It only indexes a Dreaming run and the candidates proposed from that run.
 
+## Access Boundary
+
+Background Dreaming is not an access-profile bypass. Heartbeat-triggered runs resolve the active
+workspace's [access profile](access-profiles.md) before reading file-backed memory and transcript
+evidence. The resulting read guard is applied to workspace-kit pressure checks and transcript
+searches. If the profile cannot be resolved or a candidate path is outside the effective boundary,
+that evidence is skipped and the run does not widen access or continue with an unrestricted read.
+
+Dreaming candidates remain reviewable memory proposals. Profile selection does not authorize
+silent filesystem writes; accepted changes still pass through the owning memory service and its
+memory-write approval policy.
+
 ## Durable State
 
 Dreaming writes two SQLite-backed records:

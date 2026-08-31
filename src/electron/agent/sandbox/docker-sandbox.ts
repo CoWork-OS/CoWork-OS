@@ -13,8 +13,22 @@ import { spawn, ChildProcess as _ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { createHash } from "crypto";
 import { Workspace } from "../../../shared/types";
-import { ISandbox, SandboxType, SandboxOptions, SandboxResult } from "./sandbox-factory";
+import {
+  ISandbox,
+  SandboxType,
+  SandboxOptions,
+  SandboxResult,
+  SandboxedProcess,
+} from "./sandbox-factory";
+import {
+  evaluateWorkspaceFilesystemAccess,
+  hasEffectiveFilesystemScope,
+  isAccessPathWithin,
+  resolveAccessControlledPath,
+} from "../../security/access-profile-paths";
+import { createSecureTempFile } from "./security-utils";
 
 /**
  * Docker sandbox configuration
@@ -66,6 +80,16 @@ const PROTECTED_WORKSPACE_WRITE_RELATIVE_PATHS = [
   ".env.development",
 ];
 
+interface DockerPathMapping {
+  hostPath: string;
+  containerPath: string;
+  kind: "directory" | "file";
+}
+
+function shellQuote(value: string): string {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
 /**
  * Docker container-based sandbox implementation
  */
@@ -111,6 +135,7 @@ export class DockerSandbox implements ISandbox {
     command: string,
     args: string[] = [],
     options: SandboxOptions = {},
+    imageOverride?: string,
   ): Promise<SandboxResult> {
     if (!this.initialized) {
       return {
@@ -123,12 +148,72 @@ export class DockerSandbox implements ISandbox {
       };
     }
 
-    const opts = { ...DEFAULT_OPTIONS, ...options };
-    const dockerArgs = this.buildDockerArgs(opts);
-    const fullCommand = args.length > 0 ? `${command} ${args.join(" ")}` : command;
+    const unsupportedDenyRule = this.getUnsupportedWorkspaceDenyRule();
+    if (unsupportedDenyRule) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Docker sandbox cannot safely mask the denied path inside the workspace: ${unsupportedDenyRule}`,
+        killed: false,
+        timedOut: false,
+        error: "Unsupported access-profile deny rule",
+      };
+    }
+
+    let containerCwd: string;
+    try {
+      containerCwd = this.resolveContainerCwd(options.cwd);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: message,
+        killed: false,
+        timedOut: false,
+        error: "Path access denied",
+      };
+    }
+    const opts = {
+      ...DEFAULT_OPTIONS,
+      ...options,
+      cwd: containerCwd,
+    };
+    const networkError = this.getNetworkAccessError(opts.allowNetwork === true);
+    if (networkError) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: networkError,
+        killed: false,
+        timedOut: false,
+        error: "Network access denied",
+      };
+    }
+
+    let dockerArgs: string[];
+    try {
+      dockerArgs = this.buildDockerArgs(opts);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: message,
+        killed: false,
+        timedOut: false,
+        error: "Path access denied",
+      };
+    }
+    // The legacy shell-command path intentionally accepts a complete command
+    // string when no args are supplied. Once structured args are present,
+    // quote every token so a caller cannot turn an argument into shell syntax.
+    const mappedArgs = args.map((arg) => this.mapHostArgumentToContainer(arg, opts));
+    const fullCommand =
+      mappedArgs.length > 0 ? [command, ...mappedArgs].map(shellQuote).join(" ") : command;
 
     // Add the command to execute inside container
-    dockerArgs.push(this.config.image, "/bin/sh", "-c", fullCommand);
+    dockerArgs.push(imageOverride || this.config.image, "/bin/sh", "-c", fullCommand);
 
     return new Promise((resolve) => {
       let stdout = "";
@@ -194,41 +279,106 @@ export class DockerSandbox implements ISandbox {
     });
   }
 
+  /** Start a long-running command inside a managed Docker container. */
+  spawnProcess(
+    command: string,
+    args: string[] = [],
+    options: SandboxOptions = {},
+  ): SandboxedProcess {
+    if (!this.initialized) {
+      throw new Error("Docker sandbox not initialized");
+    }
+    const unsupportedDenyRule = this.getUnsupportedWorkspaceDenyRule();
+    if (unsupportedDenyRule) {
+      throw new Error(
+        `Docker sandbox cannot safely mask the denied path inside the workspace: ${unsupportedDenyRule}`,
+      );
+    }
+
+    const opts = { ...DEFAULT_OPTIONS, ...options };
+    const networkError = this.getNetworkAccessError(opts.allowNetwork === true);
+    if (networkError) throw new Error(networkError);
+    const normalizedOptions = {
+      ...opts,
+      cwd: this.resolveContainerCwd(opts.cwd),
+    };
+    const dockerArgs = this.buildDockerArgs(normalizedOptions);
+    const fullCommand = [
+      command,
+      ...args.map((arg) => this.mapHostArgumentToContainer(arg, normalizedOptions)),
+    ]
+      .map(shellQuote)
+      .join(" ");
+    dockerArgs.push(this.config.image, "/bin/sh", "-c", fullCommand);
+
+    const proc = spawn("docker", dockerArgs, {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    opts.onProcess?.(proc);
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (!proc.killed) proc.kill("SIGTERM");
+      this.killContainer(proc.pid);
+    };
+    proc.once("close", () => {
+      this.currentContainerName = undefined;
+    });
+    return { process: proc, cleanup };
+  }
+
   /**
    * Execute code in Docker container
    */
   async executeCode(code: string, language: "python" | "javascript"): Promise<SandboxResult> {
     const ext = language === "python" ? ".py" : ".js";
-    const tempFile = path.join(os.tmpdir(), `cowork_script_${Date.now()}${ext}`);
-
+    const { filePath: tempFile, cleanup } = createSecureTempFile(ext, code);
     try {
-      fs.writeFileSync(tempFile, code, "utf8");
-
       // Select appropriate image and interpreter
       const interpreter = language === "python" ? "python3" : "node";
       const image = language === "python" ? "python:3.11-alpine" : this.config.image;
 
-      // Create a modified config for this execution
-      const originalImage = this.config.image;
-      this.config.image = image;
-
-      const result = await this.execute(interpreter, ["/tmp/script" + ext], {
-        timeout: 60 * 1000,
-        allowNetwork: false,
-        allowedReadPaths: [tempFile],
-      });
-
-      // Restore original image
-      this.config.image = originalImage;
+      const result = await this.execute(
+        interpreter,
+        [tempFile],
+        {
+          timeout: 60 * 1000,
+          allowNetwork: false,
+          allowedReadPaths: [tempFile],
+        },
+        image,
+      );
 
       return result;
     } finally {
-      try {
-        fs.unlinkSync(tempFile);
-      } catch {
-        // Ignore cleanup errors
+      cleanup();
+    }
+  }
+
+  /**
+   * Docker bind-mounts the complete workspace. A nested deny rule cannot be
+   * represented safely by simply omitting an additional mount because the
+   * parent bind mount would still expose that path. Refuse the command rather
+   * than silently widening the effective access profile.
+   */
+  private getUnsupportedWorkspaceDenyRule(): string | undefined {
+    if (this.workspace.permissions.read !== true) return undefined;
+    const workspacePath = path.resolve(this.workspace.path);
+
+    for (const rule of this.workspace.permissions.accessFilesystemRules || []) {
+      if (rule.access !== "deny" || typeof rule.path !== "string") continue;
+      const rawPath = rule.path.trim();
+      if (!rawPath) continue;
+
+      const deniedPath = resolveAccessControlledPath(workspacePath, rawPath);
+      if (isAccessPathWithin(workspacePath, deniedPath)) {
+        return rawPath;
       }
     }
+
+    return undefined;
   }
 
   /**
@@ -348,38 +498,126 @@ export class DockerSandbox implements ISandbox {
     const networkMode = options.allowNetwork ? "bridge" : "none";
     args.push("--network", networkMode);
 
-    // Mount workspace (with Windows path conversion)
-    const workspacePath = this.convertToDockerPath(this.workspace.path);
-    const writeMode = this.workspace.permissions.write ? "rw" : "ro";
-    args.push("-v", `${workspacePath}:/workspace:${writeMode}`);
-    if (this.workspace.permissions.write) {
+    const mounts = new Map<
+      string,
+      { hostPath: string; containerPath: string; mode: "ro" | "rw" }
+    >();
+    const addMount = (hostPath: string, containerPath: string, mode: "ro" | "rw"): void => {
+      const key = `${hostPath}\0${containerPath}`;
+      const existing = mounts.get(key);
+      if (!existing || (existing.mode === "ro" && mode === "rw")) {
+        mounts.set(key, { hostPath, containerPath, mode });
+      }
+    };
+
+    // Never bind the host workspace when read access is disabled. A writable
+    // ephemeral mount still lets a task create scratch output without
+    // exposing pre-existing host files.
+    if (this.workspace.permissions.read === true) {
+      const workspacePath = this.convertToDockerPath(path.resolve(this.workspace.path));
+      const writeMode = this.workspace.permissions.write ? "rw" : "ro";
+      addMount(workspacePath, "/workspace", writeMode);
+    } else {
+      const mode = this.workspace.permissions.write ? "rw" : "ro";
+      args.push("--tmpfs", `/workspace:${mode},nosuid,nodev,size=100m`);
+    }
+
+    if (this.workspace.permissions.read === true && this.workspace.permissions.write) {
       for (const relativePath of PROTECTED_WORKSPACE_WRITE_RELATIVE_PATHS) {
-        const hostPath = path.join(this.workspace.path, relativePath);
+        const hostPath = path.resolve(this.workspace.path, relativePath);
         if (!fs.existsSync(hostPath)) continue;
-        const dockerPath = this.convertToDockerPath(hostPath);
         const containerPath = `/workspace/${relativePath.replace(/\\/g, "/")}`;
-        args.push("-v", `${dockerPath}:${containerPath}:ro`);
+        addMount(this.convertToDockerPath(hostPath), containerPath, "ro");
       }
     }
 
     // Set working directory
     args.push("-w", options.cwd || "/workspace");
 
-    // Mount additional allowed paths
+    // Mount additional caller-supplied paths only after the central evaluator
+    // has approved them. Temp files are mapped into the container's private
+    // /tmp namespace rather than exposing the host temp directory wholesale.
     for (const readPath of options.allowedReadPaths || []) {
-      if (fs.existsSync(readPath)) {
-        const dockerPath = this.convertToDockerPath(readPath);
-        const containerPath = this.getContainerMountPath(readPath);
-        args.push("-v", `${dockerPath}:${containerPath}:ro`);
-      }
+      const checkedPath = this.assertSandboxPath(readPath, "read", options);
+      if (!fs.existsSync(checkedPath) || this.isPathInsideWorkspace(checkedPath)) continue;
+      addMount(
+        this.convertToDockerPath(checkedPath),
+        this.getContainerMountPath(checkedPath),
+        "ro",
+      );
     }
 
     for (const writePath of options.allowedWritePaths || []) {
-      if (fs.existsSync(writePath)) {
-        const dockerPath = this.convertToDockerPath(writePath);
-        const containerPath = this.getContainerMountPath(writePath);
-        args.push("-v", `${dockerPath}:${containerPath}:rw`);
-      }
+      const checkedPath = this.assertSandboxPath(writePath, "write", options);
+      if (!fs.existsSync(checkedPath) || this.isPathInsideWorkspace(checkedPath)) continue;
+      addMount(
+        this.convertToDockerPath(checkedPath),
+        this.getContainerMountPath(checkedPath),
+        "rw",
+      );
+    }
+
+    // Named profile roots are mounted explicitly. Denied rules are not
+    // mounted, so they cannot accidentally become an additional container
+    // filesystem surface.
+    for (const root of this.workspace.permissions.accessWorkspaceRoots || []) {
+      const checkedPath = this.assertSandboxPath(root, "read", options);
+      if (!fs.existsSync(checkedPath) || this.isPathInsideWorkspace(checkedPath)) continue;
+      const mode =
+        this.workspace.permissions.write &&
+        this.isSandboxPathAllowed(checkedPath, "write", options) &&
+        !this.isExplicitReadOnlyOptionPath(checkedPath, options)
+          ? "rw"
+          : "ro";
+      addMount(
+        this.convertToDockerPath(checkedPath),
+        this.getContainerMountPath(checkedPath),
+        mode,
+      );
+    }
+
+    for (const rule of this.workspace.permissions.accessFilesystemRules || []) {
+      if (rule.access === "deny") continue;
+      const checkedPath = this.assertSandboxPath(rule.path, "read", options);
+      if (!fs.existsSync(checkedPath) || this.isPathInsideWorkspace(checkedPath)) continue;
+      const mode =
+        rule.access === "write" &&
+        this.workspace.permissions.write &&
+        this.isSandboxPathAllowed(checkedPath, "write", options) &&
+        !this.isExplicitReadOnlyOptionPath(checkedPath, options)
+          ? "rw"
+          : "ro";
+      addMount(
+        this.convertToDockerPath(checkedPath),
+        this.getContainerMountPath(checkedPath),
+        mode,
+      );
+    }
+
+    const legacyAllowedPaths = hasEffectiveFilesystemScope(
+      this.workspace.path,
+      this.workspace.permissions,
+    )
+      ? []
+      : this.workspace.permissions.allowedPaths || [];
+    for (const allowedPath of legacyAllowedPaths) {
+      const checkedPath = this.assertSandboxPath(allowedPath, "read", options);
+      if (!fs.existsSync(checkedPath) || this.isPathInsideWorkspace(checkedPath)) continue;
+      const mode =
+        this.workspace.permissions.write &&
+        this.isSandboxPathAllowed(checkedPath, "write", options) &&
+        !this.isExplicitReadOnlyOptionPath(checkedPath, options)
+          ? "rw"
+          : "ro";
+      addMount(
+        this.convertToDockerPath(checkedPath),
+        this.getContainerMountPath(checkedPath),
+        mode,
+      );
+    }
+
+    for (const mount of mounts.values()) {
+      args.push("-v", `${mount.hostPath}:${mount.containerPath}:${mount.mode}`);
     }
 
     // Environment variables
@@ -401,6 +639,269 @@ export class DockerSandbox implements ISandbox {
     }
 
     return args;
+  }
+
+  private resolveContainerCwd(rawCwd?: string): string {
+    if (!rawCwd) return "/workspace";
+    if (rawCwd === "/workspace" || rawCwd.startsWith("/workspace/")) {
+      const relative = rawCwd.slice("/workspace".length).replace(/^\/+/, "");
+      const normalized = path.posix.normalize(`/workspace/${relative}`);
+      if (normalized !== "/workspace" && !normalized.startsWith("/workspace/")) {
+        throw new Error(`Docker sandbox working directory escapes /workspace: ${rawCwd}`);
+      }
+      if (this.workspace.permissions.read === true && relative) {
+        const hostPath = path.resolve(this.workspace.path, relative);
+        if (!this.isSandboxPathAllowed(hostPath, "read")) {
+          throw new Error(`Docker sandbox working directory is not readable: ${rawCwd}`);
+        }
+      }
+      return normalized === "/workspace/." ? "/workspace" : normalized;
+    }
+
+    const workspacePath = path.resolve(this.workspace.path);
+    const candidate = resolveAccessControlledPath(workspacePath, rawCwd);
+    const relative = path.relative(workspacePath, candidate);
+    if (relative === "") return "/workspace";
+    if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+      return `/workspace/${relative.replace(/\\/g, "/")}`;
+    }
+
+    if (!this.isSandboxPathAllowed(candidate, "read")) {
+      throw new Error(`Docker sandbox working directory is outside the workspace: ${rawCwd}`);
+    }
+
+    const mountRoot = this.findExternalMountRoot(candidate);
+    if (!mountRoot) {
+      throw new Error(`Docker sandbox working directory is not mounted: ${rawCwd}`);
+    }
+    const mountPath = this.getContainerMountPath(mountRoot);
+    const mountRelative = path.relative(mountRoot, candidate).replace(/\\/g, "/");
+    return mountRelative ? `${mountPath}/${mountRelative}` : mountPath;
+  }
+
+  private isPathInsideWorkspace(candidatePath: string): boolean {
+    return isAccessPathWithin(path.resolve(this.workspace.path), candidatePath);
+  }
+
+  private isRuntimeTemporaryPath(candidatePath: string): boolean {
+    if (this.isPathInsideWorkspace(candidatePath)) return false;
+    if (hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)) return false;
+    return isAccessPathWithin(os.tmpdir(), candidatePath);
+  }
+
+  private isSandboxPathAllowed(
+    rawPath: string,
+    operation: "read" | "write" | "delete",
+    options?: SandboxOptions,
+  ): boolean {
+    try {
+      const candidate = resolveAccessControlledPath(this.workspace.path, rawPath);
+      const decision = evaluateWorkspaceFilesystemAccess(this.workspace, candidate, operation);
+      return (
+        decision.decision === "allow" ||
+        this.isRuntimeTemporaryPath(candidate) ||
+        this.isExplicitTemporaryOptionPath(candidate, options, operation)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private assertSandboxPath(
+    rawPath: string,
+    operation: "read" | "write",
+    options?: SandboxOptions,
+  ): string {
+    const candidate = resolveAccessControlledPath(this.workspace.path, rawPath);
+    if (!this.isSandboxPathAllowed(candidate, operation, options)) {
+      throw new Error(`Docker sandbox denied ${operation} access to path: ${rawPath}`);
+    }
+    return candidate;
+  }
+
+  private isExplicitTemporaryOptionPath(
+    candidatePath: string,
+    options: SandboxOptions | undefined,
+    operation: "read" | "write" | "delete",
+  ): boolean {
+    if (!options || !hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)) {
+      return false;
+    }
+    if (operation === "delete") return false;
+    if (!isAccessPathWithin(os.tmpdir(), candidatePath)) return false;
+    const candidates = operation === "read" ? options.allowedReadPaths : options.allowedWritePaths;
+    return (candidates || []).some((rawPath) => {
+      try {
+        const allowedPath = resolveAccessControlledPath(this.workspace.path, rawPath);
+        return isAccessPathWithin(allowedPath, candidatePath);
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /**
+   * Preserve a caller's read-only file boundary even when a broader profile
+   * root or legacy allowed path overlaps it. Without this check Docker's
+   * mount de-duplication could upgrade an explicitly readable input to rw.
+   */
+  private isExplicitReadOnlyOptionPath(
+    candidatePath: string,
+    options: SandboxOptions | undefined,
+  ): boolean {
+    if (!options) return false;
+
+    const readPaths = (options.allowedReadPaths || []).map((rawPath) => {
+      try {
+        return resolveAccessControlledPath(this.workspace.path, rawPath);
+      } catch {
+        return undefined;
+      }
+    });
+    const writePaths = (options.allowedWritePaths || []).map((rawPath) => {
+      try {
+        return resolveAccessControlledPath(this.workspace.path, rawPath);
+      } catch {
+        return undefined;
+      }
+    });
+
+    return readPaths.some((readPath) => {
+      if (!readPath) return false;
+      const readIsCoveredByWrite = writePaths.some(
+        (writePath) => !!writePath && isAccessPathWithin(writePath, readPath),
+      );
+      if (readIsCoveredByWrite) return false;
+      return (
+        isAccessPathWithin(candidatePath, readPath) || isAccessPathWithin(readPath, candidatePath)
+      );
+    });
+  }
+
+  private collectPathMappings(options: SandboxOptions): DockerPathMapping[] {
+    const mappings: DockerPathMapping[] = [
+      {
+        hostPath: path.resolve(this.workspace.path),
+        containerPath: "/workspace",
+        kind: "directory",
+      },
+    ];
+    const seen = new Set<string>();
+    const add = (
+      rawPath: string,
+      operation: "read" | "write",
+      approvalOptions?: SandboxOptions,
+    ): void => {
+      const checkedPath = this.assertSandboxPath(rawPath, operation, approvalOptions);
+      if (!fs.existsSync(checkedPath) || this.isPathInsideWorkspace(checkedPath)) return;
+      const key = path.resolve(checkedPath);
+      if (seen.has(key)) return;
+      seen.add(key);
+      let kind: DockerPathMapping["kind"] = "file";
+      try {
+        kind = fs.statSync(checkedPath).isDirectory() ? "directory" : "file";
+      } catch {
+        return;
+      }
+      mappings.push({
+        hostPath: checkedPath,
+        containerPath: this.getContainerMountPath(checkedPath),
+        kind,
+      });
+    };
+
+    for (const readPath of options.allowedReadPaths || []) add(readPath, "read", options);
+    for (const writePath of options.allowedWritePaths || []) add(writePath, "write", options);
+    for (const root of this.workspace.permissions.accessWorkspaceRoots || []) {
+      add(
+        root,
+        this.workspace.permissions.write && this.isSandboxPathAllowed(root, "write")
+          ? "write"
+          : "read",
+      );
+    }
+    for (const rule of this.workspace.permissions.accessFilesystemRules || []) {
+      if (rule.access === "deny") continue;
+      add(rule.path, rule.access === "write" ? "write" : "read");
+    }
+    const legacyAllowedPaths = hasEffectiveFilesystemScope(
+      this.workspace.path,
+      this.workspace.permissions,
+    )
+      ? []
+      : this.workspace.permissions.allowedPaths || [];
+    for (const allowedPath of legacyAllowedPaths) {
+      add(
+        allowedPath,
+        this.workspace.permissions.write && this.isSandboxPathAllowed(allowedPath, "write")
+          ? "write"
+          : "read",
+      );
+    }
+    return mappings;
+  }
+
+  private findExternalMountRoot(candidatePath: string): string | undefined {
+    const configuredRoots = [
+      ...(this.workspace.permissions.accessWorkspaceRoots || []),
+      ...(this.workspace.permissions.accessFilesystemRules || [])
+        .filter((rule) => rule.access !== "deny")
+        .map((rule) => rule.path),
+      ...(hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)
+        ? []
+        : this.workspace.permissions.allowedPaths || []),
+    ];
+    const candidate = resolveAccessControlledPath(this.workspace.path, candidatePath);
+    return configuredRoots
+      .map((rawRoot) => {
+        try {
+          return resolveAccessControlledPath(this.workspace.path, rawRoot);
+        } catch {
+          return "";
+        }
+      })
+      .filter((root) => root && isAccessPathWithin(root, candidate))
+      .sort((left, right) => right.length - left.length)[0];
+  }
+
+  private mapHostArgumentToContainer(arg: string, options: SandboxOptions): string {
+    const value = String(arg);
+    if (!path.isAbsolute(value) && !/^[a-zA-Z]:[\\/]/.test(value)) return value;
+
+    let candidate: string;
+    try {
+      candidate = resolveAccessControlledPath(this.workspace.path, value);
+    } catch {
+      return value;
+    }
+
+    const mappings = this.collectPathMappings(options).sort(
+      (left, right) => right.hostPath.length - left.hostPath.length,
+    );
+    for (const mapping of mappings) {
+      const isMatch =
+        mapping.kind === "file"
+          ? path.resolve(mapping.hostPath) === path.resolve(candidate)
+          : isAccessPathWithin(mapping.hostPath, candidate);
+      if (!isMatch) continue;
+      const relative = path.relative(mapping.hostPath, candidate).replace(/\\/g, "/");
+      if (mapping.kind === "file" || !relative) return mapping.containerPath;
+      return `${mapping.containerPath}/${relative}`;
+    }
+    return value;
+  }
+
+  private getNetworkAccessError(allowNetwork: boolean): string | undefined {
+    if (!allowNetwork) return undefined;
+    const permissions = this.workspace.permissions;
+    if (permissions.network !== true) return "Network access is disabled for this workspace.";
+    if (permissions.accessNetworkMode === "disabled") {
+      return "Network access is disabled by the active access profile.";
+    }
+    if ((permissions.accessDomainRules || []).length > 0) {
+      return "The Docker process sandbox cannot enforce domain-scoped network rules for arbitrary shell code.";
+    }
+    return undefined;
   }
 
   /**
@@ -430,16 +931,11 @@ export class DockerSandbox implements ISandbox {
    * Get the container mount path for a host path
    */
   private getContainerMountPath(hostPath: string): string {
-    // For temp directories, keep the path structure
-    if (
-      hostPath.startsWith("/tmp") ||
-      hostPath.includes("\\Temp\\") ||
-      hostPath.includes("/temp/")
-    ) {
-      return hostPath.startsWith("/tmp") ? hostPath : "/tmp/mounted";
-    }
-    // For other paths, mount under /mnt
-    return `/mnt${hostPath.replace(/^[a-zA-Z]:/, "").replace(/\\/g, "/")}`;
+    const normalized = path.resolve(hostPath);
+    const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+    return this.isRuntimeTemporaryPath(normalized)
+      ? `/tmp/cowork-mount-${digest}`
+      : `/mnt/cowork-mount-${digest}`;
   }
 
   // Track current container name for cleanup

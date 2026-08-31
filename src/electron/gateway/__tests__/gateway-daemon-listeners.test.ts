@@ -90,7 +90,7 @@ describe("ChannelGateway daemon listeners", () => {
     expect(router.handleTaskCompletion).toHaveBeenCalledWith("t1", "Final summary from daemon.");
   });
 
-  it("includes semantic batch summaries and verifier output in completion payloads", () => {
+  it("keeps internal semantic summaries out of channel completion messages", () => {
     const db = createMockDb();
     const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
 
@@ -110,10 +110,8 @@ describe("ChannelGateway daemon listeners", () => {
       "t1",
       expect.stringContaining("Final summary from daemon."),
     );
-    expect(router.handleTaskCompletion).toHaveBeenCalledWith(
-      "t1",
-      expect.stringContaining("Read auth config"),
-    );
+    const completionText = router.handleTaskCompletion.mock.calls[0][1] as string;
+    expect(completionText).not.toContain("Read auth config");
     expect(router.handleTaskCompletion).toHaveBeenCalledWith(
       "t1",
       expect.stringContaining("Verification: PASS"),
@@ -122,6 +120,22 @@ describe("ChannelGateway daemon listeners", () => {
       "t1",
       expect.stringContaining("Verifier confirmed the implementation."),
     );
+  });
+
+  it("does not send a semantic-only completion as the user-facing result", () => {
+    const db = createMockDb();
+    const gateway = new ChannelGateway(db, { agentDaemon: agentDaemon as Any });
+
+    const router = (gateway as Any).router;
+    router.sendTaskUpdate = vi.fn();
+    router.handleTaskCompletion = vi.fn();
+    router.isPendingTaskTextOnlyChannel = vi.fn().mockReturnValue(false);
+
+    emitTimeline("timeline_step_finished", "semantic-only", "task_completed", {
+      semanticSummary: "List Directory .cowork/memory",
+    });
+
+    expect(router.handleTaskCompletion).toHaveBeenCalledWith("semantic-only", "");
   });
 
   it("falls back to the latest streamed assistant message when resultSummary is missing", () => {

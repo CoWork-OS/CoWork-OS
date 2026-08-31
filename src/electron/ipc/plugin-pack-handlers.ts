@@ -62,7 +62,13 @@ function titleFromSkillId(id: string): string {
 }
 
 function listManifestSkills(manifest: {
-  skills?: Array<{ id: string; name: string; description: string; icon?: string; enabled?: boolean }>;
+  skills?: Array<{
+    id: string;
+    name: string;
+    description: string;
+    icon?: string;
+    enabled?: boolean;
+  }>;
   skillDirectories?: Array<{
     id: string;
     name?: string;

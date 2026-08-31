@@ -7,7 +7,8 @@ import {
 
 describe("rich frame design language", () => {
   it("injects the shared design style into document heads", () => {
-    const html = "<!doctype html><html><head><title>Card</title></head><body><main class=\"rf-card\">Hi</main></body></html>";
+    const html =
+      '<!doctype html><html><head><title>Card</title></head><body><main class="rf-card">Hi</main></body></html>';
     const result = applyRichFrameDesignLanguage(html);
 
     expect(result).toContain(`id="${RICH_FRAME_DESIGN_STYLE_ID}"`);
@@ -20,7 +21,7 @@ describe("rich frame design language", () => {
   });
 
   it("can inject dark frame tokens", () => {
-    const html = "<html><head></head><body><main class=\"rf-card\">Hi</main></body></html>";
+    const html = '<html><head></head><body><main class="rf-card">Hi</main></body></html>';
     const result = applyRichFrameDesignLanguage(html, { theme: "dark" });
 
     expect(result).toContain("color-scheme: dark");
@@ -30,7 +31,7 @@ describe("rich frame design language", () => {
   });
 
   it("injects a sanitized host background for frame edges", () => {
-    const html = "<html><head></head><body><main class=\"rf-card\">Hi</main></body></html>";
+    const html = '<html><head></head><body><main class="rf-card">Hi</main></body></html>';
     const result = applyRichFrameDesignLanguage(html, {
       theme: "dark",
       hostBackground: "rgba(31, 32, 36, 0.97)",
@@ -41,7 +42,7 @@ describe("rich frame design language", () => {
   });
 
   it("rejects unsafe host background values", () => {
-    const html = "<html><head></head><body><main class=\"rf-card\">Hi</main></body></html>";
+    const html = '<html><head></head><body><main class="rf-card">Hi</main></body></html>';
     const result = applyRichFrameDesignLanguage(html, {
       theme: "dark",
       hostBackground: "red;body{display:none}",

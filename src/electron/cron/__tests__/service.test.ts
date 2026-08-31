@@ -3,7 +3,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { CronJob as _CronJob, CronJobCreate, CronServiceDeps, CronStoreFile, CronEvent } from "../types";
+import type {
+  CronJob as _CronJob,
+  CronJobCreate,
+  CronServiceDeps,
+  CronStoreFile,
+  CronEvent,
+} from "../types";
 
 // Job ID counter for tests that need unique IDs
 let jobIdCounter = 0;
@@ -622,6 +628,31 @@ describe("CronService", () => {
       );
     });
 
+    it("passes a named access profile without reapplying the legacy shell restriction", async () => {
+      service = createService({ nowMs: () => 1000000 });
+      await service.start();
+
+      await service.add({
+        name: "Profiled Job",
+        enabled: true,
+        accessProfileId: "ask_for_approval",
+        workspaceId: "ws-1",
+        taskPrompt: "Run the profiled task",
+        schedule: { kind: "at", atMs: 900000 },
+        state: { nextRunAtMs: 900000 },
+      });
+
+      await service.run("job-1", "force");
+
+      expect(mockCreateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentConfig: expect.objectContaining({ accessProfileId: "ask_for_approval" }),
+        }),
+      );
+      const call = (mockCreateTask as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Any;
+      expect(call.agentConfig.toolRestrictions).toBeUndefined();
+    });
+
     it("persists the run lease before waiting for task creation", async () => {
       let resolveCreateTask: (value: { id: string }) => void = () => {};
       const snapshots: CronStoreFile[] = [];
@@ -670,9 +701,9 @@ describe("CronService", () => {
           agentConfig: expect.objectContaining({ scheduledJobId: "job-1" }),
         }),
       );
-      expect(snapshots.some((snapshot) => snapshot.jobs[0].state.lastTaskId === "task-created")).toBe(
-        true,
-      );
+      expect(
+        snapshots.some((snapshot) => snapshot.jobs[0].state.lastTaskId === "task-created"),
+      ).toBe(true);
     });
 
     it("does not create a due run when the previous cron task is still active", async () => {

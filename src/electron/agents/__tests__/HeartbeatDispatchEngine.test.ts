@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { HeartbeatDispatchEngine, type HeartbeatDispatchDeps, type DispatchExecutionInput } from "../HeartbeatDispatchEngine";
+import {
+  HeartbeatDispatchEngine,
+  type HeartbeatDispatchDeps,
+  type DispatchExecutionInput,
+} from "../HeartbeatDispatchEngine";
 import type { AgentRole, Task } from "../../../shared/types";
 
 function makeAgent(overrides: Partial<AgentRole> = {}): AgentRole {
@@ -70,7 +74,8 @@ describe("HeartbeatDispatchEngine.execute", () => {
 
   it("sets assignedAgentRoleId on the created task", async () => {
     await engine.execute(makeInput({ dispatchKind: "task" }));
-    const taskOverrides = (deps.createTask as ReturnType<typeof vi.fn>).mock.calls[0][4].taskOverrides;
+    const taskOverrides = (deps.createTask as ReturnType<typeof vi.fn>).mock.calls[0][4]
+      .taskOverrides;
     expect(taskOverrides.assignedAgentRoleId).toBe("agent-1");
     expect(taskOverrides.heartbeatRunId).toBe("run-1");
   });

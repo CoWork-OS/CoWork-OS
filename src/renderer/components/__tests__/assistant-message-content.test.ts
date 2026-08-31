@@ -4,7 +4,7 @@ import { parseAssistantMessageSegments } from "../AssistantMessageContent";
 describe("AssistantMessageContent", () => {
   it("splits markdown and video directives", () => {
     const segments = parseAssistantMessageSegments(
-      "Here is the clip.\n\n::video{path=\"artifacts/demo.mp4\" title=\"Demo clip\" muted=true loop=false}\n\nWrap up.",
+      'Here is the clip.\n\n::video{path="artifacts/demo.mp4" title="Demo clip" muted=true loop=false}\n\nWrap up.',
     );
 
     expect(segments).toHaveLength(3);
@@ -22,11 +22,11 @@ describe("AssistantMessageContent", () => {
   });
 
   it("returns a compact error segment for malformed directives", () => {
-    const segments = parseAssistantMessageSegments("::video{title=\"Missing path\"}");
+    const segments = parseAssistantMessageSegments('::video{title="Missing path"}');
     expect(segments).toEqual([
       {
         type: "video_error",
-        raw: "::video{title=\"Missing path\"}",
+        raw: '::video{title="Missing path"}',
         error: "Video embed requires a path",
       },
     ]);
@@ -34,7 +34,7 @@ describe("AssistantMessageContent", () => {
 
   it("splits markdown and html directives", () => {
     const segments = parseAssistantMessageSegments(
-      "Here is the diagram.\n\n::html{path=\"artifacts/diagram.html\" title=\"Architecture diagram\"}\n\nWrap up.",
+      'Here is the diagram.\n\n::html{path="artifacts/diagram.html" title="Architecture diagram"}\n\nWrap up.',
     );
 
     expect(segments).toHaveLength(3);
@@ -50,11 +50,11 @@ describe("AssistantMessageContent", () => {
   });
 
   it("returns a compact error segment for malformed html directives", () => {
-    const segments = parseAssistantMessageSegments("::html{title=\"Missing path\"}");
+    const segments = parseAssistantMessageSegments('::html{title="Missing path"}');
     expect(segments).toEqual([
       {
         type: "html_error",
-        raw: "::html{title=\"Missing path\"}",
+        raw: '::html{title="Missing path"}',
         error: "HTML embed requires a path",
       },
     ]);
@@ -62,7 +62,7 @@ describe("AssistantMessageContent", () => {
 
   it("splits markdown and rich frame directives", () => {
     const segments = parseAssistantMessageSegments(
-      "Here is the portfolio view.\n\n::frame{path=\"artifacts/portfolio.html\" title=\"Portfolio distribution\" kind=\"chart\" height=\"560\" aspectRatio=\"16 / 9\" chrome=true}\n\nThe concentration is visible.",
+      'Here is the portfolio view.\n\n::frame{path="artifacts/portfolio.html" title="Portfolio distribution" kind="chart" height="560" aspectRatio="16 / 9" chrome=true}\n\nThe concentration is visible.',
     );
 
     expect(segments).toHaveLength(3);
@@ -110,11 +110,11 @@ describe("AssistantMessageContent", () => {
   });
 
   it("returns a compact error segment for malformed frame directives", () => {
-    const segments = parseAssistantMessageSegments("::frame{title=\"Missing path\"}");
+    const segments = parseAssistantMessageSegments('::frame{title="Missing path"}');
     expect(segments).toEqual([
       {
         type: "html_error",
-        raw: "::frame{title=\"Missing path\"}",
+        raw: '::frame{title="Missing path"}',
         error: "Frame embed requires a path",
       },
     ]);
@@ -148,8 +148,8 @@ describe("AssistantMessageContent", () => {
       "<head><title>Demand letter details</title></head>",
       "<body>",
       "<form>",
-      "<label>Matter title <textarea name=\"title\"></textarea></label>",
-      "<button type=\"submit\">Continue</button>",
+      '<label>Matter title <textarea name="title"></textarea></label>',
+      '<button type="submit">Continue</button>',
       "</form>",
       "</body>",
       "</html>",

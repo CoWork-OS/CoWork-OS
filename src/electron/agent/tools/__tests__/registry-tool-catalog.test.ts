@@ -128,6 +128,7 @@ vi.mock("../../../memory/SupermemoryService", () => ({
 }));
 
 import { ToolRegistry } from "../registry";
+import { ChannelTools } from "../channel-tools";
 
 function createWorkspace(): Any {
   return {
@@ -192,7 +193,9 @@ describe("ToolRegistry tool catalog versioning", () => {
   it("no longer registers security scan helpers as tools (migrated to codex-security plugin skills)", () => {
     mockBuiltinSettings.version = "security-scan-gating";
     const normalRegistry = new ToolRegistry(createWorkspace(), createDaemon(), "task-normal");
-    expect(normalRegistry.getTools().some((tool) => tool.name === "security_scan_prepare")).toBe(false);
+    expect(normalRegistry.getTools().some((tool) => tool.name === "security_scan_prepare")).toBe(
+      false,
+    );
 
     // Even Codex Security tasks no longer get built-in security_scan_* tools; the scan
     // capability now lives in the codex-security plugin pack (security-scan,
@@ -205,7 +208,9 @@ describe("ToolRegistry tool catalog versioning", () => {
       undefined,
       true,
     );
-    expect(securityRegistry.getTools().some((tool) => tool.name === "security_scan_prepare")).toBe(false);
+    expect(securityRegistry.getTools().some((tool) => tool.name === "security_scan_prepare")).toBe(
+      false,
+    );
   });
 
   it("annotates MCP tool descriptions with the source server name", () => {
@@ -262,7 +267,11 @@ describe("ToolRegistry tool catalog versioning", () => {
   });
 
   it("keeps Supermemory tools hidden by default", () => {
-    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-supermemory-default-off");
+    const registry = new ToolRegistry(
+      createWorkspace(),
+      createDaemon(),
+      "task-supermemory-default-off",
+    );
 
     const toolNames = registry.getTools().map((tool) => tool.name);
     expect(toolNames).not.toContain("supermemory_profile");
@@ -284,7 +293,11 @@ describe("ToolRegistry tool catalog versioning", () => {
 
   it("exposes Supermemory tools only when the integration is configured", () => {
     supermemoryIsConfiguredMock.mockReturnValue(true);
-    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-supermemory-enabled");
+    const registry = new ToolRegistry(
+      createWorkspace(),
+      createDaemon(),
+      "task-supermemory-enabled",
+    );
 
     const toolNames = registry.getTools().map((tool) => tool.name);
     expect(toolNames).toContain("supermemory_profile");
@@ -303,10 +316,31 @@ describe("ToolRegistry tool catalog versioning", () => {
 
     expect((registry as Any).getApprovalTypeForTool("read_file")).toBeNull();
     expect((registry as Any).getApprovalTypeForTool("glob")).toBeNull();
-    expect((registry as Any).getApprovalTypeForTool("web_search")).toBeNull();
+    expect((registry as Any).getApprovalTypeForTool("web_search")).toBe("network_access");
     expect((registry as Any).getApprovalTypeForTool("web_fetch")).toBe("network_access");
-    expect((registry as Any).getApprovalTypeForTool("http_request", { method: "GET" })).toBe("network_access");
-    expect((registry as Any).getApprovalTypeForTool("http_request", { method: "POST", body: "x" })).toBe("data_export");
+    expect((registry as Any).getApprovalTypeForTool("execute_code", { allow_network: true })).toBe(
+      "network_access",
+    );
+    expect((registry as Any).getApprovalTypeForTool("execute_code", { allow_network: false })).toBe(
+      null,
+    );
+    expect((registry as Any).getApprovalTypeForTool("http_request", { method: "GET" })).toBe(
+      "network_access",
+    );
+    expect(
+      (registry as Any).getApprovalTypeForTool("http_request", { method: "POST", body: "x" }),
+    ).toBe("data_export");
+  });
+
+  it("classifies local file mutations as workspace writes rather than external services", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-workspace-write");
+
+    expect(
+      (registry as Any).getApprovalTypeForTool("write_file", { path: "notes/checklist.md" }),
+    ).toBe("workspace_write");
+    expect((registry as Any).getApprovalTypeForTool("edit_file", { path: "src/app.ts" })).toBe(
+      "workspace_write",
+    );
   });
 
   it("keeps explicit approval classes for destructive, integration, and computer-use tools", () => {
@@ -314,11 +348,19 @@ describe("ToolRegistry tool catalog versioning", () => {
 
     expect((registry as Any).getApprovalTypeForTool("run_command")).toBe("run_command");
     expect((registry as Any).getApprovalTypeForTool("delete_file")).toBe("delete_file");
-    expect((registry as Any).getApprovalTypeForTool("get_current_location")).toBe("location_access");
+    expect((registry as Any).getApprovalTypeForTool("get_current_location")).toBe(
+      "location_access",
+    );
     expect((registry as Any).getApprovalTypeForTool("analyze_image")).toBe("data_export");
     expect((registry as Any).getApprovalTypeForTool("read_pdf_visual")).toBe("data_export");
     expect((registry as Any).getApprovalTypeForTool("mcp_fetch_issue")).toBe("external_service");
     expect((registry as Any).getApprovalTypeForTool("notion_action")).toBe("external_service");
+    expect((registry as Any).getApprovalTypeForTool("supermemory_search")).toBe("external_service");
+    expect((registry as Any).getApprovalTypeForTool("channel_fetch_discord_messages")).toBe(
+      "external_service",
+    );
+    expect((registry as Any).getApprovalTypeForTool("email_imap_unread")).toBe("external_service");
+    expect((registry as Any).getApprovalTypeForTool("open_application")).toBe("computer_use");
     expect((registry as Any).getApprovalTypeForTool("click")).toBe("computer_use");
   });
 
@@ -350,6 +392,17 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(rendered.description).toContain("test");
     expect(compact).toContain("cached mode");
     expect(compact).toContain("web_fetch");
+  });
+
+  it("prioritizes local channel history for message summarization", () => {
+    const definitions = ChannelTools.getToolDefinitions();
+    const listChats = definitions.find((tool) => tool.name === "channel_list_chats");
+    const history = definitions.find((tool) => tool.name === "channel_history");
+
+    expect(listChats?.description).toContain("before browser automation");
+    expect(history?.description).toContain(
+      "prefer this local history over opening the channel's web app",
+    );
   });
 
   it("resolves scheduler specs independently from runtime metadata", () => {
@@ -448,7 +501,9 @@ describe("ToolRegistry tool catalog versioning", () => {
 
   it("still rejects invalid Mermaid syntax when parser validation runs normally", async () => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "diagram-task-2");
-    const parseSpy = vi.spyOn(mermaid, "parse").mockRejectedValue(new Error("Parse error on line 1"));
+    const parseSpy = vi
+      .spyOn(mermaid, "parse")
+      .mockRejectedValue(new Error("Parse error on line 1"));
 
     const result = await registry.executeTool("create_diagram", {
       title: "Broken",

@@ -29,44 +29,26 @@ describe("Sidebar top-level destinations", () => {
     );
   });
 
-  it("truncates sidebar titles to the available width", () => {
+  it("clips sidebar titles to the available width without an ellipsis", () => {
     const measureByCharacters = (value: string) => value.length;
 
     expect(
-      truncateSidebarTitleToFit(
-        'check the "new country for onboarding',
-        25,
-        measureByCharacters,
-      ),
-    ).toBe('check the "new country...');
+      truncateSidebarTitleToFit('check the "new country for onboarding', 25, measureByCharacters),
+    ).toBe('check the "new country fo');
 
     expect(
-      truncateSidebarTitleToFit(
-        "I need to create a presentation",
-        20,
-        measureByCharacters,
-      ),
-    ).toBe("I need to create...");
+      truncateSidebarTitleToFit("I need to create a presentation", 20, measureByCharacters),
+    ).toBe("I need to create a p");
 
-    expect(
-      truncateSidebarTitleToFit(
-        "Check documentation please",
-        18,
-        measureByCharacters,
-      ),
-    ).toBe("Check documenta...");
+    expect(truncateSidebarTitleToFit("Check documentation please", 18, measureByCharacters)).toBe(
+      "Check documentatio",
+    );
   });
 
-  it("keeps very narrow sidebar titles compact", () => {
+  it("keeps very narrow sidebar titles compact without an ellipsis", () => {
     const measureByCharacters = (value: string) => value.length;
 
-    expect(
-      truncateSidebarTitleToFit(
-        "Presentation",
-        5,
-        measureByCharacters,
-      ),
-    ).toBe("Pr...");
+    expect(truncateSidebarTitleToFit("Presentation", 5, measureByCharacters)).toBe("Prese");
   });
 
   it("renders Agents as a primary destination and keeps More collapsed by default", () => {
@@ -95,7 +77,7 @@ describe("Sidebar top-level destinations", () => {
     expect(markup).toContain("Everyday");
     expect(markup).toContain("More");
     expect(markup).not.toContain("Mission Control");
-    expect(markup).toContain("aria-pressed=\"true\"");
+    expect(markup).toContain('aria-pressed="true"');
   });
 
   it("expands More when a nested destination is active", () => {
@@ -120,7 +102,7 @@ describe("Sidebar top-level destinations", () => {
       }),
     );
 
-    expect(markup).toContain("aria-expanded=\"true\"");
+    expect(markup).toContain('aria-expanded="true"');
     expect(markup).toContain("Mission Control");
   });
 
@@ -241,7 +223,7 @@ describe("Sidebar top-level destinations", () => {
     expect(markup).toContain("cli-task-time-wrap");
     expect(markup).toContain("task-completion-unread-dot");
     expect(markup.indexOf("task-completion-unread-dot")).toBeLessThan(
-      markup.indexOf("class=\"cli-task-time\""),
+      markup.indexOf('class="cli-task-time"'),
     );
   });
 
@@ -294,22 +276,39 @@ describe("Sidebar top-level destinations", () => {
     const automatedIconIndex = markup.indexOf("cli-task-automation-icon");
     expect(automatedIconIndex).toBeGreaterThan(markup.indexOf("Update AGENTS.md"));
     expect(automatedIconIndex).toBeLessThan(
-      markup.indexOf("class=\"cli-task-time\"", automatedIconIndex),
+      markup.indexOf('class="cli-task-time"', automatedIconIndex),
     );
   });
 
   it("uses compact container-query rules when the sidebar is narrow", () => {
     const source = readFileSync(stylesPath, "utf8");
 
-    expect(source).toMatch(
-      /\.sidebar\s*\{[\s\S]*container-type:\s*inline-size;[\s\S]*\}/,
-    );
+    expect(source).toMatch(/\.sidebar\s*\{[\s\S]*container-type:\s*inline-size;[\s\S]*\}/);
     expect(source).toMatch(/@container\s*\(max-width:\s*280px\)/);
     expect(source).toMatch(
       /@container\s*\(max-width:\s*280px\)\s*\{[\s\S]*\.cli-task-time\s*\{[\s\S]*display:\s*none;[\s\S]*\}/,
     );
     expect(source).toMatch(
       /@container\s*\(max-width:\s*280px\)\s*\{[\s\S]*\.cli-task-item\s*\{[\s\S]*gap:\s*4px;[\s\S]*padding-right:\s*6px\s*!important;[\s\S]*\}/,
+    );
+  });
+
+  it("clips focused session titles without a CSS ellipsis", () => {
+    const source = readFileSync(stylesPath, "utf8");
+
+    expect(source).toMatch(
+      /\.density-focused\s+\.cli-task-title\s*\{[^}]*text-overflow:\s*clip;[^}]*\}/,
+    );
+    expect(source).not.toMatch(
+      /\.density-focused\s+\.cli-task-title\s*\{[^}]*text-overflow:\s*ellipsis;/,
+    );
+  });
+
+  it("fades the end of clipped session titles", () => {
+    const source = readFileSync(stylesPath, "utf8");
+
+    expect(source).toMatch(
+      /\.cli-task-title--faded\s*\{[^}]*-webkit-mask-image:\s*linear-gradient\([\s\S]*transparent\s+100%[\s\S]*\}/,
     );
   });
 });

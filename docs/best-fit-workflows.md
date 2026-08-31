@@ -19,6 +19,11 @@ CoWork is also GUI-first and CLI-capable: operators can create agents, spawn par
 
 CoWork's Everything Workbench strengthens these lanes for knowledge workers and operators: reports, issue summaries, tables, decks, generated web pages, live website testing, inbox work, and PDFs stay attached to the task that produced or used them. Teams can review or edit generated artifacts in-place, test websites in a visible Browser V2 Workbench with snapshot refs and diagnostics, annotate screenshots, request follow-up changes, and use CoWork as the everyday alternative to separate office, browser, mail, and coding apps. Native apps and explicitly consented external browsers remain available when specialized functionality is needed.
 
+Every lane is still governed by the task's [access profile](access-profiles.md).
+Choose a profile that matches the work before enabling connectors, browser
+actions, command tools, or automation; a workflow pack and its approval preset
+can reduce interruption only within that profile's boundary.
+
 ---
 
 ## Three Best-Fit Workflow Lanes

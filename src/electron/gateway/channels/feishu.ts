@@ -109,7 +109,10 @@ function computeFeishuSignature(
   encryptKey: string,
   rawBody: string,
 ): string {
-  return crypto.createHash("sha256").update(timestamp + nonce + encryptKey + rawBody).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(timestamp + nonce + encryptKey + rawBody)
+    .digest("hex");
 }
 
 export class FeishuAdapter implements ChannelAdapter {
@@ -312,7 +315,10 @@ export class FeishuAdapter implements ChannelAdapter {
     });
   }
 
-  private parseAndVerifyPayload(req: http.IncomingMessage, rawBody: string): Record<string, unknown> {
+  private parseAndVerifyPayload(
+    req: http.IncomingMessage,
+    rawBody: string,
+  ): Record<string, unknown> {
     const parsed = parseMaybeJson<Record<string, unknown>>(rawBody);
     if (!parsed) {
       throw new Error("Invalid Feishu payload");

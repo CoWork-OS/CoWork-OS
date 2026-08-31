@@ -30,10 +30,7 @@ import {
   isLongOsascriptCommandText,
 } from "../AssistantMessageContent";
 import { formatProviderErrorForDisplay } from "../../../shared/provider-error-format";
-import {
-  MermaidDiagram,
-  normalizeCodeBlockTextForDisplay,
-} from "../markdown-components";
+import { MermaidDiagram, normalizeCodeBlockTextForDisplay } from "../markdown-components";
 import {
   hasTaskOutputs,
   resolveTaskOutputSummaryFromCompletionEvent,
@@ -84,7 +81,10 @@ function getEvidenceSiteLabel(hostname: string): string {
   return parts.slice(-2).join(".");
 }
 
-function getWebEvidenceDisplay(source: string, snippet: string): {
+function getWebEvidenceDisplay(
+  source: string,
+  snippet: string,
+): {
   siteLabel: string;
   label: string;
 } | null {
@@ -184,7 +184,11 @@ export function coerceStepFailureText(value: unknown): string {
 }
 
 export function normalizeStepFailureTextForComparison(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, " ").replace(/[.。]+$/g, "").trim();
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[.。]+$/g, "")
+    .trim();
 }
 
 export function unwrapTaskFailureText(reason: string): string {
@@ -197,11 +201,13 @@ export function unwrapTaskFailureText(reason: string): string {
 
 export function formatCompletionGuardFailureTitle(reason: string): string | null {
   const unwrapped = unwrapTaskFailureText(reason);
-  if (/^Task missing verification evidence\b/i.test(unwrapped)) return "Verification evidence missing";
+  if (/^Task missing verification evidence\b/i.test(unwrapped))
+    return "Verification evidence missing";
   if (/^Task missing direct answer\b/i.test(unwrapped)) return "Direct answer missing";
   if (/^Task missing artifact evidence\b/i.test(unwrapped)) return "Output artifact missing";
   if (/^Task missing execution evidence\b/i.test(unwrapped)) return "Execution evidence missing";
-  if (/^Task missing required tool evidence\b/i.test(unwrapped)) return "Required tool evidence missing";
+  if (/^Task missing required tool evidence\b/i.test(unwrapped))
+    return "Required tool evidence missing";
   return null;
 }
 
@@ -422,14 +428,17 @@ export function renderEventTitle(
       return event.type === "timeline_group_finished" ? `${groupLabel} complete` : groupLabel;
     }
     if (summaryStageLabel) {
-      return event.type === "timeline_group_finished" ? `${summaryStageLabel} complete` : summaryStageLabel;
+      return event.type === "timeline_group_finished"
+        ? `${summaryStageLabel} complete`
+        : summaryStageLabel;
     }
 
     const maxParallel =
       typeof event.payload?.maxParallel === "number" && Number.isFinite(event.payload.maxParallel)
         ? Math.max(1, Math.floor(event.payload.maxParallel))
         : null;
-    const base = event.type === "timeline_group_started" ? `Starting ${label}` : `Completed ${label}`;
+    const base =
+      event.type === "timeline_group_started" ? `Starting ${label}` : `Completed ${label}`;
     return !summaryMode && maxParallel && event.type === "timeline_group_started"
       ? `${base} (${maxParallel} parallel)`
       : base;
@@ -438,7 +447,9 @@ export function renderEventTitle(
   if (event.type === "timeline_evidence_attached") {
     const refs = Array.isArray(event.payload?.evidenceRefs) ? event.payload.evidenceRefs : [];
     const count = refs.length;
-    return count > 0 ? `Attached ${count} evidence link${count === 1 ? "" : "s"}` : "Attached evidence";
+    return count > 0
+      ? `Attached ${count} evidence link${count === 1 ? "" : "s"}`
+      : "Attached evidence";
   }
 
   if (event.type === "timeline_artifact_emitted") {
@@ -453,7 +464,9 @@ export function renderEventTitle(
         <ClickableFilePath path={path} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
         {label && label !== path && <span className="event-title-meta"> ({label})</span>}
       </span>
-    ) : "Output ready";
+    ) : (
+      "Output ready"
+    );
   }
 
   if (event.type === "timeline_error") {
@@ -508,7 +521,9 @@ export function renderEventTitle(
       return getMessage(
         "stepCompleted",
         msgCtx,
-        sanitizeToolCallTextFromAssistant(event.payload.step?.description || event.payload.message || "").text,
+        sanitizeToolCallTextFromAssistant(
+          event.payload.step?.description || event.payload.message || "",
+        ).text,
       );
     case "step_failed":
       if (
@@ -691,17 +706,22 @@ export function renderEventTitle(
       return acPath ? (
         <span>
           Output ready:{" "}
-          <ClickableFilePath path={acPath} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          <ClickableFilePath
+            path={acPath}
+            workspacePath={workspacePath}
+            onOpenViewer={onOpenViewer}
+          />
           <span className="event-title-meta"> ({acType})</span>
         </span>
-      ) : `Output ready (${acType})`;
+      ) : (
+        `Output ready (${acType})`
+      );
     }
     case "diagram_created": {
       const title = typeof event.payload?.title === "string" ? event.payload.title : "Diagram";
       return (
         <span>
-          Diagram:{" "}
-          <span className="event-title-meta">{title}</span>
+          Diagram: <span className="event-title-meta">{title}</span>
         </span>
       );
     }
@@ -713,7 +733,9 @@ export function renderEventTitle(
         return "Running command:";
       }
       const description = getApprovalDescription(approval);
-      return description ? `${getMessage("approval", msgCtx)} ${description}` : getMessage("approval", msgCtx);
+      return description
+        ? `${getMessage("approval", msgCtx)} ${description}`
+        : getMessage("approval", msgCtx);
     }
     case "input_request_created":
       return "Structured input requested";
@@ -761,6 +783,7 @@ export function renderEventDetails(
     onOpenWebArtifact?: (path: string) => void;
     onQuoteAssistantMessage?: (quote: QuotedAssistantMessage) => void;
     onForkTaskSession?: (event: TaskEvent) => void;
+    isLastAssistantMessage?: boolean;
     events?: TaskEvent[];
     onViewOutputs?: (taskId: string, primaryOutputPath?: string) => void;
     hideVerificationSteps?: boolean;
@@ -786,7 +809,7 @@ export function renderEventDetails(
   const taskForEvent =
     options?.task?.id === event.taskId
       ? options.task
-      : options?.childTasks?.find((t) => t.id === event.taskId) ?? options?.task;
+      : (options?.childTasks?.find((t) => t.id === event.taskId) ?? options?.task);
   const effectiveType = getEffectiveTaskEventType(event);
   const stepCompletionPreviewPath = getStepCompletionPreviewPath(event);
   const shouldRenderOpenArtifactCard = (artifactPath: string) => {
@@ -806,8 +829,9 @@ export function renderEventDetails(
   };
   const renderLinkedArtifactCards = (text: string) => {
     if (!workspacePath) return null;
-    const artifactPaths = extractGeneratedArtifactPathsFromText(text)
-      .filter((artifactPath) => shouldRenderOpenArtifactCard(artifactPath));
+    const artifactPaths = extractGeneratedArtifactPathsFromText(text).filter((artifactPath) =>
+      shouldRenderOpenArtifactCard(artifactPath),
+    );
     if (artifactPaths.length === 0) return null;
 
     return (
@@ -913,10 +937,7 @@ export function renderEventDetails(
                       rel="noreferrer"
                       title={snippet ? `${webDisplay.label}\n${source}` : source}
                     >
-                      <span
-                        className="evidence-event-favicon"
-                        aria-hidden="true"
-                      >
+                      <span className="evidence-event-favicon" aria-hidden="true">
                         {webDisplay.siteLabel.charAt(0).toUpperCase()}
                       </span>
                       <span className="evidence-event-domain">{webDisplay.siteLabel}</span>
@@ -982,13 +1003,12 @@ export function renderEventDetails(
         typeof primaryOutputPath === "string" && isWordDocumentArtifactFile(primaryOutputPath);
       const latexPair = findLatexPdfPair(eventStream, outputSummary);
       const outputCount = outputSummary?.outputCount ?? 0;
-      const outputLabel =
-        outputCount === 1
-          ? `1 output ready`
-          : `${outputCount} outputs ready`;
+      const outputLabel = outputCount === 1 ? `1 output ready` : `${outputCount} outputs ready`;
 
       const pendingChecklist: string[] = Array.isArray(event.payload?.pendingChecklist)
-        ? event.payload.pendingChecklist.filter((item: unknown): item is string => typeof item === "string")
+        ? event.payload.pendingChecklist.filter(
+            (item: unknown): item is string => typeof item === "string",
+          )
         : [];
       return (
         <div className="event-details completion-output-card">
@@ -1026,53 +1046,53 @@ export function renderEventDetails(
                 primaryOutputPath &&
                 workspacePath &&
                 shouldRenderOpenArtifactCard(primaryOutputPath) && (
-                <div className="completion-output-preview">
-                  <WebArtifactCard
-                    filePath={primaryOutputPath}
-                    workspacePath={workspacePath}
-                    onOpenViewer={onOpenWebArtifact || onOpenViewer}
-                  />
-                </div>
-              )}
+                  <div className="completion-output-preview">
+                    <WebArtifactCard
+                      filePath={primaryOutputPath}
+                      workspacePath={workspacePath}
+                      onOpenViewer={onOpenWebArtifact || onOpenViewer}
+                    />
+                  </div>
+                )}
               {!latexPair &&
                 primaryOutputIsPresentation &&
                 primaryOutputPath &&
                 workspacePath &&
                 shouldRenderOpenArtifactCard(primaryOutputPath) && (
-                <div className="completion-output-preview">
-                  <PresentationArtifactCard
-                    filePath={primaryOutputPath}
-                    workspacePath={workspacePath}
-                    onOpenViewer={onOpenPresentationArtifact || onOpenViewer}
-                  />
-                </div>
-              )}
+                  <div className="completion-output-preview">
+                    <PresentationArtifactCard
+                      filePath={primaryOutputPath}
+                      workspacePath={workspacePath}
+                      onOpenViewer={onOpenPresentationArtifact || onOpenViewer}
+                    />
+                  </div>
+                )}
               {!latexPair &&
                 primaryOutputIsSpreadsheet &&
                 primaryOutputPath &&
                 workspacePath &&
                 shouldRenderOpenArtifactCard(primaryOutputPath) && (
-                <div className="completion-output-preview">
-                  <SpreadsheetArtifactCard
-                    filePath={primaryOutputPath}
-                    workspacePath={workspacePath}
-                    onOpenViewer={onOpenSpreadsheetArtifact || onOpenViewer}
-                  />
-                </div>
-              )}
+                  <div className="completion-output-preview">
+                    <SpreadsheetArtifactCard
+                      filePath={primaryOutputPath}
+                      workspacePath={workspacePath}
+                      onOpenViewer={onOpenSpreadsheetArtifact || onOpenViewer}
+                    />
+                  </div>
+                )}
               {!latexPair &&
                 primaryOutputIsDocument &&
                 primaryOutputPath &&
                 workspacePath &&
                 shouldRenderOpenArtifactCard(primaryOutputPath) && (
-                <div className="completion-output-preview">
-                  <DocumentArtifactCard
-                    filePath={primaryOutputPath}
-                    workspacePath={workspacePath}
-                    onOpenViewer={onOpenDocumentArtifact || onOpenViewer}
-                  />
-                </div>
-              )}
+                  <div className="completion-output-preview">
+                    <DocumentArtifactCard
+                      filePath={primaryOutputPath}
+                      workspacePath={workspacePath}
+                      onOpenViewer={onOpenDocumentArtifact || onOpenViewer}
+                    />
+                  </div>
+                )}
               <div className="completion-output-subtitle">{outputLabel}</div>
               {primaryOutputPath && (
                 <div className="completion-output-primary">
@@ -1082,7 +1102,9 @@ export function renderEventDetails(
                     workspacePath={workspacePath}
                     onOpenViewer={onOpenViewer}
                   />
-                  {primaryOutputName && <span className="event-title-meta"> ({primaryOutputName})</span>}
+                  {primaryOutputName && (
+                    <span className="event-title-meta"> ({primaryOutputName})</span>
+                  )}
                 </div>
               )}
               <div className="completion-output-actions">
@@ -1299,7 +1321,7 @@ export function renderEventDetails(
             {quote && onQuoteAssistantMessage && (
               <MessageQuoteButton onQuote={() => onQuoteAssistantMessage(quote)} />
             )}
-            {event.id && onForkTaskSession && (
+            {event.id && onForkTaskSession && options?.isLastAssistantMessage && (
               <MessageForkButton onFork={() => onForkTaskSession(event)} />
             )}
           </div>
@@ -1322,8 +1344,13 @@ export function renderEventDetails(
     }
     case "step_failed": {
       const rawReason =
-        event.payload?.reason || event.payload?.step?.error || event.payload?.error || "Step failed.";
-      const displayReason = formatProviderErrorForDisplay(String(rawReason), { task: taskForEvent });
+        event.payload?.reason ||
+        event.payload?.step?.error ||
+        event.payload?.error ||
+        "Step failed.";
+      const displayReason = formatProviderErrorForDisplay(String(rawReason), {
+        task: taskForEvent,
+      });
       if (isLongOsascriptCommandText(displayReason)) {
         return (
           <div className="event-details event-details-command-error">
@@ -1335,14 +1362,19 @@ export function renderEventDetails(
     }
     case "verification_pending_user_action": {
       const checklist: string[] = Array.isArray(event.payload?.pendingChecklist)
-        ? event.payload.pendingChecklist.filter((item: unknown): item is string => typeof item === "string")
+        ? event.payload.pendingChecklist.filter(
+            (item: unknown): item is string => typeof item === "string",
+          )
         : [];
       return (
         <div className="event-details">
           <div style={{ fontWeight: 600, marginBottom: 6 }}>Verification pending user action</div>
-          {typeof event.payload?.message === "string" && event.payload.message.trim().length > 0 && (
-            <div style={{ marginBottom: checklist.length > 0 ? 6 : 0 }}>{event.payload.message}</div>
-          )}
+          {typeof event.payload?.message === "string" &&
+            event.payload.message.trim().length > 0 && (
+              <div style={{ marginBottom: checklist.length > 0 ? 6 : 0 }}>
+                {event.payload.message}
+              </div>
+            )}
           {checklist.length > 0 && (
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {checklist.map((item, idx) => (
@@ -1373,7 +1405,9 @@ export function renderEventDetails(
           <div className="event-details">
             <div style={{ marginBottom: 6, fontWeight: 600 }}>Running command:</div>
             <div className="session-approval-code-scroll" role="region" aria-label="Command">
-              <code className="session-approval-code session-approval-code--multiline">{commandPreview.text}</code>
+              <code className="session-approval-code session-approval-code--multiline">
+                {commandPreview.text}
+              </code>
             </div>
             {commandPreview.truncated ? (
               <div className="session-approval-preview-note">
@@ -1392,18 +1426,19 @@ export function renderEventDetails(
 
       return (
         <div className="event-details event-details-scrollable">
-          {description ? <div style={{ marginBottom: approval.details ? 8 : 0 }}>{description}</div> : null}
-          {approval.details && <pre>{truncateForDisplay(JSON.stringify(approval.details, null, 2), 4000)}</pre>}
+          {description ? (
+            <div style={{ marginBottom: approval.details ? 8 : 0 }}>{description}</div>
+          ) : null}
+          {approval.details && (
+            <pre>{truncateForDisplay(JSON.stringify(approval.details, null, 2), 4000)}</pre>
+          )}
         </div>
       );
     }
     case "input_request_created": {
       const request = event.payload?.request;
-      const questions: Array<{ question?: string; options?: Array<{ label?: string }> }> = Array.isArray(
-        request?.questions,
-      )
-        ? request.questions
-        : [];
+      const questions: Array<{ question?: string; options?: Array<{ label?: string }> }> =
+        Array.isArray(request?.questions) ? request.questions : [];
       if (questions.length === 0) return null;
       return (
         <div className="event-details event-details-scrollable">
@@ -1577,8 +1612,7 @@ export function renderEventDetails(
         const previewLineCount = fcPayload.contentPreview.split("\n").length;
         const fcPathString = typeof fcPath === "string" ? fcPath : "";
         const fcLanguage = String(fcPayload.language || "").toLowerCase();
-        const isJsonlPreview =
-          fcLanguage === "jsonl" || /\.jsonl$/i.test(fcPathString);
+        const isJsonlPreview = fcLanguage === "jsonl" || /\.jsonl$/i.test(fcPathString);
         const canRenderJsonlPreview =
           isJsonlPreview && parseJsonlPreview(fcPayload.contentPreview) !== null;
         return (
@@ -1597,7 +1631,10 @@ export function renderEventDetails(
                 truncated={Boolean(fcPayload.previewTruncated)}
               />
             ) : (
-              <HighlightedCodePreview code={fcPayload.contentPreview} language={fcPayload.language} />
+              <HighlightedCodePreview
+                code={fcPayload.contentPreview}
+                language={fcPayload.language}
+              />
             )}
           </div>
         );
@@ -1836,7 +1873,8 @@ export function renderEventDetails(
           typeof event.payload?.mimeType === "string" ? event.payload.mimeType.toLowerCase() : "";
         const artifactIsDocument =
           artifactMimeType === "application/pdf" ||
-          artifactMimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+          artifactMimeType ===
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
           artifactMimeType === "text/markdown" ||
           artifactMimeType.startsWith("text/") ||
           DOCUMENT_PREVIEW_EXT_RE.test(String(artifactPath || ""));

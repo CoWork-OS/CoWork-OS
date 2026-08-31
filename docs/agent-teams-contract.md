@@ -186,7 +186,10 @@ interface AgentTeamItem {
 - Child task completion writes `resultSummary` back to both:
   - `tasks.result_summary`
   - `agent_team_items.result_summary` (if linked by `source_task_id`)
-- Workspace/context policy manager remains source of truth for approvals and denies.
+- Workspace/context policy manager remains source of truth for approvals and denies. Team-root and
+  child tasks also inherit the effective [access profile](access-profiles.md); a member may use a
+  narrower profile, but team orchestration cannot widen the parent sandbox, command-tool,
+  filesystem, network, or domain boundary.
 - Team defaults are used for spawned work:
   - `agent_teams.default_model_preference` -> `AgentConfig.modelKey` (e.g., "cheaper" -> `haiku-4-5`)
   - `agent_teams.default_personality` -> `AgentConfig.personalityId`

@@ -14,6 +14,13 @@ This integration is intentionally modeled after the Hermes-style provider shape:
 
 Supermemory does **not** replace CoWork's local memory system. CoWork keeps its own archive memory, curated hot memory, workspace kit files, transcript recall, and knowledge graph. Supermemory is an additional external memory lane.
 
+The task's [access profile](access-profiles.md) remains the ceiling for this
+integration. Profile network and connector rules apply before Supermemory
+searches, profile injection, external remembers, forgets, or background
+mirrors. Memory Write Approval is a separate durable-write gate: it can add a
+review step, but it cannot grant a denied profile, expand a domain or
+filesystem scope, or turn an unavailable profile into an executable one.
+
 ---
 
 ## What It Adds

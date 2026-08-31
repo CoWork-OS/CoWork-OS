@@ -47,7 +47,9 @@ describe("ToolRegistry request_user_input", () => {
     } as Any;
 
     await expect(
-      (ToolRegistry as Any).prototype.requestUserInput.call(fakeThis, { questions: validQuestions }),
+      (ToolRegistry as Any).prototype.requestUserInput.call(fakeThis, {
+        questions: validQuestions,
+      }),
     ).rejects.toThrow(/only available in plan or debug mode/i);
   });
 
@@ -63,7 +65,9 @@ describe("ToolRegistry request_user_input", () => {
     } as Any;
 
     await expect(
-      (ToolRegistry as Any).prototype.requestUserInput.call(fakeThis, { questions: validQuestions }),
+      (ToolRegistry as Any).prototype.requestUserInput.call(fakeThis, {
+        questions: validQuestions,
+      }),
     ).rejects.toThrow(/disabled for this task/i);
     expect(fakeThis.daemon.requestUserInput).not.toHaveBeenCalled();
   });

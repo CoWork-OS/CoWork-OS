@@ -35,7 +35,7 @@ const GMAIL_PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profil
 function getElectronShell(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     const shell = electron?.shell;
     if (shell?.openExternal) return shell;

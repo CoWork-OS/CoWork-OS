@@ -171,7 +171,11 @@ export class AzureOpenAIProvider implements LLMProvider {
     };
   }
 
-  private buildResponsesInput(messages: LLMMessage[], system?: string, systemBlocks?: LLMRequest["systemBlocks"]): Any[] {
+  private buildResponsesInput(
+    messages: LLMMessage[],
+    system?: string,
+    systemBlocks?: LLMRequest["systemBlocks"],
+  ): Any[] {
     const input: Any[] = [];
     const systemMessages = buildOpenAICompatibleSystemMessages(system, systemBlocks);
     const mapToolCallId = createToolCallIdMapper(AZURE_RESPONSES_MAX_CALL_ID_LENGTH);
@@ -297,10 +301,7 @@ export class AzureOpenAIProvider implements LLMProvider {
     );
     const instructions =
       stableText || (!request.systemBlocks && request.system ? request.system : "") || undefined;
-    const input = this.buildResponsesInput(
-      request.messages,
-      volatileText || undefined,
-    );
+    const input = this.buildResponsesInput(request.messages, volatileText || undefined);
     const rawResponsesTools = request.tools ? this.toResponsesTools(request.tools) : undefined;
     if (rawResponsesTools && rawResponsesTools.length > AZURE_MAX_TOOLS) {
       console.warn(
@@ -501,7 +502,9 @@ export class AzureOpenAIProvider implements LLMProvider {
         );
       }
 
-      const deltaToolCalls = Array.isArray(choice?.delta?.tool_calls) ? choice.delta.tool_calls : [];
+      const deltaToolCalls = Array.isArray(choice?.delta?.tool_calls)
+        ? choice.delta.tool_calls
+        : [];
       for (const toolCall of deltaToolCalls) {
         const index =
           typeof toolCall?.index === "number" && Number.isFinite(toolCall.index)
@@ -520,7 +523,9 @@ export class AzureOpenAIProvider implements LLMProvider {
         streamedToolCalls.set(index, existing);
       }
 
-      const messageToolCalls = Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : [];
+      const messageToolCalls = Array.isArray(choice?.message?.tool_calls)
+        ? choice.message.tool_calls
+        : [];
       for (const toolCall of messageToolCalls) {
         const index = streamedToolCalls.size;
         const existing = streamedToolCalls.get(index) ?? { argumentsText: "" };
@@ -586,14 +591,15 @@ export class AzureOpenAIProvider implements LLMProvider {
     return {
       content,
       stopReason: finishReason,
-      usage: inputTokens || outputTokens || cachedTokens || cacheWriteTokens
-        ? {
-            inputTokens,
-            outputTokens,
-            ...(cachedTokens ? { cachedTokens } : {}),
-            ...(cacheWriteTokens ? { cacheWriteTokens } : {}),
-          }
-        : undefined,
+      usage:
+        inputTokens || outputTokens || cachedTokens || cacheWriteTokens
+          ? {
+              inputTokens,
+              outputTokens,
+              ...(cachedTokens ? { cachedTokens } : {}),
+              ...(cacheWriteTokens ? { cacheWriteTokens } : {}),
+            }
+          : undefined,
     };
   }
 
@@ -658,8 +664,9 @@ export class AzureOpenAIProvider implements LLMProvider {
           const item = payload.item;
           if (item?.type === "function_call") {
             const key =
-              String(item.call_id || item.id || payload.output_index || payload.item_index || "")
-                .trim() || `call_${nextToolOrder}`;
+              String(
+                item.call_id || item.id || payload.output_index || payload.item_index || "",
+              ).trim() || `call_${nextToolOrder}`;
             const existing = streamedToolCalls.get(key) ?? {
               order: nextToolOrder++,
               id: String(item.call_id || item.id || key),
@@ -678,7 +685,11 @@ export class AzureOpenAIProvider implements LLMProvider {
         case "response.function_call_arguments.delta": {
           const key =
             String(
-              payload.call_id || payload.item_id || payload.output_index || payload.item_index || "",
+              payload.call_id ||
+                payload.item_id ||
+                payload.output_index ||
+                payload.item_index ||
+                "",
             ).trim() || `call_${nextToolOrder}`;
           const existing = streamedToolCalls.get(key) ?? {
             order: nextToolOrder++,
@@ -694,7 +705,11 @@ export class AzureOpenAIProvider implements LLMProvider {
         case "response.function_call_arguments.done": {
           const key =
             String(
-              payload.call_id || payload.item_id || payload.output_index || payload.item_index || "",
+              payload.call_id ||
+                payload.item_id ||
+                payload.output_index ||
+                payload.item_index ||
+                "",
             ).trim() || `call_${nextToolOrder}`;
           const existing = streamedToolCalls.get(key) ?? {
             order: nextToolOrder++,
@@ -765,7 +780,9 @@ export class AzureOpenAIProvider implements LLMProvider {
         parsed.content[0].text === "";
       return {
         ...parsed,
-        content: shouldFallbackToStreamedText ? [{ type: "text", text: contentText }] : parsed.content,
+        content: shouldFallbackToStreamedText
+          ? [{ type: "text", text: contentText }]
+          : parsed.content,
         usage:
           parsed.usage ||
           (inputTokens || outputTokens || cachedTokens || cacheWriteTokens
@@ -801,14 +818,15 @@ export class AzureOpenAIProvider implements LLMProvider {
     return {
       content,
       stopReason: finishReason,
-      usage: inputTokens || outputTokens || cachedTokens || cacheWriteTokens
-        ? {
-            inputTokens,
-            outputTokens,
-            ...(cachedTokens ? { cachedTokens } : {}),
-            ...(cacheWriteTokens ? { cacheWriteTokens } : {}),
-          }
-        : undefined,
+      usage:
+        inputTokens || outputTokens || cachedTokens || cacheWriteTokens
+          ? {
+              inputTokens,
+              outputTokens,
+              ...(cachedTokens ? { cachedTokens } : {}),
+              ...(cacheWriteTokens ? { cacheWriteTokens } : {}),
+            }
+          : undefined,
     };
   }
 
@@ -1017,7 +1035,11 @@ export class AzureOpenAIProvider implements LLMProvider {
         );
         const fallbackBody =
           fallbackReasoningEffort && reasoningEffortOverride === requestedReasoningEffort
-            ? this.buildChatCompletionsBody(request, useMaxCompletionTokens, fallbackReasoningEffort)
+            ? this.buildChatCompletionsBody(
+                request,
+                useMaxCompletionTokens,
+                fallbackReasoningEffort,
+              )
             : undefined;
         if (shouldStream) {
           body.stream = true;
@@ -1130,13 +1152,12 @@ export class AzureOpenAIProvider implements LLMProvider {
           max_output_tokens: testMaxTokens,
           ...(requestedReasoningEffort ? { reasoning: { effort: requestedReasoningEffort } } : {}),
         };
-        const fallbackBody =
-          fallbackReasoningEffort
-            ? {
-                ...body,
-                reasoning: { effort: fallbackReasoningEffort },
-              }
-            : undefined;
+        const fallbackBody = fallbackReasoningEffort
+          ? {
+              ...body,
+              reasoning: { effort: fallbackReasoningEffort },
+            }
+          : undefined;
         const response = await this.sendRequestWithReasoningFallback(
           responsesUrl,
           body,
@@ -1163,13 +1184,12 @@ export class AzureOpenAIProvider implements LLMProvider {
         max_tokens: testMaxTokens,
         ...(requestedReasoningEffort ? { reasoning_effort: requestedReasoningEffort } : {}),
       };
-      const chatFallbackBody =
-        fallbackReasoningEffort
-          ? {
-              ...chatBody,
-              reasoning_effort: fallbackReasoningEffort,
-            }
-          : undefined;
+      const chatFallbackBody = fallbackReasoningEffort
+        ? {
+            ...chatBody,
+            reasoning_effort: fallbackReasoningEffort,
+          }
+        : undefined;
 
       let response = await this.sendRequestWithReasoningFallback(
         chatUrl,

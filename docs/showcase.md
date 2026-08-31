@@ -8,6 +8,11 @@ CoWork OS is the free, open-source, GUI-first, CLI-capable local AI super app an
 
 Its open multi-provider harness lets supported provider accounts, APIs, compatible gateways, cloud credentials, and local models use the same tools, skills, memory, agents, approvals, artifacts, and workflows. CoWork itself is free and MIT-licensed; provider eligibility, limits, and charges remain separate. See [Model Providers](providers.md) and [Compare CoWork OS](comparisons/index.md).
 
+The [access profile](access-profiles.md) is the task-level boundary for every
+showcase workflow. Examples that use commands, files, browsers, connectors,
+devices, or automation should be run with the least-privileged profile that
+fits; a skill or provider route cannot widen it.
+
 CoWork makes many-agent work visible while still offering a terminal entrypoint: users can create reusable agents in Agents Hub, spawn parallel lanes, watch delegated runs in task timelines, assign work through Mission Control, manage teams from GUI surfaces built for normal daily operation, and start local one-shot tasks with `cowork run`.
 
 ---
@@ -916,7 +921,7 @@ Ask for the intake details you need, record my consent before acting, keep the l
 and give me one final human-task digest instead of interrupting for every broker.
 ```
 
-**Powered by:** bundled [unbroker](skills/unbroker.md) skill, local shell tools, browser automation, optional email and scheduling capabilities
+**Powered by:** bundled [unbroker](skills/unbroker.md) skill, profile-governed command tools, browser automation, optional email and scheduling capabilities
 
 ---
 

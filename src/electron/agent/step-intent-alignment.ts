@@ -74,7 +74,10 @@ export interface StepIntentScoreRow {
   descriptionPreview: string;
 }
 
-export function scorePlanStepIntentAlignment(plan: Plan, taskText: string): {
+export function scorePlanStepIntentAlignment(
+  plan: Plan,
+  taskText: string,
+): {
   rows: StepIntentScoreRow[];
   lowAlignmentStepIds: string[];
   minScore: number;

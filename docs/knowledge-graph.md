@@ -2,6 +2,12 @@
 
 CoWork OS includes a built-in knowledge graph that provides structured entity and relationship memory for the agent. Unlike flat-text memory, the knowledge graph stores typed entities, directed relationships, timestamped observations, and optional temporal validity windows in a normalized SQLite schema with full-text search.
 
+Graph extraction, search, and memory promotion run beneath the task's [access
+profile](access-profiles.md). A graph result is context, not a permission
+grant: it cannot widen filesystem, command-tool, network, connector, or export
+access, and background extraction skips or fails closed when the profile does
+not permit the required read path.
+
 ## Architecture
 
 ```

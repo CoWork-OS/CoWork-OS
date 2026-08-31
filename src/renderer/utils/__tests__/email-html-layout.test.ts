@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { computeEmailFitScale, getEmailFitInset, measureEmailContentWidth } from "../email-html-layout";
+import {
+  computeEmailFitScale,
+  getEmailFitInset,
+  measureEmailContentWidth,
+} from "../email-html-layout";
 
 function createMockElement(
   metrics: Partial<{
@@ -21,7 +25,10 @@ function createMockElement(
 function createMockDocument(bodyScrollWidth = 0, documentScrollWidth = 0): Document {
   return {
     body: createMockElement({ width: bodyScrollWidth, scrollWidth: bodyScrollWidth }),
-    documentElement: createMockElement({ width: documentScrollWidth, scrollWidth: documentScrollWidth }),
+    documentElement: createMockElement({
+      width: documentScrollWidth,
+      scrollWidth: documentScrollWidth,
+    }),
   } as unknown as Document;
 }
 

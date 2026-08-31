@@ -109,7 +109,8 @@ vi.mock("../ImprovementRepositories", () => ({
   ImprovementCandidateRepository: class {
     list(params?: { workspaceId?: string }) {
       let rows = [...candidates.values()];
-      if (params?.workspaceId) rows = rows.filter((item) => item.workspaceId === params.workspaceId);
+      if (params?.workspaceId)
+        rows = rows.filter((item) => item.workspaceId === params.workspaceId);
       return rows;
     }
     findById(id: string) {
@@ -140,7 +141,8 @@ vi.mock("../ImprovementRepositories", () => ({
     }
     list(params?: { workspaceId?: string; status?: string[] | string }) {
       let rows = [...campaigns.values()];
-      if (params?.workspaceId) rows = rows.filter((item) => item.workspaceId === params.workspaceId);
+      if (params?.workspaceId)
+        rows = rows.filter((item) => item.workspaceId === params.workspaceId);
       if (params?.status) {
         const statuses = Array.isArray(params.status) ? params.status : [params.status];
         rows = rows.filter((item) => statuses.includes(item.status));
@@ -263,7 +265,9 @@ vi.mock("../ExperimentEvaluationService", () => ({
           prReadiness: passed ? "ready" : "not_ready",
           missingEvidence: passed ? [] : ["pr_readiness"],
         },
-        summary: passed ? `Variant ${params.variant.lane} passed.` : `Variant ${params.variant.lane} failed.`,
+        summary: passed
+          ? `Variant ${params.variant.lane} passed.`
+          : `Variant ${params.variant.lane} failed.`,
         notes: [passed ? "passed" : "failed"],
       };
     }
@@ -387,7 +391,11 @@ describe("ImprovementLoopService", () => {
     };
   }
 
-  function completeVariantTask(taskId: string, summary: string, terminalStatus: Task["terminalStatus"] = "ok") {
+  function completeVariantTask(
+    taskId: string,
+    summary: string,
+    terminalStatus: Task["terminalStatus"] = "ok",
+  ) {
     const task = tasks.get(taskId);
     tasks.set(taskId, {
       ...task!,
@@ -401,22 +409,28 @@ describe("ImprovementLoopService", () => {
   }
 
   function attachCanonicalTaskLifecycle(daemon: Any): Any {
-    daemon.completeTask = vi.fn((taskId: string, summary: string, metadata?: { terminalStatus?: Task["terminalStatus"] }) => {
-      const task = tasks.get(taskId);
-      if (!task) return;
-      tasks.set(taskId, {
-        ...task,
-        status: "completed",
-        completedAt: Date.now(),
-        terminalStatus: metadata?.terminalStatus ?? "ok",
-        resultSummary: summary,
-      });
-    });
+    daemon.completeTask = vi.fn(
+      (taskId: string, summary: string, metadata?: { terminalStatus?: Task["terminalStatus"] }) => {
+        const task = tasks.get(taskId);
+        if (!task) return;
+        tasks.set(taskId, {
+          ...task,
+          status: "completed",
+          completedAt: Date.now(),
+          terminalStatus: metadata?.terminalStatus ?? "ok",
+          resultSummary: summary,
+        });
+      },
+    );
     daemon.failTask = vi.fn(
       (
         taskId: string,
         message: string,
-        metadata?: { terminalStatus?: Task["terminalStatus"]; resultSummary?: string; failureClass?: Task["failureClass"] },
+        metadata?: {
+          terminalStatus?: Task["terminalStatus"];
+          resultSummary?: string;
+          failureClass?: Task["failureClass"];
+        },
       ) => {
         const task = tasks.get(taskId);
         if (!task) return;
@@ -453,7 +467,9 @@ describe("ImprovementLoopService", () => {
       getTopCandidateForWorkspace: vi.fn().mockReturnValue(candidate),
     } as Any;
 
-    const openPullRequest = vi.fn().mockResolvedValue({ success: true, number: 42, url: "https://example.test/pr/42" });
+    const openPullRequest = vi
+      .fn()
+      .mockResolvedValue({ success: true, number: 42, url: "https://example.test/pr/42" });
     const daemon = attachCanonicalTaskLifecycle(new EventEmitter() as Any);
     daemon.createChildTask = vi.fn().mockImplementation(async (params: Any) => {
       const taskId = `task-${tasks.size + 1}`;
@@ -554,7 +570,9 @@ describe("ImprovementLoopService", () => {
       getTopCandidateForWorkspace: vi.fn().mockReturnValue(candidate),
     } as Any;
 
-    const openPullRequest = vi.fn().mockResolvedValue({ success: true, number: 7, url: "https://example.test/pr/7" });
+    const openPullRequest = vi
+      .fn()
+      .mockResolvedValue({ success: true, number: 7, url: "https://example.test/pr/7" });
     const daemon = attachCanonicalTaskLifecycle(new EventEmitter() as Any);
     daemon.createChildTask = vi.fn().mockImplementation(async (params: Any) => {
       const taskId = `task-${tasks.size + 1}`;
@@ -700,7 +718,9 @@ describe("ImprovementLoopService", () => {
       getTopCandidateForWorkspace: vi.fn().mockReturnValue(candidate),
     } as Any;
 
-    const openPullRequest = vi.fn().mockResolvedValue({ success: false, error: "429 Too Many Requests" });
+    const openPullRequest = vi
+      .fn()
+      .mockResolvedValue({ success: false, error: "429 Too Many Requests" });
     const daemon = attachCanonicalTaskLifecycle(new EventEmitter() as Any);
     daemon.createChildTask = vi.fn().mockImplementation(async (params: Any) => {
       const taskId = `task-${tasks.size + 1}`;
@@ -889,8 +909,12 @@ describe("ImprovementLoopService", () => {
 
     const scoutTask = tasks.get(campaign!.variants[0].taskId!);
     expect(scoutTask?.workspaceId).toBe(coworkWorkspace.id);
-    expect(scoutTask?.prompt).toContain(`Observed workspace: ${observedWorkspace.name} (${observedWorkspace.path})`);
-    expect(scoutTask?.prompt).toContain(`Execution workspace: ${coworkWorkspace.name} (${coworkWorkspace.path})`);
+    expect(scoutTask?.prompt).toContain(
+      `Observed workspace: ${observedWorkspace.name} (${observedWorkspace.path})`,
+    );
+    expect(scoutTask?.prompt).toContain(
+      `Execution workspace: ${coworkWorkspace.name} (${coworkWorkspace.path})`,
+    );
     expect(scoutTask?.prompt).toContain(
       "Use the observed workspace for failure context and evidence, but inspect and modify code only in the execution workspace git repository.",
     );

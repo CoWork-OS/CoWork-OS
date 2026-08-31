@@ -33,7 +33,7 @@ import { getUserDataDir } from "../utils/user-data-dir";
 function getElectronRuntime(): { BrowserWindow: Any; screen: Any; shell: Any } | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     // In plain Node.js, `require('electron')` resolves to the Electron binary path (string),
     // not the runtime API object. Only treat it as available when it looks like the API.
@@ -152,7 +152,9 @@ export class CanvasManager {
     if (hasScheme) {
       const parsed = new URL(trimmed);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw new Error(`Only http and https URLs are supported for canvas browsing. Received ${parsed.protocol}`);
+        throw new Error(
+          `Only http and https URLs are supported for canvas browsing. Received ${parsed.protocol}`,
+        );
       }
       return parsed.toString();
     }

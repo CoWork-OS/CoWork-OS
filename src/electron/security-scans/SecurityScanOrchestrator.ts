@@ -107,7 +107,9 @@ const SECURITY_SCAN_MODES = new Set<SecurityScanMode>([
 
 function getPackagedPluginDir(): string {
   const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-  const packaged = Boolean(resourcesPath && fs.existsSync(path.join(resourcesPath, "plugin-packs")));
+  const packaged = Boolean(
+    resourcesPath && fs.existsSync(path.join(resourcesPath, "plugin-packs")),
+  );
   return packaged
     ? path.join(resourcesPath || "", "plugin-packs", "codex-security")
     : path.join(process.cwd(), "resources", "plugin-packs", "codex-security");
@@ -127,7 +129,10 @@ function runCommand(command: string, args: string[], cwd: string): string {
 }
 
 function safeTimestamp(): string {
-  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  return new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
 }
 
 function countCsvDataRows(filePath: string): number {
@@ -160,7 +165,9 @@ function readJsonlWithErrors(filePath: string): { rows: unknown[]; errors: strin
     try {
       rows.push(JSON.parse(trimmed));
     } catch (error) {
-      errors.push(`${filePath}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
+      errors.push(
+        `${filePath}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
   return { rows, errors };
@@ -207,9 +214,13 @@ function buildPaths(input: SecurityScanPrepareInput, pluginDir: string): Securit
   })();
   const scanId = input.scanId || `${commit}_${safeTimestamp()}`;
   if (!/^[A-Za-z0-9._-]{1,160}$/.test(scanId) || scanId.includes("..")) {
-    throw new Error("Security scan id must contain only letters, numbers, dot, underscore, or dash");
+    throw new Error(
+      "Security scan id must contain only letters, numbers, dot, underscore, or dash",
+    );
   }
-  const securityScansDir = path.resolve(input.artifactRoot || path.join(repoRoot, ".cowork", "security-scans", repoName));
+  const securityScansDir = path.resolve(
+    input.artifactRoot || path.join(repoRoot, ".cowork", "security-scans", repoName),
+  );
   const scanDir = path.join(securityScansDir, scanId);
   if (!isPathWithin(securityScansDir, scanDir)) {
     throw new Error(`Security scan directory must stay under artifact root: ${scanDir}`);
@@ -259,16 +270,22 @@ export class SecurityScanOrchestrator {
       throw new Error(`Unsupported security scan mode: ${String(input.mode)}`);
     }
     if (input.mode === "deep_repository" && input.scope) {
-      throw new Error("Deep Security Scan is repository-wide only; use mode=scoped_path for scoped scans");
+      throw new Error(
+        "Deep Security Scan is repository-wide only; use mode=scoped_path for scoped scans",
+      );
     }
     const paths = buildPaths(input, pluginDir);
     const workspaceRoot = input.workspaceRoot ? path.resolve(input.workspaceRoot) : undefined;
     if (workspaceRoot) {
       if (!isPathWithin(workspaceRoot, paths.repoRoot)) {
-        throw new Error(`Security scan repository root must be inside the workspace: ${paths.repoRoot}`);
+        throw new Error(
+          `Security scan repository root must be inside the workspace: ${paths.repoRoot}`,
+        );
       }
       if (!isPathWithin(workspaceRoot, paths.securityScansDir)) {
-        throw new Error(`Security scan artifact root must be inside the workspace: ${paths.securityScansDir}`);
+        throw new Error(
+          `Security scan artifact root must be inside the workspace: ${paths.securityScansDir}`,
+        );
       }
     }
     if (!fs.existsSync(paths.repoRoot) || !fs.statSync(paths.repoRoot).isDirectory()) {
@@ -324,7 +341,9 @@ export class SecurityScanOrchestrator {
           throw new Error("Scoped-path security scans require scope");
         }
         if (path.isAbsolute(input.scope) || input.scope.split(/[\\/]+/).includes("..")) {
-          throw new Error("Scoped-path security scan scope must be a relative path inside the repository");
+          throw new Error(
+            "Scoped-path security scan scope must be a relative path inside the repository",
+          );
         }
         args.push("--scope", input.scope);
       }
@@ -374,7 +393,11 @@ export class SecurityScanOrchestrator {
       throw new Error("Deep Security Scan round must be an integer from 1 to 10");
     }
     const artifactsDir = path.join(path.resolve(scanDir), "artifacts");
-    const roundDir = path.join(artifactsDir, "deep_discovery", `round-${String(round).padStart(2, "0")}`);
+    const roundDir = path.join(
+      artifactsDir,
+      "deep_discovery",
+      `round-${String(round).padStart(2, "0")}`,
+    );
     const dirs: string[] = [];
     for (let i = 1; i <= workerCount; i++) {
       const workerDir = path.join(roundDir, `worker-${String(i).padStart(2, "0")}`);
@@ -401,7 +424,8 @@ export class SecurityScanOrchestrator {
       if (!fs.existsSync(path.join(resolved, file))) continue;
       parseErrors.push(...readJsonlWithErrors(path.join(resolved, file)).errors);
     }
-    const candidateRows = readJsonlWithErrors(path.join(resolved, "deduped_candidates.jsonl")).rows.length;
+    const candidateRows = readJsonlWithErrors(path.join(resolved, "deduped_candidates.jsonl")).rows
+      .length;
     return {
       usable: missing.length === 0 && parseErrors.length === 0,
       workerDir: resolved,
@@ -426,7 +450,8 @@ export class SecurityScanOrchestrator {
     const previousKeys = new Set(readJsonlStrict(canonicalInventoryJsonl).map(stableCandidateKey));
 
     const workerDirs = fs.existsSync(roundDir)
-      ? fs.readdirSync(roundDir)
+      ? fs
+          .readdirSync(roundDir)
           .filter((entry) => entry.startsWith("worker-"))
           .map((entry) => path.join(roundDir, entry))
           .filter((entry) => fs.statSync(entry).isDirectory())
@@ -442,7 +467,9 @@ export class SecurityScanOrchestrator {
       const workerId = path.basename(workerDir);
       for (const candidate of readJsonlStrict(path.join(workerDir, "deduped_candidates.jsonl"))) {
         merged.push({
-          ...(candidate && typeof candidate === "object" ? candidate as Record<string, unknown> : { value: candidate }),
+          ...(candidate && typeof candidate === "object"
+            ? (candidate as Record<string, unknown>)
+            : { value: candidate }),
           _deep_scan_provenance: {
             round: roundName,
             worker: workerId,
@@ -458,7 +485,7 @@ export class SecurityScanOrchestrator {
     }
 
     const seen = new Set<string>();
-    const canonical = [...readJsonlStrict(canonicalInventoryJsonl) as Record<string, unknown>[]];
+    const canonical = [...(readJsonlStrict(canonicalInventoryJsonl) as Record<string, unknown>[])];
     let newExactKeyCount = 0;
     for (const candidate of merged) {
       const key = stableCandidateKey(candidate);
@@ -472,7 +499,10 @@ export class SecurityScanOrchestrator {
 
     const inventoryJsonl = path.join(mergeDir, `${roundName}_candidate_inventory.jsonl`);
     const inventoryMarkdown = path.join(mergeDir, `${roundName}_candidate_inventory.md`);
-    fs.writeFileSync(inventoryJsonl, merged.map((row) => JSON.stringify(row)).join("\n") + (merged.length ? "\n" : ""));
+    fs.writeFileSync(
+      inventoryJsonl,
+      merged.map((row) => JSON.stringify(row)).join("\n") + (merged.length ? "\n" : ""),
+    );
     fs.writeFileSync(
       canonicalInventoryJsonl,
       canonical.map((row) => JSON.stringify(row)).join("\n") + (canonical.length ? "\n" : ""),
@@ -516,7 +546,11 @@ export class SecurityScanOrchestrator {
     if (!fs.existsSync(reportMd)) {
       throw new Error(`Missing report.md: ${reportMd}`);
     }
-    const validationOutput = runCommand("python3", [validator, "--report-md", reportMd], resolvedScanDir);
+    const validationOutput = runCommand(
+      "python3",
+      [validator, "--report-md", reportMd],
+      resolvedScanDir,
+    );
     const renderOutput = runCommand(
       "python3",
       [

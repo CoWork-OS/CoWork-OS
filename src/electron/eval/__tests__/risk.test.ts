@@ -29,7 +29,10 @@ function toolErrorEvent(tool: string): TaskEvent {
   } as TaskEvent;
 }
 
-function fileEvent(type: "file_created" | "file_modified" | "file_deleted", path: string): TaskEvent {
+function fileEvent(
+  type: "file_created" | "file_modified" | "file_deleted",
+  path: string,
+): TaskEvent {
   return {
     id: `${type}-${path}`,
     taskId: "task-1",
@@ -57,7 +60,7 @@ describe("scoreTaskRisk", () => {
 
   it("returns medium risk at score 3", () => {
     const events: TaskEvent[] = [
-      toolCallEvent("run_command", { command: "git commit -m \"test\"" }),
+      toolCallEvent("run_command", { command: 'git commit -m "test"' }),
       toolErrorEvent("web_fetch"),
       toolErrorEvent("web_fetch"),
       toolErrorEvent("web_fetch"),

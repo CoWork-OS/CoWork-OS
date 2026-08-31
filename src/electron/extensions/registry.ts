@@ -593,18 +593,24 @@ export class PluginRegistry extends EventEmitter {
   ): CustomSkill | null {
     const relativeDir = typeof definition.path === "string" ? definition.path.trim() : "";
     if (!definition.id || !relativeDir || path.isAbsolute(relativeDir)) {
-      logger.warn(`Skipping invalid skill directory definition from ${pluginName}: ${definition.id}`);
+      logger.warn(
+        `Skipping invalid skill directory definition from ${pluginName}: ${definition.id}`,
+      );
       return null;
     }
     if (relativeDir.split(/[\\/]+/).includes("..")) {
-      logger.warn(`Skipping skill directory path with parent traversal from ${pluginName}: ${relativeDir}`);
+      logger.warn(
+        `Skipping skill directory path with parent traversal from ${pluginName}: ${relativeDir}`,
+      );
       return null;
     }
 
     const pluginRoot = path.resolve(pluginPath);
     const skillDir = path.resolve(pluginRoot, relativeDir);
     if (skillDir !== pluginRoot && !skillDir.startsWith(pluginRoot + path.sep)) {
-      logger.warn(`Skipping skill directory outside plugin root from ${pluginName}: ${relativeDir}`);
+      logger.warn(
+        `Skipping skill directory outside plugin root from ${pluginName}: ${relativeDir}`,
+      );
       return null;
     }
 
@@ -656,7 +662,8 @@ export class PluginRegistry extends EventEmitter {
         pluginSource: pluginName,
         routing: {
           useWhen: description,
-          outputs: "Task-specific result plus any artifacts required by the directory-backed skill.",
+          outputs:
+            "Task-specific result plus any artifacts required by the directory-backed skill.",
           successCriteria:
             "Follow the directory-backed skill instructions and satisfy its required artifact and validation contract.",
         },

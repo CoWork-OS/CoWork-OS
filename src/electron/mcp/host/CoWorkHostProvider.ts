@@ -1,7 +1,12 @@
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import path from "path";
-import { ArtifactRepository, TaskEventRepository, TaskRepository, WorkspaceRepository } from "../../database/repositories";
+import {
+  ArtifactRepository,
+  TaskEventRepository,
+  TaskRepository,
+  WorkspaceRepository,
+} from "../../database/repositories";
 import type { MCPResource, MCPResourceReadResult, MCPTool } from "../types";
 
 type ToolDelegate = {
@@ -135,7 +140,11 @@ export class CoWorkHostProvider {
     if (parsed.hostname === "tasks" && pathSegments.length === 2 && pathSegments[1] === "events") {
       return toJsonResource(uri, this.deps.taskEventRepo.findByTaskId(pathSegments[0]));
     }
-    if (parsed.hostname === "tasks" && pathSegments.length === 2 && pathSegments[1] === "artifacts") {
+    if (
+      parsed.hostname === "tasks" &&
+      pathSegments.length === 2 &&
+      pathSegments[1] === "artifacts"
+    ) {
       return toJsonResource(uri, this.deps.artifactRepo.findByTaskId(pathSegments[0]));
     }
 

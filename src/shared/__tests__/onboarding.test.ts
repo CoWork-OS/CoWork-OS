@@ -57,10 +57,16 @@ describe("onboarding profile builders", () => {
     const userSummary = buildOnboardingUserSummary(profile);
     const workspaceSummary = buildOnboardingWorkspaceSummary(profile);
 
-    expect(userSummary).toContain("Biggest drains: Planning and organizing, Switching between client updates.");
-    expect(userSummary).toContain("Top priorities: Automate repetitive tasks, Protecting deep work blocks.");
+    expect(userSummary).toContain(
+      "Biggest drains: Planning and organizing, Switching between client updates.",
+    );
+    expect(userSummary).toContain(
+      "Top priorities: Automate repetitive tasks, Protecting deep work blocks.",
+    );
     expect(userSummary).toContain("Core tools: Gmail, Notion, Google Calendar, GitHub.");
-    expect(userSummary).toContain("Always keep in mind: Push back on vague requests and keep me moving.");
+    expect(userSummary).toContain(
+      "Always keep in mind: Push back on vague requests and keep me moving.",
+    );
 
     expect(workspaceSummary.assistantStyle).toContain("Sharp and efficient");
     expect(workspaceSummary.assistantStyle).toContain("Adapts to the task");
@@ -82,10 +88,16 @@ describe("onboarding profile builders", () => {
     expect(factValues).toContain(
       "Current work context: I run product, write specs, and spend too much time coordinating work.",
     );
-    expect(factValues).toContain("Main priorities: Automate repetitive tasks, Protecting deep work blocks.");
+    expect(factValues).toContain(
+      "Main priorities: Automate repetitive tasks, Protecting deep work blocks.",
+    );
     expect(factValues).toContain("Core tools: Gmail, Notion, Google Calendar, GitHub.");
-    expect(factValues).toContain("Preferred response style: Lead with the answer, then give tradeoffs only when needed.");
-    expect(factValues).toContain("Onboarding guidance: Push back on vague requests and keep me moving.");
+    expect(factValues).toContain(
+      "Preferred response style: Lead with the answer, then give tradeoffs only when needed.",
+    );
+    expect(factValues).toContain(
+      "Onboarding guidance: Push back on vague requests and keep me moving.",
+    );
     expect(factValues).toContain("Memory is enabled for useful recurring context.");
     expect(facts.some((fact) => fact.category === "identity" && fact.pinned)).toBe(true);
     expect(facts.some((fact) => fact.category === "goal" && fact.pinned)).toBe(true);

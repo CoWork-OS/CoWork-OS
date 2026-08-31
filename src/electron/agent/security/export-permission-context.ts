@@ -27,15 +27,18 @@ export function extractDomainFromUrl(value: unknown): string | null {
 }
 
 export function extractUrlFromToolInput(toolInput: unknown): string | null {
-  const obj = toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
+  const obj =
+    toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
   if (!obj) return null;
   if (typeof obj.url === "string" && obj.url.trim().length > 0) return obj.url.trim();
-  if (typeof obj.endpoint === "string" && obj.endpoint.trim().length > 0) return obj.endpoint.trim();
+  if (typeof obj.endpoint === "string" && obj.endpoint.trim().length > 0)
+    return obj.endpoint.trim();
   return null;
 }
 
 export function extractPathFromToolInput(toolInput: unknown): string | null {
-  const obj = toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
+  const obj =
+    toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
   if (!obj) return null;
   for (const key of ["path", "filePath", "targetPath"]) {
     const value = obj[key];
@@ -90,7 +93,9 @@ export function buildUntrustedContentBanner(source: SensitiveSourceRef): string 
 }
 
 export function isUntrustedExternalSource(source: SensitiveSourceRef | null | undefined): boolean {
-  return Boolean(source && (source.trustLevel === "untrusted" || source.sourceKind !== "workspace_native"));
+  return Boolean(
+    source && (source.trustLevel === "untrusted" || source.sourceKind !== "workspace_native"),
+  );
 }
 
 export function buildExportTargetRef(
@@ -99,11 +104,16 @@ export function buildExportTargetRef(
 ): ExportTargetRef | undefined {
   const url = extractUrlFromToolInput(toolInput);
   const domain = extractDomainFromUrl(url);
-  const obj = toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
+  const obj =
+    toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
   const method =
-    typeof obj?.method === "string" && obj.method.trim().length > 0 ? obj.method.trim().toUpperCase() : undefined;
+    typeof obj?.method === "string" && obj.method.trim().length > 0
+      ? obj.method.trim().toUpperCase()
+      : undefined;
   const provider =
-    typeof obj?.provider === "string" && obj.provider.trim().length > 0 ? obj.provider.trim() : undefined;
+    typeof obj?.provider === "string" && obj.provider.trim().length > 0
+      ? obj.provider.trim()
+      : undefined;
   if (!url && !provider) return undefined;
   return {
     toolName,
@@ -137,7 +147,9 @@ export function buildPermissionSecurityContext(args: {
     ...(exportTarget ? { exportTarget } : {}),
     ...(directSource ? { directSource } : {}),
     ...(recentSensitiveSources.length > 0 ? { recentSensitiveSources } : {}),
-    recentUntrustedContentRead: recentSensitiveSources.some((item) => isUntrustedExternalSource(item)),
+    recentUntrustedContentRead: recentSensitiveSources.some((item) =>
+      isUntrustedExternalSource(item),
+    ),
   };
   if (!context.exportTarget && !context.directSource && recentSensitiveSources.length === 0) {
     return undefined;

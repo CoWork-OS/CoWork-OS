@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { promises as fs } from "fs";
 import path from "path";
+import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import { v4 as uuidv4 } from "uuid";
 import {
   CouncilConfig,
@@ -35,7 +36,9 @@ const BLOCKED_SUBDIR_NAMES = [".ssh", ".gnupg", ".aws", ".kube"];
 
 function isSafeFilePath(filePath: string): boolean {
   const resolved = path.resolve(filePath);
-  if (BLOCKED_PATH_PREFIXES.some((prefix) => resolved === prefix || resolved.startsWith(prefix + "/"))) {
+  if (
+    BLOCKED_PATH_PREFIXES.some((prefix) => resolved === prefix || resolved.startsWith(prefix + "/"))
+  ) {
     return false;
   }
   const home = process.env.HOME;
@@ -63,7 +66,9 @@ function normalizeSourceBundle(
   sourceBundle?: Partial<CouncilSourceBundle> | CouncilSourceBundle | null,
 ): CouncilSourceBundle {
   return {
-    files: Array.isArray(sourceBundle?.files) ? sourceBundle.files.filter((item) => !!item?.path) : [],
+    files: Array.isArray(sourceBundle?.files)
+      ? sourceBundle.files.filter((item) => !!item?.path)
+      : [],
     urls: Array.isArray(sourceBundle?.urls) ? sourceBundle.urls.filter((item) => !!item?.url) : [],
     connectors: Array.isArray(sourceBundle?.connectors)
       ? sourceBundle.connectors.filter((item) => !!item?.provider && !!item?.label)
@@ -112,7 +117,10 @@ function clampIndex(value: number, length: number): number {
 }
 
 function isAllOllama(participants: CouncilParticipant[]): boolean {
-  return participants.length > 0 && participants.every((participant) => participant.providerType === "ollama");
+  return (
+    participants.length > 0 &&
+    participants.every((participant) => participant.providerType === "ollama")
+  );
 }
 
 function computeParallelism(
@@ -220,7 +228,9 @@ class CouncilConfigRepository {
     if (!existing) return undefined;
 
     const participants =
-      request.participants !== undefined ? normalizeParticipants(request.participants) : existing.participants;
+      request.participants !== undefined
+        ? normalizeParticipants(request.participants)
+        : existing.participants;
     assertCouncilParticipants(participants);
     const next: CouncilConfig = {
       ...existing,
@@ -234,7 +244,9 @@ class CouncilConfigRepository {
       ...(request.rotatingIdeaSeatIndex !== undefined
         ? { rotatingIdeaSeatIndex: clampIndex(request.rotatingIdeaSeatIndex, participants.length) }
         : {}),
-      ...(request.sourceBundle !== undefined ? { sourceBundle: normalizeSourceBundle(request.sourceBundle) } : {}),
+      ...(request.sourceBundle !== undefined
+        ? { sourceBundle: normalizeSourceBundle(request.sourceBundle) }
+        : {}),
       ...(request.deliveryConfig !== undefined
         ? { deliveryConfig: normalizeDeliveryConfig(request.deliveryConfig) }
         : {}),
@@ -452,7 +464,9 @@ class CouncilMemoRepository {
 
   getLatestForCouncil(councilConfigId: string): CouncilMemo | undefined {
     const row = this.db
-      .prepare("SELECT * FROM council_memos WHERE council_config_id = ? ORDER BY created_at DESC LIMIT 1")
+      .prepare(
+        "SELECT * FROM council_memos WHERE council_config_id = ? ORDER BY created_at DESC LIMIT 1",
+      )
       .get(councilConfigId) as Any;
     return row ? this.mapRow(row) : undefined;
   }
@@ -516,7 +530,9 @@ export class CouncilService {
     if (!trimmed.startsWith(COUNCIL_TRIGGER_PREFIX) || !trimmed.endsWith(COUNCIL_TRIGGER_SUFFIX)) {
       return null;
     }
-    return trimmed.slice(COUNCIL_TRIGGER_PREFIX.length, -COUNCIL_TRIGGER_SUFFIX.length).trim() || null;
+    return (
+      trimmed.slice(COUNCIL_TRIGGER_PREFIX.length, -COUNCIL_TRIGGER_SUFFIX.length).trim() || null
+    );
   }
 
   list(workspaceId: string): CouncilConfig[] {
@@ -582,7 +598,10 @@ export class CouncilService {
     return !!this.configRepo.findByManagedCronJobId(jobId);
   }
 
-  async prepareTaskForTrigger(triggerPrompt: string, workspaceId: string): Promise<{
+  async prepareTaskForTrigger(
+    triggerPrompt: string,
+    workspaceId: string,
+  ): Promise<{
     runId: string;
     title: string;
     prompt: string;
@@ -604,7 +623,10 @@ export class CouncilService {
     }
   }
 
-  private async _prepareTaskForTriggerInner(councilId: string, workspaceId: string): Promise<{
+  private async _prepareTaskForTriggerInner(
+    councilId: string,
+    workspaceId: string,
+  ): Promise<{
     runId: string;
     title: string;
     prompt: string;
@@ -733,7 +755,8 @@ export class CouncilService {
       memoId: memo.id,
     });
 
-    await this.deps.getNotificationService?.()
+    await this.deps
+      .getNotificationService?.()
       ?.add({
         type: status === "failed" ? "warning" : "info",
         title: `R&D Council memo: ${config.name}`,
@@ -762,6 +785,7 @@ export class CouncilService {
       name: `Council: ${config.name}`,
       description: `${COUNCIL_CRON_MARKER_PREFIX}${config.id}${COUNCIL_CRON_MARKER_SUFFIX}`,
       enabled: config.enabled,
+      accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
       schedule: config.schedule,
       workspaceId: config.workspaceId,
       taskPrompt: CouncilService.buildManagedTrigger(config.id),
@@ -777,6 +801,7 @@ export class CouncilService {
         enabled: job.enabled,
         schedule: job.schedule,
         workspaceId: job.workspaceId,
+        accessProfileId: job.accessProfileId,
         taskPrompt: job.taskPrompt,
         taskTitle: job.taskTitle,
         allowUserInput: false,
@@ -836,7 +861,10 @@ export class CouncilService {
       lines.push("Files:");
       let remaining = MAX_TOTAL_SOURCE_BYTES;
       for (const file of sourceBundle.files) {
-        const snippet = await this.readFileSnippet(file.path, Math.min(MAX_SOURCE_BYTES_PER_FILE, remaining));
+        const snippet = await this.readFileSnippet(
+          file.path,
+          Math.min(MAX_SOURCE_BYTES_PER_FILE, remaining),
+        );
         remaining -= snippet.length;
         lines.push(`- ${file.label || path.basename(file.path)} (${file.path})`);
         lines.push(snippet ? `\n\`\`\`\n${snippet}\n\`\`\`` : "  [Could not read a text snippet]");
@@ -880,7 +908,10 @@ export class CouncilService {
       if (!stats.isFile()) return "";
       const buffer = await fs.readFile(filePath);
       const slice = buffer.subarray(0, Math.min(buffer.length, Math.max(0, maxBytes)));
-      const text = slice.toString("utf8").replace(/\u0000/g, "").trim();
+      const text = slice
+        .toString("utf8")
+        .replace(/\u0000/g, "")
+        .trim();
       return text.length > 0 ? text : "";
     } catch {
       return "";

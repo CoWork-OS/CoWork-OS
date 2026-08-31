@@ -311,7 +311,9 @@ export class CrossSignalService {
         if (mention.lastSeenAt < cutoff) state.mentions.delete(key);
       }
       if (state.mentions.size > MAX_MENTIONS_PER_WORKSPACE) {
-        const sorted = [...state.mentions.entries()].sort((a, b) => a[1].lastSeenAt - b[1].lastSeenAt);
+        const sorted = [...state.mentions.entries()].sort(
+          (a, b) => a[1].lastSeenAt - b[1].lastSeenAt,
+        );
         const excess = sorted.slice(0, state.mentions.size - MAX_MENTIONS_PER_WORKSPACE);
         for (const [key] of excess) state.mentions.delete(key);
       }

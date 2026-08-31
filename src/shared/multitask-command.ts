@@ -15,10 +15,7 @@ export interface ParsedMultitaskCommand {
 
 function clampLaneCount(value: number): number {
   if (!Number.isFinite(value)) return MULTITASK_DEFAULT_LANE_COUNT;
-  return Math.max(
-    MULTITASK_MIN_LANE_COUNT,
-    Math.min(MULTITASK_MAX_LANE_COUNT, Math.floor(value)),
-  );
+  return Math.max(MULTITASK_MIN_LANE_COUNT, Math.min(MULTITASK_MAX_LANE_COUNT, Math.floor(value)));
 }
 
 export function parseMultitaskCommand(text: string): ParsedMultitaskCommand {

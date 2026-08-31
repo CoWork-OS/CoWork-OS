@@ -1,9 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
-import type {
-  CoreFailureCluster,
-  ListCoreFailureClustersRequest,
-} from "../../shared/types";
+import type { CoreFailureCluster, ListCoreFailureClustersRequest } from "../../shared/types";
 
 type Any = any;
 
@@ -15,27 +12,29 @@ export class CoreFailureClusterRepository {
       ...input,
       id: input.id || randomUUID(),
     };
-    this.db.prepare(
-      `INSERT OR REPLACE INTO core_failure_clusters (
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO core_failure_clusters (
         id, profile_id, workspace_id, category, fingerprint, root_cause_summary, status,
         recurrence_count, linked_eval_case_id, linked_experiment_id, first_seen_at, last_seen_at, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      cluster.id,
-      cluster.profileId,
-      cluster.workspaceId || null,
-      cluster.category,
-      cluster.fingerprint,
-      cluster.rootCauseSummary,
-      cluster.status,
-      cluster.recurrenceCount,
-      cluster.linkedEvalCaseId || null,
-      cluster.linkedExperimentId || null,
-      cluster.firstSeenAt,
-      cluster.lastSeenAt,
-      cluster.createdAt,
-      cluster.updatedAt,
-    );
+      )
+      .run(
+        cluster.id,
+        cluster.profileId,
+        cluster.workspaceId || null,
+        cluster.category,
+        cluster.fingerprint,
+        cluster.rootCauseSummary,
+        cluster.status,
+        cluster.recurrenceCount,
+        cluster.linkedEvalCaseId || null,
+        cluster.linkedExperimentId || null,
+        cluster.firstSeenAt,
+        cluster.lastSeenAt,
+        cluster.createdAt,
+        cluster.updatedAt,
+      );
     return cluster;
   }
 
@@ -44,14 +43,20 @@ export class CoreFailureClusterRepository {
     return row ? this.mapRow(row) : undefined;
   }
 
-  findByFingerprint(profileId: string, workspaceId: string | undefined, fingerprint: string): CoreFailureCluster | undefined {
-    const row = this.db.prepare(
-      `SELECT * FROM core_failure_clusters
+  findByFingerprint(
+    profileId: string,
+    workspaceId: string | undefined,
+    fingerprint: string,
+  ): CoreFailureCluster | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM core_failure_clusters
        WHERE profile_id = ?
          AND COALESCE(workspace_id, '') = COALESCE(?, '')
          AND fingerprint = ?
        LIMIT 1`,
-    ).get(profileId, workspaceId || null, fingerprint) as Any;
+      )
+      .get(profileId, workspaceId || null, fingerprint) as Any;
     return row ? this.mapRow(row) : undefined;
   }
 
@@ -76,9 +81,9 @@ export class CoreFailureClusterRepository {
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = Math.max(1, Math.min(500, request.limit ?? 100));
-    const rows = this.db.prepare(
-      `SELECT * FROM core_failure_clusters ${where} ORDER BY updated_at DESC LIMIT ?`,
-    ).all(...values, limit) as Any[];
+    const rows = this.db
+      .prepare(`SELECT * FROM core_failure_clusters ${where} ORDER BY updated_at DESC LIMIT ?`)
+      .all(...values, limit) as Any[];
     return rows.map((row) => this.mapRow(row));
   }
 
@@ -109,22 +114,28 @@ export class CoreFailureClusterRepository {
     }
     if (!fields.length) return existing;
     values.push(id);
-    this.db.prepare(`UPDATE core_failure_clusters SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    this.db
+      .prepare(`UPDATE core_failure_clusters SET ${fields.join(", ")} WHERE id = ?`)
+      .run(...values);
     return this.findById(id);
   }
 
   addMember(clusterId: string, failureRecordId: string, createdAt = Date.now()): void {
-    this.db.prepare(
-      `INSERT OR IGNORE INTO core_failure_cluster_members (
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO core_failure_cluster_members (
         cluster_id, failure_record_id, created_at
       ) VALUES (?, ?, ?)`,
-    ).run(clusterId, failureRecordId, createdAt);
+      )
+      .run(clusterId, failureRecordId, createdAt);
   }
 
   listMemberIds(clusterId: string): string[] {
-    const rows = this.db.prepare(
-      "SELECT failure_record_id FROM core_failure_cluster_members WHERE cluster_id = ? ORDER BY created_at ASC",
-    ).all(clusterId) as Any[];
+    const rows = this.db
+      .prepare(
+        "SELECT failure_record_id FROM core_failure_cluster_members WHERE cluster_id = ? ORDER BY created_at ASC",
+      )
+      .all(clusterId) as Any[];
     return rows.map((row) => String(row.failure_record_id));
   }
 

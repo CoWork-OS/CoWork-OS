@@ -123,9 +123,9 @@ describe("SystemTools.normalizeAppleScript", () => {
   it("rejects non-web URL schemes before opening external handlers", async () => {
     const instance = makeSystemTools();
 
-    await expect(instance.openUrl("x-apple.systempreferences:com.apple.preference.security")).rejects.toThrow(
-      "Only http and https URLs are allowed",
-    );
+    await expect(
+      instance.openUrl("x-apple.systempreferences:com.apple.preference.security"),
+    ).rejects.toThrow("Only http and https URLs are allowed");
     expect(shell.openExternal).not.toHaveBeenCalled();
   });
 });
@@ -438,14 +438,8 @@ describe("SystemTools memory feature gating", () => {
       explicitUserRequest: true,
     });
 
-    expect(searchSpy).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ taskId: "task-1" }),
-    );
-    expect(searchSpy).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ taskId: "other-task" }),
-    );
+    expect(searchSpy).toHaveBeenNthCalledWith(1, expect.objectContaining({ taskId: "task-1" }));
+    expect(searchSpy).toHaveBeenNthCalledWith(2, expect.objectContaining({ taskId: "other-task" }));
   });
 
   it("loads existing topic snippets by default when refresh is omitted", async () => {
@@ -489,18 +483,16 @@ describe("SystemTools memory feature gating", () => {
     const loadSpy = vi
       .spyOn(LayeredMemoryIndexService, "loadRelevantTopicSnippets")
       .mockResolvedValue([] as Any);
-    const refreshSpy = vi
-      .spyOn(LayeredMemoryIndexService, "refreshIndex")
-      .mockResolvedValue({
-        topics: [
-          {
-            title: "Deploy",
-            path: "/tmp/topics/deploy.md",
-            content: "Rebuild the index first.",
-            source: "memory",
-          },
-        ],
-      } as Any);
+    const refreshSpy = vi.spyOn(LayeredMemoryIndexService, "refreshIndex").mockResolvedValue({
+      topics: [
+        {
+          title: "Deploy",
+          path: "/tmp/topics/deploy.md",
+          content: "Rebuild the index first.",
+          source: "memory",
+        },
+      ],
+    } as Any);
     vi.spyOn(LayeredMemoryIndexService, "resolveMemoryIndexPath").mockReturnValue(
       "/tmp/.cowork/memory/index.json",
     );

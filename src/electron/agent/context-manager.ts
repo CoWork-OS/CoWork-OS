@@ -405,11 +405,19 @@ export class ContextManager {
         typeof msg.content === "string"
           ? msg.content
           : Array.isArray(msg.content)
-            ? (msg.content as Array<{ type: string; text?: string; input?: unknown; content?: string }>)
+            ? (
+                msg.content as Array<{
+                  type: string;
+                  text?: string;
+                  input?: unknown;
+                  content?: string;
+                }>
+              )
                 .map((c) => {
                   if (c.type === "text") return c.text || "";
                   if (c.type === "tool_use") return JSON.stringify(c.input || "");
-                  if (c.type === "tool_result") return typeof c.content === "string" ? c.content : "";
+                  if (c.type === "tool_result")
+                    return typeof c.content === "string" ? c.content : "";
                   return "";
                 })
                 .join(" ")
@@ -429,7 +437,14 @@ export class ContextManager {
       typeof msg.content === "string"
         ? msg.content
         : Array.isArray(msg.content)
-          ? (msg.content as Array<{ type: string; text?: string; input?: unknown; content?: string }>)
+          ? (
+              msg.content as Array<{
+                type: string;
+                text?: string;
+                input?: unknown;
+                content?: string;
+              }>
+            )
               .map((c) => {
                 if (c.type === "text") return c.text || "";
                 if (c.type === "tool_use") return JSON.stringify(c.input || "");
@@ -470,9 +485,7 @@ export class ContextManager {
     // Extract file paths from recent messages to identify actively-worked files.
     // Older messages referencing these files should be preserved if budget allows.
     const recentSliceStart = Math.max(1, messages.length - ACTIVE_PATH_CONTEXT_WINDOW);
-    const activeFilePaths = this.extractFilePathsFromMessages(
-      messages.slice(recentSliceStart),
-    );
+    const activeFilePaths = this.extractFilePathsFromMessages(messages.slice(recentSliceStart));
 
     // Prioritize keeping messages that reference active files (from older section).
     // Reserve up to 70% of budget for recency, use remaining for active-file context.

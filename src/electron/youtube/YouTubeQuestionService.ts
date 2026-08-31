@@ -2,6 +2,7 @@ import { extractYouTubeVideoId } from "./url";
 import { YouTubeIngestionService } from "./YouTubeIngestionService";
 import { YouTubeTranscriptStore } from "./YouTubeTranscriptStore";
 import type { YouTubeAskResult, YouTubeSearchHit } from "./types";
+import type { YouTubeIngestionOptions } from "./access";
 
 function formatTimestamp(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -32,6 +33,7 @@ export class YouTubeQuestionService {
   constructor(
     private readonly workspaceId: string,
     private readonly workspacePath: string,
+    private readonly options: YouTubeIngestionOptions = {},
   ) {}
 
   async ensureIngested(input: { url: string; language?: string; force?: boolean }) {
@@ -41,18 +43,14 @@ export class YouTubeQuestionService {
     if (!input.force && existing && YouTubeTranscriptStore.hasSegments(this.workspaceId, videoId)) {
       return { ok: true, video: existing, segments: [], warnings: [] };
     }
-    return new YouTubeIngestionService(this.workspaceId, this.workspacePath).ingest({
+    return new YouTubeIngestionService(this.workspaceId, this.workspacePath, this.options).ingest({
       url: input.url,
       language: input.language,
       force: input.force,
     });
   }
 
-  search(input: {
-    query: string;
-    videoIds?: string[];
-    limit?: number;
-  }): YouTubeSearchHit[] {
+  search(input: { query: string; videoIds?: string[]; limit?: number }): YouTubeSearchHit[] {
     return YouTubeTranscriptStore.search({ ...input, workspaceId: this.workspaceId });
   }
 

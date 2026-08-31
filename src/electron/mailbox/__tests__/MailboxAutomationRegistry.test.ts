@@ -23,13 +23,16 @@ const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
 // Minimal in-memory EventTriggerService-compatible stub
 function makeTriggerService() {
-  const triggers = new Map<string, { id: string; name: string; enabled: boolean; [key: string]: unknown }>();
+  const triggers = new Map<
+    string,
+    { id: string; name: string; enabled: boolean; [key: string]: unknown }
+  >();
   let seq = 0;
   return {
     addTrigger: vi.fn((input: Record<string, unknown>) => {
       const id = `trigger-${++seq}`;
       const trigger = { id, ...input };
-      triggers.set(id, trigger as (typeof triggers extends Map<string, infer V> ? V : never));
+      triggers.set(id, trigger as typeof triggers extends Map<string, infer V> ? V : never);
       return trigger;
     }),
     getTrigger: vi.fn((id: string) => triggers.get(id)),
@@ -64,7 +67,8 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
 
     MailboxAutomationRegistry.configure({
       db,
-      triggerService: triggerService as unknown as import("../../triggers/EventTriggerService").EventTriggerService,
+      triggerService:
+        triggerService as unknown as import("../../triggers/EventTriggerService").EventTriggerService,
       resolveDefaultWorkspaceId: () => "ws-default",
     });
   });
@@ -173,7 +177,9 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
 
     it("returns empty list when no automations exist", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      expect(MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-empty" })).toHaveLength(0);
+      expect(MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-empty" })).toHaveLength(
+        0,
+      );
     });
   });
 

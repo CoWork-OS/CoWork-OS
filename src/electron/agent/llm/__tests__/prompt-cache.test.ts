@@ -44,7 +44,11 @@ const sampleToolSchemaHash = computeToolSchemaHash([
   },
 ]);
 
-function buildStablePrefixHash(systemBlocks: Awaited<ReturnType<typeof ContentBuilder.buildExecutionPrompt>>["stableSystemBlocks"]): string {
+function buildStablePrefixHash(
+  systemBlocks: Awaited<
+    ReturnType<typeof ContentBuilder.buildExecutionPrompt>
+  >["stableSystemBlocks"],
+): string {
   return computeStablePrefixHash({
     providerFamily: "anthropic",
     modelId: "claude-sonnet-4-5",

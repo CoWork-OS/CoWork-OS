@@ -32,7 +32,12 @@ describe("MailboxTools", () => {
       accounts: [{ id: "account-1", provider: "gmail" }],
     });
     const daemon = { logEvent: vi.fn() };
-    const tools = new MailboxTools({ id: "workspace-1" } as Any, daemon as Any, "task-1", {} as Any);
+    const tools = new MailboxTools(
+      { id: "workspace-1" } as Any,
+      daemon as Any,
+      "task-1",
+      {} as Any,
+    );
 
     const result = await tools.executeAction({
       action: "create_compose_frame",

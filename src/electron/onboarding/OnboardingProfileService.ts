@@ -91,7 +91,12 @@ function upsertAutoSection(
   );
 
   if (regex.test(existing)) {
-    return existing.replace(regex, block).replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+    return (
+      existing
+        .replace(regex, block)
+        .replace(/\n{3,}/g, "\n\n")
+        .trimEnd() + "\n"
+    );
   }
 
   const trimmed = existing.trimEnd();
@@ -252,13 +257,9 @@ export class OnboardingProfileService {
         summary.timeDrains.length > 0
           ? `- Biggest time drains: ${summary.timeDrains.join(", ")}`
           : "",
-        summary.priorities.length > 0
-          ? `- Top priorities: ${summary.priorities.join(", ")}`
-          : "",
+        summary.priorities.length > 0 ? `- Top priorities: ${summary.priorities.join(", ")}` : "",
         data.workflowTools.trim() ? `- Core tools: ${data.workflowTools.trim()}` : "",
-        data.additionalGuidance.trim()
-          ? `- Keep in mind: ${data.additionalGuidance.trim()}`
-          : "",
+        data.additionalGuidance.trim() ? `- Keep in mind: ${data.additionalGuidance.trim()}` : "",
       ]
         .filter(Boolean)
         .join("\n"),
@@ -293,14 +294,14 @@ export class OnboardingProfileService {
       ONBOARDING_MEMORY_MARKER,
       "Onboarding Memory",
       [
-        summary.priorities.length > 0
-          ? `- Help first with: ${summary.priorities.join(", ")}.`
-          : "",
+        summary.priorities.length > 0 ? `- Help first with: ${summary.priorities.join(", ")}.` : "",
         summary.timeDrains.length > 0
           ? `- Watch for recurring drag from: ${summary.timeDrains.join(", ")}.`
           : "",
         `- Keep responses ${summary.responseStyle.toLowerCase()}.`,
-        data.additionalGuidance.trim() ? `- Always remember: ${data.additionalGuidance.trim()}.` : "",
+        data.additionalGuidance.trim()
+          ? `- Always remember: ${data.additionalGuidance.trim()}.`
+          : "",
         data.memoryEnabled
           ? "- Memory is allowed for useful recurring context."
           : "- Memory remains off until the user enables it.",

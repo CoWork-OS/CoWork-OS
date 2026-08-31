@@ -42,9 +42,11 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
         onStatusChange?.(slackChannels.some((entry: ChannelData) => entry.status === "connected"));
 
         const nextSelectedId =
-          preferredChannelId && slackChannels.some((entry: ChannelData) => entry.id === preferredChannelId)
+          preferredChannelId &&
+          slackChannels.some((entry: ChannelData) => entry.id === preferredChannelId)
             ? preferredChannelId
-            : selectedChannelId && slackChannels.some((entry: ChannelData) => entry.id === selectedChannelId)
+            : selectedChannelId &&
+                slackChannels.some((entry: ChannelData) => entry.id === selectedChannelId)
               ? selectedChannelId
               : slackChannels[0]?.id || null;
         setSelectedChannelId(nextSelectedId);
@@ -172,7 +174,9 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
         securityMode: mode,
       });
       setChannels((prev) =>
-        prev.map((entry) => (entry.id === selectedChannel.id ? { ...entry, securityMode: mode } : entry)),
+        prev.map((entry) =>
+          entry.id === selectedChannel.id ? { ...entry, securityMode: mode } : entry,
+        ),
       );
     } catch (error) {
       console.error("Failed to update Slack security mode:", error);
@@ -344,7 +348,9 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
                 <div className="user-info">
                   <span className="user-name">{entry.name}</span>
                   {entry.botUsername && <span className="user-username">@{entry.botUsername}</span>}
-                  <span className={`user-status ${entry.status === "connected" ? "allowed" : "pending"}`}>
+                  <span
+                    className={`user-status ${entry.status === "connected" ? "allowed" : "pending"}`}
+                  >
                     {entry.status}
                   </span>
                 </div>
@@ -411,7 +417,9 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
             <h4>Progress Updates</h4>
             <select
               className="settings-select"
-              value={(selectedChannel.config?.progressRelayMode as "minimal" | "curated") || "minimal"}
+              value={
+                (selectedChannel.config?.progressRelayMode as "minimal" | "curated") || "minimal"
+              }
               onChange={(e) =>
                 handleUpdateProgressRelayMode(e.target.value as "minimal" | "curated")
               }
@@ -420,7 +428,8 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
               <option value="curated">Curated middle steps</option>
             </select>
             <p className="settings-description">
-              Curated mode relays short planning and step updates back into Slack while the task is running.
+              Curated mode relays short planning and step updates back into Slack while the task is
+              running.
             </p>
           </div>
 
@@ -435,7 +444,9 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
               {pairingCode && (
                 <div className="pairing-code-display">
                   <span className="pairing-code">{pairingCode}</span>
-                  <p className="settings-hint">Ask the user to send `/pair &lt;code&gt;` in Slack.</p>
+                  <p className="settings-hint">
+                    Ask the user to send `/pair &lt;code&gt;` in Slack.
+                  </p>
                 </div>
               )}
             </div>
@@ -483,8 +494,13 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
           </li>
           <li>Create a new app for each workspace you want CoWork to join.</li>
           <li>Enable Socket Mode and create an app token with `connections:write`.</li>
-          <li>Add `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`, `users:read`, and `files:write` bot scopes.</li>
-          <li>Subscribe to `app_mention` and `message.im`, then install the app to the workspace.</li>
+          <li>
+            Add `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`,
+            `users:read`, and `files:write` bot scopes.
+          </li>
+          <li>
+            Subscribe to `app_mention` and `message.im`, then install the app to the workspace.
+          </li>
         </ol>
       </div>
     </div>

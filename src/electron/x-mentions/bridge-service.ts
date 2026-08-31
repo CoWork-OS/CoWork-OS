@@ -32,10 +32,7 @@ export class XMentionBridgeService {
   private readonly CONFIG_FAILURE_BACKOFF_MS = 30 * 60 * 1000;
   private readonly FAILURE_LOG_REPEAT_EVERY = 5;
 
-  constructor(
-    agentDaemon: AgentDaemon,
-    options: XMentionBridgeServiceOptions = {},
-  ) {
+  constructor(agentDaemon: AgentDaemon, options: XMentionBridgeServiceOptions = {}) {
     this.ingress = initializeHookAgentIngress(agentDaemon, {
       scope: "hooks",
       defaultTempWorkspaceKey: "x-mentions",
@@ -76,9 +73,12 @@ export class XMentionBridgeService {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    this.timer = setTimeout(() => {
-      void this.pollOnce();
-    }, Math.max(0, delayMs));
+    this.timer = setTimeout(
+      () => {
+        void this.pollOnce();
+      },
+      Math.max(0, delayMs),
+    );
   }
 
   private getCurrentPollIntervalMs(): number {
@@ -141,7 +141,9 @@ export class XMentionBridgeService {
 
       const result = await fetchMentionsWithRetry(settings, trigger.fetchCount || 25);
       if (result.jsonFallbackUsed) {
-        throw new Error("bird mentions requires JSON support. Upgrade bird CLI to a newer version.");
+        throw new Error(
+          "bird mentions requires JSON support. Upgrade bird CLI to a newer version.",
+        );
       }
       const mentions = sortMentionsOldestFirst(parseBirdMentions(result.data ?? result.stdout));
 
@@ -153,13 +155,16 @@ export class XMentionBridgeService {
         }
 
         const prompt = buildMentionTaskPrompt(parsed.mention);
-        const created = await this.ingress.createTaskFromAgentAction({
-          name: `X mention from @${parsed.mention.author}`,
-          message: prompt,
-          sessionKey: `xmention:${parsed.mention.tweetId}`,
-        }, {
-          tempWorkspaceKey: `x-${parsed.mention.author}`,
-        });
+        const created = await this.ingress.createTaskFromAgentAction(
+          {
+            name: `X mention from @${parsed.mention.author}`,
+            message: prompt,
+            sessionKey: `xmention:${parsed.mention.tweetId}`,
+          },
+          {
+            tempWorkspaceKey: `x-${parsed.mention.author}`,
+          },
+        );
         this.statusStore.incrementAccepted();
         this.statusStore.setLastTaskId(created.taskId);
       }
@@ -191,7 +196,10 @@ export class XMentionBridgeService {
     this.suppressedFailureLogCount = 0;
   }
 
-  private logPollFailure(failure: ReturnType<typeof classifyXMentionFailure>, nextDelayMs: number): void {
+  private logPollFailure(
+    failure: ReturnType<typeof classifyXMentionFailure>,
+    nextDelayMs: number,
+  ): void {
     const key = `${failure.code}:${failure.message}`;
     const repeated = key === this.lastLoggedFailureKey;
     if (repeated) {

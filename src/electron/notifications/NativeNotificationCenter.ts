@@ -13,9 +13,7 @@ export class NativeNotificationCenter {
   private static instance: NativeNotificationCenter | null = null;
   private activeNotifications = new Map<string, Notification>();
   private notificationOrder: string[] = [];
-  private onClickCallback:
-    | ((notificationId: string, taskId?: string) => void)
-    | null = null;
+  private onClickCallback: ((notificationId: string, taskId?: string) => void) | null = null;
 
   static getInstance(): NativeNotificationCenter {
     if (!NativeNotificationCenter.instance) {
@@ -26,9 +24,7 @@ export class NativeNotificationCenter {
 
   private constructor() {}
 
-  setOnClick(
-    callback: (notificationId: string, taskId?: string) => void,
-  ): void {
+  setOnClick(callback: (notificationId: string, taskId?: string) => void): void {
     this.onClickCallback = callback;
   }
 
@@ -49,9 +45,7 @@ export class NativeNotificationCenter {
 
       const releaseReference = () => {
         this.activeNotifications.delete(notification.id);
-        this.notificationOrder = this.notificationOrder.filter(
-          (id) => id !== notification.id,
-        );
+        this.notificationOrder = this.notificationOrder.filter((id) => id !== notification.id);
       };
       let failureReported = false;
       const reportFailure = () => {
@@ -81,9 +75,7 @@ export class NativeNotificationCenter {
     } catch (error) {
       console.warn("[Notifications] Native notification failed:", error);
       this.activeNotifications.delete(notification.id);
-      this.notificationOrder = this.notificationOrder.filter(
-        (id) => id !== notification.id,
-      );
+      this.notificationOrder = this.notificationOrder.filter((id) => id !== notification.id);
       return false;
     }
   }

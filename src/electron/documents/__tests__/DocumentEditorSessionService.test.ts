@@ -77,7 +77,9 @@ describe("DocumentEditorSessionService", () => {
       { type: "paragraph", text: "Original body." },
     ]);
 
-    const createChildTask = vi.fn().mockResolvedValue({ id: "child-1", title: "Edit proposal.pdf" });
+    const createChildTask = vi
+      .fn()
+      .mockResolvedValue({ id: "child-1", title: "Edit proposal.pdf" });
     const createTask = vi.fn();
     const service = new DocumentEditorSessionService(
       { findAll: () => [makeWorkspace(dir)] } as Any,

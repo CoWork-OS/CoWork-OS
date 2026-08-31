@@ -342,7 +342,7 @@ export class DurableContextService {
         .map((message) => this.prepareMessage(conversationId, message)?.contentHash)
         .filter(Boolean);
       const sourceRows = hashes.length
-        ? db
+        ? (db
             .prepare(
               `SELECT id, seq, created_at
                FROM durable_context_messages
@@ -350,7 +350,11 @@ export class DurableContextService {
                  AND content_hash IN (${hashes.map(() => "?").join(",")})
                ORDER BY seq ASC`,
             )
-            .all(conversationId, ...hashes) as Array<{ id: string; seq: number; created_at: number }>
+            .all(conversationId, ...hashes) as Array<{
+            id: string;
+            seq: number;
+            created_at: number;
+          }>)
         : [];
       const sourceIds = [...new Set(sourceRows.map((row) => row.id))];
       const now = Date.now();
@@ -485,8 +489,8 @@ export class DurableContextService {
          LIMIT ?`,
       )
       .all(params.workspaceId, ...taskValues, like, internalLimit) as Array<
-        Record<string, unknown>
-      >;
+      Record<string, unknown>
+    >;
 
     const messages = db
       .prepare(
@@ -499,8 +503,8 @@ export class DurableContextService {
          LIMIT ?`,
       )
       .all(params.workspaceId, ...taskValues, like, internalLimit) as Array<
-        Record<string, unknown>
-      >;
+      Record<string, unknown>
+    >;
 
     return [
       ...summaries.map((row) => ({
@@ -878,8 +882,8 @@ export class DurableContextService {
            LIMIT ?`,
         )
         .all(ftsQuery, params.workspaceId, ...taskValues, internalLimit) as Array<
-          Record<string, unknown>
-        >;
+        Record<string, unknown>
+      >;
       return rows
         .map((row) => {
           const kind: DurableContextHit["kind"] = row.kind === "summary" ? "summary" : "message";
@@ -891,9 +895,7 @@ export class DurableContextService {
               : Number(row.message_created_at || 0);
           return {
             id: String(row.id),
-            ...(kind === "summary"
-              ? { summaryId: String(row.id) }
-              : { messageId: String(row.id) }),
+            ...(kind === "summary" ? { summaryId: String(row.id) } : { messageId: String(row.id) }),
             kind,
             workspaceId: String(row.workspace_id),
             taskId: String(row.task_id),
@@ -908,7 +910,7 @@ export class DurableContextService {
             ...(kind === "summary" ? { depth: Number(row.depth || 0) } : {}),
             ...(kind === "summary"
               ? { sourceMessageCount: Number(row.source_message_count || 0) }
-            : {}),
+              : {}),
           };
         })
         .filter((hit) => !hit.durableEcho)

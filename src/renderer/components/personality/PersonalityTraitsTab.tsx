@@ -13,7 +13,10 @@ const PRESET_ICONS: Record<string, typeof Briefcase> = {
 
 interface PersonalityTraitsTabProps {
   config: PersonalityConfigV2;
-  presets: Record<string, { name: string; description: string; icon: string; traits: Record<string, number> }>;
+  presets: Record<
+    string,
+    { name: string; description: string; icon: string; traits: Record<string, number> }
+  >;
   onUpdate: (updates: Partial<PersonalityConfigV2>) => void;
   onSave: () => Promise<void>;
   saving: boolean;
@@ -43,18 +46,14 @@ export function PersonalityTraitsTab({
   };
 
   const setTraitIntensity = (id: string, intensity: number) => {
-    const traits = config.traits.map((t) =>
-      t.id === id ? { ...t, intensity } : t,
-    );
+    const traits = config.traits.map((t) => (t.id === id ? { ...t, intensity } : t));
     onUpdate({ traits });
   };
 
   return (
     <div className="personality-traits-tab settings-section">
       <h3>Personality</h3>
-      <p className="settings-description">
-        Quick-start presets and composable trait sliders.
-      </p>
+      <p className="settings-description">Quick-start presets and composable trait sliders.</p>
 
       <div className="preset-quick-start">
         <h4>Quick Start</h4>
@@ -98,9 +97,7 @@ export function PersonalityTraitsTab({
                 min={0}
                 max={100}
                 value={trait.intensity}
-                onChange={(e) =>
-                  setTraitIntensity(trait.id, parseInt(e.target.value, 10))
-                }
+                onChange={(e) => setTraitIntensity(trait.id, parseInt(e.target.value, 10))}
                 onMouseUp={onSave}
                 onTouchEnd={onSave}
               />

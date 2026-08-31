@@ -225,6 +225,24 @@
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/blogwatcher.json"
     },
     {
+      "id": "box",
+      "name": "Box",
+      "description": "Use Box's hosted MCP server to search, read, analyze, and manage Box content with Box AI and Hubs.",
+      "version": "1.0.0",
+      "author": "CoWork OS",
+      "tags": [
+        "box",
+        "mcp",
+        "box-ai",
+        "hubs",
+        "files"
+      ],
+      "icon": "📦",
+      "category": "Tools",
+      "updatedAt": "2026-08-29",
+      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/box.json"
+    },
+    {
       "id": "usecase-booking-options",
       "name": "Booking Options",
       "description": "Find booking openings in a time window, cross-check calendar, propose 3 options. Stops before booking.",

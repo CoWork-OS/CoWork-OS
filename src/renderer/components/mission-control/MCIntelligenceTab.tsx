@@ -5,7 +5,11 @@ interface MCIntelligenceTabProps {
   data: MissionControlData;
 }
 
-const INTELLIGENCE_GROUPS: Array<{ category: MissionControlCategory; title: string; empty: string }> = [
+const INTELLIGENCE_GROUPS: Array<{
+  category: MissionControlCategory;
+  title: string;
+  empty: string;
+}> = [
   { category: "learnings", title: "Learnings", empty: "No grouped learnings yet." },
   { category: "awareness", title: "Awareness", empty: "No awareness clusters yet." },
   { category: "reviews", title: "Reviews", empty: "No review decisions yet." },
@@ -22,7 +26,9 @@ function IntelligenceItem({
     <article className="mc-v2-intelligence-row">
       <div className="mc-v2-intelligence-row-main">
         <div className="mc-v2-brief-item-top">
-          <span className={`mc-v2-status-pill ${item.severity === "failed" ? "danger" : item.severity === "action_needed" ? "attention" : item.severity === "successful" ? "healthy" : ""}`}>
+          <span
+            className={`mc-v2-status-pill ${item.severity === "failed" ? "danger" : item.severity === "action_needed" ? "attention" : item.severity === "successful" ? "healthy" : ""}`}
+          >
             {item.severity.replace(/_/g, " ")}
           </span>
           <span className="mc-v2-feed-time">{formatRelativeTime(item.timestamp)}</span>
@@ -62,7 +68,9 @@ export function MCIntelligenceTab({ data }: MCIntelligenceTabProps) {
 
       <div className="mc-v2-intelligence-grid">
         {INTELLIGENCE_GROUPS.map((group) => {
-          const items = missionControlItems.filter((item) => item.category === group.category).slice(0, 12);
+          const items = missionControlItems
+            .filter((item) => item.category === group.category)
+            .slice(0, 12);
           return (
             <section key={group.category} className="mc-v2-intelligence-section">
               <div className="mc-v2-brief-section-header">
@@ -74,7 +82,11 @@ export function MCIntelligenceTab({ data }: MCIntelligenceTabProps) {
               ) : (
                 <div className="mc-v2-intelligence-list">
                   {items.map((item) => (
-                    <IntelligenceItem key={item.id} item={item} formatRelativeTime={formatRelativeTime} />
+                    <IntelligenceItem
+                      key={item.id}
+                      item={item}
+                      formatRelativeTime={formatRelativeTime}
+                    />
                   ))}
                 </div>
               )}

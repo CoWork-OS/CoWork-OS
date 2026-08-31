@@ -44,6 +44,7 @@ export interface SkillProposalCreateInput {
 const PROPOSALS_ROOT = path.join(".cowork", "skills", "proposals");
 const PROPOSAL_VERSION = 1;
 const REJECTED_DUPLICATE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const SAFE_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 function nowMs(): number {
   return Date.now();
@@ -78,10 +79,14 @@ function proposalSignature(input: {
 }): string {
   const canonical = JSON.stringify({
     problemStatement: input.problemStatement.trim().toLowerCase(),
-    requiredTools: [...new Set(input.requiredTools.map((tool) => tool.trim().toLowerCase()))].sort(),
+    requiredTools: [
+      ...new Set(input.requiredTools.map((tool) => tool.trim().toLowerCase())),
+    ].sort(),
     draftSkill: {
       id: input.draftSkill.id.trim().toLowerCase(),
-      promptHash: createHash("sha256").update(input.draftSkill.prompt || "").digest("hex"),
+      promptHash: createHash("sha256")
+        .update(input.draftSkill.prompt || "")
+        .digest("hex"),
     },
   });
   return createHash("sha256").update(canonical).digest("hex");
@@ -98,7 +103,12 @@ export class SkillProposalService {
     await fs.mkdir(this.proposalsDir, { recursive: true });
   }
 
+  private isSafeRecordId(id: string): boolean {
+    return SAFE_RECORD_ID.test(id);
+  }
+
   private proposalPath(id: string): string {
+    if (!this.isSafeRecordId(id)) throw new Error("Invalid skill proposal id");
     return path.join(this.proposalsDir, `${id}.json`);
   }
 
@@ -140,8 +150,13 @@ export class SkillProposalService {
   }
 
   async list(status: SkillProposalStatus | "all" = "pending"): Promise<SkillProposalRecord[]> {
-    await this.ensureDir();
-    const entries = await fs.readdir(this.proposalsDir);
+    let entries: string[];
+    try {
+      entries = await fs.readdir(this.proposalsDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
     const proposals: SkillProposalRecord[] = [];
 
     for (const entry of entries) {
@@ -158,14 +173,16 @@ export class SkillProposalService {
 
   async get(id: string): Promise<SkillProposalRecord | null> {
     const trimmedId = id.trim();
-    if (!trimmedId) return null;
-    await this.ensureDir();
+    if (!trimmedId || !this.isSafeRecordId(trimmedId)) return null;
     return await this.readProposalFile(this.proposalPath(trimmedId));
   }
 
-  async create(
-    input: SkillProposalCreateInput,
-  ): Promise<{ proposal?: SkillProposalRecord; blocked?: string; duplicateOf?: string; cooldownUntil?: number }> {
+  async create(input: SkillProposalCreateInput): Promise<{
+    proposal?: SkillProposalRecord;
+    blocked?: string;
+    duplicateOf?: string;
+    cooldownUntil?: number;
+  }> {
     const problemStatement = toNonEmptyString(input.problemStatement);
     const riskNote = toNonEmptyString(input.riskNote);
     const evidence = normalizeStringArray(input.evidence);
@@ -175,7 +192,10 @@ export class SkillProposalService {
     if (!problemStatement) {
       return { blocked: "problem_statement is required" };
     }
-    if (!draftSkill.id || !draftSkill.name || !draftSkill.description || !draftSkill.prompt) {
+    if (!draftSkill.id || !this.isSafeRecordId(draftSkill.id)) {
+      return { blocked: "draft_skill.id must contain only letters, numbers, '_' or '-'" };
+    }
+    if (!draftSkill.name || !draftSkill.description || !draftSkill.prompt) {
       return { blocked: "draft_skill must include id, name, description, and prompt" };
     }
 

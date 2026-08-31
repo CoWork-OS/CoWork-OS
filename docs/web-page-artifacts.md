@@ -6,6 +6,13 @@ This page documents the current web artifact concept for generated `.html` / `.h
 
 Web page artifacts are one surface of the broader [Everything Workbench](everything-workbench.md): generated knowledge-work files open in-place, can be reviewed in context, and keep the follow-up composer beside the artifact.
 
+Generated-page reads, writes, attachment access, browser opens, and follow-up
+execution remain subject to the task's [access profile](access-profiles.md).
+The artifact iframe's sandbox protects the preview surface; it is not a second
+access mode and cannot widen the task's filesystem, command-tool, network, or
+domain boundary. Live website work additionally uses the Browser Workbench
+policy described below.
+
 Live website testing uses a related but separate surface: the [Browser Workbench](browser-workbench.md). Prompts such as "go to llmwizard.com and test the application as a normal user" open a visible Browser V2 session in the resizable right sidebar so the agent and user share the same page, responsive viewport state, snapshot refs, diagnostics, and cursor movement. Generated `.html` files remain durable web page artifacts; live URLs use browser automation.
 
 ## Supported Outputs

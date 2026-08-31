@@ -172,17 +172,23 @@ function renderTemplate(template: string, values: Record<string, string>): strin
 }
 
 function getRecord(value: unknown): AnyRecord | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as AnyRecord) : undefined;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as AnyRecord)
+    : undefined;
 }
 
 function normalizeRuntimeMode(value: unknown): "native" | "acpx" | undefined {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   if (normalized === "native" || normalized === "acpx") return normalized;
   return undefined;
 }
 
 function normalizeRuntimeAgent(value: unknown): ExternalRuntimeAgent | undefined {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   if (normalized === "codex" || normalized === "claude") return normalized;
   return undefined;
 }
@@ -240,15 +246,28 @@ export class SymphonyService {
       enabled: Boolean(row.enabled),
       workspaceId: typeof row.workspace_id === "string" ? row.workspace_id : undefined,
       workflowPath: typeof row.workflow_path === "string" ? row.workflow_path : undefined,
-      activeStatuses: parseJson(row.active_statuses as string | null, DEFAULT_CONFIG.activeStatuses),
-      terminalStatuses: parseJson(row.terminal_statuses as string | null, DEFAULT_CONFIG.terminalStatuses),
-      maxConcurrentIssueRuns: Math.max(1, Number(row.max_concurrent_issue_runs) || DEFAULT_CONFIG.maxConcurrentIssueRuns),
-      approvalPreset: (row.approval_preset as AutonomyPolicyPreset) || DEFAULT_CONFIG.approvalPreset,
+      activeStatuses: parseJson(
+        row.active_statuses as string | null,
+        DEFAULT_CONFIG.activeStatuses,
+      ),
+      terminalStatuses: parseJson(
+        row.terminal_statuses as string | null,
+        DEFAULT_CONFIG.terminalStatuses,
+      ),
+      maxConcurrentIssueRuns: Math.max(
+        1,
+        Number(row.max_concurrent_issue_runs) || DEFAULT_CONFIG.maxConcurrentIssueRuns,
+      ),
+      approvalPreset:
+        (row.approval_preset as AutonomyPolicyPreset) || DEFAULT_CONFIG.approvalPreset,
       runtimeMode: row.runtime_mode === "acpx" ? "acpx" : "native",
       runtimeAgent: row.runtime_agent === "claude" ? "claude" : "codex",
       handoffStatus: (row.handoff_status as Issue["status"]) || DEFAULT_CONFIG.handoffStatus,
       maxRetries: Math.max(0, Number(row.max_retries) || DEFAULT_CONFIG.maxRetries),
-      retryBaseDelayMs: Math.max(1000, Number(row.retry_base_delay_ms) || DEFAULT_CONFIG.retryBaseDelayMs),
+      retryBaseDelayMs: Math.max(
+        1000,
+        Number(row.retry_base_delay_ms) || DEFAULT_CONFIG.retryBaseDelayMs,
+      ),
       pollIntervalMs: Math.max(5000, Number(row.poll_interval_ms) || DEFAULT_CONFIG.pollIntervalMs),
       createdAt: Number(row.created_at) || now,
       updatedAt: Number(row.updated_at) || now,
@@ -280,7 +299,9 @@ export class SymphonyService {
       approvalPreset: updates.approvalPreset || existing.approvalPreset,
       runtimeMode: updates.runtimeMode || existing.runtimeMode,
       runtimeAgent:
-        updates.runtimeAgent === null ? undefined : updates.runtimeAgent || existing.runtimeAgent || "codex",
+        updates.runtimeAgent === null
+          ? undefined
+          : updates.runtimeAgent || existing.runtimeAgent || "codex",
       handoffStatus: updates.handoffStatus || existing.handoffStatus,
       maxRetries:
         typeof updates.maxRetries === "number"
@@ -294,7 +315,7 @@ export class SymphonyService {
         typeof updates.pollIntervalMs === "number"
           ? Math.max(5000, Math.round(updates.pollIntervalMs))
           : existing.pollIntervalMs,
-      lastRunAt: updates.lastRunAt === null ? undefined : updates.lastRunAt ?? existing.lastRunAt,
+      lastRunAt: updates.lastRunAt === null ? undefined : (updates.lastRunAt ?? existing.lastRunAt),
       updatedAt: Date.now(),
     };
 
@@ -348,7 +369,9 @@ export class SymphonyService {
       limit: 1000,
     });
     const activeRuns = issues
-      .filter((issue) => issue.activeRunId && getSymphonyMetadata(issue).lastRunId === issue.activeRunId)
+      .filter(
+        (issue) => issue.activeRunId && getSymphonyMetadata(issue).lastRunId === issue.activeRunId,
+      )
       .map((issue) => this.toStatusIssueRef(issue));
     const retryQueue = issues
       .filter((issue) => typeof getSymphonyMetadata(issue).retryDueAt === "number")
@@ -363,7 +386,13 @@ export class SymphonyService {
       .slice(0, 8)
       .map((issue) => this.toStatusIssueRef(issue));
     return {
-      state: this.running ? "running" : workflow.error ? "blocked" : this.lastError ? "error" : "idle",
+      state: this.running
+        ? "running"
+        : workflow.error
+          ? "blocked"
+          : this.lastError
+            ? "error"
+            : "idle",
       config,
       workflow,
       activeRuns,
@@ -634,10 +663,7 @@ export class SymphonyService {
       const taskId = event?.taskId;
       if (!taskId) return;
       const status = event.payload?.status;
-      if (
-        status &&
-        !["completed", "failed", "cancelled", "interrupted"].includes(status)
-      ) {
+      if (status && !["completed", "failed", "cancelled", "interrupted"].includes(status)) {
         return;
       }
       this.handleTerminalTask(taskId);
@@ -714,7 +740,9 @@ export class SymphonyService {
     };
   }
 
-  private resolveWorkspace(config: SymphonyConfig): ReturnType<WorkspaceRepository["findById"]> | undefined {
+  private resolveWorkspace(
+    config: SymphonyConfig,
+  ): ReturnType<WorkspaceRepository["findById"]> | undefined {
     if (config.workspaceId) {
       const configured = this.workspaceRepo.findById(config.workspaceId);
       if (configured) return configured;

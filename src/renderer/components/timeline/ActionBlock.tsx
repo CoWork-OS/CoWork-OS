@@ -55,6 +55,64 @@ function asObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function getToolName(event: TaskEvent): string {
+  const payload = asObject(event.payload);
+  return typeof payload.tool === "string" ? payload.tool.trim() : "";
+}
+
+function getLegacyEventType(event: TaskEvent): string {
+  if (typeof event.legacyType === "string" && event.legacyType.trim()) {
+    return event.legacyType.trim();
+  }
+  const payload = asObject(event.payload);
+  return typeof payload.legacyType === "string" ? payload.legacyType.trim() : "";
+}
+
+function isToolOutcomeEvent(event: TaskEvent): boolean {
+  const effectiveType = getEffectiveTaskEventType(event);
+  if (effectiveType === "tool_result" || effectiveType === "tool_error") return true;
+
+  // Timeline-v2 represents tool errors as timeline_error while retaining the
+  // legacy type. Keep this compatibility path so blocked writes/lookups are
+  // treated as outcomes instead of falling back to attempted tool calls.
+  return event.type === "timeline_error" && getLegacyEventType(event) === "tool_error";
+}
+
+function isSuccessfulToolOutcome(event: TaskEvent): boolean {
+  const effectiveType = getEffectiveTaskEventType(event);
+  if (
+    !isToolOutcomeEvent(event) ||
+    effectiveType === "tool_error" ||
+    getLegacyEventType(event) === "tool_error"
+  ) {
+    return false;
+  }
+
+  const payload = asObject(event.payload);
+  const envelope = asObject(payload.envelope);
+  const envelopeStatus = String(envelope.status || "")
+    .trim()
+    .toLowerCase();
+  if (["error", "failed", "blocked", "cancelled"].includes(envelopeStatus)) return false;
+  if (
+    [event.status, payload.status]
+      .map((value) =>
+        String(value || "")
+          .trim()
+          .toLowerCase(),
+      )
+      .some((value) => ["error", "failed", "blocked", "cancelled"].includes(value))
+  ) {
+    return false;
+  }
+  if (payload.success === false || payload.isError === true || payload.is_error === true) {
+    return false;
+  }
+
+  const result = asObject(payload.result);
+  return result.success !== false && result.blocked !== true && !result.error;
+}
+
 function collectStepActionText(event: TaskEvent): string {
   const payload = asObject(event.payload);
   const step = asObject(payload.step);
@@ -71,7 +129,9 @@ function collectStepActionText(event: TaskEvent): string {
 }
 
 function isGenerativeStepText(text: string): boolean {
-  return /\b(generate|generating|generated|draft|drafting|compose|composing|synthesize|synthesizing)\b/.test(text);
+  return /\b(generate|generating|generated|draft|drafting|compose|composing|synthesize|synthesizing)\b/.test(
+    text,
+  );
 }
 
 /**
@@ -85,7 +145,9 @@ export function buildActionBlockSummary(
   options?: BuildActionBlockSummaryOptions,
 ): ActionBlockSummary {
   const isActive = options?.isActive === true;
-  const toolCounts = new Map<string, number>();
+  const attemptedToolCounts = new Map<string, number>();
+  const successfulToolCounts = new Map<string, number>();
+  const toolOutcomeSeen = new Set<string>();
   let stepCount = 0;
 
   const blockStart = events[0]?.timestamp ?? 0;
@@ -129,39 +191,57 @@ export function buildActionBlockSummary(
 
   for (const event of eventsInRange) {
     const effectiveType = getEffectiveTaskEventType(event);
-    const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
-    const tool = typeof (payload as Record<string, unknown>).tool === "string"
-      ? ((payload as Record<string, unknown>).tool as string)
-      : "";
+    const tool = getToolName(event);
     if (effectiveType === "tool_call" && tool) {
-      toolCounts.set(tool, (toolCounts.get(tool) || 0) + 1);
+      attemptedToolCounts.set(tool, (attemptedToolCounts.get(tool) || 0) + 1);
+    } else if (isToolOutcomeEvent(event) && tool) {
+      toolOutcomeSeen.add(tool);
+      if (isSuccessfulToolOutcome(event)) {
+        successfulToolCounts.set(tool, (successfulToolCounts.get(tool) || 0) + 1);
+      }
     }
   }
 
-  const totalTools = Array.from(toolCounts.values()).reduce((a, b) => a + b, 0);
+  // Active blocks describe work currently being attempted. Completed blocks should
+  // describe effects that actually succeeded; a failed/blocked tool call must not
+  // appear as a completed file write or web lookup. Keep the historical fallback
+  // for old events that only persisted tool_call records and have no outcome event.
+  const summaryToolCounts = new Map<string, number>();
+  const toolNames = new Set([...attemptedToolCounts.keys(), ...successfulToolCounts.keys()]);
+  for (const tool of toolNames) {
+    const attempted = attemptedToolCounts.get(tool) || 0;
+    const successful = successfulToolCounts.get(tool) || 0;
+    summaryToolCounts.set(
+      tool,
+      !isActive && toolOutcomeSeen.has(tool) ? successful : Math.max(attempted, successful),
+    );
+  }
+
+  const totalTools = Array.from(attemptedToolCounts.values()).reduce((a, b) => a + b, 0);
+  const summaryTotalTools = Array.from(summaryToolCounts.values()).reduce((a, b) => a + b, 0);
 
   const parts: string[] = [];
   const readFiles =
-    (toolCounts.get("read_file") || 0) +
-    (toolCounts.get("read_files") || 0) +
-    (toolCounts.get("list_directory") || 0) +
-    (toolCounts.get("glob") || 0);
+    (summaryToolCounts.get("read_file") || 0) +
+    (summaryToolCounts.get("read_files") || 0) +
+    (summaryToolCounts.get("list_directory") || 0) +
+    (summaryToolCounts.get("glob") || 0);
   const searches =
-    (toolCounts.get("grep") || 0) +
-    (toolCounts.get("search_files") || 0) +
-    (toolCounts.get("context_grep") || 0);
-  const createdFiles = toolCounts.get("write_file") || 0;
-  const editedFiles = toolCounts.get("edit_file") || 0;
+    (summaryToolCounts.get("grep") || 0) +
+    (summaryToolCounts.get("search_files") || 0) +
+    (summaryToolCounts.get("context_grep") || 0);
+  const createdFiles = summaryToolCounts.get("write_file") || 0;
+  const editedFiles = summaryToolCounts.get("edit_file") || 0;
   const writes = createdFiles + editedFiles;
   const commands =
-    (toolCounts.get("run_command") || 0) +
-    (toolCounts.get("run_skill") || 0) +
-    (toolCounts.get("execute_code") || 0);
+    (summaryToolCounts.get("run_command") || 0) +
+    (summaryToolCounts.get("run_skill") || 0) +
+    (summaryToolCounts.get("execute_code") || 0);
   const webLookups =
-    (toolCounts.get("web_fetch") || 0) +
-    (toolCounts.get("web_search") || 0) +
-    (toolCounts.get("http_request") || 0) +
-    Array.from(toolCounts.entries()).reduce(
+    (summaryToolCounts.get("web_fetch") || 0) +
+    (summaryToolCounts.get("web_search") || 0) +
+    (summaryToolCounts.get("http_request") || 0) +
+    Array.from(summaryToolCounts.entries()).reduce(
       (sum, [tool, count]) => sum + (isBrowserToolName(tool) ? count : 0),
       0,
     );
@@ -279,16 +359,19 @@ export function buildActionBlockSummary(
       parts.push(`${webLookups} web lookup${webLookups === 1 ? "" : "s"}`);
     }
     if (commands > 0) {
-      parts.push(`${parts.length > 0 ? "ran" : "Ran"} ${commands} command${commands === 1 ? "" : "s"}`);
+      parts.push(
+        `${parts.length > 0 ? "ran" : "Ran"} ${commands} command${commands === 1 ? "" : "s"}`,
+      );
     }
-    if (stepCount > 0 && parts.length === 0) parts.push(`${stepCount} step${stepCount === 1 ? "" : "s"}`);
+    if (stepCount > 0 && parts.length === 0)
+      parts.push(`${stepCount} step${stepCount === 1 ? "" : "s"}`);
   }
 
   const summary =
     parts.length > 0
       ? parts.join(", ")
       : totalTools > 0
-        ? `${totalTools} action${totalTools === 1 ? "" : "s"}`
+        ? `${summaryTotalTools > 0 ? summaryTotalTools : totalTools} action${(summaryTotalTools > 0 ? summaryTotalTools : totalTools) === 1 ? "" : "s"}`
         : `${events.length} step${events.length === 1 ? "" : "s"}`;
 
   // Duration: use full events in range when available for more accurate span (summary mode may have fewer block events)
@@ -306,7 +389,10 @@ export function buildActionBlockSummary(
   const llmUsageEvents =
     allEventsForLookup && allEventsForLookup.length > 0
       ? allEventsForLookup.filter(
-          (e) => e.type === "llm_usage" && (e.timestamp ?? 0) >= blockStart && (e.timestamp ?? 0) <= blockEnd,
+          (e) =>
+            e.type === "llm_usage" &&
+            (e.timestamp ?? 0) >= blockStart &&
+            (e.timestamp ?? 0) <= blockEnd,
         )
       : events.filter((e) => e.type === "llm_usage");
   for (const event of llmUsageEvents) {
@@ -424,72 +510,83 @@ export function ActionBlock({
   }, [isActive, onToggle]);
 
   return (
-    <div className={`action-block timeline-event ${visibleExpanded ? "expanded" : "collapsed"} ${isActive ? "active" : ""}`}>
+    <div
+      className={`action-block timeline-event ${visibleExpanded ? "expanded" : "collapsed"} ${isActive ? "active" : ""}`}
+    >
       <div className="event-indicator action-block-indicator">
-        {showConnectorAbove && <span className="event-connector event-connector-above" aria-hidden="true" />}
+        {showConnectorAbove && (
+          <span className="event-connector event-connector-above" aria-hidden="true" />
+        )}
         <span className="action-block-dot" aria-hidden="true" />
-        {showConnectorBelow && <span className="event-connector event-connector-below" aria-hidden="true" />}
+        {showConnectorBelow && (
+          <span className="event-connector event-connector-below" aria-hidden="true" />
+        )}
       </div>
       <div className="action-block-body event-content">
-      <button
-        type="button"
-        className="action-block-header"
-        onClick={handleToggle}
-        aria-expanded={visibleExpanded}
-        aria-controls={`action-block-content-${blockId}`}
-        id={`action-block-toggle-${blockId}`}
-      >
-        <span className="action-block-chevron" aria-hidden="true">
-          {visibleExpanded ? (
-            <ChevronDown size={14} strokeWidth={2.5} />
-          ) : (
-            <ChevronRight size={14} strokeWidth={2.5} />
-          )}
-        </span>
-        <span className={`action-block-kind-icon kind-${iconKind}`} title={ACTION_BLOCK_ICON_LABELS[iconKind]}>
-          <ActivityIcon size={16} strokeWidth={1.8} aria-hidden="true" />
-        </span>
-        <span className="action-block-summary">{summary}</span>
-        {!visibleExpanded && lastStepLabel && (
-          <span className="action-block-last-step-label" aria-label="Last step">{lastStepLabel}</span>
-        )}
-        <span className="action-block-meta">
-          {stepCount > 0 && (
-            <span className="action-block-count">
-              {stepCount} step{stepCount === 1 ? "" : "s"}
+        <button
+          type="button"
+          className="action-block-header"
+          onClick={handleToggle}
+          aria-expanded={visibleExpanded}
+          aria-controls={`action-block-content-${blockId}`}
+          id={`action-block-toggle-${blockId}`}
+        >
+          <span className="action-block-chevron" aria-hidden="true">
+            {visibleExpanded ? (
+              <ChevronDown size={14} strokeWidth={2.5} />
+            ) : (
+              <ChevronRight size={14} strokeWidth={2.5} />
+            )}
+          </span>
+          <span
+            className={`action-block-kind-icon kind-${iconKind}`}
+            title={ACTION_BLOCK_ICON_LABELS[iconKind]}
+          >
+            <ActivityIcon size={16} strokeWidth={1.8} aria-hidden="true" />
+          </span>
+          <span className="action-block-summary">{summary}</span>
+          {!visibleExpanded && lastStepLabel && (
+            <span className="action-block-last-step-label" aria-label="Last step">
+              {lastStepLabel}
             </span>
           )}
-          {toolCallCount > 0 && (
-            <span className="action-block-count">
-              {stepCount > 0 && <span className="action-block-stats-sep"> · </span>}
-              {toolCallCount} tool call{toolCallCount === 1 ? "" : "s"}
-            </span>
-          )}
-          {(durationMs > 0 || outputTokens > 0) && (
-            <span className="action-block-stats">
-              {(stepCount > 0 || toolCallCount > 0) && (durationMs > 0 || outputTokens > 0) && (
-                <span className="action-block-stats-sep"> · </span>
-              )}
-              {durationMs > 0 && formatDurationMs(durationMs)}
-              {durationMs > 0 && outputTokens > 0 && (
-                <span className="action-block-stats-sep"> · </span>
-              )}
-              {outputTokens > 0 && (
-                <span title="Output tokens">↓ {formatTokenCount(outputTokens)} tokens</span>
-              )}
-            </span>
-          )}
-        </span>
-      </button>
-      <div
-        id={`action-block-content-${blockId}`}
-        className="action-block-content"
-        role="region"
-        aria-labelledby={`action-block-toggle-${blockId}`}
-        hidden={!visibleExpanded}
-      >
-        {visibleExpanded && <div className="action-block-events">{children}</div>}
-      </div>
+          <span className="action-block-meta">
+            {stepCount > 0 && (
+              <span className="action-block-count">
+                {stepCount} step{stepCount === 1 ? "" : "s"}
+              </span>
+            )}
+            {toolCallCount > 0 && (
+              <span className="action-block-count">
+                {stepCount > 0 && <span className="action-block-stats-sep"> · </span>}
+                {toolCallCount} tool call{toolCallCount === 1 ? "" : "s"}
+              </span>
+            )}
+            {(durationMs > 0 || outputTokens > 0) && (
+              <span className="action-block-stats">
+                {(stepCount > 0 || toolCallCount > 0) && (durationMs > 0 || outputTokens > 0) && (
+                  <span className="action-block-stats-sep"> · </span>
+                )}
+                {durationMs > 0 && formatDurationMs(durationMs)}
+                {durationMs > 0 && outputTokens > 0 && (
+                  <span className="action-block-stats-sep"> · </span>
+                )}
+                {outputTokens > 0 && (
+                  <span title="Output tokens">↓ {formatTokenCount(outputTokens)} tokens</span>
+                )}
+              </span>
+            )}
+          </span>
+        </button>
+        <div
+          id={`action-block-content-${blockId}`}
+          className="action-block-content"
+          role="region"
+          aria-labelledby={`action-block-toggle-${blockId}`}
+          hidden={!visibleExpanded}
+        >
+          {visibleExpanded && <div className="action-block-events">{children}</div>}
+        </div>
       </div>
     </div>
   );

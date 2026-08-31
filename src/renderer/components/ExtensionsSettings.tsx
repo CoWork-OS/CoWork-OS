@@ -248,7 +248,9 @@ export function ExtensionsSettings() {
                         {ext.state}
                       </span>
                       <span className="extension-type">{ext.type}</span>
-                      {normalizedAuthor && <span className="extension-author">by {normalizedAuthor}</span>}
+                      {normalizedAuthor && (
+                        <span className="extension-author">by {normalizedAuthor}</span>
+                      )}
                     </div>
                   </div>
                   <div className="extension-actions">

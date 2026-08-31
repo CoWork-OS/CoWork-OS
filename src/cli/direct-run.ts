@@ -42,6 +42,7 @@ import {
 } from "../electron/utils/runtime-mode";
 import { isTerminalTaskStatus } from "../shared/task-status";
 import type { AgentConfig, CliTaskOwnership, Task } from "../shared/types";
+import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
 import { buildTaskTitle } from "./format";
 import { NumbatService } from "../electron/security/numbat";
 import type { AgentSecurityFindingStatus } from "../shared/agent-security";
@@ -149,6 +150,8 @@ interface DirectRunArgs {
   minCost?: number;
   maxCost?: number;
   shellAccess?: boolean;
+  accessProfileId?: AccessProfileId;
+  permissionMode?: AgentConfig["permissionMode"];
   detach?: boolean;
   detachedWorker?: boolean;
   readyFile?: string;
@@ -230,9 +233,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
 
     const workspace = await resolveWorkspace(daemon, args);
-    if (args.shellAccess) {
-      daemon.updateWorkspacePermissions(workspace.id, { shell: true });
-    }
+    // `--shell` is retained as a compatibility alias for old scripts. New
+    // tasks are always governed by an access profile, never by a workspace
+    // shell mutation.
+    const requestedAccessProfileId =
+      args.accessProfileId ||
+      (args.shellAccess ? BUILTIN_ACCESS_PROFILE_IDS.askForApproval : undefined);
     const cliRunId = randomUUID();
     const cliOwnership: CliTaskOwnership = {
       owner: "cowork-run",
@@ -245,7 +251,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       lastSeenAt: Date.now(),
     };
     const agentConfig: AgentConfig = {
-      ...(args.shellAccess ? { shellAccess: true } : {}),
+      ...(requestedAccessProfileId ? { accessProfileId: requestedAccessProfileId } : {}),
+      ...(args.permissionMode ? { permissionMode: args.permissionMode } : {}),
       cli: cliOwnership,
     };
 
@@ -765,6 +772,14 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
         break;
       case "--shell":
         args.shellAccess = true;
+        break;
+      case "--access-profile":
+        args.accessProfileId = (next || "").trim() as AccessProfileId;
+        i++;
+        break;
+      case "--permission-mode":
+        args.permissionMode = (next || "").trim() as AgentConfig["permissionMode"];
+        i++;
         break;
       case "--detach":
         args.detach = true;

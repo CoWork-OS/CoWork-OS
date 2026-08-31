@@ -1,13 +1,6 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-} from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import {
-  Task,
-  Workspace,
-} from "../../../shared/types";
+import { Task, Workspace } from "../../../shared/types";
 import {
   TASK_AUTOMATION_TEMPLATES,
   buildTaskAutomationSchedule,
@@ -105,11 +98,14 @@ export function TaskAutomationModal({
     setOpenMenu(null);
   }, [defaultName, defaultPrompt, task.id]);
 
-  const handleBackdropClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget && !saving) {
-      onClose();
-    }
-  }, [onClose, saving]);
+  const handleBackdropClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (event.target === event.currentTarget && !saving) {
+        onClose();
+      }
+    },
+    [onClose, saving],
+  );
 
   const handleTemplateSelect = useCallback((template: TaskAutomationTemplate) => {
     setName(template.name);
@@ -147,7 +143,19 @@ export function TaskAutomationModal({
     } finally {
       setSaving(false);
     }
-  }, [canSave, deeplink, name, onClose, onCreated, prompt, runMode, selectedSchedule, task, triggerPreset, workspace]);
+  }, [
+    canSave,
+    deeplink,
+    name,
+    onClose,
+    onCreated,
+    prompt,
+    runMode,
+    selectedSchedule,
+    task,
+    triggerPreset,
+    workspace,
+  ]);
 
   const scheduleOptions: TaskRoutineTriggerPreset[] = [
     "manual",
@@ -267,7 +275,9 @@ export function TaskAutomationModal({
                     {runMode === "chat" && <MessageCircle size={16} aria-hidden="true" />}
                     {runMode === "local" && <Folder size={16} aria-hidden="true" />}
                     {runMode === "worktree" && <GitFork size={16} aria-hidden="true" />}
-                    <span>{runMode === "chat" ? "Chat" : runMode === "local" ? "Local" : "Worktree"}</span>
+                    <span>
+                      {runMode === "chat" ? "Chat" : runMode === "local" ? "Local" : "Worktree"}
+                    </span>
                     <ChevronDown size={15} aria-hidden="true" />
                   </button>
                   {openMenu === "run" && (
@@ -329,7 +339,9 @@ export function TaskAutomationModal({
                     className="task-automation-pill-control"
                     aria-haspopup="menu"
                     aria-expanded={openMenu === "schedule"}
-                    onClick={() => setOpenMenu((value) => (value === "schedule" ? null : "schedule"))}
+                    onClick={() =>
+                      setOpenMenu((value) => (value === "schedule" ? null : "schedule"))
+                    }
                     disabled={saving}
                   >
                     <Clock size={16} aria-hidden="true" />

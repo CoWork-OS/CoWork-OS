@@ -120,6 +120,50 @@ describe("TaskExecutor plan parsing", () => {
     ]);
   });
 
+  it("does not route a request for one document section through the full-document pipeline", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "README.md summary";
+    executor.task.rawPrompt =
+      "Read README.md and summarize the first section in three concise bullets. Do not modify any files.";
+    executor.task.userPrompt = executor.task.rawPrompt;
+    executor.task.prompt = executor.task.rawPrompt;
+
+    expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(false);
+  });
+
+  it("merges noun-phrase continuations into the preceding answer-list step", async () => {
+    const executor = createPlanExecutor({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            description: "Read package metadata and answer the request",
+            steps: [
+              { id: "1", description: "Read `package.json` without modifying any files." },
+              { id: "2", description: "Apply the summarize skill to the file." },
+              {
+                id: "3",
+                description:
+                  "Return exactly three concise bullets covering: What the project is; Its version.",
+              },
+              { id: "4", description: "The test command" },
+            ],
+          }),
+        },
+      ],
+    });
+    executor.task.title = "Package summary";
+    executor.task.rawPrompt =
+      "Read package.json and summarize what this project is, its version, and the test command in three bullets. Do not modify files.";
+    executor.task.userPrompt = executor.task.rawPrompt;
+    executor.task.prompt = executor.task.rawPrompt;
+
+    await executor.createPlan();
+
+    expect(executor.plan.steps).toHaveLength(3);
+    expect(executor.plan.steps[2].description).toContain("The test command");
+  });
+
   it("analyzes referenced long documents through bounded independent turns", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-bounded-review-"));
     try {
@@ -981,6 +1025,9 @@ image_generation_contract:
     expect(executor.descriptionIndicatesVerification("Verify: generated image file exists")).toBe(
       true,
     );
+    expect(executor.descriptionIndicatesVerification("Leave `meeting-notes.txt` unchanged.")).toBe(
+      true,
+    );
   });
 
   it("uses compact step-count guidance for plan and advice tasks", () => {
@@ -1371,6 +1418,21 @@ relationship_memory:
     expect(summary).toBe("2 workspace entries: manuscript.docx (file), notes (directory)");
   });
 
+  it("keeps rename destinations in cross-step tool summaries", () => {
+    const executor = createPlanExecutor({ content: [] });
+
+    const summary = executor.summarizeToolResult(
+      "rename_file",
+      { success: true },
+      {
+        oldPath: "inbox/invoice_final_FINAL.txt",
+        newPath: "inbox/Invoices/invoice.txt",
+      },
+    );
+
+    expect(summary).toBe("renamed inbox/invoice_final_FINAL.txt -> inbox/Invoices/invoice.txt");
+  });
+
   it("forces local-model analysis finalization after eight successful tool calls", () => {
     const executor = createPlanExecutor({ content: [] });
     executor.provider = { type: "ollama" };
@@ -1450,6 +1512,52 @@ relationship_memory:
     expect(executor.plan?.steps?.[1]?.description).toContain("output is exactly `hello world`");
     expect(executor.plan?.steps?.[1]?.description).toContain("exit status is `0`");
     expect(executor.plan?.steps?.[1]?.kind).toBe("verification");
+  });
+
+  it("merges noun-phrase calculation fragments into their colon-led JSON plan step", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const steps = [
+      { id: "1", description: "Inspect expenses.csv without modifying it.", kind: "primary" },
+      { id: "2", description: "Use Python to calculate:", kind: "primary" },
+      { id: "3", description: "Overall expense total", kind: "primary" },
+      { id: "4", description: "Totals grouped by category", kind: "primary" },
+      {
+        id: "5",
+        description: "The top single expense, including its relevant details",
+        kind: "primary",
+      },
+      {
+        id: "6",
+        description: "Create summary.md with the calculated results.",
+        kind: "primary",
+      },
+      { id: "7", description: "Verify every number in summary.md.", kind: "verification" },
+    ];
+
+    const descriptions = executor
+      .mergeColonLedPlanFragments(steps)
+      .map((step: Any) => step.description);
+    expect(descriptions).toHaveLength(4);
+    expect(descriptions[1]).toContain("Use Python to calculate:");
+    expect(descriptions[1]).toContain("Overall expense total");
+    expect(descriptions[1]).toContain("Totals grouped by category");
+    expect(descriptions[1]).toContain("The top single expense");
+    expect(descriptions).not.toContain("Overall expense total");
+  });
+
+  it("classifies final confirm-that constraints as verification without reclassifying inspection", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+
+    expect(
+      executor.descriptionIndicatesVerification(
+        "Confirm that only summary.md changed and expenses.csv was untouched.",
+      ),
+    ).toBe(true);
+    expect(
+      executor.descriptionIndicatesVerification(
+        "Confirm the CSV structure and identify the amount and category columns.",
+      ),
+    ).toBe(false);
   });
 
   it("parses JSON plans split across multiple text blocks", async () => {

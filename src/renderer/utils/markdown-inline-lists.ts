@@ -36,10 +36,15 @@ export function normalizeInlineLists(text: string): string {
 export function unwrapMarkdownCodeBlocks(text: string): string {
   let result = text;
   // 1. ```markdown or ```md (case-insensitive) - always unwrap
-  result = result.replace(/^[ \t]*```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n[ \t]*```(?!\w)/gim, "$1");
+  result = result.replace(
+    /^[ \t]*```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n[ \t]*```(?!\w)/gim,
+    "$1",
+  );
   // 2. Plain ``` with content containing # headings - likely a markdown document
-  result = result.replace(/^[ \t]*```(?!\w)\s*\r?\n([\s\S]*?)\r?\n[ \t]*```(?!\w)/gm, (fullMatch, content) =>
-    /\n#{1,6}\s/m.test(content) || /^#{1,6}\s/m.test(content) ? content : fullMatch,
+  result = result.replace(
+    /^[ \t]*```(?!\w)\s*\r?\n([\s\S]*?)\r?\n[ \t]*```(?!\w)/gm,
+    (fullMatch, content) =>
+      /\n#{1,6}\s/m.test(content) || /^#{1,6}\s/m.test(content) ? content : fullMatch,
   );
   return result;
 }

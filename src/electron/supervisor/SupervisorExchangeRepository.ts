@@ -105,28 +105,41 @@ export class SupervisorExchangeRepository {
     if (updates.coordinationChannelId !== undefined) {
       push("coordination_channel_id", updates.coordinationChannelId);
     }
-    if (updates.sourceChannelId !== undefined) push("source_channel_id", updates.sourceChannelId || null);
-    if (updates.sourceMessageId !== undefined) push("source_message_id", updates.sourceMessageId || null);
-    if (updates.sourcePeerUserId !== undefined) push("source_peer_user_id", updates.sourcePeerUserId || null);
-    if (updates.workerAgentRoleId !== undefined) push("worker_agent_role_id", updates.workerAgentRoleId || null);
-    if (updates.supervisorAgentRoleId !== undefined) push("supervisor_agent_role_id", updates.supervisorAgentRoleId || null);
+    if (updates.sourceChannelId !== undefined)
+      push("source_channel_id", updates.sourceChannelId || null);
+    if (updates.sourceMessageId !== undefined)
+      push("source_message_id", updates.sourceMessageId || null);
+    if (updates.sourcePeerUserId !== undefined)
+      push("source_peer_user_id", updates.sourcePeerUserId || null);
+    if (updates.workerAgentRoleId !== undefined)
+      push("worker_agent_role_id", updates.workerAgentRoleId || null);
+    if (updates.supervisorAgentRoleId !== undefined)
+      push("supervisor_agent_role_id", updates.supervisorAgentRoleId || null);
     if (updates.linkedTaskId !== undefined) push("linked_task_id", updates.linkedTaskId || null);
-    if (updates.escalationTarget !== undefined) push("escalation_target", updates.escalationTarget || null);
+    if (updates.escalationTarget !== undefined)
+      push("escalation_target", updates.escalationTarget || null);
     if (updates.status !== undefined) push("status", updates.status);
     if (updates.lastIntent !== undefined) push("last_intent", updates.lastIntent || null);
     if (updates.turnCount !== undefined) push("turn_count", updates.turnCount);
-    if (updates.terminalReason !== undefined) push("terminal_reason", updates.terminalReason || null);
+    if (updates.terminalReason !== undefined)
+      push("terminal_reason", updates.terminalReason || null);
     if (updates.evidenceRefs !== undefined) {
-      push("evidence_refs_json", updates.evidenceRefs ? JSON.stringify(updates.evidenceRefs) : null);
+      push(
+        "evidence_refs_json",
+        updates.evidenceRefs ? JSON.stringify(updates.evidenceRefs) : null,
+      );
     }
-    if (updates.humanResolution !== undefined) push("human_resolution", updates.humanResolution || null);
+    if (updates.humanResolution !== undefined)
+      push("human_resolution", updates.humanResolution || null);
     if (updates.closedAt !== undefined) push("closed_at", updates.closedAt || null);
 
     if (fields.length === 0) return existing;
 
     push("updated_at", Date.now());
     values.push(id);
-    this.db.prepare(`UPDATE supervisor_exchanges SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    this.db
+      .prepare(`UPDATE supervisor_exchanges SET ${fields.join(", ")} WHERE id = ?`)
+      .run(...values);
     return this.findById(id);
   }
 
@@ -137,7 +150,9 @@ export class SupervisorExchangeRepository {
 
   findBySourceMessageId(sourceMessageId: string): SupervisorExchange | undefined {
     const row = this.db
-      .prepare("SELECT * FROM supervisor_exchanges WHERE source_message_id = ? ORDER BY created_at DESC LIMIT 1")
+      .prepare(
+        "SELECT * FROM supervisor_exchanges WHERE source_message_id = ? ORDER BY created_at DESC LIMIT 1",
+      )
       .get(sourceMessageId) as Any;
     return row ? this.mapExchange(row) : undefined;
   }
@@ -215,7 +230,9 @@ export class SupervisorExchangeRepository {
 
   listMessages(exchangeId: string): SupervisorExchangeMessage[] {
     const rows = this.db
-      .prepare("SELECT * FROM supervisor_exchange_messages WHERE exchange_id = ? ORDER BY created_at ASC")
+      .prepare(
+        "SELECT * FROM supervisor_exchange_messages WHERE exchange_id = ? ORDER BY created_at ASC",
+      )
       .all(exchangeId) as Any[];
     return rows.map((row) => this.mapMessage(row));
   }
@@ -243,7 +260,10 @@ export class SupervisorExchangeRepository {
       lastIntent: row.last_intent as SupervisorProtocolIntent | undefined,
       turnCount: Number(row.turn_count || 0),
       terminalReason: row.terminal_reason || undefined,
-      evidenceRefs: safeJsonParse<SupervisorEvidenceRef[] | undefined>(row.evidence_refs_json, undefined),
+      evidenceRefs: safeJsonParse<SupervisorEvidenceRef[] | undefined>(
+        row.evidence_refs_json,
+        undefined,
+      ),
       humanResolution: row.human_resolution || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

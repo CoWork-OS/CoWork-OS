@@ -2,10 +2,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  isResolvedPathInsideRoot,
-  resolveRealPathWithinWorkspace,
-} from "../viewer-path-security";
+import { isResolvedPathInsideRoot, resolveRealPathWithinWorkspace } from "../viewer-path-security";
 
 describe("viewer path security", () => {
   let tempRoot: string;
@@ -48,10 +45,7 @@ describe("viewer path security", () => {
 
   it("treats lexical siblings as outside the resolved workspace root", () => {
     expect(
-      isResolvedPathInsideRoot(
-        path.join(tempRoot, "workspace-sibling", "file.txt"),
-        workspaceRoot,
-      ),
+      isResolvedPathInsideRoot(path.join(tempRoot, "workspace-sibling", "file.txt"), workspaceRoot),
     ).toBe(false);
   });
 });

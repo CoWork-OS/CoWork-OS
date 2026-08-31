@@ -2,6 +2,12 @@
 
 Everyday Agent is an opt-in control, consent, trust, and observability layer over existing CoWork OS execution systems. It does not introduce a separate executor. Work still runs through Managed Agents, task timelines, Browser Workbench, Inbox Agent, Mission Control, Routines, Channels, Devices, memory, and the permission system.
 
+Everyday Agent capability bundles and trust patterns operate beneath the task's
+[access profile](access-profiles.md). Consent, a trusted pattern, or a high-trust
+Everyday Agent setting can reduce interruption for an action already permitted
+by the profile, but cannot expose command tools, widen filesystem or network
+scope, bypass a domain deny, or override a hard guardrail.
+
 ## Product Surface
 
 Open **Everyday Agent** from the sidebar. The surface shows:

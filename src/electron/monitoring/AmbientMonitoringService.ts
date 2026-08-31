@@ -31,7 +31,14 @@ const CANDIDATE_WATCH_DIRS = [
   "docs",
   "config",
 ];
-const ROOT_PROJECT_MARKERS = [".git", ".cowork", "package.json", "pyproject.toml", "Cargo.toml", "go.mod"];
+const ROOT_PROJECT_MARKERS = [
+  ".git",
+  ".cowork",
+  "package.json",
+  "pyproject.toml",
+  "Cargo.toml",
+  "go.mod",
+];
 const BLOCKED_ROOT_PATHS = new Set(
   [
     "/Applications",
@@ -144,8 +151,12 @@ export class AmbientMonitoringService {
         ],
       });
       watcher.on("add", (filePath) => this.handleFileChange(workspace, "file_created", filePath));
-      watcher.on("change", (filePath) => this.handleFileChange(workspace, "file_modified", filePath));
-      watcher.on("unlink", (filePath) => this.handleFileChange(workspace, "file_deleted", filePath));
+      watcher.on("change", (filePath) =>
+        this.handleFileChange(workspace, "file_modified", filePath),
+      );
+      watcher.on("unlink", (filePath) =>
+        this.handleFileChange(workspace, "file_deleted", filePath),
+      );
       watcher.on("error", (error) => {
         this.deps.log?.(
           `[AmbientMonitoring] File watcher disabled for ${workspace.workspacePath}: ${error instanceof Error ? error.message : String(error)}`,
@@ -159,7 +170,9 @@ export class AmbientMonitoringService {
   }
 
   private getMonitoredWorkspaces(): AmbientWorkspaceContext[] {
-    const candidates = this.deps.listWorkspaces().filter((workspace) => this.shouldMonitorWorkspace(workspace));
+    const candidates = this.deps
+      .listWorkspaces()
+      .filter((workspace) => this.shouldMonitorWorkspace(workspace));
     if (candidates.length <= MAX_MONITORED_WORKSPACES) {
       return candidates;
     }
@@ -213,16 +226,16 @@ export class AmbientMonitoringService {
     );
   }
 
-  private resolveWatchTargets(
-    workspacePath: string,
-  ): { paths: string[]; depth: number } | null {
-    const paths = CANDIDATE_WATCH_DIRS.map((entry) => path.join(workspacePath, entry)).filter((entry) => {
-      try {
-        return fs.existsSync(entry);
-      } catch {
-        return false;
-      }
-    });
+  private resolveWatchTargets(workspacePath: string): { paths: string[]; depth: number } | null {
+    const paths = CANDIDATE_WATCH_DIRS.map((entry) => path.join(workspacePath, entry)).filter(
+      (entry) => {
+        try {
+          return fs.existsSync(entry);
+        } catch {
+          return false;
+        }
+      },
+    );
 
     if (paths.length > 0) {
       return {
@@ -373,7 +386,10 @@ export class AmbientMonitoringService {
     const workspaceId = this.deps.getDefaultWorkspaceId();
     if (!workspaceId) return;
 
-    const snapshots = await Promise.all([this.getGoogleCalendarSnapshot(), this.getAppleCalendarSnapshot()]);
+    const snapshots = await Promise.all([
+      this.getGoogleCalendarSnapshot(),
+      this.getAppleCalendarSnapshot(),
+    ]);
     const combined = snapshots.filter(Boolean).join("\n");
     if (!combined) return;
     const fingerprint = createHash("sha1").update(combined).digest("hex");

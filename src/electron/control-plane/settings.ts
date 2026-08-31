@@ -9,9 +9,7 @@ import * as fs from "fs";
 import * as path from "path";
 import crypto from "crypto";
 import type { TailscaleMode } from "../tailscale/settings";
-import {
-  LOCAL_MANAGED_DEVICE_ID,
-} from "../../shared/types";
+import { LOCAL_MANAGED_DEVICE_ID } from "../../shared/types";
 import type {
   ControlPlaneConnectionMode,
   ManagedDevice,

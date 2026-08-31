@@ -31,7 +31,9 @@ describe("TaskExecutor debug mode", () => {
     >;
     expect(stepPayload?.debugPhase).toBe("instrument");
     expect(stepPayload?.ingestUrl).toMatch(
-      new RegExp(`http://127\\.0\\.0\\.1:\\d+/cowork-debug/${encodeURIComponent(DEBUG_TASK_ID)}/ingest\\?token=`),
+      new RegExp(
+        `http://127\\.0\\.0\\.1:\\d+/cowork-debug/${encodeURIComponent(DEBUG_TASK_ID)}/ingest\\?token=`,
+      ),
     );
 
     const ingestUrl = String(stepPayload?.ingestUrl);
@@ -39,7 +41,8 @@ describe("TaskExecutor debug mode", () => {
     const res = await fetch(ingestUrl, { method: "POST", body: "repro: clicked submit" });
     expect(res.status).toBe(204);
     expect(emitted.length).toBeGreaterThan(beforeIngest);
-    const lastEvidence = [...emitted].reverse().find((e) => e.type === "timeline_evidence_attached")?.payload as {
+    const lastEvidence = [...emitted].reverse().find((e) => e.type === "timeline_evidence_attached")
+      ?.payload as {
       message?: string;
       evidenceRefs?: { snippet?: string }[];
     };
@@ -58,7 +61,10 @@ describe("TaskExecutor debug mode", () => {
 
     await (executor as Any).bootstrapDebugRuntimeIfNeeded();
 
-    const calls = (executor.emitEvent as ReturnType<typeof vi.fn>).mock.calls as [string, Record<string, unknown>][];
+    const calls = (executor.emitEvent as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
     const stepPayload = calls.find((c) => c[0] === "timeline_step_started")?.[1];
     const ingestUrl = String(stepPayload?.ingestUrl);
     expect(ingestUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//);

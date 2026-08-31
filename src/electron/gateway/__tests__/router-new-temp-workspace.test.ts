@@ -25,10 +25,7 @@ vi.mock("electron", () => ({
   },
 }));
 
-import {
-  TEMP_WORKSPACE_ID_PREFIX,
-  TEMP_WORKSPACE_ROOT_DIR_NAME,
-} from "../../../shared/types";
+import { TEMP_WORKSPACE_ID_PREFIX, TEMP_WORKSPACE_ROOT_DIR_NAME } from "../../../shared/types";
 import { MessageRouter } from "../router";
 
 function createMockDb() {
@@ -85,9 +82,7 @@ describe("MessageRouter /new temp", () => {
         text: expect.stringContaining("Ready for a new temporary session"),
       }),
     );
-    expect(sendMessage.mock.calls[0]?.[0]?.text).not.toContain(
-      "Workspace:",
-    );
+    expect(sendMessage.mock.calls[0]?.[0]?.text).not.toContain("Workspace:");
   });
 
   it("excludes temp-root workspaces from /workspaces", async () => {

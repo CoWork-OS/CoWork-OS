@@ -1,5 +1,37 @@
-import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, useDeferredValue, memo } from "react";
-import { ChevronDown, ChevronRight, SlidersHorizontal, EyeOff, AppWindow, Bell, HardDrive, Rows3, Search, Server, Workflow, HeartPulse, Lightbulb, Inbox, Users, UsersRound, ListFilter, EllipsisVertical, Shapes, Plus, Sparkles, Repeat2 } from "lucide-react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useCallback,
+  useDeferredValue,
+  memo,
+} from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  SlidersHorizontal,
+  EyeOff,
+  AppWindow,
+  Bell,
+  HardDrive,
+  Rows3,
+  Search,
+  Server,
+  Workflow,
+  HeartPulse,
+  Lightbulb,
+  Inbox,
+  Users,
+  UsersRound,
+  ListFilter,
+  EllipsisVertical,
+  Shapes,
+  Plus,
+  Sparkles,
+  Repeat2,
+} from "lucide-react";
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { Task, Workspace, UiDensity, InfraStatus, UpdateInfo } from "../../shared/types";
@@ -8,6 +40,7 @@ import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
+import { WorkContextStrip } from "./WorkContextStrip";
 
 const SIDEBAR_ITEM_HEIGHT = 22;
 const SIDEBAR_DATE_HEADER_HEIGHT = 20;
@@ -104,7 +137,8 @@ const SESSION_MODE_META: Record<SessionMode, { label: string; shortLabel: string
 
 /** Derive the primary session mode from task metadata */
 export function getSessionMode(task: Task): SessionMode {
-  if (task.agentConfig?.videoGenerationMode || task.agentConfig?.taskDomain === "media") return "video";
+  if (task.agentConfig?.videoGenerationMode || task.agentConfig?.taskDomain === "media")
+    return "video";
   if (task.agentConfig?.multitaskMode) return "multitask";
   if (task.agentConfig?.collaborativeMode) return "collab";
   if (task.agentConfig?.multiLlmMode) return "multi-llm";
@@ -132,8 +166,21 @@ const AWAITING_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set(["paused"
 
 function MacMiniIcon({ className, size = 18 }: { className?: string; size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} stroke="currentColor" style={{ display: 'block' }}>
-      <path d="M 4 6.5 L 20 6.5 Q 21.8 6.5 21.8 8.3 L 21.8 14.1 Q 21.8 15.9 20 15.9 L 4 15.9 Q 2.2 15.9 2.2 14.1 L 2.2 8.3 Q 2.2 6.5 4 6.5 Z" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      stroke="currentColor"
+      style={{ display: "block" }}
+    >
+      <path
+        d="M 4 6.5 L 20 6.5 Q 21.8 6.5 21.8 8.3 L 21.8 14.1 Q 21.8 15.9 20 15.9 L 4 15.9 Q 2.2 15.9 2.2 14.1 L 2.2 8.3 Q 2.2 6.5 4 6.5 Z"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <path d="M 6.5 16.2 Q 12 19.1 17.5 16.2" strokeWidth="1.5" strokeLinecap="round" />
       <circle cx="17.0" cy="11.2" r="1.1" fill="currentColor" stroke="none" />
       <circle cx="19.6" cy="11.2" r="0.55" fill="currentColor" stroke="none" />
@@ -162,7 +209,10 @@ export function compareTasksByPinAndRecency(a: Task, b: Task): number {
   return b.createdAt - a.createdAt;
 }
 
-export function getSidebarDateGroup(task: Pick<Task, "createdAt" | "pinned">, now = new Date()): string {
+export function getSidebarDateGroup(
+  task: Pick<Task, "createdAt" | "pinned">,
+  now = new Date(),
+): string {
   if (task.pinned) return "Pinned";
 
   const date = new Date(task.createdAt);
@@ -256,13 +306,19 @@ const GENERIC_SESSION_TITLES = new Set([
   "untitled task",
 ]);
 
+function stripSidebarTitleEllipsis(value: string): string {
+  return value.replace(/(?:\s*(?:\.{3}|…))+\s*$/, "").trim();
+}
+
 function normalizeSidebarTitleCandidate(value?: string | null): string {
   if (typeof value !== "string") return "";
   const trimmed = value.trim();
   if (!trimmed) return "";
   const userRequestMatch = trimmed.match(/(?:^|\n)User request:\s*([\s\S]+)/i);
-  const candidate = (userRequestMatch?.[1] || trimmed).replace(/\s+/g, " ").trim();
-  return deriveSlashCommandTaskTitle(candidate) || candidate;
+  const candidate = stripSidebarTitleEllipsis(
+    (userRequestMatch?.[1] || trimmed).replace(/\s+/g, " ").trim(),
+  );
+  return stripSidebarTitleEllipsis(deriveSlashCommandTaskTitle(candidate) || candidate);
 }
 
 function isGenericSidebarTitle(value: string): boolean {
@@ -273,7 +329,8 @@ export function getSidebarSessionTitle(node: Pick<TaskTreeNode, "displayTitle" |
   const primaryCandidates = [node.displayTitle, node.task.title];
   for (const candidate of primaryCandidates) {
     const normalized = normalizeSidebarTitleCandidate(candidate);
-    if (normalized && !isGenericSidebarTitle(normalized)) return capitalizeSidebarSessionTitle(normalized);
+    if (normalized && !isGenericSidebarTitle(normalized))
+      return capitalizeSidebarSessionTitle(normalized);
   }
 
   const fallbackCandidates = [
@@ -295,8 +352,6 @@ export function getSidebarSessionTitle(node: Pick<TaskTreeNode, "displayTitle" |
   return "Untitled session";
 }
 
-const SIDEBAR_TITLE_ELLIPSIS = "...";
-
 type TextMeasurer = (value: string) => number;
 
 export function truncateSidebarTitleToFit(
@@ -309,9 +364,6 @@ export function truncateSidebarTitleToFit(
   if (maxWidth <= 0) return normalized;
   if (measureText(normalized) <= maxWidth) return normalized;
 
-  const ellipsisWidth = measureText(SIDEBAR_TITLE_ELLIPSIS);
-  if (ellipsisWidth > maxWidth) return "";
-
   let low = 0;
   let high = normalized.length;
   let best = "";
@@ -319,16 +371,15 @@ export function truncateSidebarTitleToFit(
   while (low <= high) {
     const mid = Math.floor((low + high) / 2);
     const prefix = normalized.slice(0, mid).trimEnd();
-    const candidate = `${prefix}${SIDEBAR_TITLE_ELLIPSIS}`;
-    if (measureText(candidate) <= maxWidth) {
-      best = candidate;
+    if (measureText(prefix) <= maxWidth) {
+      best = prefix;
       low = mid + 1;
     } else {
       high = mid - 1;
     }
   }
 
-  return best || SIDEBAR_TITLE_ELLIPSIS;
+  return best;
 }
 
 let sidebarTitleMeasureCanvas: HTMLCanvasElement | null = null;
@@ -361,12 +412,15 @@ function SidebarWordBoundaryTitle({
   title: string;
 }) {
   const ref = useRef<HTMLSpanElement | null>(null);
-  const [displayText, setDisplayText] = useState(() => text.replace(/\s+/g, " ").trim());
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+  const [displayText, setDisplayText] = useState(normalizedText);
+  const [isTruncated, setIsTruncated] = useState(false);
 
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element || typeof window === "undefined") {
-      setDisplayText(text.replace(/\s+/g, " ").trim());
+      setDisplayText(normalizedText);
+      setIsTruncated(false);
       return;
     }
 
@@ -376,7 +430,8 @@ function SidebarWordBoundaryTitle({
 
       const context = getSidebarTitleMeasureContext();
       if (!context) {
-        setDisplayText(text.replace(/\s+/g, " ").trim());
+        setDisplayText(normalizedText);
+        setIsTruncated(false);
         return;
       }
 
@@ -387,6 +442,7 @@ function SidebarWordBoundaryTitle({
         (candidate) => context.measureText(candidate).width,
       );
       setDisplayText((current) => (current === next ? current : next));
+      setIsTruncated(next !== normalizedText);
     };
 
     update();
@@ -402,7 +458,11 @@ function SidebarWordBoundaryTitle({
   }, [text]);
 
   return (
-    <span ref={ref} className={className} title={title}>
+    <span
+      ref={ref}
+      className={`${className}${isTruncated ? " cli-task-title--faded" : ""}`}
+      title={title}
+    >
       {displayText}
     </span>
   );
@@ -576,7 +636,8 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.hasMoreTasks === next.hasMoreTasks &&
     prev.uiDensity === next.uiDensity &&
     getSidebarTaskListSignature(prev.tasks) === getSidebarTaskListSignature(next.tasks) &&
-    (prev.completionAttentionTaskIds || []).join(",") === (next.completionAttentionTaskIds || []).join(",") &&
+    (prev.completionAttentionTaskIds || []).join(",") ===
+      (next.completionAttentionTaskIds || []).join(",") &&
     prev.updateInfo?.latestVersion === next.updateInfo?.latestVersion &&
     prev.onSelectTask === next.onSelectTask &&
     prev.onTasksChanged === next.onTasksChanged &&
@@ -714,9 +775,7 @@ function SidebarComponent({
 
   const inboxUnreadCount = mailboxDigest?.unreadCount ?? mailboxStatus?.unreadCount ?? 0;
   const inboxNavLabel =
-    inboxUnreadCount > 0
-      ? `Inbox (${inboxUnreadCount > 99 ? "99+" : inboxUnreadCount})`
-      : "Inbox";
+    inboxUnreadCount > 0 ? `Inbox (${inboxUnreadCount > 99 ? "99+" : inboxUnreadCount})` : "Inbox";
   // Build task tree from flat list
   const taskTree = useMemo(() => {
     const childrenMap = new Map<string, Task[]>();
@@ -949,45 +1008,42 @@ function SidebarComponent({
     [effectiveCollapsedTasks, visibleAutomatedTaskTree],
   );
   const automatedRowsExpanded = hasSessionSearch || !automatedFolderCollapsed;
-  const sidebarVirtualRows = useMemo(
-    () => {
-      const rows: SidebarVirtualRow[] = [];
-      if (visibleAutomatedTaskTree.length > 0) {
-        rows.push({
-          kind: "automated-header",
-          id: "automated-header",
-          count: visibleAutomatedTaskTree.length,
-          expanded: automatedRowsExpanded,
-          hasActive: visibleAutomatedTaskTree.some((node) => isActiveSessionStatus(node.task.status)),
-        });
-        if (automatedRowsExpanded) {
-          rows.push(
-            ...automatedTaskRows.map(
-              (row): SidebarVirtualRow => ({ kind: "task", row, section: "automated" }),
-            ),
-          );
-        }
+  const sidebarVirtualRows = useMemo(() => {
+    const rows: SidebarVirtualRow[] = [];
+    if (visibleAutomatedTaskTree.length > 0) {
+      rows.push({
+        kind: "automated-header",
+        id: "automated-header",
+        count: visibleAutomatedTaskTree.length,
+        expanded: automatedRowsExpanded,
+        hasActive: visibleAutomatedTaskTree.some((node) => isActiveSessionStatus(node.task.status)),
+      });
+      if (automatedRowsExpanded) {
+        rows.push(
+          ...automatedTaskRows.map(
+            (row): SidebarVirtualRow => ({ kind: "task", row, section: "automated" }),
+          ),
+        );
       }
-      rows.push(
-        ...buildSidebarVirtualRows(virtualizedTaskRows, {
-          showDateHeaders: uiDensity === "focused",
-        }),
-      );
-      if (hasMoreTasks) {
-        rows.push({ kind: "load-more", id: "load-more", loading: isLoadingMoreTasks });
-      }
-      return rows;
-    },
-    [
-      automatedRowsExpanded,
-      automatedTaskRows,
-      hasMoreTasks,
-      isLoadingMoreTasks,
-      uiDensity,
-      virtualizedTaskRows,
-      visibleAutomatedTaskTree,
-    ],
-  );
+    }
+    rows.push(
+      ...buildSidebarVirtualRows(virtualizedTaskRows, {
+        showDateHeaders: uiDensity === "focused",
+      }),
+    );
+    if (hasMoreTasks) {
+      rows.push({ kind: "load-more", id: "load-more", loading: isLoadingMoreTasks });
+    }
+    return rows;
+  }, [
+    automatedRowsExpanded,
+    automatedTaskRows,
+    hasMoreTasks,
+    isLoadingMoreTasks,
+    uiDensity,
+    virtualizedTaskRows,
+    visibleAutomatedTaskTree,
+  ]);
 
   const useVirtualizedTaskRows = sidebarVirtualRows.length > SIDEBAR_VIRTUALIZATION_MIN_ROWS;
 
@@ -1266,7 +1322,10 @@ function SidebarComponent({
         <>
           <span className="terminal-only">[~]</span>
           <span className="modern-only">
-            <span className="cli-session-indicator cli-session-indicator-active" aria-hidden="true" />
+            <span
+              className="cli-session-indicator cli-session-indicator-active"
+              aria-hidden="true"
+            />
           </span>
         </>
       );
@@ -1293,7 +1352,10 @@ function SidebarComponent({
             <>
               <span className="terminal-only">[ ]</span>
               <span className="modern-only">
-                <span className="cli-session-indicator cli-session-indicator-invisible" aria-hidden="true" />
+                <span
+                  className="cli-session-indicator cli-session-indicator-invisible"
+                  aria-hidden="true"
+                />
               </span>
             </>
           );
@@ -1375,11 +1437,7 @@ function SidebarComponent({
       const Icon = resolveTwinIcon(role.icon);
       return (
         <span title={role.displayName}>
-          <Icon
-            className="cli-subagent-icon"
-            size={14}
-            strokeWidth={2}
-          />
+          <Icon className="cli-subagent-icon" size={14} strokeWidth={2} />
         </span>
       );
     }
@@ -1417,10 +1475,7 @@ function SidebarComponent({
     window.dispatchEvent(new CustomEvent("devices:action", { detail: { action } }));
   }, []);
 
-  const remoteTasks = useMemo(
-    () => tasks.filter((task) => !!task.targetNodeId),
-    [tasks],
-  );
+  const remoteTasks = useMemo(() => tasks.filter((task) => !!task.targetNodeId), [tasks]);
 
   const remoteDeviceIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1587,144 +1642,143 @@ function SidebarComponent({
             "--cli-task-padding-left": depth === 0 ? "12px" : `${4 + depth * 12}px`,
           } as React.CSSProperties
         }
-        title={
-          taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined
-        }
+        title={taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined}
       >
-          {/* Tree connector for sub-agents */}
-          {depth > 0 && <span className="cli-tree-prefix">{treePrefix}</span>}
+        {/* Tree connector for sub-agents */}
+        {depth > 0 && <span className="cli-tree-prefix">{treePrefix}</span>}
 
-          <span className="cli-task-num">
-            {depth === 0 ? String(rootIndex + 1).padStart(2, "0") : "··"}
+        <span className="cli-task-num">
+          {depth === 0 ? String(rootIndex + 1).padStart(2, "0") : "··"}
+        </span>
+
+        {!isAwaitingSession && (
+          <span
+            className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)}`}
+          >
+            {getStatusIndicator(task.status, showCompletionAttention)}
           </span>
+        )}
 
-          {!isAwaitingSession && (
-            <span className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)}`}>
-              {getStatusIndicator(task.status, showCompletionAttention)}
-            </span>
-          )}
+        {task.pinned && (
+          <span className="cli-task-pinned" title="Pinned">
+            📌
+          </span>
+        )}
 
-          {task.pinned && (
-            <span className="cli-task-pinned" title="Pinned">
-              📌
-            </span>
-          )}
+        {/* Lucide icon for sub-agents */}
+        {getSubagentIcon(task)}
 
-          {/* Lucide icon for sub-agents */}
-          {getSubagentIcon(task)}
-
-          {/* Git branch indicator for worktree-isolated tasks */}
-          {task.worktreeBranch && (
-            <span
-              className="cli-task-branch"
-              title={task.worktreeBranch}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                marginRight: "4px",
-                color: "var(--color-accent)",
-                opacity: 0.7,
-                flexShrink: 0,
-              }}
+        {/* Git branch indicator for worktree-isolated tasks */}
+        {task.worktreeBranch && (
+          <span
+            className="cli-task-branch"
+            title={task.worktreeBranch}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              marginRight: "4px",
+              color: "var(--color-accent)",
+              opacity: 0.7,
+              flexShrink: 0,
+            }}
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
             >
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-              >
-                <line x1="6" y1="3" x2="6" y2="15" />
-                <circle cx="18" cy="6" r="3" />
-                <circle cx="6" cy="18" r="3" />
-                <path d="M18 9a9 9 0 0 1-9 9" />
-              </svg>
-            </span>
-          )}
+              <line x1="6" y1="3" x2="6" y2="15" />
+              <circle cx="18" cy="6" r="3" />
+              <circle cx="6" cy="18" r="3" />
+              <path d="M18 9a9 9 0 0 1-9 9" />
+            </svg>
+          </span>
+        )}
 
-          <div className="task-item-content cli-task-content">
-            {renameTaskId === task.id ? (
-              <input
-                ref={renameInputRef}
-                type="text"
-                className="task-item-rename-input cli-rename-input"
-                value={renameValue}
-                onChange={(e) => setRenameValue(e.target.value)}
-                onKeyDown={(e) => handleRenameKeyDown(e, task.id)}
-                onBlur={() => handleRenameSubmit(task.id)}
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <div className={`cli-task-title-row ${isAwaitingSession ? "cli-task-title-row-awaiting" : ""}`}>
-                {isSubAgent && task.assignedAgentRoleId ? (
-                  <span
-                    className="cli-task-title cli-task-title-with-agent cli-task-title-subagent-role"
-                    title={sessionTitle}
-                  >
-                    {(() => {
-                      const role = agentRoles.get(task.assignedAgentRoleId!);
-                      const label = role
-                        ? stripAllEmojis(role.displayName)
-                        : stripAllEmojis(sessionTitle);
-                      return (
-                        <span
-                          className="cli-task-agent-name"
-                          style={role ? { color: role.color } : undefined}
-                        >
-                          {label}
-                        </span>
-                      );
-                    })()}
-                  </span>
-                ) : (
-                  <SidebarWordBoundaryTitle
-                    text={sessionTitle}
-                    className="cli-task-title"
-                    title={sessionTitle}
-                  />
-                )}
-                {isAwaitingSession && (
-                  <span className="cli-task-awaiting-badge">Awaiting response</span>
-                )}
-                {hasChildren && !hasSessionSearch && (
-                  <button
-                    className="cli-collapse-btn cli-collapse-btn-inline"
-                    onClick={(e) => toggleCollapse(e, task.id)}
-                    title={isCollapsed ? "Expand" : "Collapse"}
-                  >
-                    {isCollapsed ? "▸" : "▾"}
-                  </button>
-                )}
-                {!isAwaitingSession && (
-                  <span className="cli-task-time-wrap">
-                    {showCompletionAttention && (
-                      <span className="task-completion-unread-dot" aria-hidden="true" />
-                    )}
-                    {isAutomatedTask && (
+        <div className="task-item-content cli-task-content">
+          {renameTaskId === task.id ? (
+            <input
+              ref={renameInputRef}
+              type="text"
+              className="task-item-rename-input cli-rename-input"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => handleRenameKeyDown(e, task.id)}
+              onBlur={() => handleRenameSubmit(task.id)}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <div
+              className={`cli-task-title-row ${isAwaitingSession ? "cli-task-title-row-awaiting" : ""}`}
+            >
+              {isSubAgent && task.assignedAgentRoleId ? (
+                <span
+                  className="cli-task-title cli-task-title-with-agent cli-task-title-subagent-role"
+                  title={sessionTitle}
+                >
+                  {(() => {
+                    const role = agentRoles.get(task.assignedAgentRoleId!);
+                    const label = role
+                      ? stripAllEmojis(role.displayName)
+                      : stripAllEmojis(sessionTitle);
+                    return (
                       <span
-                        className="cli-task-automation-icon"
-                        title="Automated task"
-                        aria-label="Automated task"
+                        className="cli-task-agent-name"
+                        style={role ? { color: role.color } : undefined}
                       >
-                        <Repeat2 size={13} strokeWidth={2} />
+                        {label}
                       </span>
-                    )}
-                    <span className="cli-task-time" aria-hidden="true">
-                      {formatRelativeShort(task.updatedAt || task.createdAt)}
+                    );
+                  })()}
+                </span>
+              ) : (
+                <SidebarWordBoundaryTitle
+                  text={sessionTitle}
+                  className="cli-task-title"
+                  title={sessionTitle}
+                />
+              )}
+              {isAwaitingSession && (
+                <span className="cli-task-awaiting-badge">Awaiting response</span>
+              )}
+              {hasChildren && !hasSessionSearch && (
+                <button
+                  className="cli-collapse-btn cli-collapse-btn-inline"
+                  onClick={(e) => toggleCollapse(e, task.id)}
+                  title={isCollapsed ? "Expand" : "Collapse"}
+                >
+                  {isCollapsed ? "▸" : "▾"}
+                </button>
+              )}
+              {!isAwaitingSession && (
+                <span className="cli-task-time-wrap">
+                  {showCompletionAttention && (
+                    <span className="task-completion-unread-dot" aria-hidden="true" />
+                  )}
+                  {isAutomatedTask && (
+                    <span
+                      className="cli-task-automation-icon"
+                      title="Automated task"
+                      aria-label="Automated task"
+                    >
+                      <Repeat2 size={13} strokeWidth={2} />
                     </span>
-                    {sessionActions}
+                  )}
+                  <span className="cli-task-time" aria-hidden="true">
+                    {formatRelativeShort(task.updatedAt || task.createdAt)}
                   </span>
-                )}
-                {isAwaitingSession && sessionActions && (
-                  <span className="cli-task-action-wrap">
-                    {sessionActions}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-
+                  {sessionActions}
+                </span>
+              )}
+              {isAwaitingSession && sessionActions && (
+                <span className="cli-task-action-wrap">{sessionActions}</span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -1851,7 +1905,11 @@ function SidebarComponent({
             <span className="cli-btn-text">
               <span className="terminal-only">agents</span>
               <span className="modern-only cli-new-task-modern-label">
-                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: "flex" }}>
+                <span
+                  className="sidebar-home-btn-icon"
+                  aria-hidden="true"
+                  style={{ display: "flex" }}
+                >
                   <UsersRound size={16} strokeWidth={2} style={{ display: "block" }} />
                 </span>
                 <span>Agents</span>
@@ -1872,7 +1930,11 @@ function SidebarComponent({
             <span className="cli-btn-text">
               <span className="terminal-only">devices</span>
               <span className="modern-only cli-new-task-modern-label">
-                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
+                <span
+                  className="sidebar-home-btn-icon"
+                  aria-hidden="true"
+                  style={{ display: "flex" }}
+                >
                   <MacMiniIcon size={16} />
                 </span>
                 <span>Devices</span>
@@ -1891,8 +1953,12 @@ function SidebarComponent({
             <span className="cli-btn-text">
               <span className="terminal-only">inbox</span>
               <span className="modern-only cli-new-task-modern-label">
-                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
-                  <Inbox size={16} strokeWidth={2} style={{ display: 'block' }} />
+                <span
+                  className="sidebar-home-btn-icon"
+                  aria-hidden="true"
+                  style={{ display: "flex" }}
+                >
+                  <Inbox size={16} strokeWidth={2} style={{ display: "block" }} />
                 </span>
                 <span>{inboxNavLabel}</span>
               </span>
@@ -1909,8 +1975,12 @@ function SidebarComponent({
             <span className="cli-btn-text">
               <span className="terminal-only">automation</span>
               <span className="modern-only cli-new-task-modern-label">
-                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
-                  <Workflow size={16} strokeWidth={2} style={{ display: 'block' }} />
+                <span
+                  className="sidebar-home-btn-icon"
+                  aria-hidden="true"
+                  style={{ display: "flex" }}
+                >
+                  <Workflow size={16} strokeWidth={2} style={{ display: "block" }} />
                 </span>
                 <span>Automations</span>
               </span>
@@ -1927,7 +1997,11 @@ function SidebarComponent({
             <span className="cli-btn-text">
               <span className="terminal-only">everyday_agent</span>
               <span className="modern-only cli-new-task-modern-label">
-                <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: "flex" }}>
+                <span
+                  className="sidebar-home-btn-icon"
+                  aria-hidden="true"
+                  style={{ display: "flex" }}
+                >
                   <Sparkles size={16} strokeWidth={2} style={{ display: "block" }} />
                 </span>
                 <span>Everyday</span>
@@ -1945,7 +2019,11 @@ function SidebarComponent({
             <span className="cli-btn-text">
               <span className="terminal-only">more</span>
               <span className="modern-only cli-new-task-modern-label">
-                <span className="sidebar-home-btn-icon sidebar-more-dots" aria-hidden="true" style={{ display: "flex" }}>
+                <span
+                  className="sidebar-home-btn-icon sidebar-more-dots"
+                  aria-hidden="true"
+                  style={{ display: "flex" }}
+                >
                   <Shapes size={16} strokeWidth={2.1} style={{ display: "block" }} />
                 </span>
                 <span>More</span>
@@ -1965,7 +2043,11 @@ function SidebarComponent({
                 <span className="cli-btn-text">
                   <span className="terminal-only">mission_control</span>
                   <span className="modern-only cli-new-task-modern-label">
-                    <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: "flex" }}>
+                    <span
+                      className="sidebar-home-btn-icon"
+                      aria-hidden="true"
+                      style={{ display: "flex" }}
+                    >
                       <Users size={16} strokeWidth={2} style={{ display: "block" }} />
                     </span>
                     <span>Mission Control</span>
@@ -1983,8 +2065,12 @@ function SidebarComponent({
                 <span className="cli-btn-text">
                   <span className="terminal-only">health</span>
                   <span className="modern-only cli-new-task-modern-label">
-                    <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
-                      <HeartPulse size={16} strokeWidth={2} style={{ display: 'block' }} />
+                    <span
+                      className="sidebar-home-btn-icon"
+                      aria-hidden="true"
+                      style={{ display: "flex" }}
+                    >
+                      <HeartPulse size={16} strokeWidth={2} style={{ display: "block" }} />
                     </span>
                     <span>Health</span>
                   </span>
@@ -2001,8 +2087,12 @@ function SidebarComponent({
                 <span className="cli-btn-text">
                   <span className="terminal-only">ideas</span>
                   <span className="modern-only cli-new-task-modern-label">
-                    <span className="sidebar-home-btn-icon" aria-hidden="true" style={{ display: 'flex' }}>
-                      <Lightbulb size={16} strokeWidth={2} style={{ display: 'block' }} />
+                    <span
+                      className="sidebar-home-btn-icon"
+                      aria-hidden="true"
+                      style={{ display: "flex" }}
+                    >
+                      <Lightbulb size={16} strokeWidth={2} style={{ display: "block" }} />
                     </span>
                     <span>Ideas</span>
                   </span>
@@ -2010,7 +2100,6 @@ function SidebarComponent({
               </button>
             </div>
           )}
-
         </div>
       </div>
 
@@ -2018,7 +2107,11 @@ function SidebarComponent({
         <div className="devices-sidebar-panel">
           <div className="devices-sidebar-header">
             <div className="devices-sidebar-home">
-              <button type="button" className="devices-sidebar-home-btn active" onClick={() => navigateDevicesSection("overview")}>
+              <button
+                type="button"
+                className="devices-sidebar-home-btn active"
+                onClick={() => navigateDevicesSection("overview")}
+              >
                 <span className="devices-sidebar-home-icon">
                   <Server size={14} />
                 </span>
@@ -2027,21 +2120,37 @@ function SidebarComponent({
               </button>
             </div>
             <div className="devices-sidebar-grid">
-              <button type="button" className="devices-sidebar-link" onClick={() => triggerDevicesAction("pairing")}>
+              <button
+                type="button"
+                className="devices-sidebar-link"
+                onClick={() => triggerDevicesAction("pairing")}
+              >
                 <Server size={14} />
                 <span>Pair remote</span>
                 <strong>+</strong>
               </button>
-              <button type="button" className="devices-sidebar-link" onClick={() => navigateDevicesSection("alerts")}>
+              <button
+                type="button"
+                className="devices-sidebar-link"
+                onClick={() => navigateDevicesSection("alerts")}
+              >
                 <Bell size={14} />
                 <span>Attention queue</span>
                 <strong>{remoteAttentionCount}</strong>
               </button>
-              <button type="button" className="devices-sidebar-link" onClick={() => navigateDevicesSection("apps")}>
+              <button
+                type="button"
+                className="devices-sidebar-link"
+                onClick={() => navigateDevicesSection("apps")}
+              >
                 <AppWindow size={14} />
                 <span>Setup inbox</span>
               </button>
-              <button type="button" className="devices-sidebar-link" onClick={() => navigateDevicesSection("storage")}>
+              <button
+                type="button"
+                className="devices-sidebar-link"
+                onClick={() => navigateDevicesSection("storage")}
+              >
                 <HardDrive size={14} />
                 <span>Isolation check</span>
               </button>
@@ -2050,177 +2159,218 @@ function SidebarComponent({
 
           <div className="devices-sidebar-subhead">
             <span>Observer</span>
-            <button type="button" className="devices-sidebar-sort" onClick={() => navigateDevicesSection("alerts")}>
+            <button
+              type="button"
+              className="devices-sidebar-sort"
+              onClick={() => navigateDevicesSection("alerts")}
+            >
               Attention {remoteAttentionCount > 0 ? `(${remoteAttentionCount})` : ""}
             </button>
           </div>
 
           <div className="devices-sidebar-list">
-            <button type="button" className="devices-sidebar-item featured" onClick={() => navigateDevicesSection("tasks")}>
+            <button
+              type="button"
+              className="devices-sidebar-item featured"
+              onClick={() => navigateDevicesSection("tasks")}
+            >
               <div className="devices-sidebar-item-top">
                 <Rows3 size={14} />
                 <span className="devices-sidebar-item-label">Execution lane</span>
                 <span className="devices-sidebar-item-dot" />
               </div>
-              <strong>{remoteTasks.length > 0 ? `${remoteTasks.length} remote runs in view` : "No remote runs yet"}</strong>
+              <strong>
+                {remoteTasks.length > 0
+                  ? `${remoteTasks.length} remote runs in view`
+                  : "No remote runs yet"}
+              </strong>
               <span>Use this page to launch and supervise work happening on paired remotes.</span>
             </button>
-            <button type="button" className="devices-sidebar-item" onClick={() => triggerDevicesAction("pairing")}>
+            <button
+              type="button"
+              className="devices-sidebar-item"
+              onClick={() => triggerDevicesAction("pairing")}
+            >
               <div className="devices-sidebar-item-top">
                 <Server size={14} />
                 <span>Fleet shape</span>
               </div>
-              <strong>{remoteDeviceIds.size > 0 ? `${remoteDeviceIds.size} remotes paired or active` : "Start with your first remote"}</strong>
-              <span>Separate work, personal, archive, or automation machines without mixing disks.</span>
+              <strong>
+                {remoteDeviceIds.size > 0
+                  ? `${remoteDeviceIds.size} remotes paired or active`
+                  : "Start with your first remote"}
+              </strong>
+              <span>
+                Separate work, personal, archive, or automation machines without mixing disks.
+              </span>
             </button>
-            <button type="button" className="devices-sidebar-item" onClick={() => navigateDevicesSection("alerts")}>
+            <button
+              type="button"
+              className="devices-sidebar-item"
+              onClick={() => navigateDevicesSection("alerts")}
+            >
               <div className="devices-sidebar-item-top">
                 <Bell size={14} />
                 <span>Observer feed</span>
               </div>
-              <strong>{remoteAttentionCount > 0 ? `${remoteAttentionCount} issues waiting` : "Observer is quiet"}</strong>
+              <strong>
+                {remoteAttentionCount > 0
+                  ? `${remoteAttentionCount} issues waiting`
+                  : "Observer is quiet"}
+              </strong>
               <span>Approvals, failed app connections, and offline remotes surface here.</span>
             </button>
           </div>
         </div>
       ) : (
         <>
+          <WorkContextStrip
+            workspaceId={workspace?.id}
+            refreshKey={`${tasks.length}:${tasks[0]?.updatedAt || 0}`}
+            onSelectTask={onSelectTask}
+          />
           {/* Sessions List Header */}
           <div className="sidebar-header-sessions">
-                <div className="new-task-btn cli-new-task-btn cli-action-btn cli-sessions-header">
+            <div className="new-task-btn cli-new-task-btn cli-action-btn cli-sessions-header">
+              <button
+                type="button"
+                className="cli-list-header-toggle"
+                onClick={() => setSessionsCollapsed((value) => !value)}
+                aria-expanded={!sessionsCollapsed}
+                title={sessionsCollapsed ? "Expand sessions" : "Collapse sessions"}
+              >
+                <span className="cli-section-prompt terminal-only">
+                  {sessionsCollapsed ? "▸" : "▾"}
+                </span>
+                <span className="terminal-only">SESSIONS</span>
+                <span className="modern-only cli-new-task-modern-label">
+                  <span className="sidebar-home-btn-icon cli-sessions-icon" aria-hidden="true">
+                    <SlidersHorizontal size={16} strokeWidth={2} style={{ display: "block" }} />
+                  </span>
+                  <span className="cli-sessions-title">Sessions</span>
+                  <span className="cli-sessions-collapse-indicator" aria-hidden="true">
+                    {sessionsCollapsed ? (
+                      <ChevronRight size={14} strokeWidth={2.5} />
+                    ) : (
+                      <ChevronDown size={14} strokeWidth={2.5} />
+                    )}
+                  </span>
+                </span>
+              </button>
+              <div className="cli-list-header-actions">
+                <button
+                  type="button"
+                  className={`sidebar-session-action ${showSessionSearch ? "active" : ""}`}
+                  onClick={() => {
+                    setSessionsCollapsed(false);
+                    setShowSessionSearch((value) => {
+                      if (value) setSessionSearch("");
+                      return !value;
+                    });
+                  }}
+                  aria-pressed={showSessionSearch}
+                  title={showSessionSearch ? "Hide search" : "Search sessions"}
+                >
+                  <Search size={16} strokeWidth={2} />
+                </button>
+                <button
+                  type="button"
+                  className={`sidebar-session-action ${showSessionFilters ? "active" : ""}`}
+                  onClick={() => {
+                    setSessionsCollapsed(false);
+                    setShowSessionFilters((value) => !value);
+                  }}
+                  aria-pressed={showSessionFilters}
+                  title={showSessionFilters ? "Hide filters" : "Filter sessions"}
+                >
+                  <ListFilter size={16} strokeWidth={2} />
+                </button>
+              </div>
+            </div>
+
+            {(pinActionError || archiveActionError) && (
+              <div
+                className="cli-sidebar-error"
+                role="alert"
+                style={{ marginTop: "4px", marginLeft: "4px", marginRight: "4px" }}
+              >
+                {pinActionError || archiveActionError}
+              </div>
+            )}
+
+            {!sessionsCollapsed && showSessionFilters && (
+              <div className="sidebar-session-filter-panel">
+                <button
+                  type="button"
+                  className={`sidebar-session-filter-option ${showFailedSessions ? "active" : ""}`}
+                  onClick={() => setShowFailedSessions((value) => !value)}
+                  disabled={failedSessionCount === 0}
+                >
+                  <span>Failed</span>
+                  {failedSessionCount > 0 && <span>{failedSessionCount}</span>}
+                </button>
+                <button
+                  type="button"
+                  className={`sidebar-session-filter-option ${showAutomatedSessions ? "active" : ""}`}
+                  onClick={() => {
+                    setShowAutomatedSessions((value) => !value);
+                    setAutomatedFolderCollapsed(false);
+                  }}
+                >
+                  <span>Automated</span>
+                  {automatedTaskTree.length > 0 && <span>{automatedTaskTree.length}</span>}
+                </button>
+              </div>
+            )}
+
+            {!sessionsCollapsed && showSessionSearch && (
+              <label className="sidebar-sessions-search">
+                <Search size={14} />
+                <input
+                  type="search"
+                  aria-label="Search sessions"
+                  placeholder="Search"
+                  value={sessionSearch}
+                  onChange={(event) => setSessionSearch(event.target.value)}
+                />
+              </label>
+            )}
+
+            {showFilterBar && (
+              <div className="session-filters-bar cli-session-filters">
+                <div className="session-filters-scroll">
                   <button
                     type="button"
-                    className="cli-list-header-toggle"
-                    onClick={() => setSessionsCollapsed((value) => !value)}
-                    aria-expanded={!sessionsCollapsed}
-                    title={sessionsCollapsed ? "Expand sessions" : "Collapse sessions"}
+                    className={`session-filter-chip standard ${activeModeFilters.size === 0 ? "active" : ""}`}
+                    onClick={() => setActiveModeFilters(new Set())}
                   >
-                    <span className="cli-section-prompt terminal-only">{sessionsCollapsed ? "▸" : "▾"}</span>
-                    <span className="terminal-only">SESSIONS</span>
-                    <span className="modern-only cli-new-task-modern-label">
-                      <span className="sidebar-home-btn-icon cli-sessions-icon" aria-hidden="true">
-                        <SlidersHorizontal size={16} strokeWidth={2} style={{ display: 'block' }} />
-                      </span>
-                      <span className="cli-sessions-title">Sessions</span>
-                      <span className="cli-sessions-collapse-indicator" aria-hidden="true">
-                        {sessionsCollapsed ? (
-                          <ChevronRight size={14} strokeWidth={2.5} />
-                        ) : (
-                          <ChevronDown size={14} strokeWidth={2.5} />
-                        )}
-                      </span>
-                    </span>
+                    All
                   </button>
-                  <div className="cli-list-header-actions">
+                  {availableModes.map((mode) => (
                     <button
+                      key={mode}
                       type="button"
-                      className={`sidebar-session-action ${showSessionSearch ? "active" : ""}`}
-                      onClick={() => {
-                        setSessionsCollapsed(false);
-                        setShowSessionSearch((value) => {
-                          if (value) setSessionSearch("");
-                          return !value;
-                        });
-                      }}
-                      aria-pressed={showSessionSearch}
-                      title={showSessionSearch ? "Hide search" : "Search sessions"}
+                      className={`session-filter-chip ${mode} ${activeModeFilters.has(mode) ? "active" : ""}`}
+                      onClick={() => toggleModeFilter(mode)}
                     >
-                      <Search size={16} strokeWidth={2} />
+                      <span className="filter-chip-dot" />
+                      {mode}
                     </button>
-                    <button
-                      type="button"
-                      className={`sidebar-session-action ${showSessionFilters ? "active" : ""}`}
-                      onClick={() => {
-                        setSessionsCollapsed(false);
-                        setShowSessionFilters((value) => !value);
-                      }}
-                      aria-pressed={showSessionFilters}
-                      title={showSessionFilters ? "Hide filters" : "Filter sessions"}
-                    >
-                      <ListFilter size={16} strokeWidth={2} />
-                    </button>
-                  </div>
+                  ))}
                 </div>
-
-                {(pinActionError || archiveActionError) && (
-                  <div className="cli-sidebar-error" role="alert" style={{ marginTop: '4px', marginLeft: '4px', marginRight: '4px' }}>
-                    {pinActionError || archiveActionError}
-                  </div>
-                )}
-
-                {!sessionsCollapsed && showSessionFilters && (
-                  <div className="sidebar-session-filter-panel">
-                    <button
-                      type="button"
-                      className={`sidebar-session-filter-option ${showFailedSessions ? "active" : ""}`}
-                      onClick={() => setShowFailedSessions((value) => !value)}
-                      disabled={failedSessionCount === 0}
-                    >
-                      <span>Failed</span>
-                      {failedSessionCount > 0 && <span>{failedSessionCount}</span>}
-                    </button>
-                    <button
-                      type="button"
-                      className={`sidebar-session-filter-option ${showAutomatedSessions ? "active" : ""}`}
-                      onClick={() => {
-                        setShowAutomatedSessions((value) => !value);
-                        setAutomatedFolderCollapsed(false);
-                      }}
-                    >
-                      <span>Automated</span>
-                      {automatedTaskTree.length > 0 && <span>{automatedTaskTree.length}</span>}
-                    </button>
-                  </div>
-                )}
-
-                {!sessionsCollapsed && showSessionSearch && (
-                  <label className="sidebar-sessions-search">
-                    <Search size={14} />
-                    <input
-                      type="search"
-                      aria-label="Search sessions"
-                      placeholder="Search"
-                      value={sessionSearch}
-                      onChange={(event) => setSessionSearch(event.target.value)}
-                    />
-                  </label>
-                )}
-
-                {showFilterBar && (
-                  <div className="session-filters-bar cli-session-filters">
-                    <div className="session-filters-scroll">
-                      <button
-                        type="button"
-                        className={`session-filter-chip standard ${activeModeFilters.size === 0 ? "active" : ""}`}
-                        onClick={() => setActiveModeFilters(new Set())}
-                      >
-                        All
-                      </button>
-                      {availableModes.map((mode) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={`session-filter-chip ${mode} ${activeModeFilters.has(mode) ? "active" : ""}`}
-                          onClick={() => toggleModeFilter(mode)}
-                        >
-                          <span className="filter-chip-dot" />
-                          {mode}
-                        </button>
-                      ))}
-                    </div>
-                    {activeModeFilters.size > 0 && (
-                      <button
-                        type="button"
-                        className="session-filter-clear"
-                        onClick={() => setActiveModeFilters(new Set())}
-                        title="Clear filters"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
+                {activeModeFilters.size > 0 && (
+                  <button
+                    type="button"
+                    className="session-filter-clear"
+                    onClick={() => setActiveModeFilters(new Set())}
+                    title="Clear filters"
+                  >
+                    Clear
+                  </button>
                 )}
               </div>
+            )}
+          </div>
 
           {/* Sessions Scrollable List */}
           <div
@@ -2229,86 +2379,88 @@ function SidebarComponent({
           >
             {!sessionsCollapsed && (
               <>
-            {filteredTaskTree.length === 0 && visibleAutomatedTaskTree.length === 0 ? (
-              isLoadingSessions && !hasSessionSearch && activeModeFilters.size === 0 ? (
-                <div className="sidebar-session-skeleton" aria-label="Loading sessions">
-                  <span className="sidebar-session-skeleton-line" />
-                  <span className="sidebar-session-skeleton-line" />
-                  <span className="sidebar-session-skeleton-line" />
-                </div>
-              ) : hasSessionSearch ? (
-                <div
-                  className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
-                >
-                  <div className="sidebar-empty-message sidebar-search-empty-message">
-                    <Search size={32} style={{ opacity: 0.3 }} />
-                    <p>No matching sessions</p>
-                    <span>Try a different title, prompt, or session id</span>
-                  </div>
-                </div>
-              ) : activeModeFilters.size > 0 ? null : (
-                <div
-                  className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
-                >
-                  <pre className="cli-tree terminal-only">{`├── (no sessions yet)
-└── ...`}</pre>
-                  {uiDensity === "focused" ? (
-                    <div className="sidebar-empty-message">
-                      <EyeOff size={32} style={{ opacity: 0.3 }} />
-                      <p>Your conversations will appear here</p>
-                      <span>Start a new session to get going</span>
+                {filteredTaskTree.length === 0 && visibleAutomatedTaskTree.length === 0 ? (
+                  isLoadingSessions && !hasSessionSearch && activeModeFilters.size === 0 ? (
+                    <div className="sidebar-session-skeleton" aria-label="Loading sessions">
+                      <span className="sidebar-session-skeleton-line" />
+                      <span className="sidebar-session-skeleton-line" />
+                      <span className="sidebar-session-skeleton-line" />
                     </div>
-                  ) : (
-                    <p className="cli-hint">
-                      <span className="terminal-only"># start a new session above</span>
-                      <span className="modern-only">Start a new session to begin</span>
-                    </p>
-                  )}
-                </div>
-              )
-            ) : useVirtualizedTaskRows ? (
-              <VirtualList
-                items={sidebarVirtualRows}
-                getItemKey={(row) => {
-                  if (row.kind === "task") return `${row.section ?? "user"}:${row.row.node.task.id}`;
-                  return row.id;
-                }}
-                getItemHeight={(row) =>
-                  row.kind === "date-header"
-                    ? uiDensity === "focused"
-                      ? SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT
-                      : SIDEBAR_DATE_HEADER_HEIGHT
-                    : row.kind === "automated-header"
-                      ? SIDEBAR_AUTOMATED_HEADER_HEIGHT
-                      : row.kind === "load-more"
-                        ? SIDEBAR_LOAD_MORE_HEIGHT
-                        : uiDensity === "focused"
-                          ? SIDEBAR_FOCUSED_ITEM_HEIGHT
-                          : SIDEBAR_ITEM_HEIGHT
-                }
-                renderItem={(row) => renderSidebarVirtualRow(row)}
-                estimatedItemHeight={
-                  uiDensity === "focused" ? SIDEBAR_FOCUSED_ITEM_HEIGHT : SIDEBAR_ITEM_HEIGHT
-                }
-                overscan={10}
-                enabled
-                className="sidebar-virtual-list"
-                style={{ height: "100%" }}
-                role="list"
-                onScrollNearEnd={onLoadMoreTasks}
-              />
-            ) : (
-              sidebarVirtualRows.map((row) => (
-                <div
-                  key={
-                    row.kind === "task" ? `${row.section ?? "user"}:${row.row.node.task.id}` : row.id
-                  }
-                >
-                  {renderSidebarVirtualRow(row)}
-                </div>
-              ))
-            )}
-
+                  ) : hasSessionSearch ? (
+                    <div
+                      className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
+                    >
+                      <div className="sidebar-empty-message sidebar-search-empty-message">
+                        <Search size={32} style={{ opacity: 0.3 }} />
+                        <p>No matching sessions</p>
+                        <span>Try a different title, prompt, or session id</span>
+                      </div>
+                    </div>
+                  ) : activeModeFilters.size > 0 ? null : (
+                    <div
+                      className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
+                    >
+                      <pre className="cli-tree terminal-only">{`├── (no sessions yet)
+└── ...`}</pre>
+                      {uiDensity === "focused" ? (
+                        <div className="sidebar-empty-message">
+                          <EyeOff size={32} style={{ opacity: 0.3 }} />
+                          <p>Your conversations will appear here</p>
+                          <span>Start a new session to get going</span>
+                        </div>
+                      ) : (
+                        <p className="cli-hint">
+                          <span className="terminal-only"># start a new session above</span>
+                          <span className="modern-only">Start a new session to begin</span>
+                        </p>
+                      )}
+                    </div>
+                  )
+                ) : useVirtualizedTaskRows ? (
+                  <VirtualList
+                    items={sidebarVirtualRows}
+                    getItemKey={(row) => {
+                      if (row.kind === "task")
+                        return `${row.section ?? "user"}:${row.row.node.task.id}`;
+                      return row.id;
+                    }}
+                    getItemHeight={(row) =>
+                      row.kind === "date-header"
+                        ? uiDensity === "focused"
+                          ? SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT
+                          : SIDEBAR_DATE_HEADER_HEIGHT
+                        : row.kind === "automated-header"
+                          ? SIDEBAR_AUTOMATED_HEADER_HEIGHT
+                          : row.kind === "load-more"
+                            ? SIDEBAR_LOAD_MORE_HEIGHT
+                            : uiDensity === "focused"
+                              ? SIDEBAR_FOCUSED_ITEM_HEIGHT
+                              : SIDEBAR_ITEM_HEIGHT
+                    }
+                    renderItem={(row) => renderSidebarVirtualRow(row)}
+                    estimatedItemHeight={
+                      uiDensity === "focused" ? SIDEBAR_FOCUSED_ITEM_HEIGHT : SIDEBAR_ITEM_HEIGHT
+                    }
+                    overscan={10}
+                    enabled
+                    className="sidebar-virtual-list"
+                    style={{ height: "100%" }}
+                    role="list"
+                    onScrollNearEnd={onLoadMoreTasks}
+                  />
+                ) : (
+                  sidebarVirtualRows.map((row) => (
+                    <div
+                      key={
+                        row.kind === "task"
+                          ? `${row.section ?? "user"}:${row.row.node.task.id}`
+                          : row.id
+                      }
+                    >
+                      {renderSidebarVirtualRow(row)}
+                    </div>
+                  ))
+                )}
               </>
             )}
           </div>

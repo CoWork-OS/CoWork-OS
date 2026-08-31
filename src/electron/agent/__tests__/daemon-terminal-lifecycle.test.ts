@@ -3,6 +3,68 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
 
 describe("AgentDaemon terminal lifecycle helpers", () => {
+  it("releases a running queue slot when generic executor status updates fail a task", () => {
+    const taskState = {
+      id: "task-generic-failure",
+      status: "executing",
+      workspaceId: "workspace-1",
+    };
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue(taskState),
+        update: vi.fn(),
+      },
+      queueManager: {
+        isRunning: vi.fn().mockReturnValue(true),
+        isQueued: vi.fn().mockReturnValue(false),
+        cancelQueuedTask: vi.fn(),
+      },
+      finishQueueSlot: vi.fn(),
+      clearRetryState: vi.fn(),
+      teamOrchestrator: null,
+    }) as Any;
+
+    AgentDaemon.prototype.updateTask.call(daemonLike, taskState.id, {
+      status: "failed",
+      error: "completion guard failed",
+    });
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(taskState.id, {
+      status: "failed",
+      error: "completion guard failed",
+    });
+    expect(daemonLike.finishQueueSlot).toHaveBeenCalledWith(taskState.id);
+  });
+
+  it("removes a queued task before releasing its slot when it becomes terminal", () => {
+    const taskState = {
+      id: "task-queued-failure",
+      status: "queued",
+      workspaceId: "workspace-1",
+    };
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue(taskState),
+        update: vi.fn(),
+      },
+      queueManager: {
+        isRunning: vi.fn().mockReturnValue(false),
+        isQueued: vi.fn().mockReturnValue(true),
+        cancelQueuedTask: vi.fn(),
+      },
+      finishQueueSlot: vi.fn(),
+      clearRetryState: vi.fn(),
+      teamOrchestrator: null,
+    }) as Any;
+
+    AgentDaemon.prototype.updateTask.call(daemonLike, taskState.id, {
+      status: "cancelled",
+    });
+
+    expect(daemonLike.queueManager.cancelQueuedTask).toHaveBeenCalledWith(taskState.id);
+    expect(daemonLike.finishQueueSlot).toHaveBeenCalledWith(taskState.id);
+  });
+
   it("reopens a terminal task when a follow-up starts a new run", () => {
     const reopenedTask = {
       id: "task-follow-up",
@@ -58,10 +120,28 @@ describe("AgentDaemon terminal lifecycle helpers", () => {
     const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
       eventRepo: {
         findByTaskId: vi.fn().mockReturnValue([
-          { id: "u1", taskId: "task-duration", timestamp: 1_000, type: "user_message", payload: {} },
+          {
+            id: "u1",
+            taskId: "task-duration",
+            timestamp: 1_000,
+            type: "user_message",
+            payload: {},
+          },
           { id: "t1", taskId: "task-duration", timestamp: 2_000, type: "tool_call", payload: {} },
-          { id: "t2", taskId: "task-duration", timestamp: 326_000, type: "tool_result", payload: {} },
-          { id: "u2", taskId: "task-duration", timestamp: 327_000, type: "user_message", payload: {} },
+          {
+            id: "t2",
+            taskId: "task-duration",
+            timestamp: 326_000,
+            type: "tool_result",
+            payload: {},
+          },
+          {
+            id: "u2",
+            taskId: "task-duration",
+            timestamp: 327_000,
+            type: "user_message",
+            payload: {},
+          },
         ]),
       },
     }) as Any;
@@ -145,6 +225,105 @@ describe("AgentDaemon terminal lifecycle helpers", () => {
     );
     expect(daemonLike.clearRetryState).toHaveBeenCalledWith("task-paused");
     expect(daemonLike.finishQueueSlot).toHaveBeenCalledWith("task-paused");
+  });
+
+  it("does not turn a verification-blocked pause into an unverified success", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({
+          id: "task-verification-paused",
+          status: "paused",
+          createdAt: 1_000,
+          terminalStatus: "needs_user_action",
+          bestKnownOutcome: {
+            capturedAt: Date.now(),
+            resultSummary: "Succeeded. Created the requested file.",
+            outputSummary: {
+              created: ["qa-output.txt"],
+              outputCount: 1,
+              folders: ["."],
+            },
+            confidence: "high",
+          },
+        }),
+        update: vi.fn(),
+      },
+      eventRepo: {
+        findByTaskId: vi.fn().mockReturnValue([
+          {
+            id: "prompt",
+            taskId: "task-verification-paused",
+            timestamp: 1_000,
+            type: "user_message",
+            payload: { message: "Create and verify qa-output.txt" },
+          },
+          {
+            id: "pause",
+            taskId: "task-verification-paused",
+            timestamp: 2_000,
+            type: "timeline_step_updated",
+            legacyType: "task_paused",
+            payload: {
+              message: "Verification failed: the file contains incorrect content.",
+              reason: "user_action_required_failure",
+            },
+          },
+        ]),
+      },
+      inputRequestRepo: {
+        findPendingByTaskId: vi.fn().mockReturnValue([]),
+      },
+      pendingInputRequests: new Map(),
+      pendingContinuationTaskIds: new Set(),
+      activeTasks: new Map([
+        [
+          "task-verification-paused",
+          {
+            status: "active",
+            lastAccessed: 0,
+            executor: { cancel },
+          },
+        ],
+      ]),
+      cleanupPendingApprovalsForTask: vi.fn(),
+      clearRetryState: vi.fn(),
+      clearTimelineTaskState: vi.fn(),
+      finishQueueSlot: vi.fn(),
+      logEvent: vi.fn(),
+      teamOrchestrator: null,
+    }) as Any;
+
+    await AgentDaemon.prototype.wrapUpTask.call(daemonLike, "task-verification-paused");
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-verification-paused",
+      expect.objectContaining({
+        status: "completed",
+        terminalStatus: "partial_success",
+        failureClass: "required_verification",
+        resultSummary: expect.stringContaining("did not reach a verified success"),
+        bestKnownOutcome: expect.objectContaining({
+          terminalStatus: "partial_success",
+          failureClass: "required_verification",
+        }),
+      }),
+    );
+    expect(daemonLike.taskRepo.update).not.toHaveBeenCalledWith(
+      "task-verification-paused",
+      expect.objectContaining({
+        terminalStatus: "ok",
+        resultSummary: expect.stringContaining("Succeeded."),
+      }),
+    );
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-verification-paused",
+      "task_completed",
+      expect.objectContaining({
+        terminalStatus: "partial_success",
+        resultSummary: expect.stringContaining("Verification blocker"),
+      }),
+    );
   });
 
   it("cancelTaskRecord persists cancelled status and emits canonical terminal events", () => {

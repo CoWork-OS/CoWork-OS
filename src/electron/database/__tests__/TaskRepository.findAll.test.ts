@@ -21,7 +21,9 @@ describe("TaskRepository.findAll", () => {
 
     const sql = prepare.mock.calls[0]?.[0] || "";
     expect(sql).toContain("COALESCE(is_pinned, 0) = 1");
-    expect(sql).toContain("status IN ('executing', 'planning', 'interrupted', 'paused', 'blocked')");
+    expect(sql).toContain(
+      "status IN ('executing', 'planning', 'interrupted', 'paused', 'blocked')",
+    );
     expect(sql).toContain("COALESCE(updated_at, created_at) DESC");
     expect(sql).toContain("created_at DESC");
     expect(all).toHaveBeenCalledWith(100, 0);
@@ -51,9 +53,7 @@ describe("TaskRepository.findAll", () => {
       is_pinned: 0,
     };
     const afterRow = { ...beforeRow, updated_at: 1234 };
-    const get = vi.fn()
-      .mockReturnValueOnce(beforeRow)
-      .mockReturnValueOnce(afterRow);
+    const get = vi.fn().mockReturnValueOnce(beforeRow).mockReturnValueOnce(afterRow);
     const run = vi.fn(() => ({ changes: 1 }));
     const prepare = vi.fn((sql: string) => {
       if (sql.includes("SELECT * FROM tasks WHERE id = ?")) return { get };

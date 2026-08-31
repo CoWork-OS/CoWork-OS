@@ -5,6 +5,11 @@
 **Commits:** 82709df3 and prior
 **Goal:** Reduce task failures caused by overly conservative guardrails and loop detection. Competing coding-agent products give the LLM more room to iterate, retry, and self-correct; these changes bring our agent closer to that baseline.
 
+These runtime guardrail changes do not grant access. The effective [access
+profile](access-profiles.md) remains the ceiling for command tools, sandboxing,
+filesystem, network, domain, and approval behavior; relaxed retry or loop
+thresholds cannot widen a denied capability or bypass a hard guardrail.
+
 ---
 
 ## Root Causes Identified

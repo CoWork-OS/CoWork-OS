@@ -2,6 +2,9 @@
  * Tests for external integration approval workflows
  */
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workspace } from "../../../../shared/types";
 import { NotionTools } from "../notion-tools";
@@ -18,6 +21,7 @@ import { OneDriveSettingsManager } from "../../../settings/onedrive-manager";
 import { GoogleWorkspaceSettingsManager } from "../../../settings/google-workspace-manager";
 import { DropboxSettingsManager } from "../../../settings/dropbox-manager";
 import { SharePointSettingsManager } from "../../../settings/sharepoint-manager";
+import { googleDriveRequest } from "../../../utils/google-workspace-api";
 
 vi.mock("../../../utils/notion-api", () => ({
   notionRequest: vi.fn().mockResolvedValue({ status: 200, data: {} }),
@@ -267,5 +271,43 @@ describe("External integration approval workflows", () => {
     ).rejects.toThrow("User denied Box action");
 
     expect(daemon.requestApproval).toHaveBeenCalled();
+  });
+
+  it("requests separate external-file approval before uploading an outside-workspace input", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-integration-approval-"));
+    try {
+      const workspacePath = path.join(root, "workspace");
+      const inputPath = path.join(root, "input.txt");
+      fs.mkdirSync(workspacePath, { recursive: true });
+      fs.writeFileSync(inputPath, "external input", "utf8");
+      const uploadWorkspace = { ...workspace, path: workspacePath };
+      const daemon = buildDaemon();
+      const tools = new GoogleDriveTools(uploadWorkspace, daemon as Any, taskId);
+      vi.mocked(googleDriveRequest).mockResolvedValueOnce({
+        status: 200,
+        data: { id: "file-1" },
+      } as Any);
+
+      await tools.executeAction({ action: "upload_file", file_path: inputPath });
+
+      expect(daemon.requestApproval).toHaveBeenCalledWith(
+        taskId,
+        "external_file_access",
+        expect.stringContaining("external Google Drive upload input"),
+        expect.objectContaining({
+          path: fs.realpathSync(inputPath),
+          operation: "read",
+          tool: "google_drive",
+        }),
+      );
+      expect(daemon.requestApproval).toHaveBeenCalledWith(
+        taskId,
+        "external_service",
+        expect.any(String),
+        expect.objectContaining({ action: "upload_file" }),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

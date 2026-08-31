@@ -194,7 +194,9 @@ async function isExecutable(filePath: string): Promise<boolean> {
   }
 }
 
-function getElectronDialog(): { showMessageBox: (options: Any) => Promise<{ response: number }> } | null {
+function getElectronDialog(): {
+  showMessageBox: (options: Any) => Promise<{ response: number }>;
+} | null {
   try {
     // oxlint-disable-next-line typescript-eslint/no-require-imports
     const electron = require("electron") as Any;
@@ -310,8 +312,10 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
   async listApps(): Promise<ComputerUseHelperApp[]> {
     const result = await this.bridgeCommand<unknown>("listApps");
     const rawApps = Array.isArray(result) ? result : [];
-    const apps: Array<ComputerUseHelperApp | null> = rawApps.map((entry): ComputerUseHelperApp | null => {
-        const record = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
+    const apps: Array<ComputerUseHelperApp | null> = rawApps.map(
+      (entry): ComputerUseHelperApp | null => {
+        const record =
+          entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
         if (!record) return null;
         const pid = Number(record.pid);
         if (!Number.isFinite(pid) || pid <= 0) return null;
@@ -321,7 +325,8 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
           pid: Math.trunc(pid),
           isFrontmost: record.isFrontmost === true,
         };
-      });
+      },
+    );
     return apps.filter((entry): entry is ComputerUseHelperApp => entry !== null);
   }
 
@@ -330,9 +335,10 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
     const rawWindows = Array.isArray(result) ? result : [];
     return rawWindows.map((entry) => {
       const record = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
-      const frame = record.framePoints && typeof record.framePoints === "object"
-        ? (record.framePoints as Record<string, unknown>)
-        : {};
+      const frame =
+        record.framePoints && typeof record.framePoints === "object"
+          ? (record.framePoints as Record<string, unknown>)
+          : {};
       return {
         windowId:
           typeof record.windowId === "number" && Number.isFinite(record.windowId)
@@ -373,9 +379,13 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
   }
 
   async screenshot(windowId: number): Promise<ComputerUseScreenshotPayload> {
-    const result = await this.bridgeCommand<Record<string, unknown>>("screenshot", {
-      windowId,
-    }, 25_000);
+    const result = await this.bridgeCommand<Record<string, unknown>>(
+      "screenshot",
+      {
+        windowId,
+      },
+      25_000,
+    );
     const pngBase64 = typeof result.pngBase64 === "string" ? result.pngBase64 : "";
     if (!pngBase64) {
       throw new Error("Computer-use helper returned an invalid screenshot payload.");
@@ -450,7 +460,10 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
     windowId?: number;
     roles?: string[];
   }): Promise<ComputerUseAxElementResult> {
-    const result = await this.bridgeCommand<Record<string, unknown>>("axFindFocusableElement", args);
+    const result = await this.bridgeCommand<Record<string, unknown>>(
+      "axFindFocusableElement",
+      args,
+    );
     return this.parseAxElementResult(result);
   }
 
@@ -459,7 +472,10 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
     windowId?: number;
     roles?: string[];
   }): Promise<ComputerUseAxElementResult> {
-    const result = await this.bridgeCommand<Record<string, unknown>>("axFindActionableElement", args);
+    const result = await this.bridgeCommand<Record<string, unknown>>(
+      "axFindActionableElement",
+      args,
+    );
     return this.parseAxElementResult(result);
   }
 
@@ -589,9 +605,7 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
       const currentStamp = existsSync(HELPER_STAMP_PATH)
         ? await readFile(HELPER_STAMP_PATH, "utf8").catch(() => "")
         : "";
-      const currentHelperStamp = existsSync(HELPER_PATH)
-        ? sha256(await readFile(HELPER_PATH))
-        : "";
+      const currentHelperStamp = existsSync(HELPER_PATH) ? sha256(await readFile(HELPER_PATH)) : "";
       if (currentHelperStamp === nextStamp && currentStamp.trim() === nextStamp) {
         return;
       }
@@ -651,20 +665,17 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
 
     const child =
       process.platform === "win32"
-        ? spawn(resolvePowerShellCommand(), [
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            HELPER_PATH,
-          ], {
-            stdio: ["pipe", "pipe", "pipe"],
-            windowsHide: true,
-          })
+        ? spawn(
+            resolvePowerShellCommand(),
+            ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", HELPER_PATH],
+            {
+              stdio: ["pipe", "pipe", "pipe"],
+              windowsHide: true,
+            },
+          )
         : spawn(HELPER_PATH, [], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+            stdio: ["pipe", "pipe", "pipe"],
+          });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
 
@@ -678,7 +689,9 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
       if (this.helper === child) {
         this.helper = null;
       }
-      this.rejectAllPending(new HelperTransportError(`Computer-use helper crashed: ${error.message}`));
+      this.rejectAllPending(
+        new HelperTransportError(`Computer-use helper crashed: ${error.message}`),
+      );
     });
     child.on("exit", (code, signal) => {
       if (this.helper === child) {
@@ -857,9 +870,14 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
       value: typeof result.value === "string" ? result.value : undefined,
       x: typeof result.x === "number" && Number.isFinite(result.x) ? result.x : undefined,
       y: typeof result.y === "number" && Number.isFinite(result.y) ? result.y : undefined,
-      score: typeof result.score === "number" && Number.isFinite(result.score) ? result.score : undefined,
+      score:
+        typeof result.score === "number" && Number.isFinite(result.score)
+          ? result.score
+          : undefined,
       confidence: typeof result.confidence === "string" ? result.confidence : undefined,
-      actions: Array.isArray(result.actions) ? result.actions.filter((entry): entry is string => typeof entry === "string") : undefined,
+      actions: Array.isArray(result.actions)
+        ? result.actions.filter((entry): entry is string => typeof entry === "string")
+        : undefined,
       isTextInput: result.isTextInput === true,
       isSecure: result.isSecure === true,
       canSetValue: result.canSetValue === true,

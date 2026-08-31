@@ -29,9 +29,7 @@ export function PersonalityMemoryTab({ onChanged }: PersonalityMemoryTabProps) {
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState("");
   const [editingFact, setEditingFact] = useState<UserFact | null>(null);
-  const [status, setStatus] = useState<{ tone: "success" | "error"; message: string } | null>(
-    null,
-  );
+  const [status, setStatus] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
   const sections = useMemo(() => buildStructuredUserProfileSummary(profile), [profile]);
   const factCount = profile?.facts?.length ?? 0;
@@ -204,7 +202,9 @@ export function PersonalityMemoryTab({ onChanged }: PersonalityMemoryTabProps) {
           </p>
         </div>
         <div className="profile-memory-meta">
-          <span>{factCount} item{factCount === 1 ? "" : "s"}</span>
+          <span>
+            {factCount} item{factCount === 1 ? "" : "s"}
+          </span>
           <span>{formatRelativeTime(profile?.updatedAt)}</span>
         </div>
       </div>
@@ -252,9 +252,7 @@ export function PersonalityMemoryTab({ onChanged }: PersonalityMemoryTabProps) {
       )}
 
       <div className="profile-memory-composer">
-        {status && (
-          <div className={`profile-memory-status ${status.tone}`}>{status.message}</div>
-        )}
+        {status && <div className={`profile-memory-status ${status.tone}`}>{status.message}</div>}
         {editingFact && (
           <div className="profile-memory-editing">
             Updating {editingFact.category} memory

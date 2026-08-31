@@ -10,13 +10,15 @@ vi.mock("child_process", () => ({
 
 import { isMacOSSandboxAvailable, resetMacOSSandboxCache } from "../sandbox-factory";
 
-function makeChildProcess(options: {
-  closeCode?: number;
-  stdout?: string;
-  stderr?: string;
-  errorMessage?: string;
-  stayOpen?: boolean;
-} = {}): ChildProcess {
+function makeChildProcess(
+  options: {
+    closeCode?: number;
+    stdout?: string;
+    stderr?: string;
+    errorMessage?: string;
+    stayOpen?: boolean;
+  } = {},
+): ChildProcess {
   const proc = new EventEmitter() as ChildProcess;
   proc.stdout = new EventEmitter() as ChildProcess["stdout"];
   proc.stderr = new EventEmitter() as ChildProcess["stderr"];

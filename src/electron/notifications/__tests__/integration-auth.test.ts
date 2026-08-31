@@ -16,10 +16,12 @@ describe("integration auth notifications", () => {
   });
 
   it("recognizes token and authorization failures", () => {
-    expect(isLikelyIntegrationAuthError(Object.assign(new Error("Unauthorized"), { status: 401 })))
-      .toBe(true);
-    expect(isLikelyIntegrationAuthError(new Error("Google Workspace token refresh failed")))
-      .toBe(true);
+    expect(
+      isLikelyIntegrationAuthError(Object.assign(new Error("Unauthorized"), { status: 401 })),
+    ).toBe(true);
+    expect(isLikelyIntegrationAuthError(new Error("Google Workspace token refresh failed"))).toBe(
+      true,
+    );
     expect(isLikelyIntegrationAuthError(new Error("request timed out"))).toBe(false);
   });
 
@@ -35,7 +37,9 @@ describe("integration auth notifications", () => {
 
     expect(
       detectIntegrationAuthIssue(
-        new Error("Microsoft Outlook permission failed (403): missing scope. Reconnect the Outlook email channel."),
+        new Error(
+          "Microsoft Outlook permission failed (403): missing scope. Reconnect the Outlook email channel.",
+        ),
       ),
     ).toMatchObject({
       integrationId: "outlook-email",

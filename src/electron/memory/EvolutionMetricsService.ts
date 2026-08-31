@@ -115,7 +115,9 @@ export class EvolutionMetricsService {
     for (const metric of snapshot.metrics) {
       const trendIcon =
         metric.trend === "improving" ? "+" : metric.trend === "declining" ? "-" : "=";
-      lines.push(`  [${trendIcon}] ${metric.label}: ${metric.value}${metric.unit} — ${metric.detail}`);
+      lines.push(
+        `  [${trendIcon}] ${metric.label}: ${metric.value}${metric.unit} — ${metric.detail}`,
+      );
     }
 
     lines.push(`  Overall Evolution Score: ${snapshot.overallScore}/100`);
@@ -130,9 +132,14 @@ export class EvolutionMetricsService {
    */
   private static computeCorrectionRate(workspaceId: string): EvolutionMetric {
     try {
-      const results = MemoryService.searchByContentMarker(workspaceId, "[PLAYBOOK] Task failed", 100);
+      const results = MemoryService.searchByContentMarker(
+        workspaceId,
+        "[PLAYBOOK] Task failed",
+        100,
+      );
       const failures = results.filter(
-        (r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]") && r.snippet.includes("failed"),
+        (r) =>
+          r.type === "insight" && r.snippet.includes("[PLAYBOOK]") && r.snippet.includes("failed"),
       );
 
       const now = Date.now();
@@ -183,9 +190,7 @@ export class EvolutionMetricsService {
       const stats = AdaptiveStyleEngine.getObservationStats();
 
       const now = Date.now();
-      const recentAdaptations = history.filter(
-        (h) => now - h.appliedAt < ONE_WEEK_MS * 4,
-      ).length;
+      const recentAdaptations = history.filter((h) => now - h.appliedAt < ONE_WEEK_MS * 4).length;
 
       return {
         id: "adaptation_velocity",
@@ -214,9 +219,7 @@ export class EvolutionMetricsService {
    */
   private static async computeKnowledgeGrowth(workspaceId: string): Promise<EvolutionMetric> {
     try {
-      const { KnowledgeGraphService } = await import(
-        "../knowledge-graph/KnowledgeGraphService"
-      );
+      const { KnowledgeGraphService } = await import("../knowledge-graph/KnowledgeGraphService");
       const stats = KnowledgeGraphService.getStats(workspaceId);
 
       return {

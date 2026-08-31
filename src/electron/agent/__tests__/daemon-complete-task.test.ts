@@ -379,9 +379,7 @@ describe("AgentDaemon.completeTask", () => {
       "The due date is 2026-04-13 and the exported file is 585 bytes.",
     );
 
-    expect(keyClaims).toEqual([
-      "The due date is 2026-04-13 and the exported file is 585 bytes.",
-    ]);
+    expect(keyClaims).toEqual(["The due date is 2026-04-13 and the exported file is 585 bytes."]);
   });
 
   it("treats successful structured verification evidence as satisfying the key-claim gate", () => {
@@ -392,7 +390,14 @@ describe("AgentDaemon.completeTask", () => {
       "task-1",
       "The exported file is 585 bytes.",
       {
-        entries: [{ kind: "file_exists", ok: true, detail: "deliverables/report.md exists", capturedAt: Date.now() }],
+        entries: [
+          {
+            kind: "file_exists",
+            ok: true,
+            detail: "deliverables/report.md exists",
+            capturedAt: Date.now(),
+          },
+        ],
       },
     );
 
@@ -426,9 +431,14 @@ describe("AgentDaemon.completeTask", () => {
       entries: [{ kind: "shell_command", ok: true, detail: "ok", capturedAt: Date.now() }],
     };
 
-    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "The exported file is 585 bytes.", {
-      verificationEvidenceBundle,
-    });
+    AgentDaemon.prototype.completeTask.call(
+      daemonLike,
+      "task-1",
+      "The exported file is 585 bytes.",
+      {
+        verificationEvidenceBundle,
+      },
+    );
 
     expect(daemonLike.hasEvidenceForKeyClaims).toHaveBeenCalledWith(
       "task-1",
@@ -522,11 +532,45 @@ describe("AgentDaemon.completeTask", () => {
     );
   });
 
+  it("allows completion when failed steps were recovered by alternate plan steps", () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.getUnresolvedFailedSteps.mockReturnValue(["step:run-command"]);
+
+    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "The command succeeded.", {
+      recoveredFailedStepIds: ["run-command"],
+    });
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "completed",
+        terminalStatus: "ok",
+        error: null,
+      }),
+    );
+    expect(daemonLike.taskRepo.update).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+      }),
+    );
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "timeline_step_updated",
+      expect.objectContaining({
+        stepId: "completion_gate:recovered_failures",
+        status: "completed",
+        recoveredFailedStepIds: ["step:run-command"],
+      }),
+    );
+  });
+
   it("does not block completion for failed tool-lane steps", () => {
     const daemonLike = createDaemonLike();
     daemonLike.failedPlanStepsByTask.set("task-1", new Set(["tool_lane:step:use-1"]));
     daemonLike.knownPlanStepIdsByTask.set("task-1", new Set(["tool_lane:step:use-1"]));
-    daemonLike.normalizeStepIdForPlanTracking = AgentDaemon.prototype["normalizeStepIdForPlanTracking"];
+    daemonLike.normalizeStepIdForPlanTracking =
+      AgentDaemon.prototype["normalizeStepIdForPlanTracking"];
     daemonLike.isSyntheticNonPlanStepId = AgentDaemon.prototype["isSyntheticNonPlanStepId"];
     daemonLike.isKnownPlanStepId = AgentDaemon.prototype["isKnownPlanStepId"];
     daemonLike.getUnresolvedFailedSteps = AgentDaemon.prototype["getUnresolvedFailedSteps"];
@@ -580,7 +624,8 @@ describe("AgentDaemon.completeTask", () => {
     const daemonLike = createDaemonLike();
     daemonLike.failedPlanStepsByTask.set("task-1", new Set(["1"]));
     daemonLike.knownPlanStepIdsByTask.set("task-1", new Set(["1"]));
-    daemonLike.normalizeStepIdForPlanTracking = AgentDaemon.prototype["normalizeStepIdForPlanTracking"];
+    daemonLike.normalizeStepIdForPlanTracking =
+      AgentDaemon.prototype["normalizeStepIdForPlanTracking"];
     daemonLike.isSyntheticNonPlanStepId = AgentDaemon.prototype["isSyntheticNonPlanStepId"];
     daemonLike.isKnownPlanStepId = AgentDaemon.prototype["isKnownPlanStepId"];
     daemonLike.getUnresolvedFailedSteps = AgentDaemon.prototype["getUnresolvedFailedSteps"];
@@ -588,7 +633,8 @@ describe("AgentDaemon.completeTask", () => {
     AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "partial", {
       terminalStatus: "partial_success",
       failureClass: "optional_enrichment",
-      terminalStatusReason: "Soft deadline reached during execution. Finalizing with best-effort answer.",
+      terminalStatusReason:
+        "Soft deadline reached during execution. Finalizing with best-effort answer.",
     });
 
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
@@ -608,17 +654,22 @@ describe("AgentDaemon.completeTask", () => {
     const daemonLike = createDaemonLike();
     daemonLike.getUnresolvedFailedSteps.mockReturnValue([]);
 
-    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "Cannot verify required evidence.", {
-      terminalStatus: "failed",
-      terminalKind: "failed",
-      failureClass: "required_verification",
-      failedStepIds: ["step:verify"],
-      terminalStatusReason: "Task missing required verification evidence.",
-      outputSummary: {
-        outputCount: 1,
-        textOutputCount: 1,
+    AgentDaemon.prototype.completeTask.call(
+      daemonLike,
+      "task-1",
+      "Cannot verify required evidence.",
+      {
+        terminalStatus: "failed",
+        terminalKind: "failed",
+        failureClass: "required_verification",
+        failedStepIds: ["step:verify"],
+        terminalStatusReason: "Task missing required verification evidence.",
+        outputSummary: {
+          outputCount: 1,
+          textOutputCount: 1,
+        },
       },
-    });
+    );
 
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
       "task-1",
@@ -674,17 +725,22 @@ describe("AgentDaemon.completeTask", () => {
       keyClaims: ["The required verification passed."],
     });
 
-    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "Cannot verify required evidence.", {
-      terminalStatus: "failed",
-      terminalKind: "failed",
-      failureClass: "required_verification",
-      failedStepIds: ["step:verify"],
-      terminalStatusReason: "Task missing required verification evidence.",
-      outputSummary: {
-        outputCount: 1,
-        textOutputCount: 1,
+    AgentDaemon.prototype.completeTask.call(
+      daemonLike,
+      "task-1",
+      "Cannot verify required evidence.",
+      {
+        terminalStatus: "failed",
+        terminalKind: "failed",
+        failureClass: "required_verification",
+        failedStepIds: ["step:verify"],
+        terminalStatusReason: "Task missing required verification evidence.",
+        outputSummary: {
+          outputCount: 1,
+          textOutputCount: 1,
+        },
       },
-    });
+    );
 
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
       "task-1",
@@ -721,11 +777,16 @@ describe("AgentDaemon.completeTask", () => {
     const daemonLike = createDaemonLike();
     daemonLike.getUnresolvedFailedSteps.mockReturnValue([]);
 
-    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "Cannot verify required evidence.", {
-      terminalStatus: "ok",
-      terminalKind: "failed",
-      failureClass: "required_verification",
-    });
+    AgentDaemon.prototype.completeTask.call(
+      daemonLike,
+      "task-1",
+      "Cannot verify required evidence.",
+      {
+        terminalStatus: "ok",
+        terminalKind: "failed",
+        failureClass: "required_verification",
+      },
+    );
 
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
       "task-1",
@@ -754,7 +815,8 @@ describe("AgentDaemon.completeTask", () => {
     daemonLike.taskRepo.findById.mockReturnValue({
       id: "task-1",
       title: "Task 1",
-      prompt: "Run tests, edit files, deploy production changes, verify security, and publish release",
+      prompt:
+        "Run tests, edit files, deploy production changes, verify security, and publish release",
       status: "executing",
       workspaceId: "workspace-1",
       agentType: "main",
@@ -781,18 +843,23 @@ describe("AgentDaemon.completeTask", () => {
       },
     ]);
 
-    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "Cannot verify required evidence.", {
-      terminalStatus: "failed",
-      terminalKind: "failed",
-      failureClass: "required_verification",
-      failedStepIds: ["step:verify"],
-      outputSummary: {
-        outputCount: 1,
-        textOutputCount: 1,
-        created: ["artifacts/report.md"],
-        primaryOutputPath: "artifacts/report.md",
+    AgentDaemon.prototype.completeTask.call(
+      daemonLike,
+      "task-1",
+      "Cannot verify required evidence.",
+      {
+        terminalStatus: "failed",
+        terminalKind: "failed",
+        failureClass: "required_verification",
+        failedStepIds: ["step:verify"],
+        outputSummary: {
+          outputCount: 1,
+          textOutputCount: 1,
+          created: ["artifacts/report.md"],
+          primaryOutputPath: "artifacts/report.md",
+        },
       },
-    });
+    );
     await Promise.resolve();
 
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(

@@ -151,6 +151,9 @@ describe("AgentBuilderService helpers", () => {
     expect(plan.scheduleConfig.enabled).toBe(true);
     expect(plan.approvalPolicy.autoApproveReadOnly).toBe(true);
     expect(plan.approvalPolicy.requireApprovalFor).toContain("send email");
+    expect(plan.accessProfileId).toBe("ask_for_approval");
+    expect(plan.enableShell).toBe(false);
+    expect(plan.selectedToolFamilies).not.toContain("shell");
     expect(plan.sharing).toEqual({ visibility: "private", ownerLabel: "You" });
   });
 

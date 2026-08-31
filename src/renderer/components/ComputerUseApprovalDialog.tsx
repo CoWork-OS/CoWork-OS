@@ -91,8 +91,8 @@ export function ComputerUseApprovalDialog({
           ) : null}
 
           <p className="session-approval-footer-hint session-approval-footer-hint--center">
-            Grants apply only for this computer-use session. Press <kbd className="session-approval-kbd">Esc</kbd>{" "}
-            during control to stop.
+            Grants apply only for this computer-use session. Press{" "}
+            <kbd className="session-approval-kbd">Esc</kbd> during control to stop.
           </p>
         </div>
 

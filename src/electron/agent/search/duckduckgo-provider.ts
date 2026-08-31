@@ -6,6 +6,7 @@ import {
   SearchResult,
   SearchType,
 } from "./types";
+import { assertNetworkPolicyAllowed } from "../../security/network-policy";
 
 /**
  * DuckDuckGo HTML search provider (free, no API key required).
@@ -30,6 +31,13 @@ export class DuckDuckGoProvider implements SearchProvider {
     }
 
     const maxResults = Math.min(query.maxResults || 10, 20);
+    assertNetworkPolicyAllowed({
+      url: this.baseUrl,
+      toolName: "web_search",
+      networkEnabled: query.networkEnabled,
+      accessNetworkMode: query.accessNetworkMode,
+      profileDomainRules: query.profileDomainRules,
+    });
 
     const params = new URLSearchParams({
       q: query.query,

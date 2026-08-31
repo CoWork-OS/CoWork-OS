@@ -86,11 +86,7 @@ describe("timeline-tool-labels", () => {
       ),
     ).toBe("Fetched Releases · foo/bar · GitHub");
     expect(
-      friendlyToolResultTitle(
-        "web_search",
-        { query: "trending news", provider: "brave" },
-        true,
-      ),
+      friendlyToolResultTitle("web_search", { query: "trending news", provider: "brave" }, true),
     ).toBe("Searched via Brave: trending news");
     expect(
       friendlyToolResultTitle(
@@ -102,11 +98,7 @@ describe("timeline-tool-labels", () => {
       ),
     ).toBe("Read files: a.ts, b.ts");
     expect(
-      friendlyToolResultTitle(
-        "grep",
-        { pattern: "SessionRuntime", totalMatches: 2 },
-        true,
-      ),
+      friendlyToolResultTitle("grep", { pattern: "SessionRuntime", totalMatches: 2 }, true),
     ).toBe("Searched in files: SessionRuntime");
     expect(friendlyToolResultTitle("grep", { success: true, matches: [{}, {}] }, true)).toContain(
       "match",
@@ -139,9 +131,7 @@ describe("timeline-tool-labels", () => {
         true,
       ),
     ).toBe("Read Test skill");
-    expect(
-      friendlyToolResultTitle("skill", { skill_name: "Test" }, true),
-    ).toBe("Read Test skill");
+    expect(friendlyToolResultTitle("skill", { skill_name: "Test" }, true)).toBe("Read Test skill");
   });
 
   it("uses short lane completion labels", () => {

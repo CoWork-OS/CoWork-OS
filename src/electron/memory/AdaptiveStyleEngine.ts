@@ -75,7 +75,8 @@ const DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes between adaptation checks
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Emoji regex pattern — covers common emoji ranges */
-const EMOJI_PATTERN = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+const EMOJI_PATTERN =
+  /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
 
 /** Technical vocabulary indicators */
 const TECHNICAL_PATTERNS = [
@@ -188,7 +189,9 @@ export class AdaptiveStyleEngine {
   static observeFeedback(decision?: string, reason?: string): void {
     if (!this.isEnabled()) return;
 
-    const feedback = String(reason || "").trim().toLowerCase();
+    const feedback = String(reason || "")
+      .trim()
+      .toLowerCase();
     if (!feedback) return;
 
     const state = this.loadState();
@@ -216,9 +219,10 @@ export class AdaptiveStyleEngine {
     }
 
     if (/\b(emoji|emojis|smiley)\b/.test(feedback)) {
-      const direction = /\b(no|stop|fewer|less|without|remove|don't|disable)\b.*\b(emoji|emojis)\b/.test(feedback)
-        ? "decrease"
-        : "increase";
+      const direction =
+        /\b(no|stop|fewer|less|without|remove|don't|disable)\b.*\b(emoji|emojis)\b/.test(feedback)
+          ? "decrease"
+          : "increase";
       state.pendingSignals.push({
         dimension: "emojiUsage",
         direction,
@@ -443,8 +447,7 @@ export class AdaptiveStyleEngine {
     if (state.messageLengths.length < MIN_MESSAGES_FOR_ADAPTATION) return null;
 
     // ── Response length: infer from user's message length distribution ──
-    const avgLength =
-      state.messageLengths.reduce((a, b) => a + b, 0) / state.messageLengths.length;
+    const avgLength = state.messageLengths.reduce((a, b) => a + b, 0) / state.messageLengths.length;
     // Short messages (<80 chars avg) suggest user prefers brevity
     if (avgLength < 80 && currentStyle.responseLength !== "terse") {
       const shifted = shiftOnScale(LENGTH_SCALE, currentStyle.responseLength, "decrease");
@@ -517,9 +520,8 @@ export class AdaptiveStyleEngine {
 
   private static loadState(): AdaptiveStyleState {
     try {
-      const stored = SecureSettingsRepository.getInstance().load<AdaptiveStyleState>(
-        "adaptive-style-engine",
-      );
+      const stored =
+        SecureSettingsRepository.getInstance().load<AdaptiveStyleState>("adaptive-style-engine");
       if (stored) return { ...getDefaultState(), ...stored };
     } catch {
       // fresh start — repository may not be initialized yet

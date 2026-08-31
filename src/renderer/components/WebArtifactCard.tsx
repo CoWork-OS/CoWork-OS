@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpRight, Clipboard, ExternalLink, FolderOpen } from "lucide-react";
-import {
-  canPreviewWebPageInApp,
-  getWebPageFormatLabel,
-} from "../../shared/web-page-formats";
+import { canPreviewWebPageInApp, getWebPageFormatLabel } from "../../shared/web-page-formats";
 
 type WebArtifactCardProps = {
   filePath: string;
@@ -16,11 +13,7 @@ function getFileName(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
 }
 
-export function WebArtifactCard({
-  filePath,
-  workspacePath,
-  onOpenViewer,
-}: WebArtifactCardProps) {
+export function WebArtifactCard({ filePath, workspacePath, onOpenViewer }: WebArtifactCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const actionsRef = useRef<HTMLDivElement | null>(null);
@@ -139,7 +132,13 @@ export function WebArtifactCard({
             fill="none"
             aria-hidden="true"
           >
-            <path d="M3.5 5.25L7 8.75L10.5 5.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d="M3.5 5.25L7 8.75L10.5 5.25"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         </button>
       </div>
@@ -150,7 +149,12 @@ export function WebArtifactCard({
             className="web-artifact-menu"
             ref={menuRef}
             role="menu"
-            style={{ position: "fixed", top: menuPosition.top, left: menuPosition.left, right: "auto" }}
+            style={{
+              position: "fixed",
+              top: menuPosition.top,
+              left: menuPosition.left,
+              right: "auto",
+            }}
           >
             <button type="button" role="menuitem" onClick={handleOpenBrowser}>
               <span className="web-artifact-app-icon browser">

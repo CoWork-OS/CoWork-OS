@@ -50,9 +50,13 @@ export class CoreMemoryCandidateRepository {
   }
 
   bulkCreate(
-    inputs: Array<Omit<CoreMemoryCandidate, "id" | "createdAt"> & { id?: string; createdAt?: number }>,
+    inputs: Array<
+      Omit<CoreMemoryCandidate, "id" | "createdAt"> & { id?: string; createdAt?: number }
+    >,
   ): CoreMemoryCandidate[] {
-    const tx = this.db.transaction((items: typeof inputs) => items.map((item) => this.create(item)));
+    const tx = this.db.transaction((items: typeof inputs) =>
+      items.map((item) => this.create(item)),
+    );
     return tx(inputs);
   }
 

@@ -1,7 +1,4 @@
-export function buildVideoPreviewTranscodeArgs(
-  inputPath: string,
-  outputPath: string,
-): string[] {
+export function buildVideoPreviewTranscodeArgs(inputPath: string, outputPath: string): string[] {
   return [
     "-y",
     "-i",

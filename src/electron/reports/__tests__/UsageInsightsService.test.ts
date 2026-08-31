@@ -91,7 +91,10 @@ function defaultMockDb(overrides: {
       if (sql.includes("SELECT created_at FROM tasks")) {
         return { all: () => [], get: () => ({ count: 0 }) };
       }
-      if (sql.includes("COALESCE(t.assigned_agent_role_id, 'unassigned') as persona_id") && sql.includes("llm_usage")) {
+      if (
+        sql.includes("COALESCE(t.assigned_agent_role_id, 'unassigned') as persona_id") &&
+        sql.includes("llm_usage")
+      ) {
         return { all: () => personaCostRows, get: () => ({ count: 0 }) };
       }
       if (isLlmUsageQuery(sql)) {
@@ -202,8 +205,12 @@ describe("UsageInsightsService", () => {
     );
     const insights = service.generate("ws-1", 7);
 
-    const dayOneRow = insights.awuMetrics.byDay.find((row) => row.dateKey === usageLocalDateKey(dayOne));
-    const dayTwoRow = insights.awuMetrics.byDay.find((row) => row.dateKey === usageLocalDateKey(dayTwo));
+    const dayOneRow = insights.awuMetrics.byDay.find(
+      (row) => row.dateKey === usageLocalDateKey(dayOne),
+    );
+    const dayTwoRow = insights.awuMetrics.byDay.find(
+      (row) => row.dateKey === usageLocalDateKey(dayTwo),
+    );
 
     expect(dayOneRow).toMatchObject({
       awuCount: 2,
@@ -787,7 +794,13 @@ describe("UsageInsightsService", () => {
         }
         if (sql.includes("FROM usage_insights_hour")) {
           return {
-            all: () => [{ day_of_week: new Date(ts).getDay(), hour_of_day: new Date(ts).getHours(), count: 4 }],
+            all: () => [
+              {
+                day_of_week: new Date(ts).getDay(),
+                hour_of_day: new Date(ts).getHours(),
+                count: 4,
+              },
+            ],
           };
         }
         if (sql.includes("FROM usage_insights_skill_day")) {
@@ -817,7 +830,9 @@ describe("UsageInsightsService", () => {
         }
         if (sql.includes("FROM usage_insights_tool_day")) {
           return {
-            all: () => [{ tool: "run_command", calls: 3, results: 2, errors: 1, blocked: 0, warnings: 0 }],
+            all: () => [
+              { tool: "run_command", calls: 3, results: 2, errors: 1, blocked: 0, warnings: 0 },
+            ],
           };
         }
         if (sql.includes("FROM llm_call_events") && sql.includes("success = 1")) {
@@ -899,8 +914,8 @@ describe("UsageInsightsService", () => {
                     : key === "llm_watermark_ms"
                       ? String(endOfLocalDay(tailTs))
                       : key === "task_watermark_ms" || key === "event_watermark_ms"
-                      ? String(watermarkMs)
-                      : null,
+                        ? String(watermarkMs)
+                        : null,
             }),
           };
         }
@@ -958,7 +973,9 @@ describe("UsageInsightsService", () => {
         }
         if (sql.includes("FROM usage_insights_tool_day")) {
           return {
-            all: () => [{ tool: "run_command", calls: 3, results: 2, errors: 1, blocked: 0, warnings: 0 }],
+            all: () => [
+              { tool: "run_command", calls: 3, results: 2, errors: 1, blocked: 0, warnings: 0 },
+            ],
           };
         }
         if (sql.includes("FROM llm_call_events") && sql.includes("success = 1")) {
@@ -1060,7 +1077,14 @@ describe("UsageInsightsService", () => {
           return {
             all: (...params: unknown[]) =>
               isTailRange(params)
-                ? [{ payload: JSON.stringify({ decision: "rejected", reason: "Needs more detail" }) }]
+                ? [
+                    {
+                      payload: JSON.stringify({
+                        decision: "rejected",
+                        reason: "Needs more detail",
+                      }),
+                    },
+                  ]
                 : [],
             get: () => ({ c: 0, event_max: 0 }),
           };
@@ -1069,7 +1093,13 @@ describe("UsageInsightsService", () => {
           return {
             all: (...params: unknown[]) =>
               isTailRange(params)
-                ? [{ type: "tool_call", legacy_type: null, payload: JSON.stringify({ tool: "grep" }) }]
+                ? [
+                    {
+                      type: "tool_call",
+                      legacy_type: null,
+                      payload: JSON.stringify({ tool: "grep" }),
+                    },
+                  ]
                 : [],
           };
         }

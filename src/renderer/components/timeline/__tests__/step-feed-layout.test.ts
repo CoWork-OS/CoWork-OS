@@ -16,7 +16,9 @@ describe("StepFeed layout styles", () => {
 
   it("allows long step titles and details to wrap inside the reserved content area", () => {
     expect(timelineCss).toMatch(/\.step-feed-card \.event-title\s*\{[\s\S]*white-space:\s*normal;/);
-    expect(timelineCss).toMatch(/\.step-feed-card \.event-title\s*\{[\s\S]*overflow-wrap:\s*anywhere;/);
+    expect(timelineCss).toMatch(
+      /\.step-feed-card \.event-title\s*\{[\s\S]*overflow-wrap:\s*anywhere;/,
+    );
     expect(timelineCss).toMatch(
       /\.step-feed-card \.event-title > \*,[\s\S]*\.step-feed-card \.event-title > p,[\s\S]*\.step-feed-card \.event-title li\s*\{/,
     );
@@ -24,8 +26,12 @@ describe("StepFeed layout styles", () => {
   });
 
   it("renders failure details as a compact status strip instead of a large pill", () => {
-    expect(timelineCss).toMatch(/\.event-details\.event-details-failure\s*\{[\s\S]*border-left-width:\s*3px;/);
-    expect(timelineCss).toMatch(/\.event-details\.event-details-failure\s*\{[\s\S]*border-radius:\s*8px;/);
+    expect(timelineCss).toMatch(
+      /\.event-details\.event-details-failure\s*\{[\s\S]*border-left-width:\s*3px;/,
+    );
+    expect(timelineCss).toMatch(
+      /\.event-details\.event-details-failure\s*\{[\s\S]*border-radius:\s*8px;/,
+    );
     expect(timelineCss).toMatch(
       /\.step-feed-card \.event-details\.event-details-failure\s*\{[\s\S]*padding:\s*7px 10px 7px 12px;/,
     );
@@ -38,9 +44,15 @@ describe("StepFeed layout styles", () => {
       /\.action-block-events > \.step-feed-card\s*\{[\s\S]*padding:\s*2px 0;/,
     );
     expect(timelineCss).toMatch(/\.step-feed-card \.event-details\s*\{[\s\S]*margin-top:\s*4px;/);
-    expect(timelineCss).toMatch(/\.step-feed-card \.inline-document-header\s*\{[\s\S]*display:\s*none;/);
-    expect(timelineCss).toMatch(/\.step-feed-card \.inline-document-markdown,[\s\S]*\.step-feed-card \.inline-document-content\s*\{[\s\S]*padding:\s*0;/);
-    expect(timelineCss).toMatch(/\.step-feed-card \.edit-diff-preview\s*\{[\s\S]*padding:\s*2px 0;/);
+    expect(timelineCss).toMatch(
+      /\.step-feed-card \.inline-document-header\s*\{[\s\S]*display:\s*none;/,
+    );
+    expect(timelineCss).toMatch(
+      /\.step-feed-card \.inline-document-markdown,[\s\S]*\.step-feed-card \.inline-document-content\s*\{[\s\S]*padding:\s*0;/,
+    );
+    expect(timelineCss).toMatch(
+      /\.step-feed-card \.edit-diff-preview\s*\{[\s\S]*padding:\s*2px 0;/,
+    );
   });
 
   it("renders action block activity icons as compact line glyphs", () => {

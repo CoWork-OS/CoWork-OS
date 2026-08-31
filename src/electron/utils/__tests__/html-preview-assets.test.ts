@@ -76,7 +76,10 @@ describe("inlineLocalHtmlPreviewAssets", () => {
     const distDir = path.join(workspace, "dist");
     await fs.mkdir(path.join(distDir, "assets"), { recursive: true });
     await fs.writeFile(path.join(distDir, "assets", "app.css"), "body { color: red; }");
-    await fs.writeFile(path.join(distDir, "assets", "app.js"), "document.body.dataset.app = 'ready';");
+    await fs.writeFile(
+      path.join(distDir, "assets", "app.js"),
+      "document.body.dataset.app = 'ready';",
+    );
     const htmlPath = path.join(distDir, "index.html");
     const html = [
       '<link rel="stylesheet" href="/assets/app.css">',

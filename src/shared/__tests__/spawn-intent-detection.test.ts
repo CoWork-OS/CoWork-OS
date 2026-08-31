@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  isSpawnSubagentsPrompt,
-  parseSpawnAgentCount,
-} from "../spawn-intent-detection";
+import { isSpawnSubagentsPrompt, parseSpawnAgentCount } from "../spawn-intent-detection";
 
 describe("isSpawnSubagentsPrompt", () => {
   it("returns true for 'spawn subagents'", () => {

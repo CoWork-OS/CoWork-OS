@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 import { ErrorCodes, Events, Methods } from "../electron/control-plane/protocol";
 import type { ControlPlaneServer } from "../electron/control-plane/server";
 import { ControlPlaneSettingsManager } from "../electron/control-plane/settings";
-import type { AgentConfig } from "../shared/types";
+import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
+import type { AgentConfig, PermissionMode } from "../shared/types";
 import { isTempWorkspaceId } from "../shared/types";
 import type { AgentDaemon } from "../electron/agent/daemon";
 import type { DatabaseManager } from "../electron/database/schema";
@@ -44,6 +45,8 @@ import { registerStrategicPlannerMethods } from "../electron/control-plane/regis
 import { getStrategicPlannerService } from "../electron/control-plane/StrategicPlannerService";
 import { resolvePathWithinRoot } from "../electron/control-plane/path-containment";
 import { evaluateControlPlaneDeploymentPosture } from "../electron/control-plane/deployment-posture";
+import { applyDefaultAccessProfile } from "../electron/security/access-profile-resolver";
+import { PermissionSettingsManager } from "../electron/security/permission-settings-manager";
 import {
   buildTaskEventDetailForTransport,
   buildTaskTimelinePageForTransport,
@@ -79,6 +82,26 @@ function sanitizeTaskCreateParams(params: unknown): {
   const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
   const assignedAgentRoleId =
     typeof p.assignedAgentRoleId === "string" ? p.assignedAgentRoleId.trim() : "";
+  const accessProfileId =
+    typeof p.accessProfileId === "string" && p.accessProfileId.trim().length > 0
+      ? (p.accessProfileId.trim() as AccessProfileId)
+      : undefined;
+
+  let permissionMode: PermissionMode | undefined;
+  if (typeof p.permissionMode === "string") {
+    const allowedPermissionModes = new Set<PermissionMode>([
+      "default",
+      "plan",
+      "dangerous_only",
+      "accept_edits",
+      "dont_ask",
+      "bypass_permissions",
+    ]);
+    if (!allowedPermissionModes.has(p.permissionMode as PermissionMode)) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: "Invalid permissionMode" };
+    }
+    permissionMode = p.permissionMode as PermissionMode;
+  }
 
   const budgetTokens =
     typeof p.budgetTokens === "number" && Number.isFinite(p.budgetTokens)
@@ -88,11 +111,22 @@ function sanitizeTaskCreateParams(params: unknown): {
     typeof p.budgetCost === "number" && Number.isFinite(p.budgetCost)
       ? Math.max(0, p.budgetCost)
       : undefined;
-  const shellAccess = p.shellAccess === true;
+  const shellAccess = typeof p.shellAccess === "boolean" ? p.shellAccess : undefined;
 
   const agentConfig: AgentConfig | undefined = (() => {
-    if (!p.agentConfig || typeof p.agentConfig !== "object") return undefined;
-    return p.agentConfig as AgentConfig;
+    if (!p.agentConfig || typeof p.agentConfig !== "object") {
+      return accessProfileId || permissionMode
+        ? {
+            ...(accessProfileId ? { accessProfileId } : {}),
+            ...(permissionMode ? { permissionMode } : {}),
+          }
+        : undefined;
+    }
+    return {
+      ...(p.agentConfig as AgentConfig),
+      ...(accessProfileId ? { accessProfileId } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
+    };
   })();
 
   if (!title) throw { code: ErrorCodes.INVALID_PARAMS, message: "title is required" };
@@ -107,7 +141,7 @@ function sanitizeTaskCreateParams(params: unknown): {
     ...(agentConfig ? { agentConfig } : {}),
     ...(budgetTokens !== undefined ? { budgetTokens } : {}),
     ...(budgetCost !== undefined ? { budgetCost } : {}),
-    ...(shellAccess ? { shellAccess } : {}),
+    ...(shellAccess !== undefined ? { shellAccess } : {}),
   };
 }
 
@@ -943,19 +977,30 @@ export function registerControlPlaneMethods(
       };
     }
 
-    if (validated.shellAccess && !workspace.permissions?.shell) {
-      workspaceRepo.updatePermissions(validated.workspaceId, {
-        ...workspace.permissions,
-        shell: true,
-      });
-    }
+    const hasNamedAccessProfile =
+      typeof validated.agentConfig?.accessProfileId === "string" &&
+      validated.agentConfig.accessProfileId.trim().length > 0;
+    const compatibilityAgentConfig =
+      validated.shellAccess === true && !hasNamedAccessProfile
+        ? {
+            ...(validated.agentConfig || {}),
+            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+          }
+        : validated.agentConfig;
+    const normalizedAgentConfig =
+      validated.shellAccess !== undefined
+        ? compatibilityAgentConfig
+        : applyDefaultAccessProfile(
+            compatibilityAgentConfig,
+            PermissionSettingsManager.loadSettings(),
+          );
 
     const task = taskRepo.create({
       title: validated.title,
       prompt: validated.prompt,
       status: "pending",
       workspaceId: validated.workspaceId,
-      agentConfig: validated.agentConfig,
+      agentConfig: normalizedAgentConfig,
       budgetTokens: validated.budgetTokens,
       budgetCost: validated.budgetCost,
     });
@@ -1385,7 +1430,7 @@ export function registerControlPlaneMethods(
     requireScope(client, "admin");
     const { channelId } = sanitizeChannelIdParams(params);
     if (!channelGateway) {
-      db.prepare("DELETE FROM channels WHERE id = ?").run(channelId);
+      channelRepo.delete(channelId);
       return { ok: true, restartRequired: true };
     }
     await channelGateway.removeChannel(channelId);

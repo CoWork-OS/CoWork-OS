@@ -48,13 +48,7 @@ const LazyMarkdownRenderer = lazy(() =>
   import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer })),
 );
 
-function DeferredMarkdown({
-  children,
-  components,
-}: {
-  children: string;
-  components?: unknown;
-}) {
+function DeferredMarkdown({ children, components }: { children: string; components?: unknown }) {
   return (
     <Suspense fallback={<span className="markdown-deferred-text">{children}</span>}>
       <LazyMarkdownRenderer components={components}>{children}</LazyMarkdownRenderer>
@@ -70,7 +64,8 @@ const RICH_FRAME_CLOSE_LINE_REGEX = /^\s*<\/rich-frame>\s*$/i;
 const HTML_FENCE_START_REGEX = /^\s*```(?:html|HTML)\s*$/;
 const FENCE_END_REGEX = /^\s*```\s*$/;
 const DIRECTIVE_ATTR_REGEX = /(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|true|false)/g;
-const HTML_ATTR_REGEX = /([a-z][a-z0-9_-]*)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s"'=<>`]+)/gi;
+const HTML_ATTR_REGEX =
+  /([a-z][a-z0-9_-]*)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s"'=<>`]+)/gi;
 const FRAME_KIND_REGEX = /^[a-z][a-z0-9_-]{0,32}$/i;
 const LONG_OSASCRIPT_MIN_CHARS = 220;
 const OSASCRIPT_START_REGEX = /\b(?:Command failed:\s*)?osascript\b/i;
@@ -158,19 +153,17 @@ export function OsascriptCommandExcerpt({
 }
 
 function decodeQuotedValue(value: string): string {
-  if (!value.startsWith("\"") || !value.endsWith("\"")) return value;
-  return value.slice(1, -1).replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
+  if (!value.startsWith('"') || !value.endsWith('"')) return value;
+  return value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
 }
 
 function decodeHtmlAttrValue(value: string): string {
   const trimmed = value.trim();
   const quote = trimmed[0];
   const unquoted =
-    (quote === "\"" || quote === "'") && trimmed.endsWith(quote)
-      ? trimmed.slice(1, -1)
-      : trimmed;
+    (quote === '"' || quote === "'") && trimmed.endsWith(quote) ? trimmed.slice(1, -1) : trimmed;
   return unquoted
-    .replace(/&quot;/gi, "\"")
+    .replace(/&quot;/gi, '"')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/gi, "'")
     .replace(/&amp;/gi, "&")
@@ -453,7 +446,9 @@ function getRenderableHtmlTitle(html: string): string | undefined {
 function looksLikeRenderableHtml(html: string): boolean {
   const trimmed = html.trim();
   if (trimmed.length < 80) return false;
-  if (!/<(?:!doctype|html|head|body|form|style|script|input|textarea|select|button)\b/i.test(trimmed)) {
+  if (
+    !/<(?:!doctype|html|head|body|form|style|script|input|textarea|select|button)\b/i.test(trimmed)
+  ) {
     return false;
   }
   return /<(?:form|input|textarea|select|button)\b/i.test(trimmed) || /<html\b/i.test(trimmed);
@@ -562,7 +557,10 @@ export function parseAssistantMessageSegments(message: string): MessageSegment[]
         markdownBuffer.push(line);
       } else {
         segments.push(parsed);
-        if (lineIndex + 1 < lines.length && RICH_FRAME_CLOSE_LINE_REGEX.test(lines[lineIndex + 1])) {
+        if (
+          lineIndex + 1 < lines.length &&
+          RICH_FRAME_CLOSE_LINE_REGEX.test(lines[lineIndex + 1])
+        ) {
           lineIndex += 1;
         }
       }
@@ -624,7 +622,10 @@ export function AssistantMessageContent({
 
         if (segment.type === "html_source") {
           return (
-            <div key={`html-source-${index}`} className="assistant-html-embed assistant-html-source-embed">
+            <div
+              key={`html-source-${index}`}
+              className="assistant-html-embed assistant-html-source-embed"
+            >
               <InlineHtmlSourcePreview
                 htmlContent={segment.html}
                 title={segment.title}
@@ -657,7 +658,9 @@ export function AssistantMessageContent({
           return (
             <div
               key={`directive-missing-workspace-${index}`}
-              className={segment.type === "video" ? "assistant-video-error" : "assistant-html-error"}
+              className={
+                segment.type === "video" ? "assistant-video-error" : "assistant-html-error"
+              }
             >
               {segment.type === "video"
                 ? "Video embeds require a workspace-backed file."

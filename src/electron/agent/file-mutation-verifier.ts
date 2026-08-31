@@ -26,9 +26,7 @@ export class FileMutationVerifier {
     const targetPath = this.extractTargetPath(opts.toolName, opts.input);
     if (opts.succeeded && targetPath) {
       // Self-correction: remove prior failure for the same path
-      this.mutations = this.mutations.filter(
-        (m) => !(m.targetPath === targetPath && !m.succeeded),
-      );
+      this.mutations = this.mutations.filter((m) => !(m.targetPath === targetPath && !m.succeeded));
     }
     this.mutations.push({
       toolName: opts.toolName,

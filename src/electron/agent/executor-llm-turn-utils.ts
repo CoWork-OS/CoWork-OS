@@ -148,7 +148,12 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
     }, retryLabel);
 
     const effectiveMaxTokens = applyTokenCap(budget, 0, opts.llmTimeoutMs, hasTools);
-    const requestTimeoutMs = opts.getRetryTimeoutMs(opts.llmTimeoutMs, 0, hasTools, effectiveMaxTokens);
+    const requestTimeoutMs = opts.getRetryTimeoutMs(
+      opts.llmTimeoutMs,
+      0,
+      hasTools,
+      effectiveMaxTokens,
+    );
     return { response, effectiveMaxTokens, requestTimeoutMs };
   };
 
@@ -219,15 +224,17 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
         toBudget: escalatedBudget.transport.value,
         classification: truncationClassification,
       });
-      const secondAttempt = await issueRequest(escalatedBudget.transport.value, "[adaptive-escalation]");
+      const secondAttempt = await issueRequest(
+        escalatedBudget.transport.value,
+        "[adaptive-escalation]",
+      );
       recordUsage(secondAttempt.response);
       response = secondAttempt.response;
       finalBudget = escalatedBudget.transport.value;
       if (response?.stopReason === "max_tokens") {
         truncationClassification = classifyOutputTruncation(response.content);
         const hasToolUse = responseHasToolUse(response.content);
-        continuationAllowed =
-          truncationClassification === "visible_partial_output" && !hasToolUse;
+        continuationAllowed = truncationClassification === "visible_partial_output" && !hasToolUse;
         if (!continuationAllowed && truncationClassification === "reasoning_exhausted") {
           guidanceMessage = buildReasoningExhaustedGuidance();
         }
@@ -252,7 +259,7 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
     0,
   );
   opts.log(
-      `  │ LLM call done | duration=${llmCallDuration}s | stopReason=${response.stopReason} | ` +
+    `  │ LLM call done | duration=${llmCallDuration}s | stopReason=${response.stopReason} | ` +
       `toolUseBlocks=${toolUseBlocks.length} | textLen=${textLen} | ` +
       `inputTokens=${response.usage?.inputTokens ?? "?"} | outputTokens=${response.usage?.outputTokens ?? "?"} | cachedTokens=${response.usage?.cachedTokens ?? 0}`,
   );

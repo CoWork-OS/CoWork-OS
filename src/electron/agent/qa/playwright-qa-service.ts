@@ -8,12 +8,17 @@
  */
 
 import { v4 as uuid } from "uuid";
-import { ChildProcess, spawn } from "child_process";
+import { ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs/promises";
 import * as net from "net";
 import { BrowserService } from "../browser/browser-service";
 import { Workspace } from "../../../shared/types";
+import {
+  resolveWorkspaceFilesystemAccessWithApproval,
+  type WorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
+import { createSandbox, type ISandbox } from "../sandbox/sandbox-factory";
 import {
   QARun,
   QARunConfig,
@@ -75,6 +80,51 @@ function detectPortFromUrl(url: string): number | undefined {
   return undefined;
 }
 
+function parseServerCommand(commandLine: string): { command: string; args: string[] } {
+  const source = String(commandLine || "").trim();
+  if (!source) throw new Error("QA server command cannot be empty");
+  if (/[\u0000\r\n;&|`$<>()[\]{}]/.test(source)) {
+    throw new Error("QA server command contains unsupported shell syntax");
+  }
+
+  const tokens: string[] = [];
+  let token = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  const push = () => {
+    if (token) tokens.push(token);
+    token = "";
+  };
+
+  for (const character of source) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = null;
+      else token += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (/\s/.test(character)) push();
+    else token += character;
+  }
+
+  if (escaped || quote) throw new Error("QA server command has an incomplete quote or escape");
+  push();
+  if (!tokens[0]) throw new Error("QA server command cannot be empty");
+  return { command: tokens[0], args: tokens.slice(1) };
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -82,12 +132,15 @@ function detectPortFromUrl(url: string): number | undefined {
 export class PlaywrightQAService {
   private browserService: BrowserService | null = null;
   private serverProcess: ChildProcess | null = null;
+  private serverSandbox: ISandbox | null = null;
   private currentRun: QARun | null = null;
   private eventListeners: Array<(event: QAEvent) => void> = [];
 
   constructor(
     private workspace: Workspace,
     private screenshotDir?: string,
+    private requestServerCommandApproval?: (command: string, cwd: string) => Promise<boolean>,
+    private filesystemApprovalHandlers: WorkspaceFilesystemApprovalHandlers = {},
   ) {}
 
   // -----------------------------------------------------------------------
@@ -101,10 +154,7 @@ export class PlaywrightQAService {
     };
   }
 
-  private emit(
-    type: QAEvent["type"],
-    data: QAEvent["data"],
-  ): void {
+  private emit(type: QAEvent["type"], data: QAEvent["data"]): void {
     if (!this.currentRun) return;
     const event: QAEvent = {
       type,
@@ -140,7 +190,11 @@ export class PlaywrightQAService {
     }
 
     const run = this.currentRun;
-    const screenshotBase = this.screenshotDir || path.join(this.workspace.path, ".cowork", "qa-screenshots");
+    const screenshotBase = await this.resolvePathWithApproval(
+      this.screenshotDir || path.join(this.workspace.path, ".cowork", "qa-screenshots"),
+      "write",
+      "QA screenshot directory",
+    );
 
     switch (checkType) {
       case "console_errors":
@@ -204,7 +258,11 @@ export class PlaywrightQAService {
     };
 
     this.currentRun = run;
-    const screenshotBase = this.screenshotDir || path.join(this.workspace.path, ".cowork", "qa-screenshots");
+    const screenshotBase = await this.resolvePathWithApproval(
+      this.screenshotDir || path.join(this.workspace.path, ".cowork", "qa-screenshots"),
+      "write",
+      "QA screenshot directory",
+    );
     await fs.mkdir(screenshotBase, { recursive: true });
 
     try {
@@ -228,10 +286,7 @@ export class PlaywrightQAService {
       // Use "load" instead of "networkidle" — dev servers (Vite/CRA) keep a
       // persistent WebSocket open for HMR, so networkidle never resolves.
       await this.updateStatus("navigating");
-      const navResult = await this.browserService.navigate(
-        mergedConfig.targetUrl,
-        "load",
-      );
+      const navResult = await this.browserService.navigate(mergedConfig.targetUrl, "load");
 
       const navStep: QAInteractionStep = {
         action: "navigate",
@@ -245,13 +300,15 @@ export class PlaywrightQAService {
       this.emit("qa:step", { step: navStep });
 
       if (navResult.isError) {
-        run.issues.push(this.createIssue({
-          type: "network_errors",
-          severity: "critical",
-          title: `Navigation failed with HTTP ${navResult.status}`,
-          description: `The target URL ${mergedConfig.targetUrl} returned status ${navResult.status}`,
-          url: mergedConfig.targetUrl,
-        }));
+        run.issues.push(
+          this.createIssue({
+            type: "network_errors",
+            severity: "critical",
+            title: `Navigation failed with HTTP ${navResult.status}`,
+            description: `The target URL ${mergedConfig.targetUrl} returned status ${navResult.status}`,
+            url: mergedConfig.targetUrl,
+          }),
+        );
       }
 
       // Take initial screenshot
@@ -366,9 +423,7 @@ export class PlaywrightQAService {
           break;
 
         case "scroll":
-          await this.browserService.evaluate(
-            `window.scrollBy(0, ${step.value || "500"})`,
-          );
+          await this.browserService.evaluate(`window.scrollBy(0, ${step.value || "500"})`);
           step.success = true;
           break;
 
@@ -378,7 +433,8 @@ export class PlaywrightQAService {
           break;
 
         case "screenshot": {
-          const dir = this.screenshotDir || path.join(this.workspace.path, ".cowork", "qa-screenshots");
+          const dir =
+            this.screenshotDir || path.join(this.workspace.path, ".cowork", "qa-screenshots");
           const screenshotPath = await this.takeScreenshot(dir, step.value || "step");
           step.screenshotPath = screenshotPath;
           step.success = true;
@@ -493,8 +549,10 @@ export class PlaywrightQAService {
       }
       if (this.serverProcess && !this.serverProcess.killed) {
         this.serverProcess.kill("SIGTERM");
-        this.serverProcess = null;
       }
+      this.serverProcess = null;
+      this.serverSandbox?.cleanup();
+      this.serverSandbox = null;
     } finally {
       this.currentRun = null;
     }
@@ -507,9 +565,29 @@ export class PlaywrightQAService {
   private async startServer(config: QARunConfig): Promise<void> {
     if (!config.serverCommand) return;
 
-    const cwd = config.serverCwd || this.workspace.path;
+    const cwd = await this.resolvePathWithApproval(
+      config.serverCwd || this.workspace.path,
+      "read",
+      "QA server working directory",
+    );
+    const cwdStats = await fs.stat(cwd).catch(() => null);
+    if (!cwdStats?.isDirectory()) {
+      throw new Error(`QA server working directory is not a directory: ${cwd}`);
+    }
     const port = config.serverPort || detectPortFromUrl(config.targetUrl) || 3000;
-    const timeout = config.serverStartupTimeout || 30_000;
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new Error(`Invalid QA server port: ${port}`);
+    }
+    const timeout = Math.min(Math.max(config.serverStartupTimeout || 30_000, 1_000), 5 * 60_000);
+
+    if (this.workspace.permissions.shell !== true) {
+      throw new Error("QA server commands require the workspace shell capability");
+    }
+    if (!this.requestServerCommandApproval) {
+      throw new Error("QA server commands require an approval context");
+    }
+    const approved = await this.requestServerCommandApproval(config.serverCommand, cwd);
+    if (!approved) throw new Error("QA server command approval denied");
 
     // Check if port is already in use (server may already be running)
     const alreadyUp = await waitForPort(port, 1000);
@@ -519,15 +597,43 @@ export class PlaywrightQAService {
     }
 
     // Spawn server process
-    const parts = config.serverCommand.split(/\s+/);
-    const cmd = parts[0];
-    const args = parts.slice(1);
+    const { command, args } = parseServerCommand(config.serverCommand);
+    const requestedSandboxType = this.workspace.permissions.sandboxType || "auto";
+    this.serverSandbox = await createSandbox(this.workspace, requestedSandboxType);
+    const restrictedProfile = this.workspace.permissions.accessSandboxMode !== "danger-full-access";
+    if (restrictedProfile && this.serverSandbox.type === "none") {
+      this.serverSandbox.cleanup();
+      this.serverSandbox = null;
+      throw new Error(
+        "QA server commands require an OS-level sandbox for the active access profile",
+      );
+    }
 
-    this.serverProcess = spawn(cmd, args, {
+    const sandboxProcess = this.serverSandbox.spawnProcess?.(command, args, {
       cwd,
-      stdio: "pipe",
-      shell: true,
-      env: { ...process.env, NODE_ENV: "development", BROWSER: "none" },
+      // The process sandbox only has a binary network switch; it cannot
+      // enforce the profile's domain allow/deny language. Fail closed for a
+      // scoped domain profile so a dev server cannot use the QA helper as an
+      // unrestricted network tunnel. Browser navigation still applies the
+      // domain policy at the page/request layer.
+      allowNetwork:
+        this.workspace.permissions.network === true &&
+        this.workspace.permissions.accessNetworkMode !== "disabled" &&
+        this.workspace.permissions.accessNetworkMode !== "on-request" &&
+        (this.workspace.permissions.accessDomainRules?.length || 0) === 0,
+      envPassthrough: ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "TMPDIR"],
+    });
+    if (!sandboxProcess) {
+      this.serverSandbox.cleanup();
+      this.serverSandbox = null;
+      throw new Error("The selected QA sandbox cannot start a long-running server process");
+    }
+    this.serverProcess = sandboxProcess.process;
+    this.serverProcess.once("close", () => {
+      sandboxProcess.cleanup();
+    });
+    this.serverProcess.once("error", () => {
+      sandboxProcess.cleanup();
     });
 
     // Wait for port to be ready
@@ -535,7 +641,7 @@ export class PlaywrightQAService {
     if (!ready) {
       throw new Error(
         `Dev server did not start on port ${port} within ${timeout}ms. ` +
-        `Command: ${config.serverCommand}`,
+          `Command: ${config.serverCommand}`,
       );
     }
   }
@@ -581,17 +687,18 @@ export class PlaywrightQAService {
 
     const issues: QAIssue[] = [];
     for (const msg of errors) {
-      const severity: QASeverity = msg.startsWith("[ERROR]") || msg.startsWith("[UNCAUGHT]")
-        ? "major"
-        : "minor";
-      issues.push(this.createIssue({
-        type: "console_errors",
-        severity,
-        title: msg.slice(0, 120),
-        description: msg,
-        url: this.browserService!.getUrl?.() || run.config.targetUrl,
-        consoleMessage: msg,
-      }));
+      const severity: QASeverity =
+        msg.startsWith("[ERROR]") || msg.startsWith("[UNCAUGHT]") ? "major" : "minor";
+      issues.push(
+        this.createIssue({
+          type: "console_errors",
+          severity,
+          title: msg.slice(0, 120),
+          description: msg,
+          url: this.browserService!.getUrl?.() || run.config.targetUrl,
+          consoleMessage: msg,
+        }),
+      );
     }
 
     const check: QACheck = {
@@ -631,18 +738,20 @@ export class PlaywrightQAService {
     const issues: QAIssue[] = [];
 
     for (const req of failedRequests) {
-      issues.push(this.createIssue({
-        type: "network_errors",
-        severity: (req as Any).status >= 500 ? "major" : "minor",
-        title: `HTTP ${(req as Any).status} — ${(req as Any).url?.split("/").pop() || (req as Any).url}`,
-        description: `Failed request: ${(req as Any).url} (${(req as Any).status})`,
-        url: run.config.targetUrl,
-        networkDetails: {
-          url: (req as Any).url,
-          status: (req as Any).status,
-          method: "GET",
-        },
-      }));
+      issues.push(
+        this.createIssue({
+          type: "network_errors",
+          severity: (req as Any).status >= 500 ? "major" : "minor",
+          title: `HTTP ${(req as Any).status} — ${(req as Any).url?.split("/").pop() || (req as Any).url}`,
+          description: `Failed request: ${(req as Any).url} (${(req as Any).status})`,
+          url: run.config.targetUrl,
+          networkDetails: {
+            url: (req as Any).url,
+            status: (req as Any).status,
+            method: "GET",
+          },
+        }),
+      );
     }
 
     const check: QACheck = {
@@ -732,21 +841,24 @@ export class PlaywrightQAService {
         excessive_truncation: "minor",
         empty_container: "critical",
       };
-      issues.push(this.createIssue({
-        type: "visual_snapshot",
-        severity: severityMap[(vi as Any).type] || "minor",
-        title: (vi as Any).detail?.slice(0, 120) || "Visual issue",
-        description: (vi as Any).detail || "",
-        url: run.config.targetUrl,
-        screenshotPath,
-      }));
+      issues.push(
+        this.createIssue({
+          type: "visual_snapshot",
+          severity: severityMap[(vi as Any).type] || "minor",
+          title: (vi as Any).detail?.slice(0, 120) || "Visual issue",
+          description: (vi as Any).detail || "",
+          url: run.config.targetUrl,
+          screenshotPath,
+        }),
+      );
     }
 
     const check: QACheck = {
       type: "visual_snapshot",
       label: "Visual Snapshot",
       description: "Full-page screenshot and visual issue detection",
-      passed: issues.filter((i) => i.severity === "critical" || i.severity === "major").length === 0,
+      passed:
+        issues.filter((i) => i.severity === "critical" || i.severity === "major").length === 0,
       issues,
       screenshotPath,
       durationMs: now() - start,
@@ -839,14 +951,16 @@ export class PlaywrightQAService {
           this.emit("qa:step", { step });
 
           if (!clickResult.success) {
-            issues.push(this.createIssue({
-              type: "interaction_test",
-              severity: "minor",
-              title: `Button not clickable: "${(el as Any).text}"`,
-              description: `Failed to click button with selector "${(el as Any).selector}": ${clickResult.error}`,
-              url: run.config.targetUrl,
-              element: (el as Any).selector,
-            }));
+            issues.push(
+              this.createIssue({
+                type: "interaction_test",
+                severity: "minor",
+                title: `Button not clickable: "${(el as Any).text}"`,
+                description: `Failed to click button with selector "${(el as Any).selector}": ${clickResult.error}`,
+                url: run.config.targetUrl,
+                element: (el as Any).selector,
+              }),
+            );
           }
 
           // Brief pause between interactions
@@ -862,14 +976,16 @@ export class PlaywrightQAService {
       for (const step of config.interactionSteps) {
         const result = await this.executeStep({ ...step });
         if (!result.success) {
-          issues.push(this.createIssue({
-            type: "interaction_test",
-            severity: "major",
-            title: `Interaction failed: ${step.description}`,
-            description: `Step "${step.action}" on "${step.selector || step.url}" failed: ${result.error}`,
-            url: run.config.targetUrl,
-            element: step.selector,
-          }));
+          issues.push(
+            this.createIssue({
+              type: "interaction_test",
+              severity: "major",
+              title: `Interaction failed: ${step.description}`,
+              description: `Step "${step.action}" on "${step.selector || step.url}" failed: ${result.error}`,
+              url: run.config.targetUrl,
+              element: step.selector,
+            }),
+          );
         }
       }
     }
@@ -881,14 +997,16 @@ export class PlaywrightQAService {
     );
     for (const err of newErrors) {
       if (err.startsWith("[ERROR]") || err.startsWith("[UNCAUGHT]")) {
-        issues.push(this.createIssue({
-          type: "interaction_test",
-          severity: "major",
-          title: `Error during interaction: ${err.slice(0, 100)}`,
-          description: err,
-          url: run.config.targetUrl,
-          consoleMessage: err,
-        }));
+        issues.push(
+          this.createIssue({
+            type: "interaction_test",
+            severity: "major",
+            title: `Error during interaction: ${err.slice(0, 100)}`,
+            description: err,
+            url: run.config.targetUrl,
+            consoleMessage: err,
+          }),
+        );
       }
     }
 
@@ -898,7 +1016,8 @@ export class PlaywrightQAService {
       type: "interaction_test",
       label: "Interaction Tests",
       description: "Test interactive elements (buttons, links, inputs)",
-      passed: issues.filter((i) => i.severity === "critical" || i.severity === "major").length === 0,
+      passed:
+        issues.filter((i) => i.severity === "critical" || i.severity === "major").length === 0,
       issues,
       screenshotPath,
       durationMs: now() - start,
@@ -942,14 +1061,16 @@ export class PlaywrightQAService {
         );
 
         if (overflowResult.success && (overflowResult.result as Any)?.overflow) {
-          issues.push(this.createIssue({
-            type: "responsive_check",
-            severity: "major",
-            title: `Horizontal overflow at ${vp.label} (${vp.width}x${vp.height})`,
-            description: `Content width ${(overflowResult.result as Any).docWidth}px exceeds viewport ${vp.width}px`,
-            url: run.config.targetUrl,
-            screenshotPath,
-          }));
+          issues.push(
+            this.createIssue({
+              type: "responsive_check",
+              severity: "major",
+              title: `Horizontal overflow at ${vp.label} (${vp.width}x${vp.height})`,
+              description: `Content width ${(overflowResult.result as Any).docWidth}px exceeds viewport ${vp.width}px`,
+              url: run.config.targetUrl,
+              screenshotPath,
+            }),
+          );
         }
       } catch {
         // Best-effort responsive checks
@@ -1105,7 +1226,8 @@ export class PlaywrightQAService {
       type: "performance_check",
       label: "Performance",
       description: "Check page load time, DOM size, resource sizes",
-      passed: issues.filter((i) => i.severity === "major" || i.severity === "critical").length === 0,
+      passed:
+        issues.filter((i) => i.severity === "major" || i.severity === "critical").length === 0,
       issues,
       durationMs: now() - start,
     };
@@ -1126,15 +1248,36 @@ export class PlaywrightQAService {
     }
   }
 
+  private async resolvePathWithApproval(
+    rawPath: string,
+    operation: "read" | "write" | "delete",
+    label: string,
+  ): Promise<string> {
+    const access = await resolveWorkspaceFilesystemAccessWithApproval(
+      this.workspace,
+      rawPath,
+      operation,
+      label,
+      this.filesystemApprovalHandlers,
+    );
+    if (access.decision !== "allow") {
+      throw new Error(`Access denied for ${label} "${rawPath}": ${access.reason}`);
+    }
+    return access.path;
+  }
+
   private async takeScreenshot(dir: string, label: string, fullPage = false): Promise<string> {
     if (!this.browserService) return "";
     try {
-      await fs.mkdir(dir, { recursive: true });
-      const filename = `qa-${label}-${Date.now()}.png`;
-      const result = await this.browserService.screenshot(
-        path.join(dir, filename),
-        fullPage,
-      );
+      const safeDir = await this.resolvePathWithApproval(dir, "write", "QA screenshot directory");
+      await fs.mkdir(safeDir, { recursive: true });
+      const safeLabel =
+        String(label || "step")
+          .replace(/[^a-zA-Z0-9._-]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 80) || "step";
+      const filename = `qa-${safeLabel}-${Date.now()}.png`;
+      const result = await this.browserService.screenshot(path.join(safeDir, filename), fullPage);
       return result.path;
     } catch {
       return "";

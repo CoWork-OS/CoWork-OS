@@ -128,8 +128,7 @@ export function UsageInsightsLlmSection({
 
   const chargeablePct =
     ls.chargeableCallRate !== null ? `${ls.chargeableCallRate.toFixed(1)}%` : "\u2014";
-  const successPct =
-    llmSuccessRate !== null ? `${llmSuccessRate.toFixed(1)}%` : "\u2014";
+  const successPct = llmSuccessRate !== null ? `${llmSuccessRate.toFixed(1)}%` : "\u2014";
   const cachePct =
     ls.totalCachedTokens > 0 && ls.cacheReadRate !== null
       ? `${ls.cacheReadRate.toFixed(1)}%`
@@ -168,9 +167,7 @@ export function UsageInsightsLlmSection({
         <div className="insights-hero-card insights-llm-kpi-card">
           <div className="insights-hero-value">{cachePct}</div>
           <div className="insights-hero-label">Cache read (of prompt)</div>
-          {ls.totalCachedTokens === 0 && (
-            <div className="insights-hero-sub">No cache data yet</div>
-          )}
+          {ls.totalCachedTokens === 0 && <div className="insights-hero-sub">No cache data yet</div>}
         </div>
       </div>
 
@@ -178,243 +175,262 @@ export function UsageInsightsLlmSection({
         <div className="insights-card insights-llm-empty-banner" role="status">
           <p className="insights-llm-empty-title">No LLM usage in this period</p>
           <p className="insights-llm-empty-body">
-            Charts below stay hidden until at least one model call is recorded in this date range. Tool runs
-            alone do not increment LLM metrics. Try a longer range (14d / 30d) if your tasks finished outside
-            the last 7 days.
+            Charts below stay hidden until at least one model call is recorded in this date range.
+            Tool runs alone do not increment LLM metrics. Try a longer range (14d / 30d) if your
+            tasks finished outside the last 7 days.
           </p>
         </div>
       )}
 
       {!hasLlmUsage ? null : (
         <>
-      <div className="insights-two-col insights-chart-row">
-        <div className="insights-card insights-chart-card">
-          <div className="insights-card-header">LLM calls by day</div>
-          <div className="insights-chart-wrap">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dailyRows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border, rgba(255,255,255,0.08))" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
-                  interval="preserveStartEnd"
-                />
-                <YAxis tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }} allowDecimals={false} />
-                <Tooltip {...tooltipProps} />
-                <Bar dataKey="llmCalls" fill="#3b82f6" name="Calls" radius={[4, 4, 0, 0]}>
-                  <LabelList
-                    dataKey="llmCalls"
-                    position="top"
-                    fontSize={10}
-                    fill="var(--color-text-muted, #888)"
-                    formatter={(value) =>
-                      Number(value ?? 0) > 0 ? String(value ?? "") : ""
-                    }
-                  />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+          <div className="insights-two-col insights-chart-row">
+            <div className="insights-card insights-chart-card">
+              <div className="insights-card-header">LLM calls by day</div>
+              <div className="insights-chart-wrap">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyRows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="var(--color-border, rgba(255,255,255,0.08))"
+                    />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
+                      allowDecimals={false}
+                    />
+                    <Tooltip {...tooltipProps} />
+                    <Bar dataKey="llmCalls" fill="#3b82f6" name="Calls" radius={[4, 4, 0, 0]}>
+                      <LabelList
+                        dataKey="llmCalls"
+                        position="top"
+                        fontSize={10}
+                        fill="var(--color-text-muted, #888)"
+                        formatter={(value) => (Number(value ?? 0) > 0 ? String(value ?? "") : "")}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
 
-        <div className="insights-card insights-chart-card">
-          <div className="insights-card-header">Cost trend</div>
-          <div className="insights-card-header-sub">Daily cost and avg cost per call</div>
-          <div className="insights-chart-wrap">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={dailyRows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border, rgba(255,255,255,0.08))" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  yAxisId="left"
-                  tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
-                  tickFormatter={(v) => `$${Number(v).toFixed(2)}`}
-                />
-                <YAxis
-                  yAxisId="right"
-                  orientation="right"
-                  tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
-                  tickFormatter={(v) => `$${Number(v).toFixed(3)}`}
-                />
-                <Tooltip
-                  {...tooltipProps}
-                  formatter={(value, name) => {
-                    const numericValue = Number(value ?? 0);
-                    const label = String(name ?? "");
-                    if (label === "Daily cost") return [`$${numericValue.toFixed(4)}`, label];
-                    if (label === "Avg $/call") return [`$${numericValue.toFixed(4)}`, label];
-                    return [value ?? "", label];
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Line
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="cost"
-                  name="Daily cost"
-                  stroke="#3b82f6"
-                  dot={false}
-                  strokeWidth={2}
-                />
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="avgCostPerCall"
-                  name="Avg $/call"
-                  stroke="#14b8a6"
-                  dot={false}
-                  strokeWidth={2}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      <div className="insights-two-col insights-chart-row">
-        <div className="insights-card insights-chart-card">
-          <div className="insights-card-header">Calls by model</div>
-          <div className="insights-chart-wrap insights-chart-wrap-tall">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                layout="vertical"
-                data={byModelChart}
-                margin={{ top: 8, right: 28, left: 8, bottom: 8 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border, rgba(255,255,255,0.08))" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }} allowDecimals={false} domain={[0, maxModelCalls]} />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  width={132}
-                  tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
-                />
-                <Tooltip {...tooltipProps} />
-                <Bar dataKey="calls" fill="#3b82f6" name="Calls" radius={[0, 4, 4, 0]}>
-                  <LabelList
-                    dataKey="calls"
-                    position="right"
-                    fontSize={10}
-                    fill="var(--color-text-muted, #888)"
-                  />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="insights-card insights-chart-card">
-          <div className="insights-card-header">
-            Provider share
-            <span className="insights-card-header-sub">
-              {ls.totalCost > 0 ? "Share of cost" : "Share of calls"}
-            </span>
-          </div>
-          <div className="insights-chart-wrap">
-            {pieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius="48%"
-                    outerRadius="72%"
-                    paddingAngle={1}
+            <div className="insights-card insights-chart-card">
+              <div className="insights-card-header">Cost trend</div>
+              <div className="insights-card-header-sub">Daily cost and avg cost per call</div>
+              <div className="insights-chart-wrap">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={dailyRows}
+                    margin={{ top: 8, right: 12, left: 0, bottom: 4 }}
                   >
-                    {pieData.map((_, i) => (
-                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip {...tooltipProps} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="insights-chart-empty">No provider data</p>
-            )}
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="var(--color-border, rgba(255,255,255,0.08))"
+                    />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      yAxisId="left"
+                      tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
+                      tickFormatter={(v) => `$${Number(v).toFixed(2)}`}
+                    />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
+                      tickFormatter={(v) => `$${Number(v).toFixed(3)}`}
+                    />
+                    <Tooltip
+                      {...tooltipProps}
+                      formatter={(value, name) => {
+                        const numericValue = Number(value ?? 0);
+                        const label = String(name ?? "");
+                        if (label === "Daily cost") return [`$${numericValue.toFixed(4)}`, label];
+                        if (label === "Avg $/call") return [`$${numericValue.toFixed(4)}`, label];
+                        return [value ?? "", label];
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="cost"
+                      name="Daily cost"
+                      stroke="#3b82f6"
+                      dot={false}
+                      strokeWidth={2}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="avgCostPerCall"
+                      name="Avg $/call"
+                      stroke="#14b8a6"
+                      dot={false}
+                      strokeWidth={2}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div className="insights-card insights-chart-card insights-model-table-card">
-        <div className="insights-card-header">Model breakdown</div>
-        <div className="insights-table-wrap">
-          <table className="insights-data-table">
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th className="num">Calls</th>
-                <th className="num">Tasks</th>
-                <th className="num">Cost</th>
-                <th className="num">In tok</th>
-                <th className="num">Out tok</th>
-                <th className="num">Cache</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tableRows.map((row) => (
-                <tr key={row.model}>
-                  <td className="insights-table-model" title={row.model}>
-                    {row.model}
-                  </td>
-                  <td className="num">{row.calls}</td>
-                  <td className="num">{row.distinctTasks}</td>
-                  <td className="num">${row.cost.toFixed(4)}</td>
-                  <td className="num">{formatTokens(row.inputTokens)}</td>
-                  <td className="num">{formatTokens(row.outputTokens)}</td>
-                  <td className="num">{formatTokens(row.cachedTokens)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+          <div className="insights-two-col insights-chart-row">
+            <div className="insights-card insights-chart-card">
+              <div className="insights-card-header">Calls by model</div>
+              <div className="insights-chart-wrap insights-chart-wrap-tall">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    layout="vertical"
+                    data={byModelChart}
+                    margin={{ top: 8, right: 28, left: 8, bottom: 8 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="var(--color-border, rgba(255,255,255,0.08))"
+                      horizontal={false}
+                    />
+                    <XAxis
+                      type="number"
+                      tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
+                      allowDecimals={false}
+                      domain={[0, maxModelCalls]}
+                    />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      width={132}
+                      tick={{ fontSize: 10, fill: "var(--color-text-muted, #888)" }}
+                    />
+                    <Tooltip {...tooltipProps} />
+                    <Bar dataKey="calls" fill="#3b82f6" name="Calls" radius={[0, 4, 4, 0]}>
+                      <LabelList
+                        dataKey="calls"
+                        position="right"
+                        fontSize={10}
+                        fill="var(--color-text-muted, #888)"
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
 
-      {providerTableRows.length > 0 && (
-        <div className="insights-card insights-chart-card insights-model-table-card">
-          <div className="insights-card-header">Provider breakdown</div>
-          <div className="insights-table-wrap">
-            <table className="insights-data-table">
-              <thead>
-                <tr>
-                  <th>Provider</th>
-                  <th className="num">Calls</th>
-                  <th className="num">Tasks</th>
-                  <th className="num">Cost</th>
-                  <th className="num">In tok</th>
-                  <th className="num">Out tok</th>
-                  <th className="num">Cache</th>
-                </tr>
-              </thead>
-              <tbody>
-                {providerTableRows.map((row) => (
-                  <tr key={row.provider}>
-                    <td
-                      className="insights-table-model"
-                      title={getLlmProviderDisplayName(row.provider)}
-                    >
-                      {getLlmProviderDisplayName(row.provider)}
-                    </td>
-                    <td className="num">{row.calls}</td>
-                    <td className="num">{row.distinctTasks}</td>
-                    <td className="num">${row.cost.toFixed(4)}</td>
-                    <td className="num">{formatTokens(row.inputTokens)}</td>
-                    <td className="num">{formatTokens(row.outputTokens)}</td>
-                    <td className="num">{formatTokens(row.cachedTokens)}</td>
+            <div className="insights-card insights-chart-card">
+              <div className="insights-card-header">
+                Provider share
+                <span className="insights-card-header-sub">
+                  {ls.totalCost > 0 ? "Share of cost" : "Share of calls"}
+                </span>
+              </div>
+              <div className="insights-chart-wrap">
+                {pieData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+                      <Pie
+                        data={pieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius="48%"
+                        outerRadius="72%"
+                        paddingAngle={1}
+                      >
+                        {pieData.map((_, i) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip {...tooltipProps} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className="insights-chart-empty">No provider data</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="insights-card insights-chart-card insights-model-table-card">
+            <div className="insights-card-header">Model breakdown</div>
+            <div className="insights-table-wrap">
+              <table className="insights-data-table">
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th className="num">Calls</th>
+                    <th className="num">Tasks</th>
+                    <th className="num">Cost</th>
+                    <th className="num">In tok</th>
+                    <th className="num">Out tok</th>
+                    <th className="num">Cache</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {tableRows.map((row) => (
+                    <tr key={row.model}>
+                      <td className="insights-table-model" title={row.model}>
+                        {row.model}
+                      </td>
+                      <td className="num">{row.calls}</td>
+                      <td className="num">{row.distinctTasks}</td>
+                      <td className="num">${row.cost.toFixed(4)}</td>
+                      <td className="num">{formatTokens(row.inputTokens)}</td>
+                      <td className="num">{formatTokens(row.outputTokens)}</td>
+                      <td className="num">{formatTokens(row.cachedTokens)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+
+          {providerTableRows.length > 0 && (
+            <div className="insights-card insights-chart-card insights-model-table-card">
+              <div className="insights-card-header">Provider breakdown</div>
+              <div className="insights-table-wrap">
+                <table className="insights-data-table">
+                  <thead>
+                    <tr>
+                      <th>Provider</th>
+                      <th className="num">Calls</th>
+                      <th className="num">Tasks</th>
+                      <th className="num">Cost</th>
+                      <th className="num">In tok</th>
+                      <th className="num">Out tok</th>
+                      <th className="num">Cache</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {providerTableRows.map((row) => (
+                      <tr key={row.provider}>
+                        <td
+                          className="insights-table-model"
+                          title={getLlmProviderDisplayName(row.provider)}
+                        >
+                          {getLlmProviderDisplayName(row.provider)}
+                        </td>
+                        <td className="num">{row.calls}</td>
+                        <td className="num">{row.distinctTasks}</td>
+                        <td className="num">${row.cost.toFixed(4)}</td>
+                        <td className="num">{formatTokens(row.inputTokens)}</td>
+                        <td className="num">{formatTokens(row.outputTokens)}</td>
+                        <td className="num">{formatTokens(row.cachedTokens)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Access profiles**: added Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles combining sandbox, approvals, reviewer behavior, network, filesystem, and domain policy across desktop, CLI, remote, managed, automation, channel, and child-task surfaces.
+- **Access profile documentation**: added the canonical [Access Profiles guide](access-profiles.md) covering selection, defaults, custom profile fields, inheritance, fail-closed behavior, migration, compatibility, and verification.
+
+### Changed
+
+- **Profile-first command access**: removed the new-task shell enable/disable control. Command tools now derive from the selected profile; legacy shell fields and permission modes remain only at compatibility boundaries.
+- **Governed cross-surface execution**: documented that browser, computer-use, connector, MCP tunnel, memory, skill, channel, automation, terminal, remote, and managed-agent surfaces inherit the effective profile and cannot widen it.
+- **Fail-closed policy documentation**: documented unavailable or backend-incompatible profiles, finite filesystem/domain boundaries, protected paths, and the separation between logical profiles, sandbox backends, approval behavior, and execution modes.
+
 ## [0.5.52] - 2026-08-27
 
 ### Added

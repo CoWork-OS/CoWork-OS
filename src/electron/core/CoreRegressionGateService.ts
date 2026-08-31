@@ -47,7 +47,10 @@ export class CoreRegressionGateService {
         targetImproved = false;
     }
 
-    if (typeof proposal.cadenceMinutes === "number" && (proposal.cadenceMinutes < 5 || proposal.cadenceMinutes > 24 * 60)) {
+    if (
+      typeof proposal.cadenceMinutes === "number" &&
+      (proposal.cadenceMinutes < 5 || proposal.cadenceMinutes > 24 * 60)
+    ) {
       regressions.push("cadence_out_of_bounds");
     }
     if (

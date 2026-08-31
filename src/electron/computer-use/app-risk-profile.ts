@@ -81,7 +81,10 @@ export function classifyApp(bundleId: string, appName: string): AppRiskProfile {
     };
   }
 
-  if (bundleStartsWithAny(bundle, BROWSER_BUNDLE_PREFIXES) || /\b(chrome|safari|firefox|brave|edge|opera)\b/i.test(name)) {
+  if (
+    bundleStartsWithAny(bundle, BROWSER_BUNDLE_PREFIXES) ||
+    /\b(chrome|safari|firefox|brave|edge|opera)\b/i.test(name)
+  ) {
     return {
       riskClass: "browser",
       maxSuggestedLevel: "view_only",
@@ -90,7 +93,10 @@ export function classifyApp(bundleId: string, appName: string): AppRiskProfile {
     };
   }
 
-  if (bundleStartsWithAny(bundle, TERMINAL_IDE_BUNDLE_PREFIXES) || /\b(terminal|iterm|vscode|code|cursor|xcode|warp)\b/i.test(name)) {
+  if (
+    bundleStartsWithAny(bundle, TERMINAL_IDE_BUNDLE_PREFIXES) ||
+    /\b(terminal|iterm|vscode|code|cursor|xcode|warp)\b/i.test(name)
+  ) {
     return {
       riskClass: "terminal_ide",
       maxSuggestedLevel: "click_only",
@@ -103,7 +109,8 @@ export function classifyApp(bundleId: string, appName: string): AppRiskProfile {
     return {
       riskClass: "trading",
       maxSuggestedLevel: "view_only",
-      sentinelWarning: "Trading platforms may expose financial data. Prefer view-only unless interaction is required.",
+      sentinelWarning:
+        "Trading platforms may expose financial data. Prefer view-only unless interaction is required.",
     };
   }
 

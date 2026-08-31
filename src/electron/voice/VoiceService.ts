@@ -17,10 +17,7 @@ import {
   DEFAULT_VOICE_SETTINGS,
 } from "../../shared/types";
 import { createLogger } from "../utils/logger";
-import {
-  createSystemVoiceRuntime,
-  type SystemVoiceRuntime,
-} from "./system-voice";
+import { createSystemVoiceRuntime, type SystemVoiceRuntime } from "./system-voice";
 
 // ElevenLabs API configuration
 const ELEVENLABS_API_BASE = "https://api.elevenlabs.io/v1";

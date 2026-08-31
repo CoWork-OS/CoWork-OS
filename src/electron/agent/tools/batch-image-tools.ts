@@ -7,28 +7,27 @@ import * as fsSync from "fs";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
+import {
+  canonicalizeAccessPath,
+  resolveWorkspaceFilesystemAccessWithApproval,
+  evaluateWorkspaceFilesystemAccess,
+  isAccessPathWithin,
+  isProtectedFilesystemPath,
+  type WorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
 
 type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const PROCESS_TIMEOUT_MS = 60_000;
-const PROTECTED_WRITE_PATHS = [
-  "/System",
-  "/Library",
-  "/usr",
-  "/bin",
-  "/sbin",
-  "/etc",
-  "/var",
-  "/private",
-  "C:\\Windows",
-  "C:\\Program Files",
-  "C:\\Program Files (x86)",
-];
-
 export type ImageOutputFormat = "png" | "jpeg" | "webp";
-export type WatermarkPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center";
+export type WatermarkPosition =
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right"
+  | "center";
 
 export interface BatchImageOperation {
   type: "resize" | "convert" | "watermark";
@@ -70,34 +69,34 @@ export class BatchImageTools {
     this.workspace = workspace;
   }
 
-  private isPathAllowedOutsideWorkspace(absolutePath: string): boolean {
-    const allowedPaths = this.workspace.permissions.allowedPaths || [];
-    if (allowedPaths.length === 0) return false;
-
-    const normalizedPath = path.normalize(absolutePath);
-    return allowedPaths.some((allowed) => {
-      const normalizedAllowed = path.normalize(allowed);
-      return (
-        normalizedPath === normalizedAllowed ||
-        normalizedPath.startsWith(normalizedAllowed + path.sep)
-      );
-    });
-  }
-
-  private isInsideWorkspace(absolutePath: string): boolean {
-    const workspaceRoot = path.resolve(this.workspace.path);
-    const relative = path.relative(workspaceRoot, absolutePath);
-    return !(relative.startsWith("..") || path.isAbsolute(relative));
+  private getFileApprovalHandlers(): WorkspaceFilesystemApprovalHandlers {
+    const daemon = this.daemon as Any;
+    return {
+      ...(typeof daemon.requestApproval === "function"
+        ? {
+            request: ({ path: approvedPath, operation, label }) =>
+              daemon.requestApproval(
+                this.taskId,
+                "external_file_access",
+                `Allow ${operation} access to external ${label}: ${approvedPath}`,
+                { path: approvedPath, operation, tool: "batch_image_process" },
+              ),
+          }
+        : {}),
+      ...(typeof daemon.consumeExternalFileApproval === "function"
+        ? {
+            consume: (approvedPath: string, operation: "read" | "write" | "delete") =>
+              daemon.consumeExternalFileApproval(this.taskId, approvedPath, operation),
+          }
+        : {}),
+    };
   }
 
   private isProtectedWritePath(absolutePath: string): boolean {
-    const normalizedPath = path.normalize(absolutePath).toLowerCase();
-    return PROTECTED_WRITE_PATHS.some((protectedPath) =>
-      normalizedPath.startsWith(protectedPath.toLowerCase()),
-    );
+    return isProtectedFilesystemPath(absolutePath);
   }
 
-  private ensureReadablePath(inputPath: string): string {
+  private async ensureReadablePath(inputPath: string): Promise<string> {
     if (!this.workspace.permissions.read) {
       throw new Error("Read permission not granted for batch image processing");
     }
@@ -109,18 +108,28 @@ export class BatchImageTools {
       throw new Error(`File not found: ${inputPath}`);
     }
 
-    const resolvedPath = fsSync.realpathSync(candidate);
-    const canReadOutside =
-      this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess;
-    if (
-      !this.isInsideWorkspace(resolvedPath) &&
-      !canReadOutside &&
-      !this.isPathAllowedOutsideWorkspace(resolvedPath)
-    ) {
-      throw new Error(
-        "Image path must be inside the workspace or an approved Allowed Path.",
-      );
+    const access = await resolveWorkspaceFilesystemAccessWithApproval(
+      this.workspace,
+      candidate,
+      "read",
+      "batch image input",
+      this.getFileApprovalHandlers(),
+    );
+    if (access.decision !== "allow") {
+      if (access.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${candidate}`);
+      }
+      if (access.reason === "access_profile_unavailable") {
+        throw new Error("The selected access profile is unavailable.");
+      }
+      if (access.reason === "outside_workspace") {
+        throw new Error(
+          `Image path must be inside the workspace or an approved Allowed Path (external access was not approved): ${candidate}`,
+        );
+      }
+      throw new Error("Image path must be inside the workspace or an approved Allowed Path.");
     }
+    const resolvedPath = access.path;
 
     const stats = fsSync.statSync(resolvedPath);
     if (!stats.isFile()) {
@@ -129,27 +138,41 @@ export class BatchImageTools {
     return resolvedPath;
   }
 
-  private ensureWritablePath(outputPath: string): string {
+  private async ensureWritablePath(outputPath: string): Promise<string> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted for batch image processing");
     }
 
-    const resolvedPath = path.isAbsolute(outputPath)
+    const candidatePath = path.isAbsolute(outputPath)
       ? path.resolve(outputPath)
       : path.resolve(this.workspace.path, outputPath);
-    const canWriteOutside =
-      this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess;
-
-    if (
-      !this.isInsideWorkspace(resolvedPath) &&
-      !canWriteOutside &&
-      !this.isPathAllowedOutsideWorkspace(resolvedPath)
-    ) {
-      throw new Error(
-        "Output path must be inside the workspace or an approved Allowed Path.",
-      );
+    const access = await resolveWorkspaceFilesystemAccessWithApproval(
+      this.workspace,
+      candidatePath,
+      "write",
+      "batch image output",
+      this.getFileApprovalHandlers(),
+    );
+    if (access.decision !== "allow") {
+      if (access.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${candidatePath}`);
+      }
+      if (access.reason === "access_profile_unavailable") {
+        throw new Error("The selected access profile is unavailable.");
+      }
+      if (access.reason === "outside_workspace") {
+        throw new Error(
+          `Output path must be inside the workspace or an approved Allowed Path (external access was not approved): ${candidatePath}`,
+        );
+      }
+      throw new Error("Output path must be inside the workspace or an approved Allowed Path.");
     }
-    if (!this.isInsideWorkspace(resolvedPath) && this.isProtectedWritePath(resolvedPath)) {
+    const resolvedPath = access.path;
+    const isInsideWorkspace = isAccessPathWithin(
+      canonicalizeAccessPath(this.workspace.path),
+      resolvedPath,
+    );
+    if (!isInsideWorkspace && this.isProtectedWritePath(resolvedPath)) {
       throw new Error(`Cannot write batch image output to protected path: ${resolvedPath}`);
     }
     return resolvedPath;
@@ -171,8 +194,8 @@ export class BatchImageTools {
 
     // Resolve output directory
     const outDir = outputDir
-      ? this.ensureWritablePath(outputDir)
-      : this.ensureWritablePath(path.join(this.workspace.path, `batch-output-${Date.now()}`));
+      ? await this.ensureWritablePath(outputDir)
+      : await this.ensureWritablePath(path.join(this.workspace.path, `batch-output-${Date.now()}`));
 
     await fs.mkdir(outDir, { recursive: true });
 
@@ -188,13 +211,13 @@ export class BatchImageTools {
     let failed = 0;
 
     for (const inputPath of inputPaths) {
-      const absInput = this.ensureReadablePath(inputPath);
+      const absInput = await this.ensureReadablePath(inputPath);
 
       try {
         // Determine output filename based on operations
         const ext = this.resolveOutputExtension(absInput, operations);
         const baseName = path.parse(absInput).name;
-        const outputPath = this.ensureWritablePath(path.join(outDir, `${baseName}${ext}`));
+        const outputPath = await this.ensureWritablePath(path.join(outDir, `${baseName}${ext}`));
 
         // Process sequentially through each operation
         let currentPath = absInput;
@@ -203,7 +226,7 @@ export class BatchImageTools {
         for (let i = 0; i < operations.length; i++) {
           const op = operations[i];
           const isLast = i === operations.length - 1;
-          const dest = this.ensureWritablePath(
+          const dest = await this.ensureWritablePath(
             isLast ? outputPath : path.join(outDir, `_tmp_${baseName}_${i}${ext}`),
           );
 
@@ -215,7 +238,19 @@ export class BatchImageTools {
 
         // Clean up intermediate temp files
         if (tmpPath && tmpPath !== outputPath) {
-          try { await fs.unlink(tmpPath); } catch { /* ignore */ }
+          try {
+            // Cleanup is destructive too. A profile that can write but not
+            // delete must be allowed to keep the generated intermediate file
+            // rather than being given an implicit delete capability.
+            const cleanupAccess = evaluateWorkspaceFilesystemAccess(
+              this.workspace,
+              tmpPath,
+              "delete",
+            );
+            if (cleanupAccess.decision === "allow") await fs.unlink(cleanupAccess.path);
+          } catch {
+            /* ignore */
+          }
         }
 
         results.push({ input: absInput, output: outputPath });
@@ -283,17 +318,14 @@ export class BatchImageTools {
     if (os.platform() === "darwin") {
       // Copy first, then resize in-place with sips
       await fs.copyFile(inputPath, outputPath);
-      await execFileAsync("sips", [
-        "--resampleHeightWidthMax", String(maxDim),
-        outputPath,
-      ], { timeout: PROCESS_TIMEOUT_MS });
+      await execFileAsync("sips", ["--resampleHeightWidthMax", String(maxDim), outputPath], {
+        timeout: PROCESS_TIMEOUT_MS,
+      });
     } else {
       // ImageMagick
-      await execFileAsync("convert", [
-        inputPath,
-        "-resize", `${maxDim}x${maxDim}>`,
-        outputPath,
-      ], { timeout: PROCESS_TIMEOUT_MS });
+      await execFileAsync("convert", [inputPath, "-resize", `${maxDim}x${maxDim}>`, outputPath], {
+        timeout: PROCESS_TIMEOUT_MS,
+      });
     }
   }
 
@@ -307,18 +339,25 @@ export class BatchImageTools {
 
     if (os.platform() === "darwin") {
       const sipsFormat = format === "jpeg" ? "jpeg" : format;
-      await execFileAsync("sips", [
-        "-s", "format", sipsFormat,
-        ...(format === "jpeg" ? ["-s", "formatOptions", String(quality)] : []),
-        inputPath,
-        "--out", outputPath,
-      ], { timeout: PROCESS_TIMEOUT_MS });
+      await execFileAsync(
+        "sips",
+        [
+          "-s",
+          "format",
+          sipsFormat,
+          ...(format === "jpeg" ? ["-s", "formatOptions", String(quality)] : []),
+          inputPath,
+          "--out",
+          outputPath,
+        ],
+        { timeout: PROCESS_TIMEOUT_MS },
+      );
     } else {
-      await execFileAsync("convert", [
-        inputPath,
-        ...(format === "jpeg" ? ["-quality", String(quality)] : []),
-        outputPath,
-      ], { timeout: PROCESS_TIMEOUT_MS });
+      await execFileAsync(
+        "convert",
+        [inputPath, ...(format === "jpeg" ? ["-quality", String(quality)] : []), outputPath],
+        { timeout: PROCESS_TIMEOUT_MS },
+      );
     }
   }
 
@@ -331,22 +370,18 @@ export class BatchImageTools {
       throw new Error("watermarkPath is required for watermark operation");
     }
 
-    const wmPath = path.isAbsolute(op.watermarkPath)
-      ? this.ensureReadablePath(op.watermarkPath)
-      : this.ensureReadablePath(op.watermarkPath);
+    const wmPath = await this.ensureReadablePath(op.watermarkPath);
 
     const gravity = this.positionToGravity(op.position ?? "bottom-right");
     const opacity = Math.round((op.opacity ?? 0.8) * 100);
 
     // ImageMagick composite — works on all platforms
     try {
-      await execFileAsync("composite", [
-        "-dissolve", String(opacity),
-        "-gravity", gravity,
-        wmPath,
-        inputPath,
-        outputPath,
-      ], { timeout: PROCESS_TIMEOUT_MS });
+      await execFileAsync(
+        "composite",
+        ["-dissolve", String(opacity), "-gravity", gravity, wmPath, inputPath, outputPath],
+        { timeout: PROCESS_TIMEOUT_MS },
+      );
     } catch {
       // Fallback: try with `magick composite` (ImageMagick 7)
       await execAsync(
@@ -362,7 +397,7 @@ export class BatchImageTools {
       "top-right": "NorthEast",
       "bottom-left": "SouthWest",
       "bottom-right": "SouthEast",
-      "center": "Center",
+      center: "Center",
     };
     return map[position] ?? "SouthEast";
   }

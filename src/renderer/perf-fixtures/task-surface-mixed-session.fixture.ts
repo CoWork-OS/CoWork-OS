@@ -97,7 +97,8 @@ export const taskSurfacePerfFixtureEvents: TaskEvent[] = [
     message: "Allow opening the generated artifact?",
   }),
   makeEvent("task-complete-1", 860, "task_completed", {
-    resultSummary: "Completed successfully with a stable live transcript and bounded sidebar churn.",
+    resultSummary:
+      "Completed successfully with a stable live transcript and bounded sidebar churn.",
   }),
 ];
 

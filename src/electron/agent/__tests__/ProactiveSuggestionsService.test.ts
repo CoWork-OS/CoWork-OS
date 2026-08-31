@@ -78,9 +78,11 @@ describe("ProactiveSuggestionsService", () => {
     expect(suggestions).toHaveLength(1);
 
     const savedAfterSurface = repoSave.mock.calls.at(-1)?.[1];
-    expect(savedAfterSurface.telemetryEvents.some((event: { type: string }) => event.type === "surfaced")).toBe(
-      true,
-    );
+    expect(
+      savedAfterSurface.telemetryEvents.some(
+        (event: { type: string }) => event.type === "surfaced",
+      ),
+    ).toBe(true);
 
     ProactiveSuggestionsService.dismiss("ws-1", "s1");
     const savedAfterDismiss = repoSave.mock.calls.at(-1)?.[1];
@@ -143,7 +145,7 @@ describe("ProactiveSuggestionsService", () => {
       "ws-1",
       undefined,
       "insight",
-      expect.stringContaining("\"workspaceScope\":\"all\""),
+      expect.stringContaining('"workspaceScope":"all"'),
       false,
       expect.objectContaining({ batchable: false }),
     );

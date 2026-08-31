@@ -82,8 +82,7 @@ function extractTemplateMetadata(soul?: string): {
   try {
     const parsed = JSON.parse(soul) as Record<string, unknown>;
     const profileMetadata =
-      parsed?.automationProfileMetadata &&
-      typeof parsed.automationProfileMetadata === "object"
+      parsed?.automationProfileMetadata && typeof parsed.automationProfileMetadata === "object"
         ? (parsed.automationProfileMetadata as Record<string, unknown>)
         : parsed?.cognitiveOffload && typeof parsed.cognitiveOffload === "object"
           ? (parsed.cognitiveOffload as Record<string, unknown>)
@@ -151,12 +150,10 @@ export class AgentRoleRepository {
     const enabled = profile?.enabled ?? role.heartbeatEnabled ?? false;
     const cadenceMinutes =
       profile?.cadenceMinutes ?? role.pulseEveryMinutes ?? role.heartbeatIntervalMinutes ?? 15;
-    const staggerOffsetMinutes =
-      profile?.staggerOffsetMinutes ?? role.heartbeatStaggerOffset ?? 0;
+    const staggerOffsetMinutes = profile?.staggerOffsetMinutes ?? role.heartbeatStaggerOffset ?? 0;
     const dispatchCooldownMinutes =
       profile?.dispatchCooldownMinutes ?? role.dispatchCooldownMinutes ?? 120;
-    const maxDispatchesPerDay =
-      profile?.maxDispatchesPerDay ?? role.maxDispatchesPerDay ?? 6;
+    const maxDispatchesPerDay = profile?.maxDispatchesPerDay ?? role.maxDispatchesPerDay ?? 6;
     const heartbeatProfile =
       profile?.profile ?? role.heartbeatProfile ?? defaultHeartbeatProfile(role.autonomyLevel);
     const activeHours = profile?.activeHours ?? role.activeHours ?? null;
@@ -201,15 +198,12 @@ export class AgentRoleRepository {
       roleKind: role.roleKind || defaultRoleKind(role.isSystem),
       heartbeatPolicy,
       heartbeatEnabled: heartbeatPolicy?.enabled ?? role.heartbeatEnabled ?? false,
-      heartbeatIntervalMinutes:
-        heartbeatPolicy?.cadenceMinutes ?? role.heartbeatIntervalMinutes,
-      heartbeatStaggerOffset:
-        heartbeatPolicy?.staggerOffsetMinutes ?? role.heartbeatStaggerOffset,
+      heartbeatIntervalMinutes: heartbeatPolicy?.cadenceMinutes ?? role.heartbeatIntervalMinutes,
+      heartbeatStaggerOffset: heartbeatPolicy?.staggerOffsetMinutes ?? role.heartbeatStaggerOffset,
       pulseEveryMinutes: heartbeatPolicy?.cadenceMinutes ?? role.pulseEveryMinutes,
       dispatchCooldownMinutes:
         heartbeatPolicy?.dispatchCooldownMinutes ?? role.dispatchCooldownMinutes,
-      maxDispatchesPerDay:
-        heartbeatPolicy?.maxDispatchesPerDay ?? role.maxDispatchesPerDay,
+      maxDispatchesPerDay: heartbeatPolicy?.maxDispatchesPerDay ?? role.maxDispatchesPerDay,
       heartbeatProfile: heartbeatPolicy?.profile ?? role.heartbeatProfile,
       activeHours: heartbeatPolicy?.activeHours ?? role.activeHours ?? undefined,
       lastHeartbeatAt: profile?.lastHeartbeatAt,
@@ -255,7 +249,7 @@ export class AgentRoleRepository {
     const resolvedActiveHours =
       heartbeatPolicyInput && "activeHours" in heartbeatPolicyInput
         ? (heartbeatPolicyInput.activeHours ?? undefined)
-        : request.activeHours ?? undefined;
+        : (request.activeHours ?? undefined);
     const resolvedSoul = mergeAutomationProfileMetadataIntoSoul(request.soul, heartbeatPolicyInput);
     const role: AgentRole = {
       id: uuidv4(),
@@ -632,7 +626,10 @@ export class AgentRoleRepository {
         heartbeatIntervalMinutes: 15,
         heartbeatStaggerOffset: 0,
         pulseEveryMinutes: 15,
-        dispatchCooldownMinutes: deriveDispatchCooldownMinutes(defaultRole.autonomyLevel, undefined),
+        dispatchCooldownMinutes: deriveDispatchCooldownMinutes(
+          defaultRole.autonomyLevel,
+          undefined,
+        ),
         maxDispatchesPerDay: deriveMaxDispatchesPerDay(defaultRole.autonomyLevel, undefined),
         heartbeatProfile: defaultHeartbeatProfile(defaultRole.autonomyLevel),
         heartbeatStatus: "idle",
@@ -733,7 +730,10 @@ export class AgentRoleRepository {
         heartbeatIntervalMinutes: 15,
         heartbeatStaggerOffset: 0,
         pulseEveryMinutes: 15,
-        dispatchCooldownMinutes: deriveDispatchCooldownMinutes(defaultRole.autonomyLevel, undefined),
+        dispatchCooldownMinutes: deriveDispatchCooldownMinutes(
+          defaultRole.autonomyLevel,
+          undefined,
+        ),
         maxDispatchesPerDay: deriveMaxDispatchesPerDay(defaultRole.autonomyLevel, undefined),
         heartbeatProfile: defaultHeartbeatProfile(defaultRole.autonomyLevel),
         heartbeatStatus: "idle",
@@ -811,7 +811,8 @@ export class AgentRoleRepository {
     return {
       id: row.id,
       name: row.name,
-      roleKind: (row.role_kind as AgentRoleKind | undefined) || defaultRoleKind(row.is_system === 1),
+      roleKind:
+        (row.role_kind as AgentRoleKind | undefined) || defaultRoleKind(row.is_system === 1),
       sourceTemplateId: row.source_template_id || undefined,
       sourceTemplateVersion: row.source_template_version || undefined,
       companyId: row.company_id || undefined,
@@ -844,8 +845,7 @@ export class AgentRoleRepository {
       heartbeatEnabled: row.heartbeat_enabled === 1,
       heartbeatIntervalMinutes: row.heartbeat_interval_minutes || 15,
       heartbeatStaggerOffset: row.heartbeat_stagger_offset || 0,
-      pulseEveryMinutes:
-        row.heartbeat_pulse_every_minutes || row.heartbeat_interval_minutes || 15,
+      pulseEveryMinutes: row.heartbeat_pulse_every_minutes || row.heartbeat_interval_minutes || 15,
       dispatchCooldownMinutes: row.heartbeat_dispatch_cooldown_minutes || 120,
       maxDispatchesPerDay: row.heartbeat_max_dispatches_per_day || 6,
       heartbeatProfile:
@@ -864,8 +864,7 @@ export class AgentRoleRepository {
       heartbeatStatus: (row.heartbeat_status as HeartbeatStatus) || "idle",
       monthlyBudgetCost:
         typeof row.monthly_budget_cost === "number" ? row.monthly_budget_cost : undefined,
-      autoPausedAt:
-        typeof row.auto_paused_at === "number" ? row.auto_paused_at : undefined,
+      autoPausedAt: typeof row.auto_paused_at === "number" ? row.auto_paused_at : undefined,
       operatorMandate: row.operator_mandate || undefined,
       allowedLoopTypes: safeJsonParse(row.allowed_loop_types, [], "agentRole.allowedLoopTypes"),
       outputTypes: safeJsonParse(row.output_types, [], "agentRole.outputTypes"),

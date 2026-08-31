@@ -122,7 +122,9 @@ export class ImprovementCandidateRepository {
 
     if (fields.length === 0) return;
     values.push(id);
-    this.db.prepare(`UPDATE improvement_candidates SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    this.db
+      .prepare(`UPDATE improvement_candidates SET ${fields.join(", ")} WHERE id = ?`)
+      .run(...values);
   }
 
   findById(id: string): ImprovementCandidate | undefined {
@@ -132,7 +134,9 @@ export class ImprovementCandidateRepository {
 
   findByFingerprint(workspaceId: string, fingerprint: string): ImprovementCandidate | undefined {
     const row = this.db
-      .prepare("SELECT * FROM improvement_candidates WHERE workspace_id = ? AND fingerprint = ? LIMIT 1")
+      .prepare(
+        "SELECT * FROM improvement_candidates WHERE workspace_id = ? AND fingerprint = ? LIMIT 1",
+      )
       .get(workspaceId, fingerprint) as Any;
     return row ? this.mapCandidate(row) : undefined;
   }
@@ -159,14 +163,21 @@ export class ImprovementCandidateRepository {
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limitSql =
-      typeof params?.limit === "number" && Number.isFinite(params.limit) ? `LIMIT ${params.limit}` : "";
+      typeof params?.limit === "number" && Number.isFinite(params.limit)
+        ? `LIMIT ${params.limit}`
+        : "";
     const rows = this.db
-      .prepare(`SELECT * FROM improvement_candidates ${where} ORDER BY priority_score DESC, last_seen_at DESC ${limitSql}`)
+      .prepare(
+        `SELECT * FROM improvement_candidates ${where} ORDER BY priority_score DESC, last_seen_at DESC ${limitSql}`,
+      )
       .all(...values) as Any[];
     return rows.map((row) => this.mapCandidate(row));
   }
 
-  getTopRunnableCandidate(workspaceId: string, maxOpenCandidates = 25): ImprovementCandidate | undefined {
+  getTopRunnableCandidate(
+    workspaceId: string,
+    maxOpenCandidates = 25,
+  ): ImprovementCandidate | undefined {
     const row = this.db
       .prepare(
         `
@@ -220,7 +231,9 @@ export class ImprovementCandidateRepository {
 export class ImprovementRunRepository {
   constructor(private db: Database.Database) {}
 
-  create(input: Omit<ImprovementRun, "id" | "createdAt"> & { id?: string; createdAt?: number }): ImprovementRun {
+  create(
+    input: Omit<ImprovementRun, "id" | "createdAt"> & { id?: string; createdAt?: number },
+  ): ImprovementRun {
     const run: ImprovementRun = {
       ...input,
       id: input.id || uuidv4(),
@@ -297,7 +310,9 @@ export class ImprovementRunRepository {
   }
 
   reassignCandidate(fromCandidateId: string, toCandidateId: string): void {
-    this.db.prepare("UPDATE improvement_runs SET candidate_id = ? WHERE candidate_id = ?").run(toCandidateId, fromCandidateId);
+    this.db
+      .prepare("UPDATE improvement_runs SET candidate_id = ? WHERE candidate_id = ?")
+      .run(toCandidateId, fromCandidateId);
   }
 
   list(params?: {
@@ -320,7 +335,11 @@ export class ImprovementRunRepository {
   }
 
   countActive(): number {
-    const row = this.db.prepare("SELECT COUNT(*) as count FROM improvement_runs WHERE status IN ('queued', 'running')").get() as {
+    const row = this.db
+      .prepare(
+        "SELECT COUNT(*) as count FROM improvement_runs WHERE status IN ('queued', 'running')",
+      )
+      .get() as {
       count: number;
     };
     return Number(row?.count || 0);
@@ -339,8 +358,14 @@ export class ImprovementRunRepository {
       mergeResult: safeJsonParse<MergeResult | undefined>(row.merge_result, undefined),
       pullRequest: safeJsonParse<PullRequestResult | undefined>(row.pull_request, undefined),
       promotionError: row.promotion_error || undefined,
-      baselineMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(row.baseline_metrics, undefined),
-      outcomeMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(row.outcome_metrics, undefined),
+      baselineMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(
+        row.baseline_metrics,
+        undefined,
+      ),
+      outcomeMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(
+        row.outcome_metrics,
+        undefined,
+      ),
       verdictSummary: row.verdict_summary || undefined,
       evaluationNotes: row.evaluation_notes || undefined,
       createdAt: Number(row.created_at || 0),
@@ -350,7 +375,12 @@ export class ImprovementRunRepository {
     };
   }
 
-  private updateTable(table: string, id: string, updates: Record<string, unknown>, mapped: Record<string, string>) {
+  private updateTable(
+    table: string,
+    id: string,
+    updates: Record<string, unknown>,
+    mapped: Record<string, string>,
+  ) {
     updateJsonAwareTable(this.db, table, id, updates, mapped);
   }
 }
@@ -530,8 +560,14 @@ export class ImprovementCampaignRepository {
         undefined,
       ),
       stageBudget: safeJsonParse<Record<string, unknown> | undefined>(row.stage_budget, undefined),
-      verificationCommands: safeJsonParse<string[] | undefined>(row.verification_commands, undefined),
-      observability: safeJsonParse<Record<string, unknown> | undefined>(row.observability, undefined) as ImprovementCampaign["observability"],
+      verificationCommands: safeJsonParse<string[] | undefined>(
+        row.verification_commands,
+        undefined,
+      ),
+      observability: safeJsonParse<Record<string, unknown> | undefined>(
+        row.observability,
+        undefined,
+      ) as ImprovementCampaign["observability"],
       prRequired: Number(row.pr_required ?? 1) !== 0,
       winnerVariantId: row.winner_variant_id || undefined,
       promotedTaskId: row.promoted_task_id || undefined,
@@ -539,8 +575,14 @@ export class ImprovementCampaignRepository {
       mergeResult: safeJsonParse<MergeResult | undefined>(row.merge_result, undefined),
       pullRequest: safeJsonParse<PullRequestResult | undefined>(row.pull_request, undefined),
       promotionError: row.promotion_error || undefined,
-      baselineMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(row.baseline_metrics, undefined),
-      outcomeMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(row.outcome_metrics, undefined),
+      baselineMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(
+        row.baseline_metrics,
+        undefined,
+      ),
+      outcomeMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(
+        row.outcome_metrics,
+        undefined,
+      ),
       verdictSummary: row.verdict_summary || undefined,
       evaluationNotes: row.evaluation_notes || undefined,
       trainingEvidence: safeJsonParse<ImprovementEvidence[]>(row.training_evidence, []),
@@ -620,13 +662,17 @@ export class ImprovementVariantRunRepository {
   }
 
   findById(id: string): ImprovementVariantRun | undefined {
-    const row = this.db.prepare("SELECT * FROM improvement_variant_runs WHERE id = ?").get(id) as Any;
+    const row = this.db
+      .prepare("SELECT * FROM improvement_variant_runs WHERE id = ?")
+      .get(id) as Any;
     return row ? this.mapVariant(row) : undefined;
   }
 
   findByTaskId(taskId: string): ImprovementVariantRun | undefined {
     const row = this.db
-      .prepare("SELECT * FROM improvement_variant_runs WHERE task_id = ? ORDER BY created_at DESC LIMIT 1")
+      .prepare(
+        "SELECT * FROM improvement_variant_runs WHERE task_id = ? ORDER BY created_at DESC LIMIT 1",
+      )
       .get(taskId) as Any;
     return row ? this.mapVariant(row) : undefined;
   }
@@ -664,11 +710,20 @@ export class ImprovementVariantRunRepository {
       status: row.status,
       taskId: row.task_id || undefined,
       branchName: row.branch_name || undefined,
-      baselineMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(row.baseline_metrics, undefined),
-      outcomeMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(row.outcome_metrics, undefined),
+      baselineMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(
+        row.baseline_metrics,
+        undefined,
+      ),
+      outcomeMetrics: safeJsonParse<EvalBaselineMetrics | undefined>(
+        row.outcome_metrics,
+        undefined,
+      ),
       verdictSummary: row.verdict_summary || undefined,
       evaluationNotes: row.evaluation_notes || undefined,
-      observability: safeJsonParse<Record<string, unknown> | undefined>(row.observability, undefined) as ImprovementVariantRun["observability"],
+      observability: safeJsonParse<Record<string, unknown> | undefined>(
+        row.observability,
+        undefined,
+      ) as ImprovementVariantRun["observability"],
       createdAt: Number(row.created_at || 0),
       startedAt: row.started_at ? Number(row.started_at) : undefined,
       completedAt: row.completed_at ? Number(row.completed_at) : undefined,
@@ -735,10 +790,9 @@ export class ImprovementJudgeVerdictRepository {
       status: row.status,
       summary: String(row.summary || ""),
       notes: safeJsonParse<string[]>(row.notes, []),
-      variantRankings: safeJsonParse<Array<{ variantId: string; score: number; lane: ImprovementVariantRun["lane"] }>>(
-        row.variant_rankings,
-        [],
-      ),
+      variantRankings: safeJsonParse<
+        Array<{ variantId: string; score: number; lane: ImprovementVariantRun["lane"] }>
+      >(row.variant_rankings, []),
       replayCases: safeJsonParse<ImprovementReplayCase[]>(row.replay_cases, []),
       comparedAt: Number(row.compared_at || 0),
     };
@@ -749,7 +803,9 @@ export function clearImprovementHistoryData(
   db: Database.Database,
 ): ImprovementHistoryResetResult["deleted"] {
   const countTable = (table: string): number => {
-    const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number } | undefined;
+    const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as
+      | { count?: number }
+      | undefined;
     return Number(row?.count || 0);
   };
 
@@ -792,7 +848,8 @@ function buildFilterSql(
   }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limitValue = params && "limit" in params ? Number(params.limit) : undefined;
-  const limitSql = typeof limitValue === "number" && Number.isFinite(limitValue) ? `LIMIT ${limitValue}` : "";
+  const limitSql =
+    typeof limitValue === "number" && Number.isFinite(limitValue) ? `LIMIT ${limitValue}` : "";
   return { where, values, limitSql };
 }
 
@@ -822,7 +879,13 @@ function updateJsonAwareTable(
       key === "holdoutEvidence" ||
       key === "replayCases"
     ) {
-      values.push(value ? JSON.stringify(value) : key === "trainingEvidence" || key === "holdoutEvidence" || key === "replayCases" ? "[]" : null);
+      values.push(
+        value
+          ? JSON.stringify(value)
+          : key === "trainingEvidence" || key === "holdoutEvidence" || key === "replayCases"
+            ? "[]"
+            : null,
+      );
     } else {
       values.push(value ?? null);
     }

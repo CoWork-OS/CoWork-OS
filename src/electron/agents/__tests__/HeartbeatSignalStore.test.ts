@@ -17,7 +17,9 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function makeInput(overrides: Partial<SubmitHeartbeatSignalInput> = {}): SubmitHeartbeatSignalInput {
+function makeInput(
+  overrides: Partial<SubmitHeartbeatSignalInput> = {},
+): SubmitHeartbeatSignalInput {
   return {
     agentRoleId: "agent-1",
     signalFamily: "awareness_signal",
@@ -104,9 +106,7 @@ describe("HeartbeatSignalStore.removeSignals", () => {
     // Merge a second submit so mergedCount becomes 2.
     s.submit(makeInput({ fingerprint: "fp-keep" }));
     // Try to remove using the stale snapshot (mergedCount = 1).
-    s.removeSignals("agent-1", [
-      { id: signal.id, lastSeenAt: signal.lastSeenAt, mergedCount: 1 },
-    ]);
+    s.removeSignals("agent-1", [{ id: signal.id, lastSeenAt: signal.lastSeenAt, mergedCount: 1 }]);
     const remaining = s.listAgentSignals("agent-1");
     expect(remaining).toHaveLength(1);
     expect(remaining[0].mergedCount).toBe(2);

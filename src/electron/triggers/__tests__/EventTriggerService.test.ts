@@ -134,7 +134,9 @@ describe("EventTriggerService", () => {
   });
 
   it("allows Routine v2 to intercept a matched trigger before task creation", async () => {
-    const interceptor = vi.fn().mockResolvedValue({ handled: true, actionResult: "workflow_queued" });
+    const interceptor = vi
+      .fn()
+      .mockResolvedValue({ handled: true, actionResult: "workflow_queued" });
     service.setFireInterceptor(interceptor);
     const trigger = service.addTrigger({
       name: "Workflow",
@@ -152,34 +154,37 @@ describe("EventTriggerService", () => {
     expect(service.getHistory(trigger.id)[0]?.actionResult).toBe("workflow_queued");
   });
 
-  (nativeSqliteAvailable ? it : it.skip)("queues events while task capacity is full and replays them later", async () => {
-    const Database = (await import("better-sqlite3")).default;
-    const db = new Database(":memory:");
-    let activeCount = 4;
-    const localDeps = makeDeps({ getActiveTaskCount: () => activeCount });
-    const localService = new EventTriggerService(localDeps, db);
-    localService.start();
-    localService.addTrigger({
-      name: "Queued",
-      enabled: true,
-      source: "channel_message",
-      conditions: [],
-      action: { type: "create_task", config: { prompt: "Queued event" } },
-      workspaceId: "ws-1",
-    });
+  (nativeSqliteAvailable ? it : it.skip)(
+    "queues events while task capacity is full and replays them later",
+    async () => {
+      const Database = (await import("better-sqlite3")).default;
+      const db = new Database(":memory:");
+      let activeCount = 4;
+      const localDeps = makeDeps({ getActiveTaskCount: () => activeCount });
+      const localService = new EventTriggerService(localDeps, db);
+      localService.start();
+      localService.addTrigger({
+        name: "Queued",
+        enabled: true,
+        source: "channel_message",
+        conditions: [],
+        action: { type: "create_task", config: { prompt: "Queued event" } },
+        workspaceId: "ws-1",
+      });
 
-    await localService.evaluateEvent(makeMessageEvent("queued"));
-    expect(db.prepare("SELECT COUNT(*) AS count FROM event_trigger_queue").get().count).toBe(1);
-    expect(localDeps.createTask).not.toHaveBeenCalled();
+      await localService.evaluateEvent(makeMessageEvent("queued"));
+      expect(db.prepare("SELECT COUNT(*) AS count FROM event_trigger_queue").get().count).toBe(1);
+      expect(localDeps.createTask).not.toHaveBeenCalled();
 
-    activeCount = 0;
-    await localService.drainPendingEvents();
+      activeCount = 0;
+      await localService.drainPendingEvents();
 
-    expect(localDeps.createTask).toHaveBeenCalledTimes(1);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM event_trigger_queue").get().count).toBe(0);
-    localService.stop();
-    db.close();
-  });
+      expect(localDeps.createTask).toHaveBeenCalledTimes(1);
+      expect(db.prepare("SELECT COUNT(*) AS count FROM event_trigger_queue").get().count).toBe(0);
+      localService.stop();
+      db.close();
+    },
+  );
 
   it("does not fire disabled triggers", async () => {
     service.addTrigger({

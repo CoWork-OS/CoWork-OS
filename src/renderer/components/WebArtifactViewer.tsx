@@ -87,9 +87,7 @@ function formatAttachmentSize(size: number): string {
 }
 
 function isImageAttachment(attachment: PendingWebAttachment): boolean {
-  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(
-    attachment.mimeType || "",
-  );
+  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(attachment.mimeType || "");
 }
 
 function textFromHtml(htmlContent: string): string {
@@ -136,11 +134,12 @@ export function WebArtifactViewer({
   const preview = fileData?.webPreview;
   const htmlContent = preview?.htmlContent || fileData?.htmlContent || "";
   const formatLabel = preview?.format.toUpperCase() || getWebPageFormatLabel(fileName);
-  const fullscreenLabel = mode === "fullscreen" ? "Exit full screen" : "Open web page in full screen";
+  const fullscreenLabel =
+    mode === "fullscreen" ? "Exit full screen" : "Open web page in full screen";
   const voiceInput = useVoiceInput({
     onTranscript: (text) => {
       setVoiceNotice("");
-      setFullscreenMessage((current) => current ? `${current} ${text}` : text);
+      setFullscreenMessage((current) => (current ? `${current} ${text}` : text));
     },
     onError: (message) => setVoiceNotice(message),
     onNotConfigured: () => {
@@ -183,7 +182,10 @@ export function WebArtifactViewer({
           setError(result.error || "Failed to load web page");
           return;
         }
-        if (result.data.fileType !== "html" || (!result.data.webPreview && !result.data.htmlContent)) {
+        if (
+          result.data.fileType !== "html" ||
+          (!result.data.webPreview && !result.data.htmlContent)
+        ) {
           setError("In-app preview is only available for HTML web pages.");
           return;
         }
@@ -251,41 +253,43 @@ export function WebArtifactViewer({
     setFullscreenAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }, []);
 
-  const buildMessageWithAttachments = useCallback(async (message: string) => {
-    if (fullscreenAttachments.length === 0) {
-      return { message, images: undefined as ImageAttachment[] | undefined };
-    }
+  const buildMessageWithAttachments = useCallback(
+    async (message: string) => {
+      if (fullscreenAttachments.length === 0) {
+        return { message, images: undefined as ImageAttachment[] | undefined };
+      }
 
-    const importedAttachments = workspaceId
-      ? await window.electronAPI.importFilesToWorkspace({
-          workspaceId,
-          files: fullscreenAttachments.map((attachment) => attachment.path),
-        })
-      : [];
-    const attachmentLines =
-      importedAttachments.length > 0
-        ? importedAttachments.map(
-            (attachment) => `- ${attachment.fileName} (${attachment.relativePath})`,
-          )
-        : fullscreenAttachments.map((attachment) => `- ${attachment.name} (${attachment.path})`);
-    const base = message || "Please review the attached files.";
-    const images = fullscreenAttachments
-      .filter(isImageAttachment)
-      .map((attachment) => ({
+      const importedAttachments = workspaceId
+        ? await window.electronAPI.importFilesToWorkspace({
+            workspaceId,
+            files: fullscreenAttachments.map((attachment) => attachment.path),
+          })
+        : [];
+      const attachmentLines =
+        importedAttachments.length > 0
+          ? importedAttachments.map(
+              (attachment) => `- ${attachment.fileName} (${attachment.relativePath})`,
+            )
+          : fullscreenAttachments.map((attachment) => `- ${attachment.name} (${attachment.path})`);
+      const base = message || "Please review the attached files.";
+      const images = fullscreenAttachments.filter(isImageAttachment).map((attachment) => ({
         filePath: attachment.path,
         mimeType: attachment.mimeType as ImageAttachment["mimeType"],
         filename: attachment.name,
         sizeBytes: attachment.size,
       }));
-    return {
-      message: `${base}\n\nAttached files:\n${attachmentLines.join("\n")}`,
-      images: images.length > 0 ? images : undefined,
-    };
-  }, [fullscreenAttachments, workspaceId]);
+      return {
+        message: `${base}\n\nAttached files:\n${attachmentLines.join("\n")}`,
+        images: images.length > 0 ? images : undefined,
+      };
+    },
+    [fullscreenAttachments, workspaceId],
+  );
 
   const handleFullscreenSend = async () => {
     const message = fullscreenMessage.trim();
-    if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending) return;
+    if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending)
+      return;
     const previousMessage = fullscreenMessage;
     const previousAttachments = fullscreenAttachments;
     setFullscreenSending(true);
@@ -305,10 +309,15 @@ export function WebArtifactViewer({
   };
 
   const renderBody = () => {
-    if (loading && !htmlContent) return <div className="web-artifact-state">Loading web page...</div>;
+    if (loading && !htmlContent)
+      return <div className="web-artifact-state">Loading web page...</div>;
     if (error) return <div className="web-artifact-state web-artifact-error">{error}</div>;
     if (preview && !preview.canPreview) {
-      return <div className="web-artifact-state">{preview.previewMessage || "No web preview available."}</div>;
+      return (
+        <div className="web-artifact-state">
+          {preview.previewMessage || "No web preview available."}
+        </div>
+      );
     }
     if (!htmlContent) return <div className="web-artifact-state">No web preview available.</div>;
     return (
@@ -350,7 +359,9 @@ export function WebArtifactViewer({
       <div className="web-artifact-viewer-titlebar">
         <div className="web-artifact-viewer-format">
           {formatLabel}
-          {preview?.framework && preview.framework !== "html" ? <span>{preview.framework}</span> : null}
+          {preview?.framework && preview.framework !== "html" ? (
+            <span>{preview.framework}</span>
+          ) : null}
         </div>
         <button
           type="button"
@@ -406,9 +417,7 @@ export function WebArtifactViewer({
                 <div className="spreadsheet-viewer-turn-body">
                   <p>{turnContext.summary}</p>
                   {turnContext.secondaryText && (
-                    <p className="spreadsheet-viewer-turn-secondary">
-                      {turnContext.secondaryText}
-                    </p>
+                    <p className="spreadsheet-viewer-turn-secondary">{turnContext.secondaryText}</p>
                   )}
                   {turnContext.events && turnContext.events.length > 0 && (
                     <div className="spreadsheet-viewer-turn-events">
@@ -445,7 +454,9 @@ export function WebArtifactViewer({
                         <span className="attachment-name" title={attachment.name}>
                           {attachment.name}
                         </span>
-                        <span className="attachment-size">{formatAttachmentSize(attachment.size)}</span>
+                        <span className="attachment-size">
+                          {formatAttachmentSize(attachment.size)}
+                        </span>
                         <button
                           type="button"
                           className="attachment-remove"
@@ -537,12 +548,6 @@ export function WebArtifactViewer({
             </div>
             <div className="input-below-actions spreadsheet-viewer-composer-actions">
               <span className="input-status-workspace">Work in a folder</span>
-              <span className="shell-toggle shell-toggle-inline enabled">
-                Shell
-                <span className="goal-mode-switch-track on">
-                  <span className="goal-mode-switch-thumb" />
-                </span>
-              </span>
               <span className="input-status-mode">Execute</span>
               <span className="input-status-mode">Auto</span>
             </div>

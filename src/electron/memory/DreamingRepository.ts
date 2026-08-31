@@ -62,7 +62,12 @@ export class DreamingRepository {
 
   updateRun(
     id: string,
-    patch: Partial<Pick<DreamingRun, "status" | "summary" | "evidenceCount" | "candidateCount" | "error" | "completedAt">>,
+    patch: Partial<
+      Pick<
+        DreamingRun,
+        "status" | "summary" | "evidenceCount" | "candidateCount" | "error" | "completedAt"
+      >
+    >,
   ): DreamingRun | undefined {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -159,9 +164,13 @@ export class DreamingRepository {
   }
 
   bulkCreateCandidates(
-    inputs: Array<Omit<DreamingCandidate, "id" | "createdAt"> & { id?: string; createdAt?: number }>,
+    inputs: Array<
+      Omit<DreamingCandidate, "id" | "createdAt"> & { id?: string; createdAt?: number }
+    >,
   ): DreamingCandidate[] {
-    const tx = this.db.transaction((items: typeof inputs) => items.map((item) => this.createCandidate(item)));
+    const tx = this.db.transaction((items: typeof inputs) =>
+      items.map((item) => this.createCandidate(item)),
+    );
     return tx(inputs);
   }
 

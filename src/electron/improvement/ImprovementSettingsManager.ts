@@ -48,7 +48,10 @@ export class ImprovementSettingsManager {
       enabled: !!input.enabled,
       autoRun: input.autoRun !== false,
       includeDevLogs: input.includeDevLogs !== false,
-      intervalMinutes: Math.min(Math.max(Math.round(input.intervalMinutes || 24 * 60), 15), 7 * 24 * 60),
+      intervalMinutes: Math.min(
+        Math.max(Math.round(input.intervalMinutes || 24 * 60), 15),
+        7 * 24 * 60,
+      ),
       variantsPerCampaign: Math.min(Math.max(Math.round(input.variantsPerCampaign || 1), 1), 3),
       maxConcurrentCampaigns: Math.min(
         Math.max(Math.round(input.maxConcurrentCampaigns || 1), 1),
@@ -75,11 +78,18 @@ export class ImprovementSettingsManager {
       promotionMode: input.promotionMode === "merge" ? "merge" : "github_pr",
       evalWindowDays: Math.min(Math.max(Math.round(input.evalWindowDays || 14), 1), 90),
       replaySetSize: Math.min(Math.max(Math.round(input.replaySetSize || 3), 1), 10),
-      campaignTimeoutMinutes: Math.min(Math.max(Math.round(input.campaignTimeoutMinutes || 30), 5), 120),
-      campaignTokenBudget: Math.min(Math.max(Math.round(input.campaignTokenBudget || 60000), 1000), 500000),
+      campaignTimeoutMinutes: Math.min(
+        Math.max(Math.round(input.campaignTimeoutMinutes || 30), 5),
+        120,
+      ),
+      campaignTokenBudget: Math.min(
+        Math.max(Math.round(input.campaignTokenBudget || 60000), 1000),
+        500000,
+      ),
       campaignCostBudget: Math.min(Math.max(Number(input.campaignCostBudget || 15), 1), 200),
       improvementProgramPath:
-        typeof input.improvementProgramPath === "string" && input.improvementProgramPath.trim().length > 0
+        typeof input.improvementProgramPath === "string" &&
+        input.improvementProgramPath.trim().length > 0
           ? input.improvementProgramPath.trim()
           : undefined,
     };

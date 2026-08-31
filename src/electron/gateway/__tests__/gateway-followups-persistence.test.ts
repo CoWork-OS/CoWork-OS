@@ -85,7 +85,9 @@ describe("ChannelGateway follow-up listeners", () => {
     router.sendArtifacts = vi.fn().mockResolvedValue(undefined);
 
     emitTimeline("timeline_step_updated", "t1", "user_message", { message: "follow-up" });
-    emitTimeline("timeline_step_updated", "t1", "assistant_message", { message: "Follow-up response" });
+    emitTimeline("timeline_step_updated", "t1", "assistant_message", {
+      message: "Follow-up response",
+    });
     emitTimeline("timeline_step_updated", "t1", "follow_up_completed");
 
     await tick();

@@ -96,7 +96,9 @@ function getAcpxLaunchCandidates(): AcpxLauncherSpec[] {
   ];
   if (!preferredAcpxLauncherLabel) return candidates;
   const preferred = candidates.find((candidate) => candidate.label === preferredAcpxLauncherLabel);
-  const remaining = candidates.filter((candidate) => candidate.label !== preferredAcpxLauncherLabel);
+  const remaining = candidates.filter(
+    (candidate) => candidate.label !== preferredAcpxLauncherLabel,
+  );
   return preferred ? [preferred, ...remaining] : candidates;
 }
 
@@ -224,7 +226,9 @@ export function mapAcpxSessionUpdate(
           String(update.status || "").toLowerCase() === "completed" &&
           (exitCode === undefined || exitCode === 0),
         error:
-          exitCode !== undefined && exitCode !== 0 ? stderr || `Command exited with ${exitCode}` : undefined,
+          exitCode !== undefined && exitCode !== 0
+            ? stderr || `Command exited with ${exitCode}`
+            : undefined,
         result: rawOutput,
         exitCode,
       },
@@ -238,7 +242,9 @@ export function mapAcpxSessionUpdate(
       type: "progress_update",
       payload: {
         phase: "acpx_runtime",
-        message: used ? `${agentName} via ACP running (${used} tokens used)` : `${agentName} via ACP running`,
+        message: used
+          ? `${agentName} via ACP running (${used} tokens used)`
+          : `${agentName} via ACP running`,
         state: "active",
         heartbeat: true,
       },
@@ -320,7 +326,9 @@ export class AcpxRuntimeRunner {
       await new Promise<void>((resolve) => {
         let finished = false;
         let fallbackStarted = false;
-        const fallbackLauncher = getAcpxLaunchCandidates().find((candidate) => candidate.label !== "acpx");
+        const fallbackLauncher = getAcpxLaunchCandidates().find(
+          (candidate) => candidate.label !== "acpx",
+        );
         const resolveOnce = () => {
           if (finished) return;
           finished = true;
@@ -333,7 +341,13 @@ export class AcpxRuntimeRunner {
           fallbackStarted = true;
           const fallbackProc = spawn(
             fallbackLauncher.command,
-            [...fallbackLauncher.prefixArgs, this.input.runtimeConfig.agent, "cancel", "--session", this.sessionName],
+            [
+              ...fallbackLauncher.prefixArgs,
+              this.input.runtimeConfig.agent,
+              "cancel",
+              "--session",
+              this.sessionName,
+            ],
             { cwd: this.input.cwd, env: process.env, stdio: "ignore" },
           );
           fallbackProc.on("close", (code) => {

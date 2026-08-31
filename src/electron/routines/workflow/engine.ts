@@ -6,6 +6,7 @@ import type {
   RoutineWorkflowStepRecord,
   WorkflowRiskLevel,
 } from "../../../shared/routine-workflow";
+import type { AccessProfileId } from "../../../shared/access-profiles";
 import type { Routine } from "../types";
 import { DEFAULT_WORKFLOW_LIMITS, getWorkflowOperation } from "./catalog";
 import { RoutineWorkflowRepository } from "./repository";
@@ -26,6 +27,8 @@ export interface RoutineWorkflowActionExecutorParams {
   stepId: string;
   dryRun: boolean;
   signal: AbortSignal;
+  /** Access profile selected by the scheduler for agent-backed actions. */
+  accessProfileId?: AccessProfileId;
 }
 
 export interface RoutineWorkflowEngineOptions {
@@ -42,6 +45,8 @@ export interface StartWorkflowRunInput {
   eventId?: string;
   idempotencyKey?: string;
   dryRun?: boolean;
+  /** Access profile selected by the scheduler for agent-backed actions. */
+  accessProfileId?: AccessProfileId;
 }
 
 type StoredRunContext = {
@@ -50,6 +55,8 @@ type StoredRunContext = {
   approvedStepIds: string[];
   dryRun: boolean;
   executedOperationCount: number;
+  /** Persisted so recovery/retry cannot lose the scheduler's access boundary. */
+  accessProfileId?: AccessProfileId;
 };
 
 type ExecutionBudget = {
@@ -100,6 +107,7 @@ export class RoutineWorkflowEngine {
         approvedStepIds: [],
         dryRun: Boolean(input.dryRun),
         executedOperationCount: 0,
+        ...(input.accessProfileId ? { accessProfileId: input.accessProfileId } : {}),
       } satisfies StoredRunContext,
     });
 
@@ -410,6 +418,7 @@ export class RoutineWorkflowEngine {
             context.dryRun,
             budget,
             controller.signal,
+            context.accessProfileId,
           ),
           Math.max(1_000, node.timeoutMs ?? 120_000),
           `${node.name} timed out.`,
@@ -465,6 +474,7 @@ export class RoutineWorkflowEngine {
     dryRun: boolean,
     budget: ExecutionBudget,
     signal: AbortSignal,
+    accessProfileId?: AccessProfileId,
   ): Promise<Record<string, unknown>> {
     throwIfAborted(signal);
     if (this.now() > budget.deadline) {
@@ -524,6 +534,7 @@ export class RoutineWorkflowEngine {
             dryRun,
             budget,
             signal,
+            accessProfileId,
           );
         }
         results.push(childResult);
@@ -545,6 +556,7 @@ export class RoutineWorkflowEngine {
       stepId,
       dryRun,
       signal,
+      accessProfileId,
     });
   }
 
@@ -603,6 +615,9 @@ export class RoutineWorkflowEngine {
       executedOperationCount: Number.isFinite(Number(raw.executedOperationCount))
         ? Math.max(0, Number(raw.executedOperationCount))
         : 0,
+      ...(typeof raw.accessProfileId === "string" && raw.accessProfileId.trim()
+        ? { accessProfileId: raw.accessProfileId.trim() as AccessProfileId }
+        : {}),
     };
   }
 

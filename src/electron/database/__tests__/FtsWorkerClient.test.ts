@@ -29,7 +29,11 @@ describe("FtsWorkerClient", () => {
 
   afterEach(async () => {
     // Catch rejections from pending requests being cleaned up
-    try { client.destroy(); } catch { /* expected */ }
+    try {
+      client.destroy();
+    } catch {
+      /* expected */
+    }
     await vi.runAllTimersAsync().catch(() => {});
     vi.useRealTimers();
   });

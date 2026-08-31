@@ -14,13 +14,13 @@ Understanding the security boundaries in CoWork OS helps you configure appropria
 |  |  - Generated artifacts             |  |
 |  +------------------------------------+  |
 |                                          |
-|  Permissions:                            |
-|  - read, write, delete                   |
-|  - shell (command execution)             |
-|  - network (browser/web access)          |
+|  Access profile:                         |
+|  - sandbox, approval, reviewer            |
+|  - command tools, network, filesystem     |
+|  - profile roots and domain rules         |
 +------------------------------------------+
          |
-         | Allowed Paths (optional)
+         | Profile roots/rules (optional)
          v
 +------------------------------------------+
 |           External Paths                  |
@@ -33,15 +33,20 @@ Understanding the security boundaries in CoWork OS helps you configure appropria
 
 Each workspace operates in isolation:
 - Tools can only access files within the workspace by default
-- External paths require explicit configuration
+- External paths require explicit profile roots/rules or a compatible one-shot approval
 - Different workspaces cannot access each other's files
 
-### Unrestricted Mode
+### Access Profile Boundary
 
-When `unrestrictedFileAccess` is enabled:
-- Tools can read/write files anywhere the user has permission
-- Protected system paths are still blocked
-- Use only for development workflows requiring broad access
+[Access Profiles](../access-profiles.md) are the task-level authority. They combine the logical
+sandbox, approval/reviewer behavior, command-tool availability, network posture, filesystem scope,
+and domain rules. A finite profile scope is a hard boundary: an approval, session shortcut, legacy
+permission mode, or old `allowedPaths` entry cannot widen it.
+
+The legacy `unrestrictedFileAccess` flag remains for older unprofiled tasks. It does not override
+named profile denies, protected system paths, administrator constraints, or the unavailable
+read-only state used when a profile cannot be resolved. New tasks should select a profile instead
+of changing a workspace-wide unrestricted flag.
 
 ## Imported Capability Boundary
 
@@ -180,8 +185,8 @@ Package-intelligence checks are additive, not the sole gate:
          v
 +------------------------------------------+
 |         Context Restrictions              |
-|  DM: Full access                          |
-|  Group: Memory tools blocked              |
+|  DM: Target access profile                |
+|  Group: Profile plus narrower restrictions |
 +------------------------------------------+
          |
          v
@@ -195,23 +200,23 @@ Package-intelligence checks are additive, not the sole gate:
 | Level | How Users Get It | Capabilities |
 |-------|------------------|--------------|
 | Untrusted | Default for unknown users | Access denied |
-| Paired | Entered valid pairing code | Full context access |
-| Allowlisted | Pre-configured in settings | Full context access |
-| Open Mode | Any user | Full context access |
+| Paired | Entered valid pairing code | Access allowed by the target profile |
+| Allowlisted | Pre-configured in settings | Access allowed by the target profile |
+| Open Mode | Any user | Still constrained by the target profile |
 
 ### Context-Based Restrictions
 
 Even after authentication, capabilities vary by context:
 
 **DM Context:**
-- Full tool access
-- No memory restrictions
-- Clipboard read/write allowed
+- Tools allowed by the target access profile
+- No additional group restriction by default
+- Clipboard access remains subject to profile, tool, and OS policy
 
 **Group Context:**
-- Memory tools blocked (clipboard)
+- Memory tools blocked by default (including clipboard)
 - Prevents data leakage to other group members
-- Other tools function normally
+- Other tools remain subject to the target profile and context restrictions
 
 ## Network Boundary
 
@@ -238,7 +243,7 @@ Even after authentication, capabilities vary by context:
 |  - read_pdf_visual                        |
 +------------------------------------------+
          |
-         | Domain Allowlist / Domain Rules
+         | Profile Domain Rules / Legacy Allowlist
          v
 +------------------------------------------+
 |           External Networks               |
@@ -253,9 +258,9 @@ Even after authentication, capabilities vary by context:
 - `network: true` enables network-capable tools to participate in permission evaluation
 - `network: false` blocks ordinary web access and export-sensitive actions
 
-**Guardrail Level:**
-- `enforceAllowedDomains: true` limits to specific domains
-- Domain allowlist restricts which destinations can be accessed
+**Profile and Guardrail Level:**
+- Profile `domainRules` and legacy `enforceAllowedDomains` can limit destinations
+- Positive domain rules act as an allowlist; deny rules win and later approval cannot widen them
 
 **Permission Rule Level:**
 - `domain` rules can allow or deny one destination hostname
@@ -305,7 +310,7 @@ Even after authentication, capabilities vary by context:
 |------------|----------|----------|
 | Read | read_file, list_directory | Auto-allowed if read permission |
 | Write | write_file, create_directory | Auto-allowed if write permission and no rule blocks it |
-| Destructive | delete_file, run_command | Usually prompts unless a rule or mode changes the outcome |
+| Destructive | delete_file, run_command | Usually prompts unless the access profile, rule, or legacy mode changes the outcome |
 | System | screenshot, clipboard | Context-dependent |
 | Network | browser_navigate, web_fetch | Requires network permission and may still prompt under default mode |
 | Export | mutating `http_request`, `analyze_image`, `read_pdf_visual` | Requires network permission and explicit export review unless an exact rule allows it |
@@ -313,7 +318,7 @@ Even after authentication, capabilities vary by context:
 ### Approval Gates
 
 Some operations usually require user approval:
-- Shell command execution
+- Command-tool execution
 - File deletion
 - Destructive operations
 - External side effects without matching allow rules

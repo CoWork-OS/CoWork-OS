@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildTaskTitle,
-  formatTaskEventFrame,
-  isTerminalTaskFrame,
-  matchesTask,
-} from "../format";
+import { buildTaskTitle, formatTaskEventFrame, isTerminalTaskFrame, matchesTask } from "../format";
 
 describe("CLI formatting", () => {
   it("builds compact task titles from prompts", () => {

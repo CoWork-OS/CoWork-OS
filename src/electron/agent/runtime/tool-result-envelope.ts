@@ -86,8 +86,13 @@ function buildDefaultEvidence(params: BuildToolResultEnvelopeParams): ToolResult
 
   const stringValue = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
-  if (params.toolName === "read_file" || params.toolName === "write_file" || params.toolName === "edit_file") {
-    const path = stringValue(result.path) || stringValue(result.filePath) || stringValue(result.file);
+  if (
+    params.toolName === "read_file" ||
+    params.toolName === "write_file" ||
+    params.toolName === "edit_file"
+  ) {
+    const path =
+      stringValue(result.path) || stringValue(result.filePath) || stringValue(result.file);
     if (path) {
       push({
         type: "file",
@@ -106,7 +111,8 @@ function buildDefaultEvidence(params: BuildToolResultEnvelopeParams): ToolResult
   }
 
   if (params.toolName === "delete_file") {
-    const path = stringValue(result.path) || stringValue(result.filePath) || stringValue(result.file);
+    const path =
+      stringValue(result.path) || stringValue(result.filePath) || stringValue(result.file);
     if (path) {
       push({
         type: "file",
@@ -181,9 +187,7 @@ function buildDefaultEvidence(params: BuildToolResultEnvelopeParams): ToolResult
   return evidence;
 }
 
-export function buildToolResultEnvelope(
-  params: BuildToolResultEnvelopeParams,
-): ToolResultEnvelope {
+export function buildToolResultEnvelope(params: BuildToolResultEnvelopeParams): ToolResultEnvelope {
   return {
     toolUseId: params.toolUseId,
     toolName: params.toolName,

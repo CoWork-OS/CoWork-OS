@@ -33,8 +33,10 @@ export interface SecureMcpTunnelConfig {
   lastError?: string;
 }
 
-export interface SecureMcpTunnelDisplayConfig
-  extends Omit<SecureMcpTunnelConfig, "clientToken" | "callerToken"> {
+export interface SecureMcpTunnelDisplayConfig extends Omit<
+  SecureMcpTunnelConfig,
+  "clientToken" | "callerToken"
+> {
   hasClientToken: boolean;
   hasCallerToken: boolean;
 }
@@ -138,8 +140,9 @@ export interface SecureMcpTunnelCreateInput {
   enabled?: boolean;
 }
 
-export interface SecureMcpTunnelUpdateInput
-  extends Partial<Omit<SecureMcpTunnelCreateInput, "policy">> {
+export interface SecureMcpTunnelUpdateInput extends Partial<
+  Omit<SecureMcpTunnelCreateInput, "policy">
+> {
   policy?: Partial<SecureMcpTunnelPolicy>;
 }
 

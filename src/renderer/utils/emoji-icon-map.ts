@@ -222,9 +222,6 @@ for (const [key, value] of Object.entries(EMOJI_ICON_MAP)) {
 export function getEmojiIcon(emoji: string): ComponentType<LucideProps> {
   const normalized = emoji.replace(VS_REGEX, "").replace(SKIN_TONE_REGEX, "");
   return (
-    NORMALIZED[emoji] ||
-    NORMALIZED[normalized] ||
-    NORMALIZED[emoji.replace(VS_REGEX, "")] ||
-    Bot
+    NORMALIZED[emoji] || NORMALIZED[normalized] || NORMALIZED[emoji.replace(VS_REGEX, "")] || Bot
   );
 }

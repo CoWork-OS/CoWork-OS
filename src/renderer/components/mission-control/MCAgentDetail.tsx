@@ -9,9 +9,17 @@ interface MCAgentDetailProps {
 
 export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
   const {
-    agents, heartbeatStatuses, tasksByAgent,
-    getAgentStatus, handleTriggerHeartbeat, handleEditAgent,
-    setDetailPanel, formatRelativeTime, agentContext, isAllWorkspacesSelected, getWorkspaceName,
+    agents,
+    heartbeatStatuses,
+    tasksByAgent,
+    getAgentStatus,
+    handleTriggerHeartbeat,
+    handleEditAgent,
+    setDetailPanel,
+    formatRelativeTime,
+    agentContext,
+    isAllWorkspacesSelected,
+    getWorkspaceName,
   } = data;
 
   const agent = agents.find((a) => a.id === agentId);
@@ -26,12 +34,17 @@ export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
     <>
       <div className="mc-v2-agent-detail-header">
         <div className="mc-v2-agent-avatar" style={{ backgroundColor: agent.color }}>
-          {(() => { const Icon = getEmojiIcon(agent.icon || "🤖"); return <Icon size={24} strokeWidth={2} />; })()}
+          {(() => {
+            const Icon = getEmojiIcon(agent.icon || "🤖");
+            return <Icon size={24} strokeWidth={2} />;
+          })()}
         </div>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className="mc-v2-agent-detail-name">{agent.displayName}</span>
-            <span className="mc-v2-autonomy-badge" style={{ backgroundColor: badge.color }}>{badge.label}</span>
+            <span className="mc-v2-autonomy-badge" style={{ backgroundColor: badge.color }}>
+              {badge.label}
+            </span>
             <span className={`mc-v2-status-dot ${status}`}></span>
             <span className="mc-v2-status-text">{status}</span>
           </div>
@@ -40,7 +53,9 @@ export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
       </div>
 
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="mc-v2-icon-btn" onClick={() => handleEditAgent(agent)}>Edit Agent</button>
+        <button className="mc-v2-icon-btn" onClick={() => handleEditAgent(agent)}>
+          Edit Agent
+        </button>
         {statusInfo?.heartbeatEnabled && (
           <button className="mc-v2-wake-btn" onClick={() => handleTriggerHeartbeat(agent.id)}>
             {agentContext.getUiCopy("mcWakeAgent")}
@@ -59,13 +74,17 @@ export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
             {statusInfo.lastHeartbeatAt && (
               <div className="mc-v2-card-item">
                 <span className="mc-v2-card-item-label">Last review</span>
-                <span className="mc-v2-card-item-value">{formatRelativeTime(statusInfo.lastHeartbeatAt)}</span>
+                <span className="mc-v2-card-item-value">
+                  {formatRelativeTime(statusInfo.lastHeartbeatAt)}
+                </span>
               </div>
             )}
             {statusInfo.nextHeartbeatAt && (
               <div className="mc-v2-card-item">
                 <span className="mc-v2-card-item-label">Next review</span>
-                <span className="mc-v2-card-item-value">{formatRelativeTime(statusInfo.nextHeartbeatAt)}</span>
+                <span className="mc-v2-card-item-value">
+                  {formatRelativeTime(statusInfo.nextHeartbeatAt)}
+                </span>
               </div>
             )}
           </div>
@@ -76,7 +95,9 @@ export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
         <h4>Assigned Tasks ({agentTasks.length})</h4>
         <div className="mc-v2-agent-detail-tasks">
           {agentTasks.length === 0 ? (
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{agentContext.getUiCopy("mcNoActiveTask")}</div>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+              {agentContext.getUiCopy("mcNoActiveTask")}
+            </div>
           ) : (
             agentTasks.slice(0, 10).map((task) => (
               <div
@@ -84,7 +105,9 @@ export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
                 className="mc-v2-agent-detail-task"
                 onClick={() => setDetailPanel({ kind: "task", taskId: task.id })}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span
+                  style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                >
                   {task.title}
                   {isAllWorkspacesSelected ? (
                     <span className="mc-v2-agent-detail-task-workspace-inline">
@@ -92,7 +115,9 @@ export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
                     </span>
                   ) : null}
                 </span>
-                <span className={`mc-v2-status-pill status-${task.status}`}>{task.status.replace("_", " ")}</span>
+                <span className={`mc-v2-status-pill status-${task.status}`}>
+                  {task.status.replace("_", " ")}
+                </span>
               </div>
             ))
           )}

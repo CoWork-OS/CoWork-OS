@@ -54,7 +54,8 @@ function createDaemonLike(taskOverrides: Record<string, unknown> = {}) {
     maybeEnrichLlmTelemetryPayload: (AgentDaemon.prototype as Any).maybeEnrichLlmTelemetryPayload,
     normalizeArtifactEventPayload: (AgentDaemon.prototype as Any).normalizeArtifactEventPayload,
     maybeEmitAssistantMediaPreview: (AgentDaemon.prototype as Any).maybeEmitAssistantMediaPreview,
-    shouldEmitInlineHtmlFramePreview: (AgentDaemon.prototype as Any).shouldEmitInlineHtmlFramePreview,
+    shouldEmitInlineHtmlFramePreview: (AgentDaemon.prototype as Any)
+      .shouldEmitInlineHtmlFramePreview,
   } as Any;
 }
 
@@ -79,6 +80,23 @@ describe("AgentDaemon.logEvent artifact normalization", () => {
       "task_completed",
     ]);
     expect(persistedEvents.map((event: Any) => event.seq)).toEqual([2, 3, 4]);
+  });
+
+  it("does not reopen a timeline stage for events that arrive after cancellation", () => {
+    const daemonLike = createDaemonLike({
+      status: "cancelled",
+      completedAt: 2_000,
+    });
+
+    AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "tool_result", {
+      tool: "run_command",
+      result: {
+        terminationReason: "user_stopped",
+      },
+    });
+
+    expect(daemonLike.transitionTimelineStage).not.toHaveBeenCalled();
+    expect((daemonLike.persistTimelineEvent as Any).mock.calls).toHaveLength(1);
   });
 
   it("normalizes relative artifact paths to absolute workspace paths and assigns stable label", () => {
@@ -123,12 +141,15 @@ describe("AgentDaemon.logEvent artifact normalization", () => {
     expect(fileEvent.type).toBe("timeline_artifact_emitted");
     expect(fileOptions.legacyType).toBe("file_created");
 
-    const [assistantEvent, assistantOptions] = (daemonLike.persistTimelineEvent as Any).mock.calls[1];
+    const [assistantEvent, assistantOptions] = (daemonLike.persistTimelineEvent as Any).mock
+      .calls[1];
     expect(assistantEvent.type).toBe("timeline_step_updated");
     expect(assistantEvent.payload.legacyType).toBe("assistant_message");
     expect(assistantEvent.payload.internal).toBe(true);
     expect(String(assistantEvent.payload.message)).toContain("::video{");
-    expect(String(assistantEvent.payload.message)).toContain('path="artifacts/hyperframes-demo.mp4"');
+    expect(String(assistantEvent.payload.message)).toContain(
+      'path="artifacts/hyperframes-demo.mp4"',
+    );
     expect(assistantOptions.legacyType).toBe("assistant_message");
 
     AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "artifact_created", {
@@ -153,12 +174,15 @@ describe("AgentDaemon.logEvent artifact normalization", () => {
 
     expect((daemonLike.persistTimelineEvent as Any).mock.calls).toHaveLength(2);
 
-    const [assistantEvent, assistantOptions] = (daemonLike.persistTimelineEvent as Any).mock.calls[1];
+    const [assistantEvent, assistantOptions] = (daemonLike.persistTimelineEvent as Any).mock
+      .calls[1];
     expect(assistantEvent.type).toBe("timeline_step_updated");
     expect(assistantEvent.payload.legacyType).toBe("assistant_message");
     expect(assistantEvent.payload.internal).toBe(true);
     expect(String(assistantEvent.payload.message)).toContain("::frame{");
-    expect(String(assistantEvent.payload.message)).toContain('path="artifacts/investment-performance.html"');
+    expect(String(assistantEvent.payload.message)).toContain(
+      'path="artifacts/investment-performance.html"',
+    );
     expect(String(assistantEvent.payload.message)).toContain('kind="preview"');
     expect(assistantOptions.legacyType).toBe("assistant_message");
   });

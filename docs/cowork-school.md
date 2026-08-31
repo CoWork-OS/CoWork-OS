@@ -26,7 +26,7 @@ CoWork OS is a free, open-source, local-first AI super app and personal agentic 
 In practice, that means:
 
 - it can chat with you like a normal assistant
-- it can execute multi-step tasks using tools such as files, shell, browser automation, and connectors
+- it can execute multi-step tasks using tools such as files, command tools, browser automation, and connectors
 - it can run across desktop, messaging channels, or a headless control plane
 - it can keep background systems running through Memory, Heartbeat, Workflow Intelligence, Scheduled Tasks, and Daily Briefing
 - it keeps approvals, guardrails, encrypted settings, and workspace boundaries in the product instead of expecting you to bolt them on later
@@ -59,7 +59,7 @@ By default, CoWork OS is only as capable as the permissions and connections you 
 Depending on your setup, it can work with:
 
 - local files in the selected workspace
-- shell commands
+- command tools governed by the task's [access profile](access-profiles.md)
 - browser automation
 - messaging channels
 - email and inbox workflows
@@ -293,7 +293,9 @@ CoWork OS is designed with stronger controls than most agent tools, but the cont
 
 ### Start narrow
 
-Begin with one workspace and one concrete task. Do not enable broad shell or delete permissions unless the workflow needs them.
+Begin with one workspace and one concrete task. Start with **Ask for
+approval**, and choose a broader access profile or delete capability only when
+the workflow needs it.
 
 ### Keep sensitive work in the right profile
 

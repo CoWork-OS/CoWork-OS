@@ -178,10 +178,7 @@ describe("MessageRouter WhatsApp task updates", () => {
       "task-tool-noise",
       "Glob search: */[Ss]ens_et_Dieu_finale.pdf in .",
     );
-    await router.sendTaskUpdate(
-      "task-tool-noise",
-      "Resuming execution after user input",
-    );
+    await router.sendTaskUpdate("task-tool-noise", "Resuming execution after user input");
     await router.sendTaskUpdate(
       "task-tool-noise",
       "Tool error (read_pdf_visual): p1: The current model cannot analyze images directly. Switch to an image-capable model/provider and resend the image. | p2: The current model cannot analyze images directly. Switch to an image-capable model/provider and resend the image.",
@@ -262,17 +259,11 @@ describe("MessageRouter WhatsApp task updates", () => {
       const db = createMockDb();
       const router = new MessageRouter(db, {}, undefined);
       const adapter =
-        channelType === "whatsapp"
-          ? createWhatsAppAdapter()
-          : createChatAdapter(channelType);
+        channelType === "whatsapp" ? createWhatsAppAdapter() : createChatAdapter(channelType);
 
       (router as Any).adapters.set(channelType, adapter);
-      (router as Any).channelRepo.findById = vi
-        .fn()
-        .mockReturnValue({ id: `${channelType}-1` });
-      (router as Any).channelRepo.findByType = vi
-        .fn()
-        .mockReturnValue({ id: `${channelType}-1` });
+      (router as Any).channelRepo.findById = vi.fn().mockReturnValue({ id: `${channelType}-1` });
+      (router as Any).channelRepo.findByType = vi.fn().mockReturnValue({ id: `${channelType}-1` });
       (router as Any).messageRepo.create = vi.fn();
       (router as Any).maybeSendTaskFeedbackControls = vi.fn().mockResolvedValue(undefined);
       (router as Any).sendTaskArtifacts = vi.fn().mockResolvedValue(undefined);
@@ -314,9 +305,18 @@ describe("MessageRouter external channel task updates", () => {
         sessionId: "session-1",
       });
 
-      await router.sendTaskUpdate(`task-${channelType}`, "LLM route selected: provider=azure, profile=cheap, source=profile_model, model=gpt-5.4-mini");
-      await router.sendTaskUpdate(`task-${channelType}`, "Creating execution plan (model: gpt-5.4)...");
-      await router.sendTaskUpdate(`task-${channelType}`, "Executing step 1/3: Inspect the codebase");
+      await router.sendTaskUpdate(
+        `task-${channelType}`,
+        "LLM route selected: provider=azure, profile=cheap, source=profile_model, model=gpt-5.4-mini",
+      );
+      await router.sendTaskUpdate(
+        `task-${channelType}`,
+        "Creating execution plan (model: gpt-5.4)...",
+      );
+      await router.sendTaskUpdate(
+        `task-${channelType}`,
+        "Executing step 1/3: Inspect the codebase",
+      );
       await router.sendTaskUpdate(
         `task-${channelType}`,
         "Execution strategy active: intent=advice, domain=general, convoMode=hybrid, execMode=plan, answerFirst=true, llmProfileHint=strong",
@@ -352,7 +352,10 @@ describe("MessageRouter external channel task updates", () => {
       sessionId: "session-1",
     });
 
-    await router.sendTaskUpdate("task-slack-curated", "Creating execution plan (model: gpt-5.4)...");
+    await router.sendTaskUpdate(
+      "task-slack-curated",
+      "Creating execution plan (model: gpt-5.4)...",
+    );
     await router.sendTaskUpdate("task-slack-curated", "Executing step 1/3: Inspect the codebase");
     await router.sendTaskUpdate("task-slack-curated", "Completed step 1: Inspect the codebase");
 
@@ -399,10 +402,7 @@ describe("MessageRouter external channel task updates", () => {
       lastProgressMessageText: "Planning the work.",
     });
 
-    await router.sendTaskUpdate(
-      "task-wa-edit-fallback",
-      "Completed step 1: Inspect the codebase",
-    );
+    await router.sendTaskUpdate("task-wa-edit-fallback", "Completed step 1: Inspect the codebase");
 
     expect(adapter.editMessage).toHaveBeenCalledWith(
       "chat-1",
@@ -438,7 +438,11 @@ describe("MessageRouter external channel task updates", () => {
       sessionId: "session-1",
     });
 
-    await router.sendTaskUpdate("task-slack-stream", "I found the root cause. Applying the fix now.", true);
+    await router.sendTaskUpdate(
+      "task-slack-stream",
+      "I found the root cause. Applying the fix now.",
+      true,
+    );
 
     await vi.advanceTimersByTimeAsync(2000);
     await Promise.resolve();

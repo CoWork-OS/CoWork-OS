@@ -22,27 +22,23 @@ export interface NormalizedTurnTranscript {
 
 function isToolUseBlock(block: unknown): block is LLMToolUse {
   return Boolean(
-    block &&
-      typeof block === "object" &&
-      (block as { type?: string }).type === "tool_use",
+    block && typeof block === "object" && (block as { type?: string }).type === "tool_use",
   );
 }
 
 function isToolResultBlock(block: unknown): block is LLMToolResult {
   return Boolean(
-    block &&
-      typeof block === "object" &&
-      (block as { type?: string }).type === "tool_result",
+    block && typeof block === "object" && (block as { type?: string }).type === "tool_result",
   );
 }
 
 function isToolResultOnlyUserMessage(message: LLMMessage | undefined): boolean {
   return Boolean(
     message &&
-      message.role === "user" &&
-      Array.isArray(message.content) &&
-      message.content.length > 0 &&
-      message.content.every((block) => isToolResultBlock(block)),
+    message.role === "user" &&
+    Array.isArray(message.content) &&
+    message.content.length > 0 &&
+    message.content.every((block) => isToolResultBlock(block)),
   );
 }
 
@@ -211,7 +207,9 @@ export function normalizeTurnTranscript(messages: LLMMessage[]): NormalizedTurnT
       }
     }
 
-    const missingIds = Array.from(expectedToolUseIds).filter((toolUseId) => !coveredToolUseIds.has(toolUseId));
+    const missingIds = Array.from(expectedToolUseIds).filter(
+      (toolUseId) => !coveredToolUseIds.has(toolUseId),
+    );
     if (missingIds.length > 0) {
       for (const toolUseId of missingIds) {
         issues.push({
@@ -233,8 +231,7 @@ export function normalizeTurnTranscript(messages: LLMMessage[]): NormalizedTurnT
     index = cursor - 1;
   }
 
-  const modified =
-    issues.length > 0 || JSON.stringify(normalized) !== JSON.stringify(messages);
+  const modified = issues.length > 0 || JSON.stringify(normalized) !== JSON.stringify(messages);
 
   return {
     messages: normalized,

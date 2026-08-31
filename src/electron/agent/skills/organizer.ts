@@ -7,6 +7,7 @@ import {
   getProjectIdFromWorkspaceRelPath,
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
+import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 
 /**
  * FolderOrganizer organizes files in folders
@@ -23,15 +24,27 @@ export class FolderOrganizer {
    * Uses path.relative() to safely detect path traversal attacks including symlinks
    */
   private validatePath(relativePath: string): string {
-    const normalizedWorkspace = path.resolve(this.workspace.path);
-    const resolved = path.resolve(normalizedWorkspace, relativePath);
-    const relative = path.relative(normalizedWorkspace, resolved);
-
-    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    const resolved = evaluateWorkspaceFilesystemAccess(this.workspace, relativePath, "write");
+    if (resolved.decision !== "allow") {
+      if (resolved.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${relativePath}`);
+      }
       throw new Error("Path is outside workspace boundary");
     }
+    return resolved.path;
+  }
 
-    return resolved;
+  private assertProfilePathAllowed(
+    absolutePath: string,
+    operation: "read" | "write" | "delete",
+  ): void {
+    const decision = evaluateWorkspaceFilesystemAccess(this.workspace, absolutePath, operation);
+    if (decision.decision !== "allow") {
+      if (decision.reason !== "profile_filesystem_denied") {
+        throw new Error(`Path is outside workspace boundary: ${absolutePath}`);
+      }
+      throw new Error(`Path is denied by the active access profile: ${absolutePath}`);
+    }
   }
 
   private async enforceProjectAccess(absolutePath: string): Promise<void> {
@@ -60,6 +73,9 @@ export class FolderOrganizer {
     rules?: Any,
   ): Promise<number> {
     const fullPath = this.validatePath(relativePath);
+    // Organizing enumerates and stats source entries before it mutates them;
+    // write permission alone must not imply read access.
+    this.assertProfilePathAllowed(fullPath, "read");
     await this.enforceProjectAccess(fullPath);
 
     switch (strategy) {
@@ -106,6 +122,10 @@ export class FolderOrganizer {
       const targetDir = path.join(folderPath, category);
       const targetPath = path.join(targetDir, entry.name);
 
+      this.assertProfilePathAllowed(sourcePath, "delete");
+      this.assertProfilePathAllowed(targetDir, "write");
+      this.assertProfilePathAllowed(targetPath, "write");
+
       // Create category folder if needed
       await fs.mkdir(targetDir, { recursive: true });
 
@@ -138,6 +158,10 @@ export class FolderOrganizer {
 
       const targetDir = path.join(folderPath, `${year}-${month}`);
       const targetPath = path.join(targetDir, entry.name);
+
+      this.assertProfilePathAllowed(sourcePath, "delete");
+      this.assertProfilePathAllowed(targetDir, "write");
+      this.assertProfilePathAllowed(targetPath, "write");
 
       // Create date folder if needed
       await fs.mkdir(targetDir, { recursive: true });

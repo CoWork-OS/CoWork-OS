@@ -40,7 +40,10 @@ function detectFramework(packageJson: PackageJsonShape | null): WebPagePreview["
   return undefined;
 }
 
-async function findReactProjectRoot(startPath: string, workspaceRoot: string): Promise<string | null> {
+async function findReactProjectRoot(
+  startPath: string,
+  workspaceRoot: string,
+): Promise<string | null> {
   let current = startPath;
   const normalizedWorkspaceRoot = path.resolve(workspaceRoot);
   while (current.startsWith(normalizedWorkspaceRoot)) {
@@ -111,10 +114,11 @@ export async function buildWebPagePreviewFromPath(
     });
   }
 
-  const projectRoot =
-    stats.isDirectory() ? await findReactProjectRoot(sourcePath, workspaceRoot) :
-    path.basename(sourcePath) === "package.json" ? await findReactProjectRoot(path.dirname(sourcePath), workspaceRoot) :
-    await findReactProjectRoot(sourceDir, workspaceRoot);
+  const projectRoot = stats.isDirectory()
+    ? await findReactProjectRoot(sourcePath, workspaceRoot)
+    : path.basename(sourcePath) === "package.json"
+      ? await findReactProjectRoot(path.dirname(sourcePath), workspaceRoot)
+      : await findReactProjectRoot(sourceDir, workspaceRoot);
   if (projectRoot) {
     const packageJson = await readPackageJson(path.join(projectRoot, "package.json"));
     const framework = detectFramework(packageJson);

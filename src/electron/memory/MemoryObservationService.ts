@@ -71,7 +71,12 @@ function parseJsonArray(value: unknown): string[] {
 }
 
 function stringifyArray(value: string[] | undefined): string {
-  return JSON.stringify((value || []).map((item) => item.trim()).filter(Boolean).slice(0, MAX_ARRAY_ITEMS));
+  return JSON.stringify(
+    (value || [])
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, MAX_ARRAY_ITEMS),
+  );
 }
 
 function normalizeWhitespace(value: string): string {
@@ -84,7 +89,10 @@ function truncate(value: string, max: number): string {
 }
 
 function contentHash(content: string): string {
-  return crypto.createHash("sha256").update(normalizeWhitespace(content).toLowerCase()).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(normalizeWhitespace(content).toLowerCase())
+    .digest("hex");
 }
 
 function sourceLabel(origin: string): string {
@@ -128,7 +136,9 @@ function extractConcepts(text: string): string[] {
 function extractFiles(text: string): { read: string[]; modified: string[] } {
   const files = new Set<string>();
   const modified = new Set<string>();
-  const matches = text.matchAll(/(?:^|\s)([.~/A-Za-z0-9_-]+\/[A-Za-z0-9_.@ -]+\.[A-Za-z0-9]{1,8})(?=\s|$|[),.;:])/g);
+  const matches = text.matchAll(
+    /(?:^|\s)([.~/A-Za-z0-9_-]+\/[A-Za-z0-9_.@ -]+\.[A-Za-z0-9]{1,8})(?=\s|$|[),.;:])/g,
+  );
   for (const match of matches) {
     const file = match[1]?.trim();
     if (!file || file.length > 240) continue;
@@ -138,7 +148,9 @@ function extractFiles(text: string): { read: string[]; modified: string[] } {
     for (const file of files) modified.add(file);
   }
   return {
-    read: Array.from(files).filter((file) => !modified.has(file)).slice(0, MAX_ARRAY_ITEMS),
+    read: Array.from(files)
+      .filter((file) => !modified.has(file))
+      .slice(0, MAX_ARRAY_ITEMS),
     modified: Array.from(modified).slice(0, MAX_ARRAY_ITEMS),
   };
 }
@@ -212,20 +224,25 @@ export class MemoryObservationService {
     this.db = db;
   }
 
-  static createForMemory(memory: Memory, options: CreateOptions = {}): MemoryObservationMetadata | null {
+  static createForMemory(
+    memory: Memory,
+    options: CreateOptions = {},
+  ): MemoryObservationMetadata | null {
     const db = this.requireDb();
     const metadata = buildMetadata(memory, options);
     try {
-      const existing = db.prepare(
-        `SELECT memory_id FROM memory_observation_metadata
+      const existing = db
+        .prepare(
+          `SELECT memory_id FROM memory_observation_metadata
          WHERE workspace_id = ? AND content_hash = ? AND created_at BETWEEN ? AND ?
          LIMIT 1`,
-      ).get(
-        metadata.workspaceId,
-        metadata.contentHash,
-        metadata.createdAt - 5 * 60 * 1000,
-        metadata.createdAt + 5 * 60 * 1000,
-      ) as { memory_id?: string } | undefined;
+        )
+        .get(
+          metadata.workspaceId,
+          metadata.contentHash,
+          metadata.createdAt - 5 * 60 * 1000,
+          metadata.createdAt + 5 * 60 * 1000,
+        ) as { memory_id?: string } | undefined;
 
       db.prepare(`
         INSERT OR REPLACE INTO memory_observation_metadata (
@@ -256,7 +273,11 @@ export class MemoryObservationService {
         metadata.createdAt,
         metadata.updatedAt,
       );
-      return { ...metadata, content: memory.content, estimatedDetailTokens: estimateTokens(memory.content) };
+      return {
+        ...metadata,
+        content: memory.content,
+        estimatedDetailTokens: estimateTokens(memory.content),
+      };
     } catch (error) {
       logger.warn("[MemoryObservationService] Failed to create metadata:", error);
       return null;
@@ -266,15 +287,24 @@ export class MemoryObservationService {
   static startBackfill(force = false): MemoryObservationBackfillStatus {
     const db = this.requireDb();
     if (this.status.running) return this.status;
-    this.status = { total: 0, processed: 0, failed: 0, pending: 0, running: true, lastRunAt: Date.now() };
+    this.status = {
+      total: 0,
+      processed: 0,
+      failed: 0,
+      pending: 0,
+      running: true,
+      lastRunAt: Date.now(),
+    };
     try {
-      const rows = db.prepare(`
+      const rows = db
+        .prepare(`
         SELECT m.*
         FROM memories m
         LEFT JOIN memory_observation_metadata om ON om.memory_id = m.id
         WHERE ${force ? "1 = 1" : "om.memory_id IS NULL"}
         ORDER BY m.created_at ASC
-      `).all() as Record<string, unknown>[];
+      `)
+        .all() as Record<string, unknown>[];
       this.status.total = rows.length;
       this.status.pending = rows.length;
       for (const row of rows) {
@@ -295,7 +325,10 @@ export class MemoryObservationService {
           this.status.failed += 1;
           this.status.lastError = error instanceof Error ? error.message : String(error);
         } finally {
-          this.status.pending = Math.max(0, this.status.total - this.status.processed - this.status.failed);
+          this.status.pending = Math.max(
+            0,
+            this.status.total - this.status.processed - this.status.failed,
+          );
         }
       }
     } catch (error) {
@@ -345,7 +378,8 @@ export class MemoryObservationService {
     try {
       if (rawQuery) {
         const fts = this.buildFtsQuery(rawQuery);
-        const rows = db.prepare(`
+        const rows = db
+          .prepare(`
           SELECT om.*, m.summary, m.content, m.tokens, m.created_at AS memory_created_at,
                  bm25(memory_observation_metadata_fts) AS score
           FROM memory_observation_metadata_fts f
@@ -354,7 +388,8 @@ export class MemoryObservationService {
           WHERE memory_observation_metadata_fts MATCH ? AND ${where}
           ORDER BY score ASC, m.created_at DESC
           LIMIT ? OFFSET ?
-        `).all(fts, ...params, limit, offset) as Record<string, unknown>[];
+        `)
+          .all(fts, ...params, limit, offset) as Record<string, unknown>[];
         return rows.map((row) => this.mapSearchRow(row, Math.abs(Number(row.score || 0))));
       }
     } catch {
@@ -365,17 +400,20 @@ export class MemoryObservationService {
     let likeWhere = where;
     if (rawQuery) {
       const like = `%${rawQuery}%`;
-      likeWhere += " AND (om.title LIKE ? OR om.subtitle LIKE ? OR om.narrative LIKE ? OR om.facts LIKE ? OR om.concepts LIKE ? OR om.files_read LIKE ? OR om.files_modified LIKE ? OR om.tools LIKE ?)";
+      likeWhere +=
+        " AND (om.title LIKE ? OR om.subtitle LIKE ? OR om.narrative LIKE ? OR om.facts LIKE ? OR om.concepts LIKE ? OR om.files_read LIKE ? OR om.files_modified LIKE ? OR om.tools LIKE ?)";
       likeParams.push(like, like, like, like, like, like, like, like);
     }
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(`
       SELECT om.*, m.summary, m.content, m.tokens, m.created_at AS memory_created_at
       FROM memory_observation_metadata om
       JOIN memories m ON m.id = om.memory_id
       WHERE ${likeWhere}
       ORDER BY m.created_at DESC
       LIMIT ? OFFSET ?
-    `).all(...likeParams, limit, offset) as Record<string, unknown>[];
+    `)
+      .all(...likeParams, limit, offset) as Record<string, unknown>[];
     return rows.map((row) => this.mapSearchRow(row, 1));
   }
 
@@ -392,7 +430,8 @@ export class MemoryObservationService {
       : this.search({ workspaceId: input.workspaceId, query: input.query || "", limit: 1 })[0];
     if (!anchor) return [];
     const anchorTime = "memoryCreatedAt" in anchor ? anchor.memoryCreatedAt : anchor.createdAt;
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(`
       SELECT om.*, m.summary, m.content, m.tokens, m.created_at AS memory_created_at
       FROM memory_observation_metadata om
       JOIN memories m ON m.id = om.memory_id
@@ -400,12 +439,13 @@ export class MemoryObservationService {
         AND m.created_at BETWEEN ? AND ?
       ORDER BY m.created_at ASC
       LIMIT ?
-    `).all(
-      input.workspaceId,
-      anchorTime - 30 * 60 * 1000,
-      anchorTime + 30 * 60 * 1000,
-      windowSize * 2 + 1,
-    ) as Record<string, unknown>[];
+    `)
+      .all(
+        input.workspaceId,
+        anchorTime - 30 * 60 * 1000,
+        anchorTime + 30 * 60 * 1000,
+        windowSize * 2 + 1,
+      ) as Record<string, unknown>[];
     return rows.map((row) => ({
       ...this.mapSearchRow(row, row.memory_id === anchor.memoryId ? 2 : 1),
       isAnchor: row.memory_id === anchor.memoryId,
@@ -413,10 +453,30 @@ export class MemoryObservationService {
   }
 
   static details(memoryIds: string[], workspaceId?: string): MemoryObservationMetadata[] {
-    return memoryIds.map((id) => this.getRow(id, workspaceId)).filter(Boolean) as MemoryObservationMetadata[];
+    return memoryIds
+      .map((id) => this.getRow(id, workspaceId))
+      .filter(Boolean) as MemoryObservationMetadata[];
   }
 
-  static update(workspaceId: string, memoryId: string, patch: Partial<Pick<MemoryObservationMetadata, "title" | "subtitle" | "narrative" | "facts" | "concepts" | "filesRead" | "filesModified" | "tools" | "sourceEventIds" | "privacyState">>): MemoryObservationMetadata | null {
+  static update(
+    workspaceId: string,
+    memoryId: string,
+    patch: Partial<
+      Pick<
+        MemoryObservationMetadata,
+        | "title"
+        | "subtitle"
+        | "narrative"
+        | "facts"
+        | "concepts"
+        | "filesRead"
+        | "filesModified"
+        | "tools"
+        | "sourceEventIds"
+        | "privacyState"
+      >
+    >,
+  ): MemoryObservationMetadata | null {
     const db = this.requireDb();
     const current = this.getRow(memoryId, workspaceId);
     if (!current) return null;
@@ -443,18 +503,24 @@ export class MemoryObservationService {
       memoryId,
     );
     if (next.privacyState === "private" || next.privacyState === "redacted") {
-      db.prepare("UPDATE memories SET is_private = 1, updated_at = ? WHERE id = ? AND workspace_id = ?")
-        .run(Date.now(), memoryId, workspaceId);
+      db.prepare(
+        "UPDATE memories SET is_private = 1, updated_at = ? WHERE id = ? AND workspace_id = ?",
+      ).run(Date.now(), memoryId, workspaceId);
     }
     return this.getRow(memoryId, workspaceId);
   }
 
-  static redact(workspaceId: string, memoryId: string, replacement = "[redacted]"): MemoryObservationMetadata | null {
+  static redact(
+    workspaceId: string,
+    memoryId: string,
+    replacement = "[redacted]",
+  ): MemoryObservationMetadata | null {
     const db = this.requireDb();
     const current = this.getRow(memoryId, workspaceId);
     if (!current) return null;
-    db.prepare("UPDATE memories SET content = ?, summary = ?, is_private = 1, updated_at = ? WHERE id = ? AND workspace_id = ?")
-      .run(replacement, replacement, Date.now(), memoryId, workspaceId);
+    db.prepare(
+      "UPDATE memories SET content = ?, summary = ?, is_private = 1, updated_at = ? WHERE id = ? AND workspace_id = ?",
+    ).run(replacement, replacement, Date.now(), memoryId, workspaceId);
     return this.update(workspaceId, memoryId, {
       title: "Redacted memory",
       subtitle: current.subtitle,
@@ -473,8 +539,9 @@ export class MemoryObservationService {
     const db = this.requireDb();
     const current = this.getRow(memoryId, workspaceId);
     if (!current) return false;
-    db.prepare("UPDATE memories SET is_private = 1, updated_at = ? WHERE id = ? AND workspace_id = ?")
-      .run(Date.now(), memoryId, workspaceId);
+    db.prepare(
+      "UPDATE memories SET is_private = 1, updated_at = ? WHERE id = ? AND workspace_id = ?",
+    ).run(Date.now(), memoryId, workspaceId);
     const updated = this.update(workspaceId, memoryId, {
       title: "Deleted memory",
       subtitle: current.subtitle,
@@ -493,7 +560,9 @@ export class MemoryObservationService {
   static isPromptSuppressed(memoryId: string): boolean {
     const db = this.db;
     if (!db) return false;
-    const row = db.prepare("SELECT privacy_state FROM memory_observation_metadata WHERE memory_id = ?").get(memoryId) as { privacy_state?: string } | undefined;
+    const row = db
+      .prepare("SELECT privacy_state FROM memory_observation_metadata WHERE memory_id = ?")
+      .get(memoryId) as { privacy_state?: string } | undefined;
     return row?.privacy_state === "suppressed" || row?.privacy_state === "redacted";
   }
 
@@ -501,13 +570,15 @@ export class MemoryObservationService {
     const db = this.requireDb();
     const workspaceFilter = workspaceId ? "AND om.workspace_id = ?" : "";
     const params = workspaceId ? [memoryId, workspaceId] : [memoryId];
-    const row = db.prepare(`
+    const row = db
+      .prepare(`
       SELECT om.*, m.summary, m.content, m.tokens, m.created_at AS memory_created_at
       FROM memory_observation_metadata om
       JOIN memories m ON m.id = om.memory_id
       WHERE om.memory_id = ?
       ${workspaceFilter}
-    `).get(...params) as Record<string, unknown> | undefined;
+    `)
+      .get(...params) as Record<string, unknown> | undefined;
     return row ? this.mapDetailRow(row) : null;
   }
 
@@ -515,13 +586,15 @@ export class MemoryObservationService {
     const db = this.db;
     if (!db || this.status.running) return;
     try {
-      const row = db.prepare(`
+      const row = db
+        .prepare(`
         SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN om.memory_id IS NULL THEN 1 ELSE 0 END) AS pending
         FROM memories m
         LEFT JOIN memory_observation_metadata om ON om.memory_id = m.id
-      `).get() as { total?: number; pending?: number } | undefined;
+      `)
+        .get() as { total?: number; pending?: number } | undefined;
       const total = Number(row?.total || 0);
       const pending = Number(row?.pending || 0);
       this.status = {
@@ -540,7 +613,10 @@ export class MemoryObservationService {
     }
   }
 
-  private static mapSearchRow(row: Record<string, unknown>, rank: number): MemoryObservationSearchResult {
+  private static mapSearchRow(
+    row: Record<string, unknown>,
+    rank: number,
+  ): MemoryObservationSearchResult {
     const concepts = parseJsonArray(row.concepts);
     const filesRead = parseJsonArray(row.files_read);
     const filesModified = parseJsonArray(row.files_modified);
@@ -585,7 +661,9 @@ export class MemoryObservationService {
       captureReason: String(row.capture_reason || "memory_capture"),
       privacyState: String(row.privacy_state || "normal") as MemoryObservationPrivacyState,
       generatedBy: String(row.generated_by || "capture") as MemoryObservationGeneratedBy,
-      migrationStatus: String(row.migration_status || "current") as MemoryObservationMigrationStatus,
+      migrationStatus: String(
+        row.migration_status || "current",
+      ) as MemoryObservationMigrationStatus,
       createdAt: Number(row.created_at || 0),
       updatedAt: Number(row.updated_at || 0),
       memoryCreatedAt: Number(row.memory_created_at || 0),
@@ -629,7 +707,9 @@ export class MemoryObservationService {
       .map((token) => token.trim())
       .filter((token) => token.length > 1 && !WORD_STOP.has(token))
       .slice(0, 10);
-    return tokens.length ? tokens.map((token) => `"${token.replace(/"/g, "")}"`).join(" OR ") : `"${raw.replace(/"/g, "")}"`;
+    return tokens.length
+      ? tokens.map((token) => `"${token.replace(/"/g, "")}"`).join(" OR ")
+      : `"${raw.replace(/"/g, "")}"`;
   }
 
   private static requireDb(): Database.Database {

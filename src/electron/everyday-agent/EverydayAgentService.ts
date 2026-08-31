@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 import type Database from "better-sqlite3";
+import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import {
   DEFAULT_EVERYDAY_AGENT_PROFILE,
   EVERYDAY_AGENT_ALWAYS_APPROVAL_RISKS,
@@ -1541,7 +1542,7 @@ export class EverydayAgentService {
           config: {
             workspaceId: workspace.id,
             requireWorktree: false,
-            enableShell: false,
+            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
             enableBrowser: true,
             enableComputerUse: false,
             allowedToolFamilies,

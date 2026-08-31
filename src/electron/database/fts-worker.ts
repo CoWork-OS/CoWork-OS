@@ -1,10 +1,19 @@
 import { parentPort, workerData } from "worker_threads";
 import Database from "better-sqlite3";
-import { sanitizeFtsToken, isSafeFtsToken, buildMarkerFtsQuery, buildRelaxedTokenFtsQuery } from "./fts-utils";
+import {
+  sanitizeFtsToken,
+  isSafeFtsToken,
+  buildMarkerFtsQuery,
+  buildRelaxedTokenFtsQuery,
+} from "./fts-utils";
 
 interface FtsRequest {
   id: string;
-  method: "search" | "searchImportedGlobal" | "searchLocalForPromptRecall" | "searchByContentMarker";
+  method:
+    | "search"
+    | "searchImportedGlobal"
+    | "searchLocalForPromptRecall"
+    | "searchByContentMarker";
   args: unknown[];
 }
 
@@ -22,8 +31,12 @@ function truncateToSnippet(text: string, maxLen: number): string {
   return text.slice(0, maxLen) + "...";
 }
 
-
-function search(workspaceId: string, query: string, limit: number, includePrivate: boolean): unknown[] {
+function search(
+  workspaceId: string,
+  query: string,
+  limit: number,
+  includePrivate: boolean,
+): unknown[] {
   const privacyFilter = includePrivate ? "" : "AND m.is_private = 0";
   const raw = (query || "").trim();
   if (!raw) return [];
@@ -191,15 +204,21 @@ function searchByContentMarker(workspaceId: string, marker: string, limit: numbe
 
 const handlers: Record<string, (...args: unknown[]) => unknown> = {
   search: (wid, q, lim, priv) => search(wid as string, q as string, lim as number, priv as boolean),
-  searchImportedGlobal: (q, lim, priv) => searchImportedGlobal(q as string, lim as number, priv as boolean),
-  searchLocalForPromptRecall: (wid, q, lim) => searchLocalForPromptRecall(wid as string, q as string, lim as number),
-  searchByContentMarker: (wid, m, lim) => searchByContentMarker(wid as string, m as string, lim as number),
+  searchImportedGlobal: (q, lim, priv) =>
+    searchImportedGlobal(q as string, lim as number, priv as boolean),
+  searchLocalForPromptRecall: (wid, q, lim) =>
+    searchLocalForPromptRecall(wid as string, q as string, lim as number),
+  searchByContentMarker: (wid, m, lim) =>
+    searchByContentMarker(wid as string, m as string, lim as number),
 };
 
 parentPort?.on("message", (msg: FtsRequest) => {
   const handler = handlers[msg.method];
   if (!handler) {
-    parentPort?.postMessage({ id: msg.id, error: `Unknown method: ${msg.method}` } satisfies FtsResponse);
+    parentPort?.postMessage({
+      id: msg.id,
+      error: `Unknown method: ${msg.method}`,
+    } satisfies FtsResponse);
     return;
   }
   try {

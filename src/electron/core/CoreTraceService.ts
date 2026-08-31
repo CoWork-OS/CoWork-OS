@@ -14,7 +14,9 @@ export class CoreTraceService {
     private readonly candidateRepo: CoreMemoryCandidateRepository,
   ) {}
 
-  startTrace(input: Omit<CoreTrace, "id" | "createdAt"> & { id?: string; createdAt?: number }): CoreTrace {
+  startTrace(
+    input: Omit<CoreTrace, "id" | "createdAt"> & { id?: string; createdAt?: number },
+  ): CoreTrace {
     const existing = this.traceRepo.findOpenTrace({
       profileId: input.profileId,
       sourceSurface: input.sourceSurface,
@@ -56,7 +58,11 @@ export class CoreTraceService {
     return this.traceRepo.update(traceId, { taskId });
   }
 
-  completeTrace(traceId: string, status: Exclude<CoreTraceStatus, "running">, summary?: string): CoreTrace | undefined {
+  completeTrace(
+    traceId: string,
+    status: Exclude<CoreTraceStatus, "running">,
+    summary?: string,
+  ): CoreTrace | undefined {
     return this.traceRepo.update(traceId, {
       status,
       summary,

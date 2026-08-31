@@ -451,8 +451,7 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
                 <p className="settings-description skillhub-description">{skill.description}</p>
                 {(skill.author || skill.version) && (
                   <p className="skillhub-meta">
-                    {skill.author ? `${skill.author} · ` : ""}
-                    v{skill.version}
+                    {skill.author ? `${skill.author} · ` : ""}v{skill.version}
                   </p>
                 )}
                 {renderStatsLine(skill)}
@@ -686,7 +685,9 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
                           {finding.path ? ` (${finding.path})` : ""}
                         </p>
                       ))}
-                      {record.report.findings.length === 0 && <p>No detailed findings available.</p>}
+                      {record.report.findings.length === 0 && (
+                        <p>No detailed findings available.</p>
+                      )}
                     </div>
                   )}
                 </div>

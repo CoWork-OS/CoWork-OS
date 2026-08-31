@@ -461,7 +461,7 @@ const PERSONA_MESSAGE_OVERRIDES: Partial<Record<PersonaId, Partial<Record<Messag
     verifyPassed: "Looks good.",
     verifyFailed: "Not quite right yet.",
     retrying: "Trying again (attempt {n}).",
-    disclaimer: "{agentName} can make mistakes. Please check anything important.",
+    disclaimer: "CoWork OS can make mistakes. Please check anything important.",
   },
 };
 

@@ -38,7 +38,7 @@ const OAUTH_CALLBACK_PORT = 18767;
 function getElectronShell(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
     const electron = require("electron") as Any;
     const shell = electron?.shell;
     if (shell?.openExternal) return shell;
@@ -111,9 +111,7 @@ interface MicrosoftEmailAuthorizeUrlOptions {
   prompt?: "select_account" | "consent";
 }
 
-export function buildMicrosoftEmailAuthorizeUrl(
-  options: MicrosoftEmailAuthorizeUrlOptions,
-): URL {
+export function buildMicrosoftEmailAuthorizeUrl(options: MicrosoftEmailAuthorizeUrlOptions): URL {
   const authUrl = new URL(buildAuthorizeUrl(options.tenant));
   authUrl.searchParams.set("client_id", options.clientId);
   authUrl.searchParams.set("response_type", "code");
@@ -143,10 +141,12 @@ async function startOAuthCallbackServer(timeoutMs = DEFAULT_TIMEOUT_MS): Promise
     let resolveCode: (value: { code: string; state: string }) => void = () => {};
     let rejectCode: (error: Error) => void = () => {};
 
-    const codePromise = new Promise<{ code: string; state: string }>((innerResolve, innerReject) => {
-      resolveCode = innerResolve;
-      rejectCode = innerReject;
-    });
+    const codePromise = new Promise<{ code: string; state: string }>(
+      (innerResolve, innerReject) => {
+        resolveCode = innerResolve;
+        rejectCode = innerReject;
+      },
+    );
 
     const timeout = setTimeout(() => {
       server.close();
@@ -226,7 +226,10 @@ async function startOAuthCallbackServer(timeoutMs = DEFAULT_TIMEOUT_MS): Promise
   });
 }
 
-async function exchangeCodeForTokens(params: URLSearchParams, tenant: string): Promise<MicrosoftEmailOAuthResult> {
+async function exchangeCodeForTokens(
+  params: URLSearchParams,
+  tenant: string,
+): Promise<MicrosoftEmailOAuthResult> {
   const response = await fetch(buildTokenUrl(tenant), {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -237,8 +240,7 @@ async function exchangeCodeForTokens(params: URLSearchParams, tenant: string): P
   const data = rawText ? parseJsonSafe(rawText) : undefined;
 
   if (!response.ok) {
-    const message =
-      data?.error_description || data?.error || response.statusText || "OAuth failed";
+    const message = data?.error_description || data?.error || response.statusText || "OAuth failed";
     throw new Error(`Microsoft email OAuth failed: ${message}`);
   }
 

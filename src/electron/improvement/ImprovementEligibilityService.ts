@@ -33,12 +33,28 @@ export function getImprovementEligibility(): ImprovementEligibility {
   const envSignature = getOwnerSignatureFromEnv();
 
   let enrollment = loadEnrollment();
-  if (!enrollment && unpackagedApp && canonicalRepo && machineFingerprint && ownerEnrollmentChallenge && envSignature) {
-    enrollment = autoEnrollOwner(repoPath, machineFingerprint, ownerEnrollmentChallenge, envSignature);
+  if (
+    !enrollment &&
+    unpackagedApp &&
+    canonicalRepo &&
+    machineFingerprint &&
+    ownerEnrollmentChallenge &&
+    envSignature
+  ) {
+    enrollment = autoEnrollOwner(
+      repoPath,
+      machineFingerprint,
+      ownerEnrollmentChallenge,
+      envSignature,
+    );
   }
 
   const ownerProofPresent = Boolean(enrollment?.signature);
-  const ownerEnrollment = verifyEnrollment(enrollment, machineFingerprint, ownerEnrollmentChallenge);
+  const ownerEnrollment = verifyEnrollment(
+    enrollment,
+    machineFingerprint,
+    ownerEnrollmentChallenge,
+  );
   const eligible = unpackagedApp && canonicalRepo && ownerEnrollment && ownerProofPresent;
 
   return {
@@ -158,7 +174,10 @@ function autoEnrollOwner(
   signature: string,
 ): ImprovementOwnerEnrollment | undefined {
   const normalizedSignature = normalizeOwnerSignature(signature);
-  if (!normalizedSignature || !verifyOwnerSignature(ownerEnrollmentChallenge, normalizedSignature)) {
+  if (
+    !normalizedSignature ||
+    !verifyOwnerSignature(ownerEnrollmentChallenge, normalizedSignature)
+  ) {
     return undefined;
   }
 
@@ -301,7 +320,10 @@ function normalizeGitRemote(remote: string | undefined): string | undefined {
   try {
     const parsed = new URL(asUrl);
     const host = parsed.hostname.toLowerCase();
-    const repoPath = parsed.pathname.replace(/^\/+/, "").replace(/\.git$/i, "").toLowerCase();
+    const repoPath = parsed.pathname
+      .replace(/^\/+/, "")
+      .replace(/\.git$/i, "")
+      .toLowerCase();
     if (!host || !repoPath) return undefined;
     return `${host}/${repoPath}`;
   } catch {

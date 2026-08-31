@@ -97,7 +97,10 @@ function descriptionForApproval(
   toolName?: string | null,
   appName?: string | null,
 ): string {
-  if (toolName === "open_application" && /^Approve tool call:\s*open_application\b/i.test(description)) {
+  if (
+    toolName === "open_application" &&
+    /^Approve tool call:\s*open_application\b/i.test(description)
+  ) {
     return appName
       ? `Allow CoWork OS to open ${appName}?`
       : "Allow CoWork OS to open an application?";
@@ -115,8 +118,12 @@ function titleForType(type: ApprovalType): string {
       return "Delete multiple items";
     case "bulk_rename":
       return "Bulk rename";
+    case "workspace_write":
+      return "Workspace change";
     case "network_access":
       return "Network access";
+    case "external_file_access":
+      return "External file access";
     case "external_service":
       return "External service";
     case "location_access":
@@ -136,9 +143,12 @@ function iconForType(type: ApprovalType): string {
     case "delete_multiple":
       return "🗑️";
     case "bulk_rename":
+    case "workspace_write":
       return "📝";
     case "network_access":
       return "🌐";
+    case "external_file_access":
+      return "📁";
     case "external_service":
       return "🔗";
     case "location_access":
@@ -170,7 +180,10 @@ export function GenericApprovalDialog({
   const command = typeof details.command === "string" ? details.command : null;
   const commandPreview = command ? buildApprovalCommandPreview(command) : null;
   const cwd = typeof details.cwd === "string" ? details.cwd : null;
-  const timeoutMs = typeof details.timeout === "number" && Number.isFinite(details.timeout) ? details.timeout : null;
+  const timeoutMs =
+    typeof details.timeout === "number" && Number.isFinite(details.timeout)
+      ? details.timeout
+      : null;
   const bundleScope = typeof details.bundleScope === "string" ? details.bundleScope : null;
   const path = typeof details.path === "string" ? details.path : null;
   const url = typeof details.url === "string" ? details.url : null;
@@ -212,7 +225,11 @@ export function GenericApprovalDialog({
       label: "Command",
       value: (
         <>
-          <div className="session-approval-code-scroll" role="region" aria-label="Command to approve">
+          <div
+            className="session-approval-code-scroll"
+            role="region"
+            aria-label="Command to approve"
+          >
             <code className="session-approval-code session-approval-code--multiline">
               {commandPreview?.text ?? command}
             </code>
@@ -269,13 +286,12 @@ export function GenericApprovalDialog({
     });
   }
 
-  const suggestedActions =
-    permissionPrompt?.suggestedActions?.length
-      ? permissionPrompt.suggestedActions
-      : [
-          { action: "deny_once" as const, label: "Deny once" },
-          { action: "allow_once" as const, label: "Allow once" },
-        ];
+  const suggestedActions = permissionPrompt?.suggestedActions?.length
+    ? permissionPrompt.suggestedActions
+    : [
+        { action: "deny_once" as const, label: "Deny once" },
+        { action: "allow_once" as const, label: "Allow once" },
+      ];
 
   const scopePairs = extractScopePairs(suggestedActions);
   const activePair = scopePairs?.find((p) => p.scope === selectedScope) ?? scopePairs?.[0];
@@ -283,7 +299,11 @@ export function GenericApprovalDialog({
   return (
     <div className="session-approval-overlay" role="dialog" aria-modal="true">
       <div
-        className={commandPreview ? "session-approval-card session-approval-card--command" : "session-approval-card"}
+        className={
+          commandPreview
+            ? "session-approval-card session-approval-card--command"
+            : "session-approval-card"
+        }
       >
         <div className="session-approval-icon-wrap" aria-hidden="true">
           <span className="session-approval-icon">{iconForType(approval.type)}</span>
@@ -306,7 +326,11 @@ export function GenericApprovalDialog({
           <>
             <div className="session-approval-scope-row">
               <span className="session-approval-scope-label">Remember for</span>
-              <div className="session-approval-scope-tabs" role="group" aria-label="Permission scope">
+              <div
+                className="session-approval-scope-tabs"
+                role="group"
+                aria-label="Permission scope"
+              >
                 {scopePairs.map((pair) => (
                   <button
                     key={pair.scope}

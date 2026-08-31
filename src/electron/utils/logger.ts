@@ -1,11 +1,7 @@
 export type LogLevel = "error" | "warn" | "info" | "debug";
 
 type LogMethod = (...args: unknown[]) => void;
-type LogObserver = (event: {
-  component: string;
-  level: LogLevel;
-  args: unknown[];
-}) => void;
+type LogObserver = (event: { component: string; level: LogLevel; args: unknown[] }) => void;
 
 let logObserver: LogObserver | null = null;
 

@@ -9,9 +9,15 @@ interface StructuredInputPromptCardProps {
   onDismiss: () => void;
 }
 
-export function StructuredInputPromptCard({ request, onSubmit, onDismiss }: StructuredInputPromptCardProps) {
+export function StructuredInputPromptCard({
+  request,
+  onSubmit,
+  onDismiss,
+}: StructuredInputPromptCardProps) {
   const questions = Array.isArray(request.questions) ? request.questions : [];
-  const [selectedOptionByQuestion, setSelectedOptionByQuestion] = useState<Record<string, number>>({});
+  const [selectedOptionByQuestion, setSelectedOptionByQuestion] = useState<Record<string, number>>(
+    {},
+  );
   const [otherTextByQuestion, setOtherTextByQuestion] = useState<Record<string, string>>({});
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
 
@@ -27,15 +33,12 @@ export function StructuredInputPromptCard({ request, onSubmit, onDismiss }: Stru
     setActiveQuestionIndex(0);
   }, [request.id, questions]);
 
-  const updateSelection = useCallback(
-    (questionId: string, nextIndex: number) => {
-      setSelectedOptionByQuestion((prev) => ({
-        ...prev,
-        [questionId]: Math.max(0, nextIndex),
-      }));
-    },
-    [],
-  );
+  const updateSelection = useCallback((questionId: string, nextIndex: number) => {
+    setSelectedOptionByQuestion((prev) => ({
+      ...prev,
+      [questionId]: Math.max(0, nextIndex),
+    }));
+  }, []);
 
   const isQuestionAnswered = useCallback(
     (question: InputRequest["questions"][number]) => {
@@ -190,7 +193,12 @@ export function StructuredInputPromptCard({ request, onSubmit, onDismiss }: Stru
   }
 
   return (
-    <div className="input-request-composer-shell" role="dialog" aria-modal="true" aria-label="Structured input required">
+    <div
+      className="input-request-composer-shell"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Structured input required"
+    >
       <div className="input-request-card input-request-card-inline">
         <div className="input-request-progress">
           <span className="input-request-header">{activeQuestion.header || "Question"}</span>
@@ -241,7 +249,9 @@ export function StructuredInputPromptCard({ request, onSubmit, onDismiss }: Stru
             }
           />
         )}
-        <div className="input-request-hint">Use 1-4 to choose, Enter to continue, Esc to dismiss.</div>
+        <div className="input-request-hint">
+          Use 1-4 to choose, Enter to continue, Esc to dismiss.
+        </div>
         <div className="input-request-actions">
           <button className="input-request-dismiss" onClick={onDismiss}>
             Dismiss

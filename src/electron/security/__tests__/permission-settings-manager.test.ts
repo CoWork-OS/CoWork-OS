@@ -146,4 +146,114 @@ describe("PermissionSettingsManager", () => {
       }),
     ]);
   });
+
+  it("sanitizes named access profiles without accepting built-in collisions or malformed rules", () => {
+    repository.load.mockReturnValue({
+      version: 1,
+      defaultMode: "default",
+      defaultAccessProfileId: "custom_safe",
+      accessProfiles: [
+        {
+          id: "custom_safe",
+          label: " Safe profile ",
+          description: " Read selected files ",
+          sandbox: "workspace-write",
+          approval: "on-request",
+          reviewer: "user",
+          network: "on-request",
+          filesystemRules: [
+            { path: " /tmp/shared ", access: "read" },
+            { path: "", access: "deny" },
+            { path: "/tmp/nope", access: "invalid" },
+          ],
+          domainRules: [
+            { pattern: " API.Example.COM ", access: "allow" },
+            { pattern: "private.example.com", access: "invalid" },
+          ],
+        },
+        {
+          id: "full_access",
+          label: "Must be rejected",
+          description: "",
+          sandbox: "danger-full-access",
+          approval: "never",
+          reviewer: "none",
+          network: "enabled",
+        },
+      ],
+      rules: [],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+
+    expect(settings.accessProfiles).toEqual([
+      expect.objectContaining({
+        id: "custom_safe",
+        label: "Safe profile",
+        description: "Read selected files",
+        filesystemRules: [{ path: "/tmp/shared", access: "read" }],
+        domainRules: [{ pattern: "api.example.com", access: "allow" }],
+      }),
+    ]);
+  });
+
+  it("fails closed to the built-in approval profile for an unknown default", () => {
+    repository.load.mockReturnValue({
+      version: 1,
+      defaultMode: "accept_edits",
+      defaultAccessProfileId: "missing-profile",
+      rules: [],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+
+    expect(settings.defaultAccessProfileId).toBe("ask_for_approval");
+    expect(settings.defaultMode).toBe("dangerous_only");
+    expect(settings.defaultPermissionAccess).toBe("default");
+  });
+
+  it("preserves explicit empty child scopes so inheritance cannot restore a parent grant", () => {
+    repository.load.mockReturnValue({
+      version: 1,
+      defaultMode: "default",
+      accessProfiles: [
+        {
+          id: "parent",
+          label: "Parent",
+          description: "Parent profile",
+          sandbox: "workspace-write",
+          approval: "on-request",
+          reviewer: "user",
+          network: "on-request",
+          workspaceRoots: ["/tmp/shared"],
+          filesystemRules: [{ path: "/tmp/shared", access: "write" }],
+        },
+        {
+          id: "child",
+          label: "Child",
+          description: "Narrowed profile",
+          sandbox: "workspace-write",
+          approval: "on-request",
+          reviewer: "user",
+          network: "on-request",
+          extends: "parent",
+          workspaceRoots: [],
+          filesystemRules: [],
+          domainRules: [],
+        },
+      ],
+      rules: [],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+    const child = settings.accessProfiles?.find((profile) => profile.id === "child");
+
+    expect(child).toEqual(
+      expect.objectContaining({
+        workspaceRoots: [],
+        filesystemRules: [],
+        domainRules: [],
+      }),
+    );
+  });
 });

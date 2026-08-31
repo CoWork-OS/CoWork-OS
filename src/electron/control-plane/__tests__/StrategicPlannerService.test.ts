@@ -128,7 +128,10 @@ describeWithSqlite("StrategicPlannerService", () => {
       issues.some((issue) => issue.title === "Define next deliverable for project: Growth Engine"),
     ).toBe(true);
     expect(
-      issues.some((issue) => issue.metadata?.plannerManaged === true && issue.metadata?.source === "strategic_planner"),
+      issues.some(
+        (issue) =>
+          issue.metadata?.plannerManaged === true && issue.metadata?.source === "strategic_planner",
+      ),
     ).toBe(true);
   });
 
@@ -184,7 +187,9 @@ describeWithSqlite("StrategicPlannerService", () => {
     const issues = core.listIssues({ companyId: company.id, limit: 20 });
 
     expect(run.status).toBe("completed");
-    expect(issues.some((issue) => issue.title === "Link a workspace for project: Growth Engine")).toBe(false);
+    expect(
+      issues.some((issue) => issue.title === "Link a workspace for project: Growth Engine"),
+    ).toBe(false);
     expect(
       issues.some(
         (issue) =>
@@ -192,7 +197,9 @@ describeWithSqlite("StrategicPlannerService", () => {
           issue.workspaceId === core.getCompany(company.id)?.defaultWorkspaceId,
       ),
     ).toBe(true);
-    expect(core.listProjectWorkspaces(core.listProjects({ companyId: company.id })[0]!.id)).toHaveLength(1);
+    expect(
+      core.listProjectWorkspaces(core.listProjects({ companyId: company.id })[0]!.id),
+    ).toHaveLength(1);
   });
 
   it("auto-dispatches planner-managed issues into task runs when enabled", async () => {
@@ -221,7 +228,12 @@ describeWithSqlite("StrategicPlannerService", () => {
     planner = new (await import("../StrategicPlannerService")).StrategicPlannerService({
       db,
       agentDaemon: {
-        createTask: async (params: { title: string; prompt: string; workspaceId: string; agentConfig?: Any }) => {
+        createTask: async (params: {
+          title: string;
+          prompt: string;
+          workspaceId: string;
+          agentConfig?: Any;
+        }) => {
           const task = taskRepo.create({
             title: params.title,
             prompt: params.prompt,
@@ -283,7 +295,12 @@ describeWithSqlite("StrategicPlannerService", () => {
     planner = new (await import("../StrategicPlannerService")).StrategicPlannerService({
       db,
       agentDaemon: {
-        createTask: async (params: { title: string; prompt: string; workspaceId: string; agentConfig?: Any }) => {
+        createTask: async (params: {
+          title: string;
+          prompt: string;
+          workspaceId: string;
+          agentConfig?: Any;
+        }) => {
           prompts.push(params.prompt);
           return taskRepo.create({
             title: params.title,
@@ -339,7 +356,12 @@ describeWithSqlite("StrategicPlannerService", () => {
     planner = new (await import("../StrategicPlannerService")).StrategicPlannerService({
       db,
       agentDaemon: {
-        createTask: async (params: { title: string; prompt: string; workspaceId: string; agentConfig?: Any }) => {
+        createTask: async (params: {
+          title: string;
+          prompt: string;
+          workspaceId: string;
+          agentConfig?: Any;
+        }) => {
           const task = taskRepo.create({
             title: params.title,
             prompt: params.prompt,
@@ -467,9 +489,10 @@ describeWithSqlite("StrategicPlannerService", () => {
     });
 
     const operator =
-      agentRoleRepo.findByCompanyId(company.id, false).find((role) =>
-        /customer ops|founder office|growth|planner/i.test(role.displayName),
-      ) || agentRoleRepo.findByCompanyId(company.id, false)[0];
+      agentRoleRepo
+        .findByCompanyId(company.id, false)
+        .find((role) => /customer ops|founder office|growth|planner/i.test(role.displayName)) ||
+      agentRoleRepo.findByCompanyId(company.id, false)[0];
 
     const inboxIssue = core.createIssue({
       companyId: company.id,

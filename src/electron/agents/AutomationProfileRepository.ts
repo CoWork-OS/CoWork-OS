@@ -25,7 +25,9 @@ function safeJsonParse<T>(jsonString: string | null, fallback: T): T {
 }
 
 function normalizeInput(
-  input?: Partial<CreateAutomationProfileRequest & UpdateAutomationProfileRequest & HeartbeatConfig>,
+  input?: Partial<
+    CreateAutomationProfileRequest & UpdateAutomationProfileRequest & HeartbeatConfig
+  >,
 ): Omit<
   AutomationProfile,
   | "id"
@@ -43,13 +45,11 @@ function normalizeInput(
     enabled: input?.enabled ?? input?.heartbeatEnabled ?? false,
     cadenceMinutes:
       input?.cadenceMinutes ?? input?.pulseEveryMinutes ?? input?.heartbeatIntervalMinutes ?? 15,
-    staggerOffsetMinutes:
-      input?.staggerOffsetMinutes ?? input?.heartbeatStaggerOffset ?? 0,
+    staggerOffsetMinutes: input?.staggerOffsetMinutes ?? input?.heartbeatStaggerOffset ?? 0,
     dispatchCooldownMinutes: input?.dispatchCooldownMinutes ?? 120,
     maxDispatchesPerDay: input?.maxDispatchesPerDay ?? 6,
     profile: input?.profile ?? input?.heartbeatProfile ?? "observer",
-    activeHours:
-      input && "activeHours" in input ? (input.activeHours ?? null) : null,
+    activeHours: input && "activeHours" in input ? (input.activeHours ?? null) : null,
   };
 }
 
@@ -103,8 +103,10 @@ export class AutomationProfileRepository {
       lastHeartbeatAt: row.last_heartbeat_at ? Number(row.last_heartbeat_at) : undefined,
       lastPulseAt: row.last_pulse_at ? Number(row.last_pulse_at) : undefined,
       lastDispatchAt: row.last_dispatch_at ? Number(row.last_dispatch_at) : undefined,
-      lastPulseResult: (row.heartbeat_last_pulse_result as HeartbeatPulseResultKind | null) || undefined,
-      lastDispatchKind: (row.heartbeat_last_dispatch_kind as HeartbeatDispatchKind | null) || undefined,
+      lastPulseResult:
+        (row.heartbeat_last_pulse_result as HeartbeatPulseResultKind | null) || undefined,
+      lastDispatchKind:
+        (row.heartbeat_last_dispatch_kind as HeartbeatDispatchKind | null) || undefined,
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
     };
@@ -184,7 +186,9 @@ export class AutomationProfileRepository {
     return this.create(request);
   }
 
-  update(request: UpdateAutomationProfileRequest & { agentRoleId?: string }): AutomationProfile | undefined {
+  update(
+    request: UpdateAutomationProfileRequest & { agentRoleId?: string },
+  ): AutomationProfile | undefined {
     const existing = this.findById(request.id);
     if (!existing) return undefined;
     const normalized = normalizeInput({ ...existing, ...request });
@@ -262,7 +266,9 @@ export class AutomationProfileRepository {
 
   deleteById(id: string): void {
     if (this.profileHasHistoricalDependencies(id)) {
-      logger.warn(`Preserving automation profile ${id} because it owns core history; disabling instead.`);
+      logger.warn(
+        `Preserving automation profile ${id} because it owns core history; disabling instead.`,
+      );
       this.disableInsteadOfDelete(id);
       return;
     }

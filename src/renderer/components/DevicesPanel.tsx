@@ -42,14 +42,24 @@ import type {
   Task,
   TaskDomain,
   Workspace,
+  PermissionSettingsData,
 } from "../../shared/types";
 import { isTempWorkspaceId, LOCAL_MANAGED_DEVICE_ID } from "../../shared/types";
+import {
+  BUILTIN_ACCESS_PROFILE_IDS,
+  BUILTIN_ACCESS_PROFILES,
+  getAccessProfileLabel,
+  type AccessProfileDefinition,
+  type AccessProfileId,
+} from "../../shared/access-profiles";
 import { isActiveSessionStatus, isAwaitingSessionStatus } from "./Sidebar";
 import { getPlatformVisualIcon } from "./DeviceIcons";
 import { RemoteFilePicker } from "./RemoteFilePicker";
 import { RemoteDeviceControlVisual } from "./RemoteDeviceControlVisual";
 
 export interface DeviceTaskOptions {
+  accessProfileId?: AccessProfileId;
+  /** @deprecated Kept for older callers; new tasks use accessProfileId. */
   shellAccess?: boolean;
   autonomousMode?: boolean;
   collaborativeMode?: boolean;
@@ -62,7 +72,11 @@ export interface DeviceTaskOptions {
 
 interface DevicesPanelProps {
   onOpenTask: (taskId: string, remote?: { deviceId: string; deviceName: string }) => void;
-  onNewTaskForDevice?: (nodeId: string, prompt: string, options?: DeviceTaskOptions) => Promise<void>;
+  onNewTaskForDevice?: (
+    nodeId: string,
+    prompt: string,
+    options?: DeviceTaskOptions,
+  ) => Promise<void>;
   onCreateTaskHere?: (prompt: string, options?: DeviceTaskOptions) => Promise<void>;
   workspace?: Workspace | null;
   onOpenSettings?: (tab?: string) => void;
@@ -229,10 +243,7 @@ function upsertManagedRemoteDevice(
   devices: ManagedDevice[],
   nextDevice: ManagedDevice,
 ): ManagedDevice[] {
-  return [
-    ...devices.filter((device) => device.id !== nextDevice.id),
-    nextDevice,
-  ].sort((a, b) => {
+  return [...devices.filter((device) => device.id !== nextDevice.id), nextDevice].sort((a, b) => {
     if (a.id === LOCAL_MANAGED_DEVICE_ID) return -1;
     if (b.id === LOCAL_MANAGED_DEVICE_ID) return 1;
     return (a.name || "").localeCompare(b.name || "");
@@ -253,8 +264,7 @@ function getTaskBadge(task: Task) {
   if (isTaskAttention(task)) {
     return {
       className: "attention",
-      label:
-        task.terminalStatus === "awaiting_approval" ? "Approval needed" : "Needs input",
+      label: task.terminalStatus === "awaiting_approval" ? "Approval needed" : "Needs input",
       icon: <AlertCircle size={12} />,
     };
   }
@@ -264,12 +274,17 @@ function getTaskBadge(task: Task) {
   if (task.status === "queued" || task.status === "pending" || task.status === "planning") {
     return {
       className: "pending",
-      label: task.status === "planning" ? "Planning" : task.status === "queued" ? "Queued" : "Pending",
+      label:
+        task.status === "planning" ? "Planning" : task.status === "queued" ? "Queued" : "Pending",
       icon: <Clock3 size={12} />,
     };
   }
   if (isActiveSessionStatus(task.status) || task.status === "interrupted") {
-    return { className: "running", label: "Running", icon: <Circle size={12} className="dp-pulse" /> };
+    return {
+      className: "running",
+      label: "Running",
+      icon: <Circle size={12} className="dp-pulse" />,
+    };
   }
   return { className: "pending", label: task.status, icon: <Clock3 size={12} /> };
 }
@@ -278,7 +293,14 @@ function isTerminalDeviceTask(task: Task): boolean {
   return task.status === "completed" || task.status === "failed" || task.status === "cancelled";
 }
 
-const EXECUTION_MODE_ORDER: ExecutionMode[] = ["chat", "execute", "plan", "analyze", "debug", "verified"];
+const EXECUTION_MODE_ORDER: ExecutionMode[] = [
+  "chat",
+  "execute",
+  "plan",
+  "analyze",
+  "debug",
+  "verified",
+];
 const TASK_DOMAIN_ORDER: TaskDomain[] = [
   "auto",
   "code",
@@ -338,10 +360,16 @@ export function DevicesPanel({
   const [overlay, setOverlay] = useState<PanelOverlay>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
-  const [overflowSubmenu, setOverflowSubmenu] = useState<"mode" | "domain" | null>(null);
+  const [overflowSubmenu, setOverflowSubmenu] = useState<"mode" | "domain" | "profile" | null>(
+    null,
+  );
   const overflowMenuRef = useRef<HTMLDivElement>(null);
 
-  const [shellAccess, setShellAccess] = useState(false);
+  const [accessProfileId, setAccessProfileId] = useState<AccessProfileId | undefined>(undefined);
+  const [defaultAccessProfileId, setDefaultAccessProfileId] = useState<AccessProfileId | undefined>(
+    undefined,
+  );
+  const [accessProfiles, setAccessProfiles] = useState<AccessProfileDefinition[]>([]);
   const [autonomousModeEnabled, setAutonomousModeEnabled] = useState(false);
   const [collaborativeModeEnabled, setCollaborativeModeEnabled] = useState(false);
   const [multiLlmModeEnabled, setMultiLlmModeEnabled] = useState(false);
@@ -356,8 +384,35 @@ export function DevicesPanel({
     deviceName: string;
     workspaces: Array<{ id: string; name: string }>;
   } | null>(null);
-  const [dispatchChannels, setDispatchChannels] = useState<{ id: string; type: string; name: string; status: string }[]>([]);
+  const [dispatchChannels, setDispatchChannels] = useState<
+    { id: string; type: string; name: string; status: string }[]
+  >([]);
   const [dispatchLoading, setDispatchLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPermissionSettings = async () => {
+      try {
+        const settings =
+          (await window.electronAPI.getPermissionSettings()) as PermissionSettingsData;
+        if (cancelled) return;
+        const configuredDefault =
+          settings.defaultAccessProfileId ||
+          (settings.defaultPermissionAccess === "full"
+            ? BUILTIN_ACCESS_PROFILE_IDS.fullAccess
+            : undefined);
+        setDefaultAccessProfileId(configuredDefault);
+        setAccessProfileId(configuredDefault);
+        setAccessProfiles(Array.isArray(settings.accessProfiles) ? settings.accessProfiles : []);
+      } catch (error) {
+        console.error("Failed to load device access profiles:", error);
+      }
+    };
+    void loadPermissionSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const setAutonomousModeSelection = useCallback((enabled: boolean) => {
     setAutonomousModeEnabled(enabled);
@@ -481,7 +536,11 @@ export function DevicesPanel({
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (showOverflowMenu && overflowMenuRef.current && !overflowMenuRef.current.contains(e.target as Node)) {
+      if (
+        showOverflowMenu &&
+        overflowMenuRef.current &&
+        !overflowMenuRef.current.contains(e.target as Node)
+      ) {
         setShowOverflowMenu(false);
         setOverflowSubmenu(null);
       }
@@ -549,10 +608,7 @@ export function DevicesPanel({
     };
   }, []);
 
-  const deviceMap = useMemo(
-    () => new Map(devices.map((device) => [device.id, device])),
-    [devices],
-  );
+  const deviceMap = useMemo(() => new Map(devices.map((device) => [device.id, device])), [devices]);
 
   const activeDevice = useMemo(
     () => (selectedDeviceId ? deviceMap.get(selectedDeviceId) || null : null),
@@ -608,7 +664,9 @@ export function DevicesPanel({
       }
     }
 
-    const sorted = Array.from(merged.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const sorted = Array.from(merged.values()).sort(
+      (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0),
+    );
     const visible = sorted.filter((task) => {
       const taskNodeId = typeof task.targetNodeId === "string" ? task.targetNodeId : "";
       const taskDevice = remoteDevices.find((device) => device.taskNodeId === taskNodeId);
@@ -616,7 +674,9 @@ export function DevicesPanel({
       if (taskDevice.status === "connected") return true;
       return isTerminalDeviceTask(task);
     });
-    setDeviceTasks(taskFilter === "attention" ? visible.filter((task) => isTaskAttention(task)) : visible);
+    setDeviceTasks(
+      taskFilter === "attention" ? visible.filter((task) => isTaskAttention(task)) : visible,
+    );
   }, [activeDevice, remoteDevices, taskFilter]);
 
   useEffect(() => {
@@ -640,11 +700,11 @@ export function DevicesPanel({
 
   const buildTaskOptions = useCallback((): DeviceTaskOptions => {
     const opts: DeviceTaskOptions = {
-      shellAccess,
       executionMode,
       taskDomain,
       chronicleMode: chronicleEnabledForTask ? "inherit" : "disabled",
     };
+    if (accessProfileId) opts.accessProfileId = accessProfileId;
     if (multiLlmModeEnabled) {
       opts.multiLlmMode = true;
     } else if (collaborativeModeEnabled) {
@@ -653,7 +713,15 @@ export function DevicesPanel({
       opts.autonomousMode = true;
     }
     return opts;
-  }, [autonomousModeEnabled, chronicleEnabledForTask, collaborativeModeEnabled, executionMode, multiLlmModeEnabled, shellAccess, taskDomain]);
+  }, [
+    autonomousModeEnabled,
+    chronicleEnabledForTask,
+    collaborativeModeEnabled,
+    executionMode,
+    multiLlmModeEnabled,
+    accessProfileId,
+    taskDomain,
+  ]);
 
   const buildPromptWithAttachments = useCallback(
     (basePrompt: string): string => {
@@ -682,7 +750,7 @@ export function DevicesPanel({
       }
       setTaskPrompt("");
       setPendingAttachments([]);
-      setShellAccess(false);
+      setAccessProfileId(defaultAccessProfileId);
       setAutonomousModeEnabled(false);
       setCollaborativeModeEnabled(false);
       setMultiLlmModeEnabled(false);
@@ -693,7 +761,19 @@ export function DevicesPanel({
     } finally {
       setSubmittingTask(false);
     }
-  }, [activeDevice, buildPromptWithAttachments, buildTaskOptions, loadDevices, loadTaskFeed, onCreateTaskHere, onNewTaskForDevice, pendingAttachments, submittingTask, taskPrompt]);
+  }, [
+    activeDevice,
+    buildPromptWithAttachments,
+    buildTaskOptions,
+    loadDevices,
+    loadTaskFeed,
+    onCreateTaskHere,
+    onNewTaskForDevice,
+    pendingAttachments,
+    defaultAccessProfileId,
+    submittingTask,
+    taskPrompt,
+  ]);
 
   const handleAttachFiles = useCallback(async () => {
     if (!activeDevice) return;
@@ -768,9 +848,8 @@ export function DevicesPanel({
   const handleRemoveDevice = useCallback(
     async (deviceId: string) => {
       try {
-        const settings = (await window.electronAPI?.getControlPlaneSettings?.()) as
-          | ControlPlaneSettingsData
-          | null;
+        const settings =
+          (await window.electronAPI?.getControlPlaneSettings?.()) as ControlPlaneSettingsData | null;
         const nextManagedDevices = (settings?.managedDevices || []).filter(
           (device) => device.id !== deviceId,
         );
@@ -782,9 +861,13 @@ export function DevicesPanel({
           managedDevices: nextManagedDevices,
           savedRemoteDevices: nextSavedDevices,
           activeManagedDeviceId:
-            selectedDeviceId === deviceId ? LOCAL_MANAGED_DEVICE_ID : settings?.activeManagedDeviceId,
+            selectedDeviceId === deviceId
+              ? LOCAL_MANAGED_DEVICE_ID
+              : settings?.activeManagedDeviceId,
           activeRemoteDeviceId:
-            settings?.activeRemoteDeviceId === deviceId ? undefined : settings?.activeRemoteDeviceId,
+            settings?.activeRemoteDeviceId === deviceId
+              ? undefined
+              : settings?.activeRemoteDeviceId,
         });
         if (selectedDeviceId === deviceId) {
           setSelectedDeviceId(LOCAL_MANAGED_DEVICE_ID);
@@ -946,29 +1029,51 @@ export function DevicesPanel({
                     }}
                     role="menuitem"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
                       <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
                     </svg>
-                    <span>{workspace?.isTemp || isTempWorkspaceId(workspace?.id) ? "Work in a folder" : workspace?.name || "Work in a folder"}</span>
+                    <span>
+                      {workspace?.isTemp || isTempWorkspaceId(workspace?.id)
+                        ? "Work in a folder"
+                        : workspace?.name || "Work in a folder"}
+                    </span>
                   </button>
                 </div>
                 <div className="overflow-menu-item" role="none">
                   <button
-                    className={`shell-toggle ${shellAccess ? "enabled" : ""}`}
-                    onClick={() => {
-                      setOverflowSubmenu(null);
-                      setShellAccess((v) => !v);
-                    }}
-                    role="menuitemcheckbox"
-                    aria-checked={shellAccess}
-                    aria-label={`Shell ${shellAccess ? "on" : "off"}`}
+                    className={`goal-mode-toggle overflow-submenu-trigger ${overflowSubmenu === "profile" ? "active" : ""}`}
+                    onClick={() =>
+                      setOverflowSubmenu((current) => (current === "profile" ? null : "profile"))
+                    }
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={overflowSubmenu === "profile"}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 17l6-6-6-6M12 19h8" />
-                    </svg>
-                    <span>Shell</span>
-                    <span className={`goal-mode-switch-track ${shellAccess ? "on" : ""}`} aria-hidden="true">
-                      <span className="goal-mode-switch-thumb" />
+                    <span className="overflow-submenu-trigger-content">
+                      <span className="goal-mode-toggle-text">
+                        <span className="goal-mode-label">
+                          Access:{" "}
+                          {accessProfileId ? getAccessProfileLabel(accessProfileId) : "Default"}
+                        </span>
+                      </span>
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="overflow-submenu-chevron"
+                      >
+                        <path d="M9 6l6 6-6 6" />
+                      </svg>
                     </span>
                   </button>
                 </div>
@@ -998,7 +1103,10 @@ export function DevicesPanel({
                       <span className="goal-mode-toggle-text">
                         <span className="goal-mode-label">Autonomous</span>
                       </span>
-                      <span className={`goal-mode-switch-track ${autonomousModeEnabled ? "on" : ""}`} aria-hidden="true">
+                      <span
+                        className={`goal-mode-switch-track ${autonomousModeEnabled ? "on" : ""}`}
+                        aria-hidden="true"
+                      >
                         <span className="goal-mode-switch-thumb" />
                       </span>
                     </span>
@@ -1015,7 +1123,10 @@ export function DevicesPanel({
                       <span className="goal-mode-toggle-text">
                         <span className="goal-mode-label">Collab</span>
                       </span>
-                      <span className={`goal-mode-switch-track ${collaborativeModeEnabled ? "on" : ""}`} aria-hidden="true">
+                      <span
+                        className={`goal-mode-switch-track ${collaborativeModeEnabled ? "on" : ""}`}
+                        aria-hidden="true"
+                      >
                         <span className="goal-mode-switch-thumb" />
                       </span>
                     </span>
@@ -1033,7 +1144,10 @@ export function DevicesPanel({
                         <span className="goal-mode-toggle-text">
                           <span className="goal-mode-label">Multi-LLM</span>
                         </span>
-                        <span className={`goal-mode-switch-track ${multiLlmModeEnabled ? "on" : ""}`} aria-hidden="true">
+                        <span
+                          className={`goal-mode-switch-track ${multiLlmModeEnabled ? "on" : ""}`}
+                          aria-hidden="true"
+                        >
                           <span className="goal-mode-switch-thumb" />
                         </span>
                       </span>
@@ -1051,7 +1165,10 @@ export function DevicesPanel({
                       <span className="goal-mode-toggle-text">
                         <span className="goal-mode-label">Chronicle</span>
                       </span>
-                      <span className={`goal-mode-switch-track ${chronicleEnabledForTask ? "on" : ""}`} aria-hidden="true">
+                      <span
+                        className={`goal-mode-switch-track ${chronicleEnabledForTask ? "on" : ""}`}
+                        aria-hidden="true"
+                      >
                         <span className="goal-mode-switch-thumb" />
                       </span>
                     </span>
@@ -1067,9 +1184,19 @@ export function DevicesPanel({
                   >
                     <span className="overflow-submenu-trigger-content">
                       <span className="goal-mode-toggle-text">
-                        <span className="goal-mode-label">Mode: {EXECUTION_MODE_LABEL[executionMode]}</span>
+                        <span className="goal-mode-label">
+                          Mode: {EXECUTION_MODE_LABEL[executionMode]}
+                        </span>
                       </span>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="overflow-submenu-chevron">
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="overflow-submenu-chevron"
+                      >
                         <path d="M9 6l6 6-6 6" />
                       </svg>
                     </span>
@@ -1085,46 +1212,142 @@ export function DevicesPanel({
                   >
                     <span className="overflow-submenu-trigger-content">
                       <span className="goal-mode-toggle-text">
-                        <span className="goal-mode-label">Domain: {TASK_DOMAIN_LABEL[taskDomain]}</span>
+                        <span className="goal-mode-label">
+                          Domain: {TASK_DOMAIN_LABEL[taskDomain]}
+                        </span>
                       </span>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="overflow-submenu-chevron">
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="overflow-submenu-chevron"
+                      >
                         <path d="M9 6l6 6-6 6" />
                       </svg>
                     </span>
                   </button>
                 </div>
                 {overflowSubmenu && (
-                  <div className="overflow-submenu-panel dp-overflow-submenu dp-overflow-dropdown-solid" role="menu">
+                  <div
+                    className="overflow-submenu-panel dp-overflow-submenu dp-overflow-dropdown-solid"
+                    role="menu"
+                  >
                     <div className="overflow-submenu-header">
-                      <span className="overflow-submenu-title">{overflowSubmenu === "mode" ? "Mode" : "Domain"}</span>
+                      <span className="overflow-submenu-title">
+                        {overflowSubmenu === "mode"
+                          ? "Mode"
+                          : overflowSubmenu === "domain"
+                            ? "Domain"
+                            : "Access profile"}
+                      </span>
                     </div>
-                    {(overflowSubmenu === "mode" ? EXECUTION_MODE_ORDER : TASK_DOMAIN_ORDER).map((value) => {
-                      const label = overflowSubmenu === "mode"
-                        ? EXECUTION_MODE_LABEL[value as ExecutionMode]
-                        : TASK_DOMAIN_LABEL[value as TaskDomain];
-                      const selected = overflowSubmenu === "mode" ? executionMode === value : taskDomain === value;
-                      return (
+                    {overflowSubmenu === "profile" ? (
+                      <>
                         <button
-                          key={value}
                           type="button"
-                          className={`overflow-submenu-option ${selected ? "active" : ""}`}
+                          className={`overflow-submenu-option ${!accessProfileId ? "active" : ""}`}
                           onClick={() => {
-                            if (overflowSubmenu === "mode") setExecutionMode(value as ExecutionMode);
-                            else setTaskDomain(value as TaskDomain);
+                            setAccessProfileId(undefined);
                             setOverflowSubmenu(null);
                           }}
                           role="menuitemradio"
-                          aria-checked={selected}
+                          aria-checked={!accessProfileId}
                         >
-                          <span>{label}</span>
-                          {selected && (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="check-icon">
+                          <span>Configured default</span>
+                          {!accessProfileId && (
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              className="check-icon"
+                            >
                               <path d="M20 6L9 17l-5-5" />
                             </svg>
                           )}
                         </button>
-                      );
-                    })}
+                        {[...BUILTIN_ACCESS_PROFILES, ...accessProfiles].map((profile) => {
+                          const selected = accessProfileId === profile.id;
+                          return (
+                            <button
+                              key={profile.id}
+                              type="button"
+                              className={`overflow-submenu-option ${selected ? "active" : ""}`}
+                              onClick={() => {
+                                setAccessProfileId(profile.id);
+                                setOverflowSubmenu(null);
+                              }}
+                              role="menuitemradio"
+                              aria-checked={selected}
+                              title={profile.description}
+                            >
+                              <span>{profile.label}</span>
+                              {selected && (
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  className="check-icon"
+                                >
+                                  <path d="M20 6L9 17l-5-5" />
+                                </svg>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </>
+                    ) : (
+                      (overflowSubmenu === "mode" ? EXECUTION_MODE_ORDER : TASK_DOMAIN_ORDER).map(
+                        (value) => {
+                          const label =
+                            overflowSubmenu === "mode"
+                              ? EXECUTION_MODE_LABEL[value as ExecutionMode]
+                              : TASK_DOMAIN_LABEL[value as TaskDomain];
+                          const selected =
+                            overflowSubmenu === "mode"
+                              ? executionMode === value
+                              : taskDomain === value;
+                          return (
+                            <button
+                              key={value}
+                              type="button"
+                              className={`overflow-submenu-option ${selected ? "active" : ""}`}
+                              onClick={() => {
+                                if (overflowSubmenu === "mode")
+                                  setExecutionMode(value as ExecutionMode);
+                                else setTaskDomain(value as TaskDomain);
+                                setOverflowSubmenu(null);
+                              }}
+                              role="menuitemradio"
+                              aria-checked={selected}
+                            >
+                              <span>{label}</span>
+                              {selected && (
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  className="check-icon"
+                                >
+                                  <path d="M20 6L9 17l-5-5" />
+                                </svg>
+                              )}
+                            </button>
+                          );
+                        },
+                      )
+                    )}
                   </div>
                 )}
               </div>
@@ -1147,20 +1370,18 @@ export function DevicesPanel({
         </div>
       </div>
 
-      {showRemoteFilePicker &&
-        activeDevice?.taskNodeId &&
-        remoteFilePickerContext && (
-          <RemoteFilePicker
-            nodeId={activeDevice.taskNodeId}
-            deviceName={remoteFilePickerContext.deviceName}
-            workspaces={remoteFilePickerContext.workspaces}
-            onSelect={handleRemoteFilesSelected}
-            onCancel={() => {
-              setShowRemoteFilePicker(false);
-              setRemoteFilePickerContext(null);
-            }}
-          />
-        )}
+      {showRemoteFilePicker && activeDevice?.taskNodeId && remoteFilePickerContext && (
+        <RemoteFilePicker
+          nodeId={activeDevice.taskNodeId}
+          deviceName={remoteFilePickerContext.deviceName}
+          workspaces={remoteFilePickerContext.workspaces}
+          onSelect={handleRemoteFilesSelected}
+          onCancel={() => {
+            setShowRemoteFilePicker(false);
+            setRemoteFilePickerContext(null);
+          }}
+        />
+      )}
 
       <div ref={tasksRef} className="dp-section">
         <div className="dp-section-header">
@@ -1209,10 +1430,14 @@ export function DevicesPanel({
                   >
                     <span className="dp-task-title">{task.title || task.prompt}</span>
                     <div className="dp-task-detail-row">
-                      <span className="dp-task-device-badge">{taskDevice?.name || "This device"}</span>
+                      <span className="dp-task-device-badge">
+                        {taskDevice?.name || "This device"}
+                      </span>
                       {isTaskAttention(task) ? (
                         <span className="dp-task-inline-alert">
-                          {task.terminalStatus === "awaiting_approval" ? "Approval blocked" : "Waiting for input"}
+                          {task.terminalStatus === "awaiting_approval"
+                            ? "Approval blocked"
+                            : "Waiting for input"}
                         </span>
                       ) : null}
                     </div>
@@ -1268,14 +1493,21 @@ export function DevicesPanel({
                   }}
                 >
                   <div className="dp-device-icon">
-                    {getPlatformVisualIcon(device.platform, "dp-device-svg", undefined, device.name)}
+                    {getPlatformVisualIcon(
+                      device.platform,
+                      "dp-device-svg",
+                      undefined,
+                      device.name,
+                    )}
                   </div>
                   <div className="dp-device-content">
                     <div className="dp-device-topline">
                       <div className="dp-device-heading">
                         <span className="dp-device-name">{device.name}</span>
                         <div className="dp-device-chip-row">
-                          <span className="dp-purpose-chip subtle">{purposeLabel(device.purpose)}</span>
+                          <span className="dp-purpose-chip subtle">
+                            {purposeLabel(device.purpose)}
+                          </span>
                           <span className="dp-device-chip">{device.transport}</span>
                           {attentionLabel ? (
                             <span className={`dp-device-chip attention-${device.attentionState}`}>
@@ -1285,7 +1517,9 @@ export function DevicesPanel({
                         </div>
                       </div>
                       <div className="dp-device-status-wrapper">
-                        <span className={`dp-status-dot ${device.status === "connected" || device.role === "local" ? "online" : "off"}`} />
+                        <span
+                          className={`dp-status-dot ${device.status === "connected" || device.role === "local" ? "online" : "off"}`}
+                        />
                         <span
                           className={`dp-device-status ${device.status === "connected" || device.role === "local" ? "online" : "off"}`}
                         >
@@ -1307,7 +1541,9 @@ export function DevicesPanel({
                         <span>Apps on</span>
                       </div>
                       <div className="dp-device-stat">
-                        <strong>{device.lastSeenAt ? formatRelativeTime(device.lastSeenAt) : "No sync"}</strong>
+                        <strong>
+                          {device.lastSeenAt ? formatRelativeTime(device.lastSeenAt) : "No sync"}
+                        </strong>
                         <span>Last seen</span>
                       </div>
                     </div>
@@ -1315,68 +1551,70 @@ export function DevicesPanel({
                       {summary?.alerts?.length ? (
                         <div className="dp-device-alert-strip">{summary.alerts[0].title}</div>
                       ) : (
-                        <div className="dp-device-hint">Select this device to run tasks or inspect activity.</div>
+                        <div className="dp-device-hint">
+                          Select this device to run tasks or inspect activity.
+                        </div>
                       )}
                       <div className="dp-device-actions">
-                      {device.role === "remote" ? (
-                        device.status === "connected" ? (
-                          <button
-                            type="button"
-                            className="dp-ghost-btn"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleDisconnectDevice(device.id);
-                            }}
-                            disabled={actionBusy}
-                          >
-                            <Unplug size={14} />
-                            Disconnect
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="dp-ghost-btn"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleConnectDevice(device.id);
-                            }}
-                            disabled={actionBusy}
-                          >
-                            <Plug2 size={14} />
-                            Connect
-                          </button>
-                        )
-                      ) : null}
-                      <button
-                        type="button"
-                        className="dp-ghost-btn"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setOverlay({ type: "apps", deviceId: device.id });
-                        }}
-                      >
-                        <AppWindow size={14} />
-                        Open Apps
-                      </button>
-                      <button
-                        type="button"
-                        className="dp-ghost-btn"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setOverlay({ type: "storage", deviceId: device.id });
-                        }}
-                      >
-                        <HardDrive size={14} />
-                        Storage
-                      </button>
-                      <button
-                        type="button"
-                        className="dp-ghost-btn"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setOverlay({ type: "details", deviceId: device.id });
-                        }}
-                      >
+                        {device.role === "remote" ? (
+                          device.status === "connected" ? (
+                            <button
+                              type="button"
+                              className="dp-ghost-btn"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleDisconnectDevice(device.id);
+                              }}
+                              disabled={actionBusy}
+                            >
+                              <Unplug size={14} />
+                              Disconnect
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="dp-ghost-btn"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleConnectDevice(device.id);
+                              }}
+                              disabled={actionBusy}
+                            >
+                              <Plug2 size={14} />
+                              Connect
+                            </button>
+                          )
+                        ) : null}
+                        <button
+                          type="button"
+                          className="dp-ghost-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setOverlay({ type: "apps", deviceId: device.id });
+                          }}
+                        >
+                          <AppWindow size={14} />
+                          Open Apps
+                        </button>
+                        <button
+                          type="button"
+                          className="dp-ghost-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setOverlay({ type: "storage", deviceId: device.id });
+                          }}
+                        >
+                          <HardDrive size={14} />
+                          Storage
+                        </button>
+                        <button
+                          type="button"
+                          className="dp-ghost-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setOverlay({ type: "details", deviceId: device.id });
+                          }}
+                        >
                           <Activity size={14} />
                           Details
                         </button>
@@ -1404,7 +1642,9 @@ export function DevicesPanel({
             <button
               className="dp-section-link"
               disabled={!activeDevice}
-              onClick={() => activeDevice && setOverlay({ type: "apps", deviceId: activeDevice.id })}
+              onClick={() =>
+                activeDevice && setOverlay({ type: "apps", deviceId: activeDevice.id })
+              }
             >
               Manage &gt;
             </button>
@@ -1438,7 +1678,9 @@ export function DevicesPanel({
                   </div>
                 ))}
                 {(activeSummary.apps.channels || []).length === 0 ? (
-                  <div className="dp-placeholder compact">No apps configured for this device yet.</div>
+                  <div className="dp-placeholder compact">
+                    No apps configured for this device yet.
+                  </div>
                 ) : null}
               </div>
             </>
@@ -1456,7 +1698,9 @@ export function DevicesPanel({
             <button
               className="dp-section-link"
               disabled={!activeDevice}
-              onClick={() => activeDevice && setOverlay({ type: "observer", deviceId: activeDevice.id })}
+              onClick={() =>
+                activeDevice && setOverlay({ type: "observer", deviceId: activeDevice.id })
+              }
             >
               Monitor &gt;
             </button>
@@ -1490,7 +1734,9 @@ export function DevicesPanel({
             <button
               className="dp-section-link"
               disabled={!activeDevice}
-              onClick={() => activeDevice && setOverlay({ type: "storage", deviceId: activeDevice.id })}
+              onClick={() =>
+                activeDevice && setOverlay({ type: "storage", deviceId: activeDevice.id })
+              }
             >
               Inspect &gt;
             </button>
@@ -1539,7 +1785,9 @@ export function DevicesPanel({
             <button
               className="dp-section-link"
               disabled={!activeDevice}
-              onClick={() => activeDevice && setOverlay({ type: "details", deviceId: activeDevice.id })}
+              onClick={() =>
+                activeDevice && setOverlay({ type: "details", deviceId: activeDevice.id })
+              }
             >
               Hardware &gt;
             </button>
@@ -1560,7 +1808,9 @@ export function DevicesPanel({
               </div>
             </div>
           ) : (
-            <div className="dp-placeholder compact">Load a device summary to inspect resources.</div>
+            <div className="dp-placeholder compact">
+              Load a device summary to inspect resources.
+            </div>
           )}
         </section>
       </div>
@@ -1571,158 +1821,158 @@ export function DevicesPanel({
         </div>
         {dispatchLoading ? (
           <div className="dispatch-loading">Loading…</div>
-        ) : (() => {
-          const connectedChannels = dispatchChannels.filter((c) => c.status === "connected");
-          const hasConnections = connectedChannels.length > 0;
-          if (!hasConnections) {
-            return (
-              <div className="dispatch-onboarding">
-                <div className="dispatch-illustration">
-                  <svg
-                    width="160"
-                    height="80"
-                    viewBox="0 0 160 80"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden
-                  >
-                    <rect x="8" y="20" width="36" height="56" rx="4" />
-                    <rect x="116" y="8" width="36" height="64" rx="4" />
-                    <path
-                      d="M44 48 Q80 24 116 48"
-                      stroke="var(--color-error)"
-                      strokeWidth="2"
-                      strokeDasharray="4 3"
-                    />
-                  </svg>
-                </div>
-                <h2 className="dispatch-onboarding-title">{APP_NAME} on the go</h2>
-                <p className="dispatch-onboarding-subtitle">
-                  Dispatch tasks to {APP_NAME} from WhatsApp, Telegram, Slack, and other messaging apps—in one
-                  continuous conversation.
-                </p>
-                <div className="dispatch-feature-cards">
-                  <div className="dispatch-feature-card">
-                    <MessageCircle size={20} strokeWidth={2} className="dispatch-feature-icon" />
-                    <p>
-                      Your messaging apps act like a walkie-talkie that can communicate with {APP_NAME} on your
-                      computer.
-                    </p>
+        ) : (
+          (() => {
+            const connectedChannels = dispatchChannels.filter((c) => c.status === "connected");
+            const hasConnections = connectedChannels.length > 0;
+            if (!hasConnections) {
+              return (
+                <div className="dispatch-onboarding">
+                  <div className="dispatch-illustration">
+                    <svg
+                      width="160"
+                      height="80"
+                      viewBox="0 0 160 80"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      <rect x="8" y="20" width="36" height="56" rx="4" />
+                      <rect x="116" y="8" width="36" height="64" rx="4" />
+                      <path
+                        d="M44 48 Q80 24 116 48"
+                        stroke="var(--color-error)"
+                        strokeWidth="2"
+                        strokeDasharray="4 3"
+                      />
+                    </svg>
                   </div>
-                  <div className="dispatch-feature-card">
-                    <Send size={20} strokeWidth={2} className="dispatch-feature-icon" />
-                    <p>
-                      Just send {APP_NAME} a message from WhatsApp, Telegram, or Slack, and it will work on tasks
-                      using your computer.
-                    </p>
+                  <h2 className="dispatch-onboarding-title">{APP_NAME} on the go</h2>
+                  <p className="dispatch-onboarding-subtitle">
+                    Dispatch tasks to {APP_NAME} from WhatsApp, Telegram, Slack, and other messaging
+                    apps—in one continuous conversation.
+                  </p>
+                  <div className="dispatch-feature-cards">
+                    <div className="dispatch-feature-card">
+                      <MessageCircle size={20} strokeWidth={2} className="dispatch-feature-icon" />
+                      <p>
+                        Your messaging apps act like a walkie-talkie that can communicate with{" "}
+                        {APP_NAME} on your computer.
+                      </p>
+                    </div>
+                    <div className="dispatch-feature-card">
+                      <Send size={20} strokeWidth={2} className="dispatch-feature-icon" />
+                      <p>
+                        Just send {APP_NAME} a message from WhatsApp, Telegram, or Slack, and it
+                        will work on tasks using your computer.
+                      </p>
+                    </div>
+                    <div className="dispatch-feature-card">
+                      <Clock size={20} strokeWidth={2} className="dispatch-feature-icon" />
+                      <p>{APP_NAME} can also run tasks on a schedule or whenever you need them.</p>
+                    </div>
+                    <div className="dispatch-feature-card">
+                      <Monitor size={20} strokeWidth={2} className="dispatch-feature-icon" />
+                      <p>
+                        Remember to keep your computer awake so {APP_NAME} can keep working.{" "}
+                        <button
+                          type="button"
+                          className="dispatch-link"
+                          onClick={() => onOpenSettings?.("system")}
+                        >
+                          Learn more
+                        </button>
+                      </p>
+                    </div>
                   </div>
-                  <div className="dispatch-feature-card">
-                    <Clock size={20} strokeWidth={2} className="dispatch-feature-icon" />
-                    <p>
-                      {APP_NAME} can also run tasks on a schedule or whenever you need them.
-                    </p>
+                  <span className="dispatch-section-label">
+                    Connect at least one channel to get started
+                  </span>
+                  <div className="dispatch-setup-cards">
+                    {DISPATCH_CHANNELS.map(({ type, label, icon: Icon, settingsTab }) => {
+                      const ch = dispatchChannels.find((c) => c.type === type);
+                      const isConnected = ch?.status === "connected";
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          className="dispatch-setup-card"
+                          onClick={() => onOpenSettings?.(settingsTab)}
+                        >
+                          <Icon size={20} strokeWidth={2} className="dispatch-setup-icon" />
+                          <div className="dispatch-setup-card-content">
+                            <strong>
+                              {isConnected ? `Connected to ${label}` : `Connect to ${label}`}
+                            </strong>
+                            <span>
+                              {isConnected
+                                ? "Send tasks from " + label + " anytime"
+                                : `Link your ${label} account to dispatch tasks`}
+                            </span>
+                          </div>
+                          {isConnected ? (
+                            <span className="dispatch-setup-badge connected">●</span>
+                          ) : (
+                            <span className="dispatch-setup-badge">+</span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div className="dispatch-feature-card">
-                    <Monitor size={20} strokeWidth={2} className="dispatch-feature-icon" />
-                    <p>
-                      Remember to keep your computer awake so {APP_NAME} can keep working.{" "}
-                      <button
-                        type="button"
-                        className="dispatch-link"
-                        onClick={() => onOpenSettings?.("system")}
-                      >
-                        Learn more
-                      </button>
-                    </p>
-                  </div>
-                </div>
-                <span className="dispatch-section-label">Connect at least one channel to get started</span>
-                <div className="dispatch-setup-cards">
-                  {DISPATCH_CHANNELS.map(({ type, label, icon: Icon, settingsTab }) => {
-                    const ch = dispatchChannels.find((c) => c.type === type);
-                    const isConnected = ch?.status === "connected";
-                    return (
-                      <button
-                        key={type}
-                        type="button"
-                        className="dispatch-setup-card"
-                        onClick={() => onOpenSettings?.(settingsTab)}
-                      >
-                        <Icon size={20} strokeWidth={2} className="dispatch-setup-icon" />
-                        <div className="dispatch-setup-card-content">
-                          <strong>
-                            {isConnected ? `Connected to ${label}` : `Connect to ${label}`}
-                          </strong>
-                          <span>
-                            {isConnected
-                              ? "Send tasks from " + label + " anytime"
-                              : `Link your ${label} account to dispatch tasks`}
-                          </span>
-                        </div>
-                        {isConnected ? (
-                          <span className="dispatch-setup-badge connected">●</span>
-                        ) : (
-                          <span className="dispatch-setup-badge">+</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                <button
-                  type="button"
-                  className="dispatch-get-started-btn"
-                  onClick={() => onOpenSettings?.("telegram")}
-                >
-                  Get started
-                </button>
-                <p className="dispatch-disclaimer">
-                  {APP_NAME} will access your desktop (files, apps, and browser) to complete tasks you send from
-                  messaging apps. This may have security risks. Only connect devices and accounts that you own and
-                  trust.{" "}
                   <button
                     type="button"
-                    className="dispatch-link"
-                    onClick={() => onOpenSettings?.("system")}
+                    className="dispatch-get-started-btn"
+                    onClick={() => onOpenSettings?.("telegram")}
                   >
-                    Learn how to use this safely
+                    Get started
                   </button>
-                </p>
+                  <p className="dispatch-disclaimer">
+                    {APP_NAME} will access your desktop (files, apps, and browser) to complete tasks
+                    you send from messaging apps. This may have security risks. Only connect devices
+                    and accounts that you own and trust.{" "}
+                    <button
+                      type="button"
+                      className="dispatch-link"
+                      onClick={() => onOpenSettings?.("system")}
+                    >
+                      Learn how to use this safely
+                    </button>
+                  </p>
+                </div>
+              );
+            }
+            return (
+              <div className="dispatch-connected">
+                <div className="dispatch-info-card">
+                  <p>
+                    <strong>Dispatch</strong> from your connected apps—seamless task handoff from
+                    WhatsApp, Telegram, Slack, and more.
+                  </p>
+                </div>
+                <div className="dispatch-settings-list">
+                  <div className="dispatch-settings-item">
+                    <Monitor size={18} strokeWidth={2} />
+                    <div>
+                      <strong>Keep this computer awake</strong>
+                      <span>Prevents sleep while Dispatch is running.</span>
+                    </div>
+                    <label className="dispatch-toggle">
+                      <input type="checkbox" defaultChecked={false} />
+                      <span className="dispatch-toggle-slider" />
+                    </label>
+                  </div>
+                </div>
+                <div className="dp-section">
+                  <span className="dp-section-label">Outputs</span>
+                  <div className="dp-placeholder">Files {APP_NAME} shares will appear here.</div>
+                </div>
               </div>
             );
-          }
-          return (
-            <div className="dispatch-connected">
-              <div className="dispatch-info-card">
-                <p>
-                  <strong>Dispatch</strong> from your connected apps—seamless task handoff from WhatsApp,
-                  Telegram, Slack, and more.
-                </p>
-              </div>
-              <div className="dispatch-settings-list">
-                <div className="dispatch-settings-item">
-                  <Monitor size={18} strokeWidth={2} />
-                  <div>
-                    <strong>Keep this computer awake</strong>
-                    <span>Prevents sleep while Dispatch is running.</span>
-                  </div>
-                  <label className="dispatch-toggle">
-                    <input type="checkbox" defaultChecked={false} />
-                    <span className="dispatch-toggle-slider" />
-                  </label>
-                </div>
-              </div>
-              <div className="dp-section">
-                <span className="dp-section-label">Outputs</span>
-                <div className="dp-placeholder">
-                  Files {APP_NAME} shares will appear here.
-                </div>
-              </div>
-            </div>
-          );
-        })()}
+          })()
+        )}
       </div>
 
       {overlay?.type === "pairing" ? (
@@ -1833,7 +2083,12 @@ function DeviceConnectionOverlay({
       ).filter((device) => device.role === "remote");
       setRemoteDevices(remotes);
       setDeviceStatus(
-        Object.fromEntries(remotes.map((device) => [device.id, { state: device.status as RemoteGatewayStatus["state"] }])) as Record<string, RemoteGatewayStatus>,
+        Object.fromEntries(
+          remotes.map((device) => [
+            device.id,
+            { state: device.status as RemoteGatewayStatus["state"] },
+          ]),
+        ) as Record<string, RemoteGatewayStatus>,
       );
       if (!selectedDeviceId && remotes[0]) {
         populateForm(remotes[0]);
@@ -1891,9 +2146,8 @@ function DeviceConnectionOverlay({
       setSaving(true);
       setTestResult(null);
       try {
-        const settings = (await window.electronAPI?.getControlPlaneSettings?.()) as
-          | ControlPlaneSettingsData
-          | null;
+        const settings =
+          (await window.electronAPI?.getControlPlaneSettings?.()) as ControlPlaneSettingsData | null;
         const nextId = selectedDeviceId || `remote-device:${Date.now()}`;
         const existingManaged = (settings?.managedDevices || []).filter(
           (device) => device.id !== LOCAL_MANAGED_DEVICE_ID,
@@ -2088,7 +2342,9 @@ function DeviceConnectionOverlay({
             </div>
 
             {testResult ? (
-              <div className={`devices-remote-feedback ${testResult.success ? "success" : "error"}`}>
+              <div
+                className={`devices-remote-feedback ${testResult.success ? "success" : "error"}`}
+              >
                 {testResult.success
                   ? `Connection successful${testResult.latencyMs ? ` (${testResult.latencyMs}ms)` : ""}`
                   : testResult.message}
@@ -2175,10 +2431,22 @@ function DeviceDetailsDrawer({
         </div>
 
         <div className="dp-detail-grid">
-          <DetailBlock icon={<Wifi size={14} />} label="Status" value={deviceConnectionLabel(device)} />
-          <DetailBlock icon={<ShieldCheck size={14} />} label="Purpose" value={purposeLabel(device.purpose)} />
+          <DetailBlock
+            icon={<Wifi size={14} />}
+            label="Status"
+            value={deviceConnectionLabel(device)}
+          />
+          <DetailBlock
+            icon={<ShieldCheck size={14} />}
+            label="Purpose"
+            value={purposeLabel(device.purpose)}
+          />
           <DetailBlock icon={<Server size={14} />} label="Transport" value={device.transport} />
-          <DetailBlock icon={<Activity size={14} />} label="Version" value={device.version || "Unknown"} />
+          <DetailBlock
+            icon={<Activity size={14} />}
+            label="Version"
+            value={device.version || "Unknown"}
+          />
           <DetailBlock icon={<Cpu size={14} />} label="Platform" value={device.platform} />
           <DetailBlock
             icon={<Bell size={14} />}
@@ -2225,15 +2493,7 @@ function DeviceDetailsDrawer({
   );
 }
 
-function DetailBlock({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-}) {
+function DetailBlock({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="dp-detail-block">
       <span className="dp-detail-label">
@@ -2481,9 +2741,7 @@ function buildChannelCreateParams(type: AppsChannelType, draft: ChannelDraftStat
           ...(toOptionalNumber(draft.emailSmtpPort) !== undefined
             ? { smtpPort: toOptionalNumber(draft.emailSmtpPort) }
             : {}),
-          ...(draft.emailDisplayName.trim()
-            ? { displayName: draft.emailDisplayName.trim() }
-            : {}),
+          ...(draft.emailDisplayName.trim() ? { displayName: draft.emailDisplayName.trim() } : {}),
         },
       };
   }
@@ -2619,7 +2877,9 @@ function AppsManagerModal({
             <input
               type="text"
               value={draft.name}
-              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, name: event.target.value }))
+              }
               placeholder="Connection name"
             />
             <select
@@ -2989,7 +3249,10 @@ function AppsManagerModal({
                       channel.enabled ? "channel.disable" : "channel.enable",
                     )
                   }
-                  disabled={workingKey === `channel.enable:${channel.id}` || workingKey === `channel.disable:${channel.id}`}
+                  disabled={
+                    workingKey === `channel.enable:${channel.id}` ||
+                    workingKey === `channel.disable:${channel.id}`
+                  }
                 >
                   {channel.enabled ? "Disable" : "Enable"}
                 </button>

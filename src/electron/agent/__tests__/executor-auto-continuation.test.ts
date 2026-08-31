@@ -357,13 +357,11 @@ describe("TaskExecutor continuation budgets", () => {
   });
 
   it("evaluates token budget using cumulative usage across continuation windows", () => {
-    const tokenBudgetSpy = vi
-      .spyOn(GuardrailManager, "isTokenBudgetExceeded")
-      .mockReturnValue({
-        exceeded: true,
-        used: 2100,
-        limit: 2000,
-      });
+    const tokenBudgetSpy = vi.spyOn(GuardrailManager, "isTokenBudgetExceeded").mockReturnValue({
+      exceeded: true,
+      used: 2100,
+      limit: 2000,
+    });
     vi.spyOn(GuardrailManager, "isIterationLimitExceeded").mockReturnValue({
       exceeded: false,
       iterations: 0,

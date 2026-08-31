@@ -186,17 +186,20 @@ describe("TaskExecutor workspace preflight acknowledgement", () => {
   });
 
   it("tells the model not to call shell disabled when another policy layer blocks it", () => {
-    const instruction = (TaskExecutor as Any).prototype.buildExecutionRequiredFollowUpInstruction.call(
+    const instruction = (
+      TaskExecutor as Any
+    ).prototype.buildExecutionRequiredFollowUpInstruction.call(
       {},
       {
         attemptedExecutionTool: true,
-        lastExecutionError: 'Tool "run_command" blocked by policy: blocked by workspace or gateway policy',
+        lastExecutionError:
+          'Tool "run_command" blocked by policy: blocked by workspace or gateway policy',
         shellEnabled: true,
       },
     );
 
-    expect(instruction).toContain("Shell is already enabled for this workspace");
-    expect(instruction).toContain("Do not describe this as shell being off");
+    expect(instruction).toContain("Command tools are enabled by the access profile");
+    expect(instruction).toContain("Report the exact policy blocker");
   });
 
   it("does not pause for internal app/tool change intent in temporary workspace", () => {
@@ -236,6 +239,7 @@ describe("TaskExecutor workspace preflight acknowledgement", () => {
         hasCodeFiles: false,
         hasAppDirs: false,
       })),
+      canReadWorkspacePath: vi.fn(() => true),
     };
 
     const switched = (
@@ -289,7 +293,10 @@ describe("TaskExecutor workspace preflight acknowledgement", () => {
     };
     fakeThis.plan = { steps: [step] };
 
-    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(fakeThis, step);
+    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(
+      fakeThis,
+      step,
+    );
     const reason = (TaskExecutor as Any).prototype.getMissingWorkspaceArtifactPreflightReason.call(
       fakeThis,
       step,
@@ -334,12 +341,82 @@ End with a final section titled "Verification Evidence".`,
     };
     fakeThis.plan = { steps: [step] };
 
-    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(fakeThis, step);
+    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(
+      fakeThis,
+      step,
+    );
 
     expect(contract.mode).toBe("analysis_only");
     expect(contract.requiresMutation).toBe(false);
     expect(contract.requiresArtifactEvidence).toBe(false);
     expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+  });
+
+  it("treats standalone unchanged-file constraints as verification-only", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.workspace = { path: process.cwd() };
+    fakeThis.task = {
+      id: "t-unchanged-file",
+      title: "Create a report without changing the source",
+      prompt: "Create report.md and leave meeting-notes.txt unchanged.",
+      rawPrompt: "Create report.md and leave meeting-notes.txt unchanged.",
+    };
+    fakeThis.agentPolicyConfig = null;
+    fakeThis.plan = {
+      steps: [
+        {
+          id: "s-unchanged-file",
+          description: "Leave `meeting-notes.txt` unchanged.",
+          kind: "primary",
+          status: "pending",
+        },
+      ],
+    };
+
+    const step = fakeThis.plan.steps[0];
+    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(
+      fakeThis,
+      step,
+    );
+
+    expect(contract.mode).toBe("analysis_only");
+    expect(contract.requiresMutation).toBe(false);
+    expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+  });
+
+  it("anchors a shortened verification basename to the unique task path", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.workspace = { path: process.cwd() };
+    fakeThis.task = {
+      id: "t-shortened-verification-path",
+      title: "Create an action-items report",
+      prompt:
+        "Read tmp/cowork-realistic-qa-11/meeting-notes.txt and create tmp/cowork-realistic-qa-11/action-items.md.",
+      rawPrompt:
+        "Read tmp/cowork-realistic-qa-11/meeting-notes.txt and create tmp/cowork-realistic-qa-11/action-items.md.",
+    };
+    fakeThis.taskPinnedRoot = "tmp";
+    fakeThis.reliabilityPathDriftRewriteV6Enabled = true;
+    fakeThis.stepAliasPathHints = Object.create(null);
+    fakeThis.getEffectiveWorkspacePathAliasPolicy = vi.fn(() => "rewrite_and_retry");
+    fakeThis.getEffectiveTaskPathRootPolicy = vi.fn(() => "pin_and_rewrite");
+    fakeThis.plan = {
+      steps: [
+        {
+          id: "verify-source",
+          description: "Verify that `meeting-notes.txt` remains unchanged.",
+          kind: "verification",
+          status: "pending",
+        },
+      ],
+    };
+
+    const candidates = (TaskExecutor as Any).prototype.extractStepPathCandidates.call(
+      fakeThis,
+      fakeThis.plan.steps[0],
+    );
+
+    expect(candidates).toEqual(["tmp/cowork-realistic-qa-11/meeting-notes.txt"]);
   });
 
   it("does not preflight-fail verification-only relative paths that are not yet materialized", () => {
@@ -429,16 +506,57 @@ End with a final section titled "Verification Evidence".`,
     expect(shouldRecover).toBe(true);
   });
 
+  it("classifies access-profile policy denials as user blockers", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    const recoveryClass = (TaskExecutor as Any).prototype.classifyRecoveryFailure.call(
+      fakeThis,
+      'Tool "web_fetch" blocked by policy: Workspace network capability is disabled.',
+    );
+
+    expect(recoveryClass).toBe("user_blocker");
+  });
+
+  it("pauses immediately for workspace-boundary access failures", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    const reason = (TaskExecutor as Any).prototype.getAccessBoundaryPauseReason.call(
+      fakeThis,
+      "Path is outside workspace boundary. Attempted path: /project/package.json. Workspace: /tmp/task.",
+    );
+    const recoveryClass = (TaskExecutor as Any).prototype.classifyRecoveryFailure.call(
+      fakeThis,
+      "Shell working directory is outside the active access profile boundary: /project",
+    );
+
+    expect(reason).toContain("Switch this task to the folder");
+    expect(reason).toContain("allowed paths");
+    expect(recoveryClass).toBe("user_blocker");
+  });
+
+  it("does not auto-recover a deterministic access-profile denial", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.planRevisionCount = 0;
+    fakeThis.maxPlanRevisions = 5;
+    fakeThis.isRecoveryPlanStep = vi.fn(() => false);
+    const step = { id: "s-policy-denial", description: "Fetch a URL", kind: "primary" };
+
+    const shouldRecover = (TaskExecutor as Any).prototype.shouldAutoPlanRecovery.call(
+      fakeThis,
+      step,
+      'Tool web_fetch failed: Tool "web_fetch" blocked by policy: Workspace network capability is disabled.',
+    );
+
+    expect(shouldRecover).toBe(false);
+  });
+
   it("does not apply cross-step failure hard block to execution tools", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
     const exemptRunCommand = (TaskExecutor as Any).prototype.isCrossStepFailureBlockExemptTool.call(
       fakeThis,
       "run_command",
     );
-    const exemptAppleScript = (TaskExecutor as Any).prototype.isCrossStepFailureBlockExemptTool.call(
-      fakeThis,
-      "run_applescript",
-    );
+    const exemptAppleScript = (
+      TaskExecutor as Any
+    ).prototype.isCrossStepFailureBlockExemptTool.call(fakeThis, "run_applescript");
     const exemptWebSearch = (TaskExecutor as Any).prototype.isCrossStepFailureBlockExemptTool.call(
       fakeThis,
       "web_search",
@@ -518,7 +636,17 @@ End with a final section titled "Verification Evidence".`,
 
     try {
       const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
-      fakeThis.workspace = { path: process.cwd(), isTemp: false };
+      fakeThis.workspace = {
+        path: process.cwd(),
+        isTemp: false,
+        permissions: {
+          read: true,
+          write: true,
+          delete: true,
+          network: false,
+          shell: false,
+        },
+      };
       fakeThis.agentPolicyConfig = null;
       const step = {
         id: "s-checklist-existing-write",
@@ -527,7 +655,10 @@ End with a final section titled "Verification Evidence".`,
         status: "pending",
       };
 
-      const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(fakeThis, step);
+      const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(
+        fakeThis,
+        step,
+      );
       expect(Array.from(contract.requiredTools)).toContain("write_file");
       expect(contract.mode).toBe("mutation_required");
     } finally {
@@ -573,7 +704,9 @@ End with a final section titled "Verification Evidence".`,
 
   it("requires write_file for write-intent steps that target source/project artifact files", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
-    const requiredTools = (TaskExecutor as Any).prototype.extractRequiredToolsFromStepDescription.call(
+    const requiredTools = (
+      TaskExecutor as Any
+    ).prototype.extractRequiredToolsFromStepDescription.call(
       fakeThis,
       "Build widget UI in SystemMetricsWidgetExtension/SystemMetricsWidget.swift and wire the provider.",
     ) as Set<string>;
@@ -583,7 +716,9 @@ End with a final section titled "Verification Evidence".`,
 
   it("requires create_spreadsheet for Excel workbook artifact steps", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
-    const requiredTools = (TaskExecutor as Any).prototype.extractRequiredToolsFromStepDescription.call(
+    const requiredTools = (
+      TaskExecutor as Any
+    ).prototype.extractRequiredToolsFromStepDescription.call(
       fakeThis,
       "Create the final Excel workbook `.cowork/openai_text_models.xlsx` containing the researched spreadsheet data.",
     ) as Set<string>;
@@ -594,7 +729,9 @@ End with a final section titled "Verification Evidence".`,
 
   it("ignores non-tool via phrases such as localStorage when inferring required tools", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
-    const requiredTools = (TaskExecutor as Any).prototype.extractRequiredToolsFromStepDescription.call(
+    const requiredTools = (
+      TaskExecutor as Any
+    ).prototype.extractRequiredToolsFromStepDescription.call(
       fakeThis,
       "Implement Notepad save/load via localStorage and keyboard shortcuts.",
     ) as Set<string>;
@@ -609,7 +746,9 @@ End with a final section titled "Verification Evidence".`,
         executionMode: "plan",
       },
     };
-    const requiredTools = (TaskExecutor as Any).prototype.extractRequiredToolsFromStepDescription.call(
+    const requiredTools = (
+      TaskExecutor as Any
+    ).prototype.extractRequiredToolsFromStepDescription.call(
       fakeThis,
       "Use request_user_input to confirm the target GitHub repository in `owner/repo` format and the review scope if it cannot be derived from the current workspace git metadata.",
     ) as Set<string>;
@@ -619,7 +758,9 @@ End with a final section titled "Verification Evidence".`,
 
   it("still infers real tools from via phrases when the tool exists", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
-    const requiredTools = (TaskExecutor as Any).prototype.extractRequiredToolsFromStepDescription.call(
+    const requiredTools = (
+      TaskExecutor as Any
+    ).prototype.extractRequiredToolsFromStepDescription.call(
       fakeThis,
       "Research the error via web_search and summarize likely root causes.",
     ) as Set<string>;
@@ -629,7 +770,9 @@ End with a final section titled "Verification Evidence".`,
 
   it("requires run_command for generic command execution steps with stdout-style success criteria", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
-    const requiredTools = (TaskExecutor as Any).prototype.extractRequiredToolsFromStepDescription.call(
+    const requiredTools = (
+      TaskExecutor as Any
+    ).prototype.extractRequiredToolsFromStepDescription.call(
       fakeThis,
       "You want the command run in the current session context, and success means it prints `hello world`.",
     ) as Set<string>;
@@ -642,7 +785,9 @@ End with a final section titled "Verification Evidence".`,
     fakeThis.toolRegistry = {
       getTools: () => [{ name: "task_events" }],
     };
-    const requiredTools = (TaskExecutor as Any).prototype.extractRequiredToolsFromStepDescription.call(
+    const requiredTools = (
+      TaskExecutor as Any
+    ).prototype.extractRequiredToolsFromStepDescription.call(
       fakeThis,
       'Call tool `task_events` with period="custom" and include_payload=true.',
     ) as Set<string>;
@@ -655,7 +800,9 @@ End with a final section titled "Verification Evidence".`,
     fakeThis.toolRegistry = {
       getTools: () => [{ name: "task_events" }],
     };
-    const requiredTools = (TaskExecutor as Any).prototype.extractRequiredToolsFromStepDescription.call(
+    const requiredTools = (
+      TaskExecutor as Any
+    ).prototype.extractRequiredToolsFromStepDescription.call(
       fakeThis,
       "From `task_events` output, summarize retained events into Topics and Stats.",
     ) as Set<string>;
@@ -674,8 +821,42 @@ End with a final section titled "Verification Evidence".`,
       status: "pending",
     };
 
-    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(fakeThis, step);
+    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(
+      fakeThis,
+      step,
+    );
     expect(contract.mode).not.toBe("mutation_required");
+  });
+
+  it("does not require mutation tools when a read-only task says to record an existing source", () => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.agentPolicyConfig = null;
+    fakeThis.workspace = { path: process.cwd() };
+    fakeThis.toolRegistry = { getTools: () => [] };
+    fakeThis.task = {
+      id: "read-only-onboarding",
+      title: "Prepare an onboarding note",
+      prompt:
+        "Read README.md and package.json, cite the source filename for each section, and do not modify any files.",
+      rawPrompt:
+        "Read README.md and package.json, cite the source filename for each section, and do not modify any files.",
+      agentConfig: {},
+    };
+    const step = {
+      id: "record-source",
+      description: "Record `package.json` as the source for the command section.",
+      kind: "primary",
+      status: "pending",
+    };
+
+    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(
+      fakeThis,
+      step,
+    );
+
+    expect(contract.mode).toBe("analysis_only");
+    expect(contract.enforcementLevel).toBe("advisory");
+    expect(Array.from(contract.requiredTools)).not.toContain("write_file");
   });
 
   it("infers mutation-required contract for lock requirements steps with concrete artifact paths", () => {
@@ -684,13 +865,15 @@ End with a final section titled "Verification Evidence".`,
     fakeThis.workspace = { path: process.cwd() };
     const step = {
       id: "lock-requirements",
-      description:
-        "Lock requirements in /tmp/linux/coworkos/requirements.md with Debian defaults.",
+      description: "Lock requirements in /tmp/linux/coworkos/requirements.md with Debian defaults.",
       kind: "primary",
       status: "pending",
     };
 
-    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(fakeThis, step);
+    const contract = (TaskExecutor as Any).prototype.resolveStepExecutionContract.call(
+      fakeThis,
+      step,
+    );
     expect(contract.mode).toBe("mutation_required");
     expect(Array.from(contract.requiredTools)).toContain("write_file");
   });
@@ -725,7 +908,9 @@ End with a final section titled "Verification Evidence".`,
     expect(fakeThis.task.agentConfig.executionMode).toBe("execute");
     expect(fakeThis.task.agentConfig.executionModeSource).toBe("auto_promote");
     expect(
-      fakeThis.emitEvent.mock.calls.some((call: Any[]) => call[0] === "execution_mode_auto_promoted"),
+      fakeThis.emitEvent.mock.calls.some(
+        (call: Any[]) => call[0] === "execution_mode_auto_promoted",
+      ),
     ).toBe(true);
   });
 
@@ -797,7 +982,9 @@ End with a final section titled "Verification Evidence".`,
     expect(fakeThis.task.agentConfig.executionMode).toBe("plan");
     expect(fakeThis.task.agentConfig.executionModeSource).toBeUndefined();
     expect(
-      fakeThis.emitEvent.mock.calls.some((call: Any[]) => call[0] === "execution_mode_auto_promoted"),
+      fakeThis.emitEvent.mock.calls.some(
+        (call: Any[]) => call[0] === "execution_mode_auto_promoted",
+      ),
     ).toBe(false);
     expect(
       fakeThis.emitEvent.mock.calls.some((call: Any[]) => call[0] === "plan_contract_conflict"),
@@ -822,7 +1009,7 @@ End with a final section titled "Verification Evidence".`,
         toolName: "list_directory",
         input: { path: "/" },
         errorMessage:
-          'Path is outside workspace boundary. Attempted path: /. Workspace: /tmp/linux.',
+          "Path is outside workspace boundary. Attempted path: /. Workspace: /tmp/linux.",
         toolTimeoutMs: 1_000,
         targetPaths: ["/tmp/linux/coworkos/requirements.md"],
         stepId: "s-boundary",
@@ -887,7 +1074,9 @@ End with a final section titled "Verification Evidence".`,
     };
 
     const sanitized = (TaskExecutor as Any).prototype.sanitizePlan.call(fakeThis, plan);
-    expect(String(sanitized.steps[0].description)).toContain("influencer-chat-app/src/data/influencers.ts");
+    expect(String(sanitized.steps[0].description)).toContain(
+      "influencer-chat-app/src/data/influencers.ts",
+    );
     expect(String(sanitized.steps[0].description)).not.toContain("/workspace/influencer-chat-app");
     expect(
       fakeThis.emitEvent.mock.calls.some(
@@ -935,12 +1124,12 @@ End with a final section titled "Verification Evidence".`,
     expect(secondStepDescription).toContain("influencer-chat/app/page.tsx");
     expect(secondStepDescription).toContain("influencer-chat/data/influencers.json");
     expect(secondStepDescription).toContain("influencer-chat/components/Composer.tsx");
-    expect(fakeThis.emitEvent.mock.calls.some((call: Any[]) => call[0] === "task_path_root_pinned")).toBe(
-      true,
-    );
-    expect(fakeThis.emitEvent.mock.calls.some((call: Any[]) => call[0] === "task_path_rewrite_applied")).toBe(
-      true,
-    );
+    expect(
+      fakeThis.emitEvent.mock.calls.some((call: Any[]) => call[0] === "task_path_root_pinned"),
+    ).toBe(true);
+    expect(
+      fakeThis.emitEvent.mock.calls.some((call: Any[]) => call[0] === "task_path_rewrite_applied"),
+    ).toBe(true);
   });
 
   it("does not pin task root from non-scaffold timing phrases", () => {
@@ -1056,8 +1245,7 @@ End with a final section titled "Verification Evidence".`,
     expect(
       fakeThis.emitEvent.mock.calls.some(
         (call: Any[]) =>
-          call[0] === "task_path_recovery_failed" &&
-          call[1]?.reason === "retry_budget_exhausted",
+          call[0] === "task_path_recovery_failed" && call[1]?.reason === "retry_budget_exhausted",
       ),
     ).toBe(true);
   });
@@ -1098,7 +1286,9 @@ End with a final section titled "Verification Evidence".`,
 
   it("still infers write_file for explicit draft-to-file steps", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
-    const requiredTools = (TaskExecutor as Any).prototype.extractRequiredToolsFromStepDescription.call(
+    const requiredTools = (
+      TaskExecutor as Any
+    ).prototype.extractRequiredToolsFromStepDescription.call(
       fakeThis,
       "Draft daily-ai-agent-trends-2026-03-03.md with sections and citations.",
     ) as Set<string>;

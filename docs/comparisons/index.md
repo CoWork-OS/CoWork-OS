@@ -26,6 +26,7 @@ The products below are not interchangeable. Some are exceptional coding speciali
 
 - **Super app first:** one workspace for code, knowledge work, documents, communication, automation, and everyday tasks.
 - **Open harness underneath:** supported model sources share tools, memory, approvals, agents, automations, and task history.
+- **Governed access choice:** the task-level [access profile](../access-profiles.md) combines sandbox, approvals, command tools, filesystem, network, and domain boundaries across desktop, CLI, remote, and automation surfaces.
 - **Access choice:** use eligible account connections, provider APIs, gateways, cloud routes, or local models where supported.
 - **Local control:** run the desktop app or headless daemon, keep operational state local by default, and decide which configured services receive requests.
 
@@ -34,4 +35,3 @@ CoWork OS itself is free and open source. Model providers, gateways, connected s
 ## Comparison Method
 
 Each page uses public product documentation, states the practical fit, and avoids unsupported claims about price, privacy, or feature parity. Evidence links and verification dates live in [`evidence.yml`](evidence.yml). CoWork OS is not affiliated with the products compared here.
-

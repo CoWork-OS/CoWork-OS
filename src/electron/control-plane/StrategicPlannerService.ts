@@ -64,9 +64,7 @@ interface StrategicPlannerServiceDeps {
   db: Database.Database;
   agentDaemon?: AgentDaemon;
   log?: (...args: unknown[]) => void;
-  recordAutomationOutcome?: (
-    outcome: CreateAutomationRunOutcomeInput,
-  ) => Promise<unknown>;
+  recordAutomationOutcome?: (outcome: CreateAutomationRunOutcomeInput) => Promise<unknown>;
 }
 
 export class StrategicPlannerService {
@@ -295,14 +293,21 @@ export class StrategicPlannerService {
                   ? `Planner refreshed ${outcome.createdIssueIds.length + outcome.updatedIssueIds.length} issue(s)`
                   : "Planner found no high-confidence work to dispatch",
               reviewRequired: outputType !== "issue_batch",
-              reviewReason: outputType !== "issue_batch" ? ("strategy" as CompanyReviewReason) : undefined,
+              reviewReason:
+                outputType !== "issue_batch" ? ("strategy" as CompanyReviewReason) : undefined,
               evidenceRefs: [
                 ...outcome.createdIssueIds.map((id) => ({ type: "issue", id, label: "created" })),
                 ...outcome.updatedIssueIds.map((id) => ({ type: "issue", id, label: "updated" })),
-                ...outcome.dispatchedTaskIds.map((id) => ({ type: "task", id, label: "dispatched" })),
+                ...outcome.dispatchedTaskIds.map((id) => ({
+                  type: "task",
+                  id,
+                  label: "dispatched",
+                })),
               ],
               companyPriority:
-                outcome.createdIssueIds.length > 0 || outcome.dispatchedTaskIds.length > 0 ? "high" : "normal",
+                outcome.createdIssueIds.length > 0 || outcome.dispatchedTaskIds.length > 0
+                  ? "high"
+                  : "normal",
               triggerReason: `planner:${trigger}`,
               expectedOutputType: outputType,
             } satisfies CompanyOutputContract,
@@ -348,7 +353,11 @@ export class StrategicPlannerService {
       createdIssueIds: string[];
       updatedIssueIds: string[];
       dispatchedTaskIds: string[];
-      suppressedOutputs: Array<{ seedTitle: string; summary: string; outputType: CompanyOutputType }>;
+      suppressedOutputs: Array<{
+        seedTitle: string;
+        summary: string;
+        outputType: CompanyOutputType;
+      }>;
     };
   }): Promise<void> {
     if (!this.deps.recordAutomationOutcome) return;
@@ -425,7 +434,11 @@ export class StrategicPlannerService {
       this.updateConfig(companyId, { lastRunAt: completedAt });
       return;
     } catch (error) {
-      this.log("Failed to update planner config after successful run; attempting repair", companyId, error);
+      this.log(
+        "Failed to update planner config after successful run; attempting repair",
+        companyId,
+        error,
+      );
     }
 
     try {
@@ -463,7 +476,10 @@ export class StrategicPlannerService {
     }
   }
 
-  private async executePlanningRun(company: Company, config: StrategicPlannerConfig): Promise<{
+  private async executePlanningRun(
+    company: Company,
+    config: StrategicPlannerConfig,
+  ): Promise<{
     createdIssueIds: string[];
     updatedIssueIds: string[];
     dispatchedTaskIds: string[];
@@ -488,7 +504,8 @@ export class StrategicPlannerService {
 
     for (const goal of activeGoals) {
       const goalProjects = projects.filter(
-        (project) => project.goalId === goal.id && !["completed", "archived"].includes(project.status),
+        (project) =>
+          project.goalId === goal.id && !["completed", "archived"].includes(project.status),
       );
       if (goalProjects.length === 0) {
         seeds.push({
@@ -511,7 +528,9 @@ export class StrategicPlannerService {
         companyWorkspaceId;
       const projectIssues = openIssues.filter((issue) => issue.projectId === project.id);
       const blockedIssues = projectIssues.filter((issue) => issue.status === "blocked");
-      const staleIssue = projectIssues.find((issue) => this.isStaleIssue(issue, config.staleIssueDays));
+      const staleIssue = projectIssues.find((issue) =>
+        this.isStaleIssue(issue, config.staleIssueDays),
+      );
 
       if (!linkedWorkspaceId && !companyWorkspaceId) {
         seeds.push({
@@ -580,7 +599,9 @@ export class StrategicPlannerService {
     }
 
     const uniqueSeeds = seeds.slice(0, config.maxIssuesPerRun);
-    const managedOpenIssues = openIssues.filter((issue) => this.getPlannerMetadata(issue)?.plannerManaged === true);
+    const managedOpenIssues = openIssues.filter(
+      (issue) => this.getPlannerMetadata(issue)?.plannerManaged === true,
+    );
 
     for (const seed of uniqueSeeds) {
       const score = this.scoreSeed(seed, companyWorkspaceId);
@@ -599,7 +620,13 @@ export class StrategicPlannerService {
           existing.priority !== nextPriority ||
           (seed.assigneeAgentRoleId && existing.assigneeAgentRoleId !== seed.assigneeAgentRoleId);
         if (shouldUpdate) {
-          const outputContract = this.buildIssueOutputContract(company, plannerAgent, seed, score, existing.id);
+          const outputContract = this.buildIssueOutputContract(
+            company,
+            plannerAgent,
+            seed,
+            score,
+            existing.id,
+          );
           this.core.updateIssue(existing.id, {
             priority: nextPriority,
             assigneeAgentRoleId: seed.assigneeAgentRoleId || existing.assigneeAgentRoleId,
@@ -625,9 +652,7 @@ export class StrategicPlannerService {
         goalId: seed.goalId,
         projectId: seed.projectId,
         parentIssueId:
-          seed.kind === "issue_refresh" && seed.targetIssueId
-            ? seed.targetIssueId
-            : undefined,
+          seed.kind === "issue_refresh" && seed.targetIssueId ? seed.targetIssueId : undefined,
         workspaceId: seed.workspaceId,
         title: seed.title,
         description: seed.description,
@@ -652,7 +677,9 @@ export class StrategicPlannerService {
 
     const touchedIssueIds = new Set<string>([...createdIssueIds, ...updatedIssueIds]);
     const dispatchable = [...managedOpenIssues]
-      .filter((issue) => !issue.activeRunId && ["backlog", "todo", "blocked"].includes(issue.status))
+      .filter(
+        (issue) => !issue.activeRunId && ["backlog", "todo", "blocked"].includes(issue.status),
+      )
       .filter((issue) => {
         if (touchedIssueIds.has(issue.id)) {
           return true;
@@ -797,7 +824,9 @@ export class StrategicPlannerService {
   private pickDefaultWorkspaceId(): string | undefined {
     const workspaces = this.workspaceRepo
       .findAll()
-      .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id) && workspace.path);
+      .filter(
+        (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id) && workspace.path,
+      );
     return workspaces[0]?.id;
   }
 
@@ -831,11 +860,7 @@ export class StrategicPlannerService {
       seed.kind === "issue_refresh" ? 0.9 : seed.kind === "project_blocked_review" ? 0.75 : 0.35;
     const businessImpactScore = seed.priority === 1 ? 0.9 : seed.priority === 2 ? 0.7 : 0.5;
     const confidenceScore =
-      seed.workspaceId || companyWorkspaceId
-        ? seed.assigneeAgentRoleId
-          ? 0.85
-          : 0.7
-        : 0.45;
+      seed.workspaceId || companyWorkspaceId ? (seed.assigneeAgentRoleId ? 0.85 : 0.7) : 0.45;
     const totalScore =
       coverageGapScore * 0.35 +
       stalenessScore * 0.2 +
@@ -869,8 +894,12 @@ export class StrategicPlannerService {
       reviewReason: score.confidenceScore < 0.65 ? "strategy" : undefined,
       evidenceRefs: [
         ...(seed.goalId ? [{ type: "goal", id: seed.goalId, label: "source goal" }] : []),
-        ...(seed.projectId ? [{ type: "project", id: seed.projectId, label: "source project" }] : []),
-        ...(seed.targetIssueId ? [{ type: "issue", id: seed.targetIssueId, label: "stale issue" }] : []),
+        ...(seed.projectId
+          ? [{ type: "project", id: seed.projectId, label: "source project" }]
+          : []),
+        ...(seed.targetIssueId
+          ? [{ type: "issue", id: seed.targetIssueId, label: "stale issue" }]
+          : []),
       ],
       companyPriority: seed.priority === 1 ? "high" : "normal",
       triggerReason: seed.kind,
@@ -884,7 +913,11 @@ export class StrategicPlannerService {
       doneWhen:
         seed.kind === "project_workspace"
           ? ["project linked to durable workspace", "workspace captured in control plane"]
-          : ["concrete next deliverable defined", "responsible operator identified", "next step captured"],
+          : [
+              "concrete next deliverable defined",
+              "responsible operator identified",
+              "next step captured",
+            ],
     };
   }
 

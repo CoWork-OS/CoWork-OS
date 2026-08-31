@@ -8,6 +8,12 @@ import { getOpenRouterAttributionHeaders } from "../llm/openrouter-attribution";
 import { OpenAIOAuth, OpenAIOAuthTokens } from "../llm/openai-oauth";
 import { loadPiAiModule } from "../llm/pi-ai-loader";
 import { LLMProviderFactory } from "../llm/provider-factory";
+import {
+  assertWorkspaceReadableFileAccessWithApproval,
+  evaluateWorkspaceFilesystemAccess,
+  type WorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
+import { evaluateNetworkPolicy } from "../../security/network-policy";
 
 /**
  * Image generation provider types
@@ -186,7 +192,9 @@ function getImageProviderTimeoutMs(
   provider: ImageProvider,
 ): number {
   const key = imageProviderTimeoutKey(provider);
-  const configured = normalizeImageProviderTimeoutSeconds(settings.imageGeneration?.timeouts?.[key]);
+  const configured = normalizeImageProviderTimeoutSeconds(
+    settings.imageGeneration?.timeouts?.[key],
+  );
   return (configured ?? DEFAULT_IMAGE_PROVIDER_TIMEOUT_SECONDS) * 1000;
 }
 
@@ -221,14 +229,12 @@ async function runWithImageProviderTimeout<T>(
  * Map our Gemini presets to Gemini model IDs.
  * nano-banana-2 = Gemini 3.1 Flash Image Preview (Nano Banana 2)
  */
-const GEMINI_MODEL_MAP: Record<
-  "gemini-image-fast" | "gemini-image-pro" | "nano-banana-2",
-  string
-> = {
-  "gemini-image-fast": "gemini-2.5-flash-image",
-  "gemini-image-pro": "gemini-3-pro-image-preview",
-  "nano-banana-2": "gemini-3.1-flash-image-preview",
-};
+const GEMINI_MODEL_MAP: Record<"gemini-image-fast" | "gemini-image-pro" | "nano-banana-2", string> =
+  {
+    "gemini-image-fast": "gemini-2.5-flash-image",
+    "gemini-image-pro": "gemini-3-pro-image-preview",
+    "nano-banana-2": "gemini-3.1-flash-image-preview",
+  };
 
 const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
 const OPENAI_CODEX_IMAGE_INSTRUCTIONS =
@@ -307,8 +313,7 @@ function normalizeOpenAIImageModel(model?: string): string | undefined {
 function inferOpenAIImageModelFromText(text: string): string | null {
   const t = (text || "").toLowerCase();
   if (!t.trim()) return null;
-  if (t.includes("gpt-image-2") || t.includes("gpt-2") || t.includes("gpt2"))
-    return "gpt-image-2";
+  if (t.includes("gpt-image-2") || t.includes("gpt-2") || t.includes("gpt2")) return "gpt-image-2";
   if (t.includes("gpt-image-1.5") || t.includes("gpt-1.5") || t.includes("gpt1.5"))
     return "gpt-image-1.5";
   if (t.includes("gpt-image-1") || t.includes("gpt-1") || t.includes("gpt1")) return "gpt-image-1";
@@ -363,31 +368,15 @@ function parseImageDataUrl(
   return parsed && parsed.buffer.length <= maxBytes ? parsed : null;
 }
 
-function isPathWithinRoot(candidate: string, root: string): boolean {
-  const resolvedCandidate = path.resolve(candidate);
-  const resolvedRoot = path.resolve(root);
-  return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`);
-}
-
 async function prepareOpenRouterReferenceImages(
   workspace: Workspace,
   references: string[] | undefined,
+  approvalHandlers: WorkspaceFilesystemApprovalHandlers = {},
 ): Promise<string[]> {
   if (!references || references.length === 0) return [];
   if (references.length > 16) {
     throw new Error("OpenRouter accepts at most 16 reference images per request.");
   }
-
-  const allowedRoots = [workspace.path, ...(workspace.permissions.allowedPaths || [])];
-  const resolvedAllowedRoots = await Promise.all(
-    allowedRoots.map(async (root) => {
-      try {
-        return await fs.promises.realpath(root);
-      } catch {
-        return path.resolve(root);
-      }
-    }),
-  );
 
   const prepared: string[] = [];
   for (const reference of references) {
@@ -396,36 +385,50 @@ async function prepareOpenRouterReferenceImages(
 
     if (/^data:image\//i.test(value)) {
       const parsed = parseImageDataUrl(value, MAX_OPENROUTER_REFERENCE_BYTES);
-      if (!parsed) throw new Error("Reference image data URLs must contain valid non-empty image data.");
+      if (!parsed)
+        throw new Error("Reference image data URLs must contain valid non-empty image data.");
       prepared.push(value);
       continue;
     }
 
     if (/^https?:\/\//i.test(value)) {
+      const networkDecision = evaluateNetworkPolicy({
+        url: value,
+        toolName: "image_reference",
+        networkEnabled: workspace.permissions.network,
+        accessNetworkMode: workspace.permissions.accessNetworkMode,
+        profileDomainRules: workspace.permissions.accessDomainRules,
+      });
+      if (networkDecision.action !== "allow") {
+        throw new Error(`Network access denied for image reference: ${networkDecision.reason}`);
+      }
       prepared.push(value);
       continue;
     }
 
     if (/^[a-z][a-z\d+.-]*:/i.test(value)) {
-      throw new Error("Reference images support only local paths, HTTP(S) URLs, or image data URLs.");
+      throw new Error(
+        "Reference images support only local paths, HTTP(S) URLs, or image data URLs.",
+      );
     }
 
     if (!workspace.permissions.read) {
       throw new Error("Read permission is required to use local reference images.");
     }
 
-    const candidate = path.resolve(workspace.path, value);
     let realPath: string;
     try {
-      realPath = await fs.promises.realpath(candidate);
-    } catch {
+      realPath = await assertWorkspaceReadableFileAccessWithApproval(
+        workspace,
+        value,
+        "Reference image",
+        approvalHandlers,
+      );
+    } catch (error) {
+      if (String(error).includes("profile_filesystem_denied")) {
+        throw new Error(`Path is denied by the active access profile: ${value}`);
+      }
       throw new Error(`Reference image was not found: ${value}`);
-    }
-    if (
-      !workspace.permissions.unrestrictedFileAccess &&
-      !resolvedAllowedRoots.some((root) => isPathWithinRoot(realPath, root))
-    ) {
-      throw new Error(`Reference image is outside the workspace allowed paths: ${value}`);
     }
 
     const stats = await fs.promises.stat(realPath);
@@ -448,6 +451,7 @@ async function getOpenRouterImageModelCapabilities(args: {
   baseUrl: string;
   model: string;
   signal?: AbortSignal;
+  networkPolicyGuard?: (url: string) => void;
 }): Promise<OpenRouterImageCapabilities | undefined> {
   const keyFingerprint = createHash("sha256").update(args.apiKey).digest("hex").slice(0, 16);
   const cacheKey = `${args.baseUrl}\u0000${args.model}\u0000${keyFingerprint}`;
@@ -460,7 +464,9 @@ async function getOpenRouterImageModelCapabilities(args: {
   };
   let data: { data?: Any[] };
   try {
-    const response = await fetch(`${args.baseUrl}/images/models`, {
+    const modelsUrl = `${args.baseUrl}/images/models`;
+    args.networkPolicyGuard?.(modelsUrl);
+    const response = await fetch(modelsUrl, {
       headers,
       signal: args.signal,
     });
@@ -485,16 +491,13 @@ async function getOpenRouterImageModelCapabilities(args: {
   let endpoints: OpenRouterImageEndpoint[] = [];
   try {
     const normalizedEndpointPath = endpointPath.startsWith("/") ? endpointPath : `/${endpointPath}`;
-    const endpointUrl =
-      /^https?:\/\//i.test(endpointPath)
-        ? endpointPath
-        : args.baseUrl.endsWith("/api/v1") && normalizedEndpointPath.startsWith("/api/v1/")
+    const endpointUrl = /^https?:\/\//i.test(endpointPath)
+      ? endpointPath
+      : args.baseUrl.endsWith("/api/v1") && normalizedEndpointPath.startsWith("/api/v1/")
         ? `${args.baseUrl}${normalizedEndpointPath.slice("/api/v1".length)}`
         : `${args.baseUrl}${normalizedEndpointPath}`;
-    const endpointResponse = await fetch(
-      endpointUrl,
-      { headers, signal: args.signal },
-    );
+    args.networkPolicyGuard?.(endpointUrl);
+    const endpointResponse = await fetch(endpointUrl, { headers, signal: args.signal });
     if (endpointResponse.ok) {
       const endpointData = (await endpointResponse.json()) as Any;
       const endpointItems = Array.isArray(endpointData?.data)
@@ -521,7 +524,9 @@ async function getOpenRouterImageModelCapabilities(args: {
                 : {},
           };
         })
-        .filter((entry: OpenRouterImageEndpoint) => Object.keys(entry.supportedParameters).length > 0);
+        .filter(
+          (entry: OpenRouterImageEndpoint) => Object.keys(entry.supportedParameters).length > 0,
+        );
     }
   } catch {
     // Model-level capabilities remain useful if endpoint discovery is unavailable.
@@ -537,8 +542,7 @@ function supportsOpenRouterImageParameter(
   name: string,
 ): boolean {
   return Boolean(
-    capabilities &&
-      Object.prototype.hasOwnProperty.call(capabilities.modelParameters, name),
+    capabilities && Object.prototype.hasOwnProperty.call(capabilities.modelParameters, name),
   );
 }
 
@@ -577,7 +581,8 @@ function selectOpenRouterImageEndpoint(
       requested.seed !== undefined ? "seed" : null,
     ].filter((value): value is string => Boolean(value));
     if (requested.count > 1) requires.push("n");
-    if (requires.some((name) => !Object.prototype.hasOwnProperty.call(parameters, name))) return false;
+    if (requires.some((name) => !Object.prototype.hasOwnProperty.call(parameters, name)))
+      return false;
     const refs = parameters.input_references;
     if (
       requested.referenceCount > 0 &&
@@ -736,7 +741,7 @@ function hasOpenAIOAuthTokens(
 ): boolean {
   return Boolean(
     settings.openai?.accessToken?.trim() &&
-      (settings.openai?.authMethod === "oauth" || settings.openai?.refreshToken?.trim()),
+    (settings.openai?.authMethod === "oauth" || settings.openai?.refreshToken?.trim()),
   );
 }
 
@@ -748,11 +753,14 @@ function getConfiguredImageProviders(
   const azureImageDeployments = getAzureImageDeployments(settings);
   const azureOk =
     !!(settings.imageGeneration?.azure?.imageApiKey?.trim() || settings.azure?.apiKey?.trim()) &&
-    !!(settings.imageGeneration?.azure?.imageEndpoint?.trim() || settings.azure?.endpoint?.trim()) &&
+    !!(
+      settings.imageGeneration?.azure?.imageEndpoint?.trim() || settings.azure?.endpoint?.trim()
+    ) &&
     azureImageDeployments.length > 0;
   if (azureOk) providers.push("azure");
 
-  const openaiKey = settings.imageGeneration?.openai?.apiKey?.trim() || settings.openai?.apiKey?.trim();
+  const openaiKey =
+    settings.imageGeneration?.openai?.apiKey?.trim() || settings.openai?.apiKey?.trim();
   if (openaiKey) providers.push("openai");
 
   if (hasOpenAIOAuthTokens(settings)) providers.push("openai-codex");
@@ -761,7 +769,8 @@ function getConfiguredImageProviders(
     settings.imageGeneration?.openrouter?.apiKey?.trim() || settings.openrouter?.apiKey?.trim();
   if (openrouterKey) providers.push("openrouter");
 
-  const geminiKey = settings.imageGeneration?.gemini?.apiKey?.trim() || settings.gemini?.apiKey?.trim();
+  const geminiKey =
+    settings.imageGeneration?.gemini?.apiKey?.trim() || settings.gemini?.apiKey?.trim();
   if (geminiKey) providers.push("gemini");
 
   return providers;
@@ -823,10 +832,7 @@ function buildProviderOrderFromImageSettings(
 
   pushConfiguredImageRoute(order, configured, defaultProvider, defaultPreset);
 
-  if (
-    !defaultProvider &&
-    (defaultPreset === "gpt-image-2" || defaultPreset === "gpt-image-1.5")
-  ) {
+  if (!defaultProvider && (defaultPreset === "gpt-image-2" || defaultPreset === "gpt-image-1.5")) {
     for (const p of ["azure", "openai", "openai-codex", "openrouter"] as ImageProvider[]) {
       if (configured.includes(p)) order.push({ provider: p, modelPreset: defaultPreset });
     }
@@ -869,12 +875,7 @@ function buildOpenAICodexPreferredOrder(
   for (const provider of configured) {
     if (!order.includes(provider)) order.push(provider);
   }
-  for (const provider of [
-    "gemini",
-    "openai",
-    "azure",
-    "openrouter",
-  ] as ImageProvider[]) {
+  for (const provider of ["gemini", "openai", "azure", "openrouter"] as ImageProvider[]) {
     if (!order.includes(provider)) order.push(provider);
   }
   return order.map((provider) => ({
@@ -905,7 +906,9 @@ export function selectImageProviderOrder(args: {
   if (args.preferOpenRouter && !explicitProvider && configured.includes("openrouter")) {
     return [
       { provider: "openrouter" },
-      ...configured.filter((provider) => provider !== "openrouter").map((provider) => ({ provider })),
+      ...configured
+        .filter((provider) => provider !== "openrouter")
+        .map((provider) => ({ provider })),
     ];
   }
 
@@ -933,9 +936,9 @@ export function selectImageProviderOrder(args: {
           ? "openai"
           : configured.includes("openai-codex")
             ? "openai-codex"
-          : configured.includes("openrouter")
-            ? "openrouter"
-            : null
+            : configured.includes("openrouter")
+              ? "openrouter"
+              : null
       : null) ||
     configured[0] ||
     null;
@@ -1046,7 +1049,43 @@ async function resolveOpenAICodexHostModel(): Promise<string> {
  * ImageGenerator - Generates images using whichever provider is configured, with fallback.
  */
 export class ImageGenerator {
-  constructor(private workspace: Workspace) {}
+  constructor(
+    private workspace: Workspace,
+    private filesystemApprovalHandlers: WorkspaceFilesystemApprovalHandlers = {},
+  ) {}
+
+  /**
+   * Provider SDKs and media downloads do not carry a user-supplied URL into
+   * the generic tool permission classifier. Check their concrete destination
+   * here so profile domain rules apply to the actual egress endpoint too.
+   */
+  private assertNetworkAccess(url: string, toolName = "generate_image"): void {
+    const decision = evaluateNetworkPolicy({
+      url,
+      toolName,
+      networkEnabled: this.workspace.permissions.network,
+      accessNetworkMode: this.workspace.permissions.accessNetworkMode,
+      profileDomainRules: this.workspace.permissions.accessDomainRules,
+    });
+    if (decision.action !== "allow") {
+      throw new Error(`Network access denied for ${decision.url}: ${decision.reason}`);
+    }
+  }
+
+  private assertOutputPathAllowed(outputPath: string): void {
+    if (this.workspace.permissions.write === false) {
+      throw new Error("Write permission not granted for image generation");
+    }
+    const access = evaluateWorkspaceFilesystemAccess(this.workspace, outputPath, "write");
+    if (access.decision !== "allow") {
+      if (access.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${outputPath}`);
+      }
+      throw new Error(
+        `Image output path is outside the active access profile boundary: ${outputPath}`,
+      );
+    }
+  }
 
   async generate(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
     const prompt = request.prompt;
@@ -1067,12 +1106,12 @@ export class ImageGenerator {
     const referenceImages = request.referenceImages;
     const hasOpenRouterSpecificOptions = Boolean(
       referenceImages?.length ||
-        aspectRatio ||
-        quality ||
-        background ||
-        outputFormat ||
-        outputCompression !== undefined ||
-        seed !== undefined,
+      aspectRatio ||
+      quality ||
+      background ||
+      outputFormat ||
+      outputCompression !== undefined ||
+      seed !== undefined,
     );
     const signal = request.signal;
     const onProgress = request.onProgress;
@@ -1097,16 +1136,21 @@ export class ImageGenerator {
         images: [],
         provider: providerOverride,
         model: modelOverride || "image-generation",
-        error: "Reference images and advanced image options currently require the OpenRouter provider.",
+        error:
+          "Reference images and advanced image options currently require the OpenRouter provider.",
         actionHint: buildSetupHint("openrouter"),
       };
     }
-    if (hasOpenRouterSpecificOptions && !providerOrder.some((entry) => entry.provider === "openrouter")) {
+    if (
+      hasOpenRouterSpecificOptions &&
+      !providerOrder.some((entry) => entry.provider === "openrouter")
+    ) {
       return {
         success: false,
         images: [],
         model: modelOverride || "image-generation",
-        error: "Reference images and advanced image options require a configured OpenRouter provider.",
+        error:
+          "Reference images and advanced image options require a configured OpenRouter provider.",
         actionHint: buildSetupHint("openrouter"),
       };
     }
@@ -1197,16 +1241,19 @@ export class ImageGenerator {
             timeoutMs: providerTimeoutMs,
             message: `Trying Gemini image model ${modelId} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
           });
-          const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
-            this.generateWithGemini({
-              apiKey,
-              modelId,
-              prompt,
-              filename,
-              imageSize,
-              numberOfImages,
-              signal: attemptSignal,
-            }),
+          const attempt = await runWithImageProviderTimeout(
+            signal,
+            providerTimeoutMs,
+            (attemptSignal) =>
+              this.generateWithGemini({
+                apiKey,
+                modelId,
+                prompt,
+                filename,
+                imageSize,
+                numberOfImages,
+                signal: attemptSignal,
+              }),
           );
           if (
             attempt.result.success ||
@@ -1214,7 +1261,11 @@ export class ImageGenerator {
               (providerOverride !== "auto" || !isTransientImageProviderError(attempt.result.error)))
           )
             return attempt.result;
-          considerError(provider, attempt.result.error || "Gemini image generation timed out.", modelId);
+          considerError(
+            provider,
+            attempt.result.error || "Gemini image generation timed out.",
+            modelId,
+          );
           emitProviderFallback(
             provider,
             modelId,
@@ -1248,16 +1299,19 @@ export class ImageGenerator {
             timeoutMs: providerTimeoutMs,
             message: `Trying OpenAI image model ${chosenModel} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
           });
-          const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
-            this.generateWithOpenAI({
-              apiKey,
-              model: chosenModel,
-              prompt,
-              filename,
-              imageSize,
-              numberOfImages,
-              signal: attemptSignal,
-            }),
+          const attempt = await runWithImageProviderTimeout(
+            signal,
+            providerTimeoutMs,
+            (attemptSignal) =>
+              this.generateWithOpenAI({
+                apiKey,
+                model: chosenModel,
+                prompt,
+                filename,
+                imageSize,
+                numberOfImages,
+                signal: attemptSignal,
+              }),
           );
           if (
             attempt.result.success ||
@@ -1265,7 +1319,11 @@ export class ImageGenerator {
               (providerOverride !== "auto" || !isTransientImageProviderError(attempt.result.error)))
           )
             return attempt.result;
-          considerError(provider, attempt.result.error || "OpenAI image generation timed out.", chosenModel);
+          considerError(
+            provider,
+            attempt.result.error || "OpenAI image generation timed out.",
+            chosenModel,
+          );
           emitProviderFallback(
             provider,
             chosenModel,
@@ -1288,7 +1346,9 @@ export class ImageGenerator {
             resolveOpenAICodexImageModelOverride(settings.imageGeneration?.openaiCodex?.model) ||
             resolveOpenAICodexImageModelOverride(modelOverride) ||
             resolveOpenAICodexImageModelOverride(modelPreset) ||
-            resolveOpenAICodexImageModelOverride(inferOpenAIImageModelFromText(prompt) || undefined) ||
+            resolveOpenAICodexImageModelOverride(
+              inferOpenAIImageModelFromText(prompt) || undefined,
+            ) ||
             getDefaultOpenAICodexImageModel();
           const normalizedChosenModel = normalizeOpenAIImageModel(chosenModel) || chosenModel;
           if (!OPENAI_CODEX_RESPONSES_IMAGE_MODELS.has(normalizedChosenModel.toLowerCase())) {
@@ -1307,17 +1367,20 @@ export class ImageGenerator {
             timeoutMs: providerTimeoutMs,
             message: `Trying ChatGPT subscription image model ${normalizedChosenModel} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
           });
-          const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
-            this.generateWithOpenAICodex({
-              apiKey: credentials.apiKey,
-              accessToken: credentials.accessToken,
-              model: normalizedChosenModel,
-              prompt,
-              filename,
-              imageSize,
-              numberOfImages,
-              signal: attemptSignal,
-            }),
+          const attempt = await runWithImageProviderTimeout(
+            signal,
+            providerTimeoutMs,
+            (attemptSignal) =>
+              this.generateWithOpenAICodex({
+                apiKey: credentials.apiKey,
+                accessToken: credentials.accessToken,
+                model: normalizedChosenModel,
+                prompt,
+                filename,
+                imageSize,
+                numberOfImages,
+                signal: attemptSignal,
+              }),
           );
           if (
             attempt.result.success ||
@@ -1385,18 +1448,21 @@ export class ImageGenerator {
               fallbackModel: nextDeployment,
               message: `Trying Azure image deployment ${deployment} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
             });
-            const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
-              this.generateWithAzureOpenAI({
-                apiKey,
-                endpoint,
-                apiVersion,
-                deployment,
-                prompt,
-                filename,
-                imageSize,
-                numberOfImages,
-                signal: attemptSignal,
-              }),
+            const attempt = await runWithImageProviderTimeout(
+              signal,
+              providerTimeoutMs,
+              (attemptSignal) =>
+                this.generateWithAzureOpenAI({
+                  apiKey,
+                  endpoint,
+                  apiVersion,
+                  deployment,
+                  prompt,
+                  filename,
+                  imageSize,
+                  numberOfImages,
+                  signal: attemptSignal,
+                }),
             );
             if (attempt.result.success) {
               return attempt.result;
@@ -1455,7 +1521,8 @@ export class ImageGenerator {
           );
           const requestedOpenRouterModel =
             modelOverride &&
-            (modelOverride.includes("/") || isOpenAIImageModel(normalizeOpenAIImageModel(modelOverride)))
+            (modelOverride.includes("/") ||
+              isOpenAIImageModel(normalizeOpenAIImageModel(modelOverride)))
               ? normalizeOpenRouterImageModel(modelOverride)
               : undefined;
           const openaiModel =
@@ -1473,24 +1540,27 @@ export class ImageGenerator {
             timeoutMs: providerTimeoutMs,
             message: `Trying OpenRouter image model ${openRouterModel} (timeout ${Math.round(providerTimeoutMs / 1000)}s).`,
           });
-          const attempt = await runWithImageProviderTimeout(signal, providerTimeoutMs, (attemptSignal) =>
-            this.generateWithOpenRouter({
-              apiKey,
-              baseUrl,
-              model: openRouterModel,
-              prompt,
-              filename,
-              imageSize,
-              numberOfImages,
-              aspectRatio,
-              quality,
-              background,
-              outputFormat,
-              outputCompression,
-              seed,
-              referenceImages,
-              signal: attemptSignal,
-            }),
+          const attempt = await runWithImageProviderTimeout(
+            signal,
+            providerTimeoutMs,
+            (attemptSignal) =>
+              this.generateWithOpenRouter({
+                apiKey,
+                baseUrl,
+                model: openRouterModel,
+                prompt,
+                filename,
+                imageSize,
+                numberOfImages,
+                aspectRatio,
+                quality,
+                background,
+                outputFormat,
+                outputCompression,
+                seed,
+                referenceImages,
+                signal: attemptSignal,
+              }),
           );
           if (attempt.result.success) return attempt.result;
           considerError(
@@ -1594,6 +1664,7 @@ export class ImageGenerator {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${args.modelId}:generateContent`;
     const baseFilename = getSafeImageBaseFilename(args.filename);
     const outputDir = this.workspace.path;
+    this.assertNetworkAccess(endpoint);
 
     try {
       console.log(`[ImageGenerator] Generating image with gemini (${args.modelId})`);
@@ -1671,6 +1742,7 @@ export class ImageGenerator {
             const outputPath = path.join(outputDir, imageName);
 
             const imageBuffer = Buffer.from(inlineData.data, "base64");
+            this.assertOutputPathAllowed(outputPath);
             await fs.promises.writeFile(outputPath, imageBuffer);
             const stats = await fs.promises.stat(outputPath);
 
@@ -1726,7 +1798,9 @@ export class ImageGenerator {
       const n = Math.min(args.numberOfImages, 4);
       throwIfImageGenerationAborted(args.signal);
 
-      const response = await fetch("https://api.openai.com/v1/images/generations", {
+      const endpoint = "https://api.openai.com/v1/images/generations";
+      this.assertNetworkAccess(endpoint);
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1774,6 +1848,7 @@ export class ImageGenerator {
           const imageBuffer = Buffer.from(b64, "base64");
           const imageName = n > 1 ? `${baseFilename}_${i + 1}.png` : `${baseFilename}.png`;
           const outputPath = path.join(outputDir, imageName);
+          this.assertOutputPathAllowed(outputPath);
           await fs.promises.writeFile(outputPath, imageBuffer);
           const stats = await fs.promises.stat(outputPath);
           images.push({
@@ -1785,6 +1860,7 @@ export class ImageGenerator {
           continue;
         }
         if (url && typeof url === "string") {
+          this.assertNetworkAccess(url);
           const dl = await fetch(url, { signal: args.signal });
           if (!dl.ok) continue;
           throwIfImageGenerationAborted(args.signal);
@@ -1795,6 +1871,7 @@ export class ImageGenerator {
           const imageName =
             n > 1 ? `${baseFilename}_${i + 1}.${extension}` : `${baseFilename}.${extension}`;
           const outputPath = path.join(outputDir, imageName);
+          this.assertOutputPathAllowed(outputPath);
           await fs.promises.writeFile(outputPath, buf);
           const stats = await fs.promises.stat(outputPath);
           images.push({ path: outputPath, filename: imageName, mimeType, size: stats.size });
@@ -1847,6 +1924,7 @@ export class ImageGenerator {
 
     try {
       console.log(`[ImageGenerator] Generating image with openai-codex (${args.model})`);
+      this.assertNetworkAccess(OPENAI_CODEX_BASE_URL);
 
       const accountId = extractChatGPTAccountId(args.accessToken);
       const hostModel = await resolveOpenAICodexHostModel();
@@ -1866,38 +1944,44 @@ export class ImageGenerator {
       for (let i = 0; i < n; i++) {
         throwIfImageGenerationAborted(args.signal);
         let imageBase64: string | null = null;
-        const stream = client.responses.stream({
-          model: hostModel,
-          store: false,
-          instructions: OPENAI_CODEX_IMAGE_INSTRUCTIONS,
-          input: [
-            {
-              type: "message",
-              role: "user",
-              content: [{ type: "input_text", text: args.prompt }],
+        const stream = client.responses.stream(
+          {
+            model: hostModel,
+            store: false,
+            instructions: OPENAI_CODEX_IMAGE_INSTRUCTIONS,
+            input: [
+              {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: args.prompt }],
+              },
+            ],
+            tools: [
+              {
+                type: "image_generation",
+                model: args.model,
+                size,
+                output_format: "png",
+                background: "opaque",
+                partial_images: 1,
+                ...(args.model === "gpt-image-1.5" ? { action: "generate" } : {}),
+              },
+            ],
+            tool_choice: {
+              type: "allowed_tools",
+              mode: "required",
+              tools: [{ type: "image_generation" }],
             },
-          ],
-          tools: [
-            {
-              type: "image_generation",
-              model: args.model,
-              size,
-              output_format: "png",
-              background: "opaque",
-              partial_images: 1,
-              ...(args.model === "gpt-image-1.5" ? { action: "generate" } : {}),
-            },
-          ],
-          tool_choice: {
-            type: "allowed_tools",
-            mode: "required",
-            tools: [{ type: "image_generation" }],
-          },
-        } as Any, args.signal ? ({ signal: args.signal } as Any) : undefined);
+          } as Any,
+          args.signal ? ({ signal: args.signal } as Any) : undefined,
+        );
 
         for await (const event of stream) {
           throwIfImageGenerationAborted(args.signal);
-          if (event.type === "response.output_item.done" && event.item.type === "image_generation_call") {
+          if (
+            event.type === "response.output_item.done" &&
+            event.item.type === "image_generation_call"
+          ) {
             if (typeof event.item.result === "string" && event.item.result) {
               imageBase64 = event.item.result;
             }
@@ -1911,7 +1995,11 @@ export class ImageGenerator {
         const finalResponse = await stream.finalResponse();
         throwIfImageGenerationAborted(args.signal);
         for (const item of finalResponse.output || []) {
-          if (item.type === "image_generation_call" && typeof item.result === "string" && item.result) {
+          if (
+            item.type === "image_generation_call" &&
+            typeof item.result === "string" &&
+            item.result
+          ) {
             imageBase64 = item.result;
           }
         }
@@ -1932,6 +2020,7 @@ export class ImageGenerator {
         const imageName = n > 1 ? `${baseFilename}_${i + 1}.png` : `${baseFilename}.png`;
         const outputPath = path.join(outputDir, imageName);
         throwIfImageGenerationAborted(args.signal);
+        this.assertOutputPathAllowed(outputPath);
         await fs.promises.writeFile(outputPath, imageBuffer);
         writtenPaths.push(outputPath);
         const stats = await fs.promises.stat(outputPath);
@@ -1978,6 +2067,7 @@ export class ImageGenerator {
 
     try {
       console.log(`[ImageGenerator] Generating image with azure (${args.deployment})`);
+      this.assertNetworkAccess(url);
 
       const images: ImageGenerationResult["images"] = [];
       const n = Math.min(args.numberOfImages, 4);
@@ -2034,6 +2124,7 @@ export class ImageGenerator {
           const imageBuffer = Buffer.from(b64, "base64");
           const imageName = n > 1 ? `${baseFilename}_${i + 1}.png` : `${baseFilename}.png`;
           const outputPath = path.join(outputDir, imageName);
+          this.assertOutputPathAllowed(outputPath);
           await fs.promises.writeFile(outputPath, imageBuffer);
           const stats = await fs.promises.stat(outputPath);
           images.push({
@@ -2045,6 +2136,7 @@ export class ImageGenerator {
           continue;
         }
         if (url && typeof url === "string") {
+          this.assertNetworkAccess(url);
           const dl = await fetch(url, { signal: args.signal });
           if (!dl.ok) continue;
           throwIfImageGenerationAborted(args.signal);
@@ -2055,6 +2147,7 @@ export class ImageGenerator {
           const imageName =
             n > 1 ? `${baseFilename}_${i + 1}.${extension}` : `${baseFilename}.${extension}`;
           const outputPath = path.join(outputDir, imageName);
+          this.assertOutputPathAllowed(outputPath);
           await fs.promises.writeFile(outputPath, buf);
           const stats = await fs.promises.stat(outputPath);
           images.push({ path: outputPath, filename: imageName, mimeType, size: stats.size });
@@ -2114,12 +2207,14 @@ export class ImageGenerator {
 
     try {
       console.log(`[ImageGenerator] Generating image with openrouter (${args.model})`);
+      this.assertNetworkAccess(url);
 
       const capabilities = await getOpenRouterImageModelCapabilities({
         apiKey: args.apiKey,
         baseUrl: args.baseUrl,
         model: args.model,
         signal: args.signal,
+        networkPolicyGuard: (candidateUrl) => this.assertNetworkAccess(candidateUrl),
       });
       const endpoint = selectOpenRouterImageEndpoint(capabilities, {
         count: args.numberOfImages,
@@ -2134,14 +2229,14 @@ export class ImageGenerator {
       });
       const requestedAdvancedOption = Boolean(
         args.referenceImages?.length ||
-          args.numberOfImages > 1 ||
-          args.imageSize === "2K" ||
-          args.aspectRatio ||
-          args.quality ||
-          args.background ||
-          args.outputFormat ||
-          args.outputCompression !== undefined ||
-          args.seed !== undefined,
+        args.numberOfImages > 1 ||
+        args.imageSize === "2K" ||
+        args.aspectRatio ||
+        args.quality ||
+        args.background ||
+        args.outputFormat ||
+        args.outputCompression !== undefined ||
+        args.seed !== undefined,
       );
       if (capabilities?.endpoints.length && requestedAdvancedOption && !endpoint) {
         return {
@@ -2162,6 +2257,7 @@ export class ImageGenerator {
       const references = await prepareOpenRouterReferenceImages(
         this.workspace,
         args.referenceImages,
+        this.filesystemApprovalHandlers,
       );
       const validateOption = (name: string, value: unknown): string | null => {
         if (value === undefined || value === null || value === "") return null;
@@ -2203,7 +2299,10 @@ export class ImageGenerator {
         }
       }
       if (references.length > 0) {
-        const referenceParameter = getOpenRouterParameter(effectiveCapabilities, "input_references");
+        const referenceParameter = getOpenRouterParameter(
+          effectiveCapabilities,
+          "input_references",
+        );
         if (effectiveCapabilities && !referenceParameter) {
           return {
             success: false,
@@ -2215,8 +2314,10 @@ export class ImageGenerator {
           };
         }
         if (
-          (typeof referenceParameter?.min === "number" && references.length < referenceParameter.min) ||
-          (typeof referenceParameter?.max === "number" && references.length > referenceParameter.max)
+          (typeof referenceParameter?.min === "number" &&
+            references.length < referenceParameter.min) ||
+          (typeof referenceParameter?.max === "number" &&
+            references.length > referenceParameter.max)
         ) {
           return {
             success: false,
@@ -2330,6 +2431,7 @@ export class ImageGenerator {
             : `${baseFilename}.${extension}`;
         const outputPath = path.join(outputDir, imageName);
 
+        this.assertOutputPathAllowed(outputPath);
         await fs.promises.writeFile(outputPath, imageBuffer);
         const stats = await fs.promises.stat(outputPath);
         images.push({ path: outputPath, filename: imageName, mimeType, size: stats.size });

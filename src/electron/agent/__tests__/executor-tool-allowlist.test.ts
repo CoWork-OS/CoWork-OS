@@ -21,7 +21,7 @@ describe("TaskExecutor tool allow-list semantics", () => {
       getDisabledTools: vi.fn().mockReturnValue([]),
     };
     executor.isVisualCanvasTask = vi.fn().mockReturnValue(false);
-    executor.isCanvasTool = vi.fn((toolName: string) => toolName.startsWith('canvas_'));
+    executor.isCanvasTool = vi.fn((toolName: string) => toolName.startsWith("canvas_"));
     executor.workspace = { permissions: { shell: true } };
     executor.logTag = "[Executor:test]";
     return executor;
@@ -124,6 +124,27 @@ describe("TaskExecutor tool allow-list semantics", () => {
     expect(allowlist.has("gmail_action")).toBe(true);
   });
 
+  it("keeps local channel history tools available for WhatsApp message steps", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      title: "Summarize my WhatsApp messages",
+      prompt: "Check my WhatsApp messages and summarize them.",
+      agentConfig: { taskIntent: "execution" },
+    };
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+
+    const allowlist = (TaskExecutor as Any).prototype.buildStepToolAllowlist.call(
+      executor,
+      { requiredTools: new Set<string>() },
+      "analysis",
+      "general",
+      "Access WhatsApp through the connected message channel and review the requested messages.",
+    );
+
+    expect(allowlist.has("channel_list_chats")).toBe(true);
+    expect(allowlist.has("channel_history")).toBe(true);
+  });
+
   it("ignores unrecognized integration mention tool names in step-scoped allowlists", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = {
@@ -206,6 +227,31 @@ describe("TaskExecutor tool allow-list semantics", () => {
     );
 
     expect(allowlist.has("run_command")).toBe(true);
+  });
+
+  it("keeps Python data analysis on the command lane instead of desktop computer use", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      title: "Review expenses.csv and create summary.md",
+      prompt: "Use Python for the calculations, create summary.md, and do not modify expenses.csv.",
+      agentConfig: {
+        taskIntent: "execution",
+      },
+    };
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+
+    const allowlist = (TaskExecutor as Any).prototype.buildStepToolAllowlist.call(
+      executor,
+      { requiredTools: new Set<string>() },
+      "analysis",
+      "general",
+      "Use Python to parse the CSV and calculate totals before creating the summary.",
+    );
+
+    expect(allowlist.has("run_command")).toBe(true);
+    expect(allowlist.has("open_application")).toBe(false);
+    expect(allowlist.has("screenshot")).toBe(false);
+    expect(allowlist.has("keypress")).toBe(false);
   });
 
   it("includes parse_document but not read_pdf_visual for ordinary PDF reading steps", () => {

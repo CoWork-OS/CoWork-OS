@@ -108,7 +108,9 @@ export class ControlPlaneCoreService {
       status: input.status || "active",
       isDefault: shouldBeDefault,
       defaultWorkspaceId:
-        typeof input.defaultWorkspaceId === "string" ? input.defaultWorkspaceId.trim() || undefined : undefined,
+        typeof input.defaultWorkspaceId === "string"
+          ? input.defaultWorkspaceId.trim() || undefined
+          : undefined,
       monthlyBudgetCost: input.monthlyBudgetCost ?? undefined,
       budgetPausedAt: input.budgetPausedAt ?? undefined,
       createdAt: now,
@@ -271,7 +273,11 @@ export class ControlPlaneCoreService {
     return this.getGoal(id);
   }
 
-  listProjects(input?: { companyId?: string; goalId?: string; includeArchived?: boolean }): Project[] {
+  listProjects(input?: {
+    companyId?: string;
+    goalId?: string;
+    includeArchived?: boolean;
+  }): Project[] {
     const clauses: string[] = ["1 = 1"];
     const args: Any[] = [];
     if (input?.companyId) {
@@ -299,7 +305,9 @@ export class ControlPlaneCoreService {
   createProject(input: ProjectCreateInput): Project {
     const now = Date.now();
     const companyId =
-      input.companyId || (input.goalId ? this.getGoal(input.goalId)?.companyId : undefined) || this.getDefaultCompany().id;
+      input.companyId ||
+      (input.goalId ? this.getGoal(input.goalId)?.companyId : undefined) ||
+      this.getDefaultCompany().id;
     const project: Project = {
       id: randomUUID(),
       companyId,
@@ -421,7 +429,9 @@ export class ControlPlaneCoreService {
 
     if (input.isPrimary) {
       this.db
-        .prepare("UPDATE project_workspace_links SET is_primary = 0, updated_at = ? WHERE project_id = ?")
+        .prepare(
+          "UPDATE project_workspace_links SET is_primary = 0, updated_at = ? WHERE project_id = ?",
+        )
         .run(now, input.projectId);
     }
 
@@ -458,11 +468,16 @@ export class ControlPlaneCoreService {
     return result.changes > 0;
   }
 
-  setPrimaryProjectWorkspace(projectId: string, workspaceId: string): ProjectWorkspaceLink | undefined {
+  setPrimaryProjectWorkspace(
+    projectId: string,
+    workspaceId: string,
+  ): ProjectWorkspaceLink | undefined {
     const now = Date.now();
     const tx = this.db.transaction(() => {
       this.db
-        .prepare("UPDATE project_workspace_links SET is_primary = 0, updated_at = ? WHERE project_id = ?")
+        .prepare(
+          "UPDATE project_workspace_links SET is_primary = 0, updated_at = ? WHERE project_id = ?",
+        )
         .run(now, projectId);
       this.db
         .prepare(
@@ -767,7 +782,14 @@ export class ControlPlaneCoreService {
             WHERE id = ?
           `,
         )
-        .run(input.agentRoleId || null, input.workspaceId || null, input.taskId || null, runId, now, input.issueId);
+        .run(
+          input.agentRoleId || null,
+          input.workspaceId || null,
+          input.taskId || null,
+          runId,
+          now,
+          input.issueId,
+        );
       this.insertRunEvent(runId, "issue.checked_out", {
         issueId: input.issueId,
         agentRoleId: input.agentRoleId,
@@ -893,12 +915,7 @@ export class ControlPlaneCoreService {
             WHERE id = ?
           `,
         )
-        .run(
-          nextIssueStatus,
-          now,
-          input.status === "completed" ? now : null,
-          input.issueId,
-        );
+        .run(nextIssueStatus, now, input.status === "completed" ? now : null, input.issueId);
       this.insertRunEvent(runId, `issue.released.${input.status}`, {
         issueId: input.issueId,
         summary: input.summary,
@@ -1040,9 +1057,9 @@ export class ControlPlaneCoreService {
         ? task.source === "symphony"
           ? "review"
           : task.terminalStatus === "needs_user_action" ||
-          task.terminalStatus === "awaiting_approval" ||
-          task.terminalStatus === "resume_available" ||
-          task.terminalStatus === "partial_success"
+              task.terminalStatus === "awaiting_approval" ||
+              task.terminalStatus === "resume_available" ||
+              task.terminalStatus === "partial_success"
             ? "review"
             : "done"
         : runStatus === "cancelled" || runStatus === "interrupted"
@@ -1085,14 +1102,12 @@ export class ControlPlaneCoreService {
     tx();
   }
 
-  summarizeCosts(
-    input: {
-      scopeType: CostSummary["scopeType"];
-      scopeId: string;
-      windowStart?: number;
-      windowEnd?: number;
-    },
-  ): CostSummary {
+  summarizeCosts(input: {
+    scopeType: CostSummary["scopeType"];
+    scopeId: string;
+    windowStart?: number;
+    windowEnd?: number;
+  }): CostSummary {
     const { start, end } = currentMonthWindow();
     const windowStart = input.windowStart ?? start;
     const windowEnd = input.windowEnd ?? end;
@@ -1157,7 +1172,11 @@ export class ControlPlaneCoreService {
     };
   }
 
-  summarizeCostsByAgent(agentRoleId: string, windowStart?: number, windowEnd?: number): CostSummary {
+  summarizeCostsByAgent(
+    agentRoleId: string,
+    windowStart?: number,
+    windowEnd?: number,
+  ): CostSummary {
     return this.summarizeCosts({
       scopeType: "agent",
       scopeId: agentRoleId,
@@ -1166,7 +1185,11 @@ export class ControlPlaneCoreService {
     });
   }
 
-  summarizeCostsByProject(projectId: string, windowStart?: number, windowEnd?: number): CostSummary {
+  summarizeCostsByProject(
+    projectId: string,
+    windowStart?: number,
+    windowEnd?: number,
+  ): CostSummary {
     return this.summarizeCosts({
       scopeType: "project",
       scopeId: projectId,
@@ -1205,13 +1228,15 @@ export class ControlPlaneCoreService {
     if (!company) throw new Error(`Company not found: ${companyId}`);
     const goals = this.listGoals(companyId);
     const projects = this.listProjects({ companyId, includeArchived: true });
-    const projectWorkspaceLinks = projects.flatMap((project) => this.listProjectWorkspaces(project.id));
+    const projectWorkspaceLinks = projects.flatMap((project) =>
+      this.listProjectWorkspaces(project.id),
+    );
     const issues = this.listIssues({ companyId, limit: 5000 });
     const issueComments = issues.flatMap((issue) => this.listIssueComments(issue.id));
     const agentRoles = this.agentRoleRepo.findAll(true);
-    const teams = (this.db
-      .prepare("SELECT * FROM agent_teams ORDER BY created_at ASC")
-      .all() as Any[]).map((row) => ({
+    const teams = (
+      this.db.prepare("SELECT * FROM agent_teams ORDER BY created_at ASC").all() as Any[]
+    ).map((row) => ({
       ...row,
       workspaceId: row.workspace_id,
       leadAgentRoleId: row.lead_agent_role_id,
@@ -1478,7 +1503,9 @@ export class ControlPlaneCoreService {
   }
 
   private resolveImportedCompanySlug(baseSlug: string): string {
-    return this.resolveAvailableCompanySlug(this.normalizeCompanySlug(baseSlug) || "imported-company");
+    return this.resolveAvailableCompanySlug(
+      this.normalizeCompanySlug(baseSlug) || "imported-company",
+    );
   }
 
   private resolveAvailableCompanyName(baseName: string): string {
@@ -1650,7 +1677,11 @@ export class ControlPlaneCoreService {
   }
 
   private buildCompanyWorkspacePath(slugOrName: string): string {
-    return path.join(getUserDataDir(), "company-workspaces", this.normalizeCompanySlug(slugOrName) || "company");
+    return path.join(
+      getUserDataDir(),
+      "company-workspaces",
+      this.normalizeCompanySlug(slugOrName) || "company",
+    );
   }
 
   private ensureDefaultCompanySeeded(): void {
@@ -1682,9 +1713,9 @@ export class ControlPlaneCoreService {
   }
 
   private provisionCompanyDefaultWorkspaces(): void {
-    const companyIds = (this.db.prepare("SELECT id FROM companies ORDER BY created_at ASC").all() as Any[]).map(
-      (row) => String(row.id),
-    );
+    const companyIds = (
+      this.db.prepare("SELECT id FROM companies ORDER BY created_at ASC").all() as Any[]
+    ).map((row) => String(row.id));
     for (const companyId of companyIds) {
       const company = this.getCompany(companyId);
       if (!company) continue;

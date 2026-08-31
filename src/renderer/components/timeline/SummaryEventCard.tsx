@@ -67,7 +67,13 @@ export function SummaryEventCard({
           onClick={hasDetails ? () => setExpanded((v) => !v) : undefined}
           role={hasDetails ? "button" : undefined}
           tabIndex={hasDetails ? 0 : undefined}
-          onKeyDown={hasDetails ? (e) => { if (e.key === "Enter" || e.key === " ") setExpanded((v) => !v); } : undefined}
+          onKeyDown={
+            hasDetails
+              ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") setExpanded((v) => !v);
+                }
+              : undefined
+          }
         >
           <div className="event-header-left">
             {hasDetails && (
@@ -85,9 +91,7 @@ export function SummaryEventCard({
               </svg>
             )}
             <div className="event-title">
-              {event.actor && (
-                <span className="event-actor-badge">{event.actor}</span>
-              )}
+              {event.actor && <span className="event-actor-badge">{event.actor}</span>}
               <span className="event-summary-text">{event.summary}</span>
             </div>
           </div>

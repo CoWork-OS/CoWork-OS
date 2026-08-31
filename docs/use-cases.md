@@ -2,6 +2,11 @@
 
 This doc provides copy-paste prompts you can run to validate each flow end-to-end.
 
+Run each prompt with the least-privileged [access profile](access-profiles.md)
+that fits the scenario. The examples describe capability routing, not a grant
+of permission: skills, integrations, browser actions, devices, and automations
+remain beneath the selected profile and may pause for approval.
+
 ## Ideas Panel
 
 The **Ideas** tab in the sidebar shows use case prompts that use built-in capabilities (channels, inbox, /inbox, /brief, /simplify, /batch, /llm-wiki, browser, file I/O). See [Ideas Capabilities](ideas-capabilities.md) for what’s supported. Advanced use cases (e.g. legal skills) require optional skills and are listed below as copy-paste prompts.

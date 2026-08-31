@@ -4,6 +4,10 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { DropboxSettingsManager } from "../../settings/dropbox-manager";
 import { dropboxRequest, dropboxContentUpload } from "../../utils/dropbox-api";
+import {
+  assertWorkspaceReadableFileAccessWithApproval,
+  createWorkspaceFilesystemApprovalHandlers,
+} from "../../security/access-profile-paths";
 
 type DropboxAction =
   | "get_current_user"
@@ -54,45 +58,24 @@ export class DropboxTools {
     }
   }
 
-  private resolveFilePath(inputPath: string): string {
+  private async resolveFilePath(inputPath: string): Promise<string> {
     if (!this.workspace.permissions.read) {
       throw new Error("Read permission not granted for uploads");
     }
-
-    const workspaceRoot = path.resolve(this.workspace.path);
-    const allowedPaths = this.workspace.permissions.allowedPaths || [];
-    const canReadOutside =
-      this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess;
-
-    const isPathAllowed = (absolutePath: string): boolean => {
-      if (allowedPaths.length === 0) return false;
-      const normalizedPath = path.normalize(absolutePath);
-      return allowedPaths.some((allowed) => {
-        const normalizedAllowed = path.normalize(allowed);
-        return (
-          normalizedPath === normalizedAllowed ||
-          normalizedPath.startsWith(normalizedAllowed + path.sep)
-        );
-      });
-    };
-
-    const candidate = path.isAbsolute(inputPath)
-      ? path.normalize(inputPath)
-      : path.resolve(workspaceRoot, inputPath);
-
-    const relative = path.relative(workspaceRoot, candidate);
-    const isInsideWorkspace = !(relative.startsWith("..") || path.isAbsolute(relative));
-    if (!isInsideWorkspace && !canReadOutside && !isPathAllowed(candidate)) {
-      throw new Error("File path must be inside the workspace or in Allowed Paths");
+    try {
+      return await assertWorkspaceReadableFileAccessWithApproval(
+        this.workspace,
+        inputPath,
+        "Dropbox upload input",
+        createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "dropbox"),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("profile_filesystem_denied")) {
+        throw new Error(`Path is denied by the active access profile: ${inputPath}`);
+      }
+      throw error;
     }
-    if (!fs.existsSync(candidate)) {
-      throw new Error(`File not found: ${inputPath}`);
-    }
-    const stats = fs.statSync(candidate);
-    if (!stats.isFile()) {
-      throw new Error(`Path is not a file: ${inputPath}`);
-    }
-    return candidate;
   }
 
   private normalizeDropboxPath(pathValue: string): string {
@@ -211,7 +194,7 @@ export class DropboxTools {
       }
       case "upload_file": {
         if (!input.file_path) throw new Error("Missing file_path for upload_file");
-        const resolved = this.resolveFilePath(input.file_path);
+        const resolved = await this.resolveFilePath(input.file_path);
         const data = fs.readFileSync(resolved);
         const fileName = input.name || path.basename(resolved);
         const targetPath = input.path

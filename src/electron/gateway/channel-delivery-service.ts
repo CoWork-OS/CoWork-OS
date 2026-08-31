@@ -28,11 +28,7 @@ export interface ChannelDeliveryServiceDeps {
     content: string;
     attachments?: MessageAttachment[];
   }): void;
-  emitMessageSent(input: {
-    channelType: ChannelType;
-    chatId: string;
-    messageId: string;
-  }): void;
+  emitMessageSent(input: { channelType: ChannelType; chatId: string; messageId: string }): void;
   warn(message: string, error: unknown): void;
 }
 
@@ -45,11 +41,7 @@ export class ChannelDeliveryService {
     channelId?: string,
   ): Promise<string> {
     this.deps.cleanupIdempotencyCache();
-    const cacheKey = this.deps.getIdempotencyCacheKey(
-      channelType,
-      message,
-      channelId,
-    );
+    const cacheKey = this.deps.getIdempotencyCacheKey(channelType, message, channelId);
     if (cacheKey) {
       const existing = this.deps.getCachedIdempotentMessage(cacheKey);
       if (existing) {
@@ -60,9 +52,7 @@ export class ChannelDeliveryService {
     const adapter = this.deps.getAdapter(channelType, channelId);
     if (!adapter) {
       const suffix = channelId ? ` (channel ${channelId})` : "";
-      throw new Error(
-        `No adapter registered for channel type: ${channelType}${suffix}`,
-      );
+      throw new Error(`No adapter registered for channel type: ${channelType}${suffix}`);
     }
 
     if (adapter.status !== "connected") {

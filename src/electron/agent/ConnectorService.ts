@@ -18,9 +18,9 @@ export interface ConnectorResult<T = unknown> {
 }
 
 export interface GitHubRepoFileOptions {
-  repo: string;   // e.g. "owner/repo"
-  path: string;   // e.g. "src/index.ts"
-  ref?: string;   // branch/tag/commit (default: default branch)
+  repo: string; // e.g. "owner/repo"
+  path: string; // e.g. "src/index.ts"
+  ref?: string; // branch/tag/commit (default: default branch)
   token?: string;
 }
 

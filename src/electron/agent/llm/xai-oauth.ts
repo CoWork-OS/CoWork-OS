@@ -74,10 +74,7 @@ async function discoverXAIEndpoints(): Promise<DiscoveryResult> {
     throw new Error("xAI OAuth discovery response was missing required endpoints.");
   }
   return {
-    authorization_endpoint: validateXAIEndpoint(
-      authorizationEndpoint,
-      "authorization_endpoint",
-    ),
+    authorization_endpoint: validateXAIEndpoint(authorizationEndpoint, "authorization_endpoint"),
     token_endpoint: validateXAIEndpoint(tokenEndpoint, "token_endpoint"),
   };
 }
@@ -95,15 +92,10 @@ function parseTokenExpiry(accessToken: string, fallbackExpiresIn?: unknown): num
     }
   }
   const expiresIn = Number(fallbackExpiresIn);
-  return Number.isFinite(expiresIn) && expiresIn > 0
-    ? Date.now() + expiresIn * 1000
-    : undefined;
+  return Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + expiresIn * 1000 : undefined;
 }
 
-export function isXAIAccessTokenExpiring(
-  accessToken?: string,
-  expiresAt?: number,
-): boolean {
+export function isXAIAccessTokenExpiring(accessToken?: string, expiresAt?: number): boolean {
   if (typeof expiresAt === "number" && Number.isFinite(expiresAt) && expiresAt > 0) {
     return Date.now() + XAI_ACCESS_TOKEN_REFRESH_SKEW_MS >= expiresAt;
   }
@@ -203,8 +195,7 @@ function startCallbackServer(
       }
       const error = callbackUrl.searchParams.get("error");
       if (error) {
-        callbackState.error =
-          callbackUrl.searchParams.get("error_description") || error;
+        callbackState.error = callbackUrl.searchParams.get("error_description") || error;
         writeCallbackResponse(res, false);
         settle(() => {
           void close().finally(() =>
@@ -336,8 +327,7 @@ export class XAIOAuth {
   }
 
   static async refreshTokens(tokens: XAIOAuthTokens): Promise<XAIOAuthTokens> {
-    const tokenEndpoint =
-      tokens.token_endpoint || (await discoverXAIEndpoints()).token_endpoint;
+    const tokenEndpoint = tokens.token_endpoint || (await discoverXAIEndpoints()).token_endpoint;
     return exchangeXAIToken(tokenEndpoint, {
       grant_type: "refresh_token",
       client_id: XAI_OAUTH_CLIENT_ID,

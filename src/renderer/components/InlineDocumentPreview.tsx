@@ -30,7 +30,15 @@ function formatFileSize(bytes: number): string {
 }
 
 function isDocumentType(type: string): type is SupportedDocumentType {
-  return type === "pdf" || type === "docx" || type === "document" || type === "markdown" || type === "latex" || type === "text" || type === "code";
+  return (
+    type === "pdf" ||
+    type === "docx" ||
+    type === "document" ||
+    type === "markdown" ||
+    type === "latex" ||
+    type === "text" ||
+    type === "code"
+  );
 }
 
 function htmlToText(html: string): string {
@@ -69,7 +77,10 @@ function getPreviewText(data: {
   documentPreview?: { text: string; htmlContent?: string };
 }): string {
   if (data.fileType === "docx" || data.fileType === "document") {
-    return data.documentPreview?.text || htmlToText(data.documentPreview?.htmlContent || data.htmlContent || "");
+    return (
+      data.documentPreview?.text ||
+      htmlToText(data.documentPreview?.htmlContent || data.htmlContent || "")
+    );
   }
   return data.content || "";
 }
@@ -220,7 +231,14 @@ export function InlineDocumentPreview({
 
         <div className="inline-document-header-actions">
           <button className="inline-document-action-btn" onClick={handleOpen} title="Open preview">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <polyline points="15 3 21 3 21 9" />
               <polyline points="9 21 3 21 3 15" />
               <line x1="21" y1="3" x2="14" y2="10" />
@@ -248,7 +266,9 @@ export function InlineDocumentPreview({
         </button>
       ) : fileType === "markdown" ? (
         <div className="inline-document-markdown markdown-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{preview.text}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {preview.text}
+          </ReactMarkdown>
         </div>
       ) : (
         <pre className="inline-document-content">{preview.text}</pre>

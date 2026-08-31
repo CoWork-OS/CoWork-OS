@@ -27,8 +27,7 @@ describe("GeminiProvider image handling", () => {
     expect(converted[0].parts).toEqual([
       { text: "Describe this" },
       {
-        text:
-          "[Image attached: image/png, 0.0MB - this provider does not support inline images. Switch to an image-capable model/provider and resend the image.]",
+        text: "[Image attached: image/png, 0.0MB - this provider does not support inline images. Switch to an image-capable model/provider and resend the image.]",
       },
     ]);
   });

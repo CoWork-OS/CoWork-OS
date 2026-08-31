@@ -24,8 +24,14 @@ describe("Composer styles", () => {
   it("keeps focused composer action buttons compact", () => {
     const source = readFileSync(stylesPath, "utf8");
 
+    expect(source).toMatch(/\.density-focused\s+\.input-actions\s*\{[^}]*gap:\s*6px;/s);
+  });
+
+  it("removes animated caret surfaces after pasted editor content appears", () => {
+    const source = readFileSync(stylesPath, "utf8");
+
     expect(source).toMatch(
-      /\.density-focused\s+\.input-actions\s*\{[^}]*gap:\s*6px;/s,
+      /\.mention-autocomplete-wrapper:has\(\.prompt-composer-input:not\(:empty\)\)\s*>\s*\.cli-rotating-placeholder,\s*\.mention-autocomplete-wrapper:has\(\.prompt-composer-input:not\(:empty\)\)\s*~\s*\.cli-cursor\s*\{[^}]*display:\s*none;[^}]*animation:\s*none;/s,
     );
   });
 });

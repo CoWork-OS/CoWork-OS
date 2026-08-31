@@ -181,9 +181,7 @@ const EVERYDAY_AGENT_RECIPES: EverydayAgentRecipe[] = [
 export function isEverydayAgentUuid(value: string | undefined): value is string {
   return Boolean(
     value &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        value,
-      ),
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
   );
 }
 
@@ -218,9 +216,7 @@ function statusLabel(result: EverydayAgentProfileResult | null): string {
   return "Loading";
 }
 
-export function isEverydayAgentConsentRequired(
-  result: EverydayAgentProfileResult | null,
-): boolean {
+export function isEverydayAgentConsentRequired(result: EverydayAgentProfileResult | null): boolean {
   if (!result) return false;
   const declinedCurrentConsent =
     (result.profile.declinedConsentVersion ?? 0) >= EVERYDAY_AGENT_CONSENT_VERSION;
@@ -330,9 +326,7 @@ export function buildEverydayAgentPriorityItems({
   }
 
   receipts
-    .filter((receipt) =>
-      ["blocked", "failed", "paused", "previewed"].includes(receipt.status),
-    )
+    .filter((receipt) => ["blocked", "failed", "paused", "previewed"].includes(receipt.status))
     .slice(0, 3)
     .forEach((receipt) => {
       items.push({
@@ -385,7 +379,8 @@ export function classifyEverydayAgentRecovery(
   receipt: EverydayActionReceipt,
 ): EverydayAgentRecoveryItem | null {
   if (!["blocked", "failed", "paused"].includes(receipt.status)) return null;
-  const text = `${receipt.title} ${receipt.summary} ${receipt.retryState?.lastError || ""}`.toLowerCase();
+  const text =
+    `${receipt.title} ${receipt.summary} ${receipt.retryState?.lastError || ""}`.toLowerCase();
 
   if (text.includes("oauth") || text.includes("auth") || text.includes("scope")) {
     return {
@@ -458,7 +453,9 @@ export function buildEverydayAgentPlanSteps({
     ];
   }
 
-  const firstSuggestion = suggestions.find((suggestion) => !suggestion.dismissed && !suggestion.actedOn);
+  const firstSuggestion = suggestions.find(
+    (suggestion) => !suggestion.dismissed && !suggestion.actedOn,
+  );
   const firstReceipt = receipts[0];
   const targetCapability =
     preview?.capability ||
@@ -477,8 +474,13 @@ export function buildEverydayAgentPlanSteps({
     },
     {
       id: "compose",
-      title: preview ? "Review proposed mutation" : firstSuggestion ? "Shape suggested next action" : "Wait for useful work",
-      detail: preview?.proposedMutation || firstSuggestion?.description || "No side effect is prepared.",
+      title: preview
+        ? "Review proposed mutation"
+        : firstSuggestion
+          ? "Shape suggested next action"
+          : "Wait for useful work",
+      detail:
+        preview?.proposedMutation || firstSuggestion?.description || "No side effect is prepared.",
       capability: targetCapability,
       riskClass: targetRisk,
       posture: preview ? "preview" : "read_only",
@@ -486,7 +488,8 @@ export function buildEverydayAgentPlanSteps({
     {
       id: "approval",
       title: "Ask before consequential actions",
-      detail: "Sends, posts, exports, credentials, spending, deletes, and cross-workspace movement require approval.",
+      detail:
+        "Sends, posts, exports, credentials, spending, deletes, and cross-workspace movement require approval.",
       capability: targetCapability,
       riskClass: targetRisk,
       posture:
@@ -530,11 +533,36 @@ function buildSecureLanes(
   });
 
   return [
-    laneFor("browser", "Visible browser lane", "Browser Workbench preferred; takeover pauses before side effects.", "browser"),
-    laneFor("mail", "Mail lane", "Drafts and sends bind to account, destination, approval, and receipt.", "inbox"),
-    laneFor("files", "Files lane", "Local files are evidence by default; deletion and export always ask first.", "files"),
-    laneFor("connectors", "Connector lane", "Connected app scopes stay account-bound and revocable.", "docs"),
-    laneFor("devices", "Device lane", "Remote device dispatch remains visible, pausable, and auditable.", "remote_devices"),
+    laneFor(
+      "browser",
+      "Visible browser lane",
+      "Browser Workbench preferred; takeover pauses before side effects.",
+      "browser",
+    ),
+    laneFor(
+      "mail",
+      "Mail lane",
+      "Drafts and sends bind to account, destination, approval, and receipt.",
+      "inbox",
+    ),
+    laneFor(
+      "files",
+      "Files lane",
+      "Local files are evidence by default; deletion and export always ask first.",
+      "files",
+    ),
+    laneFor(
+      "connectors",
+      "Connector lane",
+      "Connected app scopes stay account-bound and revocable.",
+      "docs",
+    ),
+    laneFor(
+      "devices",
+      "Device lane",
+      "Remote device dispatch remains visible, pausable, and auditable.",
+      "remote_devices",
+    ),
   ];
 }
 
@@ -682,7 +710,9 @@ export function EverydayAgentPanel({
   const pausedScopes = result?.compiledPolicy.pausedScopes || [];
   const adminBlocked = result?.compiledPolicy.adminPolicy.blocked === true;
   const status = getEverydayAgentStatus(result);
-  const canResume = Boolean(result && !adminBlocked && (status === "paused" || status === "disabled"));
+  const canResume = Boolean(
+    result && !adminBlocked && (status === "paused" || status === "disabled"),
+  );
 
   const connectedApps = useMemo(() => {
     if (!result) return [];
@@ -702,7 +732,8 @@ export function EverydayAgentPanel({
   );
 
   const activeSuggestions = useMemo(
-    () => suggestions.filter((suggestion) => !suggestion.dismissed && !suggestion.actedOn).slice(0, 4),
+    () =>
+      suggestions.filter((suggestion) => !suggestion.dismissed && !suggestion.actedOn).slice(0, 4),
     [suggestions],
   );
 
@@ -780,9 +811,7 @@ export function EverydayAgentPanel({
     });
 
   const revokeCapability = (capability: EverydayCapabilityBundle) =>
-    run("revoke capability", () =>
-      window.electronAPI.everydayAgentRevokeCapability(capability),
-    );
+    run("revoke capability", () => window.electronAPI.everydayAgentRevokeCapability(capability));
 
   const clearActivity = () =>
     run("clear Everyday Agent data", () =>
@@ -900,33 +929,35 @@ export function EverydayAgentPanel({
         </div>
         <h2>Enable Everyday Agent</h2>
         <p>
-          Let CoWork suggest and operate on approved everyday work with visible browser
-          execution, reviewable memory, scoped connectors, and audit-grade receipts.
+          Let CoWork suggest and operate on approved everyday work with visible browser execution,
+          reviewable memory, scoped connectors, and audit-grade receipts.
         </p>
         <div className="ea-consent-list">
           <div>
             <ShieldCheck size={18} />
-            <span>Data stays local-first unless a connected app action is explicitly approved.</span>
+            <span>
+              Data stays local-first unless a connected app action is explicitly approved.
+            </span>
           </div>
           <div>
             <Eye size={18} />
             <span>
-              Browser work prefers the visible Browser Workbench. Real-browser attach is
-              off by default.
+              Browser work prefers the visible Browser Workbench. Real-browser attach is off by
+              default.
             </span>
           </div>
           <div>
             <KeyRound size={18} />
             <span>
-              Sends, posts, exports, destructive actions, spending, credentials, and
-              cross-workspace movement always ask first.
+              Sends, posts, exports, destructive actions, spending, credentials, and cross-workspace
+              movement always ask first.
             </span>
           </div>
           <div>
             <ReceiptText size={18} />
             <span>
-              Every preview, block, approval, skip, and execution writes a receipt you
-              can inspect or delete.
+              Every preview, block, approval, skip, and execution writes a receipt you can inspect
+              or delete.
             </span>
           </div>
         </div>
@@ -974,8 +1005,8 @@ export function EverydayAgentPanel({
               </div>
               <h1>Everyday Agent Settings</h1>
               <p>
-                Configure capability bundles, scoped pauses, connector access, previews,
-                receipts, and local data controls.
+                Configure capability bundles, scoped pauses, connector access, previews, receipts,
+                and local data controls.
               </p>
             </div>
             <div className="ea-hero-actions">
@@ -1022,7 +1053,9 @@ export function EverydayAgentPanel({
             <article>
               <span>Memory review</span>
               <strong>
-                {memoryCandidateCount === null ? "Review-first" : `${memoryCandidateCount} candidates`}
+                {memoryCandidateCount === null
+                  ? "Review-first"
+                  : `${memoryCandidateCount} candidates`}
               </strong>
             </article>
           </section>
@@ -1067,16 +1100,17 @@ export function EverydayAgentPanel({
               <div>
                 <h2>Capability Bundles</h2>
                 <p>
-                  Enabled bundles compile into managed-agent, connector, permission,
-                  workflow, and routine policy.
+                  Enabled bundles compile into managed-agent, connector, permission, workflow, and
+                  routine policy.
                 </p>
               </div>
             </div>
             <div className="ea-capability-grid">
               {EVERYDAY_AGENT_CAPABILITY_BUNDLES.map((bundle) => {
                 const setting = result?.profile.capabilitySettings[bundle.id];
-                const blocked =
-                  result?.compiledPolicy.adminPolicy.blockedBundles.includes(bundle.id);
+                const blocked = result?.compiledPolicy.adminPolicy.blockedBundles.includes(
+                  bundle.id,
+                );
                 const revoked = result?.profile.revokedCapabilities.includes(bundle.id);
                 const active = enabledCapabilities.includes(bundle.id);
                 return (
@@ -1192,8 +1226,7 @@ export function EverydayAgentPanel({
                     })
                   }
                   disabled={
-                    Boolean(busy) ||
-                    (pauseKind !== "global" && pauseTarget.trim().length === 0)
+                    Boolean(busy) || (pauseKind !== "global" && pauseTarget.trim().length === 0)
                   }
                 >
                   Add pause
@@ -1204,7 +1237,10 @@ export function EverydayAgentPanel({
                   <div className="ea-empty">No active pauses</div>
                 ) : (
                   pausedScopes.map((scope) => (
-                    <div className="ea-list-item" key={scope.id || `${scope.kind}-${scope.pausedAt}`}>
+                    <div
+                      className="ea-list-item"
+                      key={scope.id || `${scope.kind}-${scope.pausedAt}`}
+                    >
                       <PauseCircle size={16} />
                       <div>
                         <strong>
@@ -1253,9 +1289,7 @@ export function EverydayAgentPanel({
                 <input
                   type="checkbox"
                   checked={temporaryModes.noMemory}
-                  onChange={(event) =>
-                    updateTemporaryMode("noMemory", event.currentTarget.checked)
-                  }
+                  onChange={(event) => updateTemporaryMode("noMemory", event.currentTarget.checked)}
                 />
                 <span>
                   <strong>Run without memory</strong>
@@ -1279,9 +1313,7 @@ export function EverydayAgentPanel({
                 <input
                   type="checkbox"
                   checked={temporaryModes.readOnly}
-                  onChange={(event) =>
-                    updateTemporaryMode("readOnly", event.currentTarget.checked)
-                  }
+                  onChange={(event) => updateTemporaryMode("readOnly", event.currentTarget.checked)}
                 />
                 <span>
                   <strong>Read-only until approved</strong>
@@ -1467,7 +1499,10 @@ export function EverydayAgentPanel({
                   <Database size={16} />
                   <div>
                     <strong>Local deletion</strong>
-                    <span>Delete receipts, previews, trust patterns, memory candidates, connector summaries, and browser metadata.</span>
+                    <span>
+                      Delete receipts, previews, trust patterns, memory candidates, connector
+                      summaries, and browser metadata.
+                    </span>
                   </div>
                   <button
                     type="button"
@@ -1496,8 +1531,8 @@ export function EverydayAgentPanel({
             </div>
             <h1>Everyday Agent</h1>
             <p>
-              Supervise the operator: pending approvals, active work, trusted routines,
-              recent receipts, and intervention controls.
+              Supervise the operator: pending approvals, active work, trusted routines, recent
+              receipts, and intervention controls.
             </p>
           </div>
           <div className="ea-console-actions">
@@ -1575,8 +1610,8 @@ export function EverydayAgentPanel({
                   : statusLabel(result)}
               </h2>
               <p>
-                Work remains bound to profile, workspace, connector account, browser
-                profile, channel, device, and target identity before execution.
+                Work remains bound to profile, workspace, connector account, browser profile,
+                channel, device, and target identity before execution.
               </p>
             </div>
           </div>
@@ -1694,7 +1729,9 @@ export function EverydayAgentPanel({
                 <div className="ea-section-header">
                   <div>
                     <h2>Action Preview</h2>
-                    <p>Review source evidence, target, mutation, risk, rollback, and idempotency.</p>
+                    <p>
+                      Review source evidence, target, mutation, risk, rollback, and idempotency.
+                    </p>
                   </div>
                 </div>
                 <div className="ea-preview-card">
@@ -1746,8 +1783,12 @@ export function EverydayAgentPanel({
                         <div className="ea-evidence-row">
                           <span>Why now: {suggestion.urgency || "normal"} urgency</span>
                           <span>Confidence: {Math.round(suggestion.confidence * 100)}%</span>
-                          {suggestion.sourceEntity && <span>Source: {suggestion.sourceEntity}</span>}
-                          {suggestion.snoozedUntil && <span>Snoozed until {formatTime(suggestion.snoozedUntil)}</span>}
+                          {suggestion.sourceEntity && (
+                            <span>Source: {suggestion.sourceEntity}</span>
+                          )}
+                          {suggestion.snoozedUntil && (
+                            <span>Snoozed until {formatTime(suggestion.snoozedUntil)}</span>
+                          )}
                         </div>
                       </div>
                       <div className="ea-row-actions">
@@ -1783,10 +1824,16 @@ export function EverydayAgentPanel({
               <div className="ea-section-header">
                 <div>
                   <h2>Recent Receipts</h2>
-                  <p>Executed, skipped, blocked, previewed, and approved work remains inspectable.</p>
+                  <p>
+                    Executed, skipped, blocked, previewed, and approved work remains inspectable.
+                  </p>
                 </div>
                 {onOpenMissionControl && (
-                  <button type="button" className="ea-secondary-button" onClick={onOpenMissionControl}>
+                  <button
+                    type="button"
+                    className="ea-secondary-button"
+                    onClick={onOpenMissionControl}
+                  >
                     <Play size={16} />
                     Mission Control
                   </button>
@@ -1834,7 +1881,10 @@ export function EverydayAgentPanel({
               <div className="ea-section-header">
                 <div>
                   <h2>Recoverable Failures</h2>
-                  <p>Auth, policy, network, duplicate, and partial-failure states become explicit actions.</p>
+                  <p>
+                    Auth, policy, network, duplicate, and partial-failure states become explicit
+                    actions.
+                  </p>
                 </div>
               </div>
               <div className="ea-recovery-list">
@@ -1844,7 +1894,11 @@ export function EverydayAgentPanel({
                   recoveryItems.map((item) => (
                     <article className={`ea-recovery-item ${item.tone}`} key={item.id}>
                       <div className="ea-recovery-icon">
-                        {item.tone === "danger" ? <AlertTriangle size={16} /> : <RefreshCw size={16} />}
+                        {item.tone === "danger" ? (
+                          <AlertTriangle size={16} />
+                        ) : (
+                          <RefreshCw size={16} />
+                        )}
                       </div>
                       <div>
                         <strong>{item.title}</strong>

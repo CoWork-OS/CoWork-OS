@@ -8,6 +8,8 @@ export interface AutomationNotificationPayload {
   workspaceId?: string;
   recommendedDelivery?: "briefing" | "inbox" | "nudge";
   companionStyle?: "email" | "note";
+  /** Fresh delivery identity used when an operator explicitly retries. */
+  deliveryId?: string;
 }
 
 export function shouldNotifyAutomationOutcome(outcome: AutomationRunOutcome): boolean {

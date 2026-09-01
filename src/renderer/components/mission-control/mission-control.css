@@ -1326,6 +1326,10 @@
 }
 
 .mc-v2-brief-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   min-height: 72px;
   padding: 12px;
   border: 1px solid var(--color-border);
@@ -2248,6 +2252,49 @@
 .mc-v2-ops-row-btn.selected {
   border-color: var(--color-accent, var(--color-border));
   background: var(--color-bg-tertiary);
+}
+
+.mc-v2-ops-row-main {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.mc-v2-ops-row-main {
+  cursor: pointer;
+}
+
+button.mc-v2-ops-row-main:hover .mc-v2-ops-row-title {
+  color: var(--color-accent);
+}
+
+.mc-v2-ops-row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mc-v2-ops-retry {
+  padding: 4px 7px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.mc-v2-ops-retry:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .mc-v2-ops-row-title {

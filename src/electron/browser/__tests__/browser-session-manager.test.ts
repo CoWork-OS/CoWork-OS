@@ -56,4 +56,21 @@ describe("BrowserSessionManager helpers", () => {
       isAllowed({ networkEnabled: true, accessNetworkMode: "disabled" }, "https://example.com"),
     ).toBe(false);
   });
+
+  it("allows a registered loopback preview without widening remote networking", () => {
+    const manager = new BrowserSessionManager();
+    const isAllowed = (manager as Any).isUrlAllowedWithPolicy.bind(manager);
+    const previewUrl = "http://127.0.0.1:4173";
+
+    expect(isAllowed({ networkEnabled: true, accessNetworkMode: "disabled" }, previewUrl)).toBe(
+      false,
+    );
+    manager.allowLocalPreviewUrl(previewUrl);
+    expect(isAllowed({ networkEnabled: true, accessNetworkMode: "disabled" }, previewUrl)).toBe(
+      true,
+    );
+    expect(
+      isAllowed({ networkEnabled: true, accessNetworkMode: "disabled" }, "http://127.0.0.1:4174"),
+    ).toBe(false);
+  });
 });

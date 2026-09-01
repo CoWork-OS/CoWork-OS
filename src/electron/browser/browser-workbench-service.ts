@@ -4,7 +4,7 @@ import type { AccessDomainRule } from "../../shared/access-profiles";
 import type { WorkspacePermissions } from "../../shared/types";
 import { IPC_CHANNELS } from "../../shared/types";
 import { BrowserSessionManager, getBrowserSessionManager } from "./browser-session-manager";
-import { isLocalHtmlFileUrl, normalizeWebviewUrl } from "./webview-url-policy";
+import { isLocalHtmlFileUrl, isLoopbackHttpUrl, normalizeWebviewUrl } from "./webview-url-policy";
 import { assertWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 
 type AnyRecord = Record<string, unknown>;
@@ -200,11 +200,18 @@ export class BrowserWorkbenchService {
   }
 
   allowLocalPreviewUrl(rawUrl: string): void {
-    if (!isLocalHtmlFileUrl(rawUrl)) return;
+    if (!isLocalHtmlFileUrl(rawUrl) && !isLoopbackHttpUrl(rawUrl)) return;
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return;
     this.allowedLocalPreviewUrls.set(normalized, Date.now() + 5 * 60_000);
     this.browserSessionManager.allowLocalPreviewUrl(normalized);
+  }
+
+  revokeLocalPreviewUrl(rawUrl: string): void {
+    const normalized = normalizeWebviewUrl(rawUrl);
+    if (!normalized) return;
+    this.allowedLocalPreviewUrls.delete(normalized);
+    this.browserSessionManager.revokeLocalPreviewUrl(normalized);
   }
 
   isAllowedLocalPreviewUrl(rawUrl: string): boolean {

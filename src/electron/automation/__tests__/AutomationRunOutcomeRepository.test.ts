@@ -59,4 +59,35 @@ describeWithSqlite("AutomationRunOutcomeRepository", () => {
 
     db.close();
   });
+
+  it("keeps explicit notification keys scoped to their owning job", async () => {
+    const [{ default: Database }, { AutomationRunOutcomeRepository }] = await Promise.all([
+      import("better-sqlite3"),
+      import("../AutomationRunOutcomeRepository"),
+    ]);
+    const db = new Database(":memory:");
+    const repo = new AutomationRunOutcomeRepository(db);
+    const base = {
+      source: "heartbeat" as const,
+      title: "Heartbeat result",
+      summary: "Changed output.",
+      usefulness: "actionable" as const,
+      trigger: "heartbeat" as const,
+      notificationRecommended: true,
+      notificationKey: "shared-key",
+      workspaceId: "workspace-1",
+    };
+
+    repo.create({ ...base, agentRoleId: "agent-a", createdAt: 1 });
+    repo.create({ ...base, agentRoleId: "agent-b", createdAt: 2 });
+
+    expect(repo.findLatestByNotificationKey("shared-key", "agent:agent-a")?.agentRoleId).toBe(
+      "agent-a",
+    );
+    expect(repo.findLatestByNotificationKey("shared-key", "agent:agent-b")?.agentRoleId).toBe(
+      "agent-b",
+    );
+
+    db.close();
+  });
 });

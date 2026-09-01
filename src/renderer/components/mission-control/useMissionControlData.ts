@@ -522,6 +522,15 @@ export function useMissionControlData(
     }
   }, []);
 
+  const retryAutomationOutcome = useCallback(
+    async (outcomeId: string) => {
+      await window.electronAPI.retryAutomationOutcomeNotification(outcomeId);
+      const companyId = selectedCompanyIdRef.current;
+      if (companyId) await loadCommandCenterSummary(companyId);
+    },
+    [loadCommandCenterSummary],
+  );
+
   const buildMissionControlScope = useCallback(
     (workspaceId?: string | null) => ({
       workspaceId: workspaceId && workspaceId !== ALL_WORKSPACES_ID ? workspaceId : null,
@@ -1810,6 +1819,7 @@ export function useMissionControlData(
     commandCenterExecutionMap,
     automationOutcomes,
     automationOutcomeSummary,
+    retryAutomationOutcome,
     selectedPlannerRun,
     plannerManagedIssues,
     selectedIssue,

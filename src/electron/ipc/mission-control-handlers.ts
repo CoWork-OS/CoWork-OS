@@ -60,6 +60,7 @@ import { CoreHarnessExperimentRunner } from "../core/CoreHarnessExperimentRunner
 import { CoreLearningsService } from "../core/CoreLearningsService";
 import { MissionControlIntelligenceService } from "../mission-control/MissionControlIntelligenceService";
 import { AutomationRunOutcomeRepository } from "../automation/AutomationRunOutcomeRepository";
+import { AutomationOutcomeService } from "../automation/AutomationOutcomeService";
 import {
   AutomationProfileAttachRequestSchema,
   AutomationProfileCreateRequestSchema,
@@ -233,6 +234,7 @@ export interface MissionControlDeps {
   coreHarnessExperimentService: CoreHarnessExperimentService;
   coreHarnessExperimentRunner: CoreHarnessExperimentRunner;
   coreLearningsService: CoreLearningsService;
+  automationOutcomeService?: AutomationOutcomeService | null;
 }
 
 /**
@@ -270,6 +272,14 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     }
     return service;
   };
+
+  ipcMain.handle(IPC_CHANNELS.MC_AUTOMATION_OUTCOME_RETRY, async (_, outcomeId: string) => {
+    const id = requireString(outcomeId, "outcomeId").slice(0, 160);
+    if (!deps.automationOutcomeService) {
+      throw new Error("Automation outcome service is unavailable.");
+    }
+    return deps.automationOutcomeService.retryNotification(id);
+  });
 
   // ============ Mission Control Intelligence Handlers ============
 

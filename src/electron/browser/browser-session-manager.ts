@@ -1,7 +1,7 @@
 import * as path from "path";
 import type { AccessDomainRule } from "../../shared/access-profiles";
 import { evaluateNetworkPolicy } from "../security/network-policy";
-import { isLocalHtmlFileUrl, normalizeWebviewUrl } from "./webview-url-policy";
+import { isLocalHtmlFileUrl, isLoopbackHttpUrl, normalizeWebviewUrl } from "./webview-url-policy";
 
 type Any = any;
 
@@ -281,13 +281,19 @@ export class BrowserSessionManager {
    * renderer must first register the exact URL it intends to display.
    */
   allowLocalPreviewUrl(rawUrl: string): void {
-    if (!isLocalHtmlFileUrl(rawUrl)) return;
+    if (!isLocalHtmlFileUrl(rawUrl) && !isLoopbackHttpUrl(rawUrl)) return;
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return;
     this.allowedLocalPreviewUrls.set(
       normalized,
       Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS,
     );
+  }
+
+  revokeLocalPreviewUrl(rawUrl: string): void {
+    const normalized = normalizeWebviewUrl(rawUrl);
+    if (!normalized) return;
+    this.allowedLocalPreviewUrls.delete(normalized);
   }
 
   private isAllowedLocalPreviewUrl(rawUrl: string): boolean {
@@ -1029,7 +1035,9 @@ export class BrowserSessionManager {
       return false;
     }
 
-    if (parsed.protocol === "file:") return this.isAllowedLocalPreviewUrl(url);
+    if (parsed.protocol === "file:" || isLoopbackHttpUrl(url)) {
+      return this.isAllowedLocalPreviewUrl(url);
+    }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
 
     if (!policy) return true;

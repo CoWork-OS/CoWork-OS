@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   CoreEvalCase,
   CoreFailureCluster,
@@ -33,6 +34,7 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
     commandCenterExecutionMap,
     automationOutcomes,
     automationOutcomeSummary,
+    retryAutomationOutcome,
     coreFailureRecords,
     coreFailureClusters,
     coreEvalCases,
@@ -150,6 +152,7 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
             summary={automationOutcomeSummary}
             formatRelativeTime={formatRelativeTime}
             setDetailPanel={setDetailPanel}
+            retryAutomationOutcome={retryAutomationOutcome}
           />
         )}
       </div>
@@ -319,13 +322,31 @@ function OpsAutomation({
   summary,
   formatRelativeTime,
   setDetailPanel,
+  retryAutomationOutcome,
 }: {
   outcomes: any[];
   summary: any;
   formatRelativeTime: (t?: number) => string;
   setDetailPanel: (panel: any) => void;
+  retryAutomationOutcome: MissionControlData["retryAutomationOutcome"];
 }) {
+  const [retryingOutcomeId, setRetryingOutcomeId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const stats = summary || { total: 0, actionable: 0, informational: 0, lowValue: 0, failed: 0 };
+
+  const retry = async (outcomeId: string) => {
+    if (retryingOutcomeId) return;
+    setRetryingOutcomeId(outcomeId);
+    setRetryError(null);
+    try {
+      await retryAutomationOutcome(outcomeId);
+    } catch (cause) {
+      setRetryError(cause instanceof Error ? cause.message : "Unable to retry notification.");
+    } finally {
+      setRetryingOutcomeId(null);
+    }
+  };
+
   return (
     <div className="mc-v2-ops-stack">
       <div className="mc-v2-ops-stats">
@@ -352,34 +373,62 @@ function OpsAutomation({
           ) : (
             outcomes.map((outcome) => {
               const clickable = Boolean(outcome.taskId);
-              const RowTag = clickable ? "button" : "div";
+              const canRetry = Boolean(
+                outcome.notificationRecommended && !outcome.notificationDeliveredAt,
+              );
               return (
-                <RowTag
-                  key={outcome.id}
-                  type={clickable ? "button" : undefined}
-                  className={`mc-v2-ops-row ${clickable ? "mc-v2-ops-row-btn" : ""}`}
-                  onClick={() => {
-                    if (outcome.taskId) setDetailPanel({ kind: "task", taskId: outcome.taskId });
-                  }}
-                >
-                  <div>
-                    <div className="mc-v2-ops-row-title">{outcome.title}</div>
-                    <div className="mc-v2-ops-row-subtitle">
-                      {outcome.source} · {formatRelativeTime(outcome.createdAt)}
+                <div key={outcome.id} className="mc-v2-ops-row">
+                  {clickable ? (
+                    <button
+                      type="button"
+                      className="mc-v2-ops-row-main"
+                      onClick={() => setDetailPanel({ kind: "task", taskId: outcome.taskId })}
+                    >
+                      <div className="mc-v2-ops-row-title">{outcome.title}</div>
+                      <div className="mc-v2-ops-row-subtitle">
+                        {outcome.source} · {formatRelativeTime(outcome.createdAt)}
+                      </div>
+                      <div className="mc-v2-ops-row-subtitle">{outcome.summary}</div>
+                      {outcome.nextAction && (
+                        <div className="mc-v2-ops-row-subtitle">Next: {outcome.nextAction}</div>
+                      )}
+                    </button>
+                  ) : (
+                    <div className="mc-v2-ops-row-main">
+                      <div className="mc-v2-ops-row-title">{outcome.title}</div>
+                      <div className="mc-v2-ops-row-subtitle">
+                        {outcome.source} · {formatRelativeTime(outcome.createdAt)}
+                      </div>
+                      <div className="mc-v2-ops-row-subtitle">{outcome.summary}</div>
+                      {outcome.nextAction && (
+                        <div className="mc-v2-ops-row-subtitle">Next: {outcome.nextAction}</div>
+                      )}
                     </div>
-                    <div className="mc-v2-ops-row-subtitle">{outcome.summary}</div>
-                    {outcome.nextAction && (
-                      <div className="mc-v2-ops-row-subtitle">Next: {outcome.nextAction}</div>
-                    )}
+                  )}
+                  <div className="mc-v2-ops-row-actions">
+                    <span className={`mc-v2-ops-pill status-${outcome.usefulness}`}>
+                      {String(outcome.usefulness).replace("_", " ")}
+                    </span>
+                    {outcome.notificationSkippedAt ? (
+                      <span className="mc-v2-ops-row-subtitle">Notification skipped</span>
+                    ) : null}
+                    {canRetry ? (
+                      <button
+                        type="button"
+                        className="mc-v2-ops-retry"
+                        onClick={() => void retry(outcome.id)}
+                        disabled={Boolean(retryingOutcomeId)}
+                      >
+                        {retryingOutcomeId === outcome.id ? "Retrying…" : "Retry notification"}
+                      </button>
+                    ) : null}
                   </div>
-                  <span className={`mc-v2-ops-pill status-${outcome.usefulness}`}>
-                    {String(outcome.usefulness).replace("_", " ")}
-                  </span>
-                </RowTag>
+                </div>
               );
             })
           )}
         </div>
+        {retryError ? <div className="mc-v2-empty mc-v2-empty-compact">{retryError}</div> : null}
       </div>
     </div>
   );

@@ -1,9 +1,13 @@
 import React from "react";
+import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { MCOverviewTab } from "../MCOverviewTab";
 import type { MissionControlData } from "../useMissionControlData";
+
+const stylesPath = fileURLToPath(new URL("../mission-control.css", import.meta.url));
 
 function renderOverview(overrides: Partial<MissionControlData> = {}): string {
   const data = {
@@ -101,5 +105,14 @@ describe("MCOverviewTab", () => {
     });
 
     expect(markup).toContain("<strong>0</strong><span>open board work</span>");
+  });
+
+  it("stacks metric values and labels despite the shared button flex rule", () => {
+    const styles = readFileSync(stylesPath, "utf8");
+    const metricRule = styles.match(/\.mc-v2-brief-metric\s*\{([^}]*)\}/s)?.[1] || "";
+
+    expect(metricRule).toMatch(/display:\s*flex/);
+    expect(metricRule).toMatch(/flex-direction:\s*column/);
+    expect(metricRule).toMatch(/align-items:\s*flex-start/);
   });
 });

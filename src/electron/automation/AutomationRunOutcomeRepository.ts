@@ -34,6 +34,8 @@ export class AutomationRunOutcomeRepository {
       summary: input.summary,
       usefulness: input.usefulness,
       trigger: input.trigger,
+      changeHash: input.changeHash,
+      notificationKey: input.notificationKey,
       metrics: input.metrics,
       evidenceRefs: input.evidenceRefs,
       nextAction: input.nextAction,
@@ -49,8 +51,10 @@ export class AutomationRunOutcomeRepository {
           INSERT INTO automation_run_outcomes (
             id, source, source_run_id, task_id, workspace_id, company_id, agent_role_id,
             title, summary, usefulness, trigger, notification_recommended, notification_reason,
-            notification_delivered_at, next_action, metrics_json, evidence_refs_json, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            notification_delivered_at, notification_skipped_at, notification_skip_reason,
+            next_action, metrics_json, evidence_refs_json,
+            change_hash, notification_key, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -68,12 +72,62 @@ export class AutomationRunOutcomeRepository {
         outcome.notificationRecommended ? 1 : 0,
         outcome.notificationReason || null,
         outcome.notificationDeliveredAt || null,
+        outcome.notificationSkippedAt || null,
+        outcome.notificationSkipReason || null,
         outcome.nextAction || null,
         outcome.metrics ? JSON.stringify(outcome.metrics) : null,
         outcome.evidenceRefs ? JSON.stringify(outcome.evidenceRefs) : null,
+        outcome.changeHash || null,
+        outcome.notificationKey || null,
         outcome.createdAt,
       );
     return outcome;
+  }
+
+  findLatestByNotificationKey(
+    notificationKey: string,
+    scopeKey?: string,
+  ): AutomationRunOutcome | null {
+    const normalizedScope = typeof scopeKey === "string" ? scopeKey.trim() : "";
+    const [scopeKind, ...scopeValueParts] = normalizedScope.split(":");
+    const scopeValue = scopeValueParts.join(":");
+    const scopeColumns: Record<string, string> = {
+      agent: "agent_role_id",
+      company: "company_id",
+      workspace: "workspace_id",
+      task: "task_id",
+      source: "source",
+    };
+    const scopeColumn = scopeColumns[scopeKind];
+    const scopeClause = scopeColumn
+      ? ` AND ${scopeColumn} = ?`
+      : normalizedScope
+        ? ` AND (agent_role_id = ? OR company_id = ? OR workspace_id = ? OR task_id = ? OR source = ?)`
+        : "";
+    const scopeArgs = scopeColumn
+      ? [scopeValue]
+      : normalizedScope
+        ? [normalizedScope, normalizedScope, normalizedScope, normalizedScope, normalizedScope]
+        : [];
+    const row = this.db
+      .prepare(
+        `
+          SELECT *
+          FROM automation_run_outcomes
+          WHERE notification_key = ?${scopeClause}
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT 1
+        `,
+      )
+      .get(notificationKey, ...scopeArgs) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : null;
+  }
+
+  findById(id: string): AutomationRunOutcome | null {
+    const row = this.db.prepare("SELECT * FROM automation_run_outcomes WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? this.mapRow(row) : null;
   }
 
   list(request: AutomationRunOutcomeListRequest = {}): AutomationRunOutcome[] {
@@ -162,8 +216,18 @@ export class AutomationRunOutcomeRepository {
 
   markNotificationDelivered(id: string, timestamp = Date.now()): void {
     this.db
-      .prepare("UPDATE automation_run_outcomes SET notification_delivered_at = ? WHERE id = ?")
+      .prepare(
+        "UPDATE automation_run_outcomes SET notification_delivered_at = ?, notification_skipped_at = NULL, notification_skip_reason = NULL WHERE id = ?",
+      )
       .run(timestamp, id);
+  }
+
+  markNotificationSkipped(id: string, reason: string, timestamp = Date.now()): void {
+    this.db
+      .prepare(
+        "UPDATE automation_run_outcomes SET notification_skipped_at = ?, notification_skip_reason = ? WHERE id = ?",
+      )
+      .run(timestamp, reason, id);
   }
 
   private ensureSchema(): void {
@@ -183,11 +247,31 @@ export class AutomationRunOutcomeRepository {
         notification_recommended INTEGER NOT NULL DEFAULT 0,
         notification_reason TEXT,
         notification_delivered_at INTEGER,
+        notification_skipped_at INTEGER,
+        notification_skip_reason TEXT,
         next_action TEXT,
         metrics_json TEXT,
         evidence_refs_json TEXT,
+        change_hash TEXT,
+        notification_key TEXT,
         created_at INTEGER NOT NULL
       );
+    `);
+
+    for (const sql of [
+      "ALTER TABLE automation_run_outcomes ADD COLUMN change_hash TEXT",
+      "ALTER TABLE automation_run_outcomes ADD COLUMN notification_key TEXT",
+      "ALTER TABLE automation_run_outcomes ADD COLUMN notification_skipped_at INTEGER",
+      "ALTER TABLE automation_run_outcomes ADD COLUMN notification_skip_reason TEXT",
+    ]) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, ignore.
+      }
+    }
+
+    this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_automation_outcomes_created
         ON automation_run_outcomes(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_automation_outcomes_company
@@ -196,6 +280,8 @@ export class AutomationRunOutcomeRepository {
         ON automation_run_outcomes(workspace_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_automation_outcomes_usefulness
         ON automation_run_outcomes(usefulness, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_automation_outcomes_notification_key
+        ON automation_run_outcomes(notification_key, created_at DESC);
     `);
   }
 
@@ -212,6 +298,8 @@ export class AutomationRunOutcomeRepository {
       summary: String(row.summary),
       usefulness: row.usefulness as AutomationRunOutcome["usefulness"],
       trigger: row.trigger as AutomationRunOutcome["trigger"],
+      changeHash: typeof row.change_hash === "string" ? row.change_hash : undefined,
+      notificationKey: typeof row.notification_key === "string" ? row.notification_key : undefined,
       metrics: parseJson(row.metrics_json, undefined),
       evidenceRefs: parseJson(row.evidence_refs_json, undefined),
       nextAction: typeof row.next_action === "string" ? row.next_action : undefined,
@@ -222,6 +310,10 @@ export class AutomationRunOutcomeRepository {
         typeof row.notification_delivered_at === "number"
           ? row.notification_delivered_at
           : undefined,
+      notificationSkippedAt:
+        typeof row.notification_skipped_at === "number" ? row.notification_skipped_at : undefined,
+      notificationSkipReason:
+        typeof row.notification_skip_reason === "string" ? row.notification_skip_reason : undefined,
       createdAt: Number(row.created_at),
     };
   }

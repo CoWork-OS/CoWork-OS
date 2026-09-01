@@ -196,13 +196,17 @@ const identities = spawnSync("security", ["find-identity", "-v", "-p", "codesign
 const identitiesOutput = identities.stdout || "";
 const quotedIdentityMatches = [...identitiesOutput.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
 const matchingTeamIdentity = findAppleDevelopmentIdentityForTeam(developmentTeam, quotedIdentityMatches);
-const firstAppleDevelopmentIdentity = quotedIdentityMatches.find((identity) => identity.startsWith("Apple Development: "));
-const signingIdentity =
+const configuredSigningIdentity =
   process.env.COWORK_HEALTHKIT_SIGNING_IDENTITY ||
   localConfig.signingIdentity ||
-  matchingTeamIdentity ||
-  firstAppleDevelopmentIdentity ||
-  "-";
+  "";
+const signingIdentity = configuredSigningIdentity || matchingTeamIdentity || "-";
+
+if (!configuredSigningIdentity && !matchingTeamIdentity) {
+  console.warn(
+    "[healthkit-bridge] No usable Apple Development identity matched the configured team; using an ad-hoc signature.",
+  );
+}
 
 const xcodeProjectPath = join(packagePath, "HealthKitBridge.xcodeproj");
 const xcodeAppBundle = join(packagePath, ".build", "xcode", "Build", "Products", "Release", "HealthKitBridge.app");
@@ -301,20 +305,43 @@ if (resolvedProvisioningProfile && existsSync(resolvedProvisioningProfile)) {
   copyFileSync(resolvedProvisioningProfile, join(appContents, "embedded.provisionprofile"));
   console.log(`[healthkit-bridge] Embedded provisioning profile ${resolvedProvisioningProfile}`);
 }
-const codesign = spawnSync(
-  "codesign",
-  [
-    "--force",
-    "--sign",
-    signingIdentity,
-    "--options",
-    "runtime",
-    "--entitlements",
-    join(packagePath, "HealthKitBridge.entitlements"),
-    appBundle,
-  ],
-  { stdio: "inherit", env: process.env },
-);
+function signApp(identity, captureOutput = false) {
+  return spawnSync(
+    "codesign",
+    [
+      "--force",
+      "--sign",
+      identity,
+      "--options",
+      "runtime",
+      "--entitlements",
+      join(packagePath, "HealthKitBridge.entitlements"),
+      appBundle,
+    ],
+    {
+      stdio: captureOutput ? ["ignore", "pipe", "pipe"] : "inherit",
+      encoding: "utf8",
+      env: process.env,
+    },
+  );
+}
+
+const automaticSigning = !configuredSigningIdentity && Boolean(matchingTeamIdentity);
+let codesign = signApp(signingIdentity, automaticSigning);
+if (codesign.status !== 0 && automaticSigning) {
+  const diagnostics = `${codesign.stdout || ""}${codesign.stderr || ""}`.trim();
+  console.warn(
+    `[healthkit-bridge] Automatic signing with ${signingIdentity} failed; retrying with an ad-hoc signature.${
+      diagnostics ? `\n${diagnostics}` : ""
+    }`,
+  );
+  codesign = signApp("-");
+  if (codesign.status === 0) {
+    console.warn(
+      "[healthkit-bridge] Built with an ad-hoc signature; HealthKit access requires a valid Apple Development identity and provisioning profile.",
+    );
+  }
+}
 if (codesign.status !== 0) {
   console.error("[healthkit-bridge] codesign failed.");
   process.exit(codesign.status ?? 1);

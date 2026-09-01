@@ -1336,6 +1336,7 @@ export class FileTools {
     }
 
     try {
+      await this.daemon.captureTaskMutationBaseline?.(this.taskId, fullPath);
       // Ensure directory exists
       await this.runWriteFilePhase("create parent directory", requestedPath, options, () =>
         fs.mkdir(path.dirname(fullPath), { recursive: true }),
@@ -1753,6 +1754,10 @@ export class FileTools {
     await this.enforceSymlinkSafeAccess(newFullPath, "write");
 
     try {
+      await Promise.all([
+        this.daemon.captureTaskMutationBaseline?.(this.taskId, oldFullPath),
+        this.daemon.captureTaskMutationBaseline?.(this.taskId, newFullPath),
+      ]);
       // Ensure target directory exists
       await fs.mkdir(path.dirname(newFullPath), { recursive: true });
 
@@ -1805,6 +1810,7 @@ export class FileTools {
     await this.enforceSymlinkSafeAccess(destFullPath, "write");
 
     try {
+      await this.daemon.captureTaskMutationBaseline?.(this.taskId, destFullPath);
       // Ensure target directory exists
       await fs.mkdir(path.dirname(destFullPath), { recursive: true });
 
@@ -1854,6 +1860,7 @@ export class FileTools {
     }
 
     try {
+      await this.daemon.captureTaskMutationBaseline?.(this.taskId, fullPath);
       // For .app bundles on macOS, use shell.trashItem directly (safer and expected behavior)
       if (fullPath.endsWith(".app")) {
         const shell = getElectronShell();

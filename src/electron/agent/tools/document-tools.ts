@@ -690,6 +690,7 @@ export class DocumentTools {
       path: result.path,
       size: result.size,
       slideCount: result.slideCount,
+      impactMetrics: [{ kind: "slides_created", value: result.slideCount }],
       message: `Presentation generated: ${path.basename(result.path)} (${result.slideCount} slides, ${formatBytes(result.size)})`,
     };
   }
@@ -717,6 +718,18 @@ export class DocumentTools {
       path: result.path,
       size: result.size,
       sheetCount: result.sheetCount,
+      impactMetrics: [
+        {
+          kind: "rows_processed",
+          value: Array.isArray(input.sheets)
+            ? input.sheets.reduce(
+                (total: number, sheet: Any) =>
+                  total + (Array.isArray(sheet?.rows) ? sheet.rows.length : 0),
+                0,
+              )
+            : 0,
+        },
+      ],
       message: `Spreadsheet generated: ${path.basename(result.path)} (${result.sheetCount} sheet(s), ${formatBytes(result.size)})`,
     };
   }

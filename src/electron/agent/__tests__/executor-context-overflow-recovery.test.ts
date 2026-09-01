@@ -49,13 +49,13 @@ function makeExecutor(): Any {
 }
 
 describe("TaskExecutor context-overflow recovery", () => {
-  it("recovers from a context-capacity error by compacting and retrying", () => {
+  it("recovers from a context-capacity error by compacting and retrying", async () => {
     const executor = makeExecutor();
     const messages: Any[] = [
       { role: "user", content: [{ type: "text", text: "A".repeat(4000) }] },
       { role: "assistant", content: [{ type: "text", text: "B".repeat(4000) }] },
     ];
-    const result = (executor as Any).recoverFromContextCapacityOverflow({
+    const result = await (executor as Any).recoverFromContextCapacityOverflow({
       error: new Error("Context length exceeded for this model"),
       messages,
       systemPromptTokens: 0,
@@ -79,10 +79,10 @@ describe("TaskExecutor context-overflow recovery", () => {
     );
   });
 
-  it("returns exhausted after repeated context overflow beyond retry cap", () => {
+  it("returns exhausted after repeated context overflow beyond retry cap", async () => {
     const executor = makeExecutor();
     const messages: Any[] = [{ role: "user", content: [{ type: "text", text: "A".repeat(4000) }] }];
-    const result = (executor as Any).recoverFromContextCapacityOverflow({
+    const result = await (executor as Any).recoverFromContextCapacityOverflow({
       error: new Error("Input too long: maximum context window reached"),
       messages,
       systemPromptTokens: 0,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { AlertTriangle, Check, Circle, Loader2 } from "lucide-react";
 import type { TimelineEventStatus } from "../../../shared/types";
 import { isBrowserToolName } from "../../utils/timeline-tool-labels";
@@ -14,7 +14,9 @@ interface ParallelGroupFeedProps {
   formatTime: (timestamp: number) => string;
   showConnectorAbove?: boolean;
   showConnectorBelow?: boolean;
-  defaultExpanded?: boolean;
+  expanded?: boolean;
+  onToggle?: () => void;
+  replay?: boolean;
 }
 
 function buildIndicatorForStatus(status: TimelineEventStatus): TimelineIndicatorSpec {
@@ -143,7 +145,9 @@ export function ParallelGroupFeed({
   formatTime: _formatTime,
   showConnectorAbove = false,
   showConnectorBelow = false,
-  defaultExpanded = false,
+  expanded = false,
+  onToggle,
+  replay = false,
 }: ParallelGroupFeedProps) {
   void _formatTime;
   if (group.lanes.length === 0) {
@@ -156,17 +160,6 @@ export function ParallelGroupFeed({
     isActiveStatus(group.status) || group.lanes.some((lane) => isActiveStatus(lane.status));
   const showImageGenerationFrame = hasActiveImageGenerationLane(group);
   const hasExpandableDetails = group.lanes.length > 1 || isBrowserGroup;
-  const [expanded, setExpanded] = useState(hasExpandableDetails && (isActive || defaultExpanded));
-
-  useEffect(() => {
-    if (!hasExpandableDetails) {
-      setExpanded(false);
-      return;
-    }
-    if (isActive || defaultExpanded) {
-      setExpanded(true);
-    }
-  }, [defaultExpanded, hasExpandableDetails, isActive]);
 
   const indicator = useMemo(() => buildIndicatorForStatus(group.status), [group.status]);
   const groupTitle = useMemo(() => buildParallelGroupTitle(group, isActive), [group, isActive]);
@@ -207,8 +200,8 @@ export function ParallelGroupFeed({
       showConnectorAbove={showConnectorAbove}
       showConnectorBelow={showConnectorBelow}
       expandable={hasExpandableDetails}
-      expanded={expanded}
-      onToggle={hasExpandableDetails ? () => setExpanded((prev) => !prev) : undefined}
+      expanded={hasExpandableDetails && expanded}
+      onToggle={hasExpandableDetails ? onToggle : undefined}
       details={
         hasExpandableDetails && expanded ? (
           <div className="parallel-group-feed-details">
@@ -227,6 +220,7 @@ export function ParallelGroupFeed({
           </div>
         ) : undefined
       }
+      replay={replay}
     />
   );
 }

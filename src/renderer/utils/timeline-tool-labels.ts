@@ -188,6 +188,12 @@ export function friendlyToolRunningLabel(toolName: string | undefined): string {
   if (!t) return "Running tool";
   if (isBrowserToolName(t)) return friendlyBrowserRunningLabel(t);
   if (isSkillToolName(t)) return "Reading a skill";
+  if (/(?:^|_)send_draft$/.test(t)) return "Saving an email draft";
+  if (/(?:^|_)send_(?:email|mail)$/.test(t)) return "Sending an email";
+  if (/(?:^|_)send_(?:message|dm)$/.test(t)) return "Sending a message";
+  if (/(?:^|_)(?:create|schedule)_event$/.test(t)) return "Creating a calendar event";
+  if (/(?:^|_)update_(?:record|row|issue|task)$/.test(t)) return "Updating a record";
+  if (/(?:^|_)create_(?:record|row|issue|task)$/.test(t)) return "Creating a record";
   switch (t) {
     case "web_fetch":
     case "http_request":
@@ -453,6 +459,12 @@ export function friendlyToolLaneCompletedLabel(
 function friendlyPastVerb(tool: string): string {
   if (isBrowserToolName(tool)) return friendlyBrowserCompletedLabel(tool);
   if (isSkillToolName(tool)) return "Read skill";
+  if (/(?:^|_)send_draft$/.test(tool)) return "Saved email draft";
+  if (/(?:^|_)send_(?:email|mail)$/.test(tool)) return "Sent email";
+  if (/(?:^|_)send_(?:message|dm)$/.test(tool)) return "Sent message";
+  if (/(?:^|_)(?:create|schedule)_event$/.test(tool)) return "Created calendar event";
+  if (/(?:^|_)update_(?:record|row|issue|task)$/.test(tool)) return "Updated record";
+  if (/(?:^|_)create_(?:record|row|issue|task)$/.test(tool)) return "Created record";
   switch (tool) {
     case "web_fetch":
     case "http_request":

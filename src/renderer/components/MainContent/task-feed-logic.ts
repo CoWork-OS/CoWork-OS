@@ -10,7 +10,6 @@ import {
 import type { EndOfTaskArtifactCard } from "./artifact-logic";
 import type { CommandOutputSession } from "../../utils/task-event-derived";
 
-export const STEP_WINDOW_SIZE = 7;
 export const VIRTUALIZED_FEED_ROW_THRESHOLD = 18;
 
 export type TaskFeedRow =
@@ -305,6 +304,80 @@ export function isDeliveryEvent(event: TaskEvent, eventStream: TaskEvent[]): boo
   return isDeliveryCompletionEvent(event, eventStream) || isDeliveryCriticalEvent(event);
 }
 
+function normalizeDeliveryMessageText(value: string): string {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Detects a completion summary that is only a clipped prefix of the final
+ * assistant message. Older executors persisted a 4,000-character summary even
+ * though the full assistant event was already stored, so delivery mode must
+ * prefer that complete event when rendering historical tasks.
+ */
+export function isCompletionSummaryCoveredByAssistantEvent(
+  completionEvent: TaskEvent,
+  assistantEvent: TaskEvent,
+): boolean {
+  if (getEffectiveTaskEventType(completionEvent) !== "task_completed") return false;
+  if (getEffectiveTaskEventType(assistantEvent) !== "assistant_message") return false;
+  if (assistantEvent.payload?.internal === true) return false;
+  if (
+    completionEvent.taskId &&
+    assistantEvent.taskId &&
+    completionEvent.taskId !== assistantEvent.taskId
+  ) {
+    return false;
+  }
+  if (
+    Number.isFinite(completionEvent.timestamp) &&
+    Number.isFinite(assistantEvent.timestamp) &&
+    assistantEvent.timestamp > completionEvent.timestamp
+  ) {
+    return false;
+  }
+  if (
+    (typeof completionEvent.payload?.terminalStatus === "string" &&
+      completionEvent.payload.terminalStatus !== "ok") ||
+    (Array.isArray(completionEvent.payload?.pendingChecklist) &&
+      completionEvent.payload.pendingChecklist.length > 0)
+  ) {
+    return false;
+  }
+
+  const rawSummary =
+    typeof completionEvent.payload?.resultSummary === "string"
+      ? completionEvent.payload.resultSummary.trim()
+      : "";
+  const formattedSummary = getCompletionSummaryText(completionEvent);
+  const normalizedSummary = normalizeDeliveryMessageText(rawSummary);
+  const normalizedFormattedSummary = normalizeDeliveryMessageText(formattedSummary);
+  const assistantText =
+    typeof assistantEvent.payload?.message === "string" ? assistantEvent.payload.message : "";
+  const normalizedAssistant = normalizeDeliveryMessageText(assistantText);
+  if (
+    !normalizedSummary ||
+    !normalizedAssistant ||
+    normalizedFormattedSummary !== normalizedSummary
+  ) {
+    return false;
+  }
+
+  const clippedPrefix = normalizedSummary.replace(/(?:\.{3}|…)$/, "");
+  const normalizedPrefix = clippedPrefix.trim();
+  if (!normalizedPrefix || normalizedPrefix === normalizedSummary) return false;
+
+  // Require a meaningful prefix and a clear continuation. This avoids treating
+  // a short, intentionally worded ellipsis as a clipped persisted result.
+  return (
+    normalizedPrefix.length >= 256 &&
+    normalizedAssistant.length > normalizedPrefix.length + 16 &&
+    normalizedAssistant.startsWith(normalizedPrefix)
+  );
+}
+
 export function createDeliveryEventRow(
   row: TaskFeedRow,
   event: TaskEvent,
@@ -393,11 +466,20 @@ export function selectVisibleTaskFeedRows(
       pushCandidate(finalAssistant.order, finalAssistant.row);
     }
 
+    const finalAssistantEvent = finalAssistant ? getTaskFeedRowEvent(finalAssistant.row) : null;
     const seenKeys = new Set<string>();
     const visibleFeedRows = candidates
       .sort((a, b) => a.order - b.order)
       .map((candidate) => candidate.row)
       .filter((row) => {
+        const event = getTaskFeedRowEvent(row);
+        if (
+          event &&
+          finalAssistantEvent &&
+          isCompletionSummaryCoveredByAssistantEvent(event, finalAssistantEvent)
+        ) {
+          return false;
+        }
         if (seenKeys.has(row.key)) return false;
         seenKeys.add(row.key);
         return true;

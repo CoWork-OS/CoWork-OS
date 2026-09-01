@@ -255,6 +255,12 @@ import { LifecycleMutex } from "./executor-lifecycle-mutex";
 import { maybeApplyQualityPasses as maybeApplyQualityPassesUtil } from "./executor-llm-turn-utils";
 import { ProgressScoreEngine } from "./progress-score-engine";
 import { processAssistantResponseText as processAssistantResponseTextUtil } from "./executor-assistant-output-utils";
+import {
+  buildTaskKickoffSummary,
+  responseHasAssistantText,
+  taskSessionKickoffIsSettled,
+  TASK_KICKOFF_PROMPT_RULES,
+} from "./task-kickoff-summary";
 import { sanitizeToolCallTextFromAssistant } from "./tool-call-text-sanitizer";
 import {
   evaluateToolAvailability,
@@ -908,6 +914,8 @@ export class TaskExecutor {
   private availableToolsCache: Any[] | null = null;
   private lastAssistantOutput: string | null = null;
   private lastNonVerificationOutput: string | null = null;
+  private sessionKickoffSummarySettled = false;
+  private emittingSessionKickoffSummary = false;
   private readonly toolResultMemoryLimit = 8;
   private readonly webEvidenceMemoryLimit = 200;
   /**
@@ -1058,6 +1066,7 @@ export class TaskExecutor {
   private _suppressNextUserMessageEvent = false;
 
   private static readonly MIN_RESULT_SUMMARY_LENGTH = 20;
+  private static readonly MAX_ASSISTANT_CONTEXT_CHARS = 4000;
   private static readonly RESULT_SUMMARY_PLACEHOLDERS = new Set<string>([
     "i understand. let me continue.",
     "done.",
@@ -1342,12 +1351,42 @@ export class TaskExecutor {
     }
   }
 
+  private ensureSessionKickoffBeforeTechnicalActivity(firstToolName = ""): void {
+    if (this.sessionKickoffSummarySettled || this.emittingSessionKickoffSummary) return;
+
+    const currentStep =
+      this.currentStepId && Array.isArray(this.plan?.steps)
+        ? this.plan.steps.find((step) => step.id === this.currentStepId)
+        : undefined;
+    const message = buildTaskKickoffSummary({
+      currentStepDescription: currentStep?.description,
+      planSteps: this.plan?.steps,
+      firstToolName,
+    });
+
+    this.sessionKickoffSummarySettled = true;
+    this.emittingSessionKickoffSummary = true;
+    try {
+      this.emitEvent("assistant_message", {
+        message,
+        internal: false,
+        kickoffSummary: true,
+        runtimeGenerated: true,
+        ...(currentStep?.id ? { stepId: currentStep.id } : {}),
+        ...(currentStep?.description ? { stepDescription: currentStep.description } : {}),
+      });
+    } finally {
+      this.emittingSessionKickoffSummary = false;
+    }
+  }
+
   private startToolBatchGroup(
     stepId: string,
     toolUseCount: number,
     phase: "step" | "follow_up",
   ): string | null {
     if (!Number.isFinite(toolUseCount) || toolUseCount <= 0) return null;
+    this.ensureSessionKickoffBeforeTechnicalActivity();
     const timeline =
       (this as Any).timelineEmitter &&
       typeof (this as Any).timelineEmitter.startGroupLane === "function"
@@ -1468,6 +1507,8 @@ export class TaskExecutor {
     opts?: {
       clearError?: boolean;
       clearTerminalFailure?: boolean;
+      terminalStatus?: Task["terminalStatus"];
+      failureClass?: Task["failureClass"];
     },
   ): void {
     const runtimeProjection = this.applyRuntimeTaskProjectionToTask();
@@ -1491,17 +1532,26 @@ export class TaskExecutor {
     if (clearTerminalFailure) {
       this.task.terminalStatus = undefined;
       this.task.failureClass = undefined;
+    } else if (opts?.terminalStatus) {
+      this.task.terminalStatus = opts.terminalStatus;
+      this.task.failureClass = opts.failureClass;
     }
     if (trimmedSummary) {
       this.task.resultSummary = trimmedSummary;
     }
-    const goalAgentConfig = this.applyGoalTerminalState(trimmedSummary, "ok");
+    const goalAgentConfig = this.applyGoalTerminalState(
+      trimmedSummary,
+      opts?.terminalStatus || (clearTerminalFailure ? "ok" : this.task.terminalStatus),
+    );
 
     this.daemon.updateTask(this.task.id, {
       status: "completed",
       completedAt,
       ...(clearError ? { error: null } : {}),
       ...(clearTerminalFailure ? { terminalStatus: undefined, failureClass: undefined } : {}),
+      ...(!clearTerminalFailure && opts?.terminalStatus
+        ? { terminalStatus: opts.terminalStatus, failureClass: opts.failureClass }
+        : {}),
       ...(trimmedSummary ? { resultSummary: trimmedSummary } : {}),
       ...(this.bestKnownOutcome ? { bestKnownOutcome: this.bestKnownOutcome } : {}),
       ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
@@ -1511,6 +1561,8 @@ export class TaskExecutor {
     this.emitEvent("task_completed", {
       message,
       ...(trimmedSummary ? { resultSummary: trimmedSummary } : {}),
+      ...(this.task.terminalStatus ? { terminalStatus: this.task.terminalStatus } : {}),
+      ...(this.task.failureClass ? { failureClass: this.task.failureClass } : {}),
       ...runtimeProjection,
       ...this.getCompletionProjectionFields(),
     });
@@ -1532,7 +1584,9 @@ export class TaskExecutor {
       if (!candidate) continue;
       const trimmed = String(candidate).trim();
       if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
-      return trimmed.length > 4000 ? `${trimmed.slice(0, 4000)}...` : trimmed;
+      // This value is persisted and rendered as the final answer. Keep it
+      // lossless; only prompt-context copies are bounded below.
+      return trimmed;
     }
 
     return "";
@@ -3058,6 +3112,19 @@ export class TaskExecutor {
       payload && typeof payload === "object" && !Array.isArray(payload)
         ? (payload as Record<string, unknown>)
         : {};
+
+    if (type === "tool_call") {
+      this.ensureSessionKickoffBeforeTechnicalActivity(
+        typeof payloadObj.tool === "string" ? payloadObj.tool : "",
+      );
+    } else if (
+      type === "assistant_message" &&
+      payloadObj.internal !== true &&
+      String(payloadObj.message || payloadObj.content || "").trim().length > 0
+    ) {
+      this.sessionKickoffSummarySettled = true;
+    }
+
     // Some tests instantiate TaskExecutor-like objects without running the constructor.
     // In that case timelineEmitter can be absent; fall back to legacy event emission.
     const timeline =
@@ -9185,7 +9252,7 @@ ${transcript}
     await this.getSessionRuntime().maybeCompactBeforeContinuation(assessment);
   }
 
-  private recoverFromContextCapacityOverflow(opts: {
+  private async recoverFromContextCapacityOverflow(opts: {
     error: unknown;
     messages: LLMMessage[];
     systemPromptTokens: number;
@@ -9193,7 +9260,7 @@ ${transcript}
     stepId?: string;
     attempt: number;
     maxAttempts: number;
-  }): { recovered: boolean; exhausted: boolean; messages: LLMMessage[] } {
+  }): Promise<{ recovered: boolean; exhausted: boolean; messages: LLMMessage[] }> {
     return this.getSessionRuntime().recoverFromContextCapacityOverflow(opts);
   }
 
@@ -11799,7 +11866,9 @@ ${transcript}
       if (!candidate) continue;
       const trimmed = candidate.trim();
       if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
-      return trimmed.length > 4000 ? `${trimmed.slice(0, 4000)}...` : trimmed;
+      // This value is persisted and rendered as the final answer. Keep it
+      // lossless; only prompt-context copies are bounded in recordAssistantOutput.
+      return trimmed;
     }
 
     return undefined;
@@ -14639,6 +14708,7 @@ ${transcript}
       "",
       "COMMUNICATION:",
       "- Use plain-language progress and outcomes unless the user asks for deeper technical detail.",
+      TASK_KICKOFF_PROMPT_RULES,
       "- Do not append trailing offer questions by default.",
       "",
       "RICH INLINE SURFACES:",
@@ -15961,6 +16031,7 @@ ${transcript}
    * This is used when recreating an executor for follow-up messages
    */
   rebuildConversationFromEvents(events: TaskEvent[]): void {
+    this.sessionKickoffSummarySettled = taskSessionKickoffIsSettled(events);
     this.getSessionRuntime().restoreFromEvents(events);
     this.currentPromptCacheContext = null;
     this.systemPromptBlocks = Array.isArray(this.stableSystemBlocks)
@@ -15988,6 +16059,7 @@ ${fallbackModeDomainContract}
 ${fallbackWebSearchModeContract}
 Always ask for approval before deleting files or making destructive changes.
 Be concise in your responses. When reading files, only read what you need.
+${TASK_KICKOFF_PROMPT_RULES}
 
 WEB ACCESS: Prefer browser_navigate for web access. If browser tools are unavailable, use web_search as an alternative. If any tool category is disabled, try alternative tools that can accomplish the same goal.
 
@@ -16028,6 +16100,7 @@ You are continuing a previous conversation. The context from the previous conver
    * Returns true if a snapshot was found and restored, false otherwise.
    */
   private restoreFromSnapshot(events: TaskEvent[]): boolean {
+    this.sessionKickoffSummarySettled = taskSessionKickoffIsSettled(events);
     this.getSessionRuntime().restoreFromEvents(events);
     return this.conversationHistory.length > 0;
   }
@@ -17808,6 +17881,7 @@ You are continuing a previous conversation. The context from the previous conver
     // If no new steps and we just cleared, we're done
     if (newSteps.length === 0) {
       this.emitEvent("plan_revised", {
+        plan: this.plan,
         reason,
         clearedSteps: clearedCount,
         clearRemaining: true,
@@ -17893,6 +17967,7 @@ You are continuing a previous conversation. The context from the previous conver
 
     // Log the plan revision
     this.emitEvent("plan_revised", {
+      plan: this.plan,
       reason,
       clearedSteps: clearedCount,
       newStepsCount: newSteps.length,
@@ -22112,29 +22187,35 @@ You are continuing a previous conversation. The context from the previous conver
       .join("\n")
       .trim();
     if (!text) return;
-    // Cap at 4000 to match buildResultSummary limit – the previous 1500 limit
-    // was too aggressive and caused delivered results to be cut short.
-    const truncated = text.length > 4000 ? `${text.slice(0, 4000)}…` : text;
+    // Keep a bounded copy for prompt/tool-selection context, but never use that
+    // copy as the user-facing completion. The full assistant text is already
+    // persisted in the assistant_message timeline event and must remain the
+    // canonical result candidate.
+    const contextText =
+      text.length > TaskExecutor.MAX_ASSISTANT_CONTEXT_CHARS
+        ? `${text.slice(0, TaskExecutor.MAX_ASSISTANT_CONTEXT_CHARS)}…`
+        : text;
     if (!this.isVerificationStep(step)) {
       const preserveExistingDeliverable =
         this.isRecoveryPlanStep(step) &&
         shouldPreserveExistingDeliverableForRecoveryUtil({
           existingDeliverable: this.lastNonVerificationOutput,
-          recoveryText: truncated,
+          recoveryText: text,
           minResultSummaryLength: TaskExecutor.MIN_RESULT_SUMMARY_LENGTH,
           contract: this.buildCompletionContract(),
         });
       const preservePriorOutputAfterNoOpStep = this.shouldPreservePriorOutputAfterNoOpStep(
         step,
-        truncated,
+        text,
       );
       if (!preserveExistingDeliverable && !preservePriorOutputAfterNoOpStep) {
-        this.lastAssistantOutput = truncated;
-        this.lastNonVerificationOutput = truncated;
+        this.lastAssistantOutput = contextText;
+        this.lastNonVerificationOutput = text;
+        this.lastAssistantText = text;
       }
     } else {
       if (!this.lastAssistantOutput) {
-        this.lastAssistantOutput = truncated;
+        this.lastAssistantOutput = contextText;
       }
       // Preserve lastNonVerificationOutput for future steps/follow-ups.
     }
@@ -28474,7 +28555,7 @@ Return ONLY a JSON object:
               forceNoTools: localModelStepFinalizationForced,
             });
           } catch (llmError: Any) {
-            const recovery = this.recoverFromContextCapacityOverflow({
+            const recovery = await this.recoverFromContextCapacityOverflow({
               error: llmError,
               messages,
               systemPromptTokens,
@@ -28716,6 +28797,12 @@ Return ONLY a JSON object:
             });
           const unrecoveredPriorPlanFailureForAssistantOutput =
             this.hasUnrecoveredBlockingPlanFailureBeforeStep(step);
+          const shouldExposeSessionKickoff =
+            !this.sessionKickoffSummarySettled &&
+            !isPlanVerifyStep &&
+            !unrecoveredPriorPlanFailureForAssistantOutput &&
+            !unrecoveredToolFailureForAssistantOutput &&
+            responseHasAssistantText(response.content);
 
           const assistantProcessing = this.processAssistantResponseText({
             responseContent: response.content,
@@ -28723,10 +28810,12 @@ Return ONLY a JSON object:
               stepId: step.id,
               stepDescription: step.description,
               internal:
-                isPlanVerifyStep ||
-                !this.isLastVisibleAssistantStep(step) ||
-                unrecoveredPriorPlanFailureForAssistantOutput ||
-                unrecoveredToolFailureForAssistantOutput,
+                !shouldExposeSessionKickoff &&
+                (isPlanVerifyStep ||
+                  !this.isLastVisibleAssistantStep(step) ||
+                  unrecoveredPriorPlanFailureForAssistantOutput ||
+                  unrecoveredToolFailureForAssistantOutput),
+              ...(shouldExposeSessionKickoff ? { kickoffSummary: true } : {}),
             },
             updateLastAssistantText: true,
           });
@@ -34586,6 +34675,7 @@ Return ONLY a JSON object:
     if (opts.awaitingUserInput) return "awaiting_user_input";
     const lower = String(opts.failureReason || "").toLowerCase();
     if (!opts.stepFailed) return "completed";
+    if (opts.loopBudgetStopReason === "max_iterations") return "max_turns";
     if (opts.loopBudgetStopReason) return opts.loopBudgetStopReason;
     if (opts.iterationCount >= opts.maxIterations) return "max_turns";
     if (
@@ -34612,6 +34702,8 @@ Return ONLY a JSON object:
 
   private getStepLoopBudgetFailureReason(reason: LoopBudgetStopReason): string {
     switch (reason) {
+      case "max_iterations":
+        return "Step loop budget exhausted: reached the maximum iteration limit.";
       case "max_llm_calls":
         return "Step loop budget exhausted: reached the total LLM call limit.";
       case "max_recovered_responses":
@@ -34692,6 +34784,7 @@ Return ONLY a JSON object:
         : terminalStatus === "partial_success" ||
             terminalStatus === "needs_user_action" ||
             terminalStatus === "awaiting_approval" ||
+            terminalStatus === "awaiting_verification" ||
             terminalStatus === "resume_available"
           ? "partial"
           : "ok";
@@ -35707,7 +35800,7 @@ Return ONLY a JSON object:
               operation: "LLM message processing",
             });
           } catch (llmError: Any) {
-            const recovery = this.recoverFromContextCapacityOverflow({
+            const recovery = await this.recoverFromContextCapacityOverflow({
               error: llmError,
               messages,
               systemPromptTokens,
@@ -37447,6 +37540,34 @@ Return ONLY a JSON object:
           "LLM returned empty responses repeatedly during follow-up processing. " +
             "This usually indicates a provider/tool-call error. Try again or switch models/providers.",
         );
+      }
+
+      // A follow-up that ran out of its loop budget is useful partial progress,
+      // but it is not a successful completion.  Preserve the honest outcome
+      // before the generic "had tool calls" finalization branch below runs.
+      if (followUpKernelOutcome.loopBudgetStopReason) {
+        const budgetReason =
+          followUpKernelOutcome.loopBudgetStopReason === "max_iterations"
+            ? "maximum iteration limit"
+            : followUpKernelOutcome.loopBudgetStopReason === "max_llm_calls"
+              ? "total LLM call limit"
+              : followUpKernelOutcome.loopBudgetStopReason === "max_recovered_responses"
+                ? "recovered response limit"
+                : "repeated iteration limit";
+        const budgetMessage =
+          `Follow-up stopped after reaching the ${budgetReason}. ` +
+          "The response contains partial progress; review it and continue if needed.";
+        this.emitEvent("log", {
+          metric: "follow_up_loop_budget_stop",
+          reason: followUpKernelOutcome.loopBudgetStopReason,
+          message: budgetMessage,
+        });
+        this.finalizeFollowUpCompletion(budgetMessage, {
+          clearTerminalFailure: false,
+          terminalStatus: "partial_success",
+          failureClass: "budget_exhausted",
+        });
+        return;
       }
 
       if (

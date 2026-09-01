@@ -5,6 +5,7 @@ export type TerminalKind =
   | "partial_success"
   | "timed_out"
   | "needs_user_action"
+  | "awaiting_verification"
   | "cancelled"
   | "external_completed"
   | "deterministic_handled"
@@ -66,6 +67,8 @@ function resolveTerminalStatus(
       return "partial_success";
     case "needs_user_action":
       return "needs_user_action";
+    case "awaiting_verification":
+      return "awaiting_verification";
     case "failed":
       return "failed";
   }
@@ -76,7 +79,13 @@ function resolveFailureClass(
   terminalStatus: Task["terminalStatus"],
   override?: Task["failureClass"],
 ): Task["failureClass"] | undefined {
-  if (terminalStatus === "ok" || terminalStatus === "needs_user_action") return undefined;
+  if (
+    terminalStatus === "ok" ||
+    terminalStatus === "needs_user_action" ||
+    terminalStatus === "awaiting_verification"
+  ) {
+    return undefined;
+  }
   if (override) return override;
   switch (terminalKind) {
     case "timed_out":

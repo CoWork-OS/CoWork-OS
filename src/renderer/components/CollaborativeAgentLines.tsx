@@ -142,6 +142,8 @@ function getTerminalTaskLabel(taskId: string, childEvents: TaskEvent[], task: Ta
       return "Needs user action";
     case "awaiting_approval":
       return "Awaiting approval";
+    case "awaiting_verification":
+      return "Verifying before completion";
     case "resume_available":
       return "Paused";
     case "failed":
@@ -215,6 +217,7 @@ function getAgentLineStatusKind(
     task?.terminalStatus === "partial_success" ||
     task?.terminalStatus === "needs_user_action" ||
     task?.terminalStatus === "awaiting_approval" ||
+    task?.terminalStatus === "awaiting_verification" ||
     task?.terminalStatus === "resume_available"
   )
     return "warning";

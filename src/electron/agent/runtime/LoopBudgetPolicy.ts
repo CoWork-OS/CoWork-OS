@@ -1,4 +1,5 @@
 export type LoopBudgetStopReason =
+  | "max_iterations"
   | "max_llm_calls"
   | "max_recovered_responses"
   | "max_repeated_iterations";

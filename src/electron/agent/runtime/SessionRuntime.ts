@@ -1396,45 +1396,21 @@ export class SessionRuntime {
         const postCompactTokens = estimateTotalTokens(messages);
         const slack = Math.max(0, ctxUtil.availableTokens - postCompactTokens);
         const summaryBudget = Math.min(4000, Math.max(800, Math.floor(slack * 0.6)));
-
-        let summaryBlock = await this.deps.buildCompactionSummaryBlock({
+        const summaryResult = await this.installCompactionSummary({
+          messages,
           removedMessages: proactiveResult.meta.removedMessages.messages,
+          systemPromptTokens: opts.systemPromptTokens,
           maxOutputTokens: summaryBudget,
+          availableTokens: ctxUtil.availableTokens,
           contextLabel: opts.contextLabel,
+          proactive: true,
+          allowMemoryInjection: opts.allowMemoryInjection,
         });
+        messages = summaryResult.messages;
 
-        if (summaryBlock) {
-          const summaryTokens = estimateTokens(summaryBlock);
-          const postInsertTokens = estimateTotalTokens(messages) + summaryTokens;
-          if (postInsertTokens > ctxUtil.availableTokens * 0.95) {
-            const maxSummaryTokens = Math.max(
-              200,
-              ctxUtil.availableTokens - estimateTotalTokens(messages) - 2000,
-            );
-            summaryBlock = this.deps.truncateSummaryBlock(summaryBlock, maxSummaryTokens);
-          }
-
-          this.deps.upsertPinnedUserBlock(messages, {
-            tag: "PINNED_COMPACTION_SUMMARY",
-            content: summaryBlock,
-          });
-          DurableContextService.recordCompactionSummary({
-            workspaceId: this.deps.getWorkspace().id,
-            taskId: this.deps.getTask().id,
-            removedMessages: proactiveResult.meta.removedMessages.messages,
-            summaryBlock,
-            contextLabel: opts.contextLabel,
-            proactive: true,
-          });
-          await this.deps.flushCompactionSummaryToMemory({
-            workspaceId: this.deps.getWorkspace().id,
-            taskId: this.deps.getTask().id,
-            allowMemoryInjection: opts.allowMemoryInjection,
-            summaryBlock,
-          });
-
+        if (summaryResult.summaryBlock) {
           const summaryText = this.deps.extractPinnedBlockContent(
-            summaryBlock,
+            summaryResult.summaryBlock,
             "PINNED_COMPACTION_SUMMARY",
             "PINNED_COMPACTION_SUMMARY_CLOSE",
           );
@@ -1461,45 +1437,21 @@ export class SessionRuntime {
         const tokensNow = estimateTotalTokens(messages);
         const slack = Math.max(0, availableTokens - tokensNow);
         const summaryBudget = Math.min(4000, Math.max(800, Math.floor(slack * 0.6)));
-
-        let summaryBlock = await this.deps.buildCompactionSummaryBlock({
+        const summaryResult = await this.installCompactionSummary({
+          messages,
           removedMessages: compaction.meta.removedMessages.messages,
+          systemPromptTokens: opts.systemPromptTokens,
           maxOutputTokens: summaryBudget,
+          availableTokens,
           contextLabel: opts.contextLabel,
+          proactive: false,
+          allowMemoryInjection: opts.allowMemoryInjection,
         });
+        messages = summaryResult.messages;
 
-        if (summaryBlock) {
-          const summaryTokens = estimateTokens(summaryBlock);
-          const postInsertTokens = estimateTotalTokens(messages) + summaryTokens;
-          if (postInsertTokens > availableTokens * 0.95) {
-            const maxSummaryTokens = Math.max(
-              200,
-              availableTokens - estimateTotalTokens(messages) - 2000,
-            );
-            summaryBlock = this.deps.truncateSummaryBlock(summaryBlock, maxSummaryTokens);
-          }
-
-          this.deps.upsertPinnedUserBlock(messages, {
-            tag: "PINNED_COMPACTION_SUMMARY",
-            content: summaryBlock,
-          });
-          DurableContextService.recordCompactionSummary({
-            workspaceId: this.deps.getWorkspace().id,
-            taskId: this.deps.getTask().id,
-            removedMessages: compaction.meta.removedMessages.messages,
-            summaryBlock,
-            contextLabel: opts.contextLabel,
-            proactive: false,
-          });
-          await this.deps.flushCompactionSummaryToMemory({
-            workspaceId: this.deps.getWorkspace().id,
-            taskId: this.deps.getTask().id,
-            allowMemoryInjection: opts.allowMemoryInjection,
-            summaryBlock,
-          });
-
+        if (summaryResult.summaryBlock) {
           const summaryText = this.deps.extractPinnedBlockContent(
-            summaryBlock,
+            summaryResult.summaryBlock,
             "PINNED_COMPACTION_SUMMARY",
             "PINNED_COMPACTION_SUMMARY_CLOSE",
           );
@@ -1525,7 +1477,116 @@ export class SessionRuntime {
     };
   }
 
-  recoverFromContextCapacityOverflow(opts: {
+  /**
+   * Install one durable compaction summary for every compaction path.
+   *
+   * Compaction is a lossy operation unless the removed transcript is both
+   * persisted and represented in the retry context.  Keeping that work in one
+   * helper prevents continuation/overflow recovery from silently dropping the
+   * summary that normal turn preparation already preserves.
+   */
+  private async installCompactionSummary(opts: {
+    messages: LLMMessage[];
+    removedMessages: LLMMessage[];
+    systemPromptTokens: number;
+    maxOutputTokens?: number;
+    availableTokens?: number;
+    contextLabel: string;
+    historySource?: string;
+    proactive?: boolean;
+    allowMemoryInjection?: boolean;
+  }): Promise<{ messages: LLMMessage[]; summaryBlock?: string }> {
+    const removedMessages = (opts.removedMessages || []).filter(Boolean);
+    if (removedMessages.length === 0) return { messages: opts.messages };
+
+    // Even when a test/minimal runtime does not provide a summary builder, keep
+    // the source transcript durable so a later restart can reconstruct it.
+    DurableContextService.recordHistory({
+      workspaceId: this.deps.getWorkspace().id,
+      taskId: this.deps.getTask().id,
+      messages: removedMessages,
+      source: opts.historySource || "compaction_source",
+    });
+
+    const buildSummary = (this.deps as Any).buildCompactionSummaryBlock as
+      | ((args: Any) => Promise<string>)
+      | undefined;
+    if (typeof buildSummary !== "function") return { messages: opts.messages };
+
+    const contextManager = this.deps.getContextManager() as Any;
+    const contextManagerAvailableTokens =
+      typeof contextManager?.getAvailableTokens === "function"
+        ? contextManager.getAvailableTokens(opts.systemPromptTokens)
+        : undefined;
+    const availableTokens =
+      typeof opts.availableTokens === "number" && Number.isFinite(opts.availableTokens)
+        ? Math.max(0, opts.availableTokens)
+        : typeof contextManagerAvailableTokens === "number" &&
+            Number.isFinite(contextManagerAvailableTokens)
+          ? Math.max(0, contextManagerAvailableTokens)
+          : Number.MAX_SAFE_INTEGER;
+    const currentTokens = estimateTotalTokens(opts.messages);
+    const slack = Math.max(0, availableTokens - currentTokens);
+    const requestedMaxOutputTokens =
+      typeof opts.maxOutputTokens === "number" && Number.isFinite(opts.maxOutputTokens)
+        ? Math.max(200, Math.floor(opts.maxOutputTokens))
+        : Math.min(4000, Math.max(800, Math.floor(slack * 0.6)));
+
+    let summaryBlock = await buildSummary({
+      removedMessages,
+      maxOutputTokens: requestedMaxOutputTokens,
+      contextLabel: opts.contextLabel,
+    });
+    if (typeof summaryBlock !== "string" || summaryBlock.trim().length === 0) {
+      return { messages: opts.messages };
+    }
+
+    const truncateSummaryBlock = (this.deps as Any).truncateSummaryBlock as
+      | ((summary: string, maxTokens: number) => string)
+      | undefined;
+    const summaryTokens = estimateTokens(summaryBlock);
+    const postInsertTokens = currentTokens + summaryTokens;
+    if (postInsertTokens > availableTokens * 0.95 && typeof truncateSummaryBlock === "function") {
+      const maxSummaryTokens = Math.max(200, availableTokens - currentTokens - 2000);
+      summaryBlock = truncateSummaryBlock(summaryBlock, maxSummaryTokens);
+    }
+    if (summaryBlock.trim().length === 0) return { messages: opts.messages };
+
+    const upsertPinnedUserBlock = (this.deps as Any).upsertPinnedUserBlock as
+      | ((messages: LLMMessage[], opts: Any) => void)
+      | undefined;
+    if (typeof upsertPinnedUserBlock === "function") {
+      upsertPinnedUserBlock(opts.messages, {
+        tag: "PINNED_COMPACTION_SUMMARY",
+        content: summaryBlock,
+      });
+    }
+
+    DurableContextService.recordCompactionSummary({
+      workspaceId: this.deps.getWorkspace().id,
+      taskId: this.deps.getTask().id,
+      removedMessages,
+      summaryBlock,
+      contextLabel: opts.contextLabel,
+      proactive: opts.proactive === true,
+    });
+
+    const flushSummary = (this.deps as Any).flushCompactionSummaryToMemory as
+      | ((args: Any) => Promise<void>)
+      | undefined;
+    if (typeof flushSummary === "function") {
+      await flushSummary({
+        workspaceId: this.deps.getWorkspace().id,
+        taskId: this.deps.getTask().id,
+        allowMemoryInjection: opts.allowMemoryInjection === true,
+        summaryBlock,
+      });
+    }
+
+    return { messages: opts.messages, summaryBlock };
+  }
+
+  async recoverFromContextCapacityOverflow(opts: {
     error: unknown;
     messages: LLMMessage[];
     systemPromptTokens: number;
@@ -1533,7 +1594,7 @@ export class SessionRuntime {
     stepId?: string;
     attempt: number;
     maxAttempts: number;
-  }): { recovered: boolean; exhausted: boolean; messages: LLMMessage[] } {
+  }): Promise<{ recovered: boolean; exhausted: boolean; messages: LLMMessage[] }> {
     if (!isContextCapacityError(opts.error)) {
       return { recovered: false, exhausted: false, messages: opts.messages };
     }
@@ -1576,14 +1637,16 @@ export class SessionRuntime {
         compactedMessages = fallback.messages;
         removedMessages = fallback.meta.removedMessages.messages;
       }
-      if (removedMessages.length > 0) {
-        DurableContextService.recordHistory({
-          workspaceId: this.deps.getWorkspace().id,
-          taskId: this.deps.getTask().id,
-          messages: removedMessages,
-          source: "context_capacity_recovery_source",
-        });
-      }
+      const summaryResult = await this.installCompactionSummary({
+        messages: compactedMessages,
+        removedMessages,
+        systemPromptTokens: opts.systemPromptTokens,
+        maxOutputTokens: 1200,
+        contextLabel: `${opts.phase} context-capacity recovery`,
+        historySource: "context_capacity_recovery_source",
+        proactive: true,
+      });
+      compactedMessages = summaryResult.messages;
 
       this.deps.pruneStaleToolErrors(compactedMessages);
       this.deps.consolidateConsecutiveUserMessages(compactedMessages);
@@ -1646,27 +1709,35 @@ export class SessionRuntime {
       const compacted = this.deps
         .getContextManager()
         .compactMessagesWithMeta(this.state.transcript.conversationHistory, systemPromptTokens);
+      let continuationMessages = compacted.messages;
+      let summaryBlock: string | undefined;
       if (
         compacted.meta.removedMessages.didRemove &&
         compacted.meta.removedMessages.messages.length > 0
       ) {
-        const summaryBlock = await this.deps.buildCompactionSummaryBlock({
+        const summaryResult = await this.installCompactionSummary({
+          messages: continuationMessages,
           removedMessages: compacted.meta.removedMessages.messages,
+          systemPromptTokens,
           maxOutputTokens: 1200,
+          availableTokens: (() => {
+            const contextManager = this.deps.getContextManager() as Any;
+            const availableTokens =
+              typeof contextManager?.getAvailableTokens === "function"
+                ? contextManager.getAvailableTokens(systemPromptTokens)
+                : Number.MAX_SAFE_INTEGER;
+            return typeof availableTokens === "number" && Number.isFinite(availableTokens)
+              ? availableTokens
+              : Number.MAX_SAFE_INTEGER;
+          })(),
           contextLabel: "continuation compaction",
+          proactive: false,
+          allowMemoryInjection: true,
         });
-        if (summaryBlock) {
-          DurableContextService.recordCompactionSummary({
-            workspaceId: this.deps.getWorkspace().id,
-            taskId: this.deps.getTask().id,
-            removedMessages: compacted.meta.removedMessages.messages,
-            summaryBlock,
-            contextLabel: "continuation compaction",
-            proactive: false,
-          });
-        }
+        continuationMessages = summaryResult.messages;
+        summaryBlock = summaryResult.summaryBlock;
       }
-      this.updateConversationHistory(compacted.messages);
+      this.updateConversationHistory(continuationMessages);
       const tokensAfter = estimateTotalTokens(this.state.transcript.conversationHistory);
       this.state.loop.compactionCount += 1;
       this.state.loop.lastCompactionAt = Date.now();
@@ -1680,7 +1751,29 @@ export class SessionRuntime {
         tokensBefore,
         tokensAfter,
         removedMessages: compacted.meta.removedMessages.count,
+        ...(summaryBlock
+          ? {
+              summary: this.deps.extractPinnedBlockContent(
+                summaryBlock,
+                "PINNED_COMPACTION_SUMMARY",
+                "PINNED_COMPACTION_SUMMARY_CLOSE",
+              ),
+            }
+          : {}),
       });
+      if (summaryBlock) {
+        this.deps.emitEvent("context_summarized", {
+          summary: this.deps.extractPinnedBlockContent(
+            summaryBlock,
+            "PINNED_COMPACTION_SUMMARY",
+            "PINNED_COMPACTION_SUMMARY_CLOSE",
+          ),
+          removedCount: compacted.meta.removedMessages.count,
+          tokensBefore: compacted.meta.originalTokens,
+          tokensAfter,
+          proactive: false,
+        });
+      }
     } catch (error: Any) {
       this.deps.emitEvent("context_compaction_failed", {
         continuationWindow: this.state.loop.continuationWindow,

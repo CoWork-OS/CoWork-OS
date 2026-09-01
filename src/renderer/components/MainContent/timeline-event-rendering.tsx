@@ -311,7 +311,7 @@ export function isRunCommandApproval(approval: Any | null): boolean {
 
 export function shouldHideApprovalEventInStepFeed(event: TaskEvent): boolean {
   if (getEffectiveTaskEventType(event) !== "approval_requested") return false;
-  if (event.payload?.autoApproved === true) return true;
+  if (event.payload?.autoApproved === true || event.payload?.autoResolving === true) return true;
   return isRunCommandApproval(getApprovalPayload(event));
 }
 
@@ -737,6 +737,10 @@ export function renderEventTitle(
         ? `${getMessage("approval", msgCtx)} ${description}`
         : getMessage("approval", msgCtx);
     }
+    case "approval_granted":
+      return "Approval granted";
+    case "approval_denied":
+      return "Approval denied";
     case "input_request_created":
       return "Structured input requested";
     case "input_request_resolved":

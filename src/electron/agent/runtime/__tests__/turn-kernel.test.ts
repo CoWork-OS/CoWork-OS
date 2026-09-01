@@ -62,6 +62,31 @@ describe("TurnKernel", () => {
     expect(result.iterations).toBe(1);
   });
 
+  it("reports natural iteration exhaustion when the policy still wants to continue", async () => {
+    const requestResponse = vi.fn().mockResolvedValue({
+      response: { stopReason: "tool_use", content: [{ type: "text", text: "continue" }] },
+      availableTools: [],
+    });
+    const handleResponse = vi.fn().mockResolvedValue({ continueLoop: true });
+    const kernel = new TurnKernel(
+      {
+        mode: "step",
+        messages: [{ role: "user", content: "start" }],
+        maxIterations: 2,
+        maxEmptyResponses: 2,
+      },
+      { requestResponse, handleResponse },
+    );
+
+    const result = await kernel.run();
+
+    expect(requestResponse).toHaveBeenCalledTimes(2);
+    expect(handleResponse).toHaveBeenCalledTimes(2);
+    expect(result.iterations).toBe(2);
+    expect(result.stopReason).toBe("max_iterations");
+    expect(result.loopBudgetStopReason).toBe("max_iterations");
+  });
+
   it("allows the final configured recovered response to issue its retry request", async () => {
     const requestResponse = vi
       .fn()

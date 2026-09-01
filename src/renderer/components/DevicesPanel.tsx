@@ -223,7 +223,8 @@ function isTaskAttention(task: Task): boolean {
   return (
     task.status === "blocked" ||
     task.terminalStatus === "needs_user_action" ||
-    task.terminalStatus === "awaiting_approval"
+    task.terminalStatus === "awaiting_approval" ||
+    task.terminalStatus === "awaiting_verification"
   );
 }
 
@@ -264,7 +265,12 @@ function getTaskBadge(task: Task) {
   if (isTaskAttention(task)) {
     return {
       className: "attention",
-      label: task.terminalStatus === "awaiting_approval" ? "Approval needed" : "Needs input",
+      label:
+        task.terminalStatus === "awaiting_approval"
+          ? "Approval needed"
+          : task.terminalStatus === "awaiting_verification"
+            ? "Verifying"
+            : "Needs input",
       icon: <AlertCircle size={12} />,
     };
   }
@@ -1437,7 +1443,9 @@ export function DevicesPanel({
                         <span className="dp-task-inline-alert">
                           {task.terminalStatus === "awaiting_approval"
                             ? "Approval blocked"
-                            : "Waiting for input"}
+                            : task.terminalStatus === "awaiting_verification"
+                              ? "Verifying before completion"
+                              : "Waiting for input"}
                         </span>
                       ) : null}
                     </div>

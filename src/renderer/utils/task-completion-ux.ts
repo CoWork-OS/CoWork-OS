@@ -225,6 +225,7 @@ export function buildTaskCompletionToast(options: {
     | "partial_success"
     | "needs_user_action"
     | "awaiting_approval"
+    | "awaiting_verification"
     | "resume_available"
     | "failed"
     | string;
@@ -234,18 +235,21 @@ export function buildTaskCompletionToast(options: {
     terminalStatus === "needs_user_action" || terminalStatus === "awaiting_approval";
   const isWarningCompletion =
     isNeedsUserAction ||
+    terminalStatus === "awaiting_verification" ||
     terminalStatus === "partial_success" ||
     terminalStatus === "resume_available";
   const title =
     terminalStatus === "awaiting_approval"
       ? "Task waiting for approval"
-      : terminalStatus === "resume_available"
-        ? "Task paused - resume available"
-        : isNeedsUserAction
-          ? "Task complete - action required"
-          : isWarningCompletion
-            ? "Task complete (warnings)"
-            : "Task complete";
+      : terminalStatus === "awaiting_verification"
+        ? "Task verifying before completion"
+        : terminalStatus === "resume_available"
+          ? "Task paused - resume available"
+          : isNeedsUserAction
+            ? "Task complete - action required"
+            : isWarningCompletion
+              ? "Task complete (warnings)"
+              : "Task complete";
   const toastType: ToastNotification["type"] = isWarningCompletion ? "warning" : "success";
 
   if (hasTaskOutputs(outputSummary)) {

@@ -863,13 +863,15 @@ export class CronService {
               status =
                 task.terminalStatus === "awaiting_approval"
                   ? "needs_user_action"
-                  : task.terminalStatus === "resume_available"
-                    ? "partial_success"
-                    : task.terminalStatus === "needs_user_action"
-                      ? "needs_user_action"
-                      : task.terminalStatus === "partial_success"
-                        ? "partial_success"
-                        : "ok";
+                  : task.terminalStatus === "awaiting_verification"
+                    ? "needs_user_action"
+                    : task.terminalStatus === "resume_available"
+                      ? "partial_success"
+                      : task.terminalStatus === "needs_user_action"
+                        ? "needs_user_action"
+                        : task.terminalStatus === "partial_success"
+                          ? "partial_success"
+                          : "ok";
               if (typeof task.resultSummary === "string" && task.resultSummary.trim()) {
                 pollResultSummary = task.resultSummary.trim();
               }
@@ -906,13 +908,15 @@ export class CronService {
               status =
                 finalTask?.terminalStatus === "awaiting_approval"
                   ? "needs_user_action"
-                  : finalTask?.terminalStatus === "resume_available"
-                    ? "partial_success"
-                    : finalTask?.terminalStatus === "needs_user_action"
-                      ? "needs_user_action"
-                      : finalTask?.terminalStatus === "partial_success"
-                        ? "partial_success"
-                        : "ok";
+                  : finalTask?.terminalStatus === "awaiting_verification"
+                    ? "needs_user_action"
+                    : finalTask?.terminalStatus === "resume_available"
+                      ? "partial_success"
+                      : finalTask?.terminalStatus === "needs_user_action"
+                        ? "needs_user_action"
+                        : finalTask?.terminalStatus === "partial_success"
+                          ? "partial_success"
+                          : "ok";
               if (
                 !pollResultSummary &&
                 typeof finalTask?.resultSummary === "string" &&

@@ -20,6 +20,12 @@ export function deriveCanonicalTaskStatus(
       ? task.completedAt
       : undefined;
 
+  // Verification is an explicit non-terminal lifecycle marker. Treat it as
+  // blocked even if a stale writer left the raw status as `completed`.
+  if (task.terminalStatus === "awaiting_verification") {
+    return "blocked";
+  }
+
   if (!isActiveTaskStatus(status)) {
     return status;
   }

@@ -470,6 +470,63 @@ describe("SessionRuntime", () => {
     );
   });
 
+  it("installs and persists a summary when compacting before continuation", async () => {
+    const harness = createHarness();
+    const runtime = harness.runtime as Any;
+    const summaryBuilder = vi
+      .fn()
+      .mockResolvedValue(
+        "<cowork_compaction_summary>Remember the decision.</cowork_compaction_summary>",
+      );
+    const summaryFlush = vi.fn().mockResolvedValue(undefined);
+    runtime.deps.shouldCompactOnContinuation = () => true;
+    runtime.deps.getRenderedContextRatio = () => 0.95;
+    runtime.deps.getContextManager = () => ({
+      getAvailableTokens: () => 1000,
+      compactMessagesWithMeta: (messages: LLMMessage[]) => ({
+        messages: messages.slice(1),
+        meta: {
+          originalTokens: 1200,
+          removedMessages: {
+            didRemove: true,
+            messages: [messages[0]],
+            count: 1,
+            tokensAfter: 400,
+          },
+        },
+      }),
+    });
+    runtime.deps.buildCompactionSummaryBlock = summaryBuilder;
+    runtime.deps.flushCompactionSummaryToMemory = summaryFlush;
+    runtime.deps.upsertPinnedUserBlock = (messages: LLMMessage[], opts: Any) => {
+      messages.push({ role: "user", content: opts.content });
+    };
+    runtime.state.transcript.conversationHistory = [
+      { role: "user", content: "old context" },
+      { role: "assistant", content: "current context" },
+    ];
+
+    await harness.runtime.maybeCompactBeforeContinuation({});
+
+    expect(summaryBuilder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextLabel: "continuation compaction",
+        removedMessages: [{ role: "user", content: "old context" }],
+      }),
+    );
+    expect(summaryFlush).toHaveBeenCalledWith(
+      expect.objectContaining({ summaryBlock: expect.stringContaining("Remember the decision") }),
+    );
+    expect(harness.runtime.state.transcript.conversationHistory).toEqual([
+      { role: "assistant", content: "current context" },
+      {
+        role: "user",
+        content: "<cowork_compaction_summary>Remember the decision.</cowork_compaction_summary>",
+      },
+    ]);
+    expect(harness.emittedEvents.some((event) => event.type === "context_summarized")).toBe(true);
+  });
+
   it("continues a text loop once when the model stops on max_tokens", async () => {
     const harness = createHarness();
     harness.createMessageWithTimeout

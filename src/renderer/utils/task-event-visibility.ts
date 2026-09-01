@@ -1,6 +1,10 @@
 import type { EventType, TaskEvent, TaskStatus } from "../../shared/types";
 import { getEffectiveTaskEventType, getTimelineErrorText } from "./task-event-compat";
 import { hasAssistantMediaDirective } from "./assistant-media-directives";
+import {
+  deriveApprovalEventState,
+  isApprovalRequestResolvedAtEmission,
+} from "./approval-event-state";
 
 export const IMPORTANT_EVENT_TYPES: EventType[] = [
   "task_created",
@@ -33,6 +37,7 @@ export const IMPORTANT_EVENT_TYPES: EventType[] = [
   "no_progress_circuit_breaker",
   "step_contract_escalated",
   "approval_requested",
+  "approval_denied",
   "input_request_created",
   "input_request_resolved",
   "input_request_dismissed",
@@ -91,6 +96,22 @@ function asObject(value: unknown): Record<string, unknown> {
 function getPayloadText(payload: Record<string, unknown>, key: string): string {
   const value = payload[key];
   return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * Compact mode should display permission outcomes, not approval bookkeeping.
+ * Keep genuinely pending requests visible, remove requests with a terminal
+ * grant or denial, and retain the denial itself as the user-facing outcome.
+ */
+export function filterResolvedApprovalNarration(
+  events: TaskEvent[],
+  resolutionEvents: TaskEvent[] = events,
+): TaskEvent[] {
+  const { resolvedRequestEventIds } = deriveApprovalEventState(resolutionEvents);
+  return events.filter((event) => {
+    if (getEffectiveTaskEventType(event) !== "approval_requested") return true;
+    return !isApprovalRequestResolvedAtEmission(event) && !resolvedRequestEventIds.has(event.id);
+  });
 }
 
 export function isLlmRequestCancelledEvent(event: TaskEvent): boolean {
@@ -205,6 +226,9 @@ function isImplementationOnlyBrowserActionEvent(event: TaskEvent): boolean {
 export function isImportantTaskEvent(event: TaskEvent): boolean {
   if (isImplementationOnlyBrowserActionEvent(event)) return false;
   const effectiveType = getEffectiveTaskEventType(event);
+  if (effectiveType === "approval_requested" && isApprovalRequestResolvedAtEmission(event)) {
+    return false;
+  }
   if (IMPORTANT_EVENT_TYPES.includes(effectiveType as EventType)) return true;
   if (effectiveType !== "tool_result") return false;
   return String((event as Any)?.payload?.tool || "") === "schedule_task";

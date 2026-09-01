@@ -43,6 +43,18 @@ describe("task status normalization", () => {
     ).toBe("blocked");
   });
 
+  it("keeps a stale completed row blocked while verification is pending", () => {
+    expect(
+      deriveCanonicalTaskStatus(
+        makeTask({
+          status: "completed",
+          completedAt: 123,
+          terminalStatus: "awaiting_verification",
+        }),
+      ),
+    ).toBe("blocked");
+  });
+
   it("normalizes active task needing user action without completion to paused", () => {
     expect(
       deriveCanonicalTaskStatus(

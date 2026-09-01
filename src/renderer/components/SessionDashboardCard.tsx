@@ -31,6 +31,7 @@ interface SessionDashboardCardProps {
   task?: Task;
   events: TaskEvent[];
   refreshKey?: string | number;
+  showSummary?: boolean;
   onSelectTask?: (taskId: string) => void;
   onOpenFile?: (path: string) => void;
   workspacePath?: string;
@@ -65,6 +66,7 @@ export function SessionDashboardCard({
   task,
   events,
   refreshKey,
+  showSummary = true,
   onSelectTask,
   onOpenFile,
   workspacePath,
@@ -86,7 +88,7 @@ export function SessionDashboardCard({
 
   useEffect(() => {
     let cancelled = false;
-    if (!task?.id) {
+    if (!task?.id || !showSummary) {
       setProgress(undefined);
       setArtifactCount(0);
       setMemberCount(0);
@@ -111,7 +113,7 @@ export function SessionDashboardCard({
     return () => {
       cancelled = true;
     };
-  }, [task?.id, task?.updatedAt, refreshKey]);
+  }, [task?.id, task?.updatedAt, refreshKey, showSummary]);
 
   useEffect(() => {
     let cancelled = false;
@@ -289,59 +291,72 @@ export function SessionDashboardCard({
     }
   };
 
-  if (!task || !progress || !metrics) return null;
+  if (!task) return null;
   const branchLabel = task.branchLabel || (task.branchFromTaskId ? "Branch" : undefined);
+  const hasPreviewTools = Boolean(workspacePath && previewTemplates.length > 0);
+  const hasCredentialTools = credentialRequests.length > 0 || Boolean(credentialError);
+  const hasSessionTools = hasPreviewTools || hasCredentialTools || Boolean(task.branchFromTaskId);
+
+  if (!showSummary && !hasSessionTools) return null;
+  if (showSummary && (!progress || !metrics) && !hasSessionTools) return null;
 
   return (
-    <section className="session-dashboard-card" aria-label="Session dashboard">
-      <div className="session-dashboard-header">
-        <div>
-          <span className="session-dashboard-eyebrow">
-            <ListChecks size={13} /> Session dashboard
-          </span>
-          <strong>{progress.headline}</strong>
-        </div>
-        <span className={`session-dashboard-phase ${progress.phase}`}>{progress.phase}</span>
-      </div>
-      <div className="session-dashboard-grid">
-        <Metric
-          icon={<CheckCircle2 size={14} />}
-          label="Progress"
-          value={`${metrics.progressPercent}%`}
-          detail={`${metrics.completedSteps}/${metrics.totalSteps || "—"} steps`}
-        />
-        <Metric
-          icon={<FileOutput size={14} />}
-          label="Artifacts"
-          value={String(metrics.artifactCount)}
-          detail="outputs"
-        />
-        <Metric
-          icon={<KeyRound size={14} />}
-          label="Approvals"
-          value={String(metrics.approvalCount)}
-          detail={metrics.approvalCount ? "needs attention" : "clear"}
-        />
-        <Metric
-          icon={<Users size={14} />}
-          label="Members"
-          value={String(metrics.memberCount)}
-          detail="active"
-        />
-        <Metric
-          icon={<Workflow size={14} />}
-          label="Automation"
-          value={String(metrics.automationRunCount)}
-          detail="runs"
-        />
-        <Metric
-          icon={<GitBranch size={14} />}
-          label="Workspace"
-          value={String(metrics.workspaceChangeCount)}
-          detail={branchLabel || "changes"}
-        />
-      </div>
-      {metrics.recentChanges.length > 0 ? (
+    <section
+      className={`session-dashboard-card${showSummary ? "" : " tools-only"}`}
+      aria-label={showSummary ? "Session dashboard" : "Session tools"}
+    >
+      {showSummary && progress && metrics ? (
+        <>
+          <div className="session-dashboard-header">
+            <div>
+              <span className="session-dashboard-eyebrow">
+                <ListChecks size={13} /> Session dashboard
+              </span>
+              <strong>{progress.headline}</strong>
+            </div>
+            <span className={`session-dashboard-phase ${progress.phase}`}>{progress.phase}</span>
+          </div>
+          <div className="session-dashboard-grid">
+            <Metric
+              icon={<CheckCircle2 size={14} />}
+              label="Progress"
+              value={`${metrics.progressPercent}%`}
+              detail={`${metrics.completedSteps}/${metrics.totalSteps || "—"} steps`}
+            />
+            <Metric
+              icon={<FileOutput size={14} />}
+              label="Artifacts"
+              value={String(metrics.artifactCount)}
+              detail="outputs"
+            />
+            <Metric
+              icon={<KeyRound size={14} />}
+              label="Approvals"
+              value={String(metrics.approvalCount)}
+              detail={metrics.approvalCount ? "needs attention" : "clear"}
+            />
+            <Metric
+              icon={<Users size={14} />}
+              label="Members"
+              value={String(metrics.memberCount)}
+              detail="active"
+            />
+            <Metric
+              icon={<Workflow size={14} />}
+              label="Automation"
+              value={String(metrics.automationRunCount)}
+              detail="runs"
+            />
+            <Metric
+              icon={<GitBranch size={14} />}
+              label="Workspace"
+              value={String(metrics.workspaceChangeCount)}
+              detail={branchLabel || "changes"}
+            />
+          </div>
+        </>
+      ) : null}
+      {showSummary && metrics && metrics.recentChanges.length > 0 ? (
         <div className="session-dashboard-changes">
           <span className="session-dashboard-section-label">Recent workspace changes</span>
           {metrics.recentChanges.map((change, index) => {
@@ -377,7 +392,7 @@ export function SessionDashboardCard({
           <GitBranch size={13} /> Open parent session
         </button>
       ) : null}
-      {workspacePath && previewTemplates.length > 0 ? (
+      {hasPreviewTools ? (
         <div className="session-dashboard-preview">
           <div className="session-dashboard-section-label">Local preview</div>
           <div className="session-dashboard-preview-controls">
@@ -488,7 +503,7 @@ export function SessionDashboardCard({
           ) : null}
         </div>
       ) : null}
-      {metrics.approvalCount > 0 ? (
+      {showSummary && metrics && metrics.approvalCount > 0 ? (
         <span className="session-dashboard-refresh-hint">
           <RefreshCw size={11} /> Approval or input is waiting in this session
         </span>

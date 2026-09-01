@@ -1324,6 +1324,7 @@ export function useMissionControlData(
   const getTaskAttentionReason = useCallback(
     (task: Task) => {
       if (task.terminalStatus === "awaiting_approval") return "Awaiting approval";
+      if (task.terminalStatus === "awaiting_verification") return "Verifying before completion";
       if (task.terminalStatus === "needs_user_action" || task.awaitingUserInputReasonCode)
         return "Waiting on you";
       if (task.status === "blocked") return "Blocked";

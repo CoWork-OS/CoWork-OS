@@ -611,7 +611,8 @@ function isTaskAttention(task: Partial<Task> | null | undefined): boolean {
   return (
     task.status === "blocked" ||
     task.terminalStatus === "needs_user_action" ||
-    task.terminalStatus === "awaiting_approval"
+    task.terminalStatus === "awaiting_approval" ||
+    task.terminalStatus === "awaiting_verification"
   );
 }
 
@@ -948,9 +949,11 @@ function buildAlertsFromSummaryParts(params: {
       description:
         task.terminalStatus === "awaiting_approval"
           ? "Awaiting approval"
-          : task.terminalStatus === "needs_user_action"
-            ? "Awaiting user input"
-            : "Task is blocked",
+          : task.terminalStatus === "awaiting_verification"
+            ? "Verifying before completion"
+            : task.terminalStatus === "needs_user_action"
+              ? "Awaiting user input"
+              : "Task is blocked",
       kind: "status",
     });
   }

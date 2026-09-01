@@ -1058,6 +1058,7 @@ export class ControlPlaneCoreService {
           ? "review"
           : task.terminalStatus === "needs_user_action" ||
               task.terminalStatus === "awaiting_approval" ||
+              task.terminalStatus === "awaiting_verification" ||
               task.terminalStatus === "resume_available" ||
               task.terminalStatus === "partial_success"
             ? "review"

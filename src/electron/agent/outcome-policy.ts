@@ -123,10 +123,17 @@ export function decideTaskOutcome(input: OutcomeDecisionInput): OutcomeDecision 
   const failureClass = input.failureClass;
   const hasEvidence = hasSubstantiveOutcomeEvidence(input);
 
-  if (input.requestedStatus === "blocked" || requestedTerminalStatus === "awaiting_approval") {
+  if (
+    input.requestedStatus === "blocked" ||
+    requestedTerminalStatus === "awaiting_approval" ||
+    requestedTerminalStatus === "awaiting_verification"
+  ) {
     return {
       status: "blocked",
-      terminalStatus: "awaiting_approval",
+      terminalStatus:
+        requestedTerminalStatus === "awaiting_verification"
+          ? "awaiting_verification"
+          : "awaiting_approval",
       failureClass: undefined,
     };
   }

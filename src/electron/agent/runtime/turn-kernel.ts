@@ -186,6 +186,14 @@ export class TurnKernel {
       await this.policy.afterIteration?.(state);
     }
 
+    // Reaching the iteration ceiling while the policy still wants to continue
+    // is a budget stop, not a successful turn.  Keep this distinct from the
+    // other loop budgets so callers can project an honest terminal outcome.
+    if (!stopReason && state.continueLoop && state.iterationCount >= this.input.maxIterations) {
+      stopReason = "max_iterations";
+      loopBudgetStopReason = "max_iterations";
+    }
+
     return {
       messages: state.messages,
       iterations: state.iterationCount,

@@ -37,6 +37,7 @@ interface CronJobState {
     | "partial_success"
     | "needs_user_action"
     | "awaiting_approval"
+    | "awaiting_verification"
     | "resume_available"
     | "error"
     | "skipped"
@@ -115,6 +116,7 @@ function isWarningLikeLastStatus(status?: CronJobState["lastStatus"]): boolean {
     status === "partial_success" ||
     status === "needs_user_action" ||
     status === "awaiting_approval" ||
+    status === "awaiting_verification" ||
     status === "resume_available"
   );
 }
@@ -420,6 +422,8 @@ function formatStatusLabel(status?: CronJobState["lastStatus"]): string {
       return "Needs reply";
     case "awaiting_approval":
       return "Awaiting approval";
+    case "awaiting_verification":
+      return "Verifying before completion";
     case "resume_available":
       return "Resume available";
     case "error":

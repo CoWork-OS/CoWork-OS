@@ -97,9 +97,13 @@ export const getAssistantBubbleStatusLabel = (
       : "Waiting for your direction";
   }
   if (task.status === "blocked") {
-    return task.terminalStatus === "awaiting_approval"
-      ? blockedApprovalLabel || "Needs approval"
-      : "Waiting for your input";
+    if (task.terminalStatus === "awaiting_approval") {
+      return blockedApprovalLabel || "Needs approval";
+    }
+    if (task.terminalStatus === "awaiting_verification") {
+      return "Verifying before completion";
+    }
+    return "Waiting for your input";
   }
   if (task.status === "cancelled") return "Cancelled";
   if (task.status === "interrupted" && task.terminalStatus === "resume_available") {

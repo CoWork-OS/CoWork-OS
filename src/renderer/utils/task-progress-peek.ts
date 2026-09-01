@@ -217,7 +217,12 @@ function deriveStatus(
   isTaskWorking: boolean,
 ): TaskProgressPeekStatus {
   if (!task) return "idle";
-  if (task.terminalStatus === "awaiting_approval") return "waiting";
+  if (
+    task.terminalStatus === "awaiting_approval" ||
+    task.terminalStatus === "awaiting_verification"
+  ) {
+    return "waiting";
+  }
   if (isTaskWorking || task.status === "executing" || task.status === "planning") return "working";
   if (task.status === "completed") return "completed";
   if (task.status === "failed") return "failed";

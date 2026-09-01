@@ -74,6 +74,9 @@ export function StepFeed({
           onClick={expandable ? handleToggle : undefined}
         >
           <div className="event-header-left">
+            <div className="event-title" title={titleTooltip}>
+              {title}
+            </div>
             {expandable && (
               <svg
                 className="event-expand-icon"
@@ -84,12 +87,9 @@ export function StepFeed({
                 stroke="currentColor"
                 strokeWidth="2"
               >
-                <path d="M9 18l6-6-6-6" />
+                <path d="M6 9l6 6 6-6" />
               </svg>
             )}
-            <div className="event-title" title={titleTooltip}>
-              {title}
-            </div>
           </div>
           {!hideTime && <div className="event-time">{timeLabel}</div>}
         </div>

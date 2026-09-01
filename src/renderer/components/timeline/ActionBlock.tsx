@@ -501,6 +501,14 @@ export function ActionBlock({
   }, [blockId, expanded]);
 
   const visibleExpanded = isActive ? true : localExpanded;
+  const durationLabel = formatDurationMs(durationMs);
+  const workedLabel = isActive
+    ? durationLabel
+      ? `Working for ${durationLabel}`
+      : "Working"
+    : durationLabel
+      ? `Worked for ${durationLabel}`
+      : "Worked";
 
   const handleToggle = useCallback(() => {
     if (!isActive) {
@@ -531,18 +539,19 @@ export function ActionBlock({
           aria-controls={`action-block-content-${blockId}`}
           id={`action-block-toggle-${blockId}`}
         >
+          <span
+            className={`action-block-kind-icon kind-${iconKind}`}
+            title={ACTION_BLOCK_ICON_LABELS[iconKind]}
+          >
+            <ActivityIcon size={16} strokeWidth={1.8} aria-hidden="true" />
+          </span>
+          <span className="action-block-worked">{workedLabel}</span>
           <span className="action-block-chevron" aria-hidden="true">
             {visibleExpanded ? (
               <ChevronDown size={14} strokeWidth={2.5} />
             ) : (
               <ChevronRight size={14} strokeWidth={2.5} />
             )}
-          </span>
-          <span
-            className={`action-block-kind-icon kind-${iconKind}`}
-            title={ACTION_BLOCK_ICON_LABELS[iconKind]}
-          >
-            <ActivityIcon size={16} strokeWidth={1.8} aria-hidden="true" />
           </span>
           <span className="action-block-summary">{summary}</span>
           {!visibleExpanded && lastStepLabel && (
@@ -578,6 +587,7 @@ export function ActionBlock({
             )}
           </span>
         </button>
+        <span className="action-block-rule" aria-hidden="true" />
         <div
           id={`action-block-content-${blockId}`}
           className="action-block-content"

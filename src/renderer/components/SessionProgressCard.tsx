@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, FileText, LoaderCircle, RotateCw } from "lucide-react";
 import type { SessionProgressState, Task } from "../../shared/types";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface SessionProgressCardProps {
   task?: Task;
@@ -107,7 +108,9 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
         </span>
         <span className="session-progress-card-status">{statusLabel(progress)}</span>
       </div>
-      <div className="session-progress-card-headline">{progress.headline}</div>
+      <div className="session-progress-card-headline markdown-content">
+        <MarkdownRenderer>{progress.headline}</MarkdownRenderer>
+      </div>
       <div className="session-progress-card-meta">
         <span>{stepLabel}</span>
         {progress.activeAgentCount > 0 ? <span>{progress.activeAgentCount} active</span> : null}

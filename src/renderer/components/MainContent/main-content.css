@@ -13403,3 +13403,329 @@
 .skills-dropdown-create svg {
   flex-shrink: 0;
 }
+
+/* ==========================================================================
+   Codex-parity transcript skin
+   Flattens the session transcript to the reference layout: a tinted borderless
+   user bubble on the right, chrome-free assistant prose at full width, and
+   single-line agent activity rows (leading glyph, muted text, trailing
+   chevron) grouped under a "Worked for …" turn header.
+   Appended last so it wins over the earlier generic timeline rules.
+   ========================================================================== */
+
+.chat-message {
+  --cw-transcript-measure: 760px;
+  --cw-user-bubble-bg: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.theme-light .chat-message {
+  --cw-user-bubble-bg: color-mix(in srgb, var(--color-accent) 11%, #ffffff);
+}
+
+/* --- User question ------------------------------------------------------ */
+
+.chat-message.user-message {
+  margin-bottom: 26px;
+}
+
+.chat-bubble.user-bubble,
+.chat-message.user-message .quoted-follow-up-reply {
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.chat-bubble.user-bubble {
+  max-width: min(72%, 620px);
+  background: var(--cw-user-bubble-bg);
+  border: none;
+  border-radius: 18px;
+  padding: 13px 19px;
+  max-height: 264px;
+}
+
+.theme-light .chat-bubble.user-bubble {
+  background: var(--cw-user-bubble-bg);
+}
+
+.chat-bubble.user-bubble p {
+  font-size: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+
+.chat-bubble.user-bubble p + p {
+  margin-top: 10px;
+}
+
+/* Keep the collapse fade in step with the new fill. */
+.chat-bubble.user-bubble:not(.expanded) .user-bubble-fade,
+.theme-light .chat-bubble.user-bubble:not(.expanded) .user-bubble-fade {
+  height: 56px;
+  background: linear-gradient(transparent, var(--cw-user-bubble-bg));
+}
+
+/* --- Assistant message -------------------------------------------------- */
+
+.chat-message.assistant-message {
+  margin-bottom: 22px;
+}
+
+.chat-bubble.assistant-bubble {
+  max-width: var(--cw-transcript-measure);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.chat-message.assistant-message .chat-bubble {
+  font-size: 15px;
+  line-height: 1.72;
+}
+
+.chat-message.assistant-message .chat-bubble-content {
+  color: var(--color-text);
+}
+
+.chat-message.assistant-message .chat-bubble-content > :first-child {
+  margin-top: 0;
+}
+
+.chat-message.assistant-message .chat-bubble-content > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-message.assistant-message .chat-bubble-content p {
+  margin: 0 0 14px;
+}
+
+/* Action buttons stay out of the way until the turn is hovered. */
+.chat-message.assistant-message .message-actions {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chat-message.assistant-message:hover .message-actions,
+.chat-message.assistant-message:focus-within .message-actions {
+  opacity: 1;
+}
+
+/* --- Turn header: "Worked for 13m 37s" ---------------------------------- */
+
+.action-block-header {
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.action-block-worked {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.action-block-header .action-block-chevron {
+  display: inline-flex;
+  align-items: center;
+  margin-right: auto;
+}
+
+.action-block-header .action-block-chevron svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* The kind icon and the richer CoWork summary/counts are kept, just demoted
+   so the header reads as the reference's single quiet line. */
+.action-block-kind-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.6;
+}
+
+.action-block-kind-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.action-block-summary,
+.action-block-meta,
+.action-block-last-step-label {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.72;
+}
+
+.action-block.expanded .action-block-summary,
+.action-block.expanded .action-block-last-step-label {
+  display: none;
+}
+
+.action-block-rule {
+  display: block;
+  height: 1px;
+  margin: 6px 0 10px;
+  background: var(--color-border-subtle);
+}
+
+/* --- Agent activity rows ------------------------------------------------ */
+
+.timeline-event.step-feed-card {
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 9px;
+  padding: 3px 0;
+  align-items: start;
+}
+
+.step-feed-card .event-indicator {
+  display: inline-flex;
+  align-self: start;
+  min-height: 0;
+  height: 21px;
+}
+
+/* Flat glyph, not a bordered chip. */
+.step-feed-card .event-indicator-icon {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.step-feed-card .event-indicator-icon.tone-active,
+.step-feed-card .event-indicator-icon.tone-success,
+.step-feed-card .event-indicator-icon.tone-neutral {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.step-feed-card .event-indicator-icon.tone-active {
+  color: var(--color-accent);
+}
+
+.step-feed-card .event-indicator-icon > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.step-feed-card .event-header {
+  align-items: center;
+  gap: 6px;
+  min-height: 21px;
+}
+
+.step-feed-card .event-header.expandable {
+  padding: 1px 6px 1px 4px;
+  margin: -1px -6px -1px -4px;
+  border-radius: 6px;
+}
+
+.step-feed-card .event-header-left {
+  align-items: center;
+  gap: 6px;
+}
+
+/* Single quiet line that truncates, with the chevron hugging the text. */
+.step-feed-card .event-title {
+  flex: 0 1 auto;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.step-feed-card .event-title > *,
+.step-feed-card .event-title > p {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-feed-card .event-header.expandable:hover .event-title {
+  color: var(--color-text-secondary);
+}
+
+.step-feed-card .event-expand-icon {
+  opacity: 0.7;
+}
+
+/* Chevron points down when collapsed, up when open — no 90° rotation. */
+.step-feed-card .event-header.expanded .event-expand-icon {
+  transform: rotate(180deg);
+}
+
+/* --- Expanded detail card ("Shell" block) ------------------------------- */
+
+.step-feed-card .event-details {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 10px;
+  background: var(--color-bg-glass);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  max-height: 260px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+}
+
+.step-feed-card .event-details.event-details-failure {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  -webkit-mask-image: none;
+  mask-image: none;
+  max-height: none;
+}
+
+.step-feed-card .event-details pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* run_command keeps CoWork's own terminal frame — drop the outer card so the
+   two chromes don't stack, and let it scroll instead of fading. */
+.step-feed-card .event-details.event-details-run-command,
+.step-feed-card .event-details:has(> .command-output-container) {
+  padding: 0;
+  border: none;
+  background: transparent;
+  max-height: none;
+  overflow: visible;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* Detail blocks that already carry their own frame (code preview) or manage
+   their own scrolling keep it — the card + fade is only for plain output. */
+.step-feed-card .event-details.event-details-code-preview,
+.step-feed-card .event-details.event-details-file-preview {
+  padding: 0;
+  border: 1px solid var(--color-border-subtle);
+  overflow: hidden;
+  max-height: none;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.step-feed-card .event-details.event-details-scrollable {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 300px;
+  -webkit-mask-image: none;
+  mask-image: none;
+}

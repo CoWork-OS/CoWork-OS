@@ -1182,7 +1182,7 @@ export type PermissionRuleSource =
   | "legacy_guardrails"
   | "legacy_builtin_settings";
 
-export type PermissionPersistenceDestination = "session" | "workspace" | "profile";
+export type PermissionPersistenceDestination = "session" | "workspace" | "profile" | "recurring";
 
 export type PermissionRuleScope =
   | {
@@ -1216,6 +1216,44 @@ export interface PermissionRule {
   scope: PermissionRuleScope;
   createdAt?: number;
   metadata?: Record<string, unknown>;
+}
+
+export interface RecurringApprovalRuleSummary {
+  id: string;
+  fingerprint: string;
+  toolName: string;
+  workspaceId: string;
+  policyVersion: string;
+  effect: Extract<PermissionEffect, "allow" | "deny">;
+  scopePreview: string;
+  createdAt: number;
+  expiresAt: number;
+  revokedAt?: number;
+  createdByApprovalId?: string;
+}
+
+export type ProtectedCredentialRequestStatus = "pending" | "fulfilled" | "denied" | "expired";
+
+export interface ProtectedCredentialRequestSummary {
+  id: string;
+  taskId?: string;
+  name: string;
+  destinationAllowlist: string[];
+  status: ProtectedCredentialRequestStatus;
+  createdAt: number;
+  expiresAt: number;
+  resolvedAt?: number;
+  credentialId?: string;
+}
+
+export interface ProtectedCredentialSummary {
+  id: string;
+  name: string;
+  destinationAllowlist: string[];
+  createdAt: number;
+  updatedAt: number;
+  lastUsedAt?: number;
+  revokedAt?: number;
 }
 
 export type PermissionDecisionReason =
@@ -1282,7 +1320,9 @@ export interface PermissionPromptActionOption {
     | "allow_workspace"
     | "deny_workspace"
     | "allow_profile"
-    | "deny_profile";
+    | "deny_profile"
+    | "allow_recurring"
+    | "deny_recurring";
   label: string;
   destination?: PermissionPersistenceDestination;
   effect: PermissionEffect;
@@ -1569,7 +1609,8 @@ export type ApprovalType =
   | "location_access"
   | "run_command"
   | "risk_gate"
-  | "computer_use";
+  | "computer_use"
+  | "protected_credential";
 
 // ============ Security Tool Groups & Risk Levels ============
 
@@ -4262,6 +4303,8 @@ export interface ApprovalRequest {
   status: "pending" | "approved" | "denied";
   requestedAt: number;
   resolvedAt?: number;
+  resolvedByPrincipalId?: string;
+  resolvedByRole?: string;
 }
 
 export type ApprovalResponseAction =
@@ -4272,7 +4315,9 @@ export type ApprovalResponseAction =
   | "allow_workspace"
   | "deny_workspace"
   | "allow_profile"
-  | "deny_profile";
+  | "deny_profile"
+  | "allow_recurring"
+  | "deny_recurring";
 
 export interface ApprovalResponse {
   approvalId: string;
@@ -5691,6 +5736,96 @@ export interface WorkContextMemberInput {
   managedSessionId?: string;
   role?: WorkContextMemberRole;
 }
+
+export type SessionHumanRole = "owner" | "contributor" | "reviewer" | "viewer";
+export type SessionHumanCapability = "view" | "contribute" | "review" | "approve" | "manage";
+export type SessionHumanMemberStatus = "active" | "revoked";
+export type SessionInviteRole = Exclude<SessionHumanRole, "owner">;
+
+export interface SessionPrincipal {
+  principalId: string;
+  displayName: string;
+}
+
+export interface SessionHumanMember {
+  id: string;
+  contextId: string;
+  principalId: string;
+  displayName: string;
+  role: SessionHumanRole;
+  status: SessionHumanMemberStatus;
+  joinedAt: number;
+  updatedAt: number;
+  lastSeenAt?: number;
+  revokedAt?: number;
+}
+
+export interface SessionInvite {
+  id: string;
+  contextId: string;
+  role: SessionInviteRole;
+  createdBy: string;
+  createdAt: number;
+  expiresAt: number;
+  usedAt?: number;
+  revokedAt?: number;
+}
+
+export interface SessionInviteCreateInput {
+  contextId: string;
+  role: SessionInviteRole;
+  expiresInMs?: number;
+}
+
+export interface SessionInviteCreateResult {
+  invite: SessionInvite;
+  token: string;
+}
+
+export interface SessionInviteAcceptInput {
+  token: string;
+  displayName: string;
+  principalId?: string;
+}
+
+export interface SessionInviteAcceptResult {
+  member: SessionHumanMember;
+  principal: SessionPrincipal;
+}
+
+export interface SessionMemberUpdateInput {
+  contextId: string;
+  memberId: string;
+  role?: SessionHumanRole;
+  revoke?: boolean;
+}
+
+export interface SessionActionAttribution {
+  principalId: string;
+  role: SessionHumanRole;
+}
+
+export interface SessionAuditEntry {
+  id: string;
+  contextId: string;
+  memberId?: string;
+  principalId: string;
+  action: string;
+  targetId?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  createdAt: number;
+}
+
+export interface SessionShareSnapshot {
+  contextId: string;
+  members: SessionHumanMember[];
+  invites: SessionInvite[];
+  actor: SessionHumanMember;
+}
+
+export type SessionMembersRequest =
+  | { contextId: string; principalId?: string }
+  | { taskId: string; principalId?: string };
 
 export type ManagedSessionSurface = "runtime" | "agent_panel" | "studio_preview";
 
@@ -8006,6 +8141,7 @@ export const IPC_CHANNELS = {
   MC_SYMPHONY_STATUS: "missionControl:symphonyStatus",
   MC_SYMPHONY_RUN: "missionControl:symphonyRun",
   MC_SYMPHONY_PAUSE: "missionControl:symphonyPause",
+  MC_AUTOMATION_OUTCOME_RETRY: "missionControl:automationOutcomeRetry",
 
   // Mission Control - Agent Performance Reviews
   REVIEW_GENERATE: "review:generate",
@@ -8190,6 +8326,14 @@ export const IPC_CHANNELS = {
   APPROVAL_RESPOND: "approval:respond",
   APPROVAL_SESSION_AUTO_APPROVE_SET: "approval:sessionAutoApprove:set",
   APPROVAL_SESSION_AUTO_APPROVE_GET: "approval:sessionAutoApprove:get",
+  RECURRING_APPROVAL_LIST: "approval:recurringList",
+  RECURRING_APPROVAL_REVOKE: "approval:recurringRevoke",
+  PROTECTED_CREDENTIAL_REQUEST_CREATE: "protectedCredential:requestCreate",
+  PROTECTED_CREDENTIAL_REQUEST_LIST: "protectedCredential:requestList",
+  PROTECTED_CREDENTIAL_REQUEST_FULFILL: "protectedCredential:requestFulfill",
+  PROTECTED_CREDENTIAL_REQUEST_DENY: "protectedCredential:requestDeny",
+  PROTECTED_CREDENTIAL_LIST: "protectedCredential:list",
+  PROTECTED_CREDENTIAL_REVOKE: "protectedCredential:revoke",
   INPUT_REQUEST_LIST: "inputRequest:list",
   INPUT_REQUEST_RESPOND: "inputRequest:respond",
 
@@ -8622,6 +8766,18 @@ export const IPC_CHANNELS = {
   WORK_CONTEXT_CREATE_IPC: "workContext:createIpc",
   WORK_CONTEXT_UPDATE_IPC: "workContext:updateIpc",
   WORK_CONTEXT_MEMBER_ADD_IPC: "workContext:memberAddIpc",
+  SESSION_MEMBERS_GET_IPC: "session:membersGetIpc",
+  SESSION_INVITE_CREATE_IPC: "session:inviteCreateIpc",
+  SESSION_INVITE_ACCEPT_IPC: "session:inviteAcceptIpc",
+  SESSION_MEMBER_UPDATE_IPC: "session:memberUpdateIpc",
+  LOCAL_PREVIEW_TEMPLATES: "localPreview:templates",
+  LOCAL_PREVIEW_START: "localPreview:start",
+  LOCAL_PREVIEW_STOP: "localPreview:stop",
+  LOCAL_PREVIEW_RESTART: "localPreview:restart",
+  LOCAL_PREVIEW_GET: "localPreview:get",
+  LOCAL_PREVIEW_LIST: "localPreview:list",
+  LOCAL_PREVIEW_HEALTH: "localPreview:health",
+  LOCAL_PREVIEW_OPEN: "localPreview:open",
   AGENT_WORKSPACE_MEMBERSHIP_LIST_IPC: "agentWorkspaceMembership:listIpc",
   AGENT_WORKSPACE_MEMBERSHIP_UPDATE_IPC: "agentWorkspaceMembership:updateIpc",
   AGENT_WORKSPACE_PERMISSION_SNAPSHOT_IPC: "agentWorkspacePermission:snapshotIpc",
@@ -10817,18 +10973,29 @@ export interface AutomationRunOutcome {
   summary: string;
   usefulness: AutomationRunUsefulness;
   trigger: AutomationRunTrigger;
+  /** Stable digest of the meaningful output, excluding run-specific IDs. */
+  changeHash?: string;
+  /** Stable owner-scoped identity used to suppress repeated notifications. */
+  notificationKey?: string;
   metrics?: AutomationRunOutcomeMetrics;
   evidenceRefs?: AutomationRunEvidenceRef[];
   nextAction?: string;
   notificationRecommended: boolean;
   notificationReason?: string;
   notificationDeliveredAt?: number;
+  /** Set when a notification was intentionally suppressed because the output was unchanged. */
+  notificationSkippedAt?: number;
+  notificationSkipReason?: string;
   createdAt: number;
 }
 
 export type CreateAutomationRunOutcomeInput = Omit<
   AutomationRunOutcome,
-  "id" | "createdAt" | "notificationDeliveredAt"
+  | "id"
+  | "createdAt"
+  | "notificationDeliveredAt"
+  | "notificationSkippedAt"
+  | "notificationSkipReason"
 > & {
   id?: string;
   createdAt?: number;

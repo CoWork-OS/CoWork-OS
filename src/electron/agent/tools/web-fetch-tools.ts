@@ -2,6 +2,15 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { ProtectedCredentialService } from "../../security/protected-credential-service";
+
+const HTTP_HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const MAX_PROTECTED_CREDENTIAL_PREFIX_LENGTH = 256;
+
+function redactSecret(value: string, secret?: string): string {
+  if (!secret) return value;
+  return value.split(secret).join("[REDACTED]");
+}
 
 /**
  * WebFetchTools provides lightweight URL fetching without browser automation.
@@ -14,6 +23,7 @@ export class WebFetchTools {
     private workspace: Workspace,
     private daemon: AgentDaemon,
     private taskId: string,
+    private protectedCredentialService?: ProtectedCredentialService,
   ) {}
 
   /**
@@ -102,6 +112,60 @@ export class WebFetchTools {
     return { ...init };
   }
 
+  private resolveProtectedCredential(
+    credentialId: unknown,
+    destination: string,
+    credentialHeader: unknown,
+    credentialPrefix: unknown,
+  ): { used: false } | { used: true; secret: string; headerName: string; prefix: string } {
+    if (credentialId === undefined || credentialId === null || credentialId === "") {
+      return { used: false };
+    }
+    if (typeof credentialId !== "string" || !credentialId.trim()) {
+      throw new Error("credentialId must be a non-empty protected credential id.");
+    }
+    if (!this.protectedCredentialService) {
+      throw new Error("Protected credential support is unavailable in this runtime.");
+    }
+
+    const headerName = credentialHeader === undefined ? "Authorization" : credentialHeader;
+    if (typeof headerName !== "string" || !HTTP_HEADER_NAME_PATTERN.test(headerName.trim())) {
+      throw new Error("credentialHeader must be a valid HTTP header name.");
+    }
+    const prefix = credentialPrefix === undefined ? "Bearer " : credentialPrefix;
+    if (
+      typeof prefix !== "string" ||
+      prefix.length > MAX_PROTECTED_CREDENTIAL_PREFIX_LENGTH ||
+      /[\r\n]/.test(prefix)
+    ) {
+      throw new Error("credentialPrefix must be a short value without line breaks.");
+    }
+
+    return {
+      used: true,
+      secret: this.protectedCredentialService.resolveForDestination(
+        credentialId.trim(),
+        destination,
+      ),
+      headerName: headerName.trim(),
+      prefix,
+    };
+  }
+
+  private applyProtectedCredentialHeader(
+    headers: Record<string, string>,
+    credential:
+      | { used: false }
+      | { used: true; secret: string; headerName: string; prefix: string },
+  ): void {
+    if (!credential.used) return;
+    const normalizedHeaderName = credential.headerName.toLowerCase();
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === normalizedHeaderName) delete headers[key];
+    }
+    headers[credential.headerName] = `${credential.prefix}${credential.secret}`;
+  }
+
   /**
    * Get tool definitions for WebFetch tools
    */
@@ -133,6 +197,20 @@ export class WebFetchTools {
             maxLength: {
               type: "number",
               description: "Maximum content length to return (default: 50000 characters)",
+            },
+            credentialId: {
+              type: "string",
+              description:
+                "Optional protected credential id. The secret is resolved only in the main process and is never returned to the agent.",
+            },
+            credentialHeader: {
+              type: "string",
+              description: "Header name for the protected credential (default: Authorization).",
+            },
+            credentialPrefix: {
+              type: "string",
+              description:
+                "Prefix placed before the protected credential (default: 'Bearer '). Use an empty string for a raw key.",
             },
           },
           required: ["url"],
@@ -180,6 +258,20 @@ export class WebFetchTools {
               type: "number",
               description: "Maximum response length to return (default: 100000 characters)",
             },
+            credentialId: {
+              type: "string",
+              description:
+                "Optional protected credential id. The secret is resolved only in the main process and is never returned to the agent.",
+            },
+            credentialHeader: {
+              type: "string",
+              description: "Header name for the protected credential (default: Authorization).",
+            },
+            credentialPrefix: {
+              type: "string",
+              description:
+                "Prefix placed before the protected credential (default: 'Bearer '). Use an empty string for a raw key.",
+            },
           },
           required: ["url"],
         },
@@ -195,6 +287,9 @@ export class WebFetchTools {
     selector?: string;
     includeLinks?: boolean;
     maxLength?: number;
+    credentialId?: string;
+    credentialHeader?: string;
+    credentialPrefix?: string;
   }): Promise<{
     success: boolean;
     url: string;
@@ -203,7 +298,16 @@ export class WebFetchTools {
     contentLength: number;
     error?: string;
   }> {
-    const { url, selector, includeLinks = true, maxLength = 50000 } = input;
+    const {
+      url,
+      selector,
+      includeLinks = true,
+      maxLength = 50000,
+      credentialId,
+      credentialHeader,
+      credentialPrefix,
+    } = input;
+    let credentialSecret: string | undefined;
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Fetching: ${url}`,
@@ -215,6 +319,20 @@ export class WebFetchTools {
       if (!["http:", "https:"].includes(parsedUrl.protocol)) {
         throw new Error("Only HTTP and HTTPS URLs are supported");
       }
+      const credential = this.resolveProtectedCredential(
+        credentialId,
+        parsedUrl.toString(),
+        credentialHeader,
+        credentialPrefix,
+      );
+      if (credential.used) credentialSecret = credential.secret;
+      const requestHeaders: Record<string, string> = {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      };
+      this.applyProtectedCredentialHeader(requestHeaders, credential);
 
       // Fetch with timeout
       const controller = new AbortController();
@@ -224,14 +342,10 @@ export class WebFetchTools {
         url,
         {
           signal: controller.signal,
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-          },
+          headers: requestHeaders,
         },
         "web_fetch",
+        !credential.used,
       );
 
       clearTimeout(timeout);
@@ -271,6 +385,8 @@ export class WebFetchTools {
       if (content.length > maxLength) {
         content = content.substring(0, maxLength) + "\n\n... [Content truncated]";
       }
+      content = redactSecret(content, credentialSecret);
+      title = title ? redactSecret(title, credentialSecret) : title;
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "web_fetch",
@@ -290,7 +406,10 @@ export class WebFetchTools {
         contentLength: content.length,
       };
     } catch (error: Any) {
-      const errorMessage = error.name === "AbortError" ? "Request timed out" : error.message;
+      const errorMessage = redactSecret(
+        error.name === "AbortError" ? "Request timed out" : error.message,
+        credentialSecret,
+      );
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "web_fetch",
@@ -318,6 +437,9 @@ export class WebFetchTools {
     timeout?: number;
     followRedirects?: boolean;
     maxLength?: number;
+    credentialId?: string;
+    credentialHeader?: string;
+    credentialPrefix?: string;
   }): Promise<{
     success: boolean;
     url: string;
@@ -336,7 +458,11 @@ export class WebFetchTools {
       timeout = 30000,
       followRedirects = true,
       maxLength = 100000,
+      credentialId,
+      credentialHeader,
+      credentialPrefix,
     } = input;
+    let credentialSecret: string | undefined;
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `HTTP ${method}: ${url}`,
@@ -350,6 +476,13 @@ export class WebFetchTools {
       if (!["http:", "https:"].includes(parsedUrl.protocol)) {
         throw new Error("Only HTTP and HTTPS URLs are supported");
       }
+      const credential = this.resolveProtectedCredential(
+        credentialId,
+        parsedUrl.toString(),
+        credentialHeader,
+        credentialPrefix,
+      );
+      if (credential.used) credentialSecret = credential.secret;
 
       // Setup abort controller for timeout
       const controller = new AbortController();
@@ -363,6 +496,7 @@ export class WebFetchTools {
         "Accept-Language": "en-US,en;q=0.9",
         ...headers,
       };
+      this.applyProtectedCredentialHeader(requestHeaders, credential);
 
       // Make the request
       const response = await this.fetchWithPolicyCheckedRedirects(
@@ -374,7 +508,7 @@ export class WebFetchTools {
           signal: controller.signal,
         },
         "http_request",
-        followRedirects,
+        followRedirects && !credential.used,
       );
 
       clearTimeout(timeoutId);
@@ -382,7 +516,7 @@ export class WebFetchTools {
       // Extract response headers
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
+        responseHeaders[key] = redactSecret(value, credentialSecret);
       });
 
       // Get response body
@@ -410,6 +544,7 @@ export class WebFetchTools {
       if (truncated) {
         responseBody = responseBody.substring(0, maxLength) + "\n\n... [Response truncated]";
       }
+      responseBody = redactSecret(responseBody, credentialSecret);
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "http_request",
@@ -427,13 +562,16 @@ export class WebFetchTools {
         success: response.ok,
         url,
         status: response.status,
-        statusText: response.statusText,
+        statusText: redactSecret(response.statusText, credentialSecret),
         headers: responseHeaders,
         body: responseBody,
         contentLength: responseBody.length,
       };
     } catch (error: Any) {
-      const errorMessage = error.name === "AbortError" ? "Request timed out" : error.message;
+      const errorMessage = redactSecret(
+        error.name === "AbortError" ? "Request timed out" : error.message,
+        credentialSecret,
+      );
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "http_request",

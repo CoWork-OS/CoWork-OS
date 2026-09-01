@@ -7,7 +7,7 @@ import type {
 } from "../../shared/types";
 import { buildApprovalCommandPreview } from "../../shared/approval-command-preview";
 
-type ScopeKey = "once" | "session" | "workspace" | "profile";
+type ScopeKey = "once" | "session" | "workspace" | "recurring" | "profile";
 
 interface ScopePair {
   scope: ScopeKey;
@@ -16,11 +16,12 @@ interface ScopePair {
   allowAction: ApprovalResponseAction;
 }
 
-const SCOPE_ORDER: ScopeKey[] = ["once", "session", "workspace", "profile"];
+const SCOPE_ORDER: ScopeKey[] = ["once", "session", "workspace", "recurring", "profile"];
 const SCOPE_LABELS: Record<ScopeKey, string> = {
   once: "Once",
   session: "Session",
   workspace: "Workspace",
+  recurring: "Recurring",
   profile: "Profile",
 };
 

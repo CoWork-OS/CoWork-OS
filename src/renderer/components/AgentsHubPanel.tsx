@@ -212,6 +212,7 @@ const APPROVAL_TYPE_LABELS: Record<ApprovalType, string> = {
   risk_gate: "Risk gate",
   computer_use: "Computer use",
   location_access: "Location access",
+  protected_credential: "Protected credential",
 };
 
 const TOOL_APPROVAL_BEHAVIOR_ORDER: Record<

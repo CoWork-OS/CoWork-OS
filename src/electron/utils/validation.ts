@@ -577,6 +577,8 @@ export const ApprovalResponseSchema = z
         "deny_workspace",
         "allow_profile",
         "deny_profile",
+        "allow_recurring",
+        "deny_recurring",
       ])
       .optional(),
   })

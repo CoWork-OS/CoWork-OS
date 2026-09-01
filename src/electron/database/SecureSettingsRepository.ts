@@ -47,6 +47,7 @@ export type SettingsCategory =
   | "personality"
   | "guardrails"
   | "permissions"
+  | "protected-credentials"
   | "hooks"
   | "mcp"
   | "secure-mcp-tunnels"

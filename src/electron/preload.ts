@@ -32,6 +32,12 @@ import type {
   SpreadsheetViewportResult,
 } from "../shared/spreadsheet-workbook";
 import type { DocumentPreview, EditableDocumentBlock } from "../shared/document-preview";
+import type {
+  LocalPreviewCommandTemplate,
+  LocalPreviewHealthResult,
+  LocalPreviewProcessInfo,
+  LocalPreviewStartRequest,
+} from "../shared/local-preview";
 import { shouldUseNativeWindowFrame } from "../shared/native-window-frame";
 import type {
   AgentTeam,
@@ -116,7 +122,19 @@ import type {
   WorkContextCreateInput,
   WorkContextMemberInput,
   WorkContextUpdateInput,
+  SessionHumanMember,
+  SessionInviteCreateInput,
+  SessionInviteCreateResult,
+  SessionInviteAcceptInput,
+  SessionInviteAcceptResult,
+  SessionMemberUpdateInput,
+  SessionMembersRequest,
+  SessionShareSnapshot,
   SessionProgressState,
+  AutomationRunOutcome,
+  RecurringApprovalRuleSummary,
+  ProtectedCredentialRequestSummary,
+  ProtectedCredentialSummary,
   SessionSearchResult,
   UpdateManagedAgentRoutineRequest,
   ConvertAgentRoleToManagedAgentRequest,
@@ -2174,6 +2192,44 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.TERMINAL_TAB_OUTPUT, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_TAB_OUTPUT, handler);
   },
+  listLocalPreviewTemplates: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.LOCAL_PREVIEW_TEMPLATES) as Promise<
+      LocalPreviewCommandTemplate[]
+    >,
+  startLocalPreview: (request: LocalPreviewStartRequest) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.LOCAL_PREVIEW_START,
+      request,
+    ) as Promise<LocalPreviewProcessInfo>,
+  stopLocalPreview: (previewId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.LOCAL_PREVIEW_STOP,
+      previewId,
+    ) as Promise<LocalPreviewProcessInfo>,
+  restartLocalPreview: (previewId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.LOCAL_PREVIEW_RESTART,
+      previewId,
+    ) as Promise<LocalPreviewProcessInfo>,
+  getLocalPreview: (previewId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.LOCAL_PREVIEW_GET,
+      previewId,
+    ) as Promise<LocalPreviewProcessInfo | null>,
+  listLocalPreviews: (workspaceId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LOCAL_PREVIEW_LIST, workspaceId) as Promise<
+      LocalPreviewProcessInfo[]
+    >,
+  checkLocalPreviewHealth: (previewId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.LOCAL_PREVIEW_HEALTH,
+      previewId,
+    ) as Promise<LocalPreviewHealthResult>,
+  openLocalPreview: (previewId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.LOCAL_PREVIEW_OPEN,
+      previewId,
+    ) as Promise<LocalPreviewProcessInfo>,
   registerBrowserWorkbenchSession: (data: BrowserWorkbenchSessionRegistration) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_REGISTER, data) as Promise<{ success: true }>,
   unregisterBrowserWorkbenchSession: (data: {
@@ -2774,6 +2830,43 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Approval APIs
   respondToApproval: (data: ApprovalResponse) =>
     ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_RESPOND, data),
+  listRecurringApprovalRules: (workspaceId?: string, includeRevoked = false) =>
+    ipcRenderer.invoke(IPC_CHANNELS.RECURRING_APPROVAL_LIST, {
+      workspaceId,
+      includeRevoked,
+    }) as Promise<RecurringApprovalRuleSummary[]>,
+  revokeRecurringApprovalRule: (ruleId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.RECURRING_APPROVAL_REVOKE, ruleId) as Promise<boolean>,
+  createProtectedCredentialRequest: (request: {
+    taskId?: string;
+    name: string;
+    destinationAllowlist: string[];
+    expiresAt?: number;
+  }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_CREATE,
+      request,
+    ) as Promise<ProtectedCredentialRequestSummary>,
+  listProtectedCredentialRequests: (options?: { taskId?: string; includeResolved?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_LIST, options) as Promise<
+      ProtectedCredentialRequestSummary[]
+    >,
+  fulfillProtectedCredentialRequest: (requestId: string, value: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_FULFILL, {
+      requestId,
+      value,
+    }) as Promise<ProtectedCredentialSummary>,
+  denyProtectedCredentialRequest: (requestId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_DENY,
+      requestId,
+    ) as Promise<boolean>,
+  listProtectedCredentials: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROTECTED_CREDENTIAL_LIST) as Promise<
+      ProtectedCredentialSummary[]
+    >,
+  revokeProtectedCredential: (credentialId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROTECTED_CREDENTIAL_REVOKE, credentialId) as Promise<boolean>,
   setSessionAutoApprove: (enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_SET, enabled),
   getSessionAutoApprove: () => ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_SESSION_AUTO_APPROVE_GET),
@@ -2994,6 +3087,26 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.WORK_CONTEXT_MEMBER_ADD_IPC,
       request,
     ) as Promise<WorkContext | null>,
+  getSessionMembers: (request: SessionMembersRequest) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SESSION_MEMBERS_GET_IPC,
+      request,
+    ) as Promise<SessionShareSnapshot>,
+  createSessionInvite: (request: SessionInviteCreateInput) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SESSION_INVITE_CREATE_IPC,
+      request,
+    ) as Promise<SessionInviteCreateResult>,
+  acceptSessionInvite: (request: SessionInviteAcceptInput) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SESSION_INVITE_ACCEPT_IPC,
+      request,
+    ) as Promise<SessionInviteAcceptResult>,
+  updateSessionMember: (request: SessionMemberUpdateInput) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SESSION_MEMBER_UPDATE_IPC,
+      request,
+    ) as Promise<SessionHumanMember>,
   listManagedSessionEvents: (sessionId: string, limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_EVENTS_LIST_IPC, {
       sessionId,
@@ -4353,6 +4466,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, companyId) as Promise<
       import("../shared/types").CompanyCommandCenterSummary
     >,
+  retryAutomationOutcomeNotification: (outcomeId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MC_AUTOMATION_OUTCOME_RETRY,
+      outcomeId,
+    ) as Promise<AutomationRunOutcome>,
   getMissionControlBrief: (request?: import("../shared/types").MissionControlScopeRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.MISSION_CONTROL_GET_BRIEF, request) as Promise<
       import("../shared/types").MissionControlBrief
@@ -5403,6 +5521,14 @@ export interface ElectronAPI {
   registerBrowserWorkbenchSession: (
     data: BrowserWorkbenchSessionRegistration,
   ) => Promise<{ success: boolean }>;
+  listLocalPreviewTemplates: () => Promise<LocalPreviewCommandTemplate[]>;
+  startLocalPreview: (request: LocalPreviewStartRequest) => Promise<LocalPreviewProcessInfo>;
+  stopLocalPreview: (previewId: string) => Promise<LocalPreviewProcessInfo>;
+  restartLocalPreview: (previewId: string) => Promise<LocalPreviewProcessInfo>;
+  getLocalPreview: (previewId: string) => Promise<LocalPreviewProcessInfo | null>;
+  listLocalPreviews: (workspaceId?: string) => Promise<LocalPreviewProcessInfo[]>;
+  checkLocalPreviewHealth: (previewId: string) => Promise<LocalPreviewHealthResult>;
+  openLocalPreview: (previewId: string) => Promise<LocalPreviewProcessInfo>;
   unregisterBrowserWorkbenchSession: (data: {
     taskId: string;
     sessionId?: string;
@@ -5851,6 +5977,28 @@ export interface ElectronAPI {
     },
   ) => Promise<Any>;
   respondToApproval: (data: ApprovalResponse) => Promise<void>;
+  listRecurringApprovalRules: (
+    workspaceId?: string,
+    includeRevoked?: boolean,
+  ) => Promise<RecurringApprovalRuleSummary[]>;
+  revokeRecurringApprovalRule: (ruleId: string) => Promise<boolean>;
+  createProtectedCredentialRequest: (request: {
+    taskId?: string;
+    name: string;
+    destinationAllowlist: string[];
+    expiresAt?: number;
+  }) => Promise<ProtectedCredentialRequestSummary>;
+  listProtectedCredentialRequests: (options?: {
+    taskId?: string;
+    includeResolved?: boolean;
+  }) => Promise<ProtectedCredentialRequestSummary[]>;
+  fulfillProtectedCredentialRequest: (
+    requestId: string,
+    value: string,
+  ) => Promise<ProtectedCredentialSummary>;
+  denyProtectedCredentialRequest: (requestId: string) => Promise<boolean>;
+  listProtectedCredentials: () => Promise<ProtectedCredentialSummary[]>;
+  revokeProtectedCredential: (credentialId: string) => Promise<boolean>;
   setSessionAutoApprove: (enabled: boolean) => Promise<void>;
   getSessionAutoApprove: () => Promise<boolean>;
   listInputRequests: (query?: {
@@ -5971,6 +6119,10 @@ export interface ElectronAPI {
   createWorkContext: (request: WorkContextCreateInput) => Promise<WorkContext>;
   updateWorkContext: (request: WorkContextUpdateInput) => Promise<WorkContext | null>;
   addWorkContextMember: (request: WorkContextMemberInput) => Promise<WorkContext | null>;
+  getSessionMembers: (request: SessionMembersRequest) => Promise<SessionShareSnapshot>;
+  createSessionInvite: (request: SessionInviteCreateInput) => Promise<SessionInviteCreateResult>;
+  acceptSessionInvite: (request: SessionInviteAcceptInput) => Promise<SessionInviteAcceptResult>;
+  updateSessionMember: (request: SessionMemberUpdateInput) => Promise<SessionHumanMember>;
   listManagedSessionEvents: (sessionId: string, limit?: number) => Promise<ManagedSessionEvent[]>;
   getManagedSessionWorkpaper: (sessionId: string) => Promise<ManagedSessionWorkpaper>;
   listAgentTemplates: () => Promise<AgentTemplate[]>;
@@ -7740,6 +7892,7 @@ export interface ElectronAPI {
   getCommandCenterSummary: (
     companyId: string,
   ) => Promise<import("../shared/types").CompanyCommandCenterSummary>;
+  retryAutomationOutcomeNotification: (outcomeId: string) => Promise<AutomationRunOutcome>;
   getMissionControlBrief: (
     request?: import("../shared/types").MissionControlScopeRequest,
   ) => Promise<import("../shared/types").MissionControlBrief>;

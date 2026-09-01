@@ -59,6 +59,7 @@ import { LoreService } from "./agents/LoreService";
 import { AutomationProfileRepository } from "./agents/AutomationProfileRepository";
 import { AutomationRunOutcomeRepository } from "./automation/AutomationRunOutcomeRepository";
 import { AutomationOutcomeService } from "./automation/AutomationOutcomeService";
+import { RecurringApprovalService } from "./security/recurring-approval-service";
 import { ProactiveSuggestionsService } from "./agent/ProactiveSuggestionsService";
 import { AgentDaemon } from "./agent/daemon";
 import { CoreMemoryCandidateRepository } from "./core/CoreMemoryCandidateRepository";
@@ -179,6 +180,7 @@ import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from "./c
 import { setupCanvasHandlers, cleanupCanvasHandlers } from "./ipc/canvas-handlers";
 import { setupQAHandlers } from "./ipc/qa-handlers";
 import { getBrowserWorkbenchService } from "./browser/browser-workbench-service";
+import { getLocalPreviewProcessService } from "./preview/LocalPreviewProcessService";
 import { isAllowedWebviewUrl } from "./browser/webview-url-policy";
 import { pruneTempWorkspaces } from "./utils/temp-workspace";
 import { getActiveTempWorkspaceLeases } from "./utils/temp-workspace-lease";
@@ -254,6 +256,7 @@ let xMentionBridgeService: XMentionBridgeService | null = null;
 let strategicPlannerService: StrategicPlannerService | null = null;
 let symphonyService: SymphonyService | null = null;
 let automationOutcomeService: AutomationOutcomeService | null = null;
+let recurringApprovalService: RecurringApprovalService | null = null;
 let eventTriggerService: EventTriggerService | null = null;
 let routineService: RoutineService | null = null;
 let workflowStarterWatcher: GoogleWorkspaceWorkflowStarterWatcher | null = null;
@@ -1699,7 +1702,8 @@ if (isCliDirectRunMode()) {
 
       // Initialize agent daemon
       const numbatService = NumbatService.initialize(dbManager.getDatabase());
-      agentDaemon = new AgentDaemon(dbManager);
+      recurringApprovalService = new RecurringApprovalService(dbManager.getDatabase());
+      agentDaemon = new AgentDaemon(dbManager, { recurringApprovalService });
       numbatService.attachTaskEventEmitter((taskId, type, payload) => {
         agentDaemon?.logEvent(taskId, type, payload);
       });
@@ -2837,6 +2841,7 @@ if (isCliDirectRunMode()) {
             coreHarnessExperimentService,
             coreHarnessExperimentRunner,
             coreLearningsService,
+            automationOutcomeService,
           });
 
           logger.info("Mission Control services initialized");
@@ -4034,6 +4039,12 @@ if (isCliDirectRunMode()) {
         MemoryService.shutdown();
       } catch (error) {
         console.error("[Main] Failed to shutdown Memory Service:", error);
+      }
+
+      try {
+        await getLocalPreviewProcessService().stopAll();
+      } catch (error) {
+        console.error("[Main] Failed to stop local preview processes:", error);
       }
 
       if (dbManager) {

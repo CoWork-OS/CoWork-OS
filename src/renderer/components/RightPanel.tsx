@@ -90,6 +90,8 @@ import {
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { measureRendererPerf, recordRendererRender } from "../utils/renderer-perf";
 import { SessionProgressCard } from "./SessionProgressCard";
+import { SessionDashboardCard } from "./SessionDashboardCard";
+import { SessionMembersCard } from "./SessionMembersCard";
 import "./right-panel.css";
 
 /**
@@ -2395,6 +2397,15 @@ function RightPanelComponent({
   return (
     <div className="right-panel cli-panel">
       <SessionProgressCard task={task} onSelectTask={onSelectTask} refreshKey={events.length} />
+      <SessionDashboardCard
+        task={task}
+        events={events}
+        refreshKey={events.length}
+        onSelectTask={onSelectTask}
+        onOpenFile={openFileFromFilesSection}
+        workspacePath={workspace?.path}
+      />
+      <SessionMembersCard task={task} refreshKey={events.length} />
       {/* Progress Section */}
       <ProgressSection
         expanded={expandedSections.progress}

@@ -227,6 +227,25 @@ describe("PermissionEngine", () => {
     expect(cases.map((result) => result.decision)).toEqual(["allow", "allow", "ask"]);
   });
 
+  it("keeps protected credential actions explicitly approved and out of recurring suggestions", () => {
+    for (const mode of ["default", "dont_ask", "bypass_permissions"] as const) {
+      const result = evaluate({
+        toolName: "http_request",
+        approvalType: "protected_credential",
+        mode,
+        toolInput: {
+          url: "https://api.example.com/items",
+          credentialId: "credential-1",
+        },
+      });
+
+      expect(result.decision).toBe("ask");
+      expect(result.suggestions.map((suggestion) => suggestion.action)).not.toContain(
+        "allow_recurring",
+      );
+    }
+  });
+
   it("allows safe commands and read-only tools in dangerous_only mode", () => {
     expect(
       evaluate({

@@ -3367,13 +3367,22 @@ export class ApprovalRepository {
     return newApproval;
   }
 
-  update(id: string, status: "approved" | "denied"): void {
+  update(
+    id: string,
+    status: "approved" | "denied",
+    attribution?: { principalId?: string; role?: string },
+  ): void {
     const stmt = this.db.prepare(`
       UPDATE approvals
-      SET status = ?, resolved_at = ?
+      SET status = ?, resolved_at = ?, resolved_by_principal_id = ?, resolved_by_role = ?
       WHERE id = ?
     `);
-    stmt.run(status, Date.now(), id);
+    stmt.run(status, Date.now(), attribution?.principalId || null, attribution?.role || null, id);
+  }
+
+  findById(id: string): ApprovalRequest | undefined {
+    const row = this.db.prepare("SELECT * FROM approvals WHERE id = ?").get(id) as Any;
+    return row ? this.mapRowToApproval(row) : undefined;
   }
 
   findPendingByTaskId(taskId: string): ApprovalRequest[] {
@@ -3411,6 +3420,8 @@ export class ApprovalRepository {
       status: row.status,
       requestedAt: row.requested_at,
       resolvedAt: row.resolved_at || undefined,
+      resolvedByPrincipalId: row.resolved_by_principal_id || undefined,
+      resolvedByRole: row.resolved_by_role || undefined,
     };
   }
 }

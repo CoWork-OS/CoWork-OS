@@ -45,6 +45,7 @@ import {
   PermissionMode,
   PermissionPromptDetails,
   PermissionRule,
+  SessionActionAttribution,
   TaskVerificationEvidenceBundle,
   TaskStatus,
   TaskEvent,
@@ -203,12 +204,17 @@ import { OrchestrationGraphRepository } from "./orchestration/OrchestrationGraph
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { getMailboxServiceInstance } from "../mailbox/MailboxService";
 import {
+  RecurringApprovalService,
+  type RecurringApprovalFingerprintInput,
+} from "../security/recurring-approval-service";
+import {
   extractMailboxComposeDraftInputFromText,
   type ChatInlineFrame,
 } from "../../shared/mailbox";
 
 export interface AgentDaemonOptions {
   startupRecovery?: boolean;
+  recurringApprovalService?: RecurringApprovalService;
 }
 
 const log = createLogger("AgentDaemon");
@@ -556,6 +562,11 @@ export class AgentDaemon extends EventEmitter {
   ) {
     super();
     const db = dbManager.getDatabase();
+    this.options = {
+      ...this.options,
+      recurringApprovalService:
+        this.options.recurringApprovalService || new RecurringApprovalService(db),
+    };
     this.taskRepo = new TaskRepository(db);
     this.eventRepo = new TaskEventRepository(db);
     this.workspaceRepo = new WorkspaceRepository(db);
@@ -4612,7 +4623,7 @@ export class AgentDaemon extends EventEmitter {
     approval: Any,
   ): {
     effect?: PermissionEffect;
-    destination?: "session" | "workspace" | "profile";
+    destination?: "session" | "workspace" | "profile" | "recurring";
     dbPersisted?: boolean;
     manifestPersisted?: boolean;
     manifestError?: string;
@@ -4632,7 +4643,9 @@ export class AgentDaemon extends EventEmitter {
         ? "workspace"
         : action.endsWith("_profile")
           ? "profile"
-          : undefined;
+          : action.endsWith("_recurring")
+            ? "recurring"
+            : undefined;
     if (!destination) {
       return { effect };
     }
@@ -4655,6 +4668,35 @@ export class AgentDaemon extends EventEmitter {
     const task = this.taskRepo.findById(approval.taskId);
     const workspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
     const runtime = this.getExecutorForTask(approval.taskId)?.runtime || null;
+
+    if (destination === "recurring") {
+      const recurringService = (this as Any).options?.recurringApprovalService as
+        | RecurringApprovalService
+        | undefined;
+      const recurringInput =
+        recurringService && workspace
+          ? this.buildRecurringApprovalInput(
+              String(approval.type || "external_service"),
+              details,
+              workspace,
+              prompt.scope,
+            )
+          : null;
+      if (!recurringService || !recurringInput) {
+        return {
+          effect,
+          destination,
+          manifestError: "Recurring approval storage is unavailable for this task.",
+        };
+      }
+      recurringService.create({
+        ...recurringInput,
+        effect: effect === "deny" ? "deny" : "allow",
+        scopePreview: prompt.scopePreview,
+        createdByApprovalId: approval.id,
+      });
+      return { effect, destination, dbPersisted: true };
+    }
 
     if (destination === "session") {
       runtime?.addSessionPermissionRule(rule);
@@ -4687,6 +4729,28 @@ export class AgentDaemon extends EventEmitter {
       };
     }
     return { effect, destination };
+  }
+
+  private buildRecurringApprovalInput(
+    type: string,
+    details: Record<string, unknown>,
+    workspace: Workspace,
+    scope: PermissionRule["scope"],
+  ): RecurringApprovalFingerprintInput {
+    const toolName = this.inferPermissionToolName(type, details);
+    const toolInput = Object.prototype.hasOwnProperty.call(details, "permissionInput")
+      ? details.permissionInput
+      : (details.params ?? details);
+    return {
+      workspaceId: workspace.id,
+      toolName,
+      toolInput,
+      approvalType: type,
+      command: typeof details.command === "string" ? details.command : null,
+      path: typeof details.path === "string" ? details.path : null,
+      serverName: typeof details.serverName === "string" ? details.serverName : null,
+      scope,
+    };
   }
 
   evaluateToolPermission(
@@ -4819,6 +4883,49 @@ export class AgentDaemon extends EventEmitter {
         constraintReason: accessProfile.constraintReason,
       },
     };
+    const recurringApprovalService = (this as Any).options?.recurringApprovalService as
+      | RecurringApprovalService
+      | undefined;
+    if (permission.evaluation.decision === "ask" && recurringApprovalService) {
+      const recurringInput = permission.workspace
+        ? this.buildRecurringApprovalInput(
+            type,
+            permissionDetails,
+            permission.workspace,
+            permission.scope,
+          )
+        : null;
+      const recurringMatch =
+        recurringInput && type !== "protected_credential"
+          ? recurringApprovalService.findActive(recurringInput)
+          : null;
+      if (recurringMatch) {
+        const approved = recurringMatch.summary.effect === "allow";
+        if (approved) permission.runtime?.recordPermissionSuccess(permission.trackingKey);
+        else permission.runtime?.recordPermissionDenial(permission.trackingKey);
+        const approval = this.approvalRepo.create({
+          taskId,
+          type: type as Any,
+          description,
+          details: permissionDetails,
+          status: approved ? "approved" : "denied",
+          requestedAt: Date.now(),
+        });
+        this.approvalRepo.update(approval.id, approved ? "approved" : "denied");
+        this.logEvent(taskId, "approval_requested", {
+          approval,
+          autoApproved: approved,
+          recurringApprovalId: recurringMatch.summary.id,
+        });
+        this.logEvent(taskId, approved ? "approval_granted" : "approval_denied", {
+          approvalId: approval.id,
+          autoResolved: true,
+          reason: "recurring_approval",
+          recurringApprovalId: recurringMatch.summary.id,
+        });
+        return approved;
+      }
+    }
     if (permission.evaluation.decision === "allow") {
       permission.runtime?.recordPermissionSuccess(permission.trackingKey);
       if (type === "external_file_access") {
@@ -5043,6 +5150,7 @@ export class AgentDaemon extends EventEmitter {
     approvalId: string,
     approved: boolean,
     action?: ApprovalResponseAction,
+    attribution?: SessionActionAttribution,
   ): Promise<"handled" | "duplicate" | "not_found" | "in_progress"> {
     // Generate idempotency key for this approval response
     const idempotencyKey = IdempotencyManager.generateKey(
@@ -5077,7 +5185,8 @@ export class AgentDaemon extends EventEmitter {
           normalizedAction === "allow_once" ||
           normalizedAction === "allow_session" ||
           normalizedAction === "allow_workspace" ||
-          normalizedAction === "allow_profile";
+          normalizedAction === "allow_profile" ||
+          normalizedAction === "allow_recurring";
         const runtime = this.getExecutorForTask(pending.taskId)?.runtime || null;
         const prompt =
           pending.approval?.details && typeof pending.approval.details === "object"
@@ -5114,7 +5223,11 @@ export class AgentDaemon extends EventEmitter {
         }
 
         this.pendingApprovals.delete(approvalId);
-        this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
+        if (attribution) {
+          this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied", attribution);
+        } else {
+          this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
+        }
         this.updateTask(pending.taskId, {
           status: didApprove ? "executing" : "paused",
           terminalStatus: didApprove ? undefined : "needs_user_action",
@@ -11001,6 +11114,36 @@ export class AgentDaemon extends EventEmitter {
   }
 
   // ===== Queue Management Methods =====
+
+  /**
+   * Update the initial prompt for a task that is still waiting in the queue.
+   * Once execution starts, the prompt is part of the task's immutable run
+   * context and must not be changed underneath the executor.
+   */
+  updateQueuedTaskPrompt(taskId: string, prompt: string): Task {
+    const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
+    const normalizedPrompt = typeof prompt === "string" ? prompt.trim() : "";
+    const task = this.taskRepo.findById(normalizedTaskId);
+
+    if (!task || task.status !== "queued" || !this.queueManager.isQueued(normalizedTaskId)) {
+      throw new Error("Only queued tasks can have their prompt edited.");
+    }
+    if (!normalizedPrompt) {
+      throw new Error("Task prompt cannot be empty.");
+    }
+
+    this.taskRepo.update(normalizedTaskId, {
+      prompt: normalizedPrompt,
+      rawPrompt: normalizedPrompt,
+      userPrompt: normalizedPrompt,
+    });
+
+    const updatedTask = this.taskRepo.findById(normalizedTaskId);
+    if (!updatedTask) {
+      throw new Error(`Task ${normalizedTaskId} was not found after updating its prompt.`);
+    }
+    return updatedTask;
+  }
 
   /**
    * Get current queue status

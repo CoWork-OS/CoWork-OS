@@ -26,6 +26,10 @@ const mockDaemon = {
   registerArtifact: vi.fn(),
 };
 
+const mockProtectedCredentialService = {
+  resolveForDestination: vi.fn(),
+};
+
 // Mock workspace
 const mockWorkspace: Workspace = {
   id: "test-workspace",
@@ -90,6 +94,9 @@ describe("WebFetchTools", () => {
       expect(schema.properties).toHaveProperty("timeout");
       expect(schema.properties).toHaveProperty("followRedirects");
       expect(schema.properties).toHaveProperty("maxLength");
+      expect(schema.properties).toHaveProperty("credentialId");
+      expect(schema.properties).toHaveProperty("credentialHeader");
+      expect(schema.properties).toHaveProperty("credentialPrefix");
       expect(schema.properties.method.enum).toEqual([
         "GET",
         "POST",
@@ -821,6 +828,45 @@ describe("WebFetchTools", () => {
             }),
           }),
         );
+      });
+
+      it("resolves protected credentials in the main process and redacts echoed secrets", async () => {
+        mockProtectedCredentialService.resolveForDestination.mockReturnValue("top-secret");
+        const protectedTools = new WebFetchTools(
+          mockWorkspace,
+          mockDaemon as Any,
+          "test-task-id",
+          mockProtectedCredentialService as Any,
+        );
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: new Map([
+            ["content-type", "application/json"],
+            ["x-echo", "Bearer top-secret"],
+          ]),
+          text: async () => JSON.stringify({ authorization: "Bearer top-secret" }),
+        });
+
+        const result = await protectedTools.httpRequest({
+          url: "https://api.example.com/items",
+          credentialId: "credential-1",
+        });
+
+        expect(mockProtectedCredentialService.resolveForDestination).toHaveBeenCalledWith(
+          "credential-1",
+          "https://api.example.com/items",
+        );
+        expect(mockFetch).toHaveBeenCalledWith(
+          "https://api.example.com/items",
+          expect.objectContaining({
+            redirect: "manual",
+            headers: expect.objectContaining({ Authorization: "Bearer top-secret" }),
+          }),
+        );
+        expect(result.body).not.toContain("top-secret");
+        expect(result.headers["x-echo"]).toBe("Bearer [REDACTED]");
       });
 
       it("should include default User-Agent header", async () => {

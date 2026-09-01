@@ -1308,6 +1308,8 @@ export class DatabaseManager {
         status TEXT NOT NULL,
         requested_at INTEGER NOT NULL,
         resolved_at INTEGER,
+        resolved_by_principal_id TEXT,
+        resolved_by_role TEXT,
         FOREIGN KEY (task_id) REFERENCES tasks(id)
       );
 
@@ -1527,9 +1529,13 @@ export class DatabaseManager {
         notification_recommended INTEGER NOT NULL DEFAULT 0,
         notification_reason TEXT,
         notification_delivered_at INTEGER,
+        notification_skipped_at INTEGER,
+        notification_skip_reason TEXT,
         next_action TEXT,
         metrics_json TEXT,
         evidence_refs_json TEXT,
+        change_hash TEXT,
+        notification_key TEXT,
         created_at INTEGER NOT NULL
       );
 
@@ -2947,6 +2953,40 @@ export class DatabaseManager {
   }
 
   private runMigrations() {
+    // Migration: Preserve the human principal and role that resolved an approval.
+    for (const sql of [
+      "ALTER TABLE approvals ADD COLUMN resolved_by_principal_id TEXT",
+      "ALTER TABLE approvals ADD COLUMN resolved_by_role TEXT",
+    ]) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, ignore.
+      }
+    }
+
+    // Migration: Add stable automation outcome identity fields before the
+    // notification-key index is created on older databases.
+    for (const sql of [
+      "ALTER TABLE automation_run_outcomes ADD COLUMN change_hash TEXT",
+      "ALTER TABLE automation_run_outcomes ADD COLUMN notification_key TEXT",
+      "ALTER TABLE automation_run_outcomes ADD COLUMN notification_skipped_at INTEGER",
+      "ALTER TABLE automation_run_outcomes ADD COLUMN notification_skip_reason TEXT",
+    ]) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, or the table will be created by the core schema.
+      }
+    }
+    try {
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_automation_outcomes_notification_key ON automation_run_outcomes(notification_key, created_at DESC)",
+      );
+    } catch {
+      // The table may be unavailable only during a partial/legacy startup.
+    }
+
     // Migration: Add task-retry tracking columns to tasks table
     // SQLite ALTER TABLE ADD COLUMN fails if column exists, so we catch and ignore
     const taskRetryColumns = [
@@ -3213,6 +3253,125 @@ export class DatabaseManager {
       `);
     } catch (error) {
       schemaLogger.error("[DatabaseManager] Failed WorkContext migration:", error);
+    }
+
+    // Session membership, local invites, and security audit records are kept
+    // separate from workspace membership and task execution history.
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS session_local_principal (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          principal_id TEXT NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS session_human_members (
+          id TEXT PRIMARY KEY,
+          context_id TEXT NOT NULL,
+          principal_id TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('owner', 'contributor', 'reviewer', 'viewer')),
+          status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+          joined_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          last_seen_at INTEGER,
+          revoked_at INTEGER,
+          UNIQUE (context_id, principal_id),
+          FOREIGN KEY (context_id) REFERENCES work_contexts(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS session_invites (
+          id TEXT PRIMARY KEY,
+          context_id TEXT NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          role TEXT NOT NULL CHECK (role IN ('contributor', 'reviewer', 'viewer')),
+          created_by TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          used_at INTEGER,
+          revoked_at INTEGER,
+          FOREIGN KEY (context_id) REFERENCES work_contexts(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS session_audit (
+          id TEXT PRIMARY KEY,
+          context_id TEXT NOT NULL,
+          member_id TEXT,
+          principal_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          target_id TEXT,
+          metadata_json TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (context_id) REFERENCES work_contexts(id) ON DELETE CASCADE,
+          FOREIGN KEY (member_id) REFERENCES session_human_members(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_session_members_context_joined
+          ON session_human_members(context_id, joined_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_session_members_principal_status
+          ON session_human_members(principal_id, status);
+        CREATE INDEX IF NOT EXISTS idx_session_invites_context_created
+          ON session_invites(context_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_session_audit_context_created
+          ON session_audit(context_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS recurring_approval_rules (
+          id TEXT PRIMARY KEY,
+          fingerprint TEXT NOT NULL UNIQUE,
+          tool_name TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          policy_version TEXT NOT NULL,
+          effect TEXT NOT NULL CHECK (effect IN ('allow', 'deny')),
+          scope_preview TEXT NOT NULL,
+          operation_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          revoked_at INTEGER,
+          created_by_approval_id TEXT,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+          FOREIGN KEY (created_by_approval_id) REFERENCES approvals(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_recurring_approval_rules_workspace
+          ON recurring_approval_rules(workspace_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_recurring_approval_rules_active
+          ON recurring_approval_rules(revoked_at, expires_at);
+
+        CREATE TABLE IF NOT EXISTS protected_credential_requests (
+          id TEXT PRIMARY KEY,
+          task_id TEXT,
+          name TEXT NOT NULL,
+          destination_allowlist_json TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'fulfilled', 'denied', 'expired')),
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          resolved_at INTEGER,
+          credential_id TEXT,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS protected_credential_audit (
+          id TEXT PRIMARY KEY,
+          request_id TEXT,
+          credential_id TEXT,
+          action TEXT NOT NULL,
+          destination TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (request_id) REFERENCES protected_credential_requests(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_protected_credential_requests_task_status
+          ON protected_credential_requests(task_id, status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_protected_credential_requests_expiry
+          ON protected_credential_requests(status, expires_at);
+        CREATE INDEX IF NOT EXISTS idx_protected_credential_audit_request
+          ON protected_credential_audit(request_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_protected_credential_audit_credential
+          ON protected_credential_audit(credential_id, created_at DESC);
+      `);
+    } catch (error) {
+      schemaLogger.error("[DatabaseManager] Failed session/security migration:", error);
     }
 
     // These indexes depend on the timeline-v2 legacy_type column, so create them

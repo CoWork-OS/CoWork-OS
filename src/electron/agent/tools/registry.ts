@@ -29,6 +29,7 @@ import { FileTools } from "./file-tools";
 import { SkillTools } from "./skill-tools";
 import { SearchTools } from "./search-tools";
 import { WebFetchTools } from "./web-fetch-tools";
+import { ProtectedCredentialService } from "../../security/protected-credential-service";
 import { GlobTools } from "./glob-tools";
 import { GrepTools } from "./grep-tools";
 import { EditTools } from "./edit-tools";
@@ -526,6 +527,7 @@ export class ToolRegistry {
   private skillTools: SkillTools;
   private searchTools: SearchTools;
   private webFetchTools: WebFetchTools;
+  private protectedCredentialService?: ProtectedCredentialService;
   private globTools: GlobTools;
   private grepTools: GrepTools;
   private editTools: EditTools;
@@ -601,7 +603,15 @@ export class ToolRegistry {
     this.fileTools = new FileTools(workspace, daemon, taskId);
     this.skillTools = new SkillTools(workspace, daemon, taskId);
     this.searchTools = new SearchTools(workspace, daemon, taskId);
-    this.webFetchTools = new WebFetchTools(workspace, daemon, taskId);
+    const dbGetter = (daemon as Any)?.getDatabase;
+    const db = typeof dbGetter === "function" ? dbGetter.call(daemon) : undefined;
+    this.protectedCredentialService = db ? new ProtectedCredentialService(db) : undefined;
+    this.webFetchTools = new WebFetchTools(
+      workspace,
+      daemon,
+      taskId,
+      this.protectedCredentialService,
+    );
     this.globTools = new GlobTools(workspace, daemon, taskId);
     this.grepTools = new GrepTools(workspace, daemon, taskId);
     this.editTools = new EditTools(workspace, daemon, taskId);
@@ -649,10 +659,8 @@ export class ToolRegistry {
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace);
     this.qaTools = new QATools(workspace, daemon, taskId);
-    // Some unit tests stub daemon as a plain object. Make channel history tools optional.
-    const dbGetter = (daemon as Any)?.getDatabase;
-    if (typeof dbGetter === "function") {
-      const db = dbGetter.call(daemon);
+    // Some unit tests stub daemon as a plain object. Make database-backed tools optional.
+    if (db) {
       this.channelTools = new ChannelTools(db, daemon, taskId);
       this.emailImapTools = new EmailImapTools(db, daemon, taskId);
       this.mailboxTools = new MailboxTools(workspace, daemon, taskId, db);
@@ -1223,6 +1231,9 @@ export class ToolRegistry {
       ...WebFetchTools.getToolDefinitions(),
       ...BrowserTools.getToolDefinitions(),
     ];
+    if (this.protectedCredentialService) {
+      allTools.push(this.getProtectedCredentialToolDefinition());
+    }
 
     // web_search is always available (DuckDuckGo provides free fallback)
     allTools.push(...this.getSearchToolDefinitions());
@@ -1778,6 +1789,14 @@ export class ToolRegistry {
   private getApprovalTypeForTool(toolName: string, input?: Any): ApprovalType | null {
     const canonicalToolName = canonicalizeToolNameUtil(toolName);
     if (canonicalToolName === "Skill") return null;
+    if (canonicalToolName === "request_protected_credential") return "protected_credential";
+    if (
+      (canonicalToolName === "web_fetch" || canonicalToolName === "http_request") &&
+      typeof input?.credentialId === "string" &&
+      input.credentialId.trim()
+    ) {
+      return "protected_credential";
+    }
     if (
       this.getExternalFilesystemBoundary(canonicalToolName, input) ||
       this.getSkillManagementFilesystemBoundary(canonicalToolName, input)
@@ -2271,6 +2290,27 @@ export class ToolRegistry {
       "http_request",
       async ({ request }) => this.webFetchTools.httpRequest(request.input),
       readParallelSchedulerSpec,
+    );
+    register(
+      "request_protected_credential",
+      async ({ request }) => {
+        if (!this.protectedCredentialService) {
+          throw new Error("Protected credential support is unavailable in this runtime.");
+        }
+        const input = request.input || {};
+        const destinationAllowlist = Array.isArray(input.destinationAllowlist)
+          ? input.destinationAllowlist.filter(
+              (value: unknown): value is string => typeof value === "string",
+            )
+          : [];
+        return this.protectedCredentialService.createRequest({
+          taskId: this.taskId,
+          name: typeof input.name === "string" ? input.name : "",
+          destinationAllowlist,
+          ...(typeof input.expiresAt === "number" ? { expiresAt: input.expiresAt } : {}),
+        });
+      },
+      exclusiveSchedulerSpec,
     );
     register(
       "web_search",
@@ -11810,6 +11850,34 @@ ${skillDescriptions}`;
       lower.includes("window is not defined") ||
       lower.includes("document is not defined")
     );
+  }
+
+  private getProtectedCredentialToolDefinition(): LLMTool {
+    return {
+      name: "request_protected_credential",
+      description:
+        "Ask the operator to enter a credential for one or more explicitly named destination hosts. Returns request metadata only; the secret is stored in the protected local vault and can be referenced by credentialId in web_fetch or http_request.",
+      input_schema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Human-readable name for the credential, such as 'GitHub token'.",
+          },
+          destinationAllowlist: {
+            type: "array",
+            description:
+              "Specific destination hostnames that may receive this credential. Wildcards are not allowed.",
+            items: { type: "string" },
+          },
+          expiresAt: {
+            type: "number",
+            description: "Optional Unix timestamp after which the request expires.",
+          },
+        },
+        required: ["name", "destinationAllowlist"],
+      },
+    };
   }
 
   /**

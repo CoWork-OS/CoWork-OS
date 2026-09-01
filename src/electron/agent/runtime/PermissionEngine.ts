@@ -82,6 +82,7 @@ type PermissionFacts = {
   isExternalFileAccess: boolean;
   isDataExport: boolean;
   isExternalSideEffect: boolean;
+  isProtectedCredential: boolean;
   isNetworkAccess: boolean;
   isNonWorkspaceInteraction: boolean;
   isMcp: boolean;
@@ -703,13 +704,15 @@ export class PermissionEngine {
           },
         };
       case "dont_ask":
-        if (facts.isDataExport) {
+        if (facts.isDataExport || facts.isProtectedCredential) {
           return {
             decision: "ask",
             reason: {
               type: "mode",
               mode,
-              summary: "Data export always requires an explicit prompt, even in bypass modes.",
+              summary: facts.isProtectedCredential
+                ? "Protected credential use always requires an explicit prompt, even in bypass modes."
+                : "Data export always requires an explicit prompt, even in bypass modes.",
             },
           };
         }
@@ -722,13 +725,15 @@ export class PermissionEngine {
           },
         };
       case "bypass_permissions":
-        if (facts.isDataExport) {
+        if (facts.isDataExport || facts.isProtectedCredential) {
           return {
             decision: "ask",
             reason: {
               type: "mode",
               mode,
-              summary: "Data export always requires an explicit prompt, even in bypass modes.",
+              summary: facts.isProtectedCredential
+                ? "Protected credential use always requires an explicit prompt, even in bypass modes."
+                : "Data export always requires an explicit prompt, even in bypass modes.",
             },
           };
         }
@@ -795,10 +800,21 @@ export class PermissionEngine {
       (toolName === "http_request" && !isHttpRequestReadOnly);
     const isLocationAccess =
       approvalType === "location_access" || toolName === "get_current_location";
+    const credentialId =
+      request.toolInput && typeof request.toolInput === "object"
+        ? (request.toolInput as Record<string, unknown>).credentialId
+        : undefined;
+    const isProtectedCredential =
+      approvalType === "protected_credential" ||
+      toolName === "request_protected_credential" ||
+      ((toolName === "web_fetch" || toolName === "http_request") &&
+        typeof credentialId === "string" &&
+        credentialId.trim().length > 0);
     const isWorkspaceWriteLike = this.isWorkspaceWriteTool(toolName);
     const isExternalSideEffect =
       (approvalType === "external_service" && !isWorkspaceWriteLike) ||
       isLocationAccess ||
+      isProtectedCredential ||
       isDataExport ||
       toolName.endsWith("_action") ||
       toolName === "voice_call";
@@ -836,6 +852,7 @@ export class PermissionEngine {
       isExternalFileAccess,
       isDataExport,
       isExternalSideEffect,
+      isProtectedCredential,
       isNetworkAccess,
       isNonWorkspaceInteraction,
       isMcp,
@@ -1089,6 +1106,22 @@ export class PermissionEngine {
         destination: "workspace",
       },
     ];
+    if (!facts.isLocationAccess && !facts.isProtectedCredential) {
+      suggestions.push(
+        {
+          action: "deny_recurring",
+          label: "Deny recurring",
+          effect: "deny",
+          destination: "recurring",
+        },
+        {
+          action: "allow_recurring",
+          label: "Allow recurring",
+          effect: "allow",
+          destination: "recurring",
+        },
+      );
+    }
     if (!facts.isDataExport) {
       suggestions.push(
         {

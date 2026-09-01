@@ -1,4 +1,11 @@
-import { ipcMain, shell, BrowserWindow, app as _app, nativeTheme } from "electron";
+import {
+  ipcMain,
+  shell,
+  BrowserWindow,
+  app as _app,
+  nativeTheme,
+  type IpcMainInvokeEvent,
+} from "electron";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
 import * as path from "path";
 import * as fs from "fs/promises";
@@ -64,6 +71,17 @@ function shouldDisableBackgroundAutostart(): boolean {
   );
 }
 
+function requireString(value: unknown, field: string): string {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) throw new Error(`${field} is required.`);
+  return normalized;
+}
+
+function optionalString(value: unknown): string | undefined {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized || undefined;
+}
+
 import { DatabaseManager } from "../database/schema";
 import {
   WorkspaceRepository,
@@ -76,6 +94,7 @@ import {
   LLMModelRepository,
   WorkspacePermissionRuleRepository,
   ChannelSpecializationRepository,
+  ApprovalRepository,
 } from "../database/repositories";
 import { SessionRetentionService } from "../sessions/SessionRetentionService";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
@@ -94,6 +113,12 @@ import { selectAgentsForTask } from "../agents/capabilityMatcher";
 import { TaskLabelRepository } from "../database/TaskLabelRepository";
 import { WorkingStateRepository } from "../agents/WorkingStateRepository";
 import { WorkContextService } from "../workspaces/WorkContextService";
+import { SessionMembershipService } from "../workspaces/SessionMembershipService";
+import { RecurringApprovalService } from "../security/recurring-approval-service";
+import { ProtectedCredentialService } from "../security/protected-credential-service";
+import { getLocalPreviewProcessService } from "../preview/LocalPreviewProcessService";
+import { getBrowserWorkbenchService } from "../browser/browser-workbench-service";
+import type { LocalPreviewStartRequest } from "../../shared/local-preview";
 import { ContextPolicyManager } from "../gateway/context-policy";
 import { OnboardingProfileService } from "../onboarding/OnboardingProfileService";
 import type { ApplyOnboardingProfileRequest } from "../../shared/onboarding";
@@ -1369,7 +1394,12 @@ export async function setupIpcHandlers(
   const taskRepo = new TaskRepository(db);
   const taskEventRepo = new TaskEventRepository(db);
   const taskSessionMetadataRepo = new TaskSessionMetadataRepository(db);
+  const approvalRepo = new ApprovalRepository(db);
   const workContextService = new WorkContextService(db);
+  const sessionMembershipService = new SessionMembershipService(db);
+  const recurringApprovalService = new RecurringApprovalService(db);
+  const protectedCredentialService = new ProtectedCredentialService(db);
+  const localPreviewService = getLocalPreviewProcessService();
   const sessionRetentionService = new SessionRetentionService(
     taskRepo,
     taskEventRepo,
@@ -1439,6 +1469,30 @@ export async function setupIpcHandlers(
       timestamp: Date.now(),
       payload: { status, ...extraPayload },
     });
+  };
+
+  const principalForEvent = (event: IpcMainInvokeEvent): string =>
+    sessionMembershipService.principalForClient(event.sender.id);
+
+  const authorizeTaskForEvent = (
+    event: IpcMainInvokeEvent,
+    taskId: string,
+    capability: "view" | "contribute" | "review" | "approve" | "manage",
+  ) => sessionMembershipService.authorizeTaskAction(taskId, capability, principalForEvent(event));
+
+  const protectedCredentialTaskId = (requestId: string): string | undefined => {
+    const row = db
+      .prepare("SELECT task_id FROM protected_credential_requests WHERE id = ?")
+      .get(requestId) as { task_id?: string } | undefined;
+    return row?.task_id || undefined;
+  };
+
+  const authorizeProtectedCredentialRequest = (
+    event: IpcMainInvokeEvent,
+    requestId: string,
+  ): void => {
+    const taskId = protectedCredentialTaskId(requestId);
+    if (taskId) authorizeTaskForEvent(event, taskId, "approve");
   };
 
   const teamOrchestrator = new AgentTeamOrchestrator({
@@ -4854,7 +4908,8 @@ export async function setupIpcHandlers(
     });
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_CANCEL, async (_, id: string) => {
+  ipcMain.handle(IPC_CHANNELS.TASK_CANCEL, async (event, id: string) => {
+    const authorization = authorizeTaskForEvent(event, id, "manage");
     try {
       await agentDaemon.cancelTask(id);
     } finally {
@@ -4864,36 +4919,81 @@ export async function setupIpcHandlers(
         agentDaemon.cancelTaskRecord(id, "Task was stopped by user");
       }
     }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.TASK_WRAP_UP, async (_, id: string) => {
-    checkRateLimit(IPC_CHANNELS.TASK_WRAP_UP);
-    const validated = validateInput(UUIDSchema, id, "task ID");
-    await agentDaemon.wrapUpTask(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.TASK_PAUSE, async (_, id: string) => {
-    const validated = validateInput(UUIDSchema, id, "task ID");
-    // Pause daemon first - if it fails, exception propagates and status won't be updated
-    await agentDaemon.pauseTask(validated);
-    taskRepo.update(validated, { status: "paused" });
-  });
-
-  ipcMain.handle(IPC_CHANNELS.TASK_RESUME, async (_, id: string) => {
-    const validated = validateInput(UUIDSchema, id, "task ID");
-    // Resume daemon first. The daemon owns lifecycle transitions and may finish the
-    // task before this call returns, so do not force a stale "executing" write here.
-    const resumed = await agentDaemon.resumeTask(validated);
-    if (resumed) return;
-    logger.warn(
-      `[IPC] TASK_RESUME ignored for task ${validated}: no active executor available to resume`,
+    sessionMembershipService.recordTaskAction(
+      id,
+      "manage",
+      "task_cancelled",
+      id,
+      undefined,
+      authorization.actor.principalId,
     );
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_CONTINUE, async (_, id: string) => {
+  ipcMain.handle(IPC_CHANNELS.TASK_WRAP_UP, async (event, id: string) => {
+    checkRateLimit(IPC_CHANNELS.TASK_WRAP_UP);
+    const validated = validateInput(UUIDSchema, id, "task ID");
+    const authorization = authorizeTaskForEvent(event, validated, "manage");
+    await agentDaemon.wrapUpTask(validated);
+    sessionMembershipService.recordTaskAction(
+      validated,
+      "manage",
+      "task_wrapped_up",
+      validated,
+      undefined,
+      authorization.actor.principalId,
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_PAUSE, async (event, id: string) => {
+    const validated = validateInput(UUIDSchema, id, "task ID");
+    const authorization = authorizeTaskForEvent(event, validated, "manage");
+    // Pause daemon first - if it fails, exception propagates and status won't be updated
+    await agentDaemon.pauseTask(validated);
+    taskRepo.update(validated, { status: "paused" });
+    sessionMembershipService.recordTaskAction(
+      validated,
+      "manage",
+      "task_paused",
+      validated,
+      undefined,
+      authorization.actor.principalId,
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_RESUME, async (event, id: string) => {
+    const validated = validateInput(UUIDSchema, id, "task ID");
+    const authorization = authorizeTaskForEvent(event, validated, "manage");
+    // Resume daemon first. The daemon owns lifecycle transitions and may finish the
+    // task before this call returns, so do not force a stale "executing" write here.
+    const resumed = await agentDaemon.resumeTask(validated);
+    if (!resumed) {
+      logger.warn(
+        `[IPC] TASK_RESUME ignored for task ${validated}: no active executor available to resume`,
+      );
+    }
+    sessionMembershipService.recordTaskAction(
+      validated,
+      "manage",
+      "task_resume_requested",
+      validated,
+      undefined,
+      authorization.actor.principalId,
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_CONTINUE, async (event, id: string) => {
     checkRateLimit(IPC_CHANNELS.TASK_CONTINUE);
     const validated = validateInput(UUIDSchema, id, "task ID");
+    const authorization = authorizeTaskForEvent(event, validated, "manage");
     await agentDaemon.continueTask(validated);
+    sessionMembershipService.recordTaskAction(
+      validated,
+      "manage",
+      "task_continued",
+      validated,
+      undefined,
+      authorization.actor.principalId,
+    );
   });
 
   ipcMain.handle(
@@ -5346,9 +5446,10 @@ export async function setupIpcHandlers(
   );
 
   // Send follow-up message to a task
-  ipcMain.handle(IPC_CHANNELS.TASK_SEND_MESSAGE, async (_, data) => {
+  ipcMain.handle(IPC_CHANNELS.TASK_SEND_MESSAGE, async (event, data) => {
     checkRateLimit(IPC_CHANNELS.TASK_SEND_MESSAGE);
     const validated = validateInput(TaskMessageSchema, data, "task message");
+    const authorization = authorizeTaskForEvent(event, validated.taskId, "contribute");
     const validatedImages = validated.images;
     try {
       const result = await agentDaemon.sendMessage(
@@ -5370,6 +5471,15 @@ export async function setupIpcHandlers(
       if (!result.queued) {
         await cleanupTaskImageTempFiles(validatedImages);
       }
+      sessionMembershipService.recordTaskAction(
+        validated.taskId,
+        "contribute",
+        "task_message_sent",
+        validated.taskId,
+        { queued: result.queued },
+        authorization.actor.principalId,
+      );
+      return result;
     } catch (err) {
       await cleanupTaskImageTempFiles(validatedImages);
       throw err;
@@ -5377,13 +5487,28 @@ export async function setupIpcHandlers(
   });
 
   // Approval handlers
-  ipcMain.handle(IPC_CHANNELS.APPROVAL_RESPOND, async (_, data) => {
+  ipcMain.handle(IPC_CHANNELS.APPROVAL_RESPOND, async (event, data) => {
     const validated = validateInput(ApprovalResponseSchema, data, "approval response");
-    await agentDaemon.respondToApproval(
+    const approval = approvalRepo.findById(validated.approvalId);
+    if (!approval) throw new Error("Approval request not found.");
+    const authorization = authorizeTaskForEvent(event, approval.taskId, "approve");
+    const result = await agentDaemon.respondToApproval(
       validated.approvalId,
       validated.approved ?? validated.action?.startsWith("allow_") === true,
       validated.action,
+      authorization.actor,
     );
+    if (result === "handled") {
+      sessionMembershipService.recordTaskAction(
+        approval.taskId,
+        "approve",
+        "approval_resolved",
+        approval.id,
+        { approved: validated.approved ?? validated.action?.startsWith("allow_") === true },
+        authorization.actor.principalId,
+      );
+    }
+    return result;
   });
 
   ipcMain.handle(IPC_CHANNELS.INPUT_REQUEST_LIST, async (_, data) => {
@@ -5722,6 +5847,164 @@ export async function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.WORK_CONTEXT_MEMBER_ADD_IPC, async (_, request: Any) => {
     return workContextService.addMember(request) || null;
+  });
+  ipcMain.handle(IPC_CHANNELS.SESSION_MEMBERS_GET_IPC, async (event, request: Any) => {
+    const principalId = sessionMembershipService.principalForClient(event.sender.id);
+    if (typeof request?.contextId === "string" && request.contextId.trim()) {
+      return sessionMembershipService.getSnapshot(request.contextId, principalId);
+    }
+    if (typeof request?.taskId === "string" && request.taskId.trim()) {
+      return sessionMembershipService.getSnapshotForTask(request.taskId, principalId);
+    }
+    throw new Error("contextId or taskId is required");
+  });
+  ipcMain.handle(IPC_CHANNELS.SESSION_INVITE_CREATE_IPC, async (event, request: Any) => {
+    const principalId = sessionMembershipService.principalForClient(event.sender.id);
+    return sessionMembershipService.createInvite(request, principalId);
+  });
+  ipcMain.handle(IPC_CHANNELS.SESSION_MEMBER_UPDATE_IPC, async (event, request: Any) => {
+    const principalId = sessionMembershipService.principalForClient(event.sender.id);
+    return sessionMembershipService.updateMember(request, principalId);
+  });
+  ipcMain.handle(IPC_CHANNELS.SESSION_INVITE_ACCEPT_IPC, async (event, request: Any) => {
+    const result = sessionMembershipService.acceptInvite({
+      token: requireString(request?.token, "token"),
+      displayName: requireString(request?.displayName, "displayName"),
+    });
+    sessionMembershipService.registerClientPrincipal(event.sender.id, result.principal.principalId);
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RECURRING_APPROVAL_LIST, async (_, request?: Any) => {
+    return recurringApprovalService.list({
+      workspaceId: optionalString(request?.workspaceId),
+      includeRevoked: request?.includeRevoked === true,
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.RECURRING_APPROVAL_REVOKE, async (_, ruleId: string) => {
+    return recurringApprovalService.revoke(requireString(ruleId, "ruleId"));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_CREATE, async (event, request: Any) => {
+    const taskId = optionalString(request?.taskId);
+    if (taskId) authorizeTaskForEvent(event, taskId, "contribute");
+    return protectedCredentialService.createRequest({
+      ...(taskId ? { taskId } : {}),
+      name: requireString(request?.name, "name"),
+      destinationAllowlist: Array.isArray(request?.destinationAllowlist)
+        ? request.destinationAllowlist.map(String)
+        : [],
+      ...(typeof request?.expiresAt === "number" ? { expiresAt: request.expiresAt } : {}),
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_LIST, async (event, request?: Any) => {
+    const taskId = optionalString(request?.taskId);
+    if (taskId) authorizeTaskForEvent(event, taskId, "view");
+    return protectedCredentialService.listRequests({
+      ...(taskId ? { taskId } : {}),
+      includeResolved: request?.includeResolved === true,
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_FULFILL, async (event, request: Any) => {
+    const requestId = requireString(request?.requestId, "requestId");
+    authorizeProtectedCredentialRequest(event, requestId);
+    return protectedCredentialService.fulfillRequest(
+      requestId,
+      typeof request?.value === "string" ? request.value : "",
+    );
+  });
+  ipcMain.handle(
+    IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_DENY,
+    async (event, requestId: string) => {
+      const id = requireString(requestId, "requestId");
+      authorizeProtectedCredentialRequest(event, id);
+      return protectedCredentialService.denyRequest(id);
+    },
+  );
+  ipcMain.handle(IPC_CHANNELS.PROTECTED_CREDENTIAL_LIST, async () => {
+    return protectedCredentialService.listCredentials();
+  });
+  ipcMain.handle(IPC_CHANNELS.PROTECTED_CREDENTIAL_REVOKE, async (_, credentialId: string) => {
+    return protectedCredentialService.revokeCredential(requireString(credentialId, "credentialId"));
+  });
+
+  const previewForTask = (previewId: string) => {
+    const info = localPreviewService.get(requireString(previewId, "previewId"));
+    if (!info) throw new Error("Local preview process not found.");
+    const task = taskRepo.findById(info.taskId);
+    if (!task || task.workspaceId !== info.workspaceId) {
+      throw new Error("Local preview task is no longer available.");
+    }
+    return info;
+  };
+
+  ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_TEMPLATES, async () =>
+    localPreviewService.listTemplates(),
+  );
+  ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_START, async (event, request: Any) => {
+    const taskId = requireString(request?.taskId, "taskId");
+    authorizeTaskForEvent(event, taskId, "contribute");
+    const task = taskRepo.findById(taskId);
+    if (!task) throw new Error("Task not found for local preview.");
+    const workspace = workspaceRepo.findById(task.workspaceId);
+    if (!workspace) throw new Error("Workspace not found for local preview.");
+    if (request?.workspaceId !== workspace.id) {
+      throw new Error("Local preview workspace does not match the task workspace.");
+    }
+    const startRequest: LocalPreviewStartRequest & { workspacePath: string } = {
+      taskId,
+      workspaceId: workspace.id,
+      templateId: request?.templateId,
+      workingDirectory:
+        typeof request?.workingDirectory === "string" ? request.workingDirectory : workspace.path,
+      ...(typeof request?.port === "number" ? { port: request.port } : {}),
+      ...(typeof request?.healthPath === "string" ? { healthPath: request.healthPath } : {}),
+      workspacePath: workspace.path,
+    };
+    return localPreviewService.start(startRequest);
+  });
+  ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_STOP, async (event, previewId: string) => {
+    const info = previewForTask(previewId);
+    authorizeTaskForEvent(event, info.taskId, "contribute");
+    return localPreviewService.stop(info.id);
+  });
+  ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_RESTART, async (event, previewId: string) => {
+    const info = previewForTask(previewId);
+    authorizeTaskForEvent(event, info.taskId, "contribute");
+    return localPreviewService.restart(info.id);
+  });
+  ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_GET, async (event, previewId: string) => {
+    const info = previewForTask(previewId);
+    authorizeTaskForEvent(event, info.taskId, "view");
+    return info;
+  });
+  ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_LIST, async (event, workspaceId?: string) => {
+    return localPreviewService.list(optionalString(workspaceId)).filter((info) => {
+      try {
+        authorizeTaskForEvent(event, info.taskId, "view");
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_HEALTH, async (event, previewId: string) => {
+    const info = previewForTask(previewId);
+    authorizeTaskForEvent(event, info.taskId, "view");
+    return localPreviewService.health(info.id);
+  });
+  ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_OPEN, async (event, previewId: string) => {
+    const info = previewForTask(previewId);
+    authorizeTaskForEvent(event, info.taskId, "view");
+    if (info.status === "stopped" || info.status === "failed") {
+      throw new Error("Local preview is not running.");
+    }
+    await getBrowserWorkbenchService().requestOpen({
+      taskId: info.taskId,
+      sessionId: `local-preview:${info.id}`,
+      url: info.url,
+    });
+    return info;
   });
   ipcMain.handle(
     IPC_CHANNELS.MANAGED_SESSION_EVENTS_LIST_IPC,

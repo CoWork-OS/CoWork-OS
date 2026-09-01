@@ -27,10 +27,39 @@ const OPENROUTER_KNOWN_TEXT_ONLY_MODEL_PATTERNS = [
   /\bnemotron\b/i,
 ];
 const MODEL_CATALOG_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
+const OPENROUTER_AUTH_ERROR_MESSAGE =
+  "OpenRouter did not accept this API key. Paste the complete key beginning with `sk-or-v1-` without `Bearer`, quotes, or `OPENROUTER_API_KEY=`.";
 
 export const OPENROUTER_DEFAULT_MODEL = "anthropic/claude-3.5-sonnet";
 export const OPENROUTER_PARETO_CODE_MODEL = "openrouter/pareto-code";
 export const OPENROUTER_PARETO_CODE_NITRO_MODEL = `${OPENROUTER_PARETO_CODE_MODEL}:nitro`;
+
+function normalizeOpenRouterApiKey(value?: string): string | undefined {
+  let normalized = value?.trim() || "";
+
+  // Users commonly paste a bearer token or a value copied from an env file.
+  // Accept those wrappers while keeping the actual secret unchanged.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const before = normalized;
+    normalized = normalized.replace(/^Bearer\s+/i, "").trim();
+    normalized = normalized.replace(/^(?:export\s+)?OPENROUTER_API_KEY\s*[:=]\s*/i, "").trim();
+
+    const first = normalized[0];
+    const last = normalized[normalized.length - 1];
+    if (
+      normalized.length >= 2 &&
+      ((first === '"' && last === '"') ||
+        (first === "'" && last === "'") ||
+        (first === "`" && last === "`"))
+    ) {
+      normalized = normalized.slice(1, -1).trim();
+    }
+
+    if (normalized === before) break;
+  }
+
+  return normalized || undefined;
+}
 
 function normalizeParetoMinCodingScore(value?: number): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
@@ -61,7 +90,7 @@ export class OpenRouterProvider implements LLMProvider {
   private modelCatalogLastAttemptAt = 0;
 
   constructor(config: LLMProviderConfig) {
-    const apiKey = config.openrouterApiKey;
+    const apiKey = normalizeOpenRouterApiKey(config.openrouterApiKey);
     if (!apiKey) {
       throw new Error(
         "OpenRouter API key is required (free, no credit card). Get one at https://openrouter.ai/keys then add it in Settings > LLM.",
@@ -152,9 +181,13 @@ export class OpenRouterProvider implements LLMProvider {
         const errorData = (await response.json().catch(() => ({}))) as {
           error?: { message?: string };
         };
+        const providerError = errorData.error?.message;
         return {
           success: false,
-          error: errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`,
+          error:
+            providerError && /missing authentication header/i.test(providerError)
+              ? OPENROUTER_AUTH_ERROR_MESSAGE
+              : providerError || `HTTP ${response.status}: ${response.statusText}`,
         };
       }
 

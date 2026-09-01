@@ -59,6 +59,51 @@ describe("OpenRouterProvider attribution headers", () => {
     );
   });
 
+  it("normalizes common pasted API-key wrappers before sending authentication", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new OpenRouterProvider({
+      type: "openrouter",
+      model: "openrouter/free",
+      openrouterApiKey: ' export OPENROUTER_API_KEY="Bearer test-key" ',
+    });
+
+    await provider.testConnection();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://openrouter.ai/api/v1/chat/completions",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer test-key" }),
+      }),
+    );
+  });
+
+  it("turns OpenRouter's missing-auth response into actionable onboarding guidance", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        json: vi.fn().mockResolvedValue({
+          error: { message: "Missing Authentication header" },
+        }),
+      } as unknown as Response),
+    );
+
+    const provider = new OpenRouterProvider({
+      type: "openrouter",
+      model: "openrouter/free",
+      openrouterApiKey: "malformed-key",
+    });
+
+    await expect(provider.testConnection()).resolves.toEqual({
+      success: false,
+      error: expect.stringContaining("sk-or-v1-"),
+    });
+  });
+
   it("uses the shared OpenRouter default model when no model is configured", () => {
     const provider = new OpenRouterProvider({
       type: "openrouter",

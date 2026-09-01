@@ -1,6 +1,6 @@
 # Public Adoption Stats
 
-Generated at: 2026-08-31T09:41:36.401Z
+Generated at: 2026-09-01T08:36:46.458Z
 
 These numbers are acquisition and download-intent signals for CoWork OS. They do **not** measure active users, first launch, successful task completion, model configuration, retention, prompts, files, emails, or any in-app content.
 
@@ -8,38 +8,38 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Metric | Value |
 |---|---:|
-| GitHub stars | 441 |
-| GitHub forks | 72 |
+| GitHub stars | 442 |
+| GitHub forks | 73 |
 | GitHub watchers | 3 |
 | GitHub open issues | 8 |
 | Latest release | v0.5.52 |
 | Latest release date | 2026-08-27 |
-| Installer/server downloads, lifetime | 1,583 |
-| Installer/server downloads, since previous snapshot | 9 |
+| Installer/server downloads, lifetime | 1,587 |
+| Installer/server downloads, since previous snapshot | 4 |
 | npm latest version | 0.5.52 |
 | npm downloads, last day | 18 |
 | npm downloads, last week | 598 |
 | npm downloads, last month | 1,439 |
 | npm downloads, all time | 7,825 |
-| GitHub views, last 14-ish days | 1,739 total / 520 unique |
-| GitHub clones, last 14-ish days | 1,998 total / 438 unique |
+| GitHub views, last 14-ish days | 1,748 total / 522 unique |
+| GitHub clones, last 14-ish days | 1,668 total / 428 unique |
 
 ## Release Downloads By Platform
 
 | Platform | Lifetime downloads | Delta |
 |---|---:|---:|
-| macos | 806 | +3 |
+| macos | 806 | +0 |
 | server | 60 | +0 |
-| windows | 717 | +6 |
+| windows | 721 | +4 |
 
 ## Recent Release Assets
 
 | Release | Asset | Platform | Downloads | Delta |
 |---|---|---|---:|---:|
-| v0.5.52 | CoWork-OS-0.5.52-arm64-mac.zip | macos | 4 | +1 |
-| v0.5.52 | CoWork-OS-0.5.52-arm64.dmg | macos | 6 | +2 |
+| v0.5.52 | CoWork-OS-0.5.52-arm64-mac.zip | macos | 4 | +0 |
+| v0.5.52 | CoWork-OS-0.5.52-arm64.dmg | macos | 6 | +0 |
 | v0.5.52 | cowork-os-server-linux-x64-v0.5.52.tar.gz | server | 2 | +0 |
-| v0.5.52 | CoWork-OS-Setup-0.5.52.exe | windows | 33 | +6 |
+| v0.5.52 | CoWork-OS-Setup-0.5.52.exe | windows | 37 | +4 |
 | v0.5.51 | CoWork-OS-0.5.51-arm64-mac.zip | macos | 6 | +0 |
 | v0.5.51 | CoWork-OS-0.5.51-arm64.dmg | macos | 22 | +0 |
 | v0.5.51 | cowork-os-server-linux-x64-v0.5.51.tar.gz | server | 4 | +0 |
@@ -61,14 +61,14 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | github.com | 331 | 123 |
-| 2 | Google | 247 | 152 |
-| 3 | chatgpt.com | 38 | 26 |
+| 1 | github.com | 325 | 122 |
+| 2 | Google | 242 | 150 |
+| 3 | chatgpt.com | 37 | 25 |
 | 4 | teams.public.onecdn.static.microsoft | 22 | 3 |
-| 5 | Bing | 16 | 12 |
-| 6 | DuckDuckGo | 15 | 9 |
-| 7 | search.brave.com | 13 | 8 |
-| 8 | perplexity.ai | 7 | 3 |
+| 5 | Bing | 19 | 14 |
+| 6 | search.brave.com | 12 | 7 |
+| 7 | DuckDuckGo | 11 | 7 |
+| 8 | perplexity.ai | 8 | 4 |
 | 9 | coworkosapp.com | 5 | 3 |
 | 10 | Baidu | 5 | 1 |
 
@@ -76,16 +76,16 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | /CoWork-OS/CoWork-OS | 383 | 228 |
-| 2 | /cowork-os/cowork-os | 308 | 201 |
-| 3 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-1.webp | 92 | 55 |
-| 4 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.51 | 61 | 46 |
-| 5 | /CoWork-OS/CoWork-OS/issues | 49 | 25 |
-| 6 | /CoWork-OS/CoWork-OS/discussions | 46 | 11 |
-| 7 | /CoWork-OS/CoWork-OS/pulls | 42 | 14 |
-| 8 | /CoWork-OS/CoWork-OS/releases | 28 | 17 |
-| 9 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.52 | 22 | 16 |
-| 10 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-7.webp | 19 | 4 |
+| 1 | /CoWork-OS/CoWork-OS | 373 | 228 |
+| 2 | /cowork-os/cowork-os | 304 | 200 |
+| 3 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-1.webp | 87 | 52 |
+| 4 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.51 | 59 | 45 |
+| 5 | /CoWork-OS/CoWork-OS/issues | 50 | 26 |
+| 6 | /CoWork-OS/CoWork-OS/pulls | 43 | 13 |
+| 7 | /CoWork-OS/CoWork-OS/discussions | 42 | 11 |
+| 8 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.52 | 29 | 21 |
+| 9 | /CoWork-OS/CoWork-OS/releases | 28 | 17 |
+| 10 | /CoWork-OS/CoWork-OS/tree/main | 17 | 13 |
 
 ## Data Policy
 

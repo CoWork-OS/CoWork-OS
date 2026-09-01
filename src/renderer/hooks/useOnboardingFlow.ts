@@ -302,6 +302,77 @@ const getRequiredUiForState = (state: OnboardingState) => ({
   showOllamaDetection: state === "ollama_detected",
 });
 
+export function getOnboardingDefaultModel(provider: LLMProviderType): string {
+  switch (provider) {
+    case "anthropic":
+      return "sonnet-4";
+    case "openai":
+      return "gpt-4o-mini";
+    case "gemini":
+      return "gemini-2.0-flash";
+    case "ollama":
+      return "llama3.2";
+    case "openrouter":
+      return "openrouter/free";
+    case "bedrock":
+      return "sonnet-4-6";
+    case "groq":
+      return "llama-3.1-8b-instant";
+    case "xai":
+      return "grok-4-fast-non-reasoning";
+    case "deepseek":
+      return "deepseek-chat";
+    case "kimi":
+      return "kimi-k2.5";
+    case "nano-gpt":
+      return "minimax/minimax-m2.7";
+    default:
+      return "sonnet-4";
+  }
+}
+
+export function buildOnboardingLLMTestConfig(
+  provider: LLMProviderType,
+  apiKey: string,
+  ollamaUrl: string,
+): Record<string, unknown> {
+  const modelKey = getOnboardingDefaultModel(provider);
+  const testConfig: Record<string, unknown> = {
+    providerType: provider,
+    modelKey,
+  };
+
+  if (provider === "anthropic") {
+    testConfig.anthropic = { apiKey };
+  } else if (provider === "openai") {
+    testConfig.openai = { apiKey, authMethod: "api_key" };
+  } else if (provider === "gemini") {
+    testConfig.gemini = { apiKey };
+  } else if (provider === "openrouter") {
+    testConfig.openrouter = { apiKey, model: modelKey };
+  } else if (provider === "ollama") {
+    testConfig.ollama = { baseUrl: ollamaUrl };
+  } else if (provider === "groq") {
+    testConfig.groq = { apiKey };
+  } else if (provider === "xai") {
+    testConfig.xai = { apiKey };
+  } else if (provider === "deepseek") {
+    testConfig.deepseek = { apiKey, model: modelKey };
+  } else if (provider === "kimi") {
+    testConfig.kimi = { apiKey };
+  } else if (provider === "nano-gpt") {
+    testConfig.customProviders = {
+      "nano-gpt": {
+        apiKey,
+        baseUrl: "https://nano-gpt.com/api/v1",
+        model: modelKey,
+      },
+    };
+  }
+
+  return testConfig;
+}
+
 const clearResumeSnapshot = (): void => {
   if (typeof window === "undefined") return;
 
@@ -1039,36 +1110,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     state,
   ]);
 
-  // Get default model for a provider
-  const getDefaultModel = useCallback((provider: LLMProviderType): string => {
-    switch (provider) {
-      case "anthropic":
-        return "sonnet-4";
-      case "openai":
-        return "gpt-4o-mini";
-      case "gemini":
-        return "gemini-2.0-flash";
-      case "ollama":
-        return "llama3.2";
-      case "openrouter":
-        return "openrouter/free";
-      case "bedrock":
-        return "sonnet-4-6";
-      case "groq":
-        return "llama-3.1-8b-instant";
-      case "xai":
-        return "grok-4-fast-non-reasoning";
-      case "deepseek":
-        return "deepseek-chat";
-      case "kimi":
-        return "kimi-k2.5";
-      case "nano-gpt":
-        return "minimax/minimax-m2.7";
-      default:
-        return "sonnet-4";
-    }
-  }, []);
-
   const loadExistingLlmSettings = useCallback(async (): Promise<LLMSettingsData | null> => {
     try {
       return await window.electronAPI.getLLMSettings();
@@ -1083,7 +1124,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         if (provider === "ollama" && data.detectedOllamaModel) {
           return data.detectedOllamaModel;
         }
-        return getDefaultModel(provider);
+        return getOnboardingDefaultModel(provider);
       }
 
       let currentModel: string | undefined;
@@ -1135,9 +1176,9 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
       if (provider === "ollama" && data.detectedOllamaModel) {
         return data.detectedOllamaModel;
       }
-      return getDefaultModel(provider);
+      return getOnboardingDefaultModel(provider);
     },
-    [data.detectedOllamaModel, getDefaultModel],
+    [data.detectedOllamaModel],
   );
 
   const providerHasSavedCredentials = useCallback(
@@ -1177,43 +1218,9 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     [],
   );
 
-  // Build test config for a provider
   const buildTestConfig = useCallback(
-    (provider: LLMProviderType, apiKey: string) => {
-      const testConfig: Record<string, unknown> = {
-        providerType: provider,
-      };
-
-      if (provider === "anthropic") {
-        testConfig.anthropic = { apiKey };
-      } else if (provider === "openai") {
-        testConfig.openai = { apiKey, authMethod: "api_key" };
-      } else if (provider === "gemini") {
-        testConfig.gemini = { apiKey };
-      } else if (provider === "openrouter") {
-        testConfig.openrouter = { apiKey };
-      } else if (provider === "ollama") {
-        testConfig.ollama = { baseUrl: data.ollamaUrl };
-      } else if (provider === "groq") {
-        testConfig.groq = { apiKey };
-      } else if (provider === "xai") {
-        testConfig.xai = { apiKey };
-      } else if (provider === "deepseek") {
-        testConfig.deepseek = { apiKey, model: "deepseek-chat" };
-      } else if (provider === "kimi") {
-        testConfig.kimi = { apiKey };
-      } else if (provider === "nano-gpt") {
-        testConfig.customProviders = {
-          "nano-gpt": {
-            apiKey,
-            baseUrl: "https://nano-gpt.com/api/v1",
-            model: getDefaultModel("nano-gpt"),
-          },
-        };
-      }
-
-      return testConfig;
-    },
+    (provider: LLMProviderType, apiKey: string) =>
+      buildOnboardingLLMTestConfig(provider, apiKey, data.ollamaUrl),
     [data.ollamaUrl],
   );
 

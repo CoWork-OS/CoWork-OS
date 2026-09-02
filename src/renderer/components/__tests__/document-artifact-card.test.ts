@@ -52,9 +52,9 @@ describe("DocumentArtifactCard", () => {
     }
   });
 
-  it("keeps a safe ink gutter so the first label glyph is not clipped", () => {
+  it("keeps a safe ink gutter for every artifact label glyph", () => {
     expect(artifactCss).toMatch(
-      /\.document-artifact-name,\s*\.document-artifact-meta\s*\{[\s\S]*margin-left:\s*-4px;[\s\S]*padding-left:\s*4px;/,
+      /\.spreadsheet-artifact-name,\s*\.spreadsheet-artifact-meta,\s*\.document-artifact-name,\s*\.document-artifact-meta,\s*\.presentation-artifact-name,\s*\.presentation-artifact-meta,\s*\.web-artifact-name,\s*\.web-artifact-meta\s*\{[\s\S]*margin-left:\s*-4px;[\s\S]*padding-left:\s*4px;/,
     );
   });
 });

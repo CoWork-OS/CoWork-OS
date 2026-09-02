@@ -39,6 +39,7 @@ export {
   getBootstrapProgressTitle,
   deriveAgentReasoningPanelState,
   selectVisibleTaskFeedRows,
+  isCompletionSummaryCoveredByAssistantEvent,
   hasInactiveStringSetEntries,
   pruneStringSetToActiveIds,
   collectInlineRunCommandSessionIds,

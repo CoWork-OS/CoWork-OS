@@ -17,7 +17,6 @@ import {
   SessionChecklistItem,
   SessionChecklistState,
 } from "../../shared/types";
-import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { DocumentAwareFileModal } from "./DocumentAwareFileModal";
 import { useAgentContext } from "../hooks/useAgentContext";
 import {
@@ -27,6 +26,7 @@ import {
 } from "../utils/task-outputs";
 import { normalizeEventsForTimelineUi } from "../utils/timeline-projection";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
+import { deriveRevisionAwarePlanSteps } from "../utils/task-status-projection";
 import {
   type FileInfo,
   type SharedTaskEventUiState,
@@ -383,6 +383,7 @@ function getCollaborativeAgentStatusKind(task: Task): CollaborativeAgentStatusKi
     task.terminalStatus === "partial_success" ||
     task.terminalStatus === "needs_user_action" ||
     task.terminalStatus === "awaiting_approval" ||
+    task.terminalStatus === "awaiting_verification" ||
     task.terminalStatus === "resume_available"
   ) {
     return "warning";
@@ -1699,6 +1700,16 @@ function RightPanelComponent({
       normalizeEventsForTimelineUi(rawEvents),
     );
   }, [rawEvents, rendererPerfLoggingEnabled, sharedTaskEventUi]);
+  const consolidatedTaskStatusVisible = useMemo(() => {
+    if (!sharedTaskEventUi?.taskStatusStrip.visible) return false;
+    try {
+      return window.localStorage.getItem("task-status-strip-enabled") !== "false";
+    } catch {
+      return true;
+    }
+  }, [sharedTaskEventUi?.taskStatusStrip.visible]);
+  const showSessionRecovery =
+    task?.status === "paused" || task?.status === "interrupted" || task?.status === "blocked";
   const [expandedSections, setExpandedSections] = useState({
     progress: true,
     checklist: true,
@@ -1791,39 +1802,9 @@ function RightPanelComponent({
   // Extract plan steps from events
   const planSteps = useMemo((): PlanStep[] => {
     if (sharedTaskEventUi) return sharedTaskEventUi.planSteps;
-    return measureRendererPerf("RightPanel.planSteps", rendererPerfLoggingEnabled, () => {
-      const planEvent = events.find((event) => getEffectiveTaskEventType(event) === "plan_created");
-      if (!planEvent?.payload?.plan?.steps) return [];
-
-      const steps = [...planEvent.payload.plan.steps];
-
-      events.forEach((event) => {
-        const effectiveType = getEffectiveTaskEventType(event);
-        if (effectiveType === "step_started" && event.payload.step) {
-          const step = steps.find((s) => s.id === event.payload.step.id);
-          if (step) step.status = "in_progress";
-        }
-        if (effectiveType === "step_completed" && event.payload.step) {
-          const step = steps.find((s) => s.id === event.payload.step.id);
-          if (step) step.status = "completed";
-        }
-        if (effectiveType === "step_failed" && event.payload.step) {
-          const step = steps.find((s) => s.id === event.payload.step.id);
-          if (step) {
-            step.status = "failed";
-            if (event.payload.reason && !step.error) step.error = String(event.payload.reason);
-          }
-        }
-        if (effectiveType === "step_skipped" && event.payload.step) {
-          const step = steps.find((s) => s.id === event.payload.step.id);
-          if (step) step.status = "skipped";
-        }
-      });
-
-      return steps.filter(
-        (step) => !isVerificationStepDescription(step.description) || step.status === "failed",
-      );
-    });
+    return measureRendererPerf("RightPanel.planSteps", rendererPerfLoggingEnabled, () =>
+      deriveRevisionAwarePlanSteps(events),
+    );
   }, [events, sharedTaskEventUi, rendererPerfLoggingEnabled]);
   const progressMaterialSignature = useMemo(
     () =>
@@ -2396,30 +2377,34 @@ function RightPanelComponent({
 
   return (
     <div className="right-panel cli-panel">
-      <SessionProgressCard task={task} onSelectTask={onSelectTask} refreshKey={events.length} />
+      {showSessionRecovery ? (
+        <SessionProgressCard task={task} onSelectTask={onSelectTask} refreshKey={events.length} />
+      ) : null}
       <SessionDashboardCard
         task={task}
         events={events}
         refreshKey={events.length}
+        showSummary={!consolidatedTaskStatusVisible}
         onSelectTask={onSelectTask}
         onOpenFile={openFileFromFilesSection}
         workspacePath={workspace?.path}
       />
       <SessionMembersCard task={task} refreshKey={events.length} />
-      {/* Progress Section */}
-      <ProgressSection
-        expanded={expandedSections.progress}
-        planSteps={stableProgressPlanSteps}
-        taskStatus={task?.status}
-        taskTerminalStatus={task?.terminalStatus}
-        hasActiveChildren={hasActiveChildren}
-        progressTitleText={progressTitleText}
-        emptyHintText={progressEmptyHintText}
-        fallbackActivityText={fallbackProgressText}
-        toggleSection={() => toggleSection("progress")}
-        rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-        getStatusIndicator={getStatusIndicator}
-      />
+      {!consolidatedTaskStatusVisible ? (
+        <ProgressSection
+          expanded={expandedSections.progress}
+          planSteps={stableProgressPlanSteps}
+          taskStatus={task?.status}
+          taskTerminalStatus={task?.terminalStatus}
+          hasActiveChildren={hasActiveChildren}
+          progressTitleText={progressTitleText}
+          emptyHintText={progressEmptyHintText}
+          fallbackActivityText={fallbackProgressText}
+          toggleSection={() => toggleSection("progress")}
+          rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+          getStatusIndicator={getStatusIndicator}
+        />
+      ) : null}
 
       <ChecklistSection
         visible={showChecklistSection}

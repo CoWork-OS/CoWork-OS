@@ -4,6 +4,7 @@ import type { TaskEvent } from "../../../shared/types";
 import {
   ALWAYS_VISIBLE_TECHNICAL_EVENT_TYPES,
   filterAdjacentDuplicateTimelineFailures,
+  filterResolvedApprovalNarration,
   filterVerboseTimelineNoise,
   IMPORTANT_EVENT_TYPES,
   isImportantTaskEvent,
@@ -96,6 +97,86 @@ describe("task event visibility helpers", () => {
     expect(isImportantTaskEvent(makeEvent("task_list_updated", { checklist: { items: [] } }))).toBe(
       true,
     );
+  });
+
+  it("hides approval requests that were resolved automatically in summary mode", () => {
+    expect(
+      shouldShowTaskEventInSummaryMode(
+        makeEvent("approval_requested", {
+          approval: { id: "approval-1", status: "approved" },
+          autoApproved: true,
+        }),
+        "executing",
+      ),
+    ).toBe(false);
+  });
+
+  it("removes a manually approved request after its matching grant", () => {
+    const events = [
+      makeEvent(
+        "approval_requested",
+        { approval: { id: "approval-1", status: "pending" } },
+        { id: "request", timestamp: 1_000 },
+      ),
+      makeEvent(
+        "approval_granted",
+        { approvalId: "approval-1" },
+        { id: "grant", timestamp: 2_000 },
+      ),
+      makeEvent(
+        "approval_requested",
+        { approval: { id: "approval-2", status: "pending" } },
+        { id: "still-pending", timestamp: 3_000 },
+      ),
+    ];
+
+    expect(filterResolvedApprovalNarration(events).map((event) => event.id)).toEqual([
+      "grant",
+      "still-pending",
+    ]);
+  });
+
+  it("replaces a denied request with its explicit terminal outcome", () => {
+    const events = [
+      makeEvent(
+        "approval_requested",
+        { approval: { id: "approval-1", status: "pending" } },
+        { id: "request", timestamp: 1_000 },
+      ),
+      makeEvent(
+        "approval_denied",
+        { approvalId: "approval-1" },
+        { id: "denied", timestamp: 2_000 },
+      ),
+    ];
+
+    expect(filterResolvedApprovalNarration(events).map((event) => event.id)).toEqual(["denied"]);
+    expect(shouldShowTaskEventInSummaryMode(events[1], "blocked")).toBe(true);
+  });
+
+  it("correlates legacy ID-less requests with the next terminal outcome", () => {
+    const events = [
+      makeEvent(
+        "approval_requested",
+        { approval: { status: "pending" } },
+        { id: "legacy-request", timestamp: 1_000 },
+      ),
+      makeEvent("approval_granted", {}, { id: "legacy-grant", timestamp: 2_000 }),
+    ];
+
+    expect(filterResolvedApprovalNarration(events).map((event) => event.id)).toEqual([
+      "legacy-grant",
+    ]);
+  });
+
+  it("hides a session auto-resolving request before its grant arrives", () => {
+    const request = makeEvent("approval_requested", {
+      approval: { id: "approval-1", status: "pending" },
+      autoResolving: true,
+    });
+
+    expect(filterResolvedApprovalNarration([request])).toEqual([]);
+    expect(shouldShowTaskEventInSummaryMode(request, "executing")).toBe(false);
   });
 
   it("hides completed task stage-boundary group start events in summary mode", () => {

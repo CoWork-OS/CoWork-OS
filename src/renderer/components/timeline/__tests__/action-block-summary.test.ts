@@ -91,6 +91,30 @@ describe("buildActionBlockSummary", () => {
     expect(summary.summary).toBe("Approved 2 requests, ran 2 commands");
   });
 
+  it("describes the approved action instead of approval bookkeeping in compact mode", () => {
+    const summary = buildActionBlockSummary(
+      [
+        event("approval-1", "approval_granted", 1000),
+        toolEvent("command-1", "run_command", 1100),
+        toolEvent("command-2", "run_command", 1200),
+      ],
+      undefined,
+      { showApprovalNarration: false },
+    );
+
+    expect(summary.iconKind).toBe("command");
+    expect(summary.summary).toBe("Ran 2 commands");
+  });
+
+  it("uses a connector action label instead of a generic action count", () => {
+    const summary = buildActionBlockSummary([
+      toolEvent("send", "gmail_send_email", 1000),
+      toolOutcomeEvent("sent", "tool_result", "gmail_send_email", 1100),
+    ]);
+
+    expect(summary.summary).toBe("Sent email");
+  });
+
   it("uses generation icon for plain generate steps", () => {
     const summary = buildActionBlockSummary([
       event("step-1", "timeline_step_started", 1000, {

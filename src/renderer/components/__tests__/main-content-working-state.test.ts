@@ -24,6 +24,7 @@ import {
   getDefaultTranscriptMode,
   getVisibleEndOfTaskArtifactCards,
   hasInactiveStringSetEntries,
+  isCompletionSummaryCoveredByAssistantEvent,
   pruneStringSetToActiveIds,
   selectVisibleTaskFeedRows,
   shouldCreateFreshTaskForSend,
@@ -103,6 +104,88 @@ describe("formatTimelineErrorTitleForDisplay", () => {
         "Task execution failed: Error: Task missing verification evidence: no completed review/verification step or review-backed conclusion was detected.",
       ),
     ).toBe("Verification evidence missing");
+  });
+});
+
+describe("completion summary delivery", () => {
+  it("shows the complete assistant event when an older completion summary is clipped", () => {
+    const fullResponse = `${"A".repeat(350)}\nFinal conclusion: the report is complete.`;
+    const clippedSummary = `${fullResponse.slice(0, 300)}...`;
+    const rows = [
+      {
+        kind: "timeline",
+        key: "assistant-final",
+        estimatedHeight: 100,
+        timelineIndex: 0,
+        visiblePerfEventId: "assistant-final",
+        revision: "assistant-final",
+        item: {
+          kind: "event",
+          event: makeEvent("assistant-final", 100, "timeline_step_updated", {
+            legacyType: "assistant_message",
+            internal: false,
+            message: fullResponse,
+          }),
+        },
+      },
+      {
+        kind: "timeline",
+        key: "completion-final",
+        estimatedHeight: 100,
+        timelineIndex: 1,
+        visiblePerfEventId: "completion-final",
+        revision: "completion-final",
+        item: {
+          kind: "event",
+          event: makeEvent("completion-final", 200, "timeline_step_finished", {
+            legacyType: "task_completed",
+            resultSummary: clippedSummary,
+          }),
+        },
+      },
+    ] as Any[];
+
+    expect(
+      isCompletionSummaryCoveredByAssistantEvent(
+        (rows[1] as Any).item.event,
+        (rows[0] as Any).item.event,
+      ),
+    ).toBe(true);
+
+    const result = selectVisibleTaskFeedRows(rows, "delivery");
+    expect(result.visibleFeedRows.map((row) => row.key)).toEqual(["assistant-final"]);
+    expect(result.hiddenLiveFeedRowCount).toBe(1);
+  });
+
+  it("does not hide a clipped completion that carries an action-required state", () => {
+    const fullResponse = `${"A".repeat(350)}\nFinal conclusion: the report is complete.`;
+    const assistantEvent = makeEvent("assistant-final", 100, "assistant_message", {
+      internal: false,
+      message: fullResponse,
+    });
+    const completionEvent = makeEvent("completion-final", 200, "task_completed", {
+      resultSummary: `${fullResponse.slice(0, 300)}...`,
+      terminalStatus: "needs_user_action",
+      pendingChecklist: ["Open the generated report"],
+    });
+
+    expect(isCompletionSummaryCoveredByAssistantEvent(completionEvent, assistantEvent)).toBe(false);
+  });
+
+  it("does not pair completion and assistant events from different tasks", () => {
+    const fullResponse = `${"A".repeat(350)}\nFinal conclusion: the report is complete.`;
+    const assistantEvent = makeEvent("assistant-final", 100, "assistant_message", {
+      internal: false,
+      message: fullResponse,
+    });
+    const completionEvent = {
+      ...makeEvent("completion-final", 200, "task_completed", {
+        resultSummary: `${fullResponse.slice(0, 300)}...`,
+      }),
+      taskId: "another-task",
+    } as TaskEvent;
+
+    expect(isCompletionSummaryCoveredByAssistantEvent(completionEvent, assistantEvent)).toBe(false);
   });
 });
 

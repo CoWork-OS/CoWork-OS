@@ -1,7 +1,7 @@
 import fsSync from "fs";
 import fs from "fs/promises";
 import path from "path";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import type { TaskEvent } from "../../shared/types";
 import { DatabaseManager } from "../database/schema";
 
@@ -57,6 +57,12 @@ export interface TranscriptCheckpointEvidencePacket {
   spans: TranscriptCheckpointEvidenceSpan[];
 }
 
+export interface TranscriptCheckpointIntegrity {
+  algorithm: "sha256";
+  generation: number;
+  checksum: string;
+}
+
 export interface TranscriptCheckpointPayload {
   checkpointKind?: TranscriptCheckpointKind;
   conversationHistory?: unknown[];
@@ -74,6 +80,7 @@ export interface TranscriptCheckpointPayload {
   structuredSummary?: TranscriptCheckpointStructuredSummary;
   evidencePacket?: TranscriptCheckpointEvidencePacket;
   dedupeHash?: string;
+  checkpointIntegrity?: TranscriptCheckpointIntegrity;
   sourceMetadata?: {
     triggerEventType?: string;
     meaningfulExchangeCount?: number;
@@ -107,6 +114,50 @@ function taskSpanPath(workspacePath: string, taskId: string): string {
 
 function taskCheckpointPath(workspacePath: string, taskId: string): string {
   return path.join(checkpointsDir(workspacePath), `${taskId}.json`);
+}
+
+function taskPreviousCheckpointPath(workspacePath: string, taskId: string): string {
+  return path.join(checkpointsDir(workspacePath), `${taskId}.previous.json`);
+}
+
+function checkpointChecksum(payload: Record<string, unknown>): string {
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function parseCheckpoint(raw: string): TranscriptCheckpointPayload | null {
+  try {
+    const parsed = JSON.parse(raw) as TranscriptCheckpointPayload;
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const integrity = parsed.checkpointIntegrity;
+    if (integrity !== undefined) {
+      if (
+        !integrity ||
+        integrity.algorithm !== "sha256" ||
+        typeof integrity.checksum !== "string" ||
+        !/^[a-f0-9]{64}$/i.test(integrity.checksum) ||
+        typeof integrity.generation !== "number" ||
+        !Number.isFinite(integrity.generation) ||
+        integrity.generation < 1
+      ) {
+        return null;
+      }
+      const withoutIntegrity = { ...(parsed as Any) };
+      delete withoutIntegrity.checkpointIntegrity;
+      if (checkpointChecksum(withoutIntegrity) !== integrity.checksum) return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function checkpointGeneration(checkpoint: TranscriptCheckpointPayload | null): number {
+  const generation = checkpoint?.checkpointIntegrity?.generation;
+  return typeof generation === "number" && Number.isFinite(generation)
+    ? Math.max(0, Math.floor(generation))
+    : 0;
 }
 
 function isSafeTaskId(taskId: string): boolean {
@@ -227,18 +278,59 @@ export class TranscriptStore {
     taskId: string,
     checkpoint: TranscriptCheckpointPayload,
   ): Promise<void> {
-    if (!workspacePath || !taskId) return;
+    if (!workspacePath || !taskId || !isSafeTaskId(taskId)) return;
     await this.ensureLayout(workspacePath);
-    const payload = {
+    const basePayload: Record<string, unknown> = {
       ...checkpoint,
       timestamp: checkpoint.timestamp ?? Date.now(),
       resumeStrategy: checkpoint.resumeStrategy ?? "checkpoint",
     };
-    await fs.writeFile(
-      taskCheckpointPath(workspacePath, taskId),
-      JSON.stringify(payload, null, 2),
-      "utf8",
+    delete basePayload.checkpointIntegrity;
+
+    const currentPath = taskCheckpointPath(workspacePath, taskId);
+    const previousPath = taskPreviousCheckpointPath(workspacePath, taskId);
+    const existingGenerations = await Promise.all(
+      [currentPath, previousPath].map(async (candidatePath) => {
+        try {
+          return checkpointGeneration(parseCheckpoint(await fs.readFile(candidatePath, "utf8")));
+        } catch {
+          return 0;
+        }
+      }),
     );
+    const payload: TranscriptCheckpointPayload = {
+      ...(basePayload as TranscriptCheckpointPayload),
+      checkpointIntegrity: {
+        algorithm: "sha256",
+        generation: Math.max(...existingGenerations, 0) + 1,
+        checksum: checkpointChecksum(basePayload),
+      },
+    };
+    const serialized = JSON.stringify(payload, null, 2);
+    const tempPath = `${currentPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    try {
+      handle = await fs.open(tempPath, "w");
+      await handle.writeFile(serialized, "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+
+      // Preserve the last known-good generation before replacing the current
+      // file.  A crash before rename therefore leaves a recoverable previous
+      // checkpoint; rename itself is atomic on the target filesystem.
+      try {
+        await fs.copyFile(currentPath, previousPath);
+      } catch (error: Any) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      await fs.rename(tempPath, currentPath);
+    } finally {
+      if (handle) {
+        await handle.close().catch(() => undefined);
+      }
+      await fs.rm(tempPath, { force: true }).catch(() => undefined);
+    }
   }
 
   static async loadCheckpoint(
@@ -247,15 +339,28 @@ export class TranscriptStore {
     readGuard?: TranscriptReadGuard,
   ): Promise<TranscriptCheckpointPayload | null> {
     if (!isSafeTaskId(taskId)) return null;
-    const checkpointPath = taskCheckpointPath(workspacePath, taskId);
-    if (!allowsRead(readGuard, checkpointPath)) return null;
-    try {
-      const raw = await fs.readFile(checkpointPath, "utf8");
-      const parsed = JSON.parse(raw) as TranscriptCheckpointPayload;
-      return parsed && typeof parsed === "object" ? parsed : null;
-    } catch {
-      return null;
+    const candidates = [
+      taskCheckpointPath(workspacePath, taskId),
+      taskPreviousCheckpointPath(workspacePath, taskId),
+    ];
+    const validCandidates: Array<{
+      checkpoint: TranscriptCheckpointPayload;
+      generation: number;
+    }> = [];
+    for (const candidatePath of candidates) {
+      if (!allowsRead(readGuard, candidatePath)) continue;
+      try {
+        const parsed = parseCheckpoint(await fs.readFile(candidatePath, "utf8"));
+        if (parsed) {
+          validCandidates.push({ checkpoint: parsed, generation: checkpointGeneration(parsed) });
+        }
+      } catch {
+        // Try the previous generation when the newest file is truncated or
+        // otherwise unreadable.
+      }
     }
+    validCandidates.sort((a, b) => b.generation - a.generation);
+    return validCandidates[0]?.checkpoint || null;
   }
 
   static loadCheckpointSync(
@@ -264,15 +369,28 @@ export class TranscriptStore {
     readGuard?: TranscriptReadGuard,
   ): TranscriptCheckpointPayload | null {
     if (!isSafeTaskId(taskId)) return null;
-    const checkpointPath = taskCheckpointPath(workspacePath, taskId);
-    if (!allowsRead(readGuard, checkpointPath)) return null;
-    try {
-      const raw = fsSync.readFileSync(checkpointPath, "utf8");
-      const parsed = JSON.parse(raw) as TranscriptCheckpointPayload;
-      return parsed && typeof parsed === "object" ? parsed : null;
-    } catch {
-      return null;
+    const candidates = [
+      taskCheckpointPath(workspacePath, taskId),
+      taskPreviousCheckpointPath(workspacePath, taskId),
+    ];
+    const validCandidates: Array<{
+      checkpoint: TranscriptCheckpointPayload;
+      generation: number;
+    }> = [];
+    for (const candidatePath of candidates) {
+      if (!allowsRead(readGuard, candidatePath)) continue;
+      try {
+        const parsed = parseCheckpoint(fsSync.readFileSync(candidatePath, "utf8"));
+        if (parsed) {
+          validCandidates.push({ checkpoint: parsed, generation: checkpointGeneration(parsed) });
+        }
+      } catch {
+        // Try the previous generation when the newest file is truncated or
+        // otherwise unreadable.
+      }
     }
+    validCandidates.sort((a, b) => b.generation - a.generation);
+    return validCandidates[0]?.checkpoint || null;
   }
 
   static async loadRecentSpans(

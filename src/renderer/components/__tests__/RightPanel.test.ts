@@ -367,6 +367,66 @@ describe("RightPanel checklist rendering", () => {
     expect(markup).not.toContain("**Genre**");
   });
 
+  it("uses the composer disclosure as the single live progress surface", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(RightPanel, {
+        task: {
+          id: "task-1",
+          status: "executing",
+          title: "Task",
+          prompt: "Prompt",
+        } as Any,
+        workspace: null,
+        events: [] as Any,
+        sharedTaskEventUi: {
+          projectionMode: "live",
+          rawEventCount: 0,
+          normalizedEvents: [],
+          filteredEvents: [],
+          liveEvents: [],
+          inspectOnlyEvents: [],
+          debugOnlyEvents: [],
+          parallelGroupProjection: {},
+          parallelGroupsByAnchorEventId: new Map(),
+          suppressedParallelEventIds: new Set(),
+          toolCallPairing: { completions: new Map(), claimedResultIds: new Set() },
+          baseTimelineItems: [],
+          commandOutputSessions: [],
+          planSteps: [
+            {
+              id: "step-1",
+              description: "Current canonical step",
+              status: "in_progress",
+            },
+          ],
+          checklistState: null,
+          files: [],
+          outputSummary: null,
+          toolUsage: [],
+          referencedFiles: [],
+          usedToolNames: new Set(),
+          latestVisibleTaskEvent: null,
+          activityGroups: [],
+          outcomeMetrics: [],
+          taskStatusStrip: {
+            visible: true,
+            state: "working",
+            tone: "active",
+            primaryLabel: "Step 1 / 1",
+            compactMetricSlots: [],
+            planSteps: [],
+            totalPlanSteps: 1,
+            updatedAt: 1,
+          },
+        } as Any,
+      }),
+    );
+
+    expect(markup).not.toContain("Current canonical step");
+    expect(markup).not.toContain("Session dashboard");
+    expect(markup).not.toContain('aria-label="Session status"');
+  });
+
   it("keeps the progress material signature stable when only array identity changes", () => {
     const planSteps = [
       { id: "step-1", description: "Inspect logs", status: "in_progress" },

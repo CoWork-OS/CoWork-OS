@@ -39,7 +39,7 @@ function makeGroup(overrides: Partial<ParallelGroupProjection> = {}): ParallelGr
 }
 
 describe("ParallelGroupFeed", () => {
-  it("renders active groups expanded with lane rows", () => {
+  it("keeps active group details collapsed until the user expands them", () => {
     const markup = render(
       React.createElement(ParallelGroupFeed, {
         group: makeGroup(),
@@ -49,8 +49,8 @@ describe("ParallelGroupFeed", () => {
     );
 
     expect(markup).toContain("Running 2 tasks in parallel");
-    expect(markup).toContain("Fetching a web page");
-    expect(markup).toContain("Searching the web");
+    expect(markup).not.toContain("Fetching a web page");
+    expect(markup).not.toContain("Searching the web");
   });
 
   it("renders an image generation frame while generate_image is running", () => {
@@ -80,6 +80,7 @@ describe("ParallelGroupFeed", () => {
         }),
         timeLabel: "12:01",
         formatTime: () => "12:01",
+        expanded: true,
       }),
     );
 
@@ -143,7 +144,7 @@ describe("ParallelGroupFeed", () => {
     expect(markup).not.toContain('class="parallel-group-feed-details"');
   });
 
-  it("renders completed groups expanded when the parent block is active", () => {
+  it("accepts explicit expansion without forcing single-lane rows into a disclosure", () => {
     const markup = render(
       React.createElement(ParallelGroupFeed, {
         group: makeGroup({
@@ -160,7 +161,7 @@ describe("ParallelGroupFeed", () => {
         }),
         timeLabel: "12:03",
         formatTime: () => "12:03",
-        defaultExpanded: true,
+        expanded: true,
       }),
     );
 
@@ -278,7 +279,7 @@ describe("ParallelGroupFeed", () => {
         }),
         timeLabel: "12:03",
         formatTime: () => "12:03",
-        defaultExpanded: true,
+        expanded: true,
       }),
     );
 
@@ -308,7 +309,7 @@ describe("ParallelGroupFeed", () => {
         }),
         timeLabel: "12:03",
         formatTime: () => "12:03",
-        defaultExpanded: true,
+        expanded: true,
       }),
     );
 

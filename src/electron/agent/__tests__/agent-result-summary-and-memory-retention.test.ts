@@ -8,7 +8,7 @@ function buildResultSummary(
   lastAssistantOutput: string | null,
   lastAssistantText: string | null,
 ): string | undefined {
-  const candidates = [lastNonVerificationOutput, lastAssistantOutput, lastAssistantText];
+  const candidates = [lastNonVerificationOutput, lastAssistantText, lastAssistantOutput];
 
   const minLength = 20;
   const placeholders = new Set(
@@ -31,7 +31,7 @@ function buildResultSummary(
     if (!trimmed) continue;
     if (placeholders.has(trimmed.toLowerCase())) continue;
     if (trimmed.length < minLength) continue;
-    return trimmed.length > 4000 ? `${trimmed.slice(0, 4000)}...` : trimmed;
+    return trimmed;
   }
 
   return undefined;
@@ -63,7 +63,7 @@ describe("Result Summary Selection", () => {
     const summary = buildResultSummary(
       null,
       "assistant output that is long enough to be useful",
-      "assistant text that is long enough",
+      null,
     );
     expect(summary).toBe("assistant output that is long enough to be useful");
   });
@@ -86,11 +86,10 @@ describe("Result Summary Selection", () => {
     expect(summary).toBeUndefined();
   });
 
-  it("truncates long summaries", () => {
+  it("preserves long summaries without a presentation cap", () => {
     const long = "x".repeat(5000);
     const summary = buildResultSummary(long, null, null);
-    expect(summary?.length).toBe(4003);
-    expect(summary?.endsWith("...")).toBe(true);
+    expect(summary).toBe(long);
   });
 });
 

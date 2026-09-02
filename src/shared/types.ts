@@ -909,7 +909,10 @@ export type EventType =
   | "timeline_evidence_attached"
   | "timeline_artifact_emitted"
   | "timeline_command_output"
-  | "timeline_error";
+  | "timeline_error"
+  // Persisted, task-scoped impact snapshots. Producers must only emit typed,
+  // attributable counts; renderer code never derives these values from prose.
+  | "task_impact_updated";
 
 export type TimelineEventType =
   | "timeline_group_started"
@@ -2627,6 +2630,7 @@ export type TaskTerminalStatus =
   | "partial_success"
   | "needs_user_action"
   | "awaiting_approval"
+  | "awaiting_verification"
   | "resume_available"
   | "failed";
 
@@ -3464,6 +3468,102 @@ export interface TaskOutputSummary {
   primaryOutputPath?: string;
   outputCount: number;
   folders: string[];
+}
+
+export type TaskMetricKind =
+  | "files_changed"
+  | "lines_added"
+  | "lines_removed"
+  | "sources_collected"
+  | "citations_used"
+  | "artifacts_created"
+  | "slides_created"
+  | "rows_processed"
+  | "records_updated"
+  | "checks_passed"
+  | "agents_active";
+
+export type TaskImpactMetricProvenance =
+  | "plan_projection"
+  | "canonical_tool_outcome"
+  | "timeline_evidence"
+  | "task_mutation_ledger";
+
+/**
+ * Additive, replay-safe task impact. Values are machine-produced counts and
+ * must never be populated by parsing assistant prose.
+ */
+export interface TaskImpactMetric {
+  id: string;
+  kind: TaskMetricKind;
+  value: number;
+  status?: "active" | "final";
+  provenance: TaskImpactMetricProvenance;
+  sourceEventIds: string[];
+  revision: number;
+  updatedAt: number;
+}
+
+export type ActivityItemStatus = "pending" | "running" | "completed" | "failed" | "blocked";
+
+export interface ActivityItemViewModel {
+  id: string;
+  status: ActivityItemStatus;
+  label: string;
+  detailAvailable: boolean;
+  providerLabel?: string;
+  toolLabel?: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface ActivityGroupViewModel {
+  id: string;
+  status: "running" | "completed" | "failed" | "blocked";
+  summary: string;
+  latestActivityLabel: string;
+  activityIds: string[];
+  startedAt: number;
+  finishedAt?: number;
+  planStepId?: string;
+}
+
+export interface TaskStatusMetricSlot {
+  id: string;
+  label: string;
+  metricIds: string[];
+  responsivePriority: number;
+  status: "active" | "final";
+}
+
+export type TaskStatusStripState =
+  | "working"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "paused"
+  | "blocked"
+  | "waiting_for_approval"
+  | "waiting_for_input"
+  | "idle";
+
+export interface TaskStatusStripViewModel {
+  visible: boolean;
+  state: TaskStatusStripState;
+  tone: "neutral" | "active" | "success" | "warning" | "danger";
+  primaryLabel: string;
+  phaseLabel?: string;
+  compactMetricSlots: TaskStatusMetricSlot[];
+  planSteps: PlanStep[];
+  activeStepId?: string;
+  activeStepOrdinal?: number;
+  totalPlanSteps: number;
+  currentActivityGroupId?: string;
+  outputs: TaskOutputSummary | null;
+  verificationLabel?: string;
+  blockingLabel?: string;
+  blockingEventId?: string;
+  updatedAt: number;
 }
 
 export type LearningProgressStage =

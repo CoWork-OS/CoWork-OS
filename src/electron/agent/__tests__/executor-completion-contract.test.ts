@@ -425,6 +425,37 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
     expect((executor as Any).getBestFinalResponseCandidate()).toBe(brief);
   });
 
+  it("keeps the full final response for completion while bounding context state", () => {
+    const fullResponse = `${"A".repeat(5000)}\nFinal conclusion: the requested report is complete.`;
+    const executor = createExecuteHarness({
+      title: "Deliver the final report",
+      prompt: "Write and deliver the complete report.",
+      lastOutput: "",
+    });
+
+    (executor as Any).recordAssistantOutput(
+      [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: fullResponse }],
+        },
+      ],
+      { id: "deliver-final", description: "Deliver the complete report", kind: "primary" },
+    );
+
+    expect((executor as Any).lastAssistantOutput).toBe(`${fullResponse.slice(0, 4000)}…`);
+    expect((executor as Any).lastAssistantText).toBe(fullResponse);
+    expect((executor as Any).lastNonVerificationOutput).toBe(fullResponse);
+    expect((executor as Any).buildResultSummary()).toBe(fullResponse);
+
+    (executor as Any).finalizeTaskBestEffort();
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
+      "task-1",
+      fullResponse,
+      expect.any(Object),
+    );
+  });
+
   it("preserves an evidenced read-only answer when a no-op step claims the result was lost", () => {
     const answer =
       "Directly under `/tmp/project` are 51 regular files. No files were modified. The list was collected from the successful directory-read result.";

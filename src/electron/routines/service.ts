@@ -2650,7 +2650,13 @@ function summarizeTriggerEvent(event: TriggerEvent): string {
 function mapTaskSnapshotStatus(status: string, terminalStatus?: string | null): RoutineRunStatus {
   if (status === "pending" || status === "queued") return "queued";
   if (status === "planning" || status === "executing") return "running";
-  if (status === "paused" || terminalStatus === "needs_user_action") return "needs_user_action";
+  if (
+    status === "paused" ||
+    terminalStatus === "needs_user_action" ||
+    terminalStatus === "awaiting_verification"
+  ) {
+    return "needs_user_action";
+  }
   if (status === "failed" || terminalStatus === "failed") return "failed";
   if (terminalStatus === "partial_success") return "partial_success";
   if (status === "completed" || terminalStatus === "ok") return "completed";

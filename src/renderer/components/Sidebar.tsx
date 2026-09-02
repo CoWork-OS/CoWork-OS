@@ -1492,6 +1492,7 @@ function SidebarComponent({
           task.status === "blocked" ||
           task.status === "failed" ||
           task.terminalStatus === "awaiting_approval" ||
+          task.terminalStatus === "awaiting_verification" ||
           task.terminalStatus === "needs_user_action",
       ).length,
     [remoteTasks],

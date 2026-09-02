@@ -24,6 +24,90 @@ function makeEvent(
 }
 
 describe("deriveSharedTaskEventUiState action blocks", () => {
+  it("keeps only genuinely pending approvals in compact projection", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("resolved-request", 100, "approval_requested", {
+          approval: { id: "approval-1", status: "pending" },
+        }),
+        makeEvent("resolved-grant", 110, "approval_granted", {
+          approvalId: "approval-1",
+        }),
+        makeEvent("auto-request", 120, "approval_requested", {
+          approval: { id: "approval-2", status: "approved" },
+          autoApproved: true,
+        }),
+        makeEvent("pending-request", 130, "approval_requested", {
+          approval: { id: "approval-3", status: "pending" },
+        }),
+      ],
+      task: { id: "task-1", status: "executing" } as Any,
+      workspace: null,
+      verboseSteps: false,
+    });
+
+    expect(shared.filteredEvents.map((event) => event.id)).toEqual(["pending-request"]);
+  });
+
+  it("does not resurrect a resolved approval when the grant falls outside the live window", () => {
+    const rawEvents = [
+      makeEvent("request", 1, "approval_requested", {
+        approval: { id: "approval-1", status: "pending" },
+      }),
+      makeEvent("grant", 2, "approval_granted", { approvalId: "approval-1" }),
+      ...Array.from({ length: 200 }, (_, index) =>
+        makeEvent(`progress-${index}`, index + 3, "progress_update", {
+          message: `Progress ${index}`,
+        }),
+      ),
+    ];
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents,
+      task: { id: "task-1", status: "executing" } as Any,
+      workspace: null,
+      verboseSteps: false,
+      projectionMode: "live",
+      liveWindowSize: 20,
+    });
+
+    expect(shared.normalizedEvents.some((event) => event.id === "request")).toBe(true);
+    expect(shared.filteredEvents.some((event) => event.id === "request")).toBe(false);
+  });
+
+  it("surfaces connector-only work as the compact activity instead of approval narration", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("request", 1, "approval_requested", {
+          approval: { id: "approval-1", status: "approved" },
+          autoApproved: true,
+        }),
+        makeEvent("call", 2, "tool_call", { tool: "gmail_send_email" }),
+        makeEvent("result", 3, "tool_result", {
+          tool: "gmail_send_email",
+          result: { success: true },
+        }),
+        ...Array.from({ length: 200 }, (_, index) =>
+          makeEvent(`progress-${index}`, index + 4, "progress_update", {
+            message: `Progress ${index}`,
+          }),
+        ),
+      ],
+      task: { id: "task-1", status: "executing", updatedAt: 203 } as Any,
+      workspace: null,
+      verboseSteps: false,
+      projectionMode: "live",
+    });
+
+    expect(shared.filteredEvents).toEqual([]);
+    expect(shared.activityGroups).toMatchObject([
+      {
+        id: "activity-fallback:task-1",
+        latestActivityLabel: "Sent email",
+      },
+    ]);
+    expect(shared.taskStatusStrip.phaseLabel).toBe("Sent email");
+  });
+
   it("shows rename destinations instead of stale source paths", () => {
     const shared = deriveSharedTaskEventUiState({
       rawEvents: [
@@ -403,5 +487,51 @@ describe("deriveSharedTaskEventUiState action blocks", () => {
     expect(shared.commandOutputSessions).toHaveLength(12);
     expect(shared.commandOutputSessions.every((session) => session.isRunning)).toBe(true);
     expect(shared.commandOutputSessions[0].command).toBe("node script-8.js");
+  });
+
+  it("retains early plan and impact state outside the bounded live transcript", () => {
+    const rawEvents = [
+      makeEvent("plan", 1, "plan_created", {
+        revision: 1,
+        plan: {
+          steps: [
+            { id: "research", description: "Research", status: "in_progress" },
+            { id: "write", description: "Write", status: "pending" },
+          ],
+        },
+      }),
+      makeEvent("impact", 2, "task_impact_updated", {
+        replaceProvenance: "task_mutation_ledger",
+        metrics: [
+          {
+            id: "task-1:mutation:files_changed",
+            kind: "files_changed",
+            value: 3,
+            provenance: "task_mutation_ledger",
+            sourceEventIds: ["file-1"],
+            revision: 1,
+            updatedAt: 2,
+          },
+        ],
+      }),
+      ...Array.from({ length: 200 }, (_, index) =>
+        makeEvent(`tool-${index}`, index + 3, "tool_call", { tool: "read_file" }),
+      ),
+    ];
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents,
+      task: { id: "task-1", status: "executing", updatedAt: 203 } as Any,
+      workspace: null,
+      verboseSteps: false,
+      projectionMode: "live",
+      liveWindowSize: 20,
+    });
+
+    expect(shared.normalizedEvents).toHaveLength(20);
+    expect(shared.planSteps.map((step) => step.id)).toEqual(["research", "write"]);
+    expect(shared.taskStatusStrip.primaryLabel).toBe("Step 1 / 2");
+    expect(shared.outcomeMetrics).toEqual([
+      expect.objectContaining({ kind: "files_changed", value: 3 }),
+    ]);
   });
 });

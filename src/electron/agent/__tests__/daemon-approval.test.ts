@@ -860,6 +860,57 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
 
     manifestSpy.mockRestore();
   });
+
+  it("resolves a durable approval after restart and schedules task recovery", async () => {
+    const approvalRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "approval-restart",
+        taskId: "task-restart",
+        type: "external_service",
+        description: "Allow the service call",
+        details: {},
+        status: "pending",
+      }),
+      update: vi.fn(),
+    };
+    const taskRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "task-restart",
+        status: "blocked",
+        terminalStatus: "awaiting_approval",
+      }),
+    };
+    const daemonLike = {
+      approvalRepo,
+      taskRepo,
+      pendingApprovals: new Map(),
+      activeTasks: new Map(),
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+      persistApprovalActionRule: vi.fn().mockReturnValue({}),
+      resumeTaskAfterDurableWait: vi.fn().mockResolvedValue(undefined),
+    } as Any;
+
+    const result = await AgentDaemon.prototype.respondToApproval.call(
+      daemonLike,
+      "approval-restart",
+      true,
+      "allow_once",
+    );
+
+    expect(result).toBe("handled");
+    expect(approvalRepo.update).toHaveBeenCalledWith("approval-restart", "approved");
+    expect(daemonLike.updateTask).toHaveBeenCalledWith(
+      "task-restart",
+      expect.objectContaining({ status: "interrupted", terminalStatus: undefined }),
+    );
+    expect(daemonLike.resumeTaskAfterDurableWait).toHaveBeenCalledWith("task-restart");
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-restart",
+      "approval_granted",
+      expect.objectContaining({ recoveredAfterRestart: true }),
+    );
+  });
 });
 
 describe("AgentDaemon.buildPermissionRules", () => {

@@ -14,6 +14,7 @@ const VALID_TERMINAL_STATUSES = new Set<TaskTerminalStatus>([
   "partial_success",
   "needs_user_action",
   "awaiting_approval",
+  "awaiting_verification",
   "resume_available",
   "failed",
 ]);

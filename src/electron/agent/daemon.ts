@@ -34,8 +34,10 @@ import { extractMentionedRoles } from "../agents/mentions";
 import { selectAgentsForTask } from "../agents/capabilityMatcher";
 import { buildSubagentDisplayName } from "../agents/subagent-display-names";
 import { recordLlmCallError, recordLlmCallSuccess } from "./llm/usage-telemetry";
+import { TaskMutationLedger } from "./task-mutation-ledger";
 import {
   Task,
+  ApprovalRequest,
   ApprovalResponseAction,
   ApprovalType,
   DEFAULT_TRUSTED_COMMAND_PATTERNS,
@@ -168,7 +170,10 @@ import {
   resolveWorkerRoleAgentConfig,
   resolveWorkerRoleKind,
 } from "./runtime/worker-role-registry";
-import { createVerificationRuntime } from "./runtime/VerificationRuntime";
+import {
+  createVerificationRuntime,
+  type VerificationRuntimeResult,
+} from "./runtime/VerificationRuntime";
 import type { AgentTeamOrchestrator } from "../agents/AgentTeamOrchestrator";
 import { AgentTeamItemRepository } from "../agents/AgentTeamItemRepository";
 import { AgentTeamRunRepository } from "../agents/AgentTeamRunRepository";
@@ -211,6 +216,7 @@ import {
   extractMailboxComposeDraftInputFromText,
   type ChatInlineFrame,
 } from "../../shared/mailbox";
+import { extractCanonicalTaskImpactMetrics } from "./canonical-task-impact";
 
 export interface AgentDaemonOptions {
   startupRecovery?: boolean;
@@ -229,6 +235,7 @@ const FORK_REPLAY_EVENT_TYPES = new Set([
   "tool_blocked",
   "plan_created",
   "plan_updated",
+  "plan_revised",
   "step_started",
   "step_completed",
   "step_failed",
@@ -244,9 +251,14 @@ const FORK_REPLAY_EVENT_TYPES = new Set([
   "diagram_created",
   "citations_collected",
   "progress_update",
+  "task_impact_updated",
 ]);
 
-const RESUME_PLAN_DEFINITION_EVENT_TYPES = ["plan_created", "plan_updated"] as const;
+const RESUME_PLAN_DEFINITION_EVENT_TYPES = [
+  "plan_created",
+  "plan_updated",
+  "plan_revised",
+] as const;
 const RESUME_PLAN_STATE_EVENT_TYPES = [
   "step_started",
   "step_completed",
@@ -490,6 +502,11 @@ export class AgentDaemon extends EventEmitter {
   private orchestrationGraphEngine: OrchestrationGraphEngine;
   private activeTasks: Map<string, CachedExecutor> = new Map();
   private pendingApprovals: Map<string, PendingApprovalEntry> = new Map();
+  /** One-shot approval decisions carried across executor reconstruction after a restart. */
+  private pendingDurableApprovalGrants: Map<
+    string,
+    Map<string, { approvalId: string; grantedAt: number }>
+  > = new Map();
   /** Per-turn agentConfig overrides used by scheduled/event dispatch. */
   private transientAgentConfigOverrides: Map<string, AgentConfig> = new Map();
   /** One-shot grants consumed by external filesystem operations. */
@@ -524,6 +541,8 @@ export class AgentDaemon extends EventEmitter {
    */
   private pendingContinuationTaskIds: Set<string> = new Set();
   private pendingMemoryConsolidations: Set<string> = new Set();
+  /** Tasks whose terminalization is waiting for an independent verifier. */
+  private pendingCompletionVerifications: Set<string> = new Set();
   /** Git worktree manager for task isolation. */
   private worktreeManager: WorktreeManager;
   /** Comparison service for agent comparison mode. */
@@ -536,6 +555,7 @@ export class AgentDaemon extends EventEmitter {
   private knownPlanStepIdsByTask: Map<string, Set<string>> = new Map();
   private evidenceRefsByTask: Map<string, Map<string, EvidenceRef>> = new Map();
   private mediaPreviewMessagesByTask: Map<string, Set<string>> = new Map();
+  private taskMutationLedger?: TaskMutationLedger;
   private lastKnownLlmProviderByTask: Map<string, string> = new Map();
   private materializedMailComposeFrameSignatures: Set<string> = new Set();
   private materializedMailComposeFrameTasks: Set<string> = new Set();
@@ -579,6 +599,7 @@ export class AgentDaemon extends EventEmitter {
     this.activityRepo = new ActivityRepository(db);
     this.agentRoleRepo = new AgentRoleRepository(db);
     this.mentionRepo = new MentionRepository(db);
+    this.taskMutationLedger = new TaskMutationLedger();
 
     // Initialize queue manager with callbacks
     this.queueManager = new TaskQueueManager({
@@ -1320,6 +1341,11 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
+    // Approval/input Promises live only in memory.  Rehydrate their durable
+    // rows before queue recovery so a restart leaves the task visibly blocked
+    // and response handlers can safely resolve the persisted request.
+    this.reconcileDurableWaitsOnStartup();
+
     // Recover stale retry tasks that were incorrectly persisted as executing.
     // These should re-enter the queue on startup so retries can continue.
     const staleTransientRetryTasks = this.taskRepo
@@ -1438,6 +1464,99 @@ export class AgentDaemon extends EventEmitter {
     }
 
     await this.orchestrationGraphEngine.resumeRunningRuns();
+  }
+
+  private reconcileDurableWaitsOnStartup(): void {
+    const findByStatus = (this.taskRepo as Any).findByStatus as
+      | ((status: TaskStatus | TaskStatus[]) => Task[])
+      | undefined;
+    const candidateTasks =
+      typeof findByStatus === "function"
+        ? findByStatus.call(this.taskRepo, [
+            "completed",
+            "planning",
+            "executing",
+            "interrupted",
+            "paused",
+            "blocked",
+          ])
+        : [];
+    const verificationPendingTasks = (Array.isArray(candidateTasks) ? candidateTasks : []).filter(
+      (task) => task.terminalStatus === "awaiting_verification",
+    );
+    for (const task of verificationPendingTasks) {
+      if (task.status === "failed" || task.status === "cancelled") continue;
+
+      // The verifier runs in a child task and cannot be resumed in-process
+      // after a crash. Re-enter the parent through the normal interrupted-task
+      // recovery path instead of leaving it permanently blocked or claiming a
+      // completion that was never independently verified.
+      this.taskRepo.update(task.id, {
+        status: "interrupted",
+        completedAt: undefined,
+        terminalStatus: undefined,
+        failureClass: undefined,
+        error: "Verification was interrupted by application restart; resuming the task.",
+      });
+      this.logEvent(task.id, "verification_wait_rehydrated", {
+        reason: "daemon_restart",
+      });
+      this.logEvent(task.id, "task_interrupted", {
+        message: "Verification was interrupted by application restart. Task will resume.",
+        reason: "verification_wait_recovered",
+      });
+    }
+
+    const pendingApprovals = this.approvalRepo.findPending(1000);
+    for (const approval of pendingApprovals) {
+      const task = this.taskRepo.findById(approval.taskId);
+      if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) continue;
+
+      const alreadyRehydrated =
+        task.status === "blocked" && task.terminalStatus === "awaiting_approval";
+      if (alreadyRehydrated) continue;
+
+      this.taskRepo.update(approval.taskId, {
+        status: "blocked",
+        completedAt: undefined,
+        terminalStatus: "awaiting_approval",
+        failureClass: undefined,
+        error:
+          task.error || "Awaiting approval. Respond to the pending approval request to resume.",
+      });
+      this.logEvent(approval.taskId, "approval_wait_rehydrated", {
+        approvalId: approval.id,
+        reason: "daemon_restart",
+      });
+    }
+
+    const pendingInputs = this.inputRequestRepo.list({
+      limit: 1000,
+      offset: 0,
+      status: "pending",
+    });
+    for (const request of pendingInputs) {
+      const task = this.taskRepo.findById(request.taskId);
+      if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) continue;
+
+      const alreadyRehydrated =
+        task.status === "paused" && task.terminalStatus === "needs_user_action";
+      if (alreadyRehydrated) continue;
+
+      this.taskRepo.update(request.taskId, {
+        status: "paused",
+        completedAt: undefined,
+        terminalStatus: "needs_user_action",
+        failureClass: undefined,
+        error:
+          task.error ||
+          "Waiting for structured user input. Respond to the pending request to resume.",
+      });
+      this.logEvent(request.taskId, "input_wait_rehydrated", {
+        requestId: request.id,
+        reason: "daemon_restart",
+      });
+    }
   }
 
   /**
@@ -1718,6 +1837,14 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
+    try {
+      await this.taskMutationLedger?.initializeTask(executionTask.id, effectiveWorkspace.path, {
+        isolatedWorktree: Boolean(executionTask.worktreePath),
+      });
+    } catch (error) {
+      console.warn("[AgentDaemon] Failed to initialize task mutation attribution:", error);
+    }
+
     // Create task executor - wrapped in try-catch to handle provider initialization errors
     let executor: TaskExecutor;
     try {
@@ -1833,7 +1960,7 @@ export class AgentDaemon extends EventEmitter {
    * Resume a single interrupted task by reconstructing the executor from saved
    * conversation snapshots and plan events, then continuing execution.
    */
-  private async resumeInterruptedTask(task: Task): Promise<void> {
+  private async resumeInterruptedTask(task: Task, resumeMessage?: string): Promise<void> {
     // Guard against double-resume (e.g. rapid restarts)
     const currentTask = this.taskRepo.findById(task.id);
     if (!currentTask || currentTask.status !== "interrupted") {
@@ -1906,6 +2033,19 @@ export class AgentDaemon extends EventEmitter {
     // Create new executor and restore conversation state
     const executor = new TaskExecutor(effectiveTask, effectiveWorkspace, this);
     executor.rebuildConversationFromEvents(events);
+
+    // A structured input/approval response can arrive after the original
+    // executor disappeared. Queue it before starting the resumed executor so
+    // the first resumed kernel iteration consumes the answer instead of
+    // replaying the same wait and losing the user's decision.
+    const queuedResumeMessage = String(resumeMessage || "").trim();
+    if (queuedResumeMessage) {
+      executor.queueFollowUp(queuedResumeMessage);
+      this.logEvent(effectiveTask.id, "user_message", {
+        message: queuedResumeMessage,
+        durableWaitResponse: true,
+      });
+    }
 
     // Reconstruct the Plan from events with correct step statuses
     if (hasPlan) {
@@ -4731,6 +4871,46 @@ export class AgentDaemon extends EventEmitter {
     return { effect, destination };
   }
 
+  private rememberDurableApprovalGrant(taskId: string, approval: ApprovalRequest): void {
+    const details =
+      approval.details && typeof approval.details === "object"
+        ? (approval.details as Record<string, unknown>)
+        : {};
+    const prompt = details.permissionPrompt as PermissionPromptDetails | undefined;
+    if (!prompt?.scope) return;
+
+    const grants = (this as Any).pendingDurableApprovalGrants as
+      | Map<string, Map<string, { approvalId: string; grantedAt: number }>>
+      | undefined;
+    if (!grants) return;
+    let taskGrants = grants.get(taskId);
+    if (!taskGrants) {
+      taskGrants = new Map();
+      grants.set(taskId, taskGrants);
+    }
+    taskGrants.set(this.buildPermissionTrackingKey(prompt.scope), {
+      approvalId: approval.id,
+      grantedAt: Date.now(),
+    });
+  }
+
+  private consumeDurableApprovalGrant(
+    taskId: string,
+    trackingKey: string,
+  ): { approvalId: string; grantedAt: number } | undefined {
+    const grants = (this as Any).pendingDurableApprovalGrants as
+      | Map<string, Map<string, { approvalId: string; grantedAt: number }>>
+      | undefined;
+    if (!grants) return undefined;
+    const taskGrants = grants.get(taskId);
+    if (!taskGrants) return undefined;
+    const grant = taskGrants.get(trackingKey);
+    if (!grant) return undefined;
+    taskGrants.delete(trackingKey);
+    if (taskGrants.size === 0) grants.delete(taskId);
+    return grant;
+  }
+
   private buildRecurringApprovalInput(
     type: string,
     details: Record<string, unknown>,
@@ -4883,6 +5063,29 @@ export class AgentDaemon extends EventEmitter {
         constraintReason: accessProfile.constraintReason,
       },
     };
+    const consumeDurableApprovalGrant = (this as Any).consumeDurableApprovalGrant as
+      | ((
+          taskId: string,
+          trackingKey: string,
+        ) => { approvalId: string; grantedAt: number } | undefined)
+      | undefined;
+    const durableApprovalGrant =
+      permission.evaluation.decision === "ask" && consumeDurableApprovalGrant
+        ? consumeDurableApprovalGrant.call(this, taskId, permission.trackingKey)
+        : undefined;
+    if (durableApprovalGrant) {
+      permission.runtime?.recordPermissionSuccess(permission.trackingKey);
+      if (type === "external_file_access") {
+        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
+      }
+      this.logEvent(taskId, "approval_granted", {
+        approvalId: durableApprovalGrant.approvalId,
+        autoResolved: true,
+        reason: "durable_restart_allow_once",
+        grantedAt: durableApprovalGrant.grantedAt,
+      });
+      return true;
+    }
     const recurringApprovalService = (this as Any).options?.recurringApprovalService as
       | RecurringApprovalService
       | undefined;
@@ -5253,8 +5456,84 @@ export class AgentDaemon extends EventEmitter {
         return "handled";
       }
 
-      approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
-      return "not_found";
+      // The Promise resolver is process-local, so it is absent after a
+      // restart.  Resolve the durable approval row directly and reconstruct
+      // the executor from its checkpoint/events instead of returning a false
+      // `not_found` response (or silently losing the user's decision).
+      const persistedApproval = this.approvalRepo.findById(approvalId);
+      if (!persistedApproval || persistedApproval.status !== "pending") {
+        approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
+        return "not_found";
+      }
+
+      const normalizedAction: ApprovalResponseAction =
+        action || (approved ? "allow_once" : "deny_once");
+      const didApprove =
+        normalizedAction === "allow_once" ||
+        normalizedAction === "allow_session" ||
+        normalizedAction === "allow_workspace" ||
+        normalizedAction === "allow_profile" ||
+        normalizedAction === "allow_recurring";
+      const persistedTask = this.taskRepo.findById(persistedApproval.taskId);
+      const persistedTaskStatus = persistedTask
+        ? deriveCanonicalTaskStatus(persistedTask)
+        : undefined;
+
+      // Never apply a late approval to an already terminal task.
+      if (!persistedTask || isTerminalTaskStatus(persistedTaskStatus)) {
+        if (attribution) {
+          this.approvalRepo.update(approvalId, "denied", attribution);
+        } else {
+          this.approvalRepo.update(approvalId, "denied");
+        }
+        this.logEvent(persistedApproval.taskId, "approval_denied", {
+          approvalId,
+          action: normalizedAction,
+          reason: "task_terminal_after_restart",
+        });
+        approvalIdempotency.complete(idempotencyKey, { success: true, status: "handled" });
+        return "handled";
+      }
+
+      const persistenceResult = this.persistApprovalActionRule(normalizedAction, persistedApproval);
+      if (didApprove && normalizedAction === "allow_once") {
+        const rememberDurableApprovalGrant = (this as Any).rememberDurableApprovalGrant as
+          | ((taskId: string, approval: ApprovalRequest) => void)
+          | undefined;
+        rememberDurableApprovalGrant?.call(this, persistedApproval.taskId, persistedApproval);
+      }
+      if (attribution) {
+        this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied", attribution);
+      } else {
+        this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
+      }
+      if (didApprove && persistedApproval.type === "external_file_access") {
+        this.grantExternalFileApprovalsFromDetails(
+          persistedApproval.taskId,
+          persistedApproval.details,
+        );
+      }
+
+      this.updateTask(persistedApproval.taskId, {
+        status: didApprove ? "interrupted" : "paused",
+        completedAt: undefined,
+        terminalStatus: didApprove ? undefined : "needs_user_action",
+        failureClass: undefined,
+        error: didApprove ? "Approval granted; resuming task." : "User denied approval",
+      });
+      this.logEvent(persistedApproval.taskId, didApprove ? "approval_granted" : "approval_denied", {
+        approvalId,
+        action: normalizedAction,
+        persistence: persistenceResult,
+        recoveredAfterRestart: true,
+      });
+
+      if (didApprove) {
+        void this.resumeTaskAfterDurableWait(persistedApproval.taskId);
+      }
+
+      approvalIdempotency.complete(idempotencyKey, { success: true, status: "handled" });
+      return "handled";
     } catch (error) {
       approvalIdempotency.fail(idempotencyKey, error);
       throw error;
@@ -5288,6 +5567,65 @@ export class AgentDaemon extends EventEmitter {
     }
 
     return cleared;
+  }
+
+  /**
+   * Resume a task whose in-memory approval/input waiter disappeared during a
+   * daemon restart.  The durable event/checkpoint is the source of truth; a
+   * follow-up message is used only when an executor is still alive (for
+   * example, during a renderer reload) and can consume it directly.
+   */
+  private async resumeTaskAfterDurableWait(
+    taskId: string,
+    responseMessage?: string,
+  ): Promise<void> {
+    const task = this.taskRepo.findById(taskId);
+    if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return;
+
+    if (this.activeTasks.has(taskId)) {
+      if (responseMessage) {
+        await this.sendMessage(taskId, responseMessage).catch((error) => {
+          console.warn(
+            `[AgentDaemon] Failed to deliver durable wait response for ${taskId}:`,
+            error,
+          );
+        });
+      }
+      return;
+    }
+
+    this.taskRepo.update(taskId, {
+      status: "interrupted",
+      completedAt: undefined,
+      terminalStatus: undefined,
+      failureClass: undefined,
+      error: "Resuming after a durable approval/input response.",
+    });
+    this.logEvent(taskId, "task_interrupted", {
+      message: "Resuming after a durable approval/input response.",
+      reason: "durable_wait_resolved",
+    });
+
+    try {
+      await this.resumeInterruptedTask(
+        {
+          ...task,
+          status: "interrupted",
+          completedAt: undefined,
+          terminalStatus: undefined,
+          failureClass: undefined,
+        },
+        responseMessage,
+      );
+    } catch (error: Any) {
+      this.failTask(
+        taskId,
+        `Failed to resume after durable wait response: ${error?.message || error}`,
+      );
+      this.logEvent(taskId, "error", {
+        message: `Failed to resume after durable wait response: ${error?.message || error}`,
+      });
+    }
   }
 
   async respondToInputRequest(
@@ -5390,7 +5728,7 @@ export class AgentDaemon extends EventEmitter {
         // Restart recovery path: executor waiter may not exist after app restart.
         try {
           const compactAnswers = JSON.stringify(response.answers || {}, null, 2);
-          await this.sendMessage(
+          await this.resumeTaskAfterDurableWait(
             request.taskId,
             `Structured input response for request ${response.requestId}:\n${compactAnswers}`,
           );
@@ -5413,6 +5751,69 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Log an event for a task
    */
+  async captureTaskMutationBaseline(taskId: string, candidatePath: string): Promise<void> {
+    const ledger = this.taskMutationLedger;
+    if (!ledger) return;
+    const task = this.taskRepo.findById(taskId);
+    const workspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
+    const workspaceRoot = task?.worktreePath || workspace?.path;
+    if (!workspaceRoot) return;
+    await ledger.captureBaseline(taskId, workspaceRoot, candidatePath, {
+      isolatedWorktree: Boolean(task?.worktreePath),
+    });
+  }
+
+  private recordTaskMutationImpact(
+    taskId: string,
+    event: TaskEvent,
+    effectiveType: string,
+    payload: Record<string, unknown>,
+  ): void {
+    const ledger = this.taskMutationLedger;
+    if (!ledger || effectiveType === "task_impact_updated") return;
+    const isFileMutation =
+      (effectiveType === "file_created" && payload.type !== "directory") ||
+      effectiveType === "file_modified" ||
+      effectiveType === "file_deleted";
+    const isFinal = effectiveType === "task_completed" || effectiveType === "task_cancelled";
+    if (!isFileMutation && !isFinal) return;
+    const task = this.taskRepo.findById(taskId);
+    const workspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
+    const workspaceRoot = task?.worktreePath || workspace?.path;
+    if (!workspaceRoot) return;
+    const candidatePaths = isFileMutation
+      ? payload.action === "rename"
+        ? [payload.from, payload.to].filter((value): value is string => typeof value === "string")
+        : typeof payload.path === "string"
+          ? [payload.path]
+          : []
+      : [];
+    void ledger
+      .recordMutation({
+        taskId,
+        workspaceRoot,
+        candidatePaths,
+        sourceEventId: event.id,
+        final: isFinal,
+      })
+      .then((metrics) => {
+        if (metrics.length === 0) return;
+        this.logEvent(taskId, "task_impact_updated", {
+          metrics,
+          replaceProvenance: "task_mutation_ledger",
+        });
+      })
+      .catch((error) => {
+        console.warn("[AgentDaemon] Task mutation impact update failed:", error);
+      });
+  }
+
+  private recordCanonicalToolImpact(taskId: string, event: TaskEvent, effectiveType: string): void {
+    if (effectiveType !== "tool_result") return;
+    const metrics = extractCanonicalTaskImpactMetrics(event);
+    if (metrics.length > 0) this.logEvent(taskId, "task_impact_updated", { metrics });
+  }
+
   logEvent(taskId: string, type: string, payload: Any): void {
     const timestamp = Date.now();
     const payloadObj: Record<string, unknown> =
@@ -5630,6 +6031,8 @@ export class AgentDaemon extends EventEmitter {
       legacyType,
       legacyPayload,
     });
+    this.recordCanonicalToolImpact(taskId, timelineEvent, legacyType || type);
+    this.recordTaskMutationImpact(taskId, timelineEvent, legacyType || type, legacyPayload);
     const persistTranscriptArtifacts = (this as Any).persistTranscriptArtifacts;
     if (typeof persistTranscriptArtifacts === "function") {
       void persistTranscriptArtifacts.call(this, taskId, timelineEvent, legacyType, legacyPayload);
@@ -9590,10 +9993,12 @@ export class AgentDaemon extends EventEmitter {
     parentSummary?: string,
     verificationEvidenceBundle?: TaskVerificationEvidenceBundle,
     timeoutMs = 120_000,
-  ): Promise<void> {
-    if (parentTask.parentTaskId || (parentTask.agentType ?? "main") !== "main") return;
+  ): Promise<VerificationRuntimeResult | undefined> {
+    if (parentTask.parentTaskId || (parentTask.agentType ?? "main") !== "main") {
+      return undefined;
+    }
     const currentDepth = parentTask.depth ?? 0;
-    if (currentDepth >= 3) return;
+    if (currentDepth >= 3) return undefined;
 
     const verificationRuntime = createVerificationRuntime({
       runReadOnlyChildTaskAndWait: (params) =>
@@ -9608,7 +10013,7 @@ export class AgentDaemon extends EventEmitter {
       verificationEvidenceBundle,
       timeoutMs,
     });
-    if (!result.gated) return;
+    if (!result.gated) return result;
 
     const eventType = result.verdict === "PASS" ? "verification_passed" : "verification_failed";
     this.logEvent(parentTask.id, eventType, {
@@ -9622,17 +10027,7 @@ export class AgentDaemon extends EventEmitter {
       verificationVerdict: result.verdict,
     });
 
-    const taskUpdates: Partial<Task> = {
-      verificationVerdict: result.verdict,
-      verificationReport: result.report,
-    };
-    if (result.verdict === "FAIL" || (result.verdict === "PARTIAL" && result.shouldBlock)) {
-      taskUpdates.terminalStatus = "failed";
-      taskUpdates.failureClass = "required_verification";
-    } else if (result.verdict === "PARTIAL") {
-      taskUpdates.terminalStatus = "partial_success";
-    }
-    this.taskRepo.update(parentTask.id, taskUpdates);
+    return result;
   }
 
   /**
@@ -9773,7 +10168,7 @@ export class AgentDaemon extends EventEmitter {
    * Mark task as completed
    * Note: We keep the executor in memory for follow-up messages (with TTL-based cleanup)
    */
-  completeTask(
+  async completeTask(
     taskId: string,
     resultSummary?: string,
     metadata?: {
@@ -9809,7 +10204,7 @@ export class AgentDaemon extends EventEmitter {
       verificationReport?: string;
       agentConfig?: AgentConfig;
     },
-  ): void {
+  ): Promise<void> {
     const existingTask = this.taskRepo.findById(taskId);
     if (!existingTask) {
       console.warn(`[AgentDaemon] completeTask called for unknown task ${taskId}`);
@@ -10468,7 +10863,108 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
-    const resolvedOutcome = decideTaskOutcome({
+    const shouldGateWithVerification =
+      reviewDecision.runVerificationAgent &&
+      terminalStatus !== "failed" &&
+      terminalStatus !== "needs_user_action" &&
+      terminalStatus !== "awaiting_approval" &&
+      terminalStatus !== "awaiting_verification" &&
+      terminalStatus !== "resume_available" &&
+      !existingTask.parentTaskId &&
+      (existingTask.agentType ?? "main") === "main";
+    let postVerificationResult: VerificationRuntimeResult | undefined;
+    if (shouldGateWithVerification) {
+      const pendingCompletionVerifications = (this as Any).pendingCompletionVerifications as
+        | Set<string>
+        | undefined;
+      if (pendingCompletionVerifications?.has(taskId)) {
+        return;
+      }
+      pendingCompletionVerifications?.add(taskId);
+      // Keep the in-memory projection aligned with the durable marker. This
+      // also lets lightweight callers observe the gate without waiting for a
+      // database round-trip.
+      existingTask.status = "blocked";
+      existingTask.completedAt = undefined;
+      existingTask.terminalStatus = "awaiting_verification";
+      existingTask.failureClass = undefined;
+      this.taskRepo.update(taskId, {
+        status: "blocked",
+        completedAt: undefined,
+        terminalStatus: "awaiting_verification",
+        failureClass: undefined,
+        error: "Awaiting independent verification before completion.",
+        ...(trimmedSummary ? { resultSummary: trimmedSummary } : {}),
+      });
+      this.logEvent(taskId, "task_status", {
+        status: "blocked",
+        terminalStatus: "awaiting_verification",
+        message: "Awaiting independent verification before completion.",
+      });
+      this.logEvent(taskId, "verification_started", {
+        source: "post_completion_review_gate",
+        policy: reviewPolicy,
+        tier: reviewDecision.tier,
+        terminalization: "blocked_until_verification",
+      });
+      try {
+        postVerificationResult = await this.runPostCompletionVerification(
+          existingTask,
+          trimmedSummary,
+          metadata?.verificationEvidenceBundle,
+        );
+        if (postVerificationResult?.gated) {
+          if (
+            postVerificationResult.verdict === "FAIL" ||
+            (postVerificationResult.verdict === "PARTIAL" && postVerificationResult.shouldBlock)
+          ) {
+            terminalStatus = "failed";
+            failureClass = "required_verification";
+          } else if (postVerificationResult.verdict === "PARTIAL") {
+            terminalStatus = "partial_success";
+            failureClass = "required_verification";
+          }
+        }
+      } catch (error: Any) {
+        terminalStatus = "partial_success";
+        failureClass = "required_verification";
+        postVerificationResult = {
+          gated: true,
+          ran: false,
+          status: "missing",
+          verdict: "PARTIAL",
+          report: `Independent verification failed to run: ${error?.message || String(error)}`,
+          shouldBlock: true,
+        };
+        this.logEvent(taskId, "verification_failed", {
+          source: "post_completion_review_gate",
+          message: postVerificationResult.report,
+          verificationVerdict: postVerificationResult.verdict,
+        });
+      } finally {
+        pendingCompletionVerifications?.delete(taskId);
+      }
+    }
+
+    if (shouldGateWithVerification) {
+      const taskAfterVerification = this.taskRepo.findById(taskId);
+      const taskAfterVerificationStatus = taskAfterVerification
+        ? deriveCanonicalTaskStatus(taskAfterVerification)
+        : undefined;
+      // A user cancellation, retry, follow-up, or another terminal path may
+      // race the verifier. Respect whichever durable lifecycle state won the
+      // race instead of overwriting it with a stale completion.
+      if (
+        !taskAfterVerification ||
+        isTerminalTaskStatus(taskAfterVerificationStatus) ||
+        (taskAfterVerification.status !== "blocked" &&
+          taskAfterVerification.terminalStatus !== "awaiting_verification")
+      ) {
+        return;
+      }
+    }
+
+    let resolvedOutcome = decideTaskOutcome({
       requestedStatus: "completed",
       terminalStatus,
       failureClass,
@@ -10478,6 +10974,13 @@ export class AgentDaemon extends EventEmitter {
     });
     terminalStatus = resolvedOutcome.terminalStatus;
     failureClass = resolvedOutcome.failureClass;
+    const effectiveVerificationVerdict = postVerificationResult?.gated
+      ? postVerificationResult.verdict
+      : metadata?.verificationVerdict;
+    const effectiveVerificationReport =
+      postVerificationResult?.gated && postVerificationResult.report
+        ? postVerificationResult.report
+        : metadata?.verificationReport;
 
     const completionTelemetry = {
       ...this.computeTimelineTelemetryFromEvents(this.getTaskEventsForReplay(taskId)),
@@ -10512,12 +11015,12 @@ export class AgentDaemon extends EventEmitter {
       metadata.semanticSummary.trim().length > 0
         ? { semanticSummary: metadata.semanticSummary.trim() }
         : {}),
-      ...(metadata?.verificationVerdict
-        ? { verificationVerdict: metadata.verificationVerdict }
+      ...(effectiveVerificationVerdict
+        ? { verificationVerdict: effectiveVerificationVerdict }
         : {}),
-      ...(typeof metadata?.verificationReport === "string" &&
-      metadata.verificationReport.trim().length > 0
-        ? { verificationReport: metadata.verificationReport.trim() }
+      ...(typeof effectiveVerificationReport === "string" &&
+      effectiveVerificationReport.trim().length > 0
+        ? { verificationReport: effectiveVerificationReport.trim() }
         : {}),
       ...(metadata?.agentConfig ? { agentConfig: metadata.agentConfig } : {}),
     };
@@ -10572,12 +11075,12 @@ export class AgentDaemon extends EventEmitter {
       metadata.semanticSummary.trim().length > 0
         ? { semanticSummary: metadata.semanticSummary.trim() }
         : {}),
-      ...(metadata?.verificationVerdict
-        ? { verificationVerdict: metadata.verificationVerdict }
+      ...(effectiveVerificationVerdict
+        ? { verificationVerdict: effectiveVerificationVerdict }
         : {}),
-      ...(typeof metadata?.verificationReport === "string" &&
-      metadata.verificationReport.trim().length > 0
-        ? { verificationReport: metadata.verificationReport.trim() }
+      ...(typeof effectiveVerificationReport === "string" &&
+      effectiveVerificationReport.trim().length > 0
+        ? { verificationReport: effectiveVerificationReport.trim() }
         : {}),
       ...(metadata?.verificationOutcome
         ? { verificationOutcome: metadata.verificationOutcome }
@@ -10642,21 +11145,6 @@ export class AgentDaemon extends EventEmitter {
         policy: reviewPolicy,
         tier: reviewDecision.tier,
         issues: quality.issues,
-      });
-    }
-
-    if (isCompletedOutcome && reviewDecision.runVerificationAgent) {
-      this.logEvent(taskId, "verification_started", {
-        source: "post_completion_review_gate",
-        policy: reviewPolicy,
-        tier: reviewDecision.tier,
-      });
-      void this.runPostCompletionVerification(
-        existingTask,
-        updates.resultSummary,
-        metadata?.verificationEvidenceBundle,
-      ).catch((error) => {
-        console.warn("[AgentDaemon] Post-completion verification failed to launch:", error);
       });
     }
 
@@ -11275,6 +11763,7 @@ export class AgentDaemon extends EventEmitter {
       }
     });
     this.pendingApprovals.clear();
+    this.pendingDurableApprovalGrants.clear();
     this.pendingInputRequests.forEach((pending, _requestId) => {
       if (!pending.resolved) {
         pending.resolved = true;

@@ -15,6 +15,16 @@ describe("timeline-tool-labels", () => {
     expect(friendlyToolRunningLabel("browser_screenshot")).toBe("Browser take screenshot");
     expect(friendlyToolRunningLabel("browser_snapshot")).toBe("Browser snapshot");
     expect(friendlyToolRunningLabel("skill")).toBe("Reading a skill");
+    expect(friendlyToolRunningLabel("gmail_send_email")).toBe("Sending an email");
+    expect(friendlyToolRunningLabel("google_calendar_create_event")).toBe(
+      "Creating a calendar event",
+    );
+  });
+
+  it("formats common connector outcomes without exposing arguments", () => {
+    expect(friendlyToolLaneCompletedLabel("gmail_send_email", false)).toBe("Sent email");
+    expect(friendlyToolLaneCompletedLabel("slack_send_message", false)).toBe("Sent message");
+    expect(friendlyToolLaneCompletedLabel("hubspot_update_record", false)).toBe("Updated record");
   });
 
   it("formats tool_call titles with context", () => {

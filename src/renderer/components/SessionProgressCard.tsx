@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, FileText, LoaderCircle, RotateCw } from "lucide-react";
+import { FileText, RotateCw } from "lucide-react";
 import type { SessionProgressState, Task } from "../../shared/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
@@ -45,17 +45,15 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
     };
   }, [task?.id, task?.updatedAt, refreshKey]);
 
-  if (!task || !progress) return null;
-
   const canResume =
-    progress.status === "interrupted" ||
-    progress.status === "paused" ||
-    progress.status === "blocked";
-  const canResumeFromCheckpoint = Boolean(progress.resumeFromEventId);
-  const stepLabel =
-    progress.totalSteps > 0
-      ? `${progress.completedSteps}/${progress.totalSteps} steps`
-      : progress.currentStep?.description || "No plan recorded";
+    progress?.status === "interrupted" ||
+    progress?.status === "paused" ||
+    progress?.status === "blocked";
+  const canResumeFromCheckpoint = canResume && Boolean(progress?.resumeFromEventId);
+
+  // The composer status strip owns routine live progress. This card is reserved
+  // for the exceptional state where the user can actually recover a session.
+  if (!task || !progress || !canResume) return null;
 
   const resume = async () => {
     if (!canResume || busy) return;
@@ -92,28 +90,17 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
     }
   };
 
-  const isHealthy = progress.phase === "completed";
   return (
-    <section className={`session-progress-card ${progress.phase}`} aria-label="Session status">
+    <section className={`session-progress-card ${progress.phase}`} aria-label="Session recovery">
       <div className="session-progress-card-header">
         <span className="session-progress-card-label">
-          {isHealthy ? (
-            <CheckCircle2 size={13} aria-hidden="true" />
-          ) : progress.waiting ? (
-            <AlertCircle size={13} aria-hidden="true" />
-          ) : (
-            <LoaderCircle size={13} aria-hidden="true" />
-          )}
-          Session status
+          <RotateCw size={13} aria-hidden="true" />
+          Session recovery
         </span>
         <span className="session-progress-card-status">{statusLabel(progress)}</span>
       </div>
       <div className="session-progress-card-headline markdown-content">
         <MarkdownRenderer>{progress.headline}</MarkdownRenderer>
-      </div>
-      <div className="session-progress-card-meta">
-        <span>{stepLabel}</span>
-        {progress.activeAgentCount > 0 ? <span>{progress.activeAgentCount} active</span> : null}
       </div>
       {progress.waiting ? (
         <div className="session-progress-card-waiting">{progress.waiting.reason}</div>
@@ -129,21 +116,17 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
           {actionError}
         </div>
       ) : null}
-      {canResume || canResumeFromCheckpoint ? (
-        <div className="session-progress-card-actions">
-          {canResume ? (
-            <button type="button" onClick={() => void resume()} disabled={busy}>
-              <RotateCw size={12} aria-hidden="true" />
-              {busy ? "Resuming…" : "Resume"}
-            </button>
-          ) : null}
-          {canResumeFromCheckpoint ? (
-            <button type="button" onClick={() => void resumeFromCheckpoint()} disabled={busy}>
-              Resume from checkpoint
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="session-progress-card-actions">
+        <button type="button" onClick={() => void resume()} disabled={busy}>
+          <RotateCw size={12} aria-hidden="true" />
+          {busy ? "Resuming…" : "Resume"}
+        </button>
+        {canResumeFromCheckpoint ? (
+          <button type="button" onClick={() => void resumeFromCheckpoint()} disabled={busy}>
+            Resume from checkpoint
+          </button>
+        ) : null}
+      </div>
     </section>
   );
 }

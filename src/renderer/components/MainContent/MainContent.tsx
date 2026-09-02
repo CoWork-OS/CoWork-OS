@@ -107,6 +107,7 @@ import { isTaskActivelyWorking } from "../../utils/task-working-state";
 import { shouldShowPersistentNeedsUserActionBanner } from "../../utils/task-completion-ux";
 import {
   filterAdjacentDuplicateTimelineFailures,
+  filterResolvedApprovalNarration,
   filterVerboseTimelineNoise,
   shouldShowTaskEventInStepFeed,
   shouldShowTaskEventInSummaryMode,
@@ -319,7 +320,6 @@ import {
   type SelectedSkillModalState,
   type TranscriptMode,
   type AgentReasoningPanelState,
-  STEP_WINDOW_SIZE,
   VIRTUALIZED_FEED_ROW_THRESHOLD,
   getTaskFeedRowVisiblePerfEventId,
   getDefaultTranscriptMode,
@@ -328,8 +328,7 @@ import {
   deriveAgentReasoningPanelState,
   hasAgentReasoningPanelContent,
   selectVisibleTaskFeedRows,
-  hasInactiveStringSetEntries,
-  pruneStringSetToActiveIds,
+  isCompletionSummaryCoveredByAssistantEvent,
   getCommandOutputSessionsRevision,
   collectInlineRunCommandSessionIds,
   isRedundantTimelineEvidenceEvent,
@@ -342,8 +341,6 @@ import {
   formatSignedScore,
   describeLoopRisk,
   shouldHideApprovalEventInStepFeed,
-  getApprovalPayload,
-  isRunCommandApproval,
   getTimelineEventStepId,
   getParallelGroupOwnerStepId,
   canStepEventOwnParallelChildren,
@@ -435,13 +432,20 @@ import { CanvasPreview } from "../CanvasPreview";
 import { StepFeed } from "../timeline/StepFeed";
 import { ParallelGroupFeed } from "../timeline/ParallelGroupFeed";
 import { ActionBlock, buildActionBlockSummary } from "../timeline/ActionBlock";
+import { TaskStatusStrip } from "../TaskStatusStrip";
 import { buildParallelGroupProjection } from "../timeline/parallel-group-projection";
 import {
   resolveTimelineIndicator,
   shouldShowTimelineBranchStub,
 } from "../timeline/timeline-indicators";
 import { getStepCompletionPreviewPath } from "../../utils/step-document-preview";
-import { resolveDisclosureExpanded } from "../../utils/disclosure-state";
+import {
+  getDisclosureIntent,
+  resolveDisclosureExpanded,
+  type DisclosureIntentState,
+  type DisclosureScope,
+} from "../../utils/disclosure-state";
+import { useTaskDisclosureIntents } from "../../hooks/useTaskDisclosureIntents";
 
 const MAX_COMMAND_OUTPUT_SESSION_CHARS = 50 * 1024;
 const MAX_COMMAND_OUTPUT_SESSIONS = 12;
@@ -1344,7 +1348,16 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const currentStep = props.currentStep as { description: string } | null;
   const eventTitleMarkdownComponents = props.eventTitleMarkdownComponents as any;
   const events = props.events as TaskEvent[];
-  const expandedActionBlocks = props.expandedActionBlocks as Set<string>;
+  const activityGroupsById = props.activityGroupsById as Map<
+    string,
+    SharedTaskEventUiState["activityGroups"][number]
+  >;
+  const disclosureIntents = props.disclosureIntents as DisclosureIntentState;
+  const toggleDisclosureIntent = props.toggleDisclosureIntent as (
+    scope: DisclosureScope,
+    id: string,
+    isCurrent?: boolean,
+  ) => void;
   const handleCanvasClose = props.handleCanvasClose as (sessionId: string) => void;
   const handleMessageFeedback = props.handleMessageFeedback as (...args: any[]) => void;
   const handleStepFeedback = props.handleStepFeedback as (...args: any[]) => void;
@@ -1392,12 +1405,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const setRejectMenuOpenFor = props.setRejectMenuOpenFor as React.Dispatch<
     React.SetStateAction<string | null>
   >;
-  const setExpandedActionBlocks = props.setExpandedActionBlocks as React.Dispatch<
-    React.SetStateAction<Set<string>>
-  >;
-  const setShowAllActionBlocks = props.setShowAllActionBlocks as React.Dispatch<
-    React.SetStateAction<Set<string>>
-  >;
   const setStepFeedbackOpen = props.setStepFeedbackOpen as React.Dispatch<
     React.SetStateAction<boolean>
   >;
@@ -1411,14 +1418,12 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const shouldRenderTimelineEventInStepFeed = props.shouldRenderTimelineEventInStepFeed as (
     event: TaskEvent,
   ) => boolean;
-  const shouldDefaultExpand = props.shouldDefaultExpand as (event: TaskEvent) => boolean;
   const toolCallPairing = props.toolCallPairing as {
     completions: Map<string, TaskEvent>;
     claimedResultIds: Set<string>;
   };
   const hasEventDetails = props.hasEventDetails as (event: TaskEvent) => boolean;
   const isEventExpanded = props.isEventExpanded as (event: TaskEvent) => boolean;
-  const showAllActionBlocks = props.showAllActionBlocks as Set<string>;
   const stepFeedbackOpen = props.stepFeedbackOpen as boolean;
   const stepFeedbackSending = props.stepFeedbackSending as boolean;
   const stepFeedbackText = props.stepFeedbackText as string;
@@ -1426,7 +1431,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const task = props.task as Task;
   const timelineItems = props.timelineItems as Array<any>;
   const timelineRef = props.timelineRef as React.RefObject<HTMLDivElement | null>;
-  const toggledEvents = props.toggledEvents as Set<string>;
   const toggleEventExpanded = props.toggleEventExpanded as (eventId: string) => void;
   const verboseSteps = props.verboseSteps as boolean;
   const voiceEnabled = props.voiceEnabled as boolean;
@@ -1484,8 +1488,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     setExpandedArtifactStacks(new Set());
   }, [task?.id]);
   const getActionBlockRenderState = useCallback(
-    (blockEvents: TaskEvent[], blockEventIndices: number[], blockId: string) => {
-      const isBlockShowAll = showAllActionBlocks.has(blockId);
+    (blockEvents: TaskEvent[], blockEventIndices: number[], _blockId: string) => {
       const renderableRawIndices: number[] = [];
       for (let ri = 0; ri < blockEvents.length; ri += 1) {
         const event = blockEvents[ri] as TaskEvent;
@@ -1505,15 +1508,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       }
 
       const renderableCount = renderableRawIndices.length;
-      const visibleRenderableRawIndices =
-        !isBlockShowAll && renderableCount > STEP_WINDOW_SIZE
-          ? renderableRawIndices.slice(-STEP_WINDOW_SIZE)
-          : renderableRawIndices;
       const renderableEvents = renderableRawIndices.map((ri) => blockEvents[ri] as TaskEvent);
-      const visibleBlockEvents = visibleRenderableRawIndices.map(
-        (ri) => blockEvents[ri] as TaskEvent,
-      );
-      const visibleBlockEventIndices = visibleRenderableRawIndices.map(
+      const visibleBlockEvents = renderableRawIndices.map((ri) => blockEvents[ri] as TaskEvent);
+      const visibleBlockEventIndices = renderableRawIndices.map(
         (ri) => blockEventIndices[ri] as number,
       );
       const commandOutputsForBlock = blockEventIndices.flatMap(
@@ -1525,7 +1522,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         renderableEvents,
         visibleBlockEvents,
         visibleBlockEventIndices,
-        hiddenBlockEventCount: Math.max(0, renderableCount - visibleRenderableRawIndices.length),
+        hiddenBlockEventCount: 0,
         hasBlockCommandOutputs: commandOutputsForBlock.length > 0,
         commandOutputsForBlock,
       };
@@ -1534,7 +1531,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       commandOutputSessionsByInsertIndex,
       parallelGroupsByAnchorEventId,
       shouldRenderTimelineEventInStepFeed,
-      showAllActionBlocks,
       suppressedParallelEventIds,
     ],
   );
@@ -1685,18 +1681,14 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 const isLatestActionBlock = timelineIndex === lastActionBlockTimelineIndex;
                 const isActive = isLatestActionBlock && (isTaskWorking || isReplayMode);
                 const expanded = resolveDisclosureExpanded({
-                  forceExpanded: isActive,
-                  defaultExpanded: isLatestActionBlock,
-                  toggled: expandedActionBlocks.has(item.blockId),
+                  intent: getDisclosureIntent(disclosureIntents, "group", item.blockId),
+                  isCurrent: isActive,
                 });
                 const visibleEventCount = expanded ? actionBlockState.visibleBlockEvents.length : 0;
                 return estimateTaskFeedRowHeight(item, {
                   expanded,
                   visibleEventCount,
-                  hasVisibilityToggle:
-                    expanded &&
-                    (actionBlockState.hiddenBlockEventCount > 0 ||
-                      showAllActionBlocks.has(item.blockId)),
+                  hasVisibilityToggle: false,
                 });
               })()
             : estimateTaskFeedRowHeight(item),
@@ -1719,8 +1711,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     isLoadingTimelineHistory,
     timelineHistoryError,
     timelineItems,
-    showAllActionBlocks,
-    expandedActionBlocks,
+    disclosureIntents,
     shouldRenderTimelineEventInStepFeed,
     suppressedParallelEventIds,
     parallelGroupsByAnchorEventId,
@@ -1837,21 +1828,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       }
     }
   }, [visibleFeedRows]);
-  useEffect(() => {
-    const activeActionBlockIds = new Set(
-      timelineItems
-        .filter((item: Any) => item.kind === "action_block")
-        .map((item: Any) => item.blockId as string),
-    );
-    if (hasInactiveStringSetEntries(expandedActionBlocks, activeActionBlockIds)) {
-      setExpandedActionBlocks(
-        pruneStringSetToActiveIds(expandedActionBlocks, activeActionBlockIds),
-      );
-    }
-    if (hasInactiveStringSetEntries(showAllActionBlocks, activeActionBlockIds)) {
-      setShowAllActionBlocks(pruneStringSetToActiveIds(showAllActionBlocks, activeActionBlockIds));
-    }
-  }, [timelineItems, expandedActionBlocks, showAllActionBlocks]);
   const lastActionBlockTimelineIndex = useMemo(() => {
     for (let i = timelineItems.length - 1; i >= 0; i -= 1) {
       if (timelineItems[i].kind === "action_block") return i;
@@ -1886,19 +1862,18 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               if (item.kind === "action_block") {
                 const visibleEventState = item.events
                   .map((event: TaskEvent) => {
-                    const toggled = toggledEvents.has(event.id) ? 1 : 0;
+                    const disclosure = getDisclosureIntent(disclosureIntents, "activity", event.id);
                     const parallel = parallelGroupsByAnchorEventId.has(event.id) ? 1 : 0;
                     const suppressed = suppressedParallelEventIds.has(event.id) ? 1 : 0;
                     const isLastAssistant = isLastAssistantMessageEvent(event, lastAssistantMessage)
                       ? 1
                       : 0;
-                    return `${event.id}:${getTaskEventPayloadRenderSignature(event)}:${toggled}:${parallel}:${suppressed}:${isLastAssistant}`;
+                    return `${event.id}:${getTaskEventPayloadRenderSignature(event)}:${disclosure}:${parallel}:${suppressed}:${isLastAssistant}`;
                   })
                   .join("|");
                 return [
                   row.revision,
-                  expandedActionBlocks.has(item.blockId) ? 1 : 0,
-                  showAllActionBlocks.has(item.blockId) ? 1 : 0,
+                  getDisclosureIntent(disclosureIntents, "group", item.blockId),
                   timelineIndex === lastActionBlockTimelineIndex ? 1 : 0,
                   isTaskWorking ? 1 : 0,
                   isReplayMode ? 1 : 0,
@@ -1911,7 +1886,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               const effectiveType = getEffectiveTaskEventType(event);
               return [
                 row.revision,
-                toggledEvents.has(event.id) ? 1 : 0,
+                getDisclosureIntent(disclosureIntents, "activity", event.id),
                 rejectMenuOpenFor === event.id ? 1 : 0,
                 messageFeedbackMap.get(event.id) ?? "none",
                 lastAssistantMessage?.id === event.id ? 1 : 0,
@@ -2148,7 +2123,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   renderableEvents,
                   visibleBlockEvents,
                   visibleBlockEventIndices,
-                  hiddenBlockEventCount,
                   hasBlockCommandOutputs,
                   commandOutputsForBlock,
                 } = actionBlockState;
@@ -2163,27 +2137,22 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   return null;
                 }
                 const { summary, iconKind, stepCount, toolCallCount, durationMs, outputTokens } =
-                  buildActionBlockSummary(renderableEvents, events, { isActive });
-                const expanded = resolveDisclosureExpanded({
-                  forceExpanded: isActive,
-                  defaultExpanded: isLatestActionBlock,
-                  toggled: expandedActionBlocks.has(item.blockId),
-                });
-                const onToggle = () => {
-                  setExpandedActionBlocks((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(item.blockId)) next.delete(item.blockId);
-                    else next.add(item.blockId);
-                    return next;
+                  buildActionBlockSummary(renderableEvents, events, {
+                    isActive,
+                    showApprovalNarration: verboseSteps,
                   });
-                };
+                const projectedActivityGroup = activityGroupsById.get(item.blockId);
+                const expanded = resolveDisclosureExpanded({
+                  intent: getDisclosureIntent(disclosureIntents, "group", item.blockId),
+                  isCurrent: isActive,
+                });
+                const onToggle = () => toggleDisclosureIntent("group", item.blockId, isActive);
                 const indicatorPosition = stepFeedTimelineIndexPosition.get(timelineIndex);
                 const showConnectorAbove =
                   typeof indicatorPosition === "number" && indicatorPosition > 0;
                 const showConnectorBelow =
                   typeof indicatorPosition === "number" &&
                   indicatorPosition < stepFeedEventCount - 1;
-                const isBlockShowAll = showAllActionBlocks.has(item.blockId);
                 // Exclude sessions shown inline inside currently visible expanded run_command frames.
                 // Hidden rows must not suppress their command outputs, or terminals disappear from the windowed feed.
                 const inlineRunCommandSessionIds = collectInlineRunCommandSessionIds({
@@ -2207,7 +2176,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                     )
                   : undefined;
                 const lastStepLabel =
-                  isActive && typeof lastStepLabelRaw === "string" ? lastStepLabelRaw : undefined;
+                  projectedActivityGroup?.latestActivityLabel ||
+                  (typeof lastStepLabelRaw === "string" ? lastStepLabelRaw : undefined);
                 const isFinishedActionBlockTask =
                   task.status === "completed" ||
                   task.status === "failed" ||
@@ -2220,7 +2190,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   <Fragment key={item.blockId}>
                     <ActionBlock
                       blockId={item.blockId}
-                      summary={summary}
+                      summary={projectedActivityGroup?.summary || summary}
                       iconKind={iconKind}
                       stepCount={stepCount}
                       toolCallCount={toolCallCount}
@@ -2232,37 +2202,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       showConnectorAbove={showConnectorAbove}
                       showConnectorBelow={showConnectorBelow}
                       lastStepLabel={lastStepLabel}
+                      replay={isReplayMode}
                     >
-                      {hiddenBlockEventCount > 0 && (
-                        <button
-                          type="button"
-                          className="action-block-show-all-btn"
-                          onClick={() =>
-                            setShowAllActionBlocks((prev) => {
-                              const next = new Set(prev);
-                              next.add(item.blockId);
-                              return next;
-                            })
-                          }
-                        >
-                          ↑ Show all ({renderableCount} steps)
-                        </button>
-                      )}
-                      {isBlockShowAll && (
-                        <button
-                          type="button"
-                          className="action-block-show-all-btn action-block-show-less-btn"
-                          onClick={() =>
-                            setShowAllActionBlocks((prev) => {
-                              const next = new Set(prev);
-                              next.delete(item.blockId);
-                              return next;
-                            })
-                          }
-                        >
-                          Show less
-                        </button>
-                      )}
                       {(() => {
                         const nestedParallelEventIds = new Set<string>();
                         return visibleBlockEvents.map((event: TaskEvent, idx: number) => {
@@ -2286,8 +2227,15 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           );
 
                           if (parallelGroup) {
-                            const shouldDefaultExpandGroup =
-                              isLatestActionBlock && idx === visibleBlockEvents.length - 1;
+                            const parallelDisclosureId = `parallel:${parallelGroup.groupId}`;
+                            const parallelExpanded = resolveDisclosureExpanded({
+                              intent: getDisclosureIntent(
+                                disclosureIntents,
+                                "activity",
+                                parallelDisclosureId,
+                              ),
+                              isCurrent: false,
+                            });
                             return (
                               <Fragment key={event.id || `event-${eventIndex}`}>
                                 <ParallelGroupFeed
@@ -2296,7 +2244,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                   formatTime={formatTime}
                                   showConnectorAbove={showChildConnectorAbove}
                                   showConnectorBelow={showChildConnectorBelow}
-                                  defaultExpanded={isActive || shouldDefaultExpandGroup}
+                                  expanded={parallelExpanded}
+                                  onToggle={() =>
+                                    toggleDisclosureIntent("activity", parallelDisclosureId, false)
+                                  }
+                                  replay={isReplayMode}
                                 />
                                 {renderCommandOutputs(perEventCmdSessions)}
                               </Fragment>
@@ -2385,15 +2337,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
 
                           const hasNestedChildren = nestedParallelChildren.length > 0;
                           const isExpandable = hasEventDetails(event) || hasNestedChildren;
-                          const shouldDefaultExpandChild =
-                            isExpandable &&
-                            (hasNestedChildren ||
-                              shouldDefaultExpand(event) ||
-                              (isLatestActionBlock && idx === visibleBlockEvents.length - 1));
                           const isExpanded = resolveDisclosureExpanded({
-                            forceExpanded: isExpandable && isActive,
-                            defaultExpanded: shouldDefaultExpandChild,
-                            toggled: toggledEvents.has(event.id),
+                            intent: getDisclosureIntent(disclosureIntents, "activity", event.id),
+                            isCurrent: false,
                           });
                           const toolCallResultEvent = toolCallPairing.completions.get(event.id);
                           const renderEvent = toolCallResultEvent ?? event;
@@ -2465,6 +2411,15 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                       {hasNestedChildren ? (
                                         <div className="timeline-step-child-groups">
                                           {nestedParallelChildren.map((child) => {
+                                            const parallelDisclosureId = `parallel:${child.group.groupId}`;
+                                            const parallelExpanded = resolveDisclosureExpanded({
+                                              intent: getDisclosureIntent(
+                                                disclosureIntents,
+                                                "activity",
+                                                parallelDisclosureId,
+                                              ),
+                                              isCurrent: false,
+                                            });
                                             const childCmdSessions = (
                                               commandOutputSessionsByInsertIndex.get(
                                                 child.eventIndex,
@@ -2481,6 +2436,15 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                                   group={child.group}
                                                   timeLabel={formatTime(child.group.startedAt)}
                                                   formatTime={formatTime}
+                                                  expanded={parallelExpanded}
+                                                  onToggle={() =>
+                                                    toggleDisclosureIntent(
+                                                      "activity",
+                                                      parallelDisclosureId,
+                                                      false,
+                                                    )
+                                                  }
+                                                  replay={isReplayMode}
                                                 />
                                                 {renderCommandOutputs(childCmdSessions)}
                                               </Fragment>
@@ -2492,6 +2456,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                     </>
                                   ) : undefined
                                 }
+                                replay={isReplayMode}
                               />
                               {renderCommandOutputs(perEventCmdSessions)}
                             </Fragment>
@@ -2932,6 +2897,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 typeof indicatorPosition === "number" && indicatorPosition < stepFeedEventCount - 1;
 
               if (parallelGroup) {
+                const parallelDisclosureId = `parallel:${parallelGroup.groupId}`;
+                const parallelExpanded = resolveDisclosureExpanded({
+                  intent: getDisclosureIntent(disclosureIntents, "activity", parallelDisclosureId),
+                  isCurrent: false,
+                });
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <ParallelGroupFeed
@@ -2940,6 +2910,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       formatTime={formatTime}
                       showConnectorAbove={showConnectorAbove}
                       showConnectorBelow={showConnectorBelow}
+                      expanded={parallelExpanded}
+                      onToggle={() =>
+                        toggleDisclosureIntent("activity", parallelDisclosureId, false)
+                      }
+                      replay={isReplayMode}
                     />
                     {renderCommandOutputs(commandOutputsAfterEvent)}
                   </Fragment>
@@ -2982,6 +2957,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                     expandable={isExpandable}
                     expanded={isExpanded}
                     onToggle={isExpandable ? () => toggleEventExpanded(event.id) : undefined}
+                    replay={isReplayMode}
                     details={
                       isExpanded
                         ? renderEventDetails(event, voiceEnabled, markdownComponents, {
@@ -3071,6 +3047,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     ),
     [
       agentContext,
+      activityGroupsById,
       childEvents,
       childTasks,
       collaborativeRun,
@@ -3079,7 +3056,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       eventTitleMarkdownComponents,
       events,
       expandedArtifactStacks,
-      expandedActionBlocks,
+      disclosureIntents,
+      toggleDisclosureIntent,
       expandArtifactStack,
       handleCanvasClose,
       handleMessageFeedback,
@@ -3108,12 +3086,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       rejectMenuOpenFor,
       rejectMenuRef,
       renderCommandOutputs,
-      setExpandedActionBlocks,
-      setShowAllActionBlocks,
       setStepFeedbackOpen,
       setStepFeedbackText,
       setViewerFilePath,
-      showAllActionBlocks,
       stepFeedbackOpen,
       stepFeedbackSending,
       stepFeedbackText,
@@ -3131,7 +3106,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       showFullTimeline,
       timelineItems,
       timelineRef,
-      toggledEvents,
       toggleEventExpanded,
       visibleFeedRows,
       verboseSteps,
@@ -3154,6 +3128,7 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.timelineHistoryError === next.timelineHistoryError &&
     prev.onLoadMoreTimelineHistory === next.onLoadMoreTimelineHistory &&
     prev.agentContext === next.agentContext &&
+    prev.activityGroupsById === next.activityGroupsById &&
     prev.childEvents === next.childEvents &&
     prev.childTasks === next.childTasks &&
     prev.collaborativeRun === next.collaborativeRun &&
@@ -3161,7 +3136,8 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.currentStep?.description === next.currentStep?.description &&
     prev.eventTitleMarkdownComponents === next.eventTitleMarkdownComponents &&
     prev.events === next.events &&
-    prev.expandedActionBlocks === next.expandedActionBlocks &&
+    prev.disclosureIntents === next.disclosureIntents &&
+    prev.toggleDisclosureIntent === next.toggleDisclosureIntent &&
     prev.isChatTask === next.isChatTask &&
     prev.isTaskWorking === next.isTaskWorking &&
     prev.isReplayMode === next.isReplayMode &&
@@ -3175,7 +3151,6 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.parallelGroupsByAnchorEventId === next.parallelGroupsByAnchorEventId &&
     prev.rejectMenuOpenFor === next.rejectMenuOpenFor &&
     prev.rejectMenuRef === next.rejectMenuRef &&
-    prev.showAllActionBlocks === next.showAllActionBlocks &&
     prev.stepFeedbackOpen === next.stepFeedbackOpen &&
     prev.stepFeedbackSending === next.stepFeedbackSending &&
     prev.stepFeedbackText === next.stepFeedbackText &&
@@ -3190,7 +3165,6 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
       getIntegrationMentionsSignature(next.task?.agentConfig?.integrationMentions) &&
     prev.timelineItems === next.timelineItems &&
     prev.timelineRef === next.timelineRef &&
-    prev.toggledEvents === next.toggledEvents &&
     prev.verboseSteps === next.verboseSteps &&
     prev.voiceEnabled === next.voiceEnabled &&
     prev.wrappingUp === next.wrappingUp &&
@@ -3199,7 +3173,6 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.toolCallPairing?.claimedResultIds === next.toolCallPairing?.claimedResultIds &&
     prev.hasEventDetails === next.hasEventDetails &&
     prev.isEventExpanded === next.isEventExpanded &&
-    prev.shouldDefaultExpand === next.shouldDefaultExpand &&
     prev.shouldRenderTimelineEventInStepFeed === next.shouldRenderTimelineEventInStepFeed &&
     prev.formatTime === next.formatTime &&
     prev.renderCommandOutputs === next.renderCommandOutputs &&
@@ -3425,10 +3398,32 @@ function MainContentComponent({
   useEffect(() => {
     setTranscriptModeOverride(null);
   }, [task?.id]);
+  const isReplayMode = replayControls?.isReplayMode ?? false;
   const effectiveSharedTaskEventUi =
     sharedTaskEventUi?.projectionMode === "live" && transcriptModeOverride === "inspect"
       ? null
       : sharedTaskEventUi;
+  const statusTaskEventUi = useMemo(
+    () =>
+      sharedTaskEventUi ??
+      deriveSharedTaskEventUiState({
+        rawEvents,
+        task,
+        workspace,
+        verboseSteps: false,
+        projectionMode: "inspect",
+        isReplayMode,
+      }),
+    [isReplayMode, rawEvents, sharedTaskEventUi, task, workspace],
+  );
+  const taskStatusStripEnabled = useMemo(
+    () => localStorage.getItem("task-status-strip-enabled") !== "false",
+    [],
+  );
+  const statusActivityGroupsById = useMemo(
+    () => new Map(statusTaskEventUi.activityGroups.map((group) => [group.id, group])),
+    [statusTaskEventUi.activityGroups],
+  );
   const events = useMemo(() => {
     if (effectiveSharedTaskEventUi) {
       return effectiveSharedTaskEventUi.normalizedEvents;
@@ -3817,9 +3812,11 @@ function MainContentComponent({
   // Collaborative team run detection for current task
   const [collaborativeRun, setCollaborativeRun] = useState<AgentTeamRun | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  // Track toggled events by ID for stable state across filtering
-  const [toggledEvents, setToggledEvents] = useState<Set<string>>(new Set());
-  const [expandedActionBlocks, setExpandedActionBlocks] = useState<Set<string>>(new Set());
+  const {
+    state: disclosureIntents,
+    intentFor: disclosureIntentFor,
+    toggle: toggleDisclosureIntent,
+  } = useTaskDisclosureIntents(task?.id);
   const [appVersion, setAppVersion] = useState<string>("");
   const [customSkills, setCustomSkills] = useState<CustomSkill[]>([]);
   const [pluginSlashCommands, setPluginSlashCommands] = useState<PluginSlashCommandAlias[]>([]);
@@ -4283,7 +4280,9 @@ function MainContentComponent({
       const baseEvents = verboseSteps
         ? filterVerboseTimelineNoise(events)
         : filterAdjacentDuplicateTimelineFailures(
-            events.filter((event) => shouldShowTaskEventInSummaryMode(event, task?.status)),
+            filterResolvedApprovalNarration(events).filter((event) =>
+              shouldShowTaskEventInSummaryMode(event, task?.status),
+            ),
           );
       // Command output is rendered separately via CommandOutput component
       const visibleEvents = baseEvents.filter(
@@ -4480,8 +4479,6 @@ function MainContentComponent({
     return null;
   }, [task, events, isTaskWorking]);
 
-  const [showAllActionBlocks, setShowAllActionBlocks] = useState<Set<string>>(new Set());
-
   // Step feedback UI state
   const [stepFeedbackOpen, setStepFeedbackOpen] = useState(false);
   const [stepFeedbackText, setStepFeedbackText] = useState("");
@@ -4550,7 +4547,6 @@ function MainContentComponent({
 
   const isTaskFinished =
     task?.status === "completed" || task?.status === "failed" || task?.status === "cancelled";
-  const isReplayMode = replayControls?.isReplayMode ?? false;
   const defaultTranscriptMode = getDefaultTranscriptMode({
     isTaskWorking,
     isReplayMode,
@@ -4689,6 +4685,7 @@ function MainContentComponent({
           task,
           workspace,
           verboseSteps,
+          isReplayMode,
         }).baseTimelineItems,
     );
   }, [
@@ -4696,6 +4693,7 @@ function MainContentComponent({
     rendererPerfLoggingEnabled,
     effectiveSharedTaskEventUi,
     task,
+    isReplayMode,
     verboseSteps,
     workspace,
   ]);
@@ -5787,20 +5785,25 @@ function MainContentComponent({
       const detailId = event
         ? getTruncatedTaskEventDetailId(event) || event.eventId || event.id
         : null;
-      const wasExpanded = toggledEvents.has(eventId);
-      setToggledEvents((current) => {
-        const next = new Set(current);
-        if (wasExpanded) next.delete(eventId);
-        else next.add(eventId);
-        return next;
+      const wasExpanded = resolveDisclosureExpanded({
+        intent: disclosureIntentFor("activity", eventId),
+        isCurrent: false,
       });
+      toggleDisclosureIntent("activity", eventId, false);
       if (!detailId || !task?.id) return;
       if (wasExpanded) onReleaseTaskEventDetail?.(detailId, task.id);
       else if (getTruncatedTaskEventDetailId(event!)) {
         void onLoadTaskEventDetail?.(detailId, task.id);
       }
     },
-    [events, onLoadTaskEventDetail, onReleaseTaskEventDetail, task?.id, toggledEvents],
+    [
+      disclosureIntentFor,
+      events,
+      onLoadTaskEventDetail,
+      onReleaseTaskEventDetail,
+      task?.id,
+      toggleDisclosureIntent,
+    ],
   );
 
   const isImageFileEvent = useCallback((event: TaskEvent): boolean => {
@@ -5972,90 +5975,16 @@ function MainContentComponent({
     ],
   );
 
-  // Determine if an event should be expanded by default
-  // Important events (plan, assistant responses, errors) should be expanded
-  // Verbose events (tool calls/results) should be collapsed
-  const shouldDefaultExpand = useCallback(
-    (event: TaskEvent): boolean => {
-      const effectiveType = getEffectiveTaskEventType(event);
-      if (isImageFileEvent(event)) return true;
-      if (isHtmlFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-      if (isVideoFileEvent(event)) return true;
-      if (isSpreadsheetFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-      if (isDocumentFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-      if (isPresentationFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-      if (workspace?.path && getStepCompletionPreviewPath(event)) return true;
-      if (effectiveType === "follow_up_completed") return true;
-      if (effectiveType === "task_completed") return hasEventDetails(event);
-      if (shouldHideApprovalEventInStepFeed(event)) return false;
-      if (effectiveType === "artifact_created") {
-        const artifactPath = typeof event.payload?.path === "string" ? event.payload.path : "";
-        const artifactPreviewKind = getInlinePreviewKindForGeneratedFile({
-          path: artifactPath,
-          mimeType: event.payload?.mimeType,
-          type: event.payload?.type,
-        });
-        if (
-          artifactPreviewKind &&
-          END_OF_TASK_ARTIFACT_KINDS.has(artifactPreviewKind) &&
-          !shouldRenderOpenArtifactCardAtEvent({
-            path: artifactPath,
-            event,
-            eventStream: events,
-          })
-        ) {
-          return false;
-        }
-        return true;
-      }
-      if (
-        effectiveType === "diagram_created" ||
-        event.type === "timeline_evidence_attached" ||
-        event.type === "timeline_error"
-      )
-        return true;
-      if (effectiveType === "approval_requested") {
-        return isRunCommandApproval(getApprovalPayload(event));
-      }
-      // Code previews: expand by default unless user opted for collapsed
-      if (codePreviewsExpanded) {
-        if (
-          effectiveType === "file_created" &&
-          (event.payload?.contentPreview || event.payload?.copiedFrom)
-        )
-          return true;
-        if (
-          effectiveType === "file_modified" &&
-          (event.payload?.oldPreview || event.payload?.action === "rename")
-        )
-          return true;
-      }
-      return ["plan_created", "assistant_message", "error", "step_failed"].includes(effectiveType);
-    },
-    [
-      codePreviewsExpanded,
-      hasEventDetails,
-      isHtmlFileEvent,
-      isImageFileEvent,
-      isDocumentFileEvent,
-      isPresentationFileEvent,
-      isSpreadsheetFileEvent,
-      isVideoFileEvent,
-      shouldExposeEndOfTaskArtifactCard,
-      workspace?.path,
-    ],
-  );
-
   // Check if an event is currently expanded using its ID
   // If the event should default expand, clicking toggles it to collapsed (and vice versa)
   const isEventExpanded = useCallback(
     (event: TaskEvent): boolean => {
       return resolveDisclosureExpanded({
-        defaultExpanded: shouldDefaultExpand(event),
-        toggled: toggledEvents.has(event.id),
+        intent: disclosureIntentFor("activity", event.id),
+        isCurrent: false,
       });
     },
-    [shouldDefaultExpand, toggledEvents],
+    [disclosureIntentFor],
   );
 
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -7848,7 +7777,23 @@ function MainContentComponent({
       if (effectiveType === "assistant_message") return true;
       return getCompletionSummaryText(event).length > 0;
     });
-    return assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1] : null;
+    const latest =
+      assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1] : null;
+    if (!latest || getEffectiveTaskEventType(latest) !== "task_completed") return latest;
+
+    const completionIndex = filteredEvents.lastIndexOf(latest);
+    for (let index = completionIndex - 1; index >= 0; index -= 1) {
+      const candidate = filteredEvents[index];
+      if (
+        getEffectiveTaskEventType(candidate) !== "assistant_message" ||
+        candidate.payload?.internal === true
+      ) {
+        continue;
+      }
+      if (isCompletionSummaryCoveredByAssistantEvent(latest, candidate)) return candidate;
+      break;
+    }
+    return latest;
   }, [filteredEvents]);
 
   const {
@@ -9609,6 +9554,7 @@ function MainContentComponent({
   const conversationFlow = (
     <TaskConversationFlow
       agentContext={agentContext}
+      activityGroupsById={statusActivityGroupsById}
       childEvents={childEvents}
       childTasks={childTasks}
       collaborativeRun={collaborativeRun}
@@ -9619,7 +9565,8 @@ function MainContentComponent({
       trimmedPrompt={trimmedPrompt}
       eventTitleMarkdownComponents={eventTitleMarkdownComponents}
       events={events}
-      expandedActionBlocks={expandedActionBlocks}
+      disclosureIntents={disclosureIntents}
+      toggleDisclosureIntent={toggleDisclosureIntent}
       handleCanvasClose={handleCanvasClose}
       handleMessageFeedback={handleMessageFeedback}
       handleStepFeedback={handleStepFeedback}
@@ -9648,18 +9595,14 @@ function MainContentComponent({
       rejectMenuRef={rejectMenuRef}
       renderCommandOutputs={renderCommandOutputs}
       setRejectMenuOpenFor={setRejectMenuOpenFor}
-      setExpandedActionBlocks={setExpandedActionBlocks}
-      setShowAllActionBlocks={setShowAllActionBlocks}
       setStepFeedbackOpen={setStepFeedbackOpen}
       setStepFeedbackText={setStepFeedbackText}
       setViewerFilePath={setViewerFilePath}
       formatTime={formatTime}
       shouldRenderTimelineEventInStepFeed={shouldRenderTimelineEventInStepFeed}
-      shouldDefaultExpand={shouldDefaultExpand}
       toolCallPairing={toolCallPairing}
       hasEventDetails={hasEventDetails}
       isEventExpanded={isEventExpanded}
-      showAllActionBlocks={showAllActionBlocks}
       stepFeedbackOpen={stepFeedbackOpen}
       stepFeedbackSending={stepFeedbackSending}
       stepFeedbackText={stepFeedbackText}
@@ -9667,7 +9610,6 @@ function MainContentComponent({
       task={task}
       timelineItems={timelineItems}
       timelineRef={timelineRef}
-      toggledEvents={toggledEvents}
       toggleEventExpanded={toggleEventExpanded}
       verboseSteps={verboseSteps}
       voiceEnabled={voiceEnabled}
@@ -10099,8 +10041,20 @@ function MainContentComponent({
                 }
               }}
               title="Scroll to bottom"
+              aria-label="Scroll to bottom"
             >
-              ↓
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 3v9" />
+                <path d="M4 8.5 8 12.5l4-4" />
+              </svg>
             </button>
           )}
         {renderAttachmentPanel()}
@@ -10229,7 +10183,9 @@ function MainContentComponent({
                 <strong>
                   {task.terminalStatus === "awaiting_approval"
                     ? "Blocked - needs approval"
-                    : "Blocked - waiting on you"}
+                    : task.terminalStatus === "awaiting_verification"
+                      ? "Verifying before completion"
+                      : "Blocked - waiting on you"}
                 </strong>
                 {latestApprovalEvent?.payload?.approval?.description &&
                   task.terminalStatus === "awaiting_approval" && (
@@ -10275,6 +10231,22 @@ function MainContentComponent({
                 </div>
               </div>
             )}
+          {taskStatusStripEnabled && (
+            <TaskStatusStrip
+              model={statusTaskEventUi.taskStatusStrip}
+              activityGroups={statusTaskEventUi.activityGroups}
+              outcomeMetrics={statusTaskEventUi.outcomeMetrics}
+              replay={isReplayMode}
+              telemetryEnabled={rendererPerfLoggingEnabled}
+              onOpenOutput={(outputPath) => {
+                if (onViewTaskOutputs) {
+                  onViewTaskOutputs(task.id, outputPath);
+                } else if (outputPath) {
+                  setViewerFilePath(outputPath);
+                }
+              }}
+            />
+          )}
           {quotedAssistantMessage && (
             <div className="composer-quoted-assistant">
               <div className="composer-quoted-assistant-copy">

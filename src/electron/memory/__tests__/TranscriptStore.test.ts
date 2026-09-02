@@ -84,6 +84,97 @@ describe("TranscriptStore", () => {
     expect(restored?.structuredSummary?.decisions).toContain("Ship the migration fix");
   });
 
+  it("writes integrity metadata and keeps the previous generation for recovery", async () => {
+    const workspacePath = await createWorkspace();
+
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-generations", {
+      checkpointKind: "periodic",
+      conversationHistory: [{ role: "user", content: "first" }],
+    });
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-generations", {
+      checkpointKind: "periodic",
+      conversationHistory: [{ role: "user", content: "second" }],
+    });
+
+    const checkpointDir = path.join(
+      workspacePath,
+      ".cowork",
+      "memory",
+      "transcripts",
+      "checkpoints",
+    );
+    const current = JSON.parse(
+      await fs.readFile(path.join(checkpointDir, "task-generations.json"), "utf8"),
+    );
+    const previous = JSON.parse(
+      await fs.readFile(path.join(checkpointDir, "task-generations.previous.json"), "utf8"),
+    );
+
+    expect(current.checkpointIntegrity.algorithm).toBe("sha256");
+    expect(current.checkpointIntegrity.generation).toBe(2);
+    expect(previous.conversationHistory).toEqual([{ role: "user", content: "first" }]);
+    expect(previous.checkpointIntegrity.generation).toBe(1);
+  });
+
+  it("falls back to the previous checkpoint when the current generation is corrupt", async () => {
+    const workspacePath = await createWorkspace();
+
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-recovery", {
+      checkpointKind: "snapshot",
+      conversationHistory: [{ role: "user", content: "recover me" }],
+    });
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-recovery", {
+      checkpointKind: "snapshot",
+      conversationHistory: [{ role: "user", content: "newer" }],
+    });
+
+    const checkpointPath = path.join(
+      workspacePath,
+      ".cowork",
+      "memory",
+      "transcripts",
+      "checkpoints",
+      "task-recovery.json",
+    );
+    await fs.writeFile(checkpointPath, '{"truncated":', "utf8");
+
+    const restored = await TranscriptStore.loadCheckpoint(workspacePath, "task-recovery");
+    expect(restored?.conversationHistory).toEqual([{ role: "user", content: "recover me" }]);
+    expect(
+      TranscriptStore.loadCheckpointSync(workspacePath, "task-recovery")?.conversationHistory,
+    ).toEqual([{ role: "user", content: "recover me" }]);
+  });
+
+  it("rejects a checkpoint when both generations fail integrity validation", async () => {
+    const workspacePath = await createWorkspace();
+
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-invalid", {
+      checkpointKind: "snapshot",
+      conversationHistory: [{ role: "user", content: "first" }],
+    });
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-invalid", {
+      checkpointKind: "snapshot",
+      conversationHistory: [{ role: "user", content: "second" }],
+    });
+
+    const checkpointDir = path.join(
+      workspacePath,
+      ".cowork",
+      "memory",
+      "transcripts",
+      "checkpoints",
+    );
+    for (const name of ["task-invalid.json", "task-invalid.previous.json"]) {
+      const filePath = path.join(checkpointDir, name);
+      const parsed = JSON.parse(await fs.readFile(filePath, "utf8"));
+      parsed.conversationHistory = [{ role: "user", content: "tampered" }];
+      await fs.writeFile(filePath, JSON.stringify(parsed), "utf8");
+    }
+
+    expect(await TranscriptStore.loadCheckpoint(workspacePath, "task-invalid")).toBeNull();
+    expect(TranscriptStore.loadCheckpointSync(workspacePath, "task-invalid")).toBeNull();
+  });
+
   it("appends searchable transcript spans", async () => {
     const workspacePath = await createWorkspace();
 

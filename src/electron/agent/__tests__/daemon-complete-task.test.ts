@@ -35,6 +35,7 @@ function createDaemonLike() {
     clearRetryState: vi.fn(),
     activeTasks: new Map(),
     pendingApprovals: new Map(),
+    pendingCompletionVerifications: new Set(),
     activeTimelineStageByTask: new Map(),
     failedPlanStepsByTask: new Map(),
     timelineErrorsByTask: new Map(),
@@ -93,6 +94,105 @@ function createDaemonLike() {
 }
 
 describe("AgentDaemon.completeTask", () => {
+  it("holds terminal persistence until the required verifier returns", async () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.taskRepo.findById.mockReturnValue({
+      id: "task-1",
+      title: "Ship production changes",
+      prompt: "Deploy and verify the production API",
+      status: "executing",
+      workspaceId: "workspace-1",
+      agentType: "main",
+      agentConfig: { reviewPolicy: "strict" },
+    });
+    daemonLike.eventRepo.findByTaskId.mockReturnValue([
+      {
+        id: "mutation-1",
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "tool_call",
+        payload: { tool: "run_command", input: { command: "npm run deploy" } },
+      },
+      {
+        id: "error-1",
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "tool_error",
+        payload: { tool: "run_command" },
+      },
+      {
+        id: "error-2",
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "tool_error",
+        payload: { tool: "run_command" },
+      },
+      {
+        id: "error-3",
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "tool_error",
+        payload: { tool: "run_command" },
+      },
+    ]);
+
+    let resolveVerification: ((result: Any) => void) | undefined;
+    daemonLike.runPostCompletionVerification = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveVerification = resolve;
+        }),
+    );
+    const outputSummary: TaskOutputSummary = {
+      created: ["a", "b", "c", "d", "e", "f"],
+      outputCount: 6,
+    };
+
+    const completion = AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done", {
+      outputSummary,
+    });
+    await Promise.resolve();
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "blocked",
+        terminalStatus: "awaiting_verification",
+      }),
+    );
+    expect(daemonLike.logEvent).not.toHaveBeenCalledWith(
+      "task-1",
+      "task_completed",
+      expect.anything(),
+    );
+
+    resolveVerification?.({
+      gated: true,
+      ran: true,
+      status: "completed",
+      verdict: "PASS",
+      report: "VERDICT: PASS\nAll required checks passed.",
+      shouldBlock: false,
+      childTaskId: "verifier-1",
+    });
+    await completion;
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "completed",
+        terminalStatus: "ok",
+        verificationVerdict: "PASS",
+      }),
+    );
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "task_completed",
+      expect.objectContaining({ verificationVerdict: "PASS" }),
+    );
+    (PersonalityManager.recordTaskCompleted as Any).mockClear();
+  });
+
   it("clears pending approvals before completing the task", () => {
     const daemonLike = createDaemonLike();
     const rejected = vi.fn();

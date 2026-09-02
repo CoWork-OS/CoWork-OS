@@ -1,11 +1,14 @@
 import type {
+  ActivityGroupViewModel,
   PlanStep,
   SessionChecklistItem,
   SessionChecklistState,
   Task,
   TaskEvent,
+  TaskImpactMetric,
   TaskOutputSummary,
   TaskStatus,
+  TaskStatusStripViewModel,
   Workspace,
 } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
@@ -21,6 +24,7 @@ import {
 import { hasAssistantMediaDirective } from "./assistant-media-directives";
 import {
   filterAdjacentDuplicateTimelineFailures,
+  filterResolvedApprovalNarration,
   filterVerboseTimelineNoise,
   isLlmRequestCancelledEvent,
   shouldShowTaskEventInSummaryMode,
@@ -32,6 +36,12 @@ import {
   classifyLiveTaskEvent,
   getLiveTaskEventCoalesceFingerprint,
 } from "./live-task-event-policy";
+import { deriveTaskImpactMetrics } from "./task-impact-metrics";
+import {
+  deriveActivityGroups,
+  deriveRevisionAwarePlanSteps,
+  deriveTaskStatusStrip,
+} from "./task-status-projection";
 
 export type RendererEventVisibility = "live" | "inspect-only" | "debug-only";
 
@@ -104,6 +114,9 @@ export interface SharedTaskEventUiState {
   referencedFiles: string[];
   usedToolNames: Set<string>;
   latestVisibleTaskEvent: TaskEvent | null;
+  activityGroups: ActivityGroupViewModel[];
+  taskStatusStrip: TaskStatusStripViewModel;
+  outcomeMetrics: TaskImpactMetric[];
 }
 
 export interface DeriveSharedTaskEventUiStateParams {
@@ -113,6 +126,7 @@ export interface DeriveSharedTaskEventUiStateParams {
   verboseSteps?: boolean;
   projectionMode?: "live" | "inspect";
   liveWindowSize?: number;
+  isReplayMode?: boolean;
 }
 
 const DEFAULT_LIVE_PROJECTION_WINDOW_SIZE = 160;
@@ -212,6 +226,110 @@ function selectLiveProjectionRawEvents(events: TaskEvent[], liveWindowSize: numb
     }
   }
   return selected;
+}
+
+const TASK_STATUS_HISTORY_TYPES = new Set([
+  "plan_created",
+  "plan_updated",
+  "plan_revised",
+  "step_started",
+  "step_completed",
+  "step_failed",
+  "step_skipped",
+  "task_impact_updated",
+  "citations_collected",
+  "artifact_created",
+  "verification_started",
+  "verification_passed",
+  "verification_failed",
+  "verification_pending_user_action",
+  "agent_spawned",
+  "agent_completed",
+  "agent_failed",
+  "approval_requested",
+  "approval_granted",
+  "approval_denied",
+  "tool_call",
+  "tool_result",
+  "tool_error",
+  "input_request_created",
+  "input_request_resolved",
+  "input_request_dismissed",
+  "user_message",
+  "task_completed",
+  "task_cancelled",
+  "error",
+]);
+
+/**
+ * Preserve compact, state-bearing history outside the bounded live transcript.
+ * Mutation snapshots replace their predecessor; per-outcome canonical metrics
+ * retain unique IDs so they can be summed during replay.
+ */
+function selectTaskStatusProjectionRawEvents(events: TaskEvent[]): TaskEvent[] {
+  const selected: TaskEvent[] = [];
+  const seenMetricIds = new Set<string>();
+  const seenReplacementScopes = new Set<string>();
+  let retainedLatestToolActivity = false;
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const effectiveType = getEffectiveTaskEventType(event);
+    if (!TASK_STATUS_HISTORY_TYPES.has(effectiveType)) continue;
+    if (
+      effectiveType === "tool_call" ||
+      effectiveType === "tool_result" ||
+      effectiveType === "tool_error"
+    ) {
+      if (retainedLatestToolActivity) continue;
+      retainedLatestToolActivity = true;
+      selected.push(event);
+      continue;
+    }
+    if (effectiveType !== "task_impact_updated") {
+      selected.push(event);
+      continue;
+    }
+
+    const payload = asObject(event.payload);
+    const rawMetrics = Array.isArray(payload.metrics)
+      ? payload.metrics
+      : payload.metric
+        ? [payload.metric]
+        : [];
+    const metricObjects = rawMetrics.map(asObject);
+    const implicitMutationSnapshot = metricObjects.some(
+      (metric) => metric.provenance === "task_mutation_ledger",
+    );
+    const replacementScope =
+      typeof payload.replaceProvenance === "string"
+        ? payload.replaceProvenance
+        : implicitMutationSnapshot
+          ? "task_mutation_ledger"
+          : "";
+    if (replacementScope) {
+      if (seenReplacementScopes.has(replacementScope)) continue;
+      seenReplacementScopes.add(replacementScope);
+      selected.push(event);
+      continue;
+    }
+
+    const metricIds = metricObjects
+      .map((metric) =>
+        typeof metric.id === "string"
+          ? metric.id
+          : typeof metric.kind === "string"
+            ? `${metric.provenance || "metric"}:${metric.kind}`
+            : "",
+      )
+      .filter(Boolean);
+    if (metricIds.length === 0 || metricIds.some((id) => !seenMetricIds.has(id))) {
+      selected.push(event);
+    }
+    metricIds.forEach((id) => seenMetricIds.add(id));
+  }
+
+  return selected.reverse();
 }
 
 function filterLiveProjectionEvents(events: TaskEvent[]): TaskEvent[] {
@@ -354,41 +472,6 @@ function getCompletionComparableTexts(event: TaskEvent): Set<string> {
     comparableSummaries
       .map(normalizeCompletionTextForComparison)
       .filter((value) => value.length > 0),
-  );
-}
-
-function derivePlanSteps(events: TaskEvent[]): PlanStep[] {
-  const planEvent = events.find((event) => getEffectiveTaskEventType(event) === "plan_created");
-  const planPayload = asObject(planEvent?.payload);
-  const plan = asObject(planPayload.plan);
-  const rawSteps = Array.isArray(plan.steps) ? plan.steps : [];
-  const steps: PlanStep[] = rawSteps
-    .filter((step): step is PlanStep => !!step && typeof step === "object")
-    .map((step) => ({ ...(step as PlanStep) }));
-
-  for (const event of events) {
-    const effectiveType = getEffectiveTaskEventType(event);
-    const payload = asObject(event.payload);
-    const stepPayload = asObject(payload.step);
-    const stepId = typeof stepPayload.id === "string" ? stepPayload.id : "";
-    if (!stepId) continue;
-    const step = steps.find((candidate) => candidate.id === stepId);
-    if (!step) continue;
-
-    if (effectiveType === "step_started") {
-      step.status = "in_progress";
-    } else if (effectiveType === "step_completed") {
-      step.status = "completed";
-    } else if (effectiveType === "step_failed") {
-      step.status = "failed";
-      if (payload.reason && !step.error) step.error = String(payload.reason);
-    } else if (effectiveType === "step_skipped") {
-      step.status = "skipped";
-    }
-  }
-
-  return steps.filter(
-    (step) => !isVerificationStepDescription(step.description) || step.status === "failed",
   );
 }
 
@@ -836,9 +919,15 @@ export function deriveSharedTaskEventUiState(
         )
       : params.rawEvents;
   const normalizedEvents = normalizeEventsForTimelineUi(rawEvents);
+  const statusProjectionEvents =
+    projectionMode === "live" && rawEvents !== params.rawEvents
+      ? normalizeEventsForTimelineUi(selectTaskStatusProjectionRawEvents(params.rawEvents))
+      : normalizedEvents;
   const candidateEvents = params.verboseSteps
     ? filterVerboseTimelineNoise(normalizedEvents)
-    : filterAdjacentDuplicateTimelineFailures(normalizedEvents);
+    : filterAdjacentDuplicateTimelineFailures(
+        filterResolvedApprovalNarration(normalizedEvents, params.rawEvents),
+      );
 
   const liveEvents: TaskEvent[] = [];
   const inspectOnlyEvents: TaskEvent[] = [];
@@ -881,14 +970,34 @@ export function deriveSharedTaskEventUiState(
   const toolCallPairing = deriveToolCallPairing(dedupedLiveEvents, suppressedParallelEventIds);
   const baseTimelineItems = deriveBaseTimelineItems(dedupedLiveEvents);
   const commandOutputSessions = deriveCommandOutputSessions(normalizedEvents);
-  const planSteps = derivePlanSteps(normalizedEvents);
+  const planSteps = deriveRevisionAwarePlanSteps(statusProjectionEvents);
   const checklistState = deriveChecklistState(normalizedEvents);
-  const outputSummary = deriveOutputSummary(params.task, normalizedEvents);
+  const outputSummary = deriveOutputSummary(params.task, statusProjectionEvents);
   const files = deriveFiles(normalizedEvents, params.workspace, outputSummary);
   const toolUsage = deriveToolUsage(normalizedEvents);
   const referencedFiles = deriveReferencedFiles(normalizedEvents);
   const usedToolNames = deriveUsedToolNames(normalizedEvents);
   const latestVisibleTaskEvent = getLatestVisibleTaskEvent(baseTimelineItems, dedupedLiveEvents);
+  const activityGroups = deriveActivityGroups({
+    timelineItems: baseTimelineItems,
+    fallbackEvents: statusProjectionEvents,
+    planSteps,
+    task: params.task,
+    isReplayMode: params.isReplayMode,
+  });
+  const outcomeMetrics = deriveTaskImpactMetrics({
+    events: statusProjectionEvents,
+    outputSummary,
+    taskStatus: params.task?.status,
+  });
+  const taskStatusStrip = deriveTaskStatusStrip({
+    task: params.task,
+    events: statusProjectionEvents,
+    planSteps,
+    activityGroups,
+    outcomeMetrics,
+    outputSummary,
+  });
 
   return {
     projectionMode,
@@ -912,5 +1021,8 @@ export function deriveSharedTaskEventUiState(
     referencedFiles,
     usedToolNames,
     latestVisibleTaskEvent,
+    activityGroups,
+    taskStatusStrip,
+    outcomeMetrics,
   };
 }

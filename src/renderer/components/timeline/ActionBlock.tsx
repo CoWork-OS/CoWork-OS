@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { TaskEvent } from "../../../shared/types";
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   ChevronDown,
-  ChevronRight,
   CircleCheck,
   Globe2,
   PencilLine,
@@ -14,7 +13,13 @@ import {
   SquareTerminal,
 } from "lucide-react";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
-import { isBrowserToolName } from "../../utils/timeline-tool-labels";
+import {
+  friendlyToolLaneCompletedLabel,
+  friendlyToolRunningLabel,
+  isBrowserToolName,
+} from "../../utils/timeline-tool-labels";
+import { AnimatedDisclosure } from "./AnimatedDisclosure";
+import { VirtualizedActivityList } from "./VirtualizedActivityList";
 
 export type ActionBlockIconKind =
   | "explore"
@@ -47,6 +52,8 @@ export interface ActionBlockSummary {
 export interface BuildActionBlockSummaryOptions {
   /** When true, use in-progress phrasing (e.g. "Exploring files…") instead of past-tense totals */
   isActive?: boolean;
+  /** Keep approval bookkeeping in the header. Compact mode disables this in favor of the action. */
+  showApprovalNarration?: boolean;
 }
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -145,6 +152,7 @@ export function buildActionBlockSummary(
   options?: BuildActionBlockSummaryOptions,
 ): ActionBlockSummary {
   const isActive = options?.isActive === true;
+  const showApprovalNarration = options?.showApprovalNarration !== false;
   const attemptedToolCounts = new Map<string, number>();
   const successfulToolCounts = new Map<string, number>();
   const toolOutcomeSeen = new Set<string>();
@@ -245,6 +253,33 @@ export function buildActionBlockSummary(
       (sum, [tool, count]) => sum + (isBrowserToolName(tool) ? count : 0),
       0,
     );
+  const summarizedToolNames = new Set([
+    "read_file",
+    "read_files",
+    "list_directory",
+    "glob",
+    "grep",
+    "search_files",
+    "context_grep",
+    "write_file",
+    "edit_file",
+    "run_command",
+    "run_skill",
+    "execute_code",
+    "web_fetch",
+    "web_search",
+    "http_request",
+  ]);
+  const latestUnclassifiedTool = [...eventsInRange]
+    .reverse()
+    .map(getToolName)
+    .find(
+      (tool) =>
+        tool &&
+        !summarizedToolNames.has(tool) &&
+        !isBrowserToolName(tool) &&
+        (summaryToolCounts.get(tool) || 0) > 0,
+    );
   let verificationSteps = 0;
   let generativeSteps = 0;
   for (const event of events) {
@@ -288,7 +323,7 @@ export function buildActionBlockSummary(
   }
 
   const iconKind: ActionBlockIconKind =
-    approvedRequests > 0
+    showApprovalNarration && approvedRequests > 0
       ? "approval"
       : writes > 0
         ? "write"
@@ -305,7 +340,7 @@ export function buildActionBlockSummary(
                   : "work";
 
   if (isActive) {
-    if (approvedRequests > 0) {
+    if (showApprovalNarration && approvedRequests > 0) {
       parts.push("Approved requests…");
     }
     if (readFiles > 0 && searches > 0) {
@@ -328,13 +363,16 @@ export function buildActionBlockSummary(
     if (commands > 0) {
       parts.push("Running commands…");
     }
+    if (parts.length === 0 && latestUnclassifiedTool) {
+      parts.push(`${friendlyToolRunningLabel(latestUnclassifiedTool)}…`);
+    }
     if (parts.length === 0 && stepCount > 0) {
       parts.push("Working…");
     } else if (parts.length === 0 && totalTools > 0) {
       parts.push("Working…");
     }
   } else {
-    if (approvedRequests > 0) {
+    if (showApprovalNarration && approvedRequests > 0) {
       parts.push(`Approved ${approvedRequests} request${approvedRequests === 1 ? "" : "s"}`);
     }
     if (createdFiles > 0 && editedFiles > 0) {
@@ -362,6 +400,9 @@ export function buildActionBlockSummary(
       parts.push(
         `${parts.length > 0 ? "ran" : "Ran"} ${commands} command${commands === 1 ? "" : "s"}`,
       );
+    }
+    if (parts.length === 0 && latestUnclassifiedTool) {
+      parts.push(friendlyToolLaneCompletedLabel(latestUnclassifiedTool, false));
     }
     if (stepCount > 0 && parts.length === 0)
       parts.push(`${stepCount} step${stepCount === 1 ? "" : "s"}`);
@@ -446,6 +487,7 @@ interface ActionBlockProps {
   showConnectorBelow?: boolean;
   /** Last step label shown centered in the header when collapsed */
   lastStepLabel?: string;
+  replay?: boolean;
   children: React.ReactNode;
 }
 
@@ -491,34 +533,47 @@ export function ActionBlock({
   showConnectorAbove = false,
   showConnectorBelow = false,
   lastStepLabel,
+  replay = false,
   children,
 }: ActionBlockProps) {
-  const [localExpanded, setLocalExpanded] = useState(expanded);
   const ActivityIcon = ACTION_BLOCK_ICONS[iconKind];
-
-  useEffect(() => {
-    setLocalExpanded(expanded);
-  }, [blockId, expanded]);
-
-  const visibleExpanded = isActive ? true : localExpanded;
+  const headerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const visibleExpanded = expanded;
   const durationLabel = formatDurationMs(durationMs);
-  const workedLabel = isActive
-    ? durationLabel
-      ? `Working for ${durationLabel}`
-      : "Working"
-    : durationLabel
-      ? `Worked for ${durationLabel}`
-      : "Worked";
+  const primaryLabel = isActive ? "Working" : summary;
 
   const handleToggle = useCallback(() => {
-    if (!isActive) {
-      setLocalExpanded((prev) => !prev);
+    if (visibleExpanded) {
+      const activeElement = document.activeElement;
+      if (activeElement && contentRef.current?.contains(activeElement)) {
+        headerRef.current?.focus();
+      }
     }
     onToggle();
-  }, [isActive, onToggle]);
+  }, [onToggle, visibleExpanded]);
+
+  useEffect(() => {
+    const label = labelRef.current;
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!label || replay || reducedMotion || typeof label.animate !== "function") return;
+    const animation = label.animate(
+      [
+        { opacity: 0.35, transform: "translateY(2px)" },
+        { opacity: 1, transform: "translateY(0)" },
+      ],
+      { duration: 110, easing: "cubic-bezier(0.16, 1, 0.3, 1)" },
+    );
+    return () => animation.cancel();
+  }, [lastStepLabel, replay]);
 
   return (
     <div
+      id={`activity-group-${blockId}`}
       className={`action-block timeline-event ${visibleExpanded ? "expanded" : "collapsed"} ${isActive ? "active" : ""}`}
     >
       <div className="event-indicator action-block-indicator">
@@ -532,6 +587,7 @@ export function ActionBlock({
       </div>
       <div className="action-block-body event-content">
         <button
+          ref={headerRef}
           type="button"
           className="action-block-header"
           onClick={handleToggle}
@@ -545,57 +601,35 @@ export function ActionBlock({
           >
             <ActivityIcon size={16} strokeWidth={1.8} aria-hidden="true" />
           </span>
-          <span className="action-block-worked">{workedLabel}</span>
+          <span className="action-block-worked">{primaryLabel}</span>
           <span className="action-block-chevron" aria-hidden="true">
-            {visibleExpanded ? (
-              <ChevronDown size={14} strokeWidth={2.5} />
-            ) : (
-              <ChevronRight size={14} strokeWidth={2.5} />
-            )}
+            <ChevronDown size={14} strokeWidth={2.5} />
           </span>
-          <span className="action-block-summary">{summary}</span>
-          {!visibleExpanded && lastStepLabel && (
-            <span className="action-block-last-step-label" aria-label="Last step">
-              {lastStepLabel}
-            </span>
-          )}
-          <span className="action-block-meta">
-            {stepCount > 0 && (
-              <span className="action-block-count">
-                {stepCount} step{stepCount === 1 ? "" : "s"}
-              </span>
-            )}
-            {toolCallCount > 0 && (
-              <span className="action-block-count">
-                {stepCount > 0 && <span className="action-block-stats-sep"> · </span>}
-                {toolCallCount} tool call{toolCallCount === 1 ? "" : "s"}
-              </span>
-            )}
-            {(durationMs > 0 || outputTokens > 0) && (
-              <span className="action-block-stats">
-                {(stepCount > 0 || toolCallCount > 0) && (durationMs > 0 || outputTokens > 0) && (
-                  <span className="action-block-stats-sep"> · </span>
-                )}
-                {durationMs > 0 && formatDurationMs(durationMs)}
-                {durationMs > 0 && outputTokens > 0 && (
-                  <span className="action-block-stats-sep"> · </span>
-                )}
-                {outputTokens > 0 && (
-                  <span title="Output tokens">↓ {formatTokenCount(outputTokens)} tokens</span>
-                )}
-              </span>
-            )}
+          <span
+            ref={labelRef}
+            className="action-block-last-step-label"
+            aria-label="Latest activity"
+          >
+            {lastStepLabel || summary}
+          </span>
+          <span
+            className="action-block-meta"
+            title={`${stepCount} activities, ${toolCallCount} tool calls, ${formatTokenCount(outputTokens)} output tokens`}
+          >
+            {durationLabel}
           </span>
         </button>
         <span className="action-block-rule" aria-hidden="true" />
-        <div
-          id={`action-block-content-${blockId}`}
-          className="action-block-content"
-          role="region"
-          aria-labelledby={`action-block-toggle-${blockId}`}
-          hidden={!visibleExpanded}
-        >
-          {visibleExpanded && <div className="action-block-events">{children}</div>}
+        <div ref={contentRef}>
+          <AnimatedDisclosure
+            id={`action-block-content-${blockId}`}
+            className="action-block-content"
+            labelledBy={`action-block-toggle-${blockId}`}
+            open={visibleExpanded}
+            replay={replay}
+          >
+            <VirtualizedActivityList replay={replay}>{children}</VirtualizedActivityList>
+          </AnimatedDisclosure>
         </div>
       </div>
     </div>

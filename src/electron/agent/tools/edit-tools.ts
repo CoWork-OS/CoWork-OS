@@ -231,6 +231,7 @@ export class EditTools {
       }
 
       // Write file
+      await this.daemon.captureTaskMutationBaseline?.(this.taskId, fullPath);
       fs.writeFileSync(fullPath, newContent, "utf-8");
 
       this.daemon.logEvent(this.taskId, "tool_result", {

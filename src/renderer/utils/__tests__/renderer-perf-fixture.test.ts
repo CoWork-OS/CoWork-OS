@@ -11,6 +11,9 @@ import {
   taskSurfaceFailureStormTask,
 } from "../../perf-fixtures/task-surface-failure-storm.fixture";
 import { deriveSharedTaskEventUiState } from "../task-event-derived";
+import { deriveActivityGroups } from "../task-status-projection";
+import { disclosureIntentReducer, EMPTY_DISCLOSURE_INTENT_STATE } from "../disclosure-state";
+import type { TaskEvent } from "../../../shared/types";
 import {
   markTaskEventRenderable,
   markTaskEventVisible,
@@ -163,4 +166,62 @@ describe("renderer perf replay fixture", () => {
       `[renderer-perf-fixture] failure_storm_projection=${projectionMs.toFixed(1)}ms raw=${shared.rawEventCount} projected=${shared.normalizedEvents.length} visible=${visible.visibleFeedRows.length}`,
     );
   });
+
+  it.each([1_000, 10_000])(
+    "projects and repeatedly discloses %,d lightweight activities without retaining large output",
+    (eventCount) => {
+      const largeOutput = "sensitive-large-output".repeat(2_000);
+      const events: TaskEvent[] = Array.from({ length: eventCount }, (_, index) => ({
+        id: `activity-${index}`,
+        taskId: "large-task",
+        type: "tool_call",
+        schemaVersion: 2,
+        seq: index + 1,
+        timestamp: index + 1,
+        payload: {
+          tool: index % 2 === 0 ? "read_file" : "web_search",
+          input: { content: largeOutput },
+        },
+      }));
+      const groupSize = 250;
+      const timelineItems = Array.from(
+        { length: Math.ceil(eventCount / groupSize) },
+        (_, groupIndex) => ({
+          kind: "action_block" as const,
+          blockId: `group-${groupIndex}`,
+          timestamp: groupIndex * groupSize + 1,
+          events: events.slice(groupIndex * groupSize, (groupIndex + 1) * groupSize),
+        }),
+      );
+
+      const startedAt = performance.now();
+      const groups = deriveActivityGroups({
+        timelineItems,
+        planSteps: [],
+        isReplayMode: true,
+      });
+      const projectionMs = performance.now() - startedAt;
+
+      let disclosure = EMPTY_DISCLOSURE_INTENT_STATE;
+      for (let index = 0; index < 200; index += 1) {
+        disclosure = disclosureIntentReducer(disclosure, {
+          type: "toggle",
+          scope: index % 2 === 0 ? "group" : "activity",
+          id: `${index % 2 === 0 ? "group" : "activity"}-${index % 20}`,
+          isCurrent: index % 2 === 0,
+        });
+      }
+
+      expect(groups).toHaveLength(timelineItems.length);
+      expect(groups.flatMap((group) => group.activityIds)).toHaveLength(eventCount);
+      expect(JSON.stringify(groups)).not.toContain("sensitive-large-output");
+      expect(Object.keys(disclosure.groups).length).toBeLessThanOrEqual(10);
+      expect(Object.keys(disclosure.activities).length).toBeLessThanOrEqual(10);
+      expect(projectionMs).toBeLessThan(eventCount === 1_000 ? 40 : 250);
+
+      console.info(
+        `[renderer-perf-fixture] activity_projection count=${eventCount} groups=${groups.length} projection=${projectionMs.toFixed(1)}ms`,
+      );
+    },
+  );
 });

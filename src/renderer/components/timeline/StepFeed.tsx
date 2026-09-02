@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useId, useRef, type ReactNode } from "react";
 import type { TimelineIndicatorSpec } from "./timeline-indicators";
+import { AnimatedDisclosure } from "./AnimatedDisclosure";
 
 interface StepFeedProps {
   title: ReactNode;
@@ -14,6 +15,7 @@ interface StepFeedProps {
   expanded: boolean;
   onToggle?: () => void;
   details?: ReactNode;
+  replay?: boolean;
 }
 
 export function StepFeed({
@@ -29,22 +31,21 @@ export function StepFeed({
   expanded,
   onToggle,
   details,
+  replay = false,
 }: StepFeedProps) {
-  const [optimisticExpanded, setOptimisticExpanded] = useState(expanded);
-
-  useEffect(() => {
-    if (expanded) {
-      setOptimisticExpanded(true);
-      return;
-    }
-    setOptimisticExpanded(false);
-  }, [expanded]);
-
-  const visibleExpanded = expanded || optimisticExpanded;
+  const generatedId = useId().replace(/:/g, "");
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const lastDetailsRef = useRef<ReactNode>(details);
+  if (details !== undefined) lastDetailsRef.current = details;
+  const visibleExpanded = expanded;
 
   const handleToggle = useCallback(() => {
-    if (!visibleExpanded) {
-      setOptimisticExpanded(true);
+    if (visibleExpanded) {
+      const activeElement = document.activeElement;
+      if (activeElement && contentRef.current?.contains(activeElement)) {
+        buttonRef.current?.focus();
+      }
     }
     onToggle?.();
   }, [onToggle, visibleExpanded]);
@@ -69,9 +70,19 @@ export function StepFeed({
         {showBranchStub && <span className="event-branch-stub" aria-hidden="true" />}
       </div>
       <div className="event-content">
-        <div
+        <span id={`step-feed-status-${generatedId}`} className="step-feed-sr-only">
+          {indicator.label}
+        </span>
+        <button
+          ref={buttonRef}
+          type="button"
           className={`event-header ${expandable ? "expandable" : ""} ${visibleExpanded ? "expanded" : ""}`}
           onClick={expandable ? handleToggle : undefined}
+          disabled={!expandable}
+          aria-expanded={expandable ? visibleExpanded : undefined}
+          aria-controls={expandable ? `step-feed-details-${generatedId}` : undefined}
+          aria-describedby={`step-feed-status-${generatedId}`}
+          id={`step-feed-toggle-${generatedId}`}
         >
           <div className="event-header-left">
             <div className="event-title" title={titleTooltip}>
@@ -92,8 +103,18 @@ export function StepFeed({
             )}
           </div>
           {!hideTime && <div className="event-time">{timeLabel}</div>}
+        </button>
+        <div ref={contentRef}>
+          <AnimatedDisclosure
+            open={expandable && visibleExpanded}
+            id={`step-feed-details-${generatedId}`}
+            labelledBy={`step-feed-toggle-${generatedId}`}
+            replay={replay}
+            durationMs={190}
+          >
+            {lastDetailsRef.current}
+          </AnimatedDisclosure>
         </div>
-        {visibleExpanded && details}
       </div>
     </div>
   );

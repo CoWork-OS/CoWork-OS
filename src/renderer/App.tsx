@@ -70,6 +70,7 @@ import {
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { getEffectiveTaskEventType } from "./utils/task-event-compat";
 import { isLlmRequestCancelledEvent } from "./utils/task-event-visibility";
+import { markSessionAutoResolvingApproval } from "./utils/approval-event-state";
 import { appendRendererTaskEvents, capTaskEvents } from "./utils/task-event-append";
 import { TaskTimelineCache } from "./utils/task-timeline-cache";
 import {
@@ -3110,10 +3111,13 @@ export function App() {
 
     const unsubscribe = window.electronAPI.onTaskEvent((rawEvent: TaskEvent) => {
       const effectiveType = getEffectiveTaskEventType(rawEvent);
-      const event = {
-        ...rawEvent,
-        type: effectiveType,
-      } as TaskEvent;
+      const event = markSessionAutoResolvingApproval(
+        {
+          ...rawEvent,
+          type: effectiveType,
+        } as TaskEvent,
+        sessionAutoApproveAllRef.current,
+      );
       noteRendererTaskEventReceived(event, rendererPerfLoggingEnabled);
       const sideChatTaskId = sideChatRef.current?.task?.id;
       const sideChatParentTaskId = sideChatRef.current?.parentTaskId;
@@ -3184,13 +3188,21 @@ export function App() {
         typeof rawEvent?.timestamp === "number" && Number.isFinite(rawEvent.timestamp)
           ? rawEvent.timestamp
           : Date.now();
+      const resolvingApprovalId =
+        event.type === "approval_granted" || event.type === "approval_denied"
+          ? extractApprovalId(event)
+          : null;
+      const hasOtherPendingApproval = Boolean(
+        resolvingApprovalId &&
+        Array.from(pendingApprovalsRef.current.keys()).some((id) => id !== resolvingApprovalId),
+      );
       taskLastEventTimestampRef.current.set(event.taskId, eventTimestamp);
       if (isImmediateTaskAttentionEvent(event)) {
         latestAttentionEventByTaskIdRef.current.set(event.taskId, event);
       } else if (
         event.type === "task_resumed" ||
-        event.type === "approval_granted" ||
-        event.type === "approval_denied" ||
+        ((event.type === "approval_granted" || event.type === "approval_denied") &&
+          !hasOtherPendingApproval) ||
         event.type === "input_request_resolved" ||
         event.type === "input_request_dismissed" ||
         event.type === "task_completed" ||
@@ -3252,7 +3264,7 @@ export function App() {
                 ? "resume_available"
                 : undefined;
       const shouldClearTerminalStatus =
-        event.type === "approval_granted" ||
+        (event.type === "approval_granted" && !hasOtherPendingApproval) ||
         event.type === "task_resumed" ||
         event.type === "input_request_resolved";
       const isNewRunStarted =
@@ -3275,7 +3287,7 @@ export function App() {
         (event.payload?.terminalTask === true ||
           isTerminalTaskStatus(tasksRef.current.find((t) => t.id === event.taskId)?.status));
       const nextStatus = newStatus as Task["status"] | undefined;
-      if (newStatus && !skipBlockedStateForAutoApproval) {
+      if (newStatus && !skipBlockedStateForAutoApproval && !hasOtherPendingApproval) {
         const applyTaskStatusUpdate = () =>
           setTasks((prev) =>
             updateTaskPreservingIdentity(prev, event.taskId, (t) => {
@@ -5042,6 +5054,7 @@ export function App() {
         task: rightPanelReplayTask,
         workspace: currentWorkspace,
         verboseSteps: false,
+        isReplayMode: true,
       }),
     );
   }, [

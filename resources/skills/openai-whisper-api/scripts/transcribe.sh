@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: transcribe.sh <audio-file> [--provider openai|atlas] [--model MODEL] [--out FILE] [--language LANG] [--prompt TEXT] [--json]
+Usage: transcribe.sh <audio-file> [--provider openai|atlas|muapi] [--model MODEL] [--out FILE] [--language LANG] [--prompt TEXT] [--json]
 USAGE
 }
 
@@ -90,8 +90,15 @@ case "$PROVIDER" in
       exit 1
     fi
     ;;
+  muapi)
+    MODEL="${MODEL:-openai-whisper}"
+    if [[ "$MODEL" != "openai-whisper" ]]; then
+      echo "Unsupported MuAPI model: $MODEL (expected openai-whisper)." >&2
+      exit 1
+    fi
+    ;;
   *)
-    echo "Unsupported provider: $PROVIDER (expected openai or atlas)." >&2
+    echo "Unsupported provider: $PROVIDER (expected openai, atlas, or muapi)." >&2
     exit 1
     ;;
 esac
@@ -158,7 +165,7 @@ if [[ "$PROVIDER" == "openai" ]]; then
     cat "$tmp_resp" >&2
     exit 1
   fi
-else
+elif [[ "$PROVIDER" == "atlas" ]]; then
   if ! command -v node >/dev/null 2>&1; then
     echo "node is required for Atlas Cloud transcription." >&2
     exit 1
@@ -260,6 +267,146 @@ const data = body.data || body;
 const text = data.stt_result?.text || data.outputs?.[0];
 if (typeof text !== "string" || !text) {
   console.error("Atlas Cloud response did not include transcript text.");
+  process.exit(1);
+}
+fs.writeFileSync(process.argv[3], `${text}\n`);
+NODE
+    cp "$tmp_req" "$tmp_resp"
+  fi
+else
+  if ! command -v node >/dev/null 2>&1; then
+    echo "node is required for MuAPI transcription." >&2
+    exit 1
+  fi
+
+  API_KEY="${MUAPI_API_KEY:-${MU_API_KEY:-}}"
+  if [[ -z "$API_KEY" ]]; then
+    API_KEY="$(read_config_key muapiApiKey)"
+  fi
+  if [[ -z "$API_KEY" ]]; then
+    echo "MUAPI_API_KEY is required (or set skills.openai-whisper-api.muapiApiKey in ~/.CoWork-OSS/CoWork-OSS.json)." >&2
+    exit 1
+  fi
+
+  muapi_base="${MUAPI_BASE_URL:-https://api.muapi.ai/api/v1}"
+  muapi_base="${muapi_base%/}"
+  http_code="$(curl -sS -X POST "${muapi_base}/upload_file" \
+    -H "x-api-key: ${API_KEY}" \
+    -F "file=@${INPUT}" \
+    -o "$tmp_resp" -w '%{http_code}')"
+  if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+    echo "MuAPI file upload failed (HTTP $http_code):" >&2
+    cat "$tmp_resp" >&2
+    exit 1
+  fi
+
+  audio_url="$(node - "$tmp_resp" <<'NODE'
+const fs = require("fs");
+const body = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const value = body.url || body.data?.url;
+if (typeof value !== "string" || !value) {
+  console.error("MuAPI upload response did not include a file URL.");
+  process.exit(1);
+}
+const parsed = new URL(value);
+if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) {
+  console.error("MuAPI upload response included an insecure file URL.");
+  process.exit(1);
+}
+process.stdout.write(value);
+NODE
+)"
+
+  node - "$audio_url" "$LANG" "$PROMPT" "$AS_JSON" "$tmp_req" <<'NODE'
+const fs = require("fs");
+const [audioUrl, language, prompt, asJson, output] = process.argv.slice(2);
+const payload = {
+  audio_url: audioUrl,
+  response_format: asJson === "1" ? "verbose_json" : "json",
+};
+if (language) payload.language = language;
+if (prompt) payload.prompt = prompt;
+fs.writeFileSync(output, JSON.stringify(payload));
+NODE
+
+  http_code="$(curl -sS -X POST "${muapi_base}/openai-whisper" \
+    -H "x-api-key: ${API_KEY}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@${tmp_req}" \
+    -o "$tmp_resp" -w '%{http_code}')"
+  if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+    echo "MuAPI transcription request failed (HTTP $http_code):" >&2
+    cat "$tmp_resp" >&2
+    exit 1
+  fi
+
+  read_muapi_field() {
+    local field="$1"
+    MUAPI_FIELD="$field" node - "$tmp_resp" <<'NODE'
+const fs = require("fs");
+const body = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const data = body.data && typeof body.data === "object" ? body.data : body;
+let value = data[process.env.MUAPI_FIELD];
+if (!value && process.env.MUAPI_FIELD === "request_id") {
+  value = data.id || data.prediction_id || data.task_id;
+}
+process.stdout.write(value == null ? "" : String(value));
+NODE
+  }
+
+  request_id="$(read_muapi_field request_id)"
+  status="$(read_muapi_field status)"
+  if [[ -z "$request_id" ]]; then
+    echo "MuAPI response did not include a prediction ID:" >&2
+    cat "$tmp_resp" >&2
+    exit 1
+  fi
+
+  delay=1
+  for ((attempt=1; attempt<=60; attempt++)); do
+    if [[ "$status" == "completed" || "$status" == "succeeded" || "$status" == "success" ]]; then
+      break
+    fi
+    if [[ "$status" == "failed" || "$status" == "error" || "$status" == "cancelled" || "$status" == "canceled" || "$status" == "timeout" ]]; then
+      echo "MuAPI prediction ${status}:" >&2
+      cat "$tmp_resp" >&2
+      exit 1
+    fi
+    sleep "$delay"
+    http_code="$(curl -sS "${muapi_base}/predictions/${request_id}/result" \
+      -H "x-api-key: ${API_KEY}" \
+      -o "$tmp_resp" -w '%{http_code}')"
+    if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+      status="$(read_muapi_field status)"
+      delay=1
+    elif [[ "$http_code" -eq 429 || "$http_code" -ge 500 ]]; then
+      delay=$((delay < 8 ? delay * 2 : 8))
+    else
+      echo "MuAPI prediction request failed (HTTP $http_code):" >&2
+      cat "$tmp_resp" >&2
+      exit 1
+    fi
+  done
+
+  if [[ "$status" != "completed" && "$status" != "succeeded" && "$status" != "success" ]]; then
+    echo "MuAPI prediction did not complete after 60 checks." >&2
+    exit 1
+  fi
+
+  if [[ "$AS_JSON" -eq 0 ]]; then
+    node - "$tmp_resp" "$tmp_req" <<'NODE'
+const fs = require("fs");
+const body = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const candidates = [
+  body.output?.text,
+  body.data?.output?.text,
+  body.result?.text,
+  body.data?.result?.text,
+  body.text,
+];
+const text = candidates.find((value) => typeof value === "string" && value.length > 0);
+if (!text) {
+  console.error("MuAPI response did not include transcript text.");
   process.exit(1);
 }
 fs.writeFileSync(process.argv[3], `${text}\n`);

@@ -1,6 +1,6 @@
 ---
 name: openai-whisper-api
-description: "Transcribe audio via OpenAI Whisper or Atlas Cloud speech-to-text APIs."
+description: "Transcribe audio via OpenAI Whisper, Atlas Cloud, or MuAPI speech-to-text APIs."
 version: "1.1.0"
 metadata:
   author: CoWork OS Contributors <info@coworkosapp.com>
@@ -10,11 +10,11 @@ metadata:
 
 ## Purpose
 
-Transcribe audio via OpenAI Whisper or Atlas Cloud speech-to-text APIs.
+Transcribe audio via OpenAI Whisper, Atlas Cloud, or MuAPI speech-to-text APIs.
 
 ## Routing
 
-- Use when: Use when the user asks to transcribe audio through OpenAI Whisper or Atlas Cloud speech-to-text.
+- Use when: Use when the user asks to transcribe audio through OpenAI Whisper, Atlas Cloud, or MuAPI speech-to-text.
 - Do not use when: Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.
 - Outputs: Outcome from Openai-whisper-api: task-specific result plus concrete action notes.
 - Success criteria: Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior.
@@ -25,7 +25,7 @@ Transcribe audio via OpenAI Whisper or Atlas Cloud speech-to-text APIs.
 
 - Use the openai-whisper-api skill for this request.
 - Help me with openai-whisper-api.
-- Use when the user asks to transcribe audio through OpenAI Whisper or Atlas Cloud speech-to-text.
+- Use when the user asks to transcribe audio through OpenAI Whisper, Atlas Cloud, or MuAPI speech-to-text.
 - Openai-whisper-api: provide an actionable result.
 
 ### Negative

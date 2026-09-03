@@ -1,6 +1,6 @@
 # Public Adoption Stats
 
-Generated at: 2026-09-02T07:53:13.863Z
+Generated at: 2026-09-03T08:00:52.483Z
 
 These numbers are acquisition and download-intent signals for CoWork OS. They do **not** measure active users, first launch, successful task completion, model configuration, retention, prompts, files, emails, or any in-app content.
 
@@ -14,32 +14,32 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 | GitHub open issues | 9 |
 | Latest release | v0.5.52 |
 | Latest release date | 2026-08-27 |
-| Installer/server downloads, lifetime | 1,592 |
-| Installer/server downloads, since previous snapshot | 5 |
+| Installer/server downloads, lifetime | 1,604 |
+| Installer/server downloads, since previous snapshot | 12 |
 | npm latest version | 0.5.52 |
 | npm downloads, last day | 18 |
 | npm downloads, last week | 598 |
 | npm downloads, last month | 1,439 |
-| npm downloads, all time | 7,837 |
-| GitHub views, last 14-ish days | 1,718 total / 524 unique |
-| GitHub clones, last 14-ish days | 1,602 total / 424 unique |
+| npm downloads, all time | 7,847 |
+| GitHub views, last 14-ish days | 1,706 total / 512 unique |
+| GitHub clones, last 14-ish days | 1,593 total / 412 unique |
 
 ## Release Downloads By Platform
 
 | Platform | Lifetime downloads | Delta |
 |---|---:|---:|
-| macos | 808 | +2 |
+| macos | 811 | +3 |
 | server | 60 | +0 |
-| windows | 724 | +3 |
+| windows | 733 | +9 |
 
 ## Recent Release Assets
 
 | Release | Asset | Platform | Downloads | Delta |
 |---|---|---|---:|---:|
-| v0.5.52 | CoWork-OS-0.5.52-arm64-mac.zip | macos | 4 | +0 |
-| v0.5.52 | CoWork-OS-0.5.52-arm64.dmg | macos | 8 | +2 |
+| v0.5.52 | CoWork-OS-0.5.52-arm64-mac.zip | macos | 5 | +1 |
+| v0.5.52 | CoWork-OS-0.5.52-arm64.dmg | macos | 10 | +2 |
 | v0.5.52 | cowork-os-server-linux-x64-v0.5.52.tar.gz | server | 2 | +0 |
-| v0.5.52 | CoWork-OS-Setup-0.5.52.exe | windows | 39 | +2 |
+| v0.5.52 | CoWork-OS-Setup-0.5.52.exe | windows | 48 | +9 |
 | v0.5.51 | CoWork-OS-0.5.51-arm64-mac.zip | macos | 6 | +0 |
 | v0.5.51 | CoWork-OS-0.5.51-arm64.dmg | macos | 22 | +0 |
 | v0.5.51 | cowork-os-server-linux-x64-v0.5.51.tar.gz | server | 4 | +0 |
@@ -61,31 +61,31 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | github.com | 311 | 117 |
-| 2 | Google | 224 | 149 |
+| 1 | github.com | 294 | 112 |
+| 2 | Google | 218 | 147 |
 | 3 | chatgpt.com | 36 | 25 |
-| 4 | teams.public.onecdn.static.microsoft | 22 | 3 |
-| 5 | Bing | 21 | 16 |
-| 6 | search.brave.com | 11 | 6 |
-| 7 | perplexity.ai | 8 | 4 |
-| 8 | DuckDuckGo | 7 | 5 |
+| 4 | Bing | 20 | 15 |
+| 5 | teams.public.onecdn.static.microsoft | 20 | 1 |
+| 6 | search.brave.com | 12 | 7 |
+| 7 | DuckDuckGo | 8 | 6 |
+| 8 | alternativeto.net | 8 | 4 |
 | 9 | Yahoo | 6 | 2 |
-| 10 | coworkosapp.com | 5 | 3 |
+| 10 | reddit.com | 5 | 5 |
 
 ## Top GitHub Paths
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | /CoWork-OS/CoWork-OS | 361 | 223 |
-| 2 | /cowork-os/cowork-os | 283 | 196 |
-| 3 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-1.webp | 80 | 46 |
-| 4 | /CoWork-OS/CoWork-OS/issues | 55 | 27 |
-| 5 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.51 | 50 | 40 |
-| 6 | /CoWork-OS/CoWork-OS/discussions | 44 | 13 |
-| 7 | /CoWork-OS/CoWork-OS/pulls | 43 | 14 |
-| 8 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.52 | 36 | 25 |
-| 9 | /CoWork-OS/CoWork-OS/releases | 28 | 17 |
-| 10 | /CoWork-OS/CoWork-OS/tree/main | 16 | 12 |
+| 1 | /CoWork-OS/CoWork-OS | 353 | 215 |
+| 2 | /cowork-os/cowork-os | 276 | 192 |
+| 3 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-1.webp | 75 | 44 |
+| 4 | /CoWork-OS/CoWork-OS/issues | 51 | 24 |
+| 5 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.51 | 46 | 37 |
+| 6 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.52 | 41 | 29 |
+| 7 | /CoWork-OS/CoWork-OS/discussions | 40 | 9 |
+| 8 | /CoWork-OS/CoWork-OS/pulls | 38 | 11 |
+| 9 | /CoWork-OS/CoWork-OS/releases | 26 | 16 |
+| 10 | /CoWork-OS/CoWork-OS/tree/main | 17 | 13 |
 
 ## Data Policy
 

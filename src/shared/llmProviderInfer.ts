@@ -5,7 +5,7 @@
 export function inferLlmProvider(modelKey?: string, modelId?: string): string {
   const s = `${modelKey ?? ""} ${modelId ?? ""}`.toLowerCase();
   // Local / Ollama models first (before cloud providers with same base names)
-  if (/ollama|:latest\b|local|offline/.test(s)) return "Local";
+  if (/ollama|\bmlx\b|mlx-community|mlx_lm|:latest\b|local|offline/.test(s)) return "Local";
   if (/anthropic|claude|\bsonnet-\d|\bopus-\d|\bhaiku-\d/.test(s)) return "Anthropic";
   if (/\bopenai\b|gpt-|o1-|o3|o4-|chatgpt|text-davinci/.test(s)) return "OpenAI";
   if (/google|gemini|palm/.test(s)) return "Google";

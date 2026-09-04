@@ -91,6 +91,29 @@ npm run dev
 
 The `cowork-os` launcher's runtime repair detects Git source checkouts (including linked worktrees) and preserves development dependencies. Normal packaged npm installs still omit development-only packages.
 
+## MLX-LM local inference issues
+
+The **MLX (Apple Silicon)** provider requires a native macOS `arm64` process and a working
+`python3` installation of `mlx-lm`. Verify the same interpreter CoWork uses:
+
+```bash
+python3 -m pip install --upgrade mlx-lm
+python3 -c "import mlx_lm; import mlx.core; print('MLX-LM ready')"
+```
+
+If the provider reports that MLX is unavailable, restart CoWork after installing the package and
+confirm the app is not running through Rosetta. If the server remains in **Starting** or
+**Downloading**, inspect the provider's live log while the model files load and check:
+
+```bash
+curl http://localhost:8080/v1/models
+```
+
+Use `http://localhost:8080/v1` as the provider base URL. The MLX and HuggingFace Local AI
+controls share port `8080`, so stop one local runtime before starting the other. The current
+desktop control does not expose a custom MLX port. For dynamic-library errors, tool-call
+compatibility, headless usage, and the full API/lifecycle contract, see [MLX-LM Local Inference](mlx-lm.md).
+
 ## CoWork CLI issues
 
 The `cowork` command has a local mode and an explicit remote mode. Normal local use should not require a Control Plane token.

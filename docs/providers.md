@@ -39,8 +39,10 @@ let organizations use existing routing infrastructure while keeping the CoWork w
 
 ### Local models
 
-Ollama and Hugging Face local routes can keep inference on the machine. Cloud routes send
-prompts and authentication data to the configured provider as required to complete requests.
+Ollama, MLX-LM, and Hugging Face local routes can keep inference on the machine. Cloud routes send
+prompts and authentication data to the configured provider as required to complete requests. See
+the dedicated [MLX-LM Local Inference guide](mlx-lm.md) for Apple Silicon setup, runtime details,
+and troubleshooting.
 
 ## Built-in Model Routes
 
@@ -58,6 +60,7 @@ prompts and authentication data to the configured provider as required to comple
 | Mixture of Agents | Presets composed from already-configured providers | No separate billing; each selected provider bills normally |
 | Ollama (Local) | Install Ollama and pull models | No hosted-model usage charge; compute runs locally |
 | HuggingFace Local AI | Install `hf-agents` and run `llama.cpp` locally | No hosted-model usage charge; compute runs locally |
+| MLX (Apple Silicon) | Install `mlx-lm` and use a quantized MLX model | No hosted-model usage charge; Apple Silicon compute runs locally |
 | Groq | API key in Settings | Free usage available subject to Groq's current limits; pay-per-token beyond free limits |
 | xAI (Grok API) | API key in Settings | Pay-per-token |
 | xAI Grok OAuth | Browser sign-in in Settings | Experimental; provider authorization and plan eligibility apply |
@@ -308,9 +311,35 @@ Then open **Settings > AI & Models > Model Access**, choose **HuggingFace Local 
 
 ### Notes
 
-- Default local endpoint: `http://localhost:8080`
+- Default local endpoint: `http://localhost:8080/v1`
 - API key is optional for local runs
 - Best fit when you want a private local provider but do not want to depend on Ollama
+
+---
+
+## MLX-LM (`mlx`)
+
+Run quantized models natively on Apple Silicon through Apple's open-source MLX framework and
+the MLX-LM OpenAI-compatible local server. The complete setup, API, lifecycle, privacy, and
+troubleshooting contract is documented in [MLX-LM Local Inference](mlx-lm.md).
+
+### Setup
+
+```bash
+python3 -m pip install --upgrade mlx-lm
+```
+
+Then open **Settings > AI & Models > Model Access**, choose **MLX (Apple Silicon)**, select a
+model, and start the **MLX Server**. CoWork connects to `http://localhost:8080/v1`.
+
+Recommended starting models:
+
+- `mlx-community/Qwen3-8B-4bit` for a smaller, faster local model
+- `mlx-community/Qwen3-14B-4bit` for a balanced model
+- `mlx-community/Qwen3.6-35B-A3B-4bit-DWQ` for larger Apple Silicon systems
+
+The MLX server downloads models from Hugging Face on first use and keeps inference local. It is
+intended for local development, not as a production-exposed service.
 
 ---
 

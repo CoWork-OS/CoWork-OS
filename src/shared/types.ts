@@ -733,6 +733,7 @@ export type CommandTerminationReason =
 
 export type EventType =
   | "task_created"
+  | "task_title_updated"
   | "task_completed"
   | "plan_created"
   | "plan_revised"
@@ -890,6 +891,7 @@ export type EventType =
   | "workflow_phase_completed" // Pipeline phase completed
   | "workflow_phase_failed" // Pipeline phase failed
   | "pipeline_completed" // Full workflow pipeline completed
+  | "pipeline_failed" // Full workflow pipeline failed
   | "step_intent_scored" // Heuristic alignment of plan steps vs task intent
   // Document generation events
   | "artifact_created" // Document/file artifact generated
@@ -2278,6 +2280,8 @@ export interface AgentConfig {
    * - hybrid: infer per-turn using prompt intent
    */
   conversationMode?: ConversationMode;
+  /** Dedicated bot conversation surface: persistent identity, message-only transcript. */
+  botConversation?: boolean;
   /**
    * Execution mode gate:
    * - execute: tools may mutate state (default)
@@ -3199,6 +3203,8 @@ export interface QuotedAssistantMessage {
 /** Follow-up payload sent to an existing task. */
 export interface TaskFollowUpInput {
   message: string;
+  /** Optional optimistic-concurrency guard for steering the active turn. */
+  expectedTurnId?: string;
   images?: ImageAttachment[];
   quotedAssistantMessage?: QuotedAssistantMessage;
   permissionMode?: PermissionMode;
@@ -3229,6 +3235,446 @@ export interface TaskEvent {
   actor?: TimelineEventActor;
   legacyType?: EventType;
   inlineFrames?: ChatInlineFrame[];
+}
+
+/**
+ * Canonical, provider-neutral work-session protocol.
+ *
+ * Task/TaskEvent remain the compatibility projection used by the current
+ * renderer and integrations.  These records are the durable aggregate that
+ * lets a session be replayed without depending on a provider-specific event
+ * shape or in-memory executor state.
+ */
+export type WorkSessionProtocolVersion = 1;
+
+export type WorkSessionStatus =
+  | "pending"
+  | "executing"
+  | "waiting"
+  | "paused"
+  | "completed"
+  | "partial_success"
+  | "failed"
+  | "cancelled";
+
+export type WorkSessionTurnStatus =
+  | "pending"
+  | "executing"
+  | "waiting"
+  | "completed"
+  | "partial_success"
+  | "failed"
+  | "cancelled";
+
+export type WorkSessionActor =
+  | "system"
+  | "user"
+  | "agent"
+  | "tool"
+  | "subagent"
+  | "automation"
+  | "controller";
+
+export type WorkSessionItemKind =
+  | "session"
+  | "turn"
+  | "message"
+  | "reasoning"
+  | "tool_call"
+  | "tool_result"
+  | "approval"
+  | "input_request"
+  | "wait"
+  | "compaction"
+  | "artifact"
+  | "evidence"
+  | "status"
+  | "error"
+  | "legacy_event";
+
+export type WorkSessionRedactionClass = "none" | "standard" | "sensitive" | "secret_redacted";
+
+export interface WorkSession {
+  id: string;
+  taskId?: string;
+  workspaceId: string;
+  protocolVersion: WorkSessionProtocolVersion;
+  status: WorkSessionStatus;
+  currentTurnId?: string;
+  lastSequence: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkSessionTurn {
+  id: string;
+  sessionId: string;
+  taskId?: string;
+  ordinal: number;
+  status: WorkSessionTurnStatus;
+  actor: WorkSessionActor | string;
+  idempotencyKey?: string;
+  startedAt: number;
+  completedAt?: number;
+  terminalReason?: string;
+}
+
+export interface WorkSessionItem {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  sequence: number;
+  kind: WorkSessionItemKind;
+  actor: WorkSessionActor | string;
+  payload: Record<string, unknown>;
+  causalParentItemId?: string;
+  idempotencyKey?: string;
+  sourceEventId?: string;
+  policySnapshot?: Record<string, unknown>;
+  redactionClass: WorkSessionRedactionClass;
+  status?: WorkSessionTurnStatus;
+  createdAt: number;
+}
+
+export interface WorkSessionAggregate {
+  session: WorkSession;
+  turns: WorkSessionTurn[];
+  items: WorkSessionItem[];
+  checksum: string;
+}
+
+export interface WorkSessionCreateInput {
+  id?: string;
+  taskId?: string;
+  workspaceId: string;
+  status?: WorkSessionStatus;
+  source?: string;
+  actor?: WorkSessionActor | string;
+  idempotencyKey?: string;
+  createInitialTurn?: boolean;
+}
+
+export interface WorkSessionTurnCreateInput {
+  sessionId: string;
+  taskId?: string;
+  actor?: WorkSessionActor | string;
+  idempotencyKey?: string;
+  expectedTurnId?: string;
+  status?: WorkSessionTurnStatus;
+}
+
+export interface WorkSessionItemAppendInput {
+  sessionId: string;
+  turnId: string;
+  kind: WorkSessionItemKind;
+  actor?: WorkSessionActor | string;
+  payload?: Record<string, unknown>;
+  causalParentItemId?: string;
+  idempotencyKey?: string;
+  sourceEventId?: string;
+  policySnapshot?: Record<string, unknown>;
+  redactionClass?: WorkSessionRedactionClass;
+  status?: WorkSessionTurnStatus;
+}
+
+export interface WorkSessionSteeringInput {
+  sessionId: string;
+  message: string;
+  expectedTurnId: string;
+  actor?: WorkSessionActor | string;
+  idempotencyKey?: string;
+}
+
+export interface WorkSessionReplayProjection {
+  sessionId: string;
+  currentTurnId?: string;
+  status: WorkSessionStatus;
+  lastSequence: number;
+  turnStatuses: Record<string, WorkSessionTurnStatus>;
+  itemCount: number;
+  checksum: string;
+}
+
+/**
+ * Phase 5 projection state.  A cursor is persisted separately from the
+ * user-facing timeline so projections can consume only the suffix that was
+ * appended since their last successful reduction.
+ */
+export interface WorkSessionProjectionCursor<State = Record<string, unknown>> {
+  sessionId: string;
+  projectionName: string;
+  lastSequence: number;
+  state: State;
+  checksum: string;
+  processedItems: number;
+  lastComparedAt?: number;
+  fullRebuildChecksum?: string;
+  lastComparisonMatched?: boolean;
+  updatedAt: number;
+}
+
+export interface WorkSessionProjectionUpdate<State = Record<string, unknown>> {
+  cursor: WorkSessionProjectionCursor<State>;
+  processed: number;
+  deltaItems: number;
+  comparisonPerformed: boolean;
+  fullRebuildChecksum?: string;
+  matches?: boolean;
+}
+
+export type WorkSessionActivityLeaseKind = "llm" | "tool" | "retry" | "wait" | "join" | "reconnect";
+export type WorkSessionActivityLeaseStatus = "active" | "released" | "expired";
+
+/** Provider-neutral liveness lease for work that can cross retries/providers. */
+export interface WorkSessionActivityLease {
+  id: string;
+  sessionId: string;
+  turnId?: string;
+  kind: WorkSessionActivityLeaseKind;
+  operationKey: string;
+  status: WorkSessionActivityLeaseStatus;
+  acquiredAt: number;
+  heartbeatAt: number;
+  expiresAt: number;
+  releasedAt?: number;
+  /** Present only to the caller that acquired the lease; never persisted raw. */
+  token?: string;
+}
+
+export interface WorkSessionOperationalMetric {
+  id: string;
+  sessionId?: string;
+  workspaceId?: string;
+  name: string;
+  value: number;
+  unit?: string;
+  dimensions: Record<string, string>;
+  idempotencyKey?: string;
+  recordedAt: number;
+}
+
+export type WorkSessionReplayFixtureKind =
+  | "crash"
+  | "compaction"
+  | "approval"
+  | "credential"
+  | "policy_revocation"
+  | "child_session";
+
+export interface WorkSessionReplayFixture {
+  id: string;
+  kind: WorkSessionReplayFixtureKind;
+  items: WorkSessionItem[];
+  expected: {
+    status: WorkSessionStatus;
+    pendingWaits: number;
+    findings: 0;
+  };
+}
+
+export interface WorkSessionReplayEvaluationResult {
+  fixtureId?: string;
+  isolated: true;
+  incrementalChecksum: string;
+  fullRebuildChecksum: string;
+  projectionsMatch: boolean;
+  itemCount: number;
+  replayStatus?: WorkSessionStatus;
+  pendingWaitCount?: number;
+  findings: string[];
+  passed: boolean;
+}
+
+export type WorkSessionReadMode = "legacy" | "vnext";
+
+export interface WorkSessionRolloutConfig {
+  enabled: boolean;
+  cohortPercent: number;
+  salt: string;
+  legacyReadRollback: boolean;
+  operatorConfigured?: boolean;
+  updatedAt: number;
+}
+
+/**
+ * Durable contracts and evidence records layered on top of the canonical
+ * WorkSession stream.  These records are deliberately provider-neutral so a
+ * task can be resumed or reviewed without replaying an in-memory executor.
+ */
+export type OutcomeContractStatus = "pending" | "satisfied" | "partial" | "unmet" | "waived";
+
+export type OutcomeContractRequirementKind = "objective" | "output" | "verification" | "criterion";
+export type OutcomeContractRequirementStatus = "pending" | "satisfied" | "failed" | "waived";
+
+export interface OutcomeContractRequirement {
+  id: string;
+  kind: OutcomeContractRequirementKind;
+  description: string;
+  required: boolean;
+  status: OutcomeContractRequirementStatus;
+  verifier?: string;
+  evidenceIds?: string[];
+}
+
+export interface OutcomeContract {
+  id: string;
+  sessionId: string;
+  taskId?: string;
+  version: number;
+  objective: string;
+  requirements: OutcomeContractRequirement[];
+  status: OutcomeContractStatus;
+  source?: string;
+  summary?: string;
+  createdAt: number;
+  updatedAt: number;
+  satisfiedAt?: number;
+}
+
+export type ConstraintLedgerEntryKind =
+  | "constraint"
+  | "decision"
+  | "assumption"
+  | "requirement"
+  | "waiver";
+export type ConstraintLedgerEntryStatus = "active" | "satisfied" | "violated" | "superseded";
+
+export interface ConstraintLedgerEntry {
+  id: string;
+  sessionId: string;
+  turnId?: string;
+  kind: ConstraintLedgerEntryKind;
+  key: string;
+  statement: string;
+  status: ConstraintLedgerEntryStatus;
+  sourceItemId?: string;
+  owner?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A read-friendly wrapper for the append-only constraint records. */
+export interface ConstraintLedger {
+  sessionId: string;
+  entries: ConstraintLedgerEntry[];
+  checksum: string;
+}
+
+export type EvidenceManifestSourceType =
+  | EvidenceRef["sourceType"]
+  | "artifact_revision"
+  | "task_event"
+  | "child_session";
+export type EvidenceManifestEntryStatus = "supporting" | "contradicting" | "neutral" | "stale";
+
+export interface EvidenceManifestEntry {
+  id: string;
+  sessionId: string;
+  contractId?: string;
+  claim: string;
+  sourceType: EvidenceManifestSourceType;
+  sourceRef: string;
+  snippet?: string;
+  capturedAt: number;
+  freshnessExpiresAt?: number;
+  confidence: number;
+  status: EvidenceManifestEntryStatus;
+  contradictionGroup?: string;
+  itemId?: string;
+  artifactRevisionId?: string;
+  createdAt: number;
+}
+
+export interface EvidenceManifest {
+  sessionId: string;
+  entries: EvidenceManifestEntry[];
+  checksum: string;
+}
+
+export type ArtifactRevisionStatus = "draft" | "committed" | "superseded" | "retracted";
+
+export interface ArtifactRevision {
+  id: string;
+  sessionId: string;
+  taskId: string;
+  artifactId?: string;
+  revision: number;
+  path: string;
+  mimeType: string;
+  sha256: string;
+  size: number;
+  parentRevisionId?: string;
+  status: ArtifactRevisionStatus;
+  createdBy: WorkSessionActor | string;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+}
+
+export type WaitStateKind = "approval" | "input" | "reconnect" | "paused" | "child" | "external";
+export type WaitStateStatus = "pending" | "resolved" | "expired" | "cancelled";
+
+export interface WaitState {
+  id: string;
+  sessionId: string;
+  taskId: string;
+  turnId?: string;
+  kind: WaitStateKind;
+  requestId?: string;
+  reason: string;
+  status: WaitStateStatus;
+  resumeToken?: string;
+  payload?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+  resolvedAt?: number;
+  expiresAt?: number;
+}
+
+export type WorkSessionChildStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "cancelled";
+export type WorkSessionChildOutcome = "complete" | "partial" | "failed";
+
+export interface WorkSessionChildLink {
+  id: string;
+  parentSessionId: string;
+  childSessionId: string;
+  parentTaskId: string;
+  childTaskId: string;
+  owner?: string;
+  isolationKey: string;
+  inheritedPolicySnapshot?: Record<string, unknown>;
+  status: WorkSessionChildStatus;
+  outcome?: WorkSessionChildOutcome;
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+}
+
+export interface WorkSessionChildAggregate {
+  parentSessionId: string;
+  childCount: number;
+  pendingCount: number;
+  runningCount: number;
+  completedCount: number;
+  partialCount: number;
+  failedCount: number;
+  outcome?: WorkSessionChildOutcome;
+}
+
+export interface WorkSessionContractAggregate {
+  contract?: OutcomeContract;
+  constraints: ConstraintLedgerEntry[];
+  evidence: EvidenceManifestEntry[];
+  artifactRevisions: ArtifactRevision[];
+  waitStates: WaitState[];
+  children: WorkSessionChildLink[];
+  checksum: string;
 }
 
 export type SessionProgressWaitingKind = "approval" | "input" | "reconnect" | "paused" | "blocked";
@@ -5947,6 +6393,8 @@ export interface ManagedSessionCreateInput {
 export interface ManagedSessionUserMessageRequest {
   sessionId: string;
   content: ManagedSessionInputContent[];
+  /** Optimistic-concurrency guard for steering the backing work-session turn. */
+  expectedTurnId?: string;
 }
 
 export type ManagedSessionEventType =
@@ -7979,6 +8427,12 @@ export const IPC_CHANNELS = {
   TASK_TIMELINE_PAGE: "task:timelinePage",
   TASK_EVENT_DETAIL: "task:eventDetail",
   SESSION_PROGRESS_GET: "session:progressGet",
+  WORK_SESSION_ROLLOUT_GET: "workSession:rolloutGet",
+  WORK_SESSION_ROLLOUT_UPDATE: "workSession:rolloutUpdate",
+  WORK_SESSION_METRICS_LIST: "workSession:metricsList",
+  WORK_SESSION_LEASES_LIST: "workSession:leasesList",
+  WORK_SESSION_PROJECTION_GET: "workSession:projectionGet",
+  WORK_SESSION_REPLAY_EVALUATE: "workSession:replayEvaluate",
   SESSION_SEARCH: "session:search",
   TASK_EXPORT_JSON: "task:exportJSON",
   TASK_PIN: "task:pin",
@@ -9242,6 +9696,7 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "kimi-coding",
   "anthropic-compatible",
   "hf-agents",
+  "mlx",
 ] as const;
 
 export const LLM_PROVIDER_TYPES = [
@@ -9259,6 +9714,7 @@ export const MULTI_LLM_PROVIDER_DISPLAY: Record<
   anthropic: { name: "Claude", icon: "\u{1F9E0}", color: "#d97706" },
   bedrock: { name: "Bedrock", icon: "\u{2601}\uFE0F", color: "#ff9900" },
   ollama: { name: "Ollama", icon: "\u{1F999}", color: "#0ea5e9" },
+  mlx: { name: "MLX (Apple Silicon)", icon: "\u{1F9E0}", color: "#8b5cf6" },
   gemini: { name: "Gemini", icon: "\u{2728}", color: "#6366f1" },
   openrouter: { name: "OpenRouter", icon: "\u{1F310}", color: "#8b5cf6" },
   openai: { name: "OpenAI", icon: "\u{1F916}", color: "#10b981" },

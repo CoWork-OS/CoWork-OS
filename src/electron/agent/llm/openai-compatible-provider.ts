@@ -21,28 +21,34 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${trimmedBase}${trimmedPath}`;
 }
 
-function normalizeBaseUrl(baseUrl: string): string {
+function normalizeBaseUrl(baseUrl: string, providerType?: LLMProviderType): string {
   const trimmedBase = baseUrl.trim().replace(/\/+$/, "");
   const lowerBase = trimmedBase.toLowerCase();
+  let normalizedBase = trimmedBase;
   if (lowerBase.endsWith("/chat/completions")) {
-    return trimmedBase.slice(0, -"/chat/completions".length);
+    normalizedBase = trimmedBase.slice(0, -"/chat/completions".length);
+  } else if (lowerBase.endsWith("/models")) {
+    normalizedBase = trimmedBase.slice(0, -"/models".length);
   }
-  if (lowerBase.endsWith("/models")) {
-    return trimmedBase.slice(0, -"/models".length);
+
+  // MLX-LM and hf-agents expose the OpenAI-compatible API below /v1. Keep
+  // accepting the legacy localhost:8080 value so existing saved settings do
+  // not silently call the wrong endpoint.
+  if (
+    (providerType === "mlx" || providerType === "hf-agents") &&
+    !normalizedBase.toLowerCase().endsWith("/v1")
+  ) {
+    return joinUrl(normalizedBase, "/v1");
   }
-  return trimmedBase;
+  return normalizedBase;
 }
 
-function resolveChatCompletionsUrl(baseUrl: string): string {
-  const trimmedBase = baseUrl.trim().replace(/\/+$/, "");
-  if (trimmedBase.toLowerCase().endsWith("/chat/completions")) {
-    return trimmedBase;
-  }
-  return joinUrl(trimmedBase, "/chat/completions");
+function resolveChatCompletionsUrl(baseUrl: string, providerType?: LLMProviderType): string {
+  return joinUrl(normalizeBaseUrl(baseUrl, providerType), "/chat/completions");
 }
 
-function resolveModelsUrl(baseUrl: string): string {
-  return joinUrl(normalizeBaseUrl(baseUrl), "/models");
+function resolveModelsUrl(baseUrl: string, providerType?: LLMProviderType): string {
+  return joinUrl(normalizeBaseUrl(baseUrl, providerType), "/models");
 }
 
 export interface OpenAICompatibleProviderOptions {
@@ -67,9 +73,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
   constructor(options: OpenAICompatibleProviderOptions) {
     this.type = options.type;
     this.apiKey = options.apiKey;
-    this.normalizedBaseUrl = normalizeBaseUrl(options.baseUrl);
-    this.chatCompletionsUrl = resolveChatCompletionsUrl(options.baseUrl);
-    this.modelsUrl = resolveModelsUrl(options.baseUrl);
+    this.normalizedBaseUrl = normalizeBaseUrl(options.baseUrl, options.type);
+    this.chatCompletionsUrl = resolveChatCompletionsUrl(options.baseUrl, options.type);
+    this.modelsUrl = resolveModelsUrl(options.baseUrl, options.type);
     this.defaultModel = options.defaultModel;
     this.providerName = options.providerName;
     this.extraHeaders = options.extraHeaders;
@@ -77,6 +83,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
   private normalizeModelForEndpoint(model: string): string {
     const trimmed = model.trim();
+    if (
+      (this.type === "mlx" || this.type === "hf-agents") &&
+      trimmed.toLowerCase().startsWith("mlx://")
+    ) {
+      return trimmed.slice("mlx://".length);
+    }
     const lowerBase = this.normalizedBaseUrl.toLowerCase();
     if (lowerBase.includes("opencode.ai/zen/go/") && trimmed.startsWith("opencode-go/")) {
       return trimmed.slice("opencode-go/".length);

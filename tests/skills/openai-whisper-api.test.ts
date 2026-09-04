@@ -119,7 +119,7 @@ elif [[ "$url" == *openai-whisper* ]]; then
   cp "$data_file" "$CAPTURE_DIR/request.json"
   printf '%s' '{"request_id":"pred-1","status":"processing"}' > "$output"
 else
-  printf '%s' '{"request_id":"pred-1","status":"completed","output":{"text":"hello from muapi"}}' > "$output"
+  printf '%s' '{"id":"pred-1","status":"completed","outputs":["hello from muapi"]}' > "$output"
 fi
 printf '200'
 `,

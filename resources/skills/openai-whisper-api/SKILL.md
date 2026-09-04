@@ -1,7 +1,7 @@
 ---
 name: openai-whisper-api
 description: "Transcribe audio via OpenAI Whisper, Atlas Cloud, or MuAPI speech-to-text APIs."
-version: "1.1.0"
+version: "1.2.0"
 metadata:
   author: CoWork OS Contributors <info@coworkosapp.com>
 ---
@@ -37,5 +37,5 @@ Transcribe audio via OpenAI Whisper, Atlas Cloud, or MuAPI speech-to-text APIs.
 
 ## Runtime Prompt
 
-- Current runtime prompt length: 1245 characters.
+- Current runtime prompt length: 1683 characters.
 - Runtime prompt is defined directly in `../openai-whisper-api.json`. 

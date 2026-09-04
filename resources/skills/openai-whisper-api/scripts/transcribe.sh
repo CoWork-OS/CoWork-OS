@@ -362,6 +362,11 @@ NODE
     exit 1
   fi
 
+  encoded_request_id="$(node - "$request_id" <<'NODE'
+process.stdout.write(encodeURIComponent(process.argv[2]));
+NODE
+)"
+
   delay=1
   for ((attempt=1; attempt<=60; attempt++)); do
     if [[ "$status" == "completed" || "$status" == "succeeded" || "$status" == "success" ]]; then
@@ -373,7 +378,7 @@ NODE
       exit 1
     fi
     sleep "$delay"
-    http_code="$(curl -sS "${muapi_base}/predictions/${request_id}/result" \
+    http_code="$(curl -sS "${muapi_base}/predictions/${encoded_request_id}/result" \
       -H "x-api-key: ${API_KEY}" \
       -o "$tmp_resp" -w '%{http_code}')"
     if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
@@ -397,13 +402,24 @@ NODE
     node - "$tmp_resp" "$tmp_req" <<'NODE'
 const fs = require("fs");
 const body = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const candidates = [
-  body.output?.text,
-  body.data?.output?.text,
-  body.result?.text,
-  body.data?.result?.text,
-  body.text,
-];
+const containers = [body, body.data].filter(
+  (value) => value && typeof value === "object",
+);
+const candidates = containers.flatMap((container) => {
+  const outputs = Array.isArray(container.outputs)
+    ? container.outputs
+    : [container.outputs];
+  return [
+    container.text,
+    container.transcript,
+    container.output,
+    container.output?.text,
+    container.result,
+    container.result?.text,
+    ...outputs,
+    ...outputs.map((output) => output?.text),
+  ];
+});
 const text = candidates.find((value) => typeof value === "string" && value.length > 0);
 if (!text) {
   console.error("MuAPI response did not include transcript text.");

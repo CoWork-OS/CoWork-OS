@@ -10,6 +10,7 @@ describe("model access taxonomy", () => {
     expect(getModelAccessDescriptor("openai").kind).toBe("mixed");
     expect(getModelAccessDescriptor("vercel-ai-gateway").group).toBe("gateways");
     expect(getModelAccessDescriptor("ollama").group).toBe("local");
+    expect(getModelAccessDescriptor("mlx").group).toBe("local");
     expect(getModelAccessDescriptor("moa").group).toBe("orchestration");
   });
 

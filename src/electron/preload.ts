@@ -2673,6 +2673,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SESSION_PROGRESS_GET, taskId) as Promise<
       SessionProgressState | undefined
     >,
+  getWorkSessionRollout: () => ipcRenderer.invoke(IPC_CHANNELS.WORK_SESSION_ROLLOUT_GET),
+  updateWorkSessionRollout: (update: {
+    enabled?: boolean;
+    cohortPercent?: number;
+    salt?: string;
+    legacyReadRollback?: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.WORK_SESSION_ROLLOUT_UPDATE, update),
+  listWorkSessionMetrics: (options?: {
+    sessionId?: string;
+    workspaceId?: string;
+    name?: string;
+    limit?: number;
+    since?: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.WORK_SESSION_METRICS_LIST, options),
+  listWorkSessionLeases: (sessionId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORK_SESSION_LEASES_LIST, sessionId),
+  getWorkSessionProjection: (request: { sessionId: string; projection?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORK_SESSION_PROJECTION_GET, request),
+  evaluateWorkSessionReplay: (request: {
+    taskId: string;
+    fixtureId?: string;
+    assertions?: {
+      expectedTerminalStatus?: string;
+      mustContainAll?: string[];
+      mustCreatePaths?: string[];
+    };
+  }) => ipcRenderer.invoke(IPC_CHANNELS.WORK_SESSION_REPLAY_EVALUATE, request),
   searchSessions: (request: { query: string; workspaceId?: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.SESSION_SEARCH, request) as Promise<SessionSearchResult[]>,
   listTasks: (opts?: {
@@ -2773,6 +2800,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: {
+      expectedTurnId?: string;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -2785,6 +2813,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       message,
       images: validatedImages,
       quotedAssistantMessage,
+      ...(options?.expectedTurnId ? { expectedTurnId: options.expectedTurnId } : {}),
       ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
       ...(options?.shellAccess !== undefined ? { shellAccess: options.shellAccess } : {}),
       ...(options?.accessProfileId ? { accessProfileId: options.accessProfileId } : {}),
@@ -3222,7 +3251,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getPiProviders: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_PI_PROVIDERS),
   getOpenAICompatibleModels: (baseUrl: string, apiKey?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OPENAI_COMPATIBLE_MODELS, baseUrl, apiKey),
-  // Local AI (hf-agents + llama.cpp)
+  // Local AI (MLX-LM + hf-agents + llama.cpp)
   checkHf: () => ipcRenderer.invoke(IPC_CHANNELS.LOCAL_AI_CHECK_HF),
   detectHardware: () => ipcRenderer.invoke(IPC_CHANNELS.LOCAL_AI_DETECT_HARDWARE),
   startLocalAIServer: (model?: string) =>
@@ -4321,7 +4350,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     decision: "accepted" | "rejected";
     reason?: string;
     note?: string;
-    kind?: "message" | "task";
   }) => ipcRenderer.invoke(IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK, payload) as Promise<void>,
 
   // ChatGPT Import APIs
@@ -5812,6 +5840,31 @@ export interface ElectronAPI {
   createTask: (data: Any) => Promise<Any>;
   getTask: (id: string) => Promise<Any>;
   getSessionProgress: (taskId: string) => Promise<SessionProgressState | undefined>;
+  getWorkSessionRollout: () => Promise<Any>;
+  updateWorkSessionRollout: (update: {
+    enabled?: boolean;
+    cohortPercent?: number;
+    salt?: string;
+    legacyReadRollback?: boolean;
+  }) => Promise<Any>;
+  listWorkSessionMetrics: (options?: {
+    sessionId?: string;
+    workspaceId?: string;
+    name?: string;
+    limit?: number;
+    since?: number;
+  }) => Promise<Any>;
+  listWorkSessionLeases: (sessionId?: string) => Promise<Any>;
+  getWorkSessionProjection: (request: { sessionId: string; projection?: string }) => Promise<Any>;
+  evaluateWorkSessionReplay: (request: {
+    taskId: string;
+    fixtureId?: string;
+    assertions?: {
+      expectedTerminalStatus?: string;
+      mustContainAll?: string[];
+      mustCreatePaths?: string[];
+    };
+  }) => Promise<Any>;
   searchSessions: (request: {
     query: string;
     workspaceId?: string;
@@ -5880,6 +5933,7 @@ export interface ElectronAPI {
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: {
+      expectedTurnId?: string;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -6255,7 +6309,7 @@ export interface ElectronAPI {
     baseUrl: string,
     apiKey?: string,
   ) => Promise<Array<{ key: string; displayName: string; description: string }>>;
-  // Local AI (hf-agents + llama.cpp)
+  // Local AI (MLX-LM + hf-agents + llama.cpp)
   checkHf?: () => Promise<{
     installed: boolean;
     hfInstalled?: boolean;
@@ -6264,6 +6318,7 @@ export interface ElectronAPI {
     mlxInstalled?: "ok" | "broken" | false;
     mlxMessage?: string;
     isMac?: boolean;
+    isAppleSilicon?: boolean;
   }>;
   detectHardware?: () => Promise<{ ok: boolean; models: string[]; output: string; error?: string }>;
   startLocalAIServer?: (
@@ -7774,7 +7829,6 @@ export interface ElectronAPI {
     decision: "accepted" | "rejected";
     reason?: string;
     note?: string;
-    kind?: "message" | "task";
   }) => Promise<void>;
 
   // ChatGPT Import

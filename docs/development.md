@@ -9,7 +9,29 @@
 - Windows: Visual Studio Build Tools 2022 (C++) and Python 3 (needed for native module builds)
 - macOS location helper: Swift toolchain (included with Xcode CLI tools) for compiling the Core Location helper binary
 - Linux location helper: `gdbus` (part of `glib2` / `libglib2.0-bin`) and a running GeoClue2 service for desktop location support
-- LLM provider credentials are optional for development, but AI task execution still needs a working route: ChatGPT sign-in, local Ollama, or provider credentials.
+- LLM provider credentials are optional for development, but AI task execution still needs a working route: ChatGPT sign-in, local Ollama, MLX-LM on native Apple Silicon, or provider credentials.
+
+## MLX-LM development route
+
+MLX-LM is an optional Python sidecar for native Apple Silicon inference; it is not an npm or
+Electron dependency. To exercise the route locally, install it into the `python3` interpreter
+visible to the desktop app:
+
+```bash
+python3 -m pip install --upgrade mlx-lm
+python3 -c "import mlx_lm; import mlx.core; print('MLX-LM ready')"
+```
+
+The desktop Settings panel starts the sidecar with:
+
+```bash
+python3 -m mlx_lm.server --model <model> --port 8080
+```
+
+It probes `http://localhost:8080/v1/models` and routes requests through the normal
+OpenAI-compatible provider adapter. No MLX package should be added to `package.json`. The
+complete user setup, endpoint contract, lifecycle, limitations, troubleshooting, and live
+smoke-test procedure are in [MLX-LM Local Inference](mlx-lm.md).
 
 ## Build from Source
 

@@ -216,7 +216,9 @@ export const AgentConfigSchema = z
     autoApproveTypes: z.array(z.string().min(1).max(200)).max(50).optional(),
     allowSharedContextMemory: z.boolean().optional(),
     conversationMode: z.enum(["task", "chat", "hybrid"]).optional(),
+    botConversation: z.boolean().optional(),
     executionMode: z.enum(["execute", "chat", "plan", "analyze", "verified", "debug"]).optional(),
+    executionModeSource: z.enum(["user", "strategy", "auto_promote"]).optional(),
     taskDomain: z
       .enum(["auto", "code", "research", "operations", "writing", "general", "media"])
       .optional(),
@@ -419,6 +421,8 @@ export const TaskCreateSchema = z.object({
   title: z.string().min(1).max(MAX_TITLE_LENGTH),
   prompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
   workspaceId: WorkspaceIdSchema,
+  generateTitle: z.boolean().optional(),
+  assignedAgentRoleId: z.string().uuid().optional(),
   budgetTokens: z.number().int().positive().optional(),
   budgetCost: z.number().positive().optional(),
   agentConfig: AgentConfigSchema.optional(),
@@ -439,6 +443,7 @@ export const TaskMessageSchema = z
   .object({
     taskId: z.string().uuid(),
     message: z.string().min(1).max(MAX_PROMPT_LENGTH),
+    expectedTurnId: z.string().trim().min(1).max(200).optional(),
     images: z.array(ImageAttachmentSchema).max(MAX_IMAGES_PER_MESSAGE).optional(),
     quotedAssistantMessage: z
       .object({

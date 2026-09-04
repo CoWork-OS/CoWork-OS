@@ -29,6 +29,7 @@ const ALLOWED_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".web
 export function sanitizeTaskMessageParams(params: unknown): {
   taskId: string;
   message: string;
+  expectedTurnId?: string;
   images?: ImageAttachment[];
   quotedAssistantMessage?: QuotedAssistantMessage;
   permissionMode?: PermissionMode;
@@ -39,6 +40,10 @@ export function sanitizeTaskMessageParams(params: unknown): {
   const p = (params ?? {}) as Record<string, unknown>;
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   const message = typeof p.message === "string" ? p.message.trim() : "";
+  const expectedTurnId =
+    typeof p.expectedTurnId === "string" && p.expectedTurnId.trim().length > 0
+      ? p.expectedTurnId.trim().slice(0, 200)
+      : undefined;
   if (!taskId) throw { code: ErrorCodes.INVALID_PARAMS, message: "taskId is required" };
   if (!message) throw { code: ErrorCodes.INVALID_PARAMS, message: "message is required" };
 
@@ -126,6 +131,7 @@ export function sanitizeTaskMessageParams(params: unknown): {
   return {
     taskId,
     message,
+    expectedTurnId,
     images,
     quotedAssistantMessage,
     permissionMode,

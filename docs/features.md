@@ -38,6 +38,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Ideas Panel**: Curated launch panel accessible from the sidebar above Sessions. Pre-written prompts organized by category let you start common workflows in one click. See [Ideas Panel: Supported Capabilities](ideas-capabilities.md) for the full list of tools each prompt uses and their graceful fallbacks.
 - **GUI-first, CLI-capable AI Super App, Everything App, and Personal Agentic OS**: CoWork OS is a free, open-source, local-first super app for everyday AI work: coding, email, web design, research, documents, spreadsheets, presentations, automations, channels, devices, terminal tasks, and long-running work in one governed workspace.
 - **Open Multi-Provider Harness**: Supported provider accounts, APIs, compatible gateways, cloud credentials, and local models can use the same CoWork tools, skills, memory, agents, approvals, artifacts, and workflows. CoWork itself is free and MIT-licensed; provider eligibility, limits, and charges remain separate. See [Model Providers](providers.md) and [Compare CoWork OS](comparisons/index.md).
+- **MLX-LM Local Inference**: On native Apple Silicon Macs, the first-class **MLX (Apple Silicon)** provider runs quantized models through the local MLX-LM OpenAI-compatible server. Settings checks the native platform and Python imports, starts/stops the local server, shows download/loading logs, and routes normal agent requests through the shared provider interface. See [MLX-LM Local Inference](mlx-lm.md).
 - **GUI-first Agent Management**: Agents Hub, Mission Control, task timelines, visual boards, Teams, Devices, and Automations let users create reusable agents, spawn many parallel or specialized agents, inspect delegated runs, assign work, review approvals, and monitor outcomes through the desktop operator console.
 - **CoWork CLI**: `cowork` opens an interactive terminal UI for local agent work, and `cowork run "task"` starts one-shot local tasks using the same local profile, providers, workspaces, skills, and MCP configuration as the desktop app. Normal local CLI use does not require a Control Plane token; `--remote` is the explicit remote client path. See [CoWork OS CLI](cli.md).
 - **Governed Access Profiles**: The main composer offers Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles. A profile carries sandbox, approval, reviewer, network, filesystem, and domain policy across desktop, CLI, remote, managed, automation, and child-task surfaces. Command tools are derived from the selected profile; there is no separate new-task shell toggle. See [Access Profiles](access-profiles.md).
@@ -130,7 +131,6 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Problem Framing Pre-flight**: Complex tasks show a structured problem restatement, assumptions, risks, and approach before execution begins
 - **Graceful Uncertainty**: Agent expresses uncertainty honestly and rates confidence on recommendations. Low-confidence messages display with an amber indicator.
 - **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures with error classification (7 categories: tool failure, wrong approach, missing context, permission denied, timeout, rate limit, user correction). Time-based decay scoring deprioritises stale entries. Proven patterns reinforced on repeated success. Mid-task user corrections automatically detected and captured. Relevant entries injected into system prompts. View in Settings > AI Playbook.
-- **Task Result Feedback**: Completed task banners show 👍 / 👎 controls, with task-level rejections logged as quality signals for Usage Insights. The shared feedback IPC still supports structured message-level feedback for adaptation and future UI surfaces.
 - **Evolving Agent Intelligence**: The agent visibly improves over time through a connected set of subsystems — layered memory, retry-aware recovery reuse, adaptive style learning, playbook-to-skill promotion, channel persona adaptation, evolution metrics, and daily operational journaling. See [Evolving Agent Intelligence](evolving-agent-intelligence.md).
 
 ### LLM Wiki Research Vaults
@@ -942,7 +942,7 @@ The workspace dropdown at the top lets you filter insights to a single workspace
 | **Top Skills** | Most-used skills ranked by usage count |
 | **Skill Usage by Pack** | Skills grouped by their parent plugin pack with aggregated usage counts and mini bar charts |
 | **Persona Performance** | Per-persona totals, success/failure mix, retry behavior, and cost attribution |
-| **Feedback & Quality** | Task-result satisfaction rate, top rejection reasons, retried-task count, and average attempts |
+| **Feedback & Quality** | Feedback satisfaction rate, top rejection reasons, retried-task count, and average attempts |
 
 ### Agentic Work Units (AWU)
 

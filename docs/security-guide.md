@@ -243,6 +243,7 @@ The app connects to these services based on your configuration:
 | Google AI | `generativelanguage.googleapis.com` | Gemini models |
 | OpenRouter | `openrouter.ai` | OpenRouter models |
 | Ollama | `localhost:11434` (default) | Local models |
+| MLX-LM | `localhost:8080/v1` (default) | Local Apple Silicon models; model downloads may reach Hugging Face |
 
 ### Search Providers (DuckDuckGo built-in; others optional)
 

@@ -56,7 +56,7 @@ describe("RightPanel checklist rendering", () => {
     expect(openers.document).not.toHaveBeenCalled();
   });
 
-  it("renders task feedback controls in the right panel for completed tasks", () => {
+  it("does not render task result feedback controls for completed tasks", () => {
     const markup = renderToStaticMarkup(
       React.createElement(RightPanel, {
         task: {
@@ -70,9 +70,9 @@ describe("RightPanel checklist rendering", () => {
       }),
     );
 
-    expect(markup).toContain("Rate this result");
-    expect(markup).toContain("Helps improve this agent and persona.");
-    expect(markup).toContain("Dismiss");
+    expect(markup).not.toContain("Rate this result");
+    expect(markup).not.toContain("Helps improve this agent and persona.");
+    expect(markup).not.toContain("right-panel-feedback-card");
   });
 
   it("renders collaborative sub-agent totals in the right panel", () => {

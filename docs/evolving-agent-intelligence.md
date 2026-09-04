@@ -429,15 +429,15 @@ DailyLogSummarizer.countRecentSummaries(workspacePath, 7)
 
 ---
 
-## 8. Task and Message Feedback
+## 8. Message Feedback
 
-**UI:** `src/renderer/components/MainContent.tsx` (task completion banner and shared feedback plumbing)
+**UI:** `src/renderer/components/MainContent/MainContent.tsx` (assistant-message feedback controls)
 
 **IPC:** `kit:submitMessageFeedback` → `UserProfileService.ingestUserFeedback()`
 
 ### Interaction
 
-Completed tasks now expose 👍 / 👎 controls in the completion banner so users can rate the overall outcome. The same IPC contract still supports structured message-level feedback for adaptation-oriented flows. Thumbs-down uses the same structured reason vocabulary:
+The latest completed assistant message exposes 👍 / 👎 controls for message-level feedback. Thumbs-down uses the following structured reason vocabulary:
 
 | Reason key | Label |
 |-----------|-------|
@@ -456,7 +456,6 @@ window.electronAPI.submitMessageFeedback({
   decision: "accepted" | "rejected",
   reason?: string,             // one of the keys above
   note?: string,               // optional free-text (future)
-  kind?: "message" | "task",
 });
 ```
 

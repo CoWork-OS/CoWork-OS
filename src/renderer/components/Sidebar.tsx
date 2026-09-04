@@ -40,7 +40,6 @@ import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
-import { WorkContextStrip } from "./WorkContextStrip";
 import { BotsPane, type BotRole } from "./BotsPane";
 
 const SIDEBAR_ITEM_HEIGHT = 22;
@@ -2321,11 +2320,6 @@ function SidebarComponent({
             />
           ) : (
             <>
-              <WorkContextStrip
-                workspaceId={workspace?.id}
-                refreshKey={`${tasks.length}:${tasks[0]?.updatedAt || 0}`}
-                onSelectTask={onSelectTask}
-              />
               {/* Sessions List Header */}
               <div className="sidebar-header-sessions">
                 <div className="new-task-btn cli-new-task-btn cli-action-btn cli-sessions-header">

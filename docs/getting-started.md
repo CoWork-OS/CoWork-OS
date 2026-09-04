@@ -60,7 +60,7 @@ See [CoWork OS CLI](cli.md) for command syntax, local-vs-remote behavior, JSON o
 On first launch, choose the easiest working model route for your machine:
 
 1. **Sign in with ChatGPT** if CoWork supports the account route you want to use. Browser sign-in avoids copying an API key, but model eligibility, limits, and charges remain governed by OpenAI and your account plan.
-2. **Use local Ollama** if CoWork detects a model already running on your computer. Model inference stays on that machine; connected tools and integrations can still send data to services you explicitly configure.
+2. **Use local Ollama** if CoWork detects a model already running on your computer. On an Apple Silicon Mac, configure [MLX-LM](mlx-lm.md) immediately afterward in Settings for a local inference route. Model inference stays on that machine; connected tools and integrations can still send data to services you explicitly configure.
 3. **Use an API key** for Claude, OpenAI API, Gemini, OpenRouter, Groq, xAI, DeepSeek, Kimi, NanoGPT, Bedrock, or another supported or compatible route. Provider pricing and free allowances can change, so confirm current terms with the provider.
 4. **Explore without AI** if you only want to look around. AI tasks stay gated until one route is connected and tested.
 
@@ -78,6 +78,7 @@ If you use the API-key path, open **Settings > AI & Models > Model Access** and 
    - **xAI API Key** - Grok models billed through your xAI API account
    - **AWS Bedrock** - Enterprise AWS (requires AWS credentials)
    - **Ollama** - Local inference with [Ollama](https://ollama.ai) installed; there is no hosted-model usage charge from CoWork, but compute runs on your hardware
+   - **MLX (Apple Silicon)** - Native Apple Silicon local inference through [MLX-LM](mlx-lm.md); install `mlx-lm`, select a quantized model, and start the local server
 
 3. If you choose **Claude**, pick one of these tabs:
    - **Claude API**: paste an API key from [console.anthropic.com](https://console.anthropic.com/)
@@ -144,6 +145,7 @@ Supermemory does not replace CoWork's local memory system. It adds an external p
 - If the Claude model list is empty, click **Refresh Models** after entering your API key or supported account token.
 - If a provider endpoint changes, override the **Base URL** in Settings (custom providers or Groq/xAI/Kimi/OpenRouter).
 - If Ollama fails to connect, confirm the service is running and the base URL is correct (default `http://localhost:11434`).
+- If MLX-LM is unavailable, confirm that CoWork is running natively on an Apple Silicon Mac, install `mlx-lm` with the same `python3` interpreter CoWork can find, and restart the app. See [MLX-LM Local Inference](mlx-lm.md).
 - If `cowork run` asks for a missing token, confirm you did not pass `--remote`. Local CLI tasks should run without `COWORK_CONTROL_PLANE_TOKEN`.
 - If `cowork` reports missing build artifacts in a source checkout, run `npm run build:cli`.
 - If `npm run setup` fails on macOS with `Killed: 9`, macOS terminated the native build due to memory pressure. The setup script retries automatically (with exponential backoff); if it still fails, close other apps and run `npm run setup` again.
@@ -444,6 +446,7 @@ Open **Settings > AI & Models > Model Access**:
 | OpenAI (ChatGPT) | Click **Sign in with ChatGPT** to connect an eligible account; available models, limits, and charges depend on OpenAI and the account plan |
 | AWS Bedrock | Enter AWS Access Key, Secret Key, and Region |
 | Ollama | Install Ollama, pull a model, select it |
+| MLX (Apple Silicon) | Install `mlx-lm`, select a compatible quantized model, start the MLX server |
 | Groq | Enter API key in Settings; free usage may be available subject to current limits |
 | xAI (Grok API) | Enter API key in Settings |
 | xAI Grok OAuth | Sign in with an eligible xAI account, refresh the available models, and select one supported for that account |
@@ -720,7 +723,7 @@ Don't use system folders like `/System` or `/Applications`.
 3. **Review Plans**: Check the execution plan before it runs
 4. **Respond Carefully**: Read approval requests and structured input prompts before accepting or submitting
 5. **Monitor Progress**: Watch the timeline to understand what's happening, especially when parallel tool groups collapse into summary lanes
-6. **Use Local Models**: Ollama can run inference without a hosted-model charge and can work offline after the required models and dependencies are installed
+6. **Use Local Models**: Ollama and MLX-LM can run inference without a hosted-model charge and can work offline after the required models and dependencies are installed
 
 ## Next Steps
 

@@ -1440,8 +1440,8 @@
     {
       "id": "openai-whisper-api",
       "name": "Openai-whisper-api",
-      "description": "Transcribe audio via OpenAI Whisper or Atlas Cloud speech-to-text APIs.",
-      "version": "1.1.0",
+      "description": "Transcribe audio via OpenAI Whisper, Atlas Cloud, or MuAPI speech-to-text APIs.",
+      "version": "1.2.0",
       "author": "CoWork OS",
       "tags": [
         "Tools"

@@ -1,46 +1,50 @@
 /* eslint-disable no-console */
-const os = require('os');
-const path = require('path');
-const { execFileSync } = require('child_process');
-const crypto = require('crypto');
+const os = require("os");
+const path = require("path");
+const { execFileSync } = require("child_process");
+const crypto = require("crypto");
+const {
+  evaluateIsolatedEvents,
+  runDeterministicReplayFixtures,
+} = require("./isolated-replay-evaluation.cjs");
 
 const DB_PATH =
   process.env.COWORK_DB_PATH ||
-  path.join(os.homedir(), 'Library', 'Application Support', 'cowork-os', 'cowork-os.db');
-const HOOKS_ORIGIN = process.env.COWORK_HOOKS_ORIGIN || 'http://127.0.0.1:9877';
-const HOOKS_TOKEN = process.env.COWORK_HOOKS_TOKEN || 'qa-token';
+  path.join(os.homedir(), "Library", "Application Support", "cowork-os", "cowork-os.db");
+const HOOKS_ORIGIN = process.env.COWORK_HOOKS_ORIGIN || "http://127.0.0.1:9877";
+const HOOKS_TOKEN = process.env.COWORK_HOOKS_TOKEN || "qa-token";
 const SQLITE_BUSY_TIMEOUT_MS = Number(process.env.COWORK_SQLITE_BUSY_TIMEOUT_MS) || 15000;
 
 function parseArgs(argv) {
   const args = {
-    suite: 'reliability-regressions',
-    mode: 'deterministic',
+    suite: "reliability-regressions",
+    mode: "deterministic",
     timeoutMs: 6 * 60 * 1000,
-    allowEmpty: process.env.COWORK_EVAL_ALLOW_EMPTY === '1',
+    allowEmpty: process.env.COWORK_EVAL_ALLOW_EMPTY === "1",
   };
 
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
-    if ((arg === '--suite' || arg === '--suite-id') && argv[i + 1]) {
+    if ((arg === "--suite" || arg === "--suite-id") && argv[i + 1]) {
       args.suite = String(argv[++i] || args.suite);
       continue;
     }
-    if (arg === '--mode' && argv[i + 1]) {
+    if (arg === "--mode" && argv[i + 1]) {
       args.mode = String(argv[++i] || args.mode);
       continue;
     }
-    if (arg === '--allow-empty') {
+    if (arg === "--allow-empty") {
       args.allowEmpty = true;
       continue;
     }
-    if (arg === '--timeout-ms' && argv[i + 1]) {
+    if (arg === "--timeout-ms" && argv[i + 1]) {
       args.timeoutMs = Number(argv[++i]) || args.timeoutMs;
       continue;
     }
   }
 
   args.timeoutMs = Math.min(Math.max(Math.round(args.timeoutMs), 30_000), 30 * 60 * 1000);
-  args.mode = args.mode === 'hooks' ? 'hooks' : 'deterministic';
+  args.mode = args.mode === "hooks" ? "hooks" : "deterministic";
   return args;
 }
 
@@ -50,29 +54,33 @@ function sqlEscape(value) {
 
 function ensureSqliteCli() {
   try {
-    execFileSync('sqlite3', ['--version'], { stdio: 'ignore' });
+    execFileSync("sqlite3", ["--version"], { stdio: "ignore" });
   } catch {
-    console.error('[eval-run] sqlite3 CLI not found. Install sqlite3 to run this script.');
+    console.error("[eval-run] sqlite3 CLI not found. Install sqlite3 to run this script.");
     process.exit(1);
   }
 }
 
 function sqlExec(sql) {
-  execFileSync('sqlite3', ['-cmd', `.timeout ${SQLITE_BUSY_TIMEOUT_MS}`, DB_PATH, sql], {
-    encoding: 'utf8',
+  execFileSync("sqlite3", ["-cmd", `.timeout ${SQLITE_BUSY_TIMEOUT_MS}`, DB_PATH, sql], {
+    encoding: "utf8",
   });
 }
 
 function sqlJson(sql) {
-  const out = execFileSync('sqlite3', ['-cmd', `.timeout ${SQLITE_BUSY_TIMEOUT_MS}`, '-json', DB_PATH, sql], {
-    encoding: 'utf8',
-  }).trim();
+  const out = execFileSync(
+    "sqlite3",
+    ["-cmd", `.timeout ${SQLITE_BUSY_TIMEOUT_MS}`, "-json", DB_PATH, sql],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
   if (!out) return [];
   return JSON.parse(out);
 }
 
 function safeJsonParse(value, fallback) {
-  if (typeof value !== 'string' || !value.trim()) return fallback;
+  if (typeof value !== "string" || !value.trim()) return fallback;
   try {
     return JSON.parse(value);
   } catch {
@@ -80,91 +88,128 @@ function safeJsonParse(value, fallback) {
   }
 }
 
-function normalizeTerminalStatus(taskRow) {
-  const terminal = String(taskRow.terminal_status || '').trim();
-  if (terminal === 'ok' || terminal === 'partial_success' || terminal === 'failed') return terminal;
-  if (taskRow.status === 'completed') return 'ok';
-  return 'failed';
-}
-
-function extractChangedPaths(events) {
-  const changed = new Set();
-  const add = (value) => {
-    if (typeof value !== 'string') return;
-    const normalized = value.trim().replace(/\\/g, '/');
-    if (!normalized) return;
-    changed.add(normalized);
-  };
-
-  for (const event of events) {
-    if (!['file_created', 'file_modified', 'file_deleted', 'artifact_created'].includes(event.type)) {
-      continue;
-    }
-    add(event.payload?.path);
-    add(event.payload?.from);
-    add(event.payload?.to);
-  }
-
-  return changed;
-}
-
-function evaluateAssertions({ taskRow, events, assertions }) {
-  const failures = [];
-  const normalizedAssertions = assertions && typeof assertions === 'object' ? assertions : {};
-
-  if (normalizedAssertions.expectedTerminalStatus) {
-    const actual = normalizeTerminalStatus(taskRow);
-    if (actual !== normalizedAssertions.expectedTerminalStatus) {
-      failures.push(
-        `expected terminal_status=${normalizedAssertions.expectedTerminalStatus}, actual=${actual}`,
-      );
-    }
-  }
-
-  const summary = String(taskRow.result_summary || '');
-  const mustContainAll = Array.isArray(normalizedAssertions.mustContainAll)
-    ? normalizedAssertions.mustContainAll
-    : [];
-  for (const needle of mustContainAll) {
-    if (!needle) continue;
-    if (!summary.toLowerCase().includes(String(needle).toLowerCase())) {
-      failures.push(`missing required summary text: \"${needle}\"`);
-    }
-  }
-
-  const mustCreatePaths = Array.isArray(normalizedAssertions.mustCreatePaths)
-    ? normalizedAssertions.mustCreatePaths
-    : [];
-  if (mustCreatePaths.length > 0) {
-    const changed = extractChangedPaths(events);
-    for (const requiredPath of mustCreatePaths) {
-      if (!requiredPath) continue;
-      const normalized = String(requiredPath).replace(/\\/g, '/');
-      const found = Array.from(changed).some((candidate) => candidate.endsWith(normalized));
-      if (!found) {
-        failures.push(`missing required changed path: \"${requiredPath}\"`);
-      }
-    }
-  }
-
-  return failures;
-}
-
 function eventRowsToEvents(rows) {
-  return rows.map((row) => ({
+  return rows.map((row, index) => ({
     id: row.id,
     taskId: row.task_id,
     timestamp: row.timestamp,
     type: row.type,
+    legacyType: row.legacy_type,
+    eventId: row.event_id,
+    // Older TaskEvent rows may not have a sequence.  Assign a deterministic
+    // replay sequence in query order instead of letting every missing value
+    // sort as zero and fall back to UUID order.
+    seq:
+      typeof row.seq === "number" && Number.isFinite(row.seq) && row.seq > 0
+        ? Math.floor(row.seq)
+        : index + 1,
+    actor: row.actor,
     payload: safeJsonParse(row.payload, {}),
   }));
 }
 
+function canonicalRowsToEvents(rows, taskId) {
+  return rows.map((row) => {
+    const payload = safeJsonParse(row.payload_json, {});
+    const timestamp =
+      payload && typeof payload.timestamp === "number" && Number.isFinite(payload.timestamp)
+        ? payload.timestamp
+        : Number(row.created_at || 0);
+    return {
+      id: row.id,
+      taskId,
+      timestamp,
+      type: row.kind || "legacy_event",
+      eventId: row.source_event_id || (payload && payload.eventId),
+      seq: Number(row.sequence || 0),
+      sequence: Number(row.sequence || 0),
+      actor: row.actor,
+      kind: row.kind,
+      payload,
+    };
+  });
+}
+
+function isSyntheticCanonicalRow(row) {
+  if (row.source_event_id) return false;
+  const payload = safeJsonParse(row.payload_json, {});
+  const event = payload && typeof payload.event === "string" ? payload.event : "";
+  return event === "session.created" || event.startsWith("turn.");
+}
+
+function loadReplayEvents(taskRow) {
+  const taskId = String(taskRow.id);
+  const legacyRows = sqlJson(
+    `SELECT id, task_id, timestamp, type, legacy_type, event_id, seq, actor, payload
+     FROM task_events
+     WHERE task_id='${sqlEscape(taskId)}' AND type <> 'llm_streaming'
+     ORDER BY COALESCE(seq, timestamp) ASC, timestamp ASC, id ASC`,
+  );
+
+  // Prefer the canonical append-only stream when it represents every
+  // persisted legacy event.  A newly-created session can temporarily contain
+  // only its synthetic root item; in that window grade the complete legacy
+  // source rather than declaring a false missing-item failure.
+  let canonicalRows = [];
+  try {
+    const sessionRow = sqlJson(
+      `SELECT ws.id
+       FROM work_sessions ws
+       LEFT JOIN tasks t ON t.session_id = ws.id
+       WHERE ws.task_id='${sqlEscape(taskId)}'
+          OR t.id='${sqlEscape(taskId)}'
+       ORDER BY ws.updated_at DESC LIMIT 1`,
+    )[0];
+    if (sessionRow && sessionRow.id) {
+      canonicalRows = sqlJson(
+        `SELECT id, session_id, turn_id, sequence, kind, actor, payload_json,
+                redaction_class, status, created_at, source_event_id
+         FROM work_session_items
+         WHERE session_id='${sqlEscape(sessionRow.id)}'
+         ORDER BY sequence ASC`,
+      );
+      if (canonicalRows.length > 0) {
+        const replayCanonicalRows = canonicalRows.filter((row) => !isSyntheticCanonicalRow(row));
+        const canonicalIds = new Set();
+        for (const row of canonicalRows) {
+          if (row.source_event_id) canonicalIds.add(String(row.source_event_id));
+          const payload = safeJsonParse(row.payload_json, {});
+          if (payload && typeof payload.eventId === "string" && payload.eventId.trim()) {
+            canonicalIds.add(payload.eventId.trim());
+          }
+        }
+        const complete = legacyRows.every((row) => {
+          const id = row.event_id || row.id;
+          return !id || canonicalIds.has(String(id));
+        });
+        // Synthetic session/turn roots are bookkeeping, not replay evidence.
+        // A task with no persisted events must not pass solely because its
+        // canonical aggregate has been created.
+        if (complete && replayCanonicalRows.length > 0) {
+          return {
+            events: canonicalRowsToEvents(canonicalRows, taskId),
+            source: "canonical",
+          };
+        }
+      }
+    }
+  } catch (error) {
+    // The script is also used against pre-Phase-5 databases.  Missing
+    // canonical tables should select the compatibility source, not abort the
+    // evaluation run.
+    if (!String(error && error.message ? error.message : error).includes("no such table")) {
+      throw error;
+    }
+  }
+
+  return { events: eventRowsToEvents(legacyRows), source: "legacy" };
+}
+
 async function postJson(pathname, body) {
   const response = await fetch(`${HOOKS_ORIGIN}${pathname}`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       Authorization: `Bearer ${HOOKS_TOKEN}`,
     },
     body: JSON.stringify(body),
@@ -190,24 +235,24 @@ async function waitForTerminalTask(taskId, timeoutMs) {
       `SELECT id, status, terminal_status, result_summary, workspace_id FROM tasks WHERE id='${sqlEscape(taskId)}' LIMIT 1`,
     )[0];
 
-    if (!task) return { ok: false, reason: 'task_not_found' };
+    if (!task) return { ok: false, reason: "task_not_found" };
 
     const approvals = sqlJson(
       `SELECT id FROM approvals WHERE task_id='${sqlEscape(taskId)}' AND status='pending' ORDER BY requested_at ASC`,
     );
 
     for (const approval of approvals) {
-      await postJson('/hooks/approval/respond', { approvalId: approval.id, approved: true });
+      await postJson("/hooks/approval/respond", { approvalId: approval.id, approved: true });
     }
 
-    if (['completed', 'failed', 'cancelled', 'paused'].includes(task.status)) {
+    if (["completed", "failed", "cancelled", "paused"].includes(task.status)) {
       return { ok: true, task };
     }
 
     await sleep(1000);
   }
 
-  return { ok: false, reason: 'timeout' };
+  return { ok: false, reason: "timeout" };
 }
 
 function ensureEvalTables() {
@@ -274,32 +319,36 @@ function getOrCreateSuiteByName(suiteName) {
 }
 
 function resolveSuite(suiteSelector) {
-  const byId = sqlJson(`SELECT * FROM eval_suites WHERE id='${sqlEscape(suiteSelector)}' LIMIT 1`)[0];
+  const byId = sqlJson(
+    `SELECT * FROM eval_suites WHERE id='${sqlEscape(suiteSelector)}' LIMIT 1`,
+  )[0];
   if (byId) return byId;
-  const byName = sqlJson(`SELECT * FROM eval_suites WHERE name='${sqlEscape(suiteSelector)}' LIMIT 1`)[0];
+  const byName = sqlJson(
+    `SELECT * FROM eval_suites WHERE name='${sqlEscape(suiteSelector)}' LIMIT 1`,
+  )[0];
   return byName || null;
 }
 
 function loadCases(caseIds) {
   if (!Array.isArray(caseIds) || caseIds.length === 0) return [];
-  const idsSql = caseIds.map((id) => `'${sqlEscape(id)}'`).join(',');
+  const idsSql = caseIds.map((id) => `'${sqlEscape(id)}'`).join(",");
   const rows = sqlJson(`SELECT * FROM eval_cases WHERE id IN (${idsSql})`);
   const byId = new Map(rows.map((row) => [row.id, row]));
   return caseIds.map((id) => byId.get(id)).filter(Boolean);
 }
 
 async function executeCaseHooksMode(evalCase, timeoutMs, runId) {
-  const trigger = await postJson('/hooks/agent', {
+  const trigger = await postJson("/hooks/agent", {
     message: evalCase.sanitized_prompt || evalCase.prompt,
     name: `eval-${String(evalCase.id).slice(0, 8)}`,
-    wakeMode: 'now',
+    wakeMode: "now",
     workspaceId: evalCase.workspace_id || undefined,
     deliver: false,
   });
 
   if (trigger.status >= 400 || !trigger.json || !trigger.json.taskId) {
     return {
-      status: 'fail',
+      status: "fail",
       details: `trigger_failed status=${trigger.status}`,
     };
   }
@@ -308,22 +357,18 @@ async function executeCaseHooksMode(evalCase, timeoutMs, runId) {
   const wait = await waitForTerminalTask(replayTaskId, timeoutMs);
   if (!wait.ok) {
     return {
-      status: 'fail',
-      details: `replay_timeout_or_missing reason=${wait.reason || 'unknown'}`,
+      status: "fail",
+      details: `replay_timeout_or_missing reason=${wait.reason || "unknown"}`,
     };
   }
 
   const taskRow = sqlJson(
     `SELECT id, status, terminal_status, result_summary, workspace_id FROM tasks WHERE id='${sqlEscape(replayTaskId)}' LIMIT 1`,
   )[0];
-  const eventRows = sqlJson(
-    `SELECT id, task_id, timestamp, type, payload FROM task_events WHERE task_id='${sqlEscape(replayTaskId)}' ORDER BY timestamp ASC`,
-  );
-  const events = eventRowsToEvents(eventRows);
+  const replaySource = loadReplayEvents(taskRow);
 
-  const failures = evaluateAssertions({
+  const replay = evaluateIsolatedEvents(replaySource.events, {
     taskRow,
-    events,
     assertions: safeJsonParse(evalCase.assertions, {}),
   });
 
@@ -331,41 +376,52 @@ async function executeCaseHooksMode(evalCase, timeoutMs, runId) {
     `UPDATE tasks SET eval_run_id='${sqlEscape(runId)}', updated_at=${Date.now()} WHERE id='${sqlEscape(replayTaskId)}'`,
   );
 
-  if (failures.length > 0) {
-    return { status: 'fail', details: failures.join('; ') };
+  if (!replay.passed) {
+    return {
+      status: "fail",
+      details: replay.failures.join("; ") || "isolated replay projection mismatch",
+    };
   }
 
-  return { status: 'pass', details: 'hook replay assertions satisfied' };
+  return {
+    status: "pass",
+    details: `isolated hook replay passed (${replay.replay.itemCount} items; source=${replaySource.source}; checksum=${replay.fullRebuildChecksum})`,
+  };
 }
 
 function executeCaseDeterministicMode(evalCase) {
   if (!evalCase.source_task_id) {
-    return { status: 'skipped', details: 'no source task linked' };
+    return { status: "skipped", details: "no source task linked" };
   }
 
   const taskRow = sqlJson(
     `SELECT id, status, terminal_status, result_summary, workspace_id FROM tasks WHERE id='${sqlEscape(evalCase.source_task_id)}' LIMIT 1`,
   )[0];
   if (!taskRow) {
-    return { status: 'skipped', details: 'source task not found' };
+    return { status: "skipped", details: "source task not found" };
   }
 
-  const eventRows = sqlJson(
-    `SELECT id, task_id, timestamp, type, payload FROM task_events WHERE task_id='${sqlEscape(taskRow.id)}' ORDER BY timestamp ASC`,
-  );
-  const events = eventRowsToEvents(eventRows);
+  const replaySource = loadReplayEvents(taskRow);
 
-  const failures = evaluateAssertions({
+  // Replay into a fresh in-memory state machine.  The source task/snapshot is
+  // input evidence only; terminal status, waits, side effects, and security
+  // invariants are derived from the isolated replay.
+  const replay = evaluateIsolatedEvents(replaySource.events, {
     taskRow,
-    events,
     assertions: safeJsonParse(evalCase.assertions, {}),
   });
 
-  if (failures.length > 0) {
-    return { status: 'fail', details: failures.join('; ') };
+  if (!replay.passed) {
+    return {
+      status: "fail",
+      details: replay.failures.join("; ") || "isolated replay projection mismatch",
+    };
   }
 
-  return { status: 'pass', details: 'deterministic assertions satisfied' };
+  return {
+    status: "pass",
+    details: `isolated replay passed (${replay.replay.itemCount} items; source=${replaySource.source}; checksum=${replay.fullRebuildChecksum})`,
+  };
 }
 
 async function main() {
@@ -403,25 +459,39 @@ async function main() {
   console.log(`[eval-run] mode: ${args.mode}`);
   console.log(`[eval-run] cases: ${cases.length}`);
 
+  const fixtureResults = runDeterministicReplayFixtures();
+  const fixtureFailures = fixtureResults.filter((result) => !result.passed);
+  const fixturePasses = fixtureResults.length - fixtureFailures.length;
+  console.log(`[eval-run] isolated fixtures: ${fixtureResults.length}`);
+  for (const result of fixtureResults) {
+    console.log(`- ${result.passed ? "PASS" : "FAIL"} fixture ${result.fixtureId}`);
+    if (!result.passed) console.log(`  ${result.failures.join("; ") || "projection mismatch"}`);
+  }
+  // Fixtures are first-class replay cases. Count them in the run summary so a
+  // clean database still reports meaningful coverage instead of looking like
+  // an empty/allowed evaluation run.
+  passCount += fixturePasses;
+  failCount += fixtureFailures.length;
+
   for (const evalCase of cases) {
     const caseStartedAt = Date.now();
     let verdict;
 
     try {
       verdict =
-        args.mode === 'hooks'
+        args.mode === "hooks"
           ? await executeCaseHooksMode(evalCase, args.timeoutMs, runId)
           : executeCaseDeterministicMode(evalCase);
     } catch (error) {
       verdict = {
-        status: 'fail',
+        status: "fail",
         details: `exception: ${String(error && error.message ? error.message : error)}`,
       };
     }
 
-    if (verdict.status === 'pass') passCount += 1;
-    if (verdict.status === 'fail') failCount += 1;
-    if (verdict.status === 'skipped') skippedCount += 1;
+    if (verdict.status === "pass") passCount += 1;
+    if (verdict.status === "fail") failCount += 1;
+    if (verdict.status === "skipped") skippedCount += 1;
 
     sqlExec(
       `INSERT INTO eval_case_runs (
@@ -431,23 +501,25 @@ async function main() {
          '${sqlEscape(runId)}',
          '${sqlEscape(evalCase.id)}',
          '${sqlEscape(verdict.status)}',
-         '${sqlEscape(verdict.details || '')}',
+         '${sqlEscape(verdict.details || "")}',
          ${caseStartedAt},
          ${Date.now()},
          ${Date.now() - caseStartedAt}
        )`,
     );
 
-    const label = verdict.status === 'pass' ? 'PASS' : verdict.status === 'skipped' ? 'SKIP' : 'FAIL';
+    const label =
+      verdict.status === "pass" ? "PASS" : verdict.status === "skipped" ? "SKIP" : "FAIL";
     console.log(`- ${label} ${evalCase.id} ${evalCase.name}`);
-    if (verdict.status !== 'pass') {
+    if (verdict.status !== "pass") {
       console.log(`  ${verdict.details}`);
     }
   }
 
   const executedCount = passCount + failCount;
   const completedAt = Date.now();
-  const runStatus = failCount > 0 || (executedCount === 0 && !args.allowEmpty) ? 'failed' : 'completed';
+  const runStatus =
+    failCount > 0 || (executedCount === 0 && !args.allowEmpty) ? "failed" : "completed";
 
   sqlExec(
     `UPDATE eval_runs
@@ -459,7 +531,7 @@ async function main() {
      WHERE id='${sqlEscape(runId)}'`,
   );
 
-  console.log('[eval-run] summary');
+  console.log("[eval-run] summary");
   console.log(`- runId: ${runId}`);
   console.log(`- pass: ${passCount}`);
   console.log(`- fail: ${failCount}`);
@@ -469,17 +541,17 @@ async function main() {
   if (executedCount === 0) {
     console.log(
       args.allowEmpty
-        ? '- reason: no eval cases were executed (all skipped or suite empty, allowed by configuration)'
-        : '- reason: no eval cases were executed (all skipped or suite empty)',
+        ? "- reason: no eval cases were executed (all skipped or suite empty, allowed by configuration)"
+        : "- reason: no eval cases were executed (all skipped or suite empty)",
     );
   }
 
-  if (runStatus === 'failed') {
+  if (runStatus === "failed") {
     process.exitCode = 1;
   }
 }
 
 main().catch((error) => {
-  console.error('[eval-run] fatal:', error);
+  console.error("[eval-run] fatal:", error);
   process.exit(1);
 });

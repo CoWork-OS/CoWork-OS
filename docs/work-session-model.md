@@ -1,7 +1,7 @@
 # CoWork OS Work Session Model
 
 **Status:** current product and architecture concept
-**Last updated:** 2026-09-01
+**Last updated:** 2026-09-02
 
 CoWork OS is a local-first, contract-driven work-session runtime. A task is not
 only a prompt and a final answer: it is a governed session that carries its
@@ -53,6 +53,7 @@ ManagedSession / Task
         +-- Durable stores: task events, transcript spans/checkpoints,
                             artifacts, approvals, outcomes, and audit records
 ```
+
 `ManagedSession` is the stable control-plane resource for a reusable managed
 run. `Task` remains the execution worker and `SessionRuntime` remains the owner
 of mutable task-session state. A managed session normally points to one
@@ -63,6 +64,90 @@ The renderer, CLI, Control Plane, channels, and Agents Hub are projections and
 entry points. They must not invent a second lifecycle or silently mutate a
 completed task. Terminal state is derived from persisted state before resume,
 follow-up, or completion events are accepted.
+
+## Harness roadmap Phase 3: canonical protocol rollout
+
+The repository now contains an additive v1 `WorkSession -> Turn -> Item`
+protocol. `Task` and `TaskEvent` remain compatibility projections while the
+protocol is populated from persisted task events. Session creation, root-turn
+creation, and the first session item are transactional; item sequences are
+SQLite-serialized and monotonic per session; source-event and idempotency keys
+make retries safe; payloads and policy snapshots are bounded and redacted;
+replay exposes a deterministic checksum. Follow-up transports may include an
+`expectedTurnId` so stale steering is rejected before task state is mutated.
+
+The current boundary is dual-write and legacy-read compatible. Provider-specific
+event shapes are mapped to typed item kinds, but the renderer and external
+clients will continue reading the existing task timeline until the protocol
+projection is proven equivalent across the supported transports.
+
+## Harness roadmap Phase 4: contracts, evidence, waits, and child sessions
+
+The canonical stream now has a durable contract layer. Each session can carry
+an `OutcomeContract` with required outputs and verification criteria, a
+`ConstraintLedger` for policy/decision/assumption changes, and an
+`EvidenceManifest` whose entries retain source, freshness, confidence, and
+contradiction status. Metadata is redacted before persistence and each
+collection exposes a deterministic checksum for replay and audit consumers.
+
+Artifact output is append-only by path: `ArtifactRevision` records the
+content hash, size, parent revision, creator, and committed/superseded state.
+Approval, input, pause, reconnect, child, and external dependencies are
+represented as restartable `WaitState` records with request/idempotency keys,
+expiry, and explicit resolution. Runtime interruption, continuation, safety,
+mode-gate, reconnect, and child-wait events are projected into the corresponding
+pause/external/reconnect/child wait kinds. A generic resume clears lifecycle
+blockers but deliberately leaves approval and structured-input waits pending
+until their explicit response. A terminal task resolves outstanding waits and
+updates its outcome contract before the compatibility timeline is treated as
+complete.
+
+Child tasks retain their legacy grouping/session fields, but each child gets a
+distinct canonical protocol session. The child link persists inherited policy,
+owner, isolation key, and `complete | partial | failed` outcome; a parent can
+therefore aggregate children without treating a partial or failed branch as a
+successful run. The compatibility projection remains in place while these
+records become the durable source for recovery and inspection.
+
+## Harness roadmap Phase 5: incremental projections, observability, and replay
+
+Phase 5 keeps the canonical item stream append-only and moves hot-path
+bookkeeping into separate, rebuildable records:
+
+- `WorkSessionProjectionRepository` persists a reducer state and cursor per
+  session/projection. Each update queries only items with a sequence greater
+  than the cursor (`O(delta)`), while a configurable item/time cadence computes
+  a full-rebuild checksum and records whether the incremental and full states
+  match. A cursor that is ahead of the stream is reset safely and rebuilt from
+  sequence zero.
+- `WorkSessionActivityLeaseRepository` stores short-lived, token-hashed
+  liveness leases for LLM work, tools, retries, waits, joins, and reconnects.
+  Only known activity/wait events create leases; ordinary `log` and step
+  telemetry remains metrics-only. End events close an existing operation by its
+  durable identity without creating a new lease. Leases can be renewed without
+  knowing which provider is active, expire after a missed heartbeat, and are
+  released on resolution or terminal cleanup.
+- `WorkSessionOperationalMetricsRepository` stores bounded counters/samples
+  outside the user timeline. Names, dimensions, values, and retention are
+  capped; credential-like dimension keys and values are dropped before SQLite.
+- `WorkSessionReplayEvaluationService` replays cloned canonical items in an
+  isolated reducer, then compares chunked/incremental and full-rebuild
+  checksums. The deterministic fixture suite covers crash recovery, compaction,
+  approval, credential redaction, policy revocation, and child-session joins,
+  including false-success, duplicate-side-effect, credential-leak, and
+  authorization-bypass findings. User-action terminal statuses and blocker
+  events replay as `waiting`, so an eval assertion cannot silently skip a
+  `needs_user_action` outcome.
+- `WorkSessionRolloutService` assigns a stable workspace/session cohort and
+  exposes a single read-mode switch. `legacyReadRollback` is checked before
+  cohort assignment, so operators can immediately return reads to the legacy
+  Task/TaskEvent projection without changing writes or deleting data.
+
+The existing `scripts/qa/run_eval_suite.cjs` deterministic mode now uses the
+isolated replay evaluator rather than grading only the source task snapshot;
+the fixture suite runs on every deterministic evaluation invocation. This keeps
+the legacy compatibility read path available while vNext projections can be
+canaried and compared in production.
 
 ## Lifecycle contract
 
@@ -263,7 +348,7 @@ or relying on opaque “safe/unsafe” labels.
 
 ## Non-goals and intentional boundaries
 
-- No Phase 5 cloud-mode or Sites implementation.
+- No cloud-mode or Sites implementation (the separate product roadmap Phase 5 remains intentionally skipped).
 - No live runtime migration between machines; use a durable handoff package.
 - No implicit browser-cookie or profile transfer.
 - No automatic dependency installation or arbitrary project command execution
@@ -285,6 +370,7 @@ or relying on opaque “safe/unsafe” labels.
 | Automation outcome hashes | `src/electron/automation/AutomationOutcomeService.ts` | [Core Automation](core-automation.md), [Task Automations](task-automations.md) |
 | Local preview lifecycle | `src/electron/preview/LocalPreviewProcessService.ts`, `src/shared/local-preview.ts` | [Web Page Artifacts](web-page-artifacts.md), [Browser Workbench](browser-workbench.md) |
 | Risk-chain explanation | `src/shared/export-risk-chain.ts`, approval/export UI | [Security Model](security/security-model.md), [Trust Boundaries](security/trust-boundaries.md) |
+| Incremental projections, leases, metrics, replay, rollout | `src/electron/database/WorkSessionProjectionRepository.ts`, `src/electron/database/WorkSessionActivityLeaseRepository.ts`, `src/electron/database/WorkSessionOperationalMetricsRepository.ts`, `src/electron/sessions/WorkSessionReliabilityService.ts`, `src/electron/sessions/WorkSessionReplayEvaluationService.ts`, `src/electron/sessions/WorkSessionRolloutService.ts` | This section |
 | Renderer/preload contract | `src/electron/preload.ts`, `src/electron/ipc/handlers.ts`, `src/shared/types.ts` | [Architecture](architecture.md) |
 
 ## Verification expectations

@@ -37,6 +37,8 @@ export interface FocusedCard {
 }
 
 export interface CreateTaskOptions {
+  /** Ask the desktop task runner to replace the initial prompt-derived title asynchronously. */
+  generateTitle?: boolean;
   autonomousMode?: boolean;
   permissionMode?: PermissionMode;
   shellAccess?: boolean;
@@ -49,6 +51,7 @@ export interface CreateTaskOptions {
   multiLlmConfig?: import("../../../shared/types").MultiLlmConfig;
   verificationAgent?: boolean;
   executionMode?: ExecutionMode;
+  assignedAgentRoleId?: string;
   taskDomain?: TaskDomain;
   chronicleMode?: import("../../../shared/types").ChronicleTaskMode;
   videoGenerationMode?: boolean;

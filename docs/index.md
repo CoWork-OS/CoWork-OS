@@ -12,6 +12,9 @@ hero:
       text: Models & Access
       link: /providers
     - theme: alt
+      text: MLX-LM Local Inference
+      link: /mlx-lm
+    - theme: alt
       text: Compare
       link: /comparisons/
     - theme: alt
@@ -164,6 +167,8 @@ features:
     details: CoWork OS keeps coding, email, research, documents, spreadsheets, presentations, browser work, PDFs, memory, skills, approvals, channels, devices, and automations in one governed workspace.
   - title: Open Multi-Provider Harness
     details: Bring supported provider accounts, API keys, compatible gateways, cloud credentials, or local models. CoWork keeps the surrounding tools, skills, memory, agents, approvals, artifacts, and workflows consistent as model routes change. CoWork is free; provider charges and terms remain separate.
+  - title: MLX-LM on Apple Silicon
+    details: Run quantized local models through Apple's open-source MLX framework and MLX-LM's OpenAI-compatible server, with native-platform checks, Settings lifecycle controls, and local-only model requests. See the MLX-LM Local Inference guide.
   - title: GUI-First Agent Management
     details: Create reusable agents, spawn parallel work, inspect delegated runs, assign tasks, review approvals, and monitor many agents through Agents Hub, Mission Control, task timelines, and visual boards, while still having a terminal-native entrypoint for fast local runs.
   - title: First-Class CoWork CLI

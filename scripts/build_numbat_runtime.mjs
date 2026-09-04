@@ -140,8 +140,23 @@ function tarPath(filePath) {
   return path.resolve(filePath).replaceAll("\\", "/");
 }
 
+function tarSupportsForceLocal() {
+  if (process.platform !== "win32") return false;
+  // Windows runners may resolve either GNU tar or bsdtar; only GNU tar
+  // understands --force-local, while both accept native drive paths.
+  const result = spawnSync("tar", ["--help"], {
+    encoding: "utf8",
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const help = `${result.stdout || ""}\n${result.stderr || ""}`;
+  return result.status === 0 && help.includes("--force-local");
+}
+
+const useForceLocalTar = tarSupportsForceLocal();
+
 function tarArgs(args) {
-  return process.platform === "win32" ? ["--force-local", ...args] : args;
+  return useForceLocalTar ? ["--force-local", ...args] : args;
 }
 
 async function download(url, outputPath, expectedSha256, label) {

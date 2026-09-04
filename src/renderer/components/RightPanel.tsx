@@ -1721,10 +1721,6 @@ function RightPanelComponent({
   });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
   const [highlightedOutputPath, setHighlightedOutputPath] = useState<string | null>(null);
-  const [taskFeedbackDecision, setTaskFeedbackDecision] = useState<"accepted" | "rejected" | null>(
-    null,
-  );
-  const [taskFeedbackDismissed, setTaskFeedbackDismissed] = useState(false);
   const fileItemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const agentContext = useAgentContext();
   const openFileFromFilesSection = useCallback(
@@ -2004,28 +2000,6 @@ function RightPanelComponent({
     }, 2200);
     return () => clearTimeout(timer);
   }, [highlightOutputPath, files.length]);
-
-  useEffect(() => {
-    setTaskFeedbackDecision(null);
-    setTaskFeedbackDismissed(false);
-  }, [task?.id]);
-
-  const handleTaskFeedback = useCallback(
-    async (decision: "accepted" | "rejected") => {
-      if (!task?.id) return;
-      setTaskFeedbackDecision(decision);
-      try {
-        await window.electronAPI.submitMessageFeedback({
-          taskId: task.id,
-          decision,
-          kind: "task",
-        });
-      } catch (err) {
-        console.error("[Feedback] Failed to submit task feedback:", err);
-      }
-    },
-    [task?.id],
-  );
 
   // Extract tool usage from events
   const toolUsage = useMemo((): ToolUsage[] => {
@@ -2477,47 +2451,6 @@ function RightPanelComponent({
         setViewerFilePath={setViewerFilePath}
         rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
       />
-
-      {task?.status === "completed" && !hasActiveChildren && !taskFeedbackDismissed && (
-        <div className="right-panel-section cli-section right-panel-feedback-section">
-          <div className="cli-section-content">
-            <div className="right-panel-feedback-card">
-              <div className="right-panel-feedback-copy">
-                <strong>Rate this result</strong>
-                <span className="right-panel-feedback-detail">
-                  Helps improve this agent and persona.
-                </span>
-              </div>
-              <div className="right-panel-feedback-actions">
-                <button
-                  type="button"
-                  className={`message-feedback-btn right-panel-feedback-btn${taskFeedbackDecision === "accepted" ? " active" : ""}`}
-                  onClick={() => void handleTaskFeedback("accepted")}
-                  title="This task result was helpful"
-                >
-                  Up
-                </button>
-                <button
-                  type="button"
-                  className={`message-feedback-btn right-panel-feedback-btn${taskFeedbackDecision === "rejected" ? " active" : ""}`}
-                  onClick={() => void handleTaskFeedback("rejected")}
-                  title="This task result needs improvement"
-                >
-                  Down
-                </button>
-                <button
-                  type="button"
-                  className="message-feedback-btn right-panel-feedback-btn right-panel-feedback-dismiss"
-                  onClick={() => setTaskFeedbackDismissed(true)}
-                  title="Close without rating"
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {task?.status === "completed" &&
         !hasActiveChildren &&

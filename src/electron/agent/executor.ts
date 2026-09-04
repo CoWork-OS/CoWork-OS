@@ -32988,9 +32988,15 @@ Return ONLY a JSON object:
           );
         },
       );
-      if (!stepFailed && missingRequiredTools.length > 0) {
+      // A text-only mutation turn can keep the kernel alive until its loop
+      // budget is exhausted (there are no tool results on which to run the
+      // per-iteration checkpoint). Preserve the more actionable contract
+      // failure in that case instead of reporting a generic max-iterations
+      // error. This keeps the terminal outcome truthful and gives recovery
+      // policy the required tool/path signal.
+      if (missingRequiredTools.length > 0 && (!stepFailed || stepLoopBudgetStopReason)) {
         stepFailed = true;
-        if (!lastFailureReason) {
+        if (!lastFailureReason || stepLoopBudgetStopReason) {
           lastFailureReason =
             `Step required tool contract was not satisfied. Missing successful calls for: ` +
             `${missingRequiredTools.join(", ")}.`;
@@ -32998,13 +33004,13 @@ Return ONLY a JSON object:
       }
 
       if (
-        !stepFailed &&
+        (!stepFailed || stepLoopBudgetStopReason) &&
         stepContract.requiresMutation &&
         !mutationSatisfiedForFinal &&
         !satisfiedByPriorMutation
       ) {
         stepFailed = true;
-        if (!lastFailureReason) {
+        if (!lastFailureReason || stepLoopBudgetStopReason) {
           lastFailureReason =
             "Step expected a written artifact but no successful file/canvas mutation was detected.";
         }

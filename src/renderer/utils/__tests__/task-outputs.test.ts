@@ -96,6 +96,24 @@ describe("task output summary utilities", () => {
     expect(getPrimaryOutputFileName(summary)).toBe("final-report.pdf");
   });
 
+  it("does not count absolute and relative emissions of one artifact twice", () => {
+    const summary = deriveTaskOutputSummaryFromEvents([
+      makeEvent("timeline_artifact_emitted", { path: "/workspace/artifacts/report.md" }, 100),
+      makeEvent("artifact_created", { path: "artifacts/report.md" }, 101),
+    ]);
+    expect(summary?.created).toEqual(["artifacts/report.md"]);
+    expect(summary?.outputCount).toBe(1);
+  });
+
+  it("retains distinct relative directories when basenames happen to match", () => {
+    const summary = deriveTaskOutputSummaryFromEvents([
+      makeEvent("timeline_artifact_emitted", { path: "/workspace/a/report.md" }, 100),
+      makeEvent("artifact_created", { path: "b/report.md" }, 101),
+    ]);
+    expect(summary?.created).toEqual(["b/report.md", "/workspace/a/report.md"]);
+    expect(summary?.outputCount).toBe(2);
+  });
+
   it("derives output evidence from assistant media directives when file events are missing", () => {
     const events: TaskEvent[] = [
       makeEvent(

@@ -14176,3 +14176,61 @@
     color: Highlight;
   }
 }
+
+/* Bot conversations reuse the task shell but present a clean message
+   transcript. Execution controls and session metadata stay available to
+   normal tasks only; bot replies remain attributed to the bot identity. */
+.bot-conversation .main-header-title-group {
+  gap: 8px;
+}
+
+.bot-conversation .main-header-title {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bot-conversation .main-body {
+  padding-top: 18px;
+}
+
+.bot-conversation .task-content {
+  max-width: 760px;
+}
+
+.bot-conversation .input-below-actions,
+.bot-conversation .input-status-text,
+.bot-conversation .footer-disclaimer,
+.bot-conversation .research-mode-badge {
+  display: none;
+}
+
+.bot-conversation .main-footer {
+  padding-top: 12px;
+}
+
+.bot-conversation .main-footer::before {
+  height: 32px;
+}
+
+.bot-conversation .chat-message.assistant-message {
+  margin-bottom: 26px;
+}
+
+.bot-conversation .chat-message.assistant-message .chat-bubble {
+  max-width: min(680px, 88%);
+}
+
+.bot-message-attribution {
+  max-width: 100%;
+  margin-bottom: 5px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}

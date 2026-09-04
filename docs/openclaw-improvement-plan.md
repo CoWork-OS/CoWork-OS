@@ -57,7 +57,7 @@ The remaining differences versus OpenClaw are now mostly product-shape choices r
 ### UI and learning surfaces
 
 - `src/renderer/components/GuardrailSettings.tsx` exposes `adaptiveStyleEnabled` and `channelPersonaEnabled`
-- `src/renderer/components/MainContent.tsx` and `src/renderer/components/RightPanel.tsx` expose message/task feedback controls
+- `src/renderer/components/MainContent/MainContent.tsx` exposes message feedback controls
 - `src/renderer/components/MemoryHubSettings.tsx` already exposes `Open USER.md` and `Open MEMORY.md`
 
 ---

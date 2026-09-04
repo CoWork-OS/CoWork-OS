@@ -48,6 +48,40 @@ function mapToSortedPaths(map: Map<string, number>): string[] {
     .map(([filePath]) => filePath);
 }
 
+function outputPathIdentity(value: string): {
+  normalized: string;
+  basename: string;
+  absolute: boolean;
+} {
+  const normalized = normalizePath(value).replace(/\/+/g, "/").replace(/^\.\//, "");
+  return {
+    normalized,
+    basename: normalized.slice(normalized.lastIndexOf("/") + 1),
+    absolute: /^(?:\/|[A-Za-z]:\/)/.test(normalized),
+  };
+}
+
+function dedupeOutputPaths(paths: string[]): string[] {
+  const kept: Array<ReturnType<typeof outputPathIdentity>> = [];
+  const result: string[] = [];
+  for (const path of paths) {
+    const identity = outputPathIdentity(path);
+    const duplicate = kept.some((candidate) => {
+      if (candidate.normalized === identity.normalized) return true;
+      if (candidate.absolute === identity.absolute || candidate.basename !== identity.basename) {
+        return false;
+      }
+      const absolute = candidate.absolute ? candidate.normalized : identity.normalized;
+      const relative = candidate.absolute ? identity.normalized : candidate.normalized;
+      return !relative.includes("/") || absolute.endsWith(`/${relative}`);
+    });
+    if (duplicate) continue;
+    kept.push(identity);
+    result.push(path);
+  }
+  return result;
+}
+
 function collectDirectoryPaths(events: TaskEvent[] | undefined): Set<string> {
   const directoryPaths = new Set<string>();
   if (!Array.isArray(events) || events.length === 0) return directoryPaths;
@@ -115,11 +149,13 @@ export function sanitizeTaskOutputSummary(raw: unknown): TaskOutputSummary | nul
     folders?: unknown[];
   };
 
-  const created = toUniqueNormalizedPaths(
-    Array.isArray(candidate.created) ? candidate.created : [],
+  const created = dedupeOutputPaths(
+    toUniqueNormalizedPaths(Array.isArray(candidate.created) ? candidate.created : []),
   );
-  const modifiedFallback = toUniqueNormalizedPaths(
-    Array.isArray(candidate.modifiedFallback) ? candidate.modifiedFallback : [],
+  const modifiedFallback = dedupeOutputPaths(
+    toUniqueNormalizedPaths(
+      Array.isArray(candidate.modifiedFallback) ? candidate.modifiedFallback : [],
+    ),
   );
   const effective = created.length > 0 ? created : modifiedFallback;
   if (effective.length === 0) return null;
@@ -208,8 +244,8 @@ export function deriveTaskOutputSummaryFromEvents(events: TaskEvent[]): TaskOutp
     }
   }
 
-  const createdPaths = mapToSortedPaths(created);
-  const modifiedPaths = mapToSortedPaths(modified);
+  const createdPaths = dedupeOutputPaths(mapToSortedPaths(created));
+  const modifiedPaths = dedupeOutputPaths(mapToSortedPaths(modified));
   return buildSummary(createdPaths, modifiedPaths);
 }
 

@@ -15,6 +15,11 @@ The key idea: on Linux you typically do **not** run a desktop app UI. Instead yo
 
 If you need the desktop app UI on macOS or Windows, that’s a separate mode.
 
+MLX-LM is also a desktop-only Apple Silicon route: it requires native macOS
+`arm64` and is not available in Linux headless deployments. Use a Linux-compatible
+provider such as Ollama or a configured cloud/API route on a VPS. For the desktop
+setup, see [MLX-LM Local Inference](mlx-lm.md).
+
 ## First 10 Minutes (What Users Actually Do)
 
 Typical flow on a new VPS:

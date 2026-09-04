@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **MLX-LM local inference**: added a first-class Apple Silicon `mlx` provider with native-platform and Python-runtime checks, quantized-model quick picks, local `mlx_lm.server` lifecycle controls, OpenAI-compatible `/v1` routing, legacy endpoint normalization, and a complete [MLX-LM Local Inference guide](mlx-lm.md).
 - **Access profiles**: added Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles combining sandbox, approvals, reviewer behavior, network, filesystem, and domain policy across desktop, CLI, remote, managed, automation, channel, and child-task surfaces.
 - **Access profile documentation**: added the canonical [Access Profiles guide](access-profiles.md) covering selection, defaults, custom profile fields, inheritance, fail-closed behavior, migration, compatibility, and verification.
 
@@ -390,7 +391,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Prompt-aware tool descriptions**: built-in tools now carry prompt metadata so the runtime can render concise execution-facing descriptions and compact planning text from one shared definition.
 - **Imported capability security**: managed skills and plugin packs now stage through a shared security gate with persisted reports, quarantine handling, retry/remove actions, and explicit file-import approval tracking.
 - **Usage Insights projector**: usage metrics now support incremental backfill/projection, richer provider breakdowns, retry metrics, normalized provider names, and new renderer helpers for periods and formatting.
-- **Task feedback controls**: completed tasks can now collect user feedback directly from the right panel.
 
 ### Changed
 - **Execution runtime**: prompt assembly now uses cache-aware session- and turn-scoped sections, shared prompt-section hashing, adaptive output-budget state, prompt-aware tool text, and normalized delegation-role inference.
@@ -399,7 +399,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Import and extension loading**: imported skills and plugin packs now carry persisted security reports through loader, installer, registry, IPC, and renderer surfaces instead of surfacing ad hoc warnings.
 - **Automations terminology and docs**: product copy, settings labels, comparisons, and troubleshooting guides now consistently use `Subconscious` or `subconscious loop` in place of the older self-improvement language where appropriate.
 - **Usage Insights UI**: the LLM section and charts now use normalized provider names, richer charting, one-day and shared period presets, and extracted formatting helpers.
-- **Approval and task-detail UX**: approval dialogs now render safer command previews, and task detail feedback moved into the right panel.
+- **Approval and task-detail UX**: approval dialogs now render safer command previews, and task detail surfaces were refreshed.
 - **Gateway, daemon, and worktree plumbing**: workspace bootstrap, channel gateway startup, secure worktree persistence, and health snapshots now carry richer routing and provider state.
 
 ### Fixed
@@ -436,7 +436,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Connector-backed Event Triggers**: MCP connector notifications and resource updates as trigger inputs with subscription sync (see docs).
 - **Per-phase workflow model routing**: workflow pipeline phases with LLM overrides or capability-based auto-selection.
 - **Federated ACP orchestration**: persisted remote agents and A2A-style invocation with orchestration targeting `acp_agent_id`.
-- **Usage Insights quality metrics**: persona breakdowns, retry metrics, and task-result satisfaction signals.
+- **Usage Insights quality metrics**: persona breakdowns, retry metrics, and feedback quality signals.
 - **Release notes for 0.5.19**: see [Release Notes 0.5.19](release-notes-0.5.19.md).
 
 ### Changed

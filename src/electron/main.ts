@@ -3708,7 +3708,11 @@ if (isCliDirectRunMode()) {
                 let options:
                   | Pick<
                       import("../shared/types").TaskFollowUpInput,
-                      "permissionMode" | "shellAccess" | "accessProfileId" | "integrationMentions"
+                      | "permissionMode"
+                      | "shellAccess"
+                      | "accessProfileId"
+                      | "integrationMentions"
+                      | "expectedTurnId"
                     >
                   | undefined;
                 try {
@@ -3718,6 +3722,9 @@ if (isCliDirectRunMode()) {
                   images = sanitized.images;
                   quotedAssistantMessage = sanitized.quotedAssistantMessage;
                   options = {
+                    ...(sanitized.expectedTurnId
+                      ? { expectedTurnId: sanitized.expectedTurnId }
+                      : {}),
                     ...(sanitized.permissionMode
                       ? { permissionMode: sanitized.permissionMode }
                       : {}),

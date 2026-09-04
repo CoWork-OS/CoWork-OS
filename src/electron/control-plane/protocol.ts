@@ -267,6 +267,13 @@ export const Methods = {
   TASK_EVENTS: "task.events",
   TASK_TIMELINE_PAGE: "task.timelinePage",
   TASK_EVENT_DETAIL: "task.eventDetail",
+  // Work-session reliability and rollout operations
+  WORK_SESSION_ROLLOUT_GET: "workSession.rollout.get",
+  WORK_SESSION_ROLLOUT_UPDATE: "workSession.rollout.update",
+  WORK_SESSION_METRICS_LIST: "workSession.metrics.list",
+  WORK_SESSION_LEASES_LIST: "workSession.leases.list",
+  WORK_SESSION_PROJECTION_GET: "workSession.projection.get",
+  WORK_SESSION_REPLAY_EVALUATE: "workSession.replay.evaluate",
   TASK_CANCEL: "task.cancel",
   TASK_SEND_MESSAGE: "task.sendMessage",
   MANAGED_AGENT_LIST: "managedAgent.list",

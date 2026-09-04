@@ -86,6 +86,7 @@ import { TASK_EVENT_BRIDGE_ALLOWLIST } from "./task-event-bridge-contract";
 import { registerControlPlaneCoreMethods } from "./registerControlPlaneCoreMethods";
 import { registerAgentSecurityMethods } from "./registerAgentSecurityMethods";
 import { registerStrategicPlannerMethods } from "./registerStrategicPlannerMethods";
+import { registerWorkSessionMethods } from "./registerWorkSessionMethods";
 import { getStrategicPlannerService } from "./StrategicPlannerService";
 import { registerSymphonyMethods } from "./registerSymphonyMethods";
 import { getSymphonyService } from "./SymphonyService";
@@ -1471,6 +1472,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         message,
         images,
         quotedAssistantMessage,
+        expectedTurnId,
         permissionMode,
         accessProfileId,
         shellAccess,
@@ -1482,6 +1484,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         images,
         quotedAssistantMessage,
         {
+          ...(expectedTurnId ? { expectedTurnId } : {}),
           ...(permissionMode ? { permissionMode } : {}),
           ...(accessProfileId ? { accessProfileId } : {}),
           ...(shellAccess !== undefined ? { shellAccess } : {}),
@@ -2879,6 +2882,13 @@ function registerTaskAndWorkspaceMethods(
   const channelGateway = deps.channelGateway;
   const isAdminClient = (client: any) => !!client?.hasScope?.("admin");
 
+  registerWorkSessionMethods({
+    server,
+    db,
+    agentDaemon,
+    requireScope,
+  });
+
   const redactWorkspaceForRead = (workspace: any) => ({
     id: workspace.id,
     name: workspace.name,
@@ -3404,12 +3414,14 @@ function registerTaskAndWorkspaceMethods(
       message,
       images,
       quotedAssistantMessage,
+      expectedTurnId,
       permissionMode,
       accessProfileId,
       shellAccess,
       integrationMentions,
     } = sanitizeTaskMessageParams(params);
     await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
+      ...(expectedTurnId ? { expectedTurnId } : {}),
       ...(permissionMode ? { permissionMode } : {}),
       ...(accessProfileId ? { accessProfileId } : {}),
       ...(shellAccess !== undefined ? { shellAccess } : {}),

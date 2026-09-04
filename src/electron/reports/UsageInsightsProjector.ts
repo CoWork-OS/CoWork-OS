@@ -119,6 +119,15 @@ export class UsageInsightsProjector {
     return UsageInsightsProjector.instance;
   }
 
+  /**
+   * The projector is process-global, but its rollups and cache are tied to the
+   * database connection it was initialized with. Callers that own another
+   * connection must not accidentally consume this singleton's state.
+   */
+  isForDatabase(db: unknown): boolean {
+    return this.db === db;
+  }
+
   private cache = new Map<string, CacheEntry<unknown>>();
   private version = 0;
   private pendingRefreshes = new Set<string>();

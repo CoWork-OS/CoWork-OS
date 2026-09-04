@@ -42,6 +42,7 @@ import { sanitizeTaskMessageParams } from "../electron/control-plane/sanitize";
 import { registerControlPlaneCoreMethods } from "../electron/control-plane/registerControlPlaneCoreMethods";
 import { registerAgentSecurityMethods } from "../electron/control-plane/registerAgentSecurityMethods";
 import { registerStrategicPlannerMethods } from "../electron/control-plane/registerStrategicPlannerMethods";
+import { registerWorkSessionMethods } from "../electron/control-plane/registerWorkSessionMethods";
 import { getStrategicPlannerService } from "../electron/control-plane/StrategicPlannerService";
 import { resolvePathWithinRoot } from "../electron/control-plane/path-containment";
 import { evaluateControlPlaneDeploymentPosture } from "../electron/control-plane/deployment-posture";
@@ -817,6 +818,12 @@ export function registerControlPlaneMethods(
     plannerService: getStrategicPlannerService(),
     requireScope,
   });
+  registerWorkSessionMethods({
+    server,
+    db,
+    agentDaemon,
+    requireScope,
+  });
 
   // Managed Accounts (API-first signup/account lifecycle)
   server.registerMethod(Methods.ACCOUNT_LIST, async (client, params) => {
@@ -1117,8 +1124,10 @@ export function registerControlPlaneMethods(
 
   server.registerMethod(Methods.TASK_SEND_MESSAGE, async (client, params) => {
     requireScope(client, "admin");
-    const { taskId, message, images } = sanitizeTaskMessageParams(params);
-    await agentDaemon.sendMessage(taskId, message, images);
+    const { taskId, message, images, expectedTurnId } = sanitizeTaskMessageParams(params);
+    await agentDaemon.sendMessage(taskId, message, images, undefined, {
+      ...(expectedTurnId ? { expectedTurnId } : {}),
+    });
     return { ok: true };
   });
 

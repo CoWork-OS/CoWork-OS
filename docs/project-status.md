@@ -74,6 +74,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Prompt caching defaults for Anthropic, Azure Anthropic, OpenAI, Azure OpenAI, and OpenRouter GPT/Claude routes
 - [x] AWS Bedrock
 - [x] Ollama (local/free)
+- [x] MLX-LM provider wiring (native Apple Silicon local inference; live-device QA remains platform-specific)
 - [x] Provider Factory with dynamic selection
 - [x] Located: `src/electron/agent/llm/`
 
@@ -483,7 +484,7 @@ unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Pe
 
 ### You Can:
 1. Select workspaces and create tasks
-2. Use a configured model route, including supported provider accounts, APIs, compatible gateways, cloud credentials, and local Ollama models
+2. Use a configured model route, including supported provider accounts, APIs, compatible gateways, cloud credentials, local Ollama models, or MLX-LM on native Apple Silicon
 3. Execute multi-step file operations
 4. Create real Office documents (.xlsx, .docx, .pdf, .pptx)
 5. Search the web with multiple providers

@@ -20,6 +20,8 @@ import {
 } from "../database/repositories";
 import { SessionRetentionService } from "../sessions/SessionRetentionService";
 import { SessionProgressService } from "../sessions/SessionProgressService";
+import { WorkSessionProtocolService } from "../sessions/WorkSessionProtocolService";
+import { WorkSessionContractService } from "../sessions/WorkSessionContractService";
 import {
   loadSessionRetentionSettings,
   saveSessionRetentionSettings,
@@ -494,6 +496,8 @@ export class AgentDaemon extends EventEmitter {
   private inputRequestRepo: InputRequestRepository;
   private artifactRepo: ArtifactRepository;
   private sessionProgressService: SessionProgressService;
+  private workSessionProtocolService: WorkSessionProtocolService;
+  private workSessionContractService: WorkSessionContractService;
   private annotationRepo: AnnotationRepository;
   private activityRepo: ActivityRepository;
   private agentRoleRepo: AgentRoleRepository;
@@ -595,6 +599,12 @@ export class AgentDaemon extends EventEmitter {
     this.inputRequestRepo = new InputRequestRepository(db);
     this.artifactRepo = new ArtifactRepository(db);
     this.sessionProgressService = new SessionProgressService(db);
+    this.workSessionProtocolService = new WorkSessionProtocolService(db);
+    this.workSessionProtocolService.getReliabilityService().start();
+    this.workSessionContractService = new WorkSessionContractService(
+      db,
+      this.workSessionProtocolService,
+    );
     this.annotationRepo = new AnnotationRepository(db);
     this.activityRepo = new ActivityRepository(db);
     this.agentRoleRepo = new AgentRoleRepository(db);
@@ -674,6 +684,21 @@ export class AgentDaemon extends EventEmitter {
   /** Return the compact durable state used to restore a session after reload/reconnect. */
   getSessionProgress(taskId: string) {
     return this.sessionProgressService.get(taskId);
+  }
+
+  /** Return the canonical WorkSession -> Turn -> Item protocol service. */
+  getWorkSessionProtocolService(): WorkSessionProtocolService {
+    return this.workSessionProtocolService;
+  }
+
+  /** Return the durable Phase 4 contracts/evidence/lineage service. */
+  getWorkSessionContractService(): WorkSessionContractService {
+    return this.workSessionContractService;
+  }
+
+  /** Return Phase 5 projection, lease, metrics, replay, and rollout services. */
+  getWorkSessionReliabilityService() {
+    return this.workSessionProtocolService.getReliabilityService();
   }
 
   searchSessions(query: string, workspaceId?: string, limit?: number) {
@@ -1311,6 +1336,14 @@ export class AgentDaemon extends EventEmitter {
     for (const task of activeAndIncompleteTasks) {
       this.backfillTaskCompletionTelemetry(task.id);
       this.completionTelemetryBackfilledTaskIds.add(task.id);
+      try {
+        // Rebuild the additive contract/lineage projection before queue
+        // recovery so approvals, input requests, and child sessions survive
+        // a process restart even when no executor is rehydrated yet.
+        this.workSessionContractService.ensureForTask(task);
+      } catch (error) {
+        log.warn(`[work-session-contracts] Failed to recover task ${task.id}:`, error);
+      }
     }
 
     const inconsistentPersistedTasks = activeAndIncompleteTasks.filter(
@@ -2895,6 +2928,15 @@ export class AgentDaemon extends EventEmitter {
     };
     this.taskRepo.update(task.id, rootLineageUpdates);
     Object.assign(task, rootLineageUpdates);
+    try {
+      this.workSessionProtocolService.ensureForTask(task);
+      this.workSessionContractService.ensureForTask(task);
+    } catch (error) {
+      // The canonical protocol is an additive projection during rollout. A
+      // migration/foreign-key issue must not prevent the compatibility task
+      // record from being created.
+      log.warn(`[work-session-protocol] Failed to initialize task ${task.id}:`, error);
+    }
     return { task, derived };
   }
 
@@ -3340,6 +3382,17 @@ export class AgentDaemon extends EventEmitter {
     if (Object.keys(initialUpdates).length > 0) {
       this.taskRepo.update(task.id, initialUpdates);
       Object.assign(task, initialUpdates);
+    }
+
+    try {
+      if (parent) {
+        this.workSessionContractService.ensureChildSession(parent, task);
+      } else {
+        this.workSessionProtocolService.ensureForTask(task);
+        this.workSessionContractService.ensureForTask(task);
+      }
+    } catch (error) {
+      log.warn(`[work-session-protocol] Failed to initialize child task ${task.id}:`, error);
     }
 
     if (!params.teamRunId && !params.teamItemId) {
@@ -5814,6 +5867,24 @@ export class AgentDaemon extends EventEmitter {
     if (metrics.length > 0) this.logEvent(taskId, "task_impact_updated", { metrics });
   }
 
+  /**
+   * Broadcast a persisted task-title change without adding metadata noise to
+   * the task's conversation timeline.
+   */
+  emitTaskTitleUpdated(taskId: string, title: string): void {
+    const eventId = crypto.randomUUID();
+    this.emitTaskEvent({
+      id: eventId,
+      taskId,
+      type: "task_title_updated",
+      payload: { title },
+      timestamp: Date.now(),
+      schemaVersion: 2,
+      eventId,
+      actor: "system",
+    });
+  }
+
   logEvent(taskId: string, type: string, payload: Any): void {
     const timestamp = Date.now();
     const payloadObj: Record<string, unknown> =
@@ -6031,8 +6102,19 @@ export class AgentDaemon extends EventEmitter {
       legacyType,
       legacyPayload,
     });
-    this.recordCanonicalToolImpact(taskId, timelineEvent, legacyType || type);
-    this.recordTaskMutationImpact(taskId, timelineEvent, legacyType || type, legacyPayload);
+    // Keep the event bridge resilient when `logEvent` is exercised on a
+    // lightweight daemon double (as in focused renderer/timeline tests). The
+    // concrete daemon always has these methods, but the canonical event should
+    // still be persisted if an older/mock host does not expose the optional
+    // mutation-impact observers.
+    const recordCanonicalToolImpact = (this as Any).recordCanonicalToolImpact;
+    if (typeof recordCanonicalToolImpact === "function") {
+      recordCanonicalToolImpact.call(this, taskId, timelineEvent, legacyType || type);
+    }
+    const recordTaskMutationImpact = (this as Any).recordTaskMutationImpact;
+    if (typeof recordTaskMutationImpact === "function") {
+      recordTaskMutationImpact.call(this, taskId, timelineEvent, legacyType || type, legacyPayload);
+    }
     const persistTranscriptArtifacts = (this as Any).persistTranscriptArtifacts;
     if (typeof persistTranscriptArtifacts === "function") {
       void persistTranscriptArtifacts.call(this, taskId, timelineEvent, legacyType, legacyPayload);
@@ -7184,6 +7266,32 @@ export class AgentDaemon extends EventEmitter {
 
     const task = this.taskRepo.findById(event.taskId);
     try {
+      const protocol = (this as Any).workSessionProtocolService as
+        | WorkSessionProtocolService
+        | undefined;
+      protocol?.recordTaskEvent(event.taskId, storedEvent);
+    } catch (error) {
+      // Keep the legacy TaskEvent stream authoritative while the canonical
+      // WorkSession projection rolls out across existing databases.
+      log.warn(
+        `[work-session-protocol] Failed to dual-write event ${event.id} for task ${event.taskId}:`,
+        error,
+      );
+    }
+    try {
+      const contracts = (this as Any).workSessionContractService as
+        | WorkSessionContractService
+        | undefined;
+      contracts?.recordTaskEvent(event.taskId, storedEvent);
+    } catch (error) {
+      // Contract/evidence projections are additive and must not interrupt the
+      // legacy timeline or task execution if a migrated database is incomplete.
+      log.warn(
+        `[work-session-contracts] Failed to project event ${event.id} for task ${event.taskId}:`,
+        error,
+      );
+    }
+    try {
       this.sessionProgressService.updateFromEvent(storedEvent);
     } catch (error) {
       // A projection failure must never interrupt task execution or timeline persistence.
@@ -8044,7 +8152,7 @@ export class AgentDaemon extends EventEmitter {
       const fileBuffer = fs.readFileSync(filePath);
       const sha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
-      this.artifactRepo.create({
+      const artifact = this.artifactRepo.create({
         taskId,
         path: filePath,
         mimeType,
@@ -8052,6 +8160,14 @@ export class AgentDaemon extends EventEmitter {
         size: stats.size,
         createdAt: Date.now(),
       });
+      try {
+        this.workSessionContractService.recordArtifact(taskId, artifact);
+      } catch (error) {
+        log.warn(
+          `[work-session-contracts] Failed to record artifact revision for ${taskId}:`,
+          error,
+        );
+      }
       this.sessionProgressService.rebuild(taskId);
 
       console.log(`[AgentDaemon] Registered artifact: ${filePath}`);
@@ -8560,13 +8676,22 @@ export class AgentDaemon extends EventEmitter {
       typeof options?.limit === "number" && Number.isFinite(options.limit)
         ? Math.min(Math.max(options.limit, 1), 200)
         : undefined;
-    if (normalizedTypes.length > 0) {
-      return this.eventRepo.findByTaskIdAndTypes(taskId, normalizedTypes, limit);
+    const legacyRead = (): TaskEvent[] => {
+      if (normalizedTypes.length > 0) {
+        return this.eventRepo.findByTaskIdAndTypes(taskId, normalizedTypes, limit);
+      }
+      if (typeof limit === "number") {
+        return this.eventRepo.findRecentByTaskId(taskId, limit);
+      }
+      return this.eventRepo.findByTaskId(taskId);
+    };
+    const protocol = (this as Any).workSessionProtocolService as
+      | WorkSessionProtocolService
+      | undefined;
+    if (typeof protocol?.readTaskEvents === "function") {
+      return protocol.readTaskEvents(taskId, { limit, types: normalizedTypes }, legacyRead);
     }
-    if (typeof limit === "number") {
-      return this.eventRepo.findRecentByTaskId(taskId, limit);
-    }
-    return this.eventRepo.findByTaskId(taskId);
+    return legacyRead();
   }
 
   /**
@@ -11340,6 +11465,7 @@ export class AgentDaemon extends EventEmitter {
       | "accessProfileId"
       | "integrationMentions"
       | "agentConfigOverride"
+      | "expectedTurnId"
     >,
   ): Promise<{ queued: boolean }> {
     let executor: TaskExecutor;
@@ -11348,6 +11474,11 @@ export class AgentDaemon extends EventEmitter {
     const task = this.taskRepo.findById(taskId);
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
+    }
+    if (options?.expectedTurnId) {
+      // Validate before touching task metadata, annotations, or the executor;
+      // a stale client must not mutate a newer turn.
+      this.workSessionProtocolService.assertExpectedTurnForTask(taskId, options.expectedTurnId);
     }
     let cached = this.activeTasks.get(taskId);
     if (this.isSideChatTask(task) && !cached?.executor.isRunning) {
@@ -11738,6 +11869,7 @@ export class AgentDaemon extends EventEmitter {
   async shutdown(): Promise<void> {
     log.info("Shutting down agent daemon...");
     this.orchestrationGraphEngine.stop();
+    this.workSessionProtocolService.getReliabilityService().stop();
 
     // Clear the cleanup interval
     if (this.cleanupIntervalHandle) {

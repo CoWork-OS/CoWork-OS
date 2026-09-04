@@ -7461,3 +7461,26 @@ export class ComparisonSessionRepository {
     return true;
   }
 }
+
+// Canonical WorkSession -> Turn -> Item protocol repository. Kept as a
+// re-export so existing database consumers can adopt the protocol without
+// importing a second repository module path.
+export {
+  WorkSessionProtocolRepository,
+  WorkSessionProtocolError,
+  StaleWorkSessionTurnError,
+  redactWorkSessionValue,
+} from "./WorkSessionProtocolRepository";
+
+// Durable Phase 4 outcome, constraint, evidence, artifact, wait, and child
+// session records. Kept as a separate repository so the canonical protocol
+// can continue rolling out additively.
+export { WorkSessionContractRepository } from "./WorkSessionContractRepository";
+
+// Phase 5 cursor, liveness, and operational-observability repositories.
+export { WorkSessionProjectionRepository } from "./WorkSessionProjectionRepository";
+export {
+  WorkSessionActivityLeaseRepository,
+  WorkSessionActivityLeaseError,
+} from "./WorkSessionActivityLeaseRepository";
+export { WorkSessionOperationalMetricsRepository } from "./WorkSessionOperationalMetricsRepository";

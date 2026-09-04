@@ -177,6 +177,7 @@ import { isTerminalTaskStatus } from "../../shared/task-status";
 import type { MailboxCommitmentState } from "../../shared/mailbox";
 import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
+import { generateTaskTitle } from "../agent/task-title-generator";
 import { RuntimeVisibilityService } from "../agent/RuntimeVisibilityService";
 import {
   LLMProviderFactory,
@@ -1042,6 +1043,12 @@ rateLimiter.configure(IPC_CHANNELS.REVIEW_GENERATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.REVIEW_DELETE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.EVAL_RUN_SUITE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_ROLLOUT_GET, RATE_LIMIT_CONFIGS.frequent);
+rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_ROLLOUT_UPDATE, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_METRICS_LIST, RATE_LIMIT_CONFIGS.frequent);
+rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_LEASES_LIST, RATE_LIMIT_CONFIGS.frequent);
+rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_PROJECTION_GET, RATE_LIMIT_CONFIGS.frequent);
+rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_REPLAY_EVALUATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.KIT_INIT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.KIT_PROJECT_CREATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.KIT_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
@@ -1469,6 +1476,35 @@ export async function setupIpcHandlers(
       timestamp: Date.now(),
       payload: { status, ...extraPayload },
     });
+  };
+
+  const scheduleTaskTitleGeneration = (
+    task: Task,
+    prompt: string,
+    agentConfig?: AgentConfig,
+  ): void => {
+    void (async () => {
+      try {
+        const generatedTitle = await generateTaskTitle(prompt, agentConfig);
+        if (!generatedTitle || generatedTitle === task.title) return;
+
+        // A user rename wins over the asynchronous metadata helper. Compare
+        // against the title that was committed with the task before applying
+        // the generated name.
+        const currentTask = taskRepo.findById(task.id);
+        if (!currentTask || currentTask.title !== task.title) return;
+
+        taskRepo.update(currentTask.id, { title: generatedTitle });
+        const updatedTask = taskRepo.findById(currentTask.id);
+        if (updatedTask?.title === generatedTitle) {
+          agentDaemon.emitTaskTitleUpdated(updatedTask.id, updatedTask.title);
+        }
+      } catch (error) {
+        // Title generation is auxiliary metadata. Provider failures and timeouts
+        // must never interrupt the primary task or surface as task errors.
+        logger.debug("[TASK_CREATE] Session title generation unavailable:", error);
+      }
+    })();
   };
 
   const principalForEvent = (event: IpcMainInvokeEvent): string =>
@@ -4448,7 +4484,9 @@ export async function setupIpcHandlers(
       budgetTokens,
       budgetCost,
       agentConfig,
+      assignedAgentRoleId,
       images: validatedImages,
+      generateTitle,
     } = validated;
     const accessProfileAgentConfig = applyDefaultAccessProfile(
       agentConfig,
@@ -4469,7 +4507,13 @@ export async function setupIpcHandlers(
       budgetTokens,
       budgetCost,
       agentConfig: normalizedAgentConfig,
+      assignedAgentRoleId,
     });
+
+    if (generateTitle && !normalizedAgentConfig?.botConversation) {
+      scheduleTaskTitleGeneration(task, prompt, normalizedAgentConfig);
+    }
+
     try {
       workContextService.ensureForTask(task);
     } catch (error) {
@@ -4704,6 +4748,13 @@ export async function setupIpcHandlers(
         }
       })();
 
+      return task;
+    }
+
+    // Bot conversations are created as dormant chat identities. The first
+    // user message starts the executor, so opening a bot never creates an
+    // unsolicited assistant reply or an execution-step timeline.
+    if (normalizedAgentConfig?.botConversation) {
       return task;
     }
 
@@ -5458,6 +5509,7 @@ export async function setupIpcHandlers(
         validatedImages,
         validated.quotedAssistantMessage,
         {
+          ...(validated.expectedTurnId ? { expectedTurnId: validated.expectedTurnId } : {}),
           ...(validated.permissionMode ? { permissionMode: validated.permissionMode } : {}),
           ...(validated.shellAccess !== undefined ? { shellAccess: validated.shellAccess } : {}),
           ...(validated.accessProfileId ? { accessProfileId: validated.accessProfileId } : {}),
@@ -5825,7 +5877,11 @@ export async function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_SEND_USER_MESSAGE_IPC, async (_, request: Any) => {
     if (!request?.sessionId) throw new Error("sessionId is required");
-    return managedSessionService.sendUserMessage(request.sessionId, request.content || []);
+    return managedSessionService.sendUserMessage(
+      request.sessionId,
+      request.content || [],
+      typeof request.expectedTurnId === "string" ? request.expectedTurnId : undefined,
+    );
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_RESUME_IPC, async (_, sessionId: string) => {
     return managedSessionService.resumeSession(sessionId);
@@ -9352,6 +9408,169 @@ export async function setupIpcHandlers(
     return evalService.getRun(validated);
   });
 
+  // Local operator controls for Phase 5 rollout, observability, and replay.
+  // These handlers are renderer-local (the remote control plane has explicit
+  // scope checks) and still validate all untrusted values before touching DB.
+  ipcMain.handle(IPC_CHANNELS.WORK_SESSION_ROLLOUT_GET, async () => {
+    checkRateLimit(IPC_CHANNELS.WORK_SESSION_ROLLOUT_GET);
+    return agentDaemon.getWorkSessionReliabilityService().rollout.getConfig();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.WORK_SESSION_ROLLOUT_UPDATE,
+    async (
+      _,
+      update?: {
+        enabled?: boolean;
+        cohortPercent?: number;
+        salt?: string;
+        legacyReadRollback?: boolean;
+      },
+    ) => {
+      checkRateLimit(IPC_CHANNELS.WORK_SESSION_ROLLOUT_UPDATE);
+      const value = update && typeof update === "object" ? update : {};
+      if (
+        (value.enabled !== undefined && typeof value.enabled !== "boolean") ||
+        (value.legacyReadRollback !== undefined && typeof value.legacyReadRollback !== "boolean") ||
+        (value.cohortPercent !== undefined &&
+          (typeof value.cohortPercent !== "number" || !Number.isFinite(value.cohortPercent))) ||
+        (value.salt !== undefined &&
+          (typeof value.salt !== "string" ||
+            value.salt.trim().length === 0 ||
+            value.salt.length > 128))
+      ) {
+        throw new Error("Invalid work-session rollout update");
+      }
+      return agentDaemon.getWorkSessionReliabilityService().rollout.updateConfig({
+        ...(value.enabled === undefined ? {} : { enabled: value.enabled }),
+        ...(value.cohortPercent === undefined
+          ? {}
+          : { cohortPercent: Math.min(100, Math.max(0, Math.round(value.cohortPercent))) }),
+        ...(value.salt === undefined ? {} : { salt: value.salt.trim() }),
+        ...(value.legacyReadRollback === undefined
+          ? {}
+          : { legacyReadRollback: value.legacyReadRollback }),
+      });
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.WORK_SESSION_METRICS_LIST,
+    async (
+      _,
+      options?: {
+        sessionId?: string;
+        workspaceId?: string;
+        name?: string;
+        limit?: number;
+        since?: number;
+      },
+    ) => {
+      checkRateLimit(IPC_CHANNELS.WORK_SESSION_METRICS_LIST);
+      const value = options && typeof options === "object" ? options : {};
+      const bounded = (candidate: unknown, max: number): string | undefined => {
+        if (candidate === undefined || candidate === null || candidate === "") return undefined;
+        if (typeof candidate !== "string" || candidate.trim().length > max) {
+          throw new Error("Invalid work-session metrics filter");
+        }
+        return candidate.trim();
+      };
+      const limit =
+        value.limit === undefined
+          ? 1_000
+          : typeof value.limit === "number" && Number.isFinite(value.limit)
+            ? Math.min(10_000, Math.max(1, Math.floor(value.limit)))
+            : (() => {
+                throw new Error("Invalid metrics limit");
+              })();
+      const since =
+        value.since === undefined
+          ? undefined
+          : typeof value.since === "number" && Number.isFinite(value.since)
+            ? Math.floor(value.since)
+            : (() => {
+                throw new Error("Invalid metrics since");
+              })();
+      return agentDaemon.getWorkSessionReliabilityService().metrics.list({
+        sessionId: bounded(value.sessionId, 256),
+        workspaceId: bounded(value.workspaceId, 256),
+        name: bounded(value.name, 128),
+        limit,
+        since,
+      });
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.WORK_SESSION_LEASES_LIST, async (_, sessionId?: string) => {
+    checkRateLimit(IPC_CHANNELS.WORK_SESSION_LEASES_LIST);
+    if (
+      sessionId !== undefined &&
+      (typeof sessionId !== "string" || sessionId.trim().length > 256)
+    ) {
+      throw new Error("Invalid session ID");
+    }
+    return agentDaemon
+      .getWorkSessionReliabilityService()
+      .leases.listActive(sessionId?.trim() || undefined);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.WORK_SESSION_PROJECTION_GET,
+    async (_, request: { sessionId?: string; projection?: string }) => {
+      checkRateLimit(IPC_CHANNELS.WORK_SESSION_PROJECTION_GET);
+      const sessionId =
+        typeof request?.sessionId === "string" ? request.sessionId.trim().slice(0, 256) : "";
+      if (!sessionId) throw new Error("sessionId is required");
+      const projection =
+        typeof request?.projection === "string" && request.projection.trim()
+          ? request.projection.trim().slice(0, 128)
+          : "work-session-vnext";
+      return (
+        agentDaemon
+          .getWorkSessionReliabilityService()
+          .projections.getCursor(sessionId, projection) || null
+      );
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.WORK_SESSION_REPLAY_EVALUATE,
+    async (
+      _,
+      request: {
+        taskId?: string;
+        fixtureId?: string;
+        assertions?: {
+          expectedTerminalStatus?: string;
+          mustContainAll?: string[];
+          mustCreatePaths?: string[];
+        };
+      },
+    ) => {
+      checkRateLimit(IPC_CHANNELS.WORK_SESSION_REPLAY_EVALUATE);
+      const taskId = validateInput(UUIDSchema, request?.taskId, "task ID");
+      const protocol = agentDaemon.getWorkSessionProtocolService().getRepository();
+      const sessionId = protocol.findSessionIdForTask(taskId);
+      const items = sessionId ? protocol.listAllItems(sessionId) : [];
+      const assertions = request?.assertions;
+      if (
+        assertions &&
+        (typeof assertions !== "object" ||
+          (assertions.mustContainAll && !Array.isArray(assertions.mustContainAll)) ||
+          (assertions.mustCreatePaths && !Array.isArray(assertions.mustCreatePaths)))
+      ) {
+        throw new Error("Invalid replay assertions");
+      }
+      return agentDaemon.getWorkSessionReliabilityService().evaluateReplay(items, {
+        fixtureId:
+          typeof request?.fixtureId === "string" && request.fixtureId.trim()
+            ? request.fixtureId.trim().slice(0, 128)
+            : `operator:${taskId}`,
+        assertions,
+      });
+    },
+  );
+
   // Usage Insights
   ipcMain.handle(
     IPC_CHANNELS.USAGE_INSIGHTS_GET,
@@ -10133,7 +10352,7 @@ export async function setupIpcHandlers(
   // Scraping (Scrapling) handlers
   setupScrapingHandlers();
 
-  // Local AI (hf-agents / llama.cpp) handlers
+  // Local AI (MLX-LM / hf-agents / llama.cpp) handlers
   setupLocalAIHandlers();
 
   // Notification handlers
@@ -12908,18 +13127,15 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
         decision: "accepted" | "rejected";
         reason?: string;
         note?: string;
-        kind?: "message" | "task";
       },
     ) => {
       checkRateLimit(IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK, RATE_LIMIT_CONFIGS.limited);
-      const { taskId, decision, reason, note, kind, messageId } = payload;
+      const { taskId, decision, reason, note, messageId } = payload;
       const feedback = [reason, note].filter(Boolean).join(": ") || undefined;
       agentDaemon.logEvent(taskId, "user_feedback", {
         decision,
         reason: feedback,
-        kind: kind || "message",
         messageId,
-        rating: kind === "task" ? (decision === "accepted" ? "positive" : "negative") : undefined,
       });
     },
   );
@@ -14169,7 +14385,7 @@ function setupMemoryHandlers(): void {
 }
 
 /**
- * Set up Local AI (hf-agents + llama.cpp) IPC handlers
+ * Set up Local AI (MLX-LM + hf-agents + llama.cpp) IPC handlers
  */
 function setupLocalAIHandlers(): void {
   const execFileAsync = promisify(execFile);
@@ -14234,7 +14450,8 @@ function setupLocalAIHandlers(): void {
     // "ok" = importable, "broken" = package found but dylib/import fails, false = not installed
     let mlxInstalled: "ok" | "broken" | false = false;
     let mlxMessage = "";
-    if (process.platform === "darwin") {
+    const isAppleSilicon = process.platform === "darwin" && process.arch === "arm64";
+    if (isAppleSilicon) {
       try {
         await execFileAsync("python3", ["-c", "import mlx_lm; import mlx.core"], {
           timeout: 8000,
@@ -14266,6 +14483,8 @@ function setupLocalAIHandlers(): void {
           /* python3 not found at all */
         }
       }
+    } else if (process.platform === "darwin") {
+      mlxMessage = "MLX requires an Apple Silicon Mac (arm64).";
     }
 
     return {
@@ -14276,6 +14495,7 @@ function setupLocalAIHandlers(): void {
       mlxInstalled,
       mlxMessage,
       isMac: process.platform === "darwin",
+      isAppleSilicon,
     };
   });
 
@@ -14421,6 +14641,13 @@ function setupLocalAIHandlers(): void {
     let args: string[];
 
     if (isMLX) {
+      if (process.platform !== "darwin" || process.arch !== "arm64") {
+        activeRuntime = null;
+        return {
+          ok: false,
+          error: "MLX-LM requires an Apple Silicon Mac (macOS arm64).",
+        };
+      }
       // Pre-flight: verify mlx_lm actually imports (catches dylib/path issues early)
       try {
         await execFileAsync("python3", ["-c", "import mlx_lm; import mlx.core"], {

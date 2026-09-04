@@ -3255,6 +3255,408 @@ export class DatabaseManager {
       schemaLogger.error("[DatabaseManager] Failed WorkContext migration:", error);
     }
 
+    // Canonical WorkSession -> Turn -> Item protocol.  Task/TaskEvent remain
+    // the compatibility projection while this append-first stream is rolled
+    // out additively.  All sequence and idempotency constraints live in
+    // SQLite so concurrent transports cannot manufacture duplicate positions.
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS work_sessions (
+          id TEXT PRIMARY KEY,
+          task_id TEXT UNIQUE,
+          workspace_id TEXT NOT NULL,
+          protocol_version INTEGER NOT NULL DEFAULT 1,
+          status TEXT NOT NULL DEFAULT 'pending',
+          current_turn_id TEXT,
+          last_sequence INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS work_session_turns (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          task_id TEXT,
+          ordinal INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          actor TEXT NOT NULL DEFAULT 'system',
+          idempotency_key TEXT,
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          terminal_reason TEXT,
+          UNIQUE (session_id, ordinal),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS work_session_items (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          turn_id TEXT NOT NULL,
+          sequence INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          actor TEXT NOT NULL DEFAULT 'system',
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          causal_parent_item_id TEXT,
+          idempotency_key TEXT,
+          source_event_id TEXT,
+          policy_snapshot_json TEXT,
+          redaction_class TEXT NOT NULL DEFAULT 'standard',
+          status TEXT,
+          created_at INTEGER NOT NULL,
+          UNIQUE (session_id, sequence),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (turn_id) REFERENCES work_session_turns(id) ON DELETE CASCADE,
+          FOREIGN KEY (causal_parent_item_id) REFERENCES work_session_items(id) ON DELETE SET NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_work_session_turns_idempotency
+          ON work_session_turns(session_id, idempotency_key)
+          WHERE idempotency_key IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_work_session_items_idempotency
+          ON work_session_items(session_id, idempotency_key)
+          WHERE idempotency_key IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_work_session_items_source_event
+          ON work_session_items(session_id, source_event_id)
+          WHERE source_event_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_work_sessions_workspace_updated
+          ON work_sessions(workspace_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_work_sessions_task
+          ON work_sessions(task_id);
+        CREATE INDEX IF NOT EXISTS idx_work_session_turns_session_ordinal
+          ON work_session_turns(session_id, ordinal ASC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_items_session_sequence
+          ON work_session_items(session_id, sequence ASC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_items_turn_sequence
+          ON work_session_items(turn_id, sequence ASC);
+
+        -- A task may keep its legacy session_id for sidebar/grouping semantics,
+        -- while this binding points protocol events at an isolated canonical
+        -- session (notably for child agents).
+        CREATE TABLE IF NOT EXISTS work_session_task_bindings (
+          task_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          parent_session_id TEXT,
+          isolation_key TEXT NOT NULL,
+          inherited_policy_snapshot_json TEXT,
+          owner TEXT NOT NULL DEFAULT 'system',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (parent_session_id) REFERENCES work_sessions(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_task_bindings_session
+          ON work_session_task_bindings(session_id);
+        CREATE INDEX IF NOT EXISTS idx_work_session_task_bindings_parent
+          ON work_session_task_bindings(parent_session_id, created_at ASC);
+
+        CREATE TABLE IF NOT EXISTS work_session_outcome_contracts (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          task_id TEXT,
+          version INTEGER NOT NULL DEFAULT 1,
+          objective TEXT NOT NULL,
+          requirements_json TEXT NOT NULL DEFAULT '[]',
+          status TEXT NOT NULL DEFAULT 'pending',
+          source TEXT,
+          summary TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          satisfied_at INTEGER,
+          idempotency_key TEXT,
+          UNIQUE (session_id, version),
+          UNIQUE (session_id, idempotency_key),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_contracts_status
+          ON work_session_outcome_contracts(session_id, status, version DESC);
+
+        CREATE TABLE IF NOT EXISTS work_session_constraints (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          turn_id TEXT,
+          kind TEXT NOT NULL,
+          key TEXT NOT NULL,
+          statement TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          source_item_id TEXT,
+          owner TEXT,
+          metadata_json TEXT,
+          idempotency_key TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE (session_id, idempotency_key),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (turn_id) REFERENCES work_session_turns(id) ON DELETE SET NULL,
+          FOREIGN KEY (source_item_id) REFERENCES work_session_items(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_constraints_session_status
+          ON work_session_constraints(session_id, status, created_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_constraints_key
+          ON work_session_constraints(session_id, key, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS work_session_evidence (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          contract_id TEXT,
+          claim TEXT NOT NULL,
+          source_type TEXT NOT NULL,
+          source_ref TEXT NOT NULL,
+          snippet TEXT,
+          captured_at INTEGER NOT NULL,
+          freshness_expires_at INTEGER,
+          confidence REAL NOT NULL DEFAULT 0.5,
+          status TEXT NOT NULL DEFAULT 'supporting',
+          contradiction_group TEXT,
+          item_id TEXT,
+          artifact_revision_id TEXT,
+          idempotency_key TEXT,
+          created_at INTEGER NOT NULL,
+          UNIQUE (session_id, idempotency_key),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (contract_id) REFERENCES work_session_outcome_contracts(id) ON DELETE SET NULL,
+          FOREIGN KEY (item_id) REFERENCES work_session_items(id) ON DELETE SET NULL,
+          FOREIGN KEY (artifact_revision_id) REFERENCES work_session_artifact_revisions(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_evidence_session_captured
+          ON work_session_evidence(session_id, captured_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_evidence_claim
+          ON work_session_evidence(session_id, claim, status);
+
+        CREATE TABLE IF NOT EXISTS work_session_artifact_revisions (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          artifact_id TEXT,
+          revision INTEGER NOT NULL,
+          path TEXT NOT NULL,
+          mime_type TEXT NOT NULL,
+          sha256 TEXT NOT NULL,
+          size INTEGER NOT NULL DEFAULT 0,
+          parent_revision_id TEXT,
+          status TEXT NOT NULL DEFAULT 'committed',
+          created_by TEXT NOT NULL DEFAULT 'agent',
+          metadata_json TEXT,
+          idempotency_key TEXT,
+          created_at INTEGER NOT NULL,
+          UNIQUE (session_id, path, revision),
+          UNIQUE (session_id, idempotency_key),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE SET NULL,
+          FOREIGN KEY (parent_revision_id) REFERENCES work_session_artifact_revisions(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_artifacts_session_path
+          ON work_session_artifact_revisions(session_id, path, revision DESC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_artifacts_task_created
+          ON work_session_artifact_revisions(task_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS work_session_wait_states (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          turn_id TEXT,
+          kind TEXT NOT NULL,
+          request_id TEXT,
+          reason TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          resume_token TEXT,
+          payload_json TEXT,
+          idempotency_key TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          resolved_at INTEGER,
+          expires_at INTEGER,
+          UNIQUE (session_id, kind, request_id),
+          UNIQUE (session_id, idempotency_key),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (turn_id) REFERENCES work_session_turns(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_wait_states_pending
+          ON work_session_wait_states(session_id, status, created_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_wait_states_request
+          ON work_session_wait_states(request_id, status);
+
+        CREATE TABLE IF NOT EXISTS work_session_child_links (
+          id TEXT PRIMARY KEY,
+          parent_session_id TEXT NOT NULL,
+          child_session_id TEXT NOT NULL UNIQUE,
+          parent_task_id TEXT NOT NULL,
+          child_task_id TEXT NOT NULL UNIQUE,
+          owner TEXT,
+          isolation_key TEXT NOT NULL,
+          inherited_policy_snapshot_json TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          outcome TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          FOREIGN KEY (parent_session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (child_session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (parent_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (child_task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_child_links_parent
+          ON work_session_child_links(parent_session_id, created_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_child_links_status
+          ON work_session_child_links(parent_session_id, status, updated_at DESC);
+      `);
+    } catch (error) {
+      schemaLogger.error("[DatabaseManager] Failed WorkSession protocol migration:", error);
+    }
+
+    // Phase 4 contract tables were introduced additively.  Older databases
+    // may already have the revision/wait tables from an early rollout, so add
+    // the idempotency columns before creating their unique indexes.
+    for (const statement of [
+      "ALTER TABLE work_session_artifact_revisions ADD COLUMN idempotency_key TEXT",
+      "ALTER TABLE work_session_wait_states ADD COLUMN idempotency_key TEXT",
+    ]) {
+      try {
+        this.db.exec(statement);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/duplicate column name|already exists|no such table/i.test(message)) {
+          schemaLogger.error(
+            "[DatabaseManager] WorkSession contract migration failed:",
+            statement,
+            message,
+          );
+        }
+      }
+    }
+    try {
+      this.db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_work_session_artifacts_idempotency
+          ON work_session_artifact_revisions(session_id, idempotency_key)
+          WHERE idempotency_key IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_work_session_wait_states_idempotency
+          ON work_session_wait_states(session_id, idempotency_key)
+          WHERE idempotency_key IS NOT NULL;
+      `);
+    } catch (error) {
+      schemaLogger.error(
+        "[DatabaseManager] Failed WorkSession contract idempotency indexes:",
+        error,
+      );
+    }
+
+    // Phase 5 reliability records stay outside the user timeline.  Projection
+    // cursors are rebuildable, leases are short-lived liveness state, metrics
+    // are bounded operational samples, and rollout is an immediately
+    // reversible read choice.  All tables are additive so older databases can
+    // start without a destructive migration.
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS work_session_projection_cursors (
+          session_id TEXT NOT NULL,
+          projection_name TEXT NOT NULL,
+          last_sequence INTEGER NOT NULL DEFAULT 0,
+          state_json TEXT NOT NULL DEFAULT '{}',
+          checksum TEXT NOT NULL,
+          processed_items INTEGER NOT NULL DEFAULT 0,
+          last_compared_at INTEGER,
+          full_rebuild_checksum TEXT,
+          last_comparison_matched INTEGER,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (session_id, projection_name),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_projection_updated
+          ON work_session_projection_cursors(projection_name, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS work_session_activity_leases (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          turn_id TEXT,
+          kind TEXT NOT NULL,
+          operation_key TEXT NOT NULL,
+          token_hash TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          acquired_at INTEGER NOT NULL,
+          heartbeat_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          released_at INTEGER,
+          UNIQUE (session_id, operation_key),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (turn_id) REFERENCES work_session_turns(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_activity_leases_active
+          ON work_session_activity_leases(session_id, status, expires_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_activity_leases_expiry
+          ON work_session_activity_leases(status, expires_at ASC);
+
+        CREATE TABLE IF NOT EXISTS work_session_operational_metrics (
+          id TEXT PRIMARY KEY,
+          session_id TEXT,
+          workspace_id TEXT,
+          name TEXT NOT NULL,
+          value REAL NOT NULL,
+          unit TEXT,
+          dimensions_json TEXT NOT NULL DEFAULT '{}',
+          idempotency_key TEXT,
+          recorded_at INTEGER NOT NULL,
+          UNIQUE (session_id, idempotency_key),
+          FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_metrics_session_recorded
+          ON work_session_operational_metrics(session_id, recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_metrics_workspace_recorded
+          ON work_session_operational_metrics(workspace_id, recorded_at DESC);
+
+        CREATE TABLE IF NOT EXISTS work_session_rollout_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          enabled INTEGER NOT NULL DEFAULT 1,
+          cohort_percent INTEGER NOT NULL DEFAULT 100,
+          salt TEXT NOT NULL DEFAULT 'cowork-work-session-vnext',
+          legacy_read_rollback INTEGER NOT NULL DEFAULT 0,
+          operator_configured INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+      const rolloutColumns = this.db
+        .prepare("PRAGMA table_info(work_session_rollout_config)")
+        .all() as Array<{ name?: string }>;
+      if (!rolloutColumns.some((column) => column.name === "operator_configured")) {
+        this.db.exec(
+          "ALTER TABLE work_session_rollout_config ADD COLUMN operator_configured INTEGER NOT NULL DEFAULT 0",
+        );
+      }
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO work_session_rollout_config
+             (id, enabled, cohort_percent, salt, legacy_read_rollback, operator_configured, updated_at)
+           VALUES (1, 1, 100, 'cowork-work-session-vnext', 0, 0, ?)`,
+        )
+        .run(Date.now());
+      this.db
+        .prepare(
+          `UPDATE work_session_rollout_config
+           SET enabled = 1, cohort_percent = 100, legacy_read_rollback = 0,
+               updated_at = ?
+           WHERE id = 1 AND operator_configured = 0 AND enabled = 0 AND cohort_percent = 0`,
+        )
+        .run(Date.now());
+    } catch (error) {
+      schemaLogger.error("[DatabaseManager] Failed WorkSession Phase 5 migration:", error);
+    }
+
     // Session membership, local invites, and security audit records are kept
     // separate from workspace membership and task execution history.
     try {

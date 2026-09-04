@@ -34,7 +34,7 @@ See also: [CoWork OS vs OpenClaw](comparisons/openclaw.md)
 | Safety | Approval-gated destructive actions and configurable command blocking |
 | Governance | Token/cost/iteration guardrails per task |
 | Reach | Desktop, CLI, daemon, and messaging-channel delivery |
-| Data control | Local-first persistence, explicit remote-service boundaries, and optional local Ollama inference |
+| Data control | Local-first persistence, explicit remote-service boundaries, and optional local Ollama or Apple Silicon MLX-LM inference |
 
 ---
 
@@ -122,7 +122,7 @@ Moving to CoWork OS provides several advantages:
 | Feature | Benefit |
 |---------|---------|
 | **Dozens of model routes** | Built-in providers, compatible gateways, supported account connections, local runtimes, and Mixture of Agents presets |
-| **Local LLM support** | Run supported models locally with Ollama; model availability and hardware needs vary |
+| **Local LLM support** | Run supported models locally with Ollama or MLX-LM on native Apple Silicon; model availability and hardware needs vary. See [MLX-LM Local Inference](mlx-lm.md) |
 | **Native desktop app** | Full desktop UX on macOS and Windows (menu bar on macOS, system tray on Windows) |
 | **GUI-first agent management** | Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through Agents Hub and Mission Control |
 | **Real-time timeline** | See exactly what the agent is doing |

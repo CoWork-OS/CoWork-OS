@@ -17,6 +17,7 @@ import {
   isActiveSessionStatus,
   isAutomatedSession,
   isAwaitingSessionStatus,
+  isUserCreatedBotRole,
   normalizeSidebarSessionSearch,
   shouldShowTaskInSidebarSessions,
   shouldShowRootTaskInSidebar,
@@ -127,6 +128,28 @@ describe("shouldShowRootTaskInSidebar", () => {
     const task = createTask({ status: "failed" });
     const visible = shouldShowRootTaskInSidebar(task, "full", false);
     expect(visible).toBe(true);
+  });
+});
+
+describe("isUserCreatedBotRole", () => {
+  it("keeps only active user-created roles out of the built-in roster", () => {
+    expect(isUserCreatedBotRole({ isActive: true, isSystem: false, roleKind: "custom" })).toBe(
+      true,
+    );
+    expect(isUserCreatedBotRole({ isActive: true, isSystem: true, roleKind: "custom" })).toBe(
+      false,
+    );
+    expect(
+      isUserCreatedBotRole({ isActive: true, isSystem: false, roleKind: "persona_template" }),
+    ).toBe(false);
+    expect(
+      isUserCreatedBotRole({
+        isActive: true,
+        isSystem: false,
+        roleKind: "custom",
+        sourceTemplateId: "template-1",
+      }),
+    ).toBe(false);
   });
 });
 
@@ -440,6 +463,12 @@ describe("shouldShowTaskInSidebarSessions", () => {
     expect(shouldShowTaskInSidebarSessions(createTask({ source: "managed_agent_panel" }))).toBe(
       false,
     );
+  });
+
+  it("keeps bot conversations in the Bots view instead of Sessions", () => {
+    expect(
+      shouldShowTaskInSidebarSessions(createTask({ agentConfig: { botConversation: true } })),
+    ).toBe(false);
   });
 
   it("keeps local tasks visible in the sidebar", () => {

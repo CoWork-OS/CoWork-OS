@@ -787,7 +787,8 @@ export class UsageInsightsService {
   }
 
   generate(workspaceId: string | null, periodDays = 7): UsageInsights {
-    const projector = UsageInsightsProjector.getIfInitialized();
+    const candidateProjector = UsageInsightsProjector.getIfInitialized();
+    const projector = candidateProjector?.isForDatabase(this.db) ? candidateProjector : null;
     if (projector) {
       projector.warm();
       const cacheKey = `${workspaceId || "__all__"}|${periodDays}`;
@@ -929,7 +930,8 @@ export class UsageInsightsService {
     const now = Date.now();
     const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
-    const projector = UsageInsightsProjector.getIfInitialized();
+    const candidateProjector = UsageInsightsProjector.getIfInitialized();
+    const projector = candidateProjector?.isForDatabase(this.db) ? candidateProjector : null;
 
     const taskMetrics = this.getTaskMetrics(workspaceId, periodStart, periodEnd);
     const llmScan = projector
@@ -2623,7 +2625,6 @@ export class UsageInsightsService {
             decision?: "accepted" | "rejected";
             rating?: "positive" | "negative";
             reason?: string;
-            kind?: "message" | "task";
           };
           const acceptedDecision = payload.decision === "accepted" || payload.rating === "positive";
           const rejectedDecision = payload.decision === "rejected" || payload.rating === "negative";

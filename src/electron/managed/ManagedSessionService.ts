@@ -1948,6 +1948,7 @@ export class ManagedSessionService {
         workspaceId: environment.config.workspaceId,
         agentConfig: baseAgentConfig,
       });
+      this.ensureCanonicalTask(task);
 
       const { teamRunId } = await this.createManagedTeamRun(task, agent, version);
       const session = this.managedSessionRepo.create({
@@ -2021,6 +2022,7 @@ export class ManagedSessionService {
       workspaceId: environment.config.workspaceId,
       agentConfig: baseAgentConfig,
     });
+    this.ensureCanonicalTask(task);
 
     const session = this.managedSessionRepo.create({
       id: randomUUID(),
@@ -2127,8 +2129,19 @@ export class ManagedSessionService {
   async sendUserMessage(
     sessionId: string,
     content: ManagedSessionInputContent[],
+    expectedTurnId?: string,
   ): Promise<ManagedSession | undefined> {
-    return this.sendEvent(sessionId, { type: "user.message", content });
+    return this.sendEvent(sessionId, { type: "user.message", content, expectedTurnId });
+  }
+
+  private ensureCanonicalTask(task: Task): void {
+    try {
+      this.agentDaemon.getWorkSessionProtocolService?.().ensureForTask(task);
+    } catch (error) {
+      // Canonical protocol persistence is additive; managed sessions must
+      // remain usable if an older database cannot create the new projection.
+      workContextLogger.warn("Failed to initialize canonical work session:", error);
+    }
   }
 
   private registerWorkContext(session: ManagedSession): void {
@@ -2144,6 +2157,7 @@ export class ManagedSessionService {
   private async steerManagedTeamSession(
     session: ManagedSession,
     content: ManagedSessionInputContent[],
+    expectedTurnId?: string,
   ): Promise<void> {
     const teamRun = session.backingTeamRunId
       ? this.teamRunRepo.findById(session.backingTeamRunId)
@@ -2172,6 +2186,10 @@ export class ManagedSessionService {
     if (!rootTask) {
       throw new Error(`Backing team task not found: ${session.backingTaskId}`);
     }
+    if (expectedTurnId) {
+      const protocol = this.agentDaemon.getWorkSessionProtocolService?.();
+      protocol?.assertExpectedTurnForTask(rootTask.id, expectedTurnId);
+    }
     const message = this.materializeContent(content).trim();
     if (!message) {
       throw new Error("Team steering message cannot be empty");
@@ -2184,7 +2202,7 @@ export class ManagedSessionService {
     this.taskRepo.update(rootTask.id, {
       prompt: appendTeamSteering(rootTask.prompt, message),
     });
-    this.taskEventRepo.create({
+    const steeringEvent = this.taskEventRepo.create({
       taskId: rootTask.id,
       timestamp: Date.now(),
       type: "user_message",
@@ -2196,13 +2214,25 @@ export class ManagedSessionService {
         teamRunId: teamRun.id,
       },
     });
+    try {
+      const protocol = this.agentDaemon.getWorkSessionProtocolService?.();
+      protocol?.recordTaskEvent(rootTask.id, steeringEvent);
+      const contracts = this.agentDaemon.getWorkSessionContractService?.();
+      contracts?.recordTaskEvent(rootTask.id, steeringEvent);
+    } catch (error) {
+      workContextLogger.warn("Failed to dual-write managed team steering:", error);
+    }
     await teamOrchestrator.tickRun(teamRun.id, "managed_session_user_steering");
   }
 
   async sendEvent(
     sessionId: string,
     event:
-      | { type: "user.message"; content: ManagedSessionInputContent[] }
+      | {
+          type: "user.message";
+          content: ManagedSessionInputContent[];
+          expectedTurnId?: string;
+        }
       | {
           type: "input.received";
           requestId: string;
@@ -2219,7 +2249,7 @@ export class ManagedSessionService {
 
     if (event.type === "user.message") {
       if (session.backingTeamRunId) {
-        await this.steerManagedTeamSession(session, event.content);
+        await this.steerManagedTeamSession(session, event.content, event.expectedTurnId);
         this.managedSessionEventRepo.create({
           sessionId,
           timestamp: Date.now(),
@@ -2239,7 +2269,13 @@ export class ManagedSessionService {
         type: "user.message",
         payload: { content: event.content },
       });
-      await this.agentDaemon.sendMessage(session.backingTaskId, message);
+      if (event.expectedTurnId) {
+        await this.agentDaemon.sendMessage(session.backingTaskId, message, undefined, undefined, {
+          expectedTurnId: event.expectedTurnId,
+        });
+      } else {
+        await this.agentDaemon.sendMessage(session.backingTaskId, message);
+      }
       return this.refreshSession(sessionId);
     }
 

@@ -1429,6 +1429,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const stepFeedbackText = props.stepFeedbackText as string;
   const suppressedParallelEventIds = props.suppressedParallelEventIds as Set<string>;
   const task = props.task as Task;
+  const isBotConversation = task?.agentConfig?.botConversation === true;
   const timelineItems = props.timelineItems as Array<any>;
   const timelineRef = props.timelineRef as React.RefObject<HTMLDivElement | null>;
   const toggleEventExpanded = props.toggleEventExpanded as (eventId: string) => void;
@@ -2661,10 +2662,24 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                         agentContext.getMessage("taskBlocked") || "Needs approval",
                       )
                     : "";
+                const botMessageSender =
+                  [
+                    event.payload?.senderAgentRoleName,
+                    event.payload?.fromAgentRoleName,
+                    event.payload?.agentName,
+                  ]
+                    .find(
+                      (value): value is string =>
+                        typeof value === "string" && value.trim().length > 0,
+                    )
+                    ?.trim() || task.title;
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div className="chat-message assistant-message">
                       <div className="chat-bubble assistant-bubble">
+                        {isBotConversation && (
+                          <div className="bot-message-attribution">{botMessageSender}</div>
+                        )}
                         {assistantStatusLabel && (
                           <div className="chat-bubble-header">
                             <span className="chat-status">{assistantStatusLabel}</span>
@@ -2679,25 +2694,26 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           />
                         </div>
                       </div>
-                      {(inlineFrames.length > 0 || (isAssistantMessage && event.id)) && (
-                        <div className="chat-inline-frames">
-                          {inlineFrames.map((frame) => (
-                            <MailComposeFrame
-                              key={`${frame.kind}:${frame.draftId}`}
-                              frame={frame}
-                            />
-                          ))}
-                          {inlineFrames.length === 0 && isLastAssistant && !isTaskWorking && (
-                            <AutoMailComposeFrame
-                              eventId={event.id}
-                              taskId={event.taskId}
-                              assistantMessage={cleanedMessageText}
-                              sourceUserMessage={sourceUserMessage}
-                              allowCreate={true}
-                            />
-                          )}
-                        </div>
-                      )}
+                      {!isBotConversation &&
+                        (inlineFrames.length > 0 || (isAssistantMessage && event.id)) && (
+                          <div className="chat-inline-frames">
+                            {inlineFrames.map((frame) => (
+                              <MailComposeFrame
+                                key={`${frame.kind}:${frame.draftId}`}
+                                frame={frame}
+                              />
+                            ))}
+                            {inlineFrames.length === 0 && isLastAssistant && !isTaskWorking && (
+                              <AutoMailComposeFrame
+                                eventId={event.id}
+                                taskId={event.taskId}
+                                assistantMessage={cleanedMessageText}
+                                sourceUserMessage={sourceUserMessage}
+                                allowCreate={true}
+                              />
+                            )}
+                          </div>
+                        )}
                       <div className="message-actions">
                         <MessageCopyButton text={messageText} />
                         <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
@@ -2768,7 +2784,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             </div>
                           </>
                         )}
-                        {isLastAssistant && isTaskWorking && (
+                        {isLastAssistant && isTaskWorking && !isBotConversation && (
                           <button
                             className="bubble-feedback-toggle"
                             onClick={() => setStepFeedbackOpen((o) => !o)}
@@ -2791,7 +2807,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           </button>
                         )}
                       </div>
-                      {isLastAssistant && stepFeedbackOpen && (
+                      {isLastAssistant && stepFeedbackOpen && !isBotConversation && (
                         <div className="bubble-feedback-panel">
                           {currentStep && (
                             <div className="bubble-feedback-step-label">
@@ -3066,6 +3082,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       hasMoreTimelineHistory,
       isLoadingTimelineHistory,
       timelineHistoryError,
+      isBotConversation,
       isChatTask,
       isTaskWorking,
       isReplayMode,
@@ -3139,6 +3156,7 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.disclosureIntents === next.disclosureIntents &&
     prev.toggleDisclosureIntent === next.toggleDisclosureIntent &&
     prev.isChatTask === next.isChatTask &&
+    prev.task?.agentConfig?.botConversation === next.task?.agentConfig?.botConversation &&
     prev.isTaskWorking === next.isTaskWorking &&
     prev.isReplayMode === next.isReplayMode &&
     prev.defaultTranscriptMode === next.defaultTranscriptMode &&
@@ -3784,6 +3802,7 @@ function MainContentComponent({
     executionMode === "chat" ||
     (isChatExecutionTask(task?.agentConfig?.executionMode) &&
       task?.agentConfig?.executionModeSource === "user");
+  const isBotConversation = task?.agentConfig?.botConversation === true;
   const setAutonomousModeSelection = useCallback((enabled: boolean) => {
     setAutonomousModeEnabled(enabled);
     if (enabled) {
@@ -3882,6 +3901,7 @@ function MainContentComponent({
       ) {
         const title = text.length > 60 ? text.slice(0, 57) + "..." : text;
         onCreateTask(title, text, {
+          generateTitle: true,
           ...(executionMode === "chat" ? { executionMode } : {}),
           ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
         });
@@ -5757,6 +5777,7 @@ function MainContentComponent({
       const expandedPrompt = expandSkillPrompt(modalState.skill, values);
       const title = buildTaskTitle(expandedPrompt);
       onCreateTask(title, expandedPrompt, {
+        generateTitle: true,
         ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
       });
     }
@@ -6766,9 +6787,11 @@ function MainContentComponent({
               : autonomousModeEnabled
                 ? { ...modeOptions, autonomousMode: true }
                 : modeOptions;
-        const options: CreateTaskOptions = verificationAgentEnabled
-          ? { ...baseOptions, verificationAgent: true }
-          : baseOptions;
+        const options: CreateTaskOptions = {
+          ...baseOptions,
+          generateTitle: true,
+          ...(verificationAgentEnabled ? { verificationAgent: true } : {}),
+        };
         await onCreateTask(title, message, options, imagePayload);
         // Reset task mode state
         setAutonomousModeEnabled(false);
@@ -8118,7 +8141,7 @@ function MainContentComponent({
     });
   }, [events, isChatTask]);
   const initialPromptBubble = useMemo(() => {
-    if (!trimmedPrompt) return null;
+    if (!trimmedPrompt || isBotConversation) return null;
     const initialIntegrationMentions = task?.agentConfig?.integrationMentions;
     const nonImageAttachmentNames = getAttachmentNamesWithoutImagePreviews(
       promptAttachmentNames,
@@ -8164,6 +8187,7 @@ function MainContentComponent({
       </div>
     );
   }, [
+    isBotConversation,
     cleanedDisplayPrompt,
     initialPromptAttachmentMetadata,
     markdownComponents,
@@ -8204,6 +8228,7 @@ function MainContentComponent({
     !hasActiveStructuredInputRequest &&
     !hasUserFollowUpAfterInitialPrompt &&
     dismissedLegalWorkflowTaskId !== task.id &&
+    !isBotConversation &&
     !["failed", "cancelled"].includes(task.status),
   );
 
@@ -9626,7 +9651,7 @@ function MainContentComponent({
 
   // Task view
   return (
-    <div className="main-content">
+    <div className={`main-content${isBotConversation ? " bot-conversation" : ""}`}>
       {/* Header */}
       <div className="main-header">
         {(task?.parentTaskId || task?.branchFromTaskId) && onSelectTask && (
@@ -9888,7 +9913,7 @@ function MainContentComponent({
           )}
 
           {/* Timeline controls - show right after original prompt */}
-          {(hasNonConversationEvents || isTaskWorking || isTaskFinished) && (
+          {!isBotConversation && (hasNonConversationEvents || isTaskWorking || isTaskFinished) && (
             <div className="timeline-controls">
               <div className="timeline-controls-status">
                 {canToggleCompletedTranscript ? (
@@ -10010,12 +10035,14 @@ function MainContentComponent({
           )}
 
           {/* Replay controls bar — shown when replay mode is active */}
-          {replayControls?.isReplayMode && replayControls.areControlsVisible && (
-            <ReplayControlsBar controls={replayControls} />
-          )}
+          {!isBotConversation &&
+            replayControls?.isReplayMode &&
+            replayControls.areControlsVisible && <ReplayControlsBar controls={replayControls} />}
 
           {conversationFlow}
-          <TaskSessionLineageFooter task={task} onSelectTask={onSelectTask} />
+          {!isBotConversation && (
+            <TaskSessionLineageFooter task={task} onSelectTask={onSelectTask} />
+          )}
         </div>
       </div>
 
@@ -10356,7 +10383,11 @@ function MainContentComponent({
               <PromptComposerInput
                 ref={promptInputRef}
                 className="input-field input-textarea"
-                placeholder={agentContext.getMessage("placeholderActive")}
+                placeholder={
+                  isBotConversation
+                    ? `Message ${headerTitle.trim() || task.title}`
+                    : agentContext.getMessage("placeholderActive")
+                }
                 value={inputValue}
                 mentions={integrationMentionSpans}
                 ariaLabel="Message"
@@ -10761,6 +10792,7 @@ function getMainContentTaskSignature(task: Task | undefined): string {
     task.prompt,
     task.userPrompt ?? "",
     task.rawPrompt ?? "",
+    task.agentConfig?.botConversation ? "bot" : "",
   ].join(":");
 }
 

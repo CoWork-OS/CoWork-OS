@@ -294,6 +294,114 @@ function isTimelineErrorStepFailureDuplicate(current: TaskEvent, previous: TaskE
   return Boolean(currentFailureText && currentFailureText === previousFailureText);
 }
 
+interface ArtifactPathIdentity {
+  normalized: string;
+  basename: string;
+  absolute: boolean;
+}
+
+function normalizeArtifactPath(value: unknown): ArtifactPathIdentity | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
+  if (!normalized) return undefined;
+  const withoutDot = normalized.replace(/^\.\//, "");
+  const basename = withoutDot.slice(withoutDot.lastIndexOf("/") + 1);
+  if (!basename) return undefined;
+  return {
+    normalized: withoutDot,
+    basename,
+    absolute: /^(?:\/|[A-Za-z]:\/)/.test(withoutDot),
+  };
+}
+
+function getArtifactPathIdentity(event: TaskEvent): ArtifactPathIdentity | undefined {
+  const effectiveType = getEffectiveTaskEventType(event);
+  if (
+    effectiveType !== "artifact_created" &&
+    effectiveType !== "file_created" &&
+    effectiveType !== "diagram_created" &&
+    event.type !== "timeline_artifact_emitted"
+  ) {
+    return undefined;
+  }
+  const payload = asObject(event.payload);
+  if (effectiveType === "file_created" && payload.type === "directory") return undefined;
+  const artifact = asObject(payload.artifact);
+  for (const candidate of [
+    payload.path,
+    payload.outputPath,
+    payload.filePath,
+    payload.file_path,
+    payload.artifactPath,
+    artifact.path,
+    artifact.outputPath,
+    artifact.filePath,
+  ]) {
+    const identity = normalizeArtifactPath(candidate);
+    if (identity) return identity;
+  }
+  return undefined;
+}
+
+function artifactPathsRepresentSameOutput(
+  current: ArtifactPathIdentity,
+  previous: ArtifactPathIdentity,
+): boolean {
+  if (current.normalized === previous.normalized) return true;
+  // A renderer may receive one event from the artifact service with an
+  // absolute path and another compatibility event with a workspace-relative
+  // path.  A relative path with directory components must be a suffix of the
+  // absolute path before it is considered the same file.  Basename-only
+  // relative emissions remain the one intentionally ambiguous compatibility
+  // case; two distinct absolute directories are always retained.
+  if (current.absolute === previous.absolute || current.basename !== previous.basename) {
+    return false;
+  }
+  const absolute = current.absolute ? current.normalized : previous.normalized;
+  const relative = current.absolute ? previous.normalized : current.normalized;
+  if (!relative.includes("/")) return true;
+  return absolute.endsWith(`/${relative}`);
+}
+
+/** Collapse duplicate artifact emissions across the canonical and timeline
+ * event formats while retaining distinct files and late retries. */
+function filterDuplicateTimelineArtifacts(events: TaskEvent[]): TaskEvent[] {
+  const out: TaskEvent[] = [];
+  const seenByTask = new Map<
+    string,
+    Array<{ identity: ArtifactPathIdentity; timestamp: number; outputIndex: number }>
+  >();
+  for (const event of events) {
+    const identity = getArtifactPathIdentity(event);
+    // Without a task boundary an artifact path is not safe to compare: two
+    // independent streams can legitimately emit the same relative filename.
+    if (!identity || !event.taskId) {
+      out.push(event);
+      continue;
+    }
+    const timestamp = Number.isFinite(event.timestamp) ? event.timestamp : 0;
+    const previous = seenByTask.get(event.taskId) || [];
+    const active = previous.filter(
+      (candidate) => Math.abs(timestamp - candidate.timestamp) <= VERBOSE_DUPLICATE_WINDOW_MS,
+    );
+    const duplicate = active.find((candidate) =>
+      artifactPathsRepresentSameOutput(identity, candidate.identity),
+    );
+    if (duplicate) {
+      out[duplicate.outputIndex] = event;
+      duplicate.identity = identity;
+      duplicate.timestamp = timestamp;
+      seenByTask.set(event.taskId, active);
+      continue;
+    }
+    const outputIndex = out.length;
+    out.push(event);
+    active.push({ identity, timestamp, outputIndex });
+    seenByTask.set(event.taskId, active);
+  }
+  return out;
+}
+
 export function filterAdjacentDuplicateTimelineFailures(events: TaskEvent[]): TaskEvent[] {
   const out: TaskEvent[] = [];
   for (const event of events) {
@@ -307,7 +415,7 @@ export function filterAdjacentDuplicateTimelineFailures(events: TaskEvent[]): Ta
     }
     out.push(event);
   }
-  return out;
+  return filterDuplicateTimelineArtifacts(out);
 }
 
 function getToolCorrelationId(payload: Record<string, unknown>): string {

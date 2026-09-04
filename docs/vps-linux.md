@@ -427,6 +427,10 @@ You have two headless-friendly options:
 2. **Env import on boot**  
    Keep credentials in environment variables and import them at startup.
 
+MLX-LM is not a Linux/VPS option. It requires a native Apple Silicon macOS
+process; use Ollama or another Linux-compatible provider for headless local
+inference. See [MLX-LM Local Inference](mlx-lm.md) for the desktop route.
+
 ### Option 1: Configure via Control Plane
 
 Examples:

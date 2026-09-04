@@ -156,7 +156,7 @@ Release maintainers can create this unsigned DMG/ZIP with `npm run package:mac:u
 
 > **Windows first launch:** Windows SmartScreen may show a warning for unrecognized apps. Click **More info** > **Run anyway** to proceed.
 
-> First launch asks how you want to power AI: sign in with an existing ChatGPT subscription, use a local Ollama model if one is installed, or add an API key for Claude, OpenAI API, Gemini, OpenRouter, Groq, and other providers. OpenRouter, Gemini through Google AI Studio, and Groq are marked when a free option is available. After at least two model routes work, you can create a Mixture of Agents preset that combines them. You can explore the app without AI, but tasks require one working model route.
+> First launch asks how you want to power AI: sign in with an existing ChatGPT subscription, use a local Ollama model, or add an API key for Claude, OpenAI API, Gemini, OpenRouter, Groq, and other providers. After onboarding, Apple Silicon users can configure [MLX-LM](docs/mlx-lm.md) in Settings. OpenRouter, Gemini through Google AI Studio, and Groq are marked when a free option is available. After at least two model routes work, you can create a Mixture of Agents preset that combines them. You can explore the app without AI, but tasks require one working model route.
 
 ### Or Install via npm
 
@@ -192,7 +192,7 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 ## How It Works
 
-1. **Choose an AI route** — The easiest path for many users is **Sign in with ChatGPT**. If CoWork detects a local Ollama model, it offers that private local route. API-key providers are available for Claude, OpenAI API, Gemini, OpenRouter, Groq, and others, with free-option badges shown where applicable. Once several routes are configured, Mixture of Agents can use them as advisor and aggregator slots.
+1. **Choose an AI route** — The easiest path for many users is **Sign in with ChatGPT**. If CoWork detects a local Ollama model, it offers a private local route; Apple Silicon users can configure [MLX-LM](docs/mlx-lm.md) in Settings for another private local route. API-key providers are available for Claude, OpenAI API, Gemini, OpenRouter, Groq, and others, with free-option badges shown where applicable. Once several routes are configured, Mixture of Agents can use them as advisor and aggregator slots.
 2. **Create a task or start from Ideas** — Describe what you want in the desktop app ("create a weekly plan", "create a quarterly report spreadsheet", "draft a DOCX memo", "build a small landing page"), begin from a curated Ideas prompt, or run a one-shot terminal task with `cowork run "..."`. No workspace needed — a private starter workspace is used automatically if you don't select one.
 3. **Choose a mode** — Pick **Chat**, **Execute**, **Plan**, **Analyze**, or **Verified** for the runtime behavior, then optionally toggle **Autonomous** (auto-approve actions), **Collaborative** (multi-agent perspectives), or **Multi-LLM** (compare providers with a judge) per task. For one-shot parallel lane work, start with `/multitask [N] <task>`.
 4. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts. Parallel tool bursts are grouped into lane summaries, shell commands stay visible, and the workspace can open real terminal tabs for direct interactive CLI work.
@@ -424,7 +424,7 @@ Real-time overview of your active integrations, always visible in the right pane
 
 ### Usage Insights
 
-Dashboard with task metrics, cost/token tracking by model, prompt-cache read telemetry (`cachedTokens` and cache-read rate where available), activity heatmaps (day-of-week and hourly), top skills usage, per-pack analytics, persona-level success/retry/cost breakdowns, and task-result thumbs up/down quality signals with 7/14/30-day period selection. Access from **Settings** > **Usage Insights**. [Learn more](docs/features.md#usage-insights)
+Dashboard with task metrics, cost/token tracking by model, prompt-cache read telemetry (`cachedTokens` and cache-read rate where available), activity heatmaps (day-of-week and hourly), top skills usage, per-pack analytics, persona-level success/retry/cost breakdowns, and feedback/retry quality metrics with 7/14/30-day period selection. Access from **Settings** > **Usage Insights**. [Learn more](docs/features.md#usage-insights)
 
 ### Health
 
@@ -437,7 +437,7 @@ Health pulls personal signals into a private, action-oriented view for readiness
 
 ### LLM Providers
 
-Dozens of routes across built-in, compatible/gateway, local, account-based, and virtual options. Use provider APIs, supported account connections, local Ollama models, or Mixture of Agents presets that fan out to advisor models before a final aggregator answers. Configure ordered fallback chains for runtime failover and get prompt caching on supported routes. Claude supports direct API keys and account-token setup; Grok supports xAI API keys and an experimental browser OAuth route. Eligibility, model availability, and provider charges follow each service's current terms. [Learn more](docs/providers.md) | [Mixture of Agents](docs/mixture-of-agents.md)
+Dozens of routes across built-in, compatible/gateway, local, account-based, and virtual options. Use provider APIs, supported account connections, local Ollama or MLX-LM models, or Mixture of Agents presets that fan out to advisor models before a final aggregator answers. Configure ordered fallback chains for runtime failover and get prompt caching on supported routes. Claude supports direct API keys and account-token setup; Grok supports xAI API keys and an experimental browser OAuth route. Eligibility, model availability, and provider charges follow each service's current terms. [Learn more](docs/providers.md) · [MLX-LM guide](docs/mlx-lm.md) · [Mixture of Agents](docs/mixture-of-agents.md)
 
 <p align="center">
   <img src="resources/branding/images/cowork-os-10.webp" alt="AI model provider settings" width="700">
@@ -601,6 +601,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Gateway Message Lifecycle](docs/gateway-message-lifecycle.md) | Remote command routing, active-task policy, skill slashes, delivery, and scheduled channel outputs |
 | [X Mention Triggers](docs/x-mention-triggers.md) | Configure `do:` mention-triggered task ingress on desktop and headless |
 | [Providers](docs/providers.md) | LLM and search provider configuration, costs, and fallback chains |
+| [MLX-LM Local Inference](docs/mlx-lm.md) | Apple Silicon setup, local API contract, runtime lifecycle, privacy, troubleshooting, and maintainer notes |
 | [Development](docs/development.md) | Build from source, project structure |
 | [Architecture](docs/architecture.md) | Technical architecture deep-dive |
 | [Access Profiles](docs/access-profiles.md) | Codex-style access choices, custom profile fields, inheritance, migration, and cross-surface enforcement |

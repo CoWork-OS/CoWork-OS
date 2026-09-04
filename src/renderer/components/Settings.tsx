@@ -1277,6 +1277,7 @@ const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
   pi: <Pi {...S} />,
   moa: <UsersRound {...S} />,
   "hf-agents": <Zap {...S} />,
+  mlx: <Sparkles {...S} />,
 };
 
 const DEFAULT_DEEPSEEK_MODELS = [{ id: "deepseek-chat", name: "DeepSeek Chat" }];
@@ -1673,6 +1674,7 @@ export function Settings({
     mlxInstalled?: "ok" | "broken" | false;
     mlxMessage?: string;
     isMac?: boolean;
+    isAppleSilicon?: boolean;
   } | null>(null);
   const [hfServerStatus, setHfServerStatus] = useState<{
     serverRunning: boolean;
@@ -1727,9 +1729,12 @@ export function Settings({
     return unsubscribe;
   }, []);
 
-  // Poll hf-agents server status when that provider is active
+  // Poll the shared local-AI server status when either local provider is active
   useEffect(() => {
-    if (settings.providerType !== "hf-agents") return;
+    if (settings.providerType !== "hf-agents" && settings.providerType !== "mlx") return;
+    window.electronAPI.checkHf?.().then((result: Any) => {
+      if (result) setHfStatus(result);
+    });
     const poll = () => {
       window.electronAPI.getLocalAIServerStatus?.().then((result: Any) => {
         if (result) setHfServerStatus(result);
@@ -3287,7 +3292,7 @@ export function Settings({
       if (openaiCompatBaseUrl) {
         loadOpenAICompatibleModels();
       }
-    } else if (providerType === "hf-agents") {
+    } else if (providerType === "hf-agents" || providerType === "mlx") {
       window.electronAPI.checkHf?.().then((result: Any) => {
         if (result) setHfStatus(result);
       });
@@ -3351,11 +3356,15 @@ export function Settings({
     }
   };
 
-  const handleHfStartServer = async () => {
+  const handleLocalAIServerStart = async (providerType: "hf-agents" | "mlx") => {
     setStartingServer(true);
     try {
-      const model = customProviders["hf-agents"]?.model;
-      const result = await window.electronAPI.startLocalAIServer?.(model);
+      const configuredModel = customProviders[providerType]?.model;
+      const defaultModel = CUSTOM_PROVIDER_MAP.get(providerType)?.defaultModel;
+      const model = configuredModel?.trim() || defaultModel;
+      const runtimeModel =
+        providerType === "mlx" && model && !model.startsWith("mlx://") ? `mlx://${model}` : model;
+      const result = await window.electronAPI.startLocalAIServer?.(runtimeModel);
       if (result && !result.ok && result.error) {
         // Show error in the server log panel — NOT in hfHardwareOutput
         setServerLog({ lines: result.error.split("\n"), state: "error" });
@@ -3383,15 +3392,18 @@ export function Settings({
       };
       setTimeout(poll, 2000);
     } catch (err: Any) {
-      setHfHardwareOutput((prev) => ({
-        ...(prev ?? { models: [], modelDetails: [] }),
-        output: `Error: ${(err as Any)?.message || "Unknown error"}`,
-      }));
+      setServerLog({
+        lines: [`Error: ${(err as Any)?.message || "Unknown error"}`],
+        state: "error",
+      });
       setStartingServer(false);
     }
   };
 
-  const handleHfStopServer = async () => {
+  const handleHfStartServer = () => handleLocalAIServerStart("hf-agents");
+  const handleMlxStartServer = () => handleLocalAIServerStart("mlx");
+
+  const handleLocalAIServerStop = async () => {
     setStoppingServer(true);
     setServerLog(null);
     try {
@@ -3402,6 +3414,9 @@ export function Settings({
       setStoppingServer(false);
     }
   };
+
+  const handleHfStopServer = () => handleLocalAIServerStop();
+  const handleMlxStopServer = () => handleLocalAIServerStop();
 
   const handleOpenAIOAuthLogout = async () => {
     try {
@@ -4224,6 +4239,7 @@ export function Settings({
 
   const currentProviderType = settings.providerType as LLMProviderType;
   const resolvedProviderType = resolveCustomProviderId(currentProviderType);
+  const mlxRuntimeReady = hfStatus?.isAppleSilicon === true && hfStatus.mlxInstalled === "ok";
   const selectedCustomProvider = CUSTOM_PROVIDER_MAP.get(resolvedProviderType);
   const selectedCustomConfig = selectedCustomProvider
     ? customProviders[resolvedProviderType] || {}
@@ -7038,7 +7054,7 @@ export function Settings({
                               <span style={{ color: "#8b5cf6" }}>MLX</span> runs natively on Apple
                               Silicon via mlx_lm — fastest on your M-series Mac.
                             </>
-                          ) : hfStatus?.isMac ? (
+                          ) : hfStatus?.isAppleSilicon ? (
                             <>
                               <span
                                 style={{
@@ -7062,7 +7078,7 @@ export function Settings({
                             </>
                           )}
                         </p>
-                        {hfStatus?.isMac && hfStatus.mlxInstalled !== "ok" && (
+                        {hfStatus?.isAppleSilicon && hfStatus.mlxInstalled !== "ok" && (
                           <div
                             style={{
                               marginBottom: "8px",
@@ -7357,7 +7373,7 @@ export function Settings({
               <h3>Server Control</h3>
               <p className="settings-description">
                 Start the llama.cpp server with your selected model. The server exposes an
-                OpenAI-compatible API at <code>http://localhost:8080</code>.
+                OpenAI-compatible API at <code>http://localhost:8080/v1</code>.
               </p>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button
@@ -7375,6 +7391,170 @@ export function Settings({
                   {stoppingServer ? "Stopping..." : "Stop Server"}
                 </button>
               </div>
+            </div>
+          </>
+        )}
+
+        {resolvedProviderType === "mlx" && (
+          <>
+            <div className="settings-section">
+              <h3>MLX-LM Status</h3>
+              {hfStatus === null ? (
+                <p className="settings-description">Checking MLX-LM installation...</p>
+              ) : !hfStatus.isAppleSilicon ? (
+                <p
+                  className="settings-description"
+                  style={{ color: "var(--color-warning, #d97706)" }}
+                >
+                  MLX-LM requires an Apple Silicon Mac running macOS arm64.
+                </p>
+              ) : hfStatus.mlxInstalled === "ok" ? (
+                <p
+                  className="settings-description"
+                  style={{ color: "var(--color-success, #16a34a)" }}
+                >
+                  MLX-LM is installed and ready for native Metal inference.
+                </p>
+              ) : (
+                <div>
+                  <p
+                    className="settings-description"
+                    style={{ color: "var(--color-warning, #d97706)" }}
+                  >
+                    {hfStatus.mlxMessage || "MLX-LM is not installed."}
+                  </p>
+                  <code
+                    style={{
+                      display: "block",
+                      marginTop: "8px",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      background: "var(--color-bg-secondary, rgba(0,0,0,0.1))",
+                      fontSize: "12px",
+                    }}
+                  >
+                    pip install mlx-lm
+                  </code>
+                </div>
+              )}
+              <p className="settings-hint">
+                MLX-LM runs the model locally on Apple Silicon and does not require an API key.
+              </p>
+            </div>
+
+            <div className="settings-section">
+              <h3>Recommended MLX Models</h3>
+              <p className="settings-description">
+                Choose a quantized MLX model, or enter any compatible Hugging Face model ID above.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {[
+                  {
+                    label: "Qwen3 8B · ~5 GB",
+                    model: "mlx-community/Qwen3-8B-4bit",
+                  },
+                  {
+                    label: "Qwen3 14B · ~9 GB",
+                    model: "mlx-community/Qwen3-14B-4bit",
+                  },
+                  {
+                    label: "Qwen3.6 35B A3B · ~21 GB",
+                    model: "mlx-community/Qwen3.6-35B-A3B-4bit-DWQ",
+                  },
+                ].map(({ label, model }) => (
+                  <button
+                    key={model}
+                    type="button"
+                    className="button-small button-secondary"
+                    style={{
+                      borderColor: "#8b5cf6",
+                      color: "#8b5cf6",
+                      background:
+                        selectedCustomConfig.model === model ? "rgba(139,92,246,0.12)" : undefined,
+                    }}
+                    onClick={() => updateCustomProvider("mlx", { model })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="settings-section">
+              <h3>Server Control</h3>
+              <p className="settings-description">
+                Start MLX-LM with the selected model. CoWork connects to its local OpenAI-compatible
+                API at <code>http://localhost:8080/v1</code>. This server is shared with HuggingFace
+                Local AI, so stop one runtime before starting the other.
+              </p>
+              <div
+                style={{
+                  marginBottom: "10px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span
+                  style={{
+                    width: "10px",
+                    height: "10px",
+                    borderRadius: "50%",
+                    background: hfServerStatus?.serverRunning
+                      ? "var(--color-success, #16a34a)"
+                      : hfServerStatus?.processAlive
+                        ? "var(--color-warning, #d97706)"
+                        : "var(--color-text-muted, #888)",
+                    flexShrink: 0,
+                  }}
+                />
+                <span className="settings-description" style={{ margin: 0 }}>
+                  {hfServerStatus?.serverRunning
+                    ? `Server running${hfServerStatus.models?.length ? ` · ${hfServerStatus.models[0]}` : ""}`
+                    : hfServerStatus?.processAlive
+                      ? "Starting… (model may be downloading)"
+                      : "Server not running"}
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                  className="button-small button-primary"
+                  onClick={handleMlxStartServer}
+                  disabled={startingServer || !mlxRuntimeReady || hfServerStatus?.serverRunning}
+                >
+                  {startingServer ? "Starting..." : "Start MLX Server"}
+                </button>
+                <button
+                  type="button"
+                  className="button-small button-secondary"
+                  onClick={handleMlxStopServer}
+                  disabled={stoppingServer || !hfServerStatus?.processAlive}
+                >
+                  {stoppingServer ? "Stopping..." : "Stop Server"}
+                </button>
+              </div>
+              {serverLog && !hfServerStatus?.serverRunning && (
+                <pre
+                  style={{
+                    marginTop: "10px",
+                    padding: "8px 10px",
+                    maxHeight: "160px",
+                    overflow: "auto",
+                    borderRadius: "6px",
+                    background: "var(--color-bg-secondary, rgba(0,0,0,0.06))",
+                    color:
+                      serverLog.state === "error"
+                        ? "var(--color-error, #dc2626)"
+                        : "var(--color-text-secondary, #666)",
+                    fontSize: "10px",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {serverLog.lines.join("\n")}
+                </pre>
+              )}
             </div>
           </>
         )}

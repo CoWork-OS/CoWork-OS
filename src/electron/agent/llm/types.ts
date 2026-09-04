@@ -245,6 +245,7 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
     maxImageBytes: 5 * 1024 * 1024,
     supportedMimeTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"],
   },
+  mlx: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   groq: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   kimi: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   pi: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },

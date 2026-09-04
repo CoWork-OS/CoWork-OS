@@ -218,6 +218,29 @@ describe("TaskCreateSchema", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it("accepts the optional asynchronous title-generation flag", () => {
+    const result = TaskCreateSchema.safeParse({
+      title: "Fallback title",
+      prompt: "Do it",
+      workspaceId: "__temp_workspace__",
+      generateTitle: true,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts the execution mode source persisted by task strategy", () => {
+    const result = TaskCreateSchema.safeParse({
+      title: "Strategy task",
+      prompt: "Do it",
+      workspaceId: "__temp_workspace__",
+      agentConfig: {
+        executionMode: "plan",
+        executionModeSource: "strategy",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("TaskWorkspaceUpdateSchema", () => {

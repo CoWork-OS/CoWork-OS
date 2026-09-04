@@ -8,7 +8,16 @@ import type {
   EvalSuite,
   Task,
   TaskEvent,
+  WorkSessionItem,
+  WorkSessionStatus,
+  WorkSessionTurnStatus,
 } from "../../shared/types";
+import { WorkSessionProtocolRepository } from "../database/WorkSessionProtocolRepository";
+import { mapTaskEventKind } from "../sessions/WorkSessionProtocolService";
+import {
+  evaluateIsolatedReplay,
+  type WorkSessionReplayAssertions,
+} from "../sessions/WorkSessionReplayEvaluationService";
 
 interface EvalSuiteSummary extends EvalSuite {
   caseCount: number;
@@ -59,6 +68,60 @@ function normalizeTerminalStatus(task: {
   }
   if (task.status === "completed") return "ok";
   return "failed";
+}
+
+function replayStatusForAssertion(status: Task["terminalStatus"]): WorkSessionStatus | undefined {
+  switch (status) {
+    case "ok":
+      return "completed";
+    case "partial_success":
+      return "partial_success";
+    case "needs_user_action":
+    case "awaiting_approval":
+    case "awaiting_verification":
+      return "waiting";
+    case "resume_available":
+      return "partial_success";
+    case "failed":
+      return "failed";
+    default:
+      return undefined;
+  }
+}
+
+function replayStatusForTask(task: {
+  status?: string;
+  terminal_status?: string | null;
+}): WorkSessionStatus | undefined {
+  if (task.status === "cancelled") return "cancelled";
+  const terminal = normalizeTerminalStatus(task);
+  return replayStatusForAssertion(terminal);
+}
+
+function normalizeReplayItemStatus(value: unknown): WorkSessionTurnStatus | undefined {
+  if (typeof value !== "string") return undefined;
+  if (
+    value === "pending" ||
+    value === "executing" ||
+    value === "waiting" ||
+    value === "completed" ||
+    value === "partial_success" ||
+    value === "failed" ||
+    value === "cancelled"
+  ) {
+    return value;
+  }
+  if (value === "ok") return "completed";
+  if (value === "blocked") return "waiting";
+  return undefined;
+}
+
+function isSyntheticCanonicalItem(item: WorkSessionItem): boolean {
+  if (item.sourceEventId) return false;
+  const payload = item.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const event = (payload as Record<string, unknown>).event;
+  return event === "session.created" || (typeof event === "string" && event.startsWith("turn."));
 }
 
 function extractTool(payload: unknown): string {
@@ -481,7 +544,7 @@ export class EvalService {
     const taskRow = this.db
       .prepare(
         `
-        SELECT id, status, terminal_status, result_summary, workspace_id
+        SELECT id, status, terminal_status, result_summary, workspace_id, session_id
         FROM tasks
         WHERE id = ?
       `,
@@ -492,74 +555,158 @@ export class EvalService {
       return { status: "skipped", details: "Source task no longer exists" };
     }
 
+    const items = this.loadReplayItems(taskRow.id, taskRow.session_id);
     const assertions = evalCase.assertions || {};
-    const failures: string[] = [];
-
-    if (assertions.expectedTerminalStatus) {
-      const actual = normalizeTerminalStatus(taskRow);
-      if (actual !== assertions.expectedTerminalStatus) {
-        failures.push(
-          `expected terminal_status=${assertions.expectedTerminalStatus}, actual=${actual}`,
-        );
-      }
-    }
-
-    const summary = (taskRow.result_summary || "").toString();
-    const mustContainAll = Array.isArray(assertions.mustContainAll)
-      ? assertions.mustContainAll
-      : [];
-    for (const needle of mustContainAll) {
-      if (!needle) continue;
-      if (!summary.toLowerCase().includes(needle.toLowerCase())) {
-        failures.push(`missing required summary text: "${needle}"`);
-      }
-    }
-
-    const mustCreatePaths = Array.isArray(assertions.mustCreatePaths)
-      ? assertions.mustCreatePaths
-      : [];
-    if (mustCreatePaths.length > 0) {
-      const eventRows = this.db
-        .prepare(
-          `
-          SELECT id, task_id, timestamp, type, payload
-          FROM task_events
-          WHERE task_id = ?
-          ORDER BY timestamp ASC
-        `,
-        )
-        .all(taskRow.id) as Any[];
-
-      const events: TaskEvent[] = eventRows.map((row) => ({
-        id: row.id,
-        taskId: row.task_id,
-        timestamp: row.timestamp,
-        schemaVersion: 2,
-        type: row.type,
-        payload: safeJsonParse(row.payload, {}),
-      }));
-      const changed = extractTaskChangedPaths(events);
-
-      for (const mustCreatePath of mustCreatePaths) {
-        if (!mustCreatePath) continue;
-        const normalized = mustCreatePath.replace(/\\/g, "/");
-        const found = Array.from(changed).some((candidate) => candidate.endsWith(normalized));
-        if (!found) {
-          failures.push(`missing required changed path: "${mustCreatePath}"`);
-        }
-      }
-    }
-
-    if (failures.length > 0) {
-      return {
-        status: "fail",
-        details: failures.join("; "),
-      };
-    }
-    return {
-      status: "pass",
-      details: "All deterministic assertions satisfied",
+    const replayAssertions: WorkSessionReplayAssertions = {
+      ...(assertions.expectedTerminalStatus
+        ? { expectedTerminalStatus: replayStatusForAssertion(assertions.expectedTerminalStatus) }
+        : {}),
+      ...(Array.isArray(assertions.mustContainAll)
+        ? { mustContainAll: assertions.mustContainAll }
+        : {}),
+      ...(Array.isArray(assertions.mustCreatePaths)
+        ? { mustCreatePaths: assertions.mustCreatePaths }
+        : {}),
     };
+    const replay = evaluateIsolatedReplay(items, {
+      fixtureId: `eval:${evalCase.id}`,
+      assertions: replayAssertions,
+    });
+    const failures = [...replay.findings];
+    const snapshotStatus = replayStatusForTask(taskRow);
+    if (
+      items.length > 0 &&
+      replay.replayStatus &&
+      snapshotStatus &&
+      ["completed", "failed", "cancelled"].includes(String(taskRow.status)) &&
+      replay.replayStatus !== snapshotStatus
+    ) {
+      failures.push(
+        `snapshot/replay status mismatch: snapshot=${snapshotStatus}, replay=${replay.replayStatus}`,
+      );
+    }
+
+    return {
+      status: failures.length === 0 ? "pass" : "fail",
+      details:
+        `isolated replay ${replay.passed ? "passed" : "failed"} (${replay.itemCount} items; ` +
+        `incremental=${replay.incrementalChecksum.slice(0, 12)}, full=${replay.fullRebuildChecksum.slice(0, 12)})` +
+        (failures.length > 0 ? `; ${[...new Set(failures)].join("; ")}` : ""),
+    };
+  }
+
+  /**
+   * Load a replay fixture without calling ensure/backfill.  Evaluation must be
+   * isolated: grading a task cannot mutate its canonical stream or silently
+   * turn a snapshot read into the source of truth.
+   */
+  private loadReplayItems(taskId: string, taskSessionId?: string | null): WorkSessionItem[] {
+    const protocol = new WorkSessionProtocolRepository(this.db);
+    const boundSessionId =
+      protocol.findSessionIdForTask(taskId) ||
+      (typeof taskSessionId === "string" && taskSessionId.trim()
+        ? taskSessionId.trim()
+        : undefined) ||
+      (
+        this.db
+          .prepare(
+            "SELECT id FROM work_sessions WHERE task_id = ? ORDER BY updated_at DESC LIMIT 1",
+          )
+          .get(taskId) as { id?: string } | undefined
+      )?.id;
+    if (boundSessionId) {
+      const canonical = protocol.listAllItems(boundSessionId);
+      if (canonical.length > 0) {
+        const replayCanonical = canonical.filter((item) => !isSyntheticCanonicalItem(item));
+        // A session can be observed between creation of its synthetic root
+        // item and completion of the legacy backfill.  Do not grade that
+        // partial canonical stream as if it were complete: compare source
+        // event ids first and fall back to the immutable legacy event rows
+        // when any persisted event is still missing from vNext.
+        const legacyEventIds = this.db
+          .prepare(
+            `SELECT id, event_id
+             FROM task_events
+             WHERE task_id = ? AND type <> 'llm_streaming'`,
+          )
+          .all(taskId) as Array<{ id?: unknown; event_id?: unknown }>;
+        const canonicalEventIds = new Set<string>();
+        for (const item of canonical) {
+          if (item.sourceEventId) canonicalEventIds.add(String(item.sourceEventId));
+          const payload = item.payload;
+          if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+            const eventId = (payload as Record<string, unknown>).eventId;
+            if (typeof eventId === "string" && eventId.trim()) {
+              canonicalEventIds.add(eventId.trim());
+            }
+          }
+        }
+        const canonicalComplete = legacyEventIds.every((row) => {
+          const eventId =
+            typeof row.event_id === "string" && row.event_id.trim()
+              ? row.event_id.trim()
+              : typeof row.id === "string"
+                ? row.id
+                : "";
+          return !eventId || canonicalEventIds.has(eventId);
+        });
+        // A synthetic session/turn root is bookkeeping, not replay evidence.
+        // Do not let a newly-created session with no persisted task events
+        // pass evaluation merely because that root item exists.
+        if (canonicalComplete && replayCanonical.length > 0) return canonical;
+      }
+    }
+
+    const rows = this.db
+      .prepare(
+        `SELECT id, task_id, timestamp, type, legacy_type, payload, schema_version,
+                event_id, seq, status, actor
+         FROM task_events
+         WHERE task_id = ? AND type <> 'llm_streaming'
+         ORDER BY COALESCE(seq, timestamp) ASC, timestamp ASC, id ASC`,
+      )
+      .all(taskId) as Any[];
+    return rows.map((row, index) => {
+      const payload = safeJsonParse<Record<string, unknown>>(row.payload, {});
+      const sourceType =
+        typeof row.legacy_type === "string" && row.legacy_type.trim()
+          ? row.legacy_type.trim()
+          : String(row.type || "legacy_event");
+      const sequence =
+        typeof row.seq === "number" && Number.isFinite(row.seq)
+          ? Math.max(1, Math.floor(row.seq))
+          : index + 1;
+      return {
+        id: String(row.id),
+        sessionId: boundSessionId || `legacy:${taskId}`,
+        turnId: `legacy-turn:${taskId}`,
+        sequence,
+        kind: mapTaskEventKind(sourceType),
+        actor:
+          typeof row.actor === "string" && row.actor.trim()
+            ? row.actor.trim()
+            : sourceType === "user_message"
+              ? "user"
+              : sourceType.startsWith("tool_")
+                ? "tool"
+                : "agent",
+        payload: {
+          eventType: sourceType,
+          sourceType: row.type,
+          eventId: row.event_id || row.id,
+          timestamp: Number(row.timestamp || 0),
+          ...(typeof row.seq === "number" ? { seq: row.seq } : {}),
+          payload,
+        },
+        redactionClass: "standard",
+        ...(normalizeReplayItemStatus(row.status)
+          ? { status: normalizeReplayItemStatus(row.status) }
+          : {}),
+        sourceEventId:
+          typeof row.event_id === "string" && row.event_id ? row.event_id : String(row.id),
+        createdAt: Number(row.timestamp || 0),
+      } satisfies WorkSessionItem;
+    });
   }
 
   getBaselineMetrics(windowDays = 30): EvalBaselineMetrics {

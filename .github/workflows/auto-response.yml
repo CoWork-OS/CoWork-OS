@@ -54,6 +54,6 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.payload.pull_request.number,
-                body: `Thanks for your first PR, @${prAuthor}! 🚀\n\nWe appreciate your contribution to CoWork-OSS. A maintainer will review this soon.\n\n**Reminder**: If this was built with AI tools (Claude Code, Codex, etc.), please note that in the PR description — AI-assisted PRs are welcome here!`
+                body: `Thanks for your first PR, @${prAuthor}! 🚀\n\nWe appreciate your contribution to CoWork OS. A maintainer will review this soon.\n\n**Reminder**: If this was built with AI tools (Claude Code, Codex, etc.), please note that in the PR description — AI-assisted PRs are welcome here!`
               });
             }

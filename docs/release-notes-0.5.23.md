@@ -4,7 +4,7 @@ This page summarizes the product and engineering changes included in `0.5.23`, f
 
 ## Overview
 
-Release `0.5.23` expands CoWork in three main directions: a new **Subconscious reflective loop** for ongoing automation and learning, a deeper **execution/runtime refresh** centered on provider-aware prompt caching and adaptive output budgeting, and stronger **managed capability security** for imported skills and plugin packs. It also broadens **Usage Insights**, improves provider setup and failover behavior, and refreshes the desktop UI around settings, approvals, and task feedback.
+Release `0.5.23` expands CoWork in three main directions: a new **Subconscious reflective loop** for ongoing automation and learning, a deeper **execution/runtime refresh** centered on provider-aware prompt caching and adaptive output budgeting, and stronger **managed capability security** for imported skills and plugin packs. It also broadens **Usage Insights**, improves provider setup and failover behavior, and refreshes the desktop UI around settings and approvals.
 
 ## What changed
 
@@ -43,7 +43,6 @@ Release `0.5.23` expands CoWork in three main directions: a new **Subconscious r
 ### Desktop UI and operator experience
 
 - **Settings refresh**: settings were restructured around LLM provider helpers, fallback behavior, import security states, and subconscious controls.
-- **Task feedback controls**: completed tasks now expose feedback actions directly in the right panel.
 - **Approval dialog previews**: command approvals now show safer, truncated previews for long or multiline commands.
 - **Skill and plugin install surfaces**: the Skill Hub, Customize panel, and Plugin Store now expose quarantine state, retry actions, and security-specific install messaging.
 - **Usage Insights UI updates**: charts, provider rows, and preset selection were refreshed for the expanded metrics model.

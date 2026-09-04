@@ -58,6 +58,25 @@ describe("first-run readiness", () => {
     });
   });
 
+  it("treats configured MLX-LM as local ready path without an API key", () => {
+    const settings: LLMSettingsData = {
+      providerType: "mlx",
+      modelKey: "mlx-community/Qwen3-8B-4bit",
+      customProviders: {
+        mlx: {
+          baseUrl: "http://localhost:8080/v1",
+          model: "mlx-community/Qwen3-8B-4bit",
+        },
+      },
+    };
+
+    expect(getFirstRunReadiness(settings, { workspace })).toMatchObject({
+      modelReady: true,
+      modelPath: "local_model",
+      providerType: "mlx",
+    });
+  });
+
   it("does not treat the default Anthropic route as ready without credentials", () => {
     const settings: LLMSettingsData = {
       providerType: "anthropic",

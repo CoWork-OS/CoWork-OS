@@ -41,6 +41,7 @@ import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
 import { WorkContextStrip } from "./WorkContextStrip";
+import { BotsPane, type BotRole } from "./BotsPane";
 
 const SIDEBAR_ITEM_HEIGHT = 22;
 const SIDEBAR_DATE_HEADER_HEIGHT = 20;
@@ -51,12 +52,7 @@ const SIDEBAR_LOAD_MORE_HEIGHT = 32;
 const SIDEBAR_VIRTUALIZATION_MIN_ROWS = 30;
 const SIDEBAR_LOAD_MORE_THRESHOLD_PX = 320;
 
-interface AgentRoleInfo {
-  id: string;
-  displayName: string;
-  color: string;
-  icon?: string;
-}
+type AgentRoleInfo = BotRole;
 
 export function formatRelativeShort(timestamp?: number): string {
   if (!timestamp) return "";
@@ -94,6 +90,7 @@ interface SidebarProps {
   onOpenIdeas?: () => void;
   onOpenInboxAgent?: () => void;
   onOpenAgents?: () => void;
+  onOpenBot?: (bot: BotRole) => void | Promise<void>;
   onOpenEverydayAgent?: () => void;
   onOpenHealth?: () => void;
   onNewSession?: () => void;
@@ -198,7 +195,20 @@ export function isAwaitingSessionStatus(status: Task["status"]): boolean {
 
 export function shouldShowTaskInSidebarSessions(task: Task): boolean {
   if (task.source === "managed_agent_panel") return false;
+  if (task.agentConfig?.botConversation === true) return false;
   return !task.targetNodeId;
+}
+
+export function isUserCreatedBotRole(
+  role: Pick<BotRole, "isActive" | "isSystem" | "roleKind" | "sourceTemplateId">,
+): boolean {
+  return (
+    role.isActive !== false &&
+    role.isSystem !== true &&
+    role.roleKind !== "system" &&
+    role.roleKind !== "persona_template" &&
+    !role.sourceTemplateId
+  );
 }
 
 export function compareTasksByPinAndRecency(a: Task, b: Task): number {
@@ -614,7 +624,9 @@ function getSidebarTaskListSignature(tasks: Task[]): string {
   const parts: string[] = [];
   for (let i = 0; i < Math.min(tasks.length, 100); i++) {
     const t = tasks[i];
-    parts.push(`${t.id}:${t.status}:${t.updatedAt ?? 0}`);
+    parts.push(
+      `${t.id}:${t.status}:${t.updatedAt ?? 0}:${t.assignedAgentRoleId ?? ""}:${t.agentConfig?.botConversation ? "bot" : ""}`,
+    );
   }
   return `${tasks.length}|${parts.join(",")}`;
 }
@@ -640,6 +652,7 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
       (next.completionAttentionTaskIds || []).join(",") &&
     prev.updateInfo?.latestVersion === next.updateInfo?.latestVersion &&
     prev.onSelectTask === next.onSelectTask &&
+    prev.onOpenBot === next.onOpenBot &&
     prev.onTasksChanged === next.onTasksChanged &&
     prev.onOpenSettings === next.onOpenSettings &&
     prev.onOpenMissionControl === next.onOpenMissionControl
@@ -664,6 +677,7 @@ function SidebarComponent({
   onOpenIdeas,
   onOpenInboxAgent,
   onOpenAgents,
+  onOpenBot,
   onOpenEverydayAgent,
   onOpenHealth,
   onNewSession,
@@ -686,6 +700,9 @@ function SidebarComponent({
   const [renameValue, setRenameValue] = useState("");
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
   const [agentRoles, setAgentRoles] = useState<Map<string, AgentRoleInfo>>(new Map());
+  const [sidebarTab, setSidebarTab] = useState<"sessions" | "bots">("sessions");
+  const [isLoadingBots, setIsLoadingBots] = useState(false);
+  const [botsError, setBotsError] = useState<string | null>(null);
   const [showFailedSessions, setShowFailedSessions] = useState(false);
   const [showAutomatedSessions, setShowAutomatedSessions] = useState(false);
   const [showSessionSearch, setShowSessionSearch] = useState(false);
@@ -719,22 +736,65 @@ function SidebarComponent({
   const isMoreActive = isMissionControlActive || isHealthActive || isIdeasActive;
   const isMoreExpanded = isMoreActive || !moreCollapsed;
 
+  const loadAgentRoles = useCallback(async () => {
+    if (!window.electronAPI?.getAgentRoles) return;
+    setIsLoadingBots(true);
+    setBotsError(null);
+    try {
+      const roles = (await window.electronAPI.getAgentRoles(false)) as Array<
+        BotRole & { roleKind?: string }
+      >;
+      const map = new Map<string, AgentRoleInfo>();
+      for (const role of roles || []) {
+        map.set(role.id, {
+          id: role.id,
+          name: role.name,
+          roleKind: role.roleKind,
+          sourceTemplateId: role.sourceTemplateId,
+          displayName: role.displayName,
+          description: role.description,
+          color: role.color || "#6366f1",
+          icon: role.icon,
+          isActive: role.isActive,
+          isSystem: role.isSystem,
+          sortOrder: role.sortOrder,
+          updatedAt: role.updatedAt,
+        });
+      }
+      setAgentRoles(map);
+    } catch (error) {
+      setBotsError(error instanceof Error ? error.message : "Could not load bots.");
+    } finally {
+      setIsLoadingBots(false);
+    }
+  }, []);
+
+  // Keep role labels available for existing Sessions rows immediately on
+  // startup, then refresh again when the Bots surface is opened.
   useEffect(() => {
-    window.electronAPI
-      .getAgentRoles(false)
-      .then((roles: { id: string; displayName: string; color?: string; icon?: string }[]) => {
-        const map = new Map<string, AgentRoleInfo>();
-        for (const r of roles) {
-          map.set(r.id, {
-            id: r.id,
-            displayName: r.displayName,
-            color: r.color || "#6366f1",
-            icon: r.icon,
-          });
-        }
-        setAgentRoles(map);
-      })
-      .catch(() => {});
+    void loadAgentRoles();
+  }, [loadAgentRoles]);
+
+  useEffect(() => {
+    if (sidebarTab !== "bots") return;
+    void loadAgentRoles();
+  }, [loadAgentRoles, sidebarTab]);
+
+  const botRoles = useMemo(
+    () => Array.from(agentRoles.values()).filter(isUserCreatedBotRole),
+    [agentRoles],
+  );
+
+  const handleBotCreated = useCallback((bot: BotRole) => {
+    if (bot.isSystem) return;
+    setAgentRoles((current) => {
+      const next = new Map(current);
+      next.set(bot.id, {
+        ...bot,
+        color: bot.color || "#6366f1",
+      });
+      return next;
+    });
   }, []);
 
   const loadMailboxInboxUnread = useCallback(async () => {
@@ -2225,246 +2285,286 @@ function SidebarComponent({
         </div>
       ) : (
         <>
-          <WorkContextStrip
-            workspaceId={workspace?.id}
-            refreshKey={`${tasks.length}:${tasks[0]?.updatedAt || 0}`}
-            onSelectTask={onSelectTask}
-          />
-          {/* Sessions List Header */}
-          <div className="sidebar-header-sessions">
-            <div className="new-task-btn cli-new-task-btn cli-action-btn cli-sessions-header">
-              <button
-                type="button"
-                className="cli-list-header-toggle"
-                onClick={() => setSessionsCollapsed((value) => !value)}
-                aria-expanded={!sessionsCollapsed}
-                title={sessionsCollapsed ? "Expand sessions" : "Collapse sessions"}
-              >
-                <span className="cli-section-prompt terminal-only">
-                  {sessionsCollapsed ? "▸" : "▾"}
-                </span>
-                <span className="terminal-only">SESSIONS</span>
-                <span className="modern-only cli-new-task-modern-label">
-                  <span className="sidebar-home-btn-icon cli-sessions-icon" aria-hidden="true">
-                    <SlidersHorizontal size={16} strokeWidth={2} style={{ display: "block" }} />
-                  </span>
-                  <span className="cli-sessions-title">Sessions</span>
-                  <span className="cli-sessions-collapse-indicator" aria-hidden="true">
-                    {sessionsCollapsed ? (
-                      <ChevronRight size={14} strokeWidth={2.5} />
-                    ) : (
-                      <ChevronDown size={14} strokeWidth={2.5} />
-                    )}
-                  </span>
-                </span>
-              </button>
-              <div className="cli-list-header-actions">
-                <button
-                  type="button"
-                  className={`sidebar-session-action ${showSessionSearch ? "active" : ""}`}
-                  onClick={() => {
-                    setSessionsCollapsed(false);
-                    setShowSessionSearch((value) => {
-                      if (value) setSessionSearch("");
-                      return !value;
-                    });
-                  }}
-                  aria-pressed={showSessionSearch}
-                  title={showSessionSearch ? "Hide search" : "Search sessions"}
-                >
-                  <Search size={16} strokeWidth={2} />
-                </button>
-                <button
-                  type="button"
-                  className={`sidebar-session-action ${showSessionFilters ? "active" : ""}`}
-                  onClick={() => {
-                    setSessionsCollapsed(false);
-                    setShowSessionFilters((value) => !value);
-                  }}
-                  aria-pressed={showSessionFilters}
-                  title={showSessionFilters ? "Hide filters" : "Filter sessions"}
-                >
-                  <ListFilter size={16} strokeWidth={2} />
-                </button>
-              </div>
-            </div>
+          <div className="sidebar-session-tabs" role="tablist" aria-label="Workspace views">
+            <button
+              type="button"
+              role="tab"
+              className={`sidebar-session-tab ${sidebarTab === "sessions" ? "active" : ""}`}
+              aria-selected={sidebarTab === "sessions"}
+              onClick={() => setSidebarTab("sessions")}
+            >
+              Sessions
+            </button>
+            <button
+              type="button"
+              role="tab"
+              className={`sidebar-session-tab ${sidebarTab === "bots" ? "active" : ""}`}
+              aria-selected={sidebarTab === "bots"}
+              onClick={() => setSidebarTab("bots")}
+            >
+              Bots
+            </button>
+          </div>
 
-            {(pinActionError || archiveActionError) && (
-              <div
-                className="cli-sidebar-error"
-                role="alert"
-                style={{ marginTop: "4px", marginLeft: "4px", marginRight: "4px" }}
-              >
-                {pinActionError || archiveActionError}
-              </div>
-            )}
-
-            {!sessionsCollapsed && showSessionFilters && (
-              <div className="sidebar-session-filter-panel">
-                <button
-                  type="button"
-                  className={`sidebar-session-filter-option ${showFailedSessions ? "active" : ""}`}
-                  onClick={() => setShowFailedSessions((value) => !value)}
-                  disabled={failedSessionCount === 0}
-                >
-                  <span>Failed</span>
-                  {failedSessionCount > 0 && <span>{failedSessionCount}</span>}
-                </button>
-                <button
-                  type="button"
-                  className={`sidebar-session-filter-option ${showAutomatedSessions ? "active" : ""}`}
-                  onClick={() => {
-                    setShowAutomatedSessions((value) => !value);
-                    setAutomatedFolderCollapsed(false);
-                  }}
-                >
-                  <span>Automated</span>
-                  {automatedTaskTree.length > 0 && <span>{automatedTaskTree.length}</span>}
-                </button>
-              </div>
-            )}
-
-            {!sessionsCollapsed && showSessionSearch && (
-              <label className="sidebar-sessions-search">
-                <Search size={14} />
-                <input
-                  type="search"
-                  aria-label="Search sessions"
-                  placeholder="Search"
-                  value={sessionSearch}
-                  onChange={(event) => setSessionSearch(event.target.value)}
-                />
-              </label>
-            )}
-
-            {showFilterBar && (
-              <div className="session-filters-bar cli-session-filters">
-                <div className="session-filters-scroll">
+          {sidebarTab === "bots" ? (
+            <BotsPane
+              roles={botRoles}
+              tasks={tasks}
+              selectedTaskId={selectedTaskId}
+              isLoading={isLoadingBots}
+              error={botsError}
+              onRetry={() => void loadAgentRoles()}
+              onSelectTask={onSelectTask}
+              onOpenBot={onOpenBot}
+              onOpenAgents={onOpenAgents}
+              onBotCreated={handleBotCreated}
+            />
+          ) : (
+            <>
+              <WorkContextStrip
+                workspaceId={workspace?.id}
+                refreshKey={`${tasks.length}:${tasks[0]?.updatedAt || 0}`}
+                onSelectTask={onSelectTask}
+              />
+              {/* Sessions List Header */}
+              <div className="sidebar-header-sessions">
+                <div className="new-task-btn cli-new-task-btn cli-action-btn cli-sessions-header">
                   <button
                     type="button"
-                    className={`session-filter-chip standard ${activeModeFilters.size === 0 ? "active" : ""}`}
-                    onClick={() => setActiveModeFilters(new Set())}
+                    className="cli-list-header-toggle"
+                    onClick={() => setSessionsCollapsed((value) => !value)}
+                    aria-expanded={!sessionsCollapsed}
+                    title={sessionsCollapsed ? "Expand sessions" : "Collapse sessions"}
                   >
-                    All
+                    <span className="cli-section-prompt terminal-only">
+                      {sessionsCollapsed ? "▸" : "▾"}
+                    </span>
+                    <span className="terminal-only">SESSIONS</span>
+                    <span className="modern-only cli-new-task-modern-label">
+                      <span className="sidebar-home-btn-icon cli-sessions-icon" aria-hidden="true">
+                        <SlidersHorizontal size={16} strokeWidth={2} style={{ display: "block" }} />
+                      </span>
+                      <span className="cli-sessions-title">Sessions</span>
+                      <span className="cli-sessions-collapse-indicator" aria-hidden="true">
+                        {sessionsCollapsed ? (
+                          <ChevronRight size={14} strokeWidth={2.5} />
+                        ) : (
+                          <ChevronDown size={14} strokeWidth={2.5} />
+                        )}
+                      </span>
+                    </span>
                   </button>
-                  {availableModes.map((mode) => (
+                  <div className="cli-list-header-actions">
                     <button
-                      key={mode}
                       type="button"
-                      className={`session-filter-chip ${mode} ${activeModeFilters.has(mode) ? "active" : ""}`}
-                      onClick={() => toggleModeFilter(mode)}
+                      className={`sidebar-session-action ${showSessionSearch ? "active" : ""}`}
+                      onClick={() => {
+                        setSessionsCollapsed(false);
+                        setShowSessionSearch((value) => {
+                          if (value) setSessionSearch("");
+                          return !value;
+                        });
+                      }}
+                      aria-pressed={showSessionSearch}
+                      title={showSessionSearch ? "Hide search" : "Search sessions"}
                     >
-                      <span className="filter-chip-dot" />
-                      {mode}
+                      <Search size={16} strokeWidth={2} />
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      className={`sidebar-session-action ${showSessionFilters ? "active" : ""}`}
+                      onClick={() => {
+                        setSessionsCollapsed(false);
+                        setShowSessionFilters((value) => !value);
+                      }}
+                      aria-pressed={showSessionFilters}
+                      title={showSessionFilters ? "Hide filters" : "Filter sessions"}
+                    >
+                      <ListFilter size={16} strokeWidth={2} />
+                    </button>
+                  </div>
                 </div>
-                {activeModeFilters.size > 0 && (
-                  <button
-                    type="button"
-                    className="session-filter-clear"
-                    onClick={() => setActiveModeFilters(new Set())}
-                    title="Clear filters"
+
+                {(pinActionError || archiveActionError) && (
+                  <div
+                    className="cli-sidebar-error"
+                    role="alert"
+                    style={{ marginTop: "4px", marginLeft: "4px", marginRight: "4px" }}
                   >
-                    Clear
-                  </button>
+                    {pinActionError || archiveActionError}
+                  </div>
+                )}
+
+                {!sessionsCollapsed && showSessionFilters && (
+                  <div className="sidebar-session-filter-panel">
+                    <button
+                      type="button"
+                      className={`sidebar-session-filter-option ${showFailedSessions ? "active" : ""}`}
+                      onClick={() => setShowFailedSessions((value) => !value)}
+                      disabled={failedSessionCount === 0}
+                    >
+                      <span>Failed</span>
+                      {failedSessionCount > 0 && <span>{failedSessionCount}</span>}
+                    </button>
+                    <button
+                      type="button"
+                      className={`sidebar-session-filter-option ${showAutomatedSessions ? "active" : ""}`}
+                      onClick={() => {
+                        setShowAutomatedSessions((value) => !value);
+                        setAutomatedFolderCollapsed(false);
+                      }}
+                    >
+                      <span>Automated</span>
+                      {automatedTaskTree.length > 0 && <span>{automatedTaskTree.length}</span>}
+                    </button>
+                  </div>
+                )}
+
+                {!sessionsCollapsed && showSessionSearch && (
+                  <label className="sidebar-sessions-search">
+                    <Search size={14} />
+                    <input
+                      type="search"
+                      aria-label="Search sessions"
+                      placeholder="Search"
+                      value={sessionSearch}
+                      onChange={(event) => setSessionSearch(event.target.value)}
+                    />
+                  </label>
+                )}
+
+                {showFilterBar && (
+                  <div className="session-filters-bar cli-session-filters">
+                    <div className="session-filters-scroll">
+                      <button
+                        type="button"
+                        className={`session-filter-chip standard ${activeModeFilters.size === 0 ? "active" : ""}`}
+                        onClick={() => setActiveModeFilters(new Set())}
+                      >
+                        All
+                      </button>
+                      {availableModes.map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`session-filter-chip ${mode} ${activeModeFilters.has(mode) ? "active" : ""}`}
+                          onClick={() => toggleModeFilter(mode)}
+                        >
+                          <span className="filter-chip-dot" />
+                          {mode}
+                        </button>
+                      ))}
+                    </div>
+                    {activeModeFilters.size > 0 && (
+                      <button
+                        type="button"
+                        className="session-filter-clear"
+                        onClick={() => setActiveModeFilters(new Set())}
+                        title="Clear filters"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-          </div>
 
-          {/* Sessions Scrollable List */}
-          <div
-            className={`task-list cli-task-list ${useVirtualizedTaskRows ? "task-list-virtualized" : ""}`}
-            ref={taskListRef}
-          >
-            {!sessionsCollapsed && (
-              <>
-                {filteredTaskTree.length === 0 && visibleAutomatedTaskTree.length === 0 ? (
-                  isLoadingSessions && !hasSessionSearch && activeModeFilters.size === 0 ? (
-                    <div className="sidebar-session-skeleton" aria-label="Loading sessions">
-                      <span className="sidebar-session-skeleton-line" />
-                      <span className="sidebar-session-skeleton-line" />
-                      <span className="sidebar-session-skeleton-line" />
-                    </div>
-                  ) : hasSessionSearch ? (
-                    <div
-                      className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
-                    >
-                      <div className="sidebar-empty-message sidebar-search-empty-message">
-                        <Search size={32} style={{ opacity: 0.3 }} />
-                        <p>No matching sessions</p>
-                        <span>Try a different title, prompt, or session id</span>
-                      </div>
-                    </div>
-                  ) : activeModeFilters.size > 0 ? null : (
-                    <div
-                      className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
-                    >
-                      <pre className="cli-tree terminal-only">{`├── (no sessions yet)
-└── ...`}</pre>
-                      {uiDensity === "focused" ? (
-                        <div className="sidebar-empty-message">
-                          <EyeOff size={32} style={{ opacity: 0.3 }} />
-                          <p>Your conversations will appear here</p>
-                          <span>Start a new session to get going</span>
+              {/* Sessions Scrollable List */}
+              <div
+                className={`task-list cli-task-list ${useVirtualizedTaskRows ? "task-list-virtualized" : ""}`}
+                ref={taskListRef}
+              >
+                {!sessionsCollapsed && (
+                  <>
+                    {filteredTaskTree.length === 0 && visibleAutomatedTaskTree.length === 0 ? (
+                      isLoadingSessions && !hasSessionSearch && activeModeFilters.size === 0 ? (
+                        <div className="sidebar-session-skeleton" aria-label="Loading sessions">
+                          <span className="sidebar-session-skeleton-line" />
+                          <span className="sidebar-session-skeleton-line" />
+                          <span className="sidebar-session-skeleton-line" />
                         </div>
-                      ) : (
-                        <p className="cli-hint">
-                          <span className="terminal-only"># start a new session above</span>
-                          <span className="modern-only">Start a new session to begin</span>
-                        </p>
-                      )}
-                    </div>
-                  )
-                ) : useVirtualizedTaskRows ? (
-                  <VirtualList
-                    items={sidebarVirtualRows}
-                    getItemKey={(row) => {
-                      if (row.kind === "task")
-                        return `${row.section ?? "user"}:${row.row.node.task.id}`;
-                      return row.id;
-                    }}
-                    getItemHeight={(row) =>
-                      row.kind === "date-header"
-                        ? uiDensity === "focused"
-                          ? SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT
-                          : SIDEBAR_DATE_HEADER_HEIGHT
-                        : row.kind === "automated-header"
-                          ? SIDEBAR_AUTOMATED_HEADER_HEIGHT
-                          : row.kind === "load-more"
-                            ? SIDEBAR_LOAD_MORE_HEIGHT
-                            : uiDensity === "focused"
-                              ? SIDEBAR_FOCUSED_ITEM_HEIGHT
-                              : SIDEBAR_ITEM_HEIGHT
-                    }
-                    renderItem={(row) => renderSidebarVirtualRow(row)}
-                    estimatedItemHeight={
-                      uiDensity === "focused" ? SIDEBAR_FOCUSED_ITEM_HEIGHT : SIDEBAR_ITEM_HEIGHT
-                    }
-                    overscan={10}
-                    enabled
-                    className="sidebar-virtual-list"
-                    style={{ height: "100%" }}
-                    role="list"
-                    onScrollNearEnd={onLoadMoreTasks}
-                  />
-                ) : (
-                  sidebarVirtualRows.map((row) => (
-                    <div
-                      key={
-                        row.kind === "task"
-                          ? `${row.section ?? "user"}:${row.row.node.task.id}`
-                          : row.id
-                      }
-                    >
-                      {renderSidebarVirtualRow(row)}
-                    </div>
-                  ))
+                      ) : hasSessionSearch ? (
+                        <div
+                          className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
+                        >
+                          <div className="sidebar-empty-message sidebar-search-empty-message">
+                            <Search size={32} style={{ opacity: 0.3 }} />
+                            <p>No matching sessions</p>
+                            <span>Try a different title, prompt, or session id</span>
+                          </div>
+                        </div>
+                      ) : activeModeFilters.size > 0 ? null : (
+                        <div
+                          className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
+                        >
+                          <pre className="cli-tree terminal-only">{`├── (no sessions yet)
+└── ...`}</pre>
+                          {uiDensity === "focused" ? (
+                            <div className="sidebar-empty-message">
+                              <EyeOff size={32} style={{ opacity: 0.3 }} />
+                              <p>Your conversations will appear here</p>
+                              <span>Start a new session to get going</span>
+                            </div>
+                          ) : (
+                            <p className="cli-hint">
+                              <span className="terminal-only"># start a new session above</span>
+                              <span className="modern-only">Start a new session to begin</span>
+                            </p>
+                          )}
+                        </div>
+                      )
+                    ) : useVirtualizedTaskRows ? (
+                      <VirtualList
+                        items={sidebarVirtualRows}
+                        getItemKey={(row) => {
+                          if (row.kind === "task")
+                            return `${row.section ?? "user"}:${row.row.node.task.id}`;
+                          return row.id;
+                        }}
+                        getItemHeight={(row) =>
+                          row.kind === "date-header"
+                            ? uiDensity === "focused"
+                              ? SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT
+                              : SIDEBAR_DATE_HEADER_HEIGHT
+                            : row.kind === "automated-header"
+                              ? SIDEBAR_AUTOMATED_HEADER_HEIGHT
+                              : row.kind === "load-more"
+                                ? SIDEBAR_LOAD_MORE_HEIGHT
+                                : uiDensity === "focused"
+                                  ? SIDEBAR_FOCUSED_ITEM_HEIGHT
+                                  : SIDEBAR_ITEM_HEIGHT
+                        }
+                        renderItem={(row) => renderSidebarVirtualRow(row)}
+                        estimatedItemHeight={
+                          uiDensity === "focused"
+                            ? SIDEBAR_FOCUSED_ITEM_HEIGHT
+                            : SIDEBAR_ITEM_HEIGHT
+                        }
+                        overscan={10}
+                        enabled
+                        className="sidebar-virtual-list"
+                        style={{ height: "100%" }}
+                        role="list"
+                        onScrollNearEnd={onLoadMoreTasks}
+                      />
+                    ) : (
+                      sidebarVirtualRows.map((row) => (
+                        <div
+                          key={
+                            row.kind === "task"
+                              ? `${row.section ?? "user"}:${row.row.node.task.id}`
+                              : row.id
+                          }
+                        >
+                          {renderSidebarVirtualRow(row)}
+                        </div>
+                      ))
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </div>
+              </div>
+            </>
+          )}
         </>
       )}
 

@@ -734,7 +734,7 @@ describe("UsageInsightsService", () => {
   it("aggregates feedback and retry metrics", () => {
     const db = defaultMockDb({
       feedbackRows: [
-        { payload: JSON.stringify({ decision: "accepted", kind: "task" }) },
+        { payload: JSON.stringify({ decision: "accepted" }) },
         { payload: JSON.stringify({ decision: "rejected", reason: "Too vague" }) },
         { payload: JSON.stringify({ rating: "negative", reason: "Missed files" }) },
       ],

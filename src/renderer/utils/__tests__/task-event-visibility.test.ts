@@ -754,6 +754,96 @@ describe("task event visibility helpers", () => {
     expect(filtered.map((event) => event.id)).toEqual(["step-failed", "completion-error"]);
   });
 
+  it("deduplicates artifact emissions across absolute and relative path formats", () => {
+    const filtered = filterAdjacentDuplicateTimelineFailures([
+      makeEvent(
+        "timeline_artifact_emitted",
+        { path: "/workspace/artifacts/report.md" },
+        { id: "absolute-artifact", timestamp: 1_000 },
+      ),
+      makeEvent(
+        "artifact_created",
+        { path: "artifacts/report.md" },
+        { id: "relative-artifact", timestamp: 1_001 },
+      ),
+    ]);
+
+    expect(filtered.map((event) => event.id)).toEqual(["relative-artifact"]);
+  });
+
+  it("deduplicates a legacy file_created emission with an artifact emission", () => {
+    const filtered = filterAdjacentDuplicateTimelineFailures([
+      makeEvent(
+        "file_created",
+        { path: "/workspace/artifacts/report.md" },
+        { id: "legacy-file", timestamp: 1_000 },
+      ),
+      makeEvent(
+        "timeline_artifact_emitted",
+        { path: "artifacts/report.md" },
+        { id: "canonical-artifact", timestamp: 1_001 },
+      ),
+    ]);
+
+    expect(filtered.map((event) => event.id)).toEqual(["canonical-artifact"]);
+  });
+
+  it("does not collapse distinct artifact directories or late retries", () => {
+    const filtered = filterAdjacentDuplicateTimelineFailures([
+      makeEvent(
+        "artifact_created",
+        { path: "/workspace/a/report.md" },
+        { id: "a", timestamp: 1_000 },
+      ),
+      makeEvent(
+        "artifact_created",
+        { path: "/workspace/b/report.md" },
+        { id: "b", timestamp: 1_001 },
+      ),
+      makeEvent(
+        "timeline_artifact_emitted",
+        { path: "report.md" },
+        { id: "late", timestamp: 20_000 },
+      ),
+    ]);
+
+    expect(filtered.map((event) => event.id)).toEqual(["a", "b", "late"]);
+  });
+
+  it("does not collapse an absolute artifact with an unrelated relative directory", () => {
+    const filtered = filterAdjacentDuplicateTimelineFailures([
+      makeEvent(
+        "artifact_created",
+        { path: "/workspace/a/report.md" },
+        { id: "absolute-a", timestamp: 1_000 },
+      ),
+      makeEvent(
+        "timeline_artifact_emitted",
+        { path: "b/report.md" },
+        { id: "relative-b", timestamp: 1_001 },
+      ),
+    ]);
+
+    expect(filtered.map((event) => event.id)).toEqual(["absolute-a", "relative-b"]);
+  });
+
+  it("does not deduplicate artifacts when the task boundary is missing", () => {
+    const filtered = filterAdjacentDuplicateTimelineFailures([
+      makeEvent(
+        "artifact_created",
+        { path: "report.md" },
+        { id: "unknown-a", taskId: "", timestamp: 1_000 },
+      ),
+      makeEvent(
+        "timeline_artifact_emitted",
+        { path: "report.md" },
+        { id: "unknown-b", taskId: "", timestamp: 1_001 },
+      ),
+    ]);
+
+    expect(filtered.map((event) => event.id)).toEqual(["unknown-a", "unknown-b"]);
+  });
+
   it("keeps stage-boundary group starts in verbose mode along with custom groups", () => {
     const filtered = filterVerboseTimelineNoise([
       makeEvent(

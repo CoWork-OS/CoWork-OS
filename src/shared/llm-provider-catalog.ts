@@ -292,13 +292,31 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     id: "hf-agents",
     name: "HuggingFace Local AI",
     compatibility: "openai",
-    baseUrl: "http://localhost:8080",
+    baseUrl: "http://localhost:8080/v1",
     defaultModel: "auto",
     apiKeyLabel: "API Key (optional)",
     apiKeyPlaceholder: "sk-... (leave empty for local)",
     apiKeyOptional: true,
     description:
       "Run local models via hf-agents + llama.cpp. Inference stays local by default; optional remote services follow their own data policies. Setup: (1) pip install huggingface_hub  (2) hf extensions install hf-agents",
+  },
+  {
+    id: "mlx",
+    name: "MLX (Apple Silicon)",
+    compatibility: "openai",
+    baseUrl: "http://localhost:8080/v1",
+    defaultModel: "mlx-community/Qwen3-8B-4bit",
+    knownModels: [
+      "mlx-community/Qwen3-8B-4bit",
+      "mlx-community/Qwen3-14B-4bit",
+      "mlx-community/Qwen3-30B-A3B-4bit",
+      "mlx-community/Qwen3.6-35B-A3B-4bit-DWQ",
+    ],
+    apiKeyLabel: "API Key (optional)",
+    apiKeyPlaceholder: "Leave empty for local inference",
+    apiKeyOptional: true,
+    description:
+      "Run MLX-LM natively on Apple Silicon through its local OpenAI-compatible server. Setup: pip install mlx-lm",
   },
 ];
 

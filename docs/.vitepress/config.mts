@@ -17,6 +17,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/getting-started' },
       { text: 'Models & Access', link: '/providers' },
+      { text: 'MLX-LM', link: '/mlx-lm' },
       { text: 'Compare', link: '/comparisons/' },
       { text: 'CLI', link: '/cli' },
       { text: 'Platform Updates', link: '/integration-skill-bootstrap-lifecycle' },
@@ -41,6 +42,7 @@ export default defineConfig({
         text: 'Models, Access & Comparison',
         items: [
           { text: 'Models & Access', link: '/providers' },
+          { text: 'MLX-LM Local Inference', link: '/mlx-lm' },
           { text: 'Compare CoWork OS', link: '/comparisons/' },
           { text: 'Migration Guide', link: '/migration' },
           { text: 'OpenClaw Comparison', link: '/openclaw-comparison' },

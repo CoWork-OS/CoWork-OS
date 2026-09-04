@@ -76,7 +76,7 @@ Examples:
 | Preset | Aggregator | Advisors |
 |--------|------------|----------|
 | Coding review | OpenAI or Azure OpenAI GPT route | Claude, Gemini, OpenRouter coding model |
-| Research synthesis | Claude or OpenAI | Gemini, OpenRouter, local Ollama |
+| Research synthesis | Claude or OpenAI | Gemini, OpenRouter, local Ollama or MLX-LM |
 | Low-cost drafting | A capable mid-tier model | one cheap model plus one local model |
 
 Avoid adding many advisors by default. Latency and cost scale with the number of advisor calls plus the aggregator call.

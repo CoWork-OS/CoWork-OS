@@ -15,6 +15,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { useReplayMode, type ReplayControls } from "./hooks/useReplayMode";
 import { useTaskDuration } from "./hooks/useTaskDuration";
 import { Sidebar } from "./components/Sidebar";
+import type { BotRole } from "./components/BotsPane";
 import type { SpreadsheetTurnContext } from "./components/SpreadsheetArtifactViewer";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
 import { DisclaimerModal } from "./components/DisclaimerModal";
@@ -146,6 +147,11 @@ import {
 import { classifyLiveTaskEvent } from "./utils/live-task-event-policy";
 import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
 import { shouldUseFreshTempWorkspaceForNewSession } from "./utils/new-session-workspace";
+import {
+  canRestoreSelectedTask,
+  persistSelectedTaskId,
+  readPersistedSelectedTaskId,
+} from "./utils/selected-task-restoration";
 
 const Settings = lazy(() =>
   import("./components/Settings").then((module) => ({ default: module.Settings })),
@@ -2094,6 +2100,8 @@ export function App() {
   const timelineHistoryLoadInFlightRef = useRef(false);
   const selectedTaskHydrationInFlightRef = useRef<Set<string>>(new Set());
   const selectedTaskHydrationAttemptedRef = useRef<Set<string>>(new Set());
+  const restoredSelectionWorkspaceRef = useRef<string | null>(null);
+  const selectionRestorationSettledWorkspaceRef = useRef<string | null>(null);
   /** Tracks output paths we've already shown completion toast for (suppresses repeat toasts on follow-ups) */
   const completionToastNotifiedPathsRef = useRef<Map<string, Set<string>>>(new Map());
 
@@ -3188,6 +3196,34 @@ export function App() {
         typeof rawEvent?.timestamp === "number" && Number.isFinite(rawEvent.timestamp)
           ? rawEvent.timestamp
           : Date.now();
+
+      if (event.type === "task_title_updated") {
+        const title = typeof event.payload?.title === "string" ? event.payload.title.trim() : "";
+        if (!title) return;
+
+        const taskWasKnown = tasksRef.current.some((task) => task.id === event.taskId);
+        const nextTasks = updateTaskPreservingIdentity(tasksRef.current, event.taskId, (task) =>
+          mergeTaskPreservingIdentity(task, {
+            title,
+            updatedAt: Math.max(task.updatedAt || 0, eventTimestamp),
+          }),
+        );
+        tasksRef.current = nextTasks;
+        setTasks((prev) =>
+          updateTaskPreservingIdentity(prev, event.taskId, (task) =>
+            mergeTaskPreservingIdentity(task, {
+              title,
+              updatedAt: Math.max(task.updatedAt || 0, eventTimestamp),
+            }),
+          ),
+        );
+
+        // The helper can finish before the createTask IPC promise resolves.
+        // Refresh in that narrow window so the persisted title is not missed.
+        if (!taskWasKnown) void loadTasks();
+        return;
+      }
+
       const resolvingApprovalId =
         event.type === "approval_granted" || event.type === "approval_denied"
           ? extractApprovalId(event)
@@ -4536,6 +4572,91 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Restore the last task for each workspace only after the initial sidebar
+  // page has settled.  The task may be outside that page, so hydrate it via
+  // the point lookup without making the sidebar load unbounded.
+  useEffect(() => {
+    if (!currentWorkspace || remoteTaskView || isInitialTaskListLoading) return;
+    const workspaceId = currentWorkspace.id;
+    if (restoredSelectionWorkspaceRef.current === workspaceId) return;
+    restoredSelectionWorkspaceRef.current = workspaceId;
+
+    const persistedTaskId = readPersistedSelectedTaskId(workspaceId);
+    if (!persistedTaskId) {
+      selectionRestorationSettledWorkspaceRef.current = workspaceId;
+      return;
+    }
+
+    const restore = (task: Task | null | undefined): boolean => {
+      if (!canRestoreSelectedTask(task, workspaceId)) {
+        persistSelectedTaskId(workspaceId, null);
+        return false;
+      }
+      setTasks((prev) => upsertTaskPreservingIdentity(prev, task!, { prependIfMissing: true }));
+      setSelectedTaskId(task!.id);
+      setCurrentView("main");
+      return true;
+    };
+
+    const candidate = tasksRef.current.find((task) => task.id === persistedTaskId);
+    if (candidate) {
+      restore(candidate);
+      selectionRestorationSettledWorkspaceRef.current = workspaceId;
+      return;
+    }
+    if (!window.electronAPI?.getTask) {
+      persistSelectedTaskId(workspaceId, null);
+      selectionRestorationSettledWorkspaceRef.current = workspaceId;
+      return;
+    }
+
+    let cancelled = false;
+    let settled = false;
+    void window.electronAPI
+      .getTask(persistedTaskId)
+      .then((task: Task | null) => {
+        if (!cancelled) {
+          settled = true;
+          selectionRestorationSettledWorkspaceRef.current = workspaceId;
+          restore(task);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          settled = true;
+          selectionRestorationSettledWorkspaceRef.current = workspaceId;
+          // A transient IPC/database failure must not discard the only durable
+          // pointer to the user's last task.  A null result or workspace
+          // mismatch is definitive and is cleared above; errors are retried
+          // on the next app/workspace initialization instead.
+          console.error("Failed to restore selected task:", error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (!settled && restoredSelectionWorkspaceRef.current === workspaceId) {
+        restoredSelectionWorkspaceRef.current = null;
+        selectionRestorationSettledWorkspaceRef.current = null;
+      }
+    };
+  }, [currentWorkspace?.id, isInitialTaskListLoading, remoteTaskView]);
+
+  useEffect(() => {
+    // Do not erase the persisted selection while the initial sidebar page is
+    // still settling.  Restoration runs after that load and needs the value
+    // that was written by the previous renderer session.
+    if (
+      !currentWorkspace ||
+      remoteTaskView ||
+      isInitialTaskListLoading ||
+      selectionRestorationSettledWorkspaceRef.current !== currentWorkspace.id
+    ) {
+      return;
+    }
+    persistSelectedTaskId(currentWorkspace.id, selectedTaskId);
+  }, [currentWorkspace?.id, isInitialTaskListLoading, remoteTaskView, selectedTaskId]);
+
   const handleSelectWorkspace = useCallback(
     async (workspace: Workspace) => {
       if (selectedTaskId && !remoteTaskView && window.electronAPI?.updateTaskWorkspace) {
@@ -4616,6 +4737,7 @@ export function App() {
     title: string,
     prompt: string,
     options?: {
+      generateTitle?: boolean;
       autonomousMode?: boolean;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
@@ -4628,6 +4750,7 @@ export function App() {
       multitaskAssignmentMode?: "auto_split";
       verificationAgent?: boolean;
       executionMode?: ExecutionMode;
+      assignedAgentRoleId?: string;
       taskDomain?: TaskDomain;
       chronicleMode?: "inherit" | "enabled" | "disabled";
       videoGenerationMode?: boolean;
@@ -4774,7 +4897,7 @@ export function App() {
         : undefined;
 
     try {
-      if (window.electronAPI?.getLLMSettings) {
+      if (window.electronAPI?.getLLMSettings && !explicitAgentConfig?.botConversation) {
         const llmSettings = await window.electronAPI.getLLMSettings();
         const readiness = getFirstRunReadiness(llmSettings, { workspace: effectiveWorkspace });
         if (!readiness.modelReady) {
@@ -4800,6 +4923,10 @@ export function App() {
         title: effectiveTitle,
         prompt: effectivePrompt,
         workspaceId: effectiveWorkspace.id,
+        ...(options?.generateTitle ? { generateTitle: true } : {}),
+        ...(options?.assignedAgentRoleId
+          ? { assignedAgentRoleId: options.assignedAgentRoleId }
+          : {}),
         ...(agentConfig && { agentConfig }),
         ...(images && images.length > 0 && { images }),
       });
@@ -5381,7 +5508,7 @@ export function App() {
     const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
     setCurrentView("main");
     clearRemoteTaskView();
-    await handleCreateTask(title, prompt);
+    await handleCreateTask(title, prompt, { generateTitle: true });
   };
 
   const handleCreateTaskFromIdea = async (prompt: string) => {
@@ -5399,7 +5526,13 @@ export function App() {
       }
     }
     const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
-    await handleCreateTask(title, prompt, undefined, undefined, workspace || undefined);
+    await handleCreateTask(
+      title,
+      prompt,
+      { generateTitle: true },
+      undefined,
+      workspace || undefined,
+    );
   };
 
   const handleNewSession = async () => {
@@ -5540,8 +5673,9 @@ export function App() {
   };
 
   // Smart right panel visibility: auto-collapse on welcome screen in focused mode
+  const isSelectedBotConversation = selectedTask?.agentConfig?.botConversation === true;
   const effectiveRightCollapsed =
-    currentView !== "main"
+    currentView !== "main" || isSelectedBotConversation
       ? true
       : uiDensity === "full"
         ? rightSidebarCollapsed
@@ -5591,6 +5725,61 @@ export function App() {
       setCurrentView("main");
     },
     [clearRemoteTaskView, markTaskSwitchStart],
+  );
+  const handleOpenBot = useCallback(
+    async (bot: BotRole) => {
+      const workspaceId = currentWorkspace?.id;
+      if (!workspaceId) return;
+
+      clearRemoteTaskView();
+
+      const matchesBot = (candidate: Task) =>
+        candidate.workspaceId === workspaceId &&
+        candidate.assignedAgentRoleId === bot.id &&
+        candidate.agentConfig?.botConversation === true;
+      const newestFirst = (a: Task, b: Task) =>
+        (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
+
+      let botTask = tasksRef.current.filter(matchesBot).sort(newestFirst)[0];
+
+      // Bot tasks are intentionally hidden from the Sessions list, so a bot
+      // conversation may be outside the normal sidebar page after restart.
+      if (!botTask && window.electronAPI?.listTasks) {
+        try {
+          const allTasks = (await window.electronAPI.listTasks({ limit: 500 })) as Task[];
+          botTask = allTasks.filter(matchesBot).sort(newestFirst)[0];
+          if (botTask) {
+            tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, botTask, {
+              prependIfMissing: true,
+            });
+            setTasks((prev) =>
+              upsertTaskPreservingIdentity(prev, botTask!, { prependIfMissing: true }),
+            );
+          }
+        } catch (error) {
+          console.error("Failed to find bot conversation:", error);
+        }
+      }
+
+      if (botTask) {
+        markTaskSwitchStart(botTask.id);
+        setSelectedTaskId(botTask.id);
+        setCurrentView("main");
+        return;
+      }
+
+      await handleCreateTask(bot.displayName, `Start a conversation with ${bot.displayName}.`, {
+        executionMode: "chat",
+        assignedAgentRoleId: bot.id,
+        agentConfig: {
+          botConversation: true,
+          conversationMode: "chat",
+          executionMode: "chat",
+          executionModeSource: "user",
+        },
+      });
+    },
+    [clearRemoteTaskView, currentWorkspace?.id, handleCreateTask, markTaskSwitchStart],
   );
   const handleOpenSettings = useCallback(() => setCurrentView("settings"), []);
   const handleOpenMissionControl = useCallback(() => {
@@ -6024,7 +6213,7 @@ export function App() {
               </svg>
             )}
           </button>
-          {currentView === "main" && (
+          {currentView === "main" && !isSelectedBotConversation && (
             <button
               type="button"
               className="title-bar-btn title-bar-panel-toggle"
@@ -6130,6 +6319,7 @@ export function App() {
                 onOpenIdeas={() => setCurrentView("ideas")}
                 onOpenInboxAgent={() => setCurrentView("inboxAgent")}
                 onOpenAgents={() => setCurrentView("agents")}
+                onOpenBot={handleOpenBot}
                 onOpenEverydayAgent={() => setCurrentView("everydayAgent")}
                 onOpenHealth={() => setCurrentView("health")}
                 onOpenDevices={() => setCurrentView("devices")}
@@ -6196,7 +6386,9 @@ export function App() {
                     setSettingsTab("llm");
                     setCurrentView("settings");
                   }}
-                  onCreateTask={handleCreateTask}
+                  onCreateTask={(title, prompt) =>
+                    handleCreateTask(title, prompt, { generateTitle: true })
+                  }
                 />
               ) : currentView === "devices" ? (
                 <DevicesPanel
@@ -6212,10 +6404,9 @@ export function App() {
                   onCreateTaskHere={async (prompt, options) => {
                     const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
                     clearRemoteTaskView();
-                    await handleCreateTask(
-                      title,
-                      prompt,
-                      options
+                    await handleCreateTask(title, prompt, {
+                      generateTitle: true,
+                      ...(options
                         ? {
                             autonomousMode: options.autonomousMode,
                             collaborativeMode: options.collaborativeMode,
@@ -6226,8 +6417,8 @@ export function App() {
                             chronicleMode: options.chronicleMode,
                             accessProfileId: options.accessProfileId,
                           }
-                        : undefined,
-                    );
+                        : {}),
+                    });
                     loadTasks();
                   }}
                   onNewTaskForDevice={async (nodeId, prompt, options) => {
@@ -6303,7 +6494,7 @@ export function App() {
                   }}
                   onCreateTask={(title, prompt) => {
                     setCurrentView("main");
-                    handleCreateTask(title, prompt);
+                    handleCreateTask(title, prompt, { generateTitle: true });
                   }}
                 />
               ) : currentView === "ideas" ? (
@@ -6363,7 +6554,7 @@ export function App() {
                   }}
                   onCreateTask={(title, prompt) => {
                     setCurrentView("main");
-                    handleCreateTask(title, prompt);
+                    handleCreateTask(title, prompt, { generateTitle: true });
                   }}
                 />
               ) : currentView === "missionControl" ? (
@@ -6524,7 +6715,7 @@ export function App() {
             workspaceId={currentWorkspace?.id}
             onCreateTask={(title, prompt) => {
               setCurrentView("main");
-              handleCreateTask(title, prompt);
+              handleCreateTask(title, prompt, { generateTitle: true });
             }}
             onOpenTask={(taskId) => {
               setCurrentView("main");

@@ -8,6 +8,17 @@ on:
   workflow_dispatch:
 
 jobs:
+  documentation-versions:
+    name: Documentation Version Policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: node --test scripts/qa/validate-doc-versions.test.mjs
+      - run: npm run qa:docs-versions
+
   secret-scan:
     name: Secret Scan
     runs-on: ubuntu-latest

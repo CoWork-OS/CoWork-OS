@@ -4,10 +4,17 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
-| 0.1.x   | :white_check_mark: |
+Security fixes are delivered in the latest stable release. Upgrade to that release
+to receive fixes; older releases do not receive separate security backports.
+
+| Release | Security fixes |
+| ------- | -------------- |
+| [Latest stable release](https://github.com/CoWork-OS/CoWork-OS/releases/latest) | Yes |
+| Older releases | No; upgrade to the latest stable release |
+
+The published npm version is available on [npm](https://www.npmjs.com/package/cowork-os).
+Please report suspected vulnerabilities even if you found them in an older release;
+include the affected version so we can assess whether the latest release is affected.
 
 ## Reporting a Vulnerability
 

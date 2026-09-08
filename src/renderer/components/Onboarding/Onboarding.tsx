@@ -82,7 +82,7 @@ const PROVIDER_URLS: Record<string, string> = {
   xai: "https://console.x.ai/",
   deepseek: "https://platform.deepseek.com/api_keys",
   kimi: "https://platform.moonshot.ai/",
-  minimax: "https://www.minimaxi.com/user-center/basic-information/interface-key",
+  minimax: "https://www.minimax.io/user-center/basic-information/interface-key",
   "nano-gpt": "https://nano-gpt.com/api",
 };
 

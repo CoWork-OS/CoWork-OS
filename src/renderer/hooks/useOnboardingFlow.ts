@@ -360,6 +360,14 @@ export function buildOnboardingLLMTestConfig(
     testConfig.deepseek = { apiKey, model: modelKey };
   } else if (provider === "kimi") {
     testConfig.kimi = { apiKey };
+  } else if (provider === "minimax") {
+    testConfig.customProviders = {
+      minimax: {
+        apiKey,
+        baseUrl: "https://api.minimax.io/v1",
+        model: modelKey,
+      },
+    };
   } else if (provider === "nano-gpt") {
     testConfig.customProviders = {
       "nano-gpt": {
@@ -1209,6 +1217,8 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           return !!existingSettings.deepseek?.apiKey;
         case "kimi":
           return !!existingSettings.kimi?.apiKey;
+        case "minimax":
+          return !!existingSettings.customProviders?.["minimax"]?.apiKey;
         case "nano-gpt":
           return !!existingSettings.customProviders?.["nano-gpt"]?.apiKey;
         default:
@@ -1299,6 +1309,18 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           ...existingSettings?.kimi,
           ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
           model: modelKey,
+        };
+      } else if (provider === "minimax") {
+        settings.customProviders = {
+          ...existingSettings?.customProviders,
+          minimax: {
+            ...existingSettings?.customProviders?.["minimax"],
+            ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
+            baseUrl:
+              existingSettings?.customProviders?.["minimax"]?.baseUrl ||
+              "https://api.minimax.io/v1",
+            model: modelKey,
+          },
         };
       } else if (provider === "nano-gpt") {
         settings.customProviders = {

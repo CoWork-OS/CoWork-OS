@@ -15,7 +15,7 @@ jobs:
     if: github.event_name == 'issues'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@v9
         with:
           script: |
             const issueAuthor = context.payload.issue.user.login;
@@ -39,7 +39,7 @@ jobs:
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@v9
         with:
           script: |
             const prAuthor = context.payload.pull_request.user.login;

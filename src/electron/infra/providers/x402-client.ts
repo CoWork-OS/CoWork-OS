@@ -13,8 +13,13 @@ import type {
   X402FetchResult,
   X402PaymentApprovalHandler,
   X402PaymentDetails,
+  X402PaymentPayload,
+  X402PaymentRequired,
+  X402PaymentRequirement,
+  X402ResourceInfo,
   X402CheckResult,
 } from "./wallet-provider";
+import { BASE_MAINNET_USDC, BASE_SEPOLIA_USDC, isResourceForRequest } from "./x402-policy";
 
 interface X402FetchWithPaymentOptions {
   method?: string;
@@ -23,21 +28,123 @@ interface X402FetchWithPaymentOptions {
   approvePayment?: X402PaymentApprovalHandler;
 }
 
-// EIP-712 domain for x402 payment signing
-const EIP712_DOMAIN = {
-  name: "x402",
-  version: "1",
-  chainId: 8453, // Base mainnet
+const EIP3009_TYPES = {
+  TransferWithAuthorization: [
+    { name: "from", type: "address" },
+    { name: "to", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "validAfter", type: "uint256" },
+    { name: "validBefore", type: "uint256" },
+    { name: "nonce", type: "bytes32" },
+  ],
 };
 
-const EIP712_TYPES = {
-  PaymentIntent: [
-    { name: "payTo", type: "address" },
-    { name: "amount", type: "uint256" },
-    { name: "resource", type: "string" },
-    { name: "nonce", type: "uint256" },
-    { name: "expires", type: "uint256" },
-  ],
+const SUPPORTED_BASE_CHAIN_IDS = new Set([8453, 84532]);
+
+const EIP3009_EXTRA_KEYS = ["name", "version"] as const;
+
+type Eip3009Extra = Record<(typeof EIP3009_EXTRA_KEYS)[number], string>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isAddress = (value: unknown): value is string =>
+  typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
+
+const isAtomicAmount = (value: unknown): value is string =>
+  typeof value === "string" && /^(?:0|[1-9]\d*)$/.test(value);
+
+const getChainId = (network: string): number | null => {
+  const match = /^eip155:(\d+)$/.exec(network);
+  if (!match) return null;
+  const chainId = Number(match[1]);
+  return Number.isSafeInteger(chainId) && SUPPORTED_BASE_CHAIN_IDS.has(chainId) ? chainId : null;
+};
+
+const getEip3009Extra = (requirement: X402PaymentRequirement): Eip3009Extra | null => {
+  if (!isRecord(requirement.extra)) return null;
+  if (
+    requirement.extra.assetTransferMethod !== undefined &&
+    requirement.extra.assetTransferMethod !== "eip3009"
+  ) {
+    return null;
+  }
+  const name = requirement.extra.name;
+  const version = requirement.extra.version;
+  return typeof name === "string" && name.length > 0 && typeof version === "string"
+    ? { name, version }
+    : null;
+};
+
+const isSupportedRequirement = (requirement: unknown): requirement is X402PaymentRequirement => {
+  if (!isRecord(requirement)) return false;
+  if (requirement.scheme !== "exact") return false;
+  if (typeof requirement.network !== "string" || getChainId(requirement.network) === null) {
+    return false;
+  }
+  if (!isAtomicAmount(requirement.amount) || !isAddress(requirement.asset)) return false;
+  const chainId = getChainId(requirement.network);
+  const expectedAsset = chainId === 8453 ? BASE_MAINNET_USDC : BASE_SEPOLIA_USDC;
+  if (requirement.asset.toLowerCase() !== expectedAsset) return false;
+  if (!isAddress(requirement.payTo)) return false;
+  if (
+    typeof requirement.maxTimeoutSeconds !== "number" ||
+    !Number.isSafeInteger(requirement.maxTimeoutSeconds) ||
+    requirement.maxTimeoutSeconds <= 0
+  ) {
+    return false;
+  }
+  return getEip3009Extra(requirement as unknown as X402PaymentRequirement) !== null;
+};
+
+const copyRequirement = (requirement: X402PaymentRequirement): X402PaymentRequirement => ({
+  ...requirement,
+  ...(requirement.extra ? { extra: { ...requirement.extra } } : {}),
+});
+
+const isResourceInfo = (value: unknown): value is X402ResourceInfo =>
+  isRecord(value) && typeof value.url === "string" && value.url.length > 0;
+
+const isPaymentRequired = (value: unknown): value is X402PaymentRequired =>
+  isRecord(value) &&
+  value.x402Version === 2 &&
+  isResourceInfo(value.resource) &&
+  Array.isArray(value.accepts) &&
+  value.accepts.filter(isSupportedRequirement).length === 1;
+
+const toPaymentDetails = (required: X402PaymentRequired): X402PaymentDetails | undefined => {
+  const selected = required.accepts.find(isSupportedRequirement);
+  if (!selected) return undefined;
+  const selectedRequirement = copyRequirement(selected);
+  const resourceInfo: X402ResourceInfo = { ...required.resource };
+  return {
+    ...required,
+    resource: resourceInfo,
+    resourceInfo,
+    resourceUrl: resourceInfo.url,
+    accepts: required.accepts.map(copyRequirement),
+    selectedRequirement,
+    scheme: selectedRequirement.scheme,
+    payTo: selectedRequirement.payTo,
+    amount: selectedRequirement.amount,
+    asset: selectedRequirement.asset,
+    network: selectedRequirement.network,
+  };
+};
+
+const parseHeaderJson = (header: string): unknown => {
+  try {
+    const decoded = Buffer.from(header, "base64").toString("utf-8");
+    const parsed = JSON.parse(decoded) as unknown;
+    if (isRecord(parsed)) return parsed;
+  } catch {
+    // Fall through to the plain JSON form used by a few development servers.
+  }
+  try {
+    return JSON.parse(header) as unknown;
+  } catch {
+    return undefined;
+  }
 };
 
 export class X402Client {
@@ -64,6 +171,12 @@ export class X402Client {
         const paymentHeader = response.headers.get("payment-required");
         if (paymentHeader) {
           const paymentDetails = this.parsePaymentHeader(paymentHeader);
+          if (!paymentDetails) {
+            throw new Error("Failed to parse PAYMENT-REQUIRED header");
+          }
+          if (!isResourceForRequest(paymentDetails.resource, url)) {
+            throw new Error("x402 payment resource does not match the requested URL");
+          }
           return { requires402: true, paymentDetails, url };
         }
         return { requires402: true, url };
@@ -113,6 +226,9 @@ export class X402Client {
     if (!paymentDetails) {
       throw new Error("Failed to parse PAYMENT-REQUIRED header");
     }
+    if (!isResourceForRequest(paymentDetails.resource, url)) {
+      throw new Error("x402 payment resource does not match the requested URL");
+    }
 
     if (!opts?.approvePayment) {
       throw new Error("x402 payment policy approval handler is required before signing.");
@@ -122,12 +238,11 @@ export class X402Client {
       throw new Error("x402 payment was not approved by policy.");
     }
 
-    // Sign the payment intent
-    const signature = await this.signPaymentIntent(paymentDetails);
+    // Sign the canonical exact EVM payment payload
+    const signature = await this.signPayment(paymentDetails);
 
     // Retry with payment signature
     headers["payment-signature"] = signature;
-    headers["payment-address"] = this.address;
 
     const paidResponse = await fetch(url, { method, headers, body: opts?.body });
     const body = await paidResponse.text();
@@ -165,42 +280,49 @@ export class X402Client {
   // --- Private helpers ---
 
   private parsePaymentHeader(header: string): X402PaymentDetails | undefined {
-    try {
-      // x402 header is base64-encoded JSON
-      const decoded = Buffer.from(header, "base64").toString("utf-8");
-      return JSON.parse(decoded) as X402PaymentDetails;
-    } catch {
-      try {
-        // Try parsing as plain JSON
-        return JSON.parse(header) as X402PaymentDetails;
-      } catch {
-        return undefined;
-      }
-    }
+    const parsed = parseHeaderJson(header);
+    return isPaymentRequired(parsed) ? toPaymentDetails(parsed) : undefined;
   }
 
-  private async signPaymentIntent(details: X402PaymentDetails): Promise<string> {
+  private async signPayment(details: X402PaymentDetails): Promise<string> {
     if (!this.privateKey) throw new Error("No private key for signing");
 
     const wallet = new ethers.Wallet(this.privateKey);
-    const amount = this.getDecimalAmount(details);
-    if (amount === null) {
-      throw new Error("x402 payment amount is missing or invalid; refusing to sign.");
+    const requirement = details.selectedRequirement;
+    const chainId = getChainId(requirement.network);
+    const extra = getEip3009Extra(requirement);
+    if (chainId === null || extra === null) {
+      throw new Error("Unsupported x402 exact EVM payment requirement; refusing to sign.");
     }
 
-    const value = {
-      payTo: details.payTo,
-      amount: ethers.parseUnits(amount, 6).toString(), // USDC 6 decimals
-      resource: details.resource,
-      nonce: Date.now() * 1000 + crypto.randomInt(1000),
-      expires: details.expires || Math.floor(Date.now() / 1000) + 300, // 5 min
+    const authorization = {
+      from: wallet.address,
+      to: requirement.payTo,
+      value: requirement.amount,
+      validAfter: "0",
+      validBefore: String(Math.floor(Date.now() / 1000) + requirement.maxTimeoutSeconds),
+      nonce: ethers.hexlify(crypto.randomBytes(32)),
     };
 
-    const signature = await wallet.signTypedData(EIP712_DOMAIN, EIP712_TYPES, value);
+    const signature = await wallet.signTypedData(
+      {
+        name: extra.name,
+        version: extra.version,
+        chainId,
+        verifyingContract: requirement.asset,
+      },
+      EIP3009_TYPES,
+      authorization,
+    );
 
-    // Encode as base64 JSON with signature + value
-    const payload = JSON.stringify({ signature, ...value, from: wallet.address });
-    return Buffer.from(payload).toString("base64");
+    const payload: X402PaymentPayload = {
+      x402Version: 2,
+      resource: details.resource,
+      accepted: requirement,
+      payload: { signature, authorization },
+      ...(details.extensions ? { extensions: details.extensions } : {}),
+    };
+    return Buffer.from(JSON.stringify(payload)).toString("base64");
   }
 
   private responseHeadersToRecord(headers: Headers): Record<string, string> {
@@ -221,15 +343,5 @@ export class X402Client {
       sanitized[key] = value;
     }
     return sanitized;
-  }
-
-  private getDecimalAmount(details: X402PaymentDetails): string | null {
-    if (typeof details.amount === "string" && Number.isFinite(Number(details.amount))) {
-      return details.amount;
-    }
-    if (typeof details.maxAmountRequired === "string" && /^\d+$/.test(details.maxAmountRequired)) {
-      return ethers.formatUnits(details.maxAmountRequired, 6);
-    }
-    return null;
   }
 }

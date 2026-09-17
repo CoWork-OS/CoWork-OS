@@ -9,6 +9,18 @@ import {
   X402PaymentDetails,
   X402PaymentPolicyEnvelope,
 } from "./wallet-provider";
+import {
+  formatAtomicUsdc,
+  getCanonicalPaymentMismatch,
+  getExpectedBaseAsset,
+  getExpectedBaseNetwork,
+  getSupportedRequirement,
+  isCanonicalPaymentDetails,
+  isResourceForRequest,
+  normalizePaymentDetails,
+  parseAtomicAmount,
+  usdToAtomic,
+} from "./x402-policy";
 
 interface CoinbaseWalletStatusResponse {
   connected?: boolean;
@@ -91,10 +103,21 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
 
   async x402Check(url: string): Promise<X402CheckResult> {
     this.ensureConfigured();
-    return this.callJson<X402CheckResult>("/x402/check", {
+    const result = await this.callJson<X402CheckResult>("/x402/check", {
       method: "POST",
       body: { url, accountId: this.accountId, network: this.network },
     });
+    if (!result.paymentDetails) return result;
+
+    const details = normalizePaymentDetails(
+      result.paymentDetails,
+      getExpectedBaseNetwork(this.network),
+      getExpectedBaseAsset(this.network),
+    );
+    if (!details || !isResourceForRequest(details.resource, url)) {
+      throw new Error("Coinbase signer returned an invalid x402 v2 preflight challenge");
+    }
+    return { ...result, paymentDetails: details };
   }
 
   async x402Fetch(req: X402FetchRequest): Promise<X402FetchResult> {
@@ -115,7 +138,7 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
         paymentPolicy: req.paymentPolicy,
       },
     });
-    this.validateSignerPaymentResult(result, req.paymentPolicy);
+    this.validateSignerPaymentResult(result, req.paymentPolicy, req.url);
     return result;
   }
 
@@ -175,6 +198,7 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
   private validateSignerPaymentResult(
     result: X402FetchResult,
     policy: X402PaymentPolicyEnvelope,
+    requestUrl: string,
   ): void {
     if (!result.paymentMade) return;
 
@@ -185,23 +209,35 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
       throw new Error("Coinbase signer did not return signed x402 payment details");
     }
 
-    const amount = this.extractPaymentAmount(result.paymentDetails);
-    if (amount === null) {
+    const rawDetails = result.paymentDetails;
+    if (!isCanonicalPaymentDetails(rawDetails)) {
+      throw new Error("Coinbase signer returned non-canonical x402 v2 payment details");
+    }
+    const expectedNetwork = getExpectedBaseNetwork(this.network);
+    const expectedAsset = getExpectedBaseAsset(this.network);
+    const details = normalizePaymentDetails(rawDetails, expectedNetwork, expectedAsset);
+    const requirement = details
+      ? getSupportedRequirement(details, expectedNetwork, expectedAsset)
+      : null;
+    const atomicAmount = requirement ? parseAtomicAmount(requirement.amount) : null;
+    const hardLimitAtomic = usdToAtomic(policy.effectiveHardLimitUsd);
+    if (!details || !requirement || atomicAmount === null) {
       throw new Error("Coinbase signer returned invalid x402 payment amount");
     }
-    if (amount > policy.effectiveHardLimitUsd) {
+    if (!isResourceForRequest(details.resource, requestUrl)) {
+      throw new Error("Coinbase signer returned an x402 resource that does not match the request");
+    }
+    if (hardLimitAtomic !== null && atomicAmount > hardLimitAtomic) {
       throw new Error(
-        `Coinbase signer payment amount (${amount} USDC) exceeds policy hard limit (${policy.effectiveHardLimitUsd} USDC)`,
+        `Coinbase signer payment amount (${formatAtomicUsdc(atomicAmount)} USDC) exceeds policy hard limit (${policy.effectiveHardLimitUsd} USDC)`,
       );
     }
-    if (!this.isAllowedPaymentNetwork(String(result.paymentDetails.network || ""))) {
-      throw new Error(
-        `Coinbase signer returned unsupported x402 network: ${result.paymentDetails.network}`,
-      );
+    if (details.network.toLowerCase() !== expectedNetwork.toLowerCase()) {
+      throw new Error(`Coinbase signer returned unsupported x402 network: ${details.network}`);
     }
-    if (!this.isAllowedPaymentAsset(result.paymentDetails)) {
+    if (details.asset.toLowerCase() !== expectedAsset.toLowerCase()) {
       throw new Error(
-        `Coinbase signer returned unsupported x402 asset: ${result.paymentDetails.asset || "unknown"}`,
+        `Coinbase signer returned unsupported x402 asset: ${details.asset || "unknown"}`,
       );
     }
     if (policy.requireApproval && !policy.approvedPaymentDetails) {
@@ -212,7 +248,7 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
 
     const expected = policy.approvedPaymentDetails || policy.preflight?.paymentDetails;
     if (expected) {
-      const mismatch = this.getPaymentDetailsMismatch(expected, result.paymentDetails);
+      const mismatch = this.getPaymentDetailsMismatch(expected, details);
       if (mismatch) {
         throw new Error(
           `Coinbase signer payment details do not match approved policy (${mismatch})`,
@@ -221,60 +257,10 @@ export class CoinbaseAgenticWalletProvider implements WalletProvider {
     }
   }
 
-  private extractPaymentAmount(details: X402PaymentDetails): number | null {
-    const amount =
-      details.amount !== undefined
-        ? Number(details.amount)
-        : typeof details.maxAmountRequired === "string" && /^\d+$/.test(details.maxAmountRequired)
-          ? Number(details.maxAmountRequired) / 1_000_000
-          : Number.NaN;
-    return Number.isFinite(amount) && amount >= 0 ? amount : null;
-  }
-
-  private isAllowedPaymentNetwork(network: string): boolean {
-    const normalized = network.trim().toLowerCase();
-    return (
-      normalized === "base" ||
-      normalized === this.network ||
-      (this.network === "base-mainnet" && normalized === "eip155:8453") ||
-      (this.network === "base-sepolia" && normalized === "eip155:84532")
-    );
-  }
-
-  private isAllowedPaymentAsset(details: X402PaymentDetails): boolean {
-    const currency = String(details.currency || "").toUpperCase();
-    if (currency && currency !== "USDC") return false;
-    if (!currency && !details.asset) return false;
-    if (!details.asset) return true;
-
-    const normalized = String(details.asset).trim().toLowerCase();
-    const mainnetUsdc = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
-    const sepoliaUsdc = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
-    return this.network === "base-sepolia"
-      ? normalized === sepoliaUsdc
-      : normalized === mainnetUsdc;
-  }
-
   private getPaymentDetailsMismatch(
     expected: X402PaymentDetails,
     actual: X402PaymentDetails,
   ): string | null {
-    const fields: Array<keyof X402PaymentDetails> = [
-      "scheme",
-      "payTo",
-      "amount",
-      "maxAmountRequired",
-      "currency",
-      "asset",
-      "network",
-      "resource",
-      "expires",
-    ];
-    for (const field of fields) {
-      if (String(expected[field] ?? "") !== String(actual[field] ?? "")) {
-        return `${field} mismatch`;
-      }
-    }
-    return null;
+    return getCanonicalPaymentMismatch(expected, actual);
   }
 }

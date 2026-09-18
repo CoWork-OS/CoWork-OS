@@ -261,7 +261,10 @@ import {
   taskSessionKickoffIsSettled,
   TASK_KICKOFF_PROMPT_RULES,
 } from "./task-kickoff-summary";
-import { sanitizeToolCallTextFromAssistant } from "./tool-call-text-sanitizer";
+import {
+  responseLooksLikeUnexecutedToolCall as detectUnexecutedToolCallText,
+  sanitizeToolCallTextFromAssistant,
+} from "./tool-call-text-sanitizer";
 import {
   evaluateToolAvailability,
   evaluateToolPolicy,
@@ -4176,6 +4179,46 @@ export class TaskExecutor {
     return _isRecoverablePathDriftError(String(errorMessage || ""));
   }
 
+  private responseLooksLikeUnexecutedToolCall(text: string, allowPartial = false): boolean {
+    return detectUnexecutedToolCallText(text, { allowPartial });
+  }
+
+  private buildUnexecutedToolCallChatFallback(): string {
+    return "I did not execute a tool in this chat turn, so I cannot treat that tool-call text as a completed result.";
+  }
+
+  private createLlmStreamingProgressHandler(options?: {
+    suppressUnexecutedToolCallText?: boolean;
+    fallbackText?: string;
+  }): StreamProgressCallback {
+    let sawUnexecutedToolCall = false;
+    const fallbackText = options?.fallbackText || this.buildUnexecutedToolCallChatFallback();
+
+    return (progress) => {
+      if (this.cancelled || this.taskCompleted) return;
+
+      let text = progress.text;
+      if (options?.suppressUnexecutedToolCallText) {
+        if (typeof text === "string" && this.responseLooksLikeUnexecutedToolCall(text, true)) {
+          sawUnexecutedToolCall = true;
+        }
+        if (sawUnexecutedToolCall) {
+          text = fallbackText;
+        }
+      }
+
+      this.emitEvent("llm_streaming", {
+        inputTokens: progress.inputTokens,
+        outputTokens: progress.outputTokens,
+        elapsedMs: progress.elapsedMs,
+        streaming: progress.streaming,
+        totalInputTokens: this.getCumulativeInputTokens() + progress.inputTokens,
+        totalOutputTokens: this.getCumulativeOutputTokens() + progress.outputTokens,
+        ...(typeof text === "string" ? { text } : {}),
+      });
+    };
+  }
+
   private getStepScopedPathDriftAttemptCount(stepId?: string): number {
     if (
       !this.pathDriftRecoveryAttemptsByStep ||
@@ -7693,25 +7736,12 @@ ${transcript}
 
     const onStreamProgress =
       this.provider.type === "azure"
-        ? (progress: {
-            inputTokens: number;
-            outputTokens: number;
-            outputChars: number;
-            elapsedMs: number;
-            streaming: boolean;
-            text?: string;
-          }) => {
-            if (this.cancelled || this.taskCompleted) return;
-            this.emitEvent("llm_streaming", {
-              inputTokens: progress.inputTokens,
-              outputTokens: progress.outputTokens,
-              elapsedMs: progress.elapsedMs,
-              streaming: progress.streaming,
-              totalInputTokens: this.getCumulativeInputTokens() + progress.inputTokens,
-              totalOutputTokens: this.getCumulativeOutputTokens() + progress.outputTokens,
-              ...(typeof progress.text === "string" ? { text: progress.text } : {}),
-            });
-          }
+        ? this.createLlmStreamingProgressHandler({
+            suppressUnexecutedToolCallText: true,
+            fallbackText: isThinkMode
+              ? "Could you say more about that? I'd like to explore this further with you."
+              : this.generateCompanionFallbackResponse(message),
+          })
         : undefined;
 
     try {
@@ -7737,12 +7767,26 @@ ${transcript}
           ? "Could you say more about that? I'd like to explore this further with you."
           : this.generateCompanionFallbackResponse(message),
       });
-      const assistantText = turnResult.assistantText;
+      const rawAssistantText = turnResult.assistantText;
+      const hasUnexecutedToolCall = this.responseLooksLikeUnexecutedToolCall(rawAssistantText);
+      const assistantText = hasUnexecutedToolCall
+        ? this.buildUnexecutedToolCallChatFallback()
+        : rawAssistantText;
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;
       this.lastNonVerificationOutput = assistantText;
       this.lastAssistantText = assistantText;
-      this.updateConversationHistory(turnResult.messages);
+      this.updateConversationHistory(
+        hasUnexecutedToolCall
+          ? [
+              ...messages,
+              {
+                role: "assistant" as const,
+                content: [{ type: "text" as const, text: assistantText }],
+              },
+            ]
+          : turnResult.messages,
+      );
       this.saveConversationSnapshot();
       this.emitEvent("follow_up_completed", {
         message: "Follow-up message processed (chat mode)",
@@ -8187,6 +8231,10 @@ ${transcript}
     operation: string,
     /** Optional per-phase provider/model for research critique workflow */
     phaseRouting?: { provider: LLMProvider; modelId: string },
+    streamOptions?: {
+      suppressUnexecutedToolCallText?: boolean;
+      fallbackText?: string;
+    },
   ): Promise<Any> {
     this.refreshProviderIfSettingsChanged();
     const parentSignal = this.abortController.signal;
@@ -8203,18 +8251,7 @@ ${transcript}
     const effectiveModelId = phaseRouting?.modelId ?? this.modelId;
     const shouldStream = effectiveProvider.type === "azure";
     const onStreamProgress: StreamProgressCallback | undefined = shouldStream
-      ? (progress) => {
-          if (this.cancelled || this.taskCompleted) return;
-          this.emitEvent("llm_streaming", {
-            inputTokens: progress.inputTokens,
-            outputTokens: progress.outputTokens,
-            elapsedMs: progress.elapsedMs,
-            streaming: progress.streaming,
-            totalInputTokens: this.getCumulativeInputTokens() + progress.inputTokens,
-            totalOutputTokens: this.getCumulativeOutputTokens() + progress.outputTokens,
-            ...(typeof progress.text === "string" ? { text: progress.text } : {}),
-          });
-        }
+      ? this.createLlmStreamingProgressHandler(streamOptions)
       : undefined;
 
     try {
@@ -24443,6 +24480,9 @@ You are continuing a previous conversation. The context from the previous conver
     });
 
     const companionUserContent = await this.buildUserContent(rawPrompt, this.initialImages);
+    const emptyFallback = isThinkMode
+      ? "I'd like to help you think through this. Could you share more about what's on your mind?"
+      : this.generateCompanionFallbackResponse(rawPrompt);
 
     try {
       const explicitChatMaxTokens = isChatMode
@@ -24464,6 +24504,11 @@ You are continuing a previous conversation. The context from the previous conver
             },
             LLM_TIMEOUT_MS,
             isThinkMode ? "Think-with-me response" : "Companion response",
+            undefined,
+            {
+              suppressUnexecutedToolCallText: true,
+              fallbackText: emptyFallback,
+            },
           ),
         isThinkMode ? "Think-with-me response" : "Companion response",
       );
@@ -24495,6 +24540,11 @@ You are continuing a previous conversation. The context from the previous conver
             },
             LLM_TIMEOUT_MS,
             "Companion continuation",
+            undefined,
+            {
+              suppressUnexecutedToolCallText: true,
+              fallbackText: emptyFallback,
+            },
           );
           if (contResponse.usage) {
             this.updateTracking(
@@ -24513,10 +24563,11 @@ You are continuing a previous conversation. The context from the previous conver
         }
       }
 
-      const emptyFallback = isThinkMode
-        ? "I'd like to help you think through this. Could you share more about what's on your mind?"
-        : this.generateCompanionFallbackResponse(rawPrompt);
-      const assistantText = String(text || "").trim() || emptyFallback;
+      const rawAssistantText = String(text || "").trim() || emptyFallback;
+      const hasUnexecutedToolCall = this.responseLooksLikeUnexecutedToolCall(rawAssistantText);
+      const assistantText = hasUnexecutedToolCall
+        ? this.buildUnexecutedToolCallChatFallback()
+        : rawAssistantText;
 
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;

@@ -574,6 +574,109 @@ describe("TaskExecutor chat mode", () => {
     expect(createMessageWithTimeout.mock.calls[0][0].maxTokens).toBe(48_000);
   });
 
+  it("replaces unexecuted tool-call syntax in chat streaming events", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.cancelled = false;
+    executor.taskCompleted = false;
+    executor.emitEvent = vi.fn();
+    executor.getCumulativeInputTokens = vi.fn().mockReturnValue(0);
+    executor.getCumulativeOutputTokens = vi.fn().mockReturnValue(0);
+
+    const onStreamProgress = (TaskExecutor as Any).prototype.createLlmStreamingProgressHandler.call(
+      executor,
+      {
+        suppressUnexecutedToolCallText: true,
+        fallbackText: "I could not complete that chat response.",
+      },
+    );
+    const progress = (text: string, streaming = true) =>
+      onStreamProgress({
+        inputTokens: 1,
+        outputTokens: 1,
+        outputChars: text.length,
+        elapsedMs: 10,
+        streaming,
+        text,
+      });
+
+    progress("I will check.");
+    progress('I will check. search_web:0{"queries":[]}');
+    progress('I will check. search_web:0{"queries":[]}', false);
+
+    const streamingEvents = executor.emitEvent.mock.calls
+      .filter(([type]: [string]) => type === "llm_streaming")
+      .map(([, payload]: [string, Any]) => payload);
+    expect(streamingEvents[0].text).toBe("I will check.");
+    expect(
+      streamingEvents
+        .slice(1)
+        .every((payload: Any) => payload.text === "I could not complete that chat response."),
+    ).toBe(true);
+    expect(
+      streamingEvents.some((payload: Any) => String(payload.text).includes("search_web:0")),
+    ).toBe(false);
+  });
+
+  it("does not emit or persist an unexecuted tool call from a companion response", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const fakeToolText = 'I will check. search_web:0{"queries":["fixtures"]}';
+    const createMessageWithTimeout = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: fakeToolText }],
+      stopReason: "end_turn",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    const updateConversationHistory = vi.fn();
+
+    executor.task = {
+      id: "task-companion-fake-tool",
+      title: "Fixture lookup",
+      prompt: "Which fixtures are scheduled tomorrow?",
+      userPrompt: "Which fixtures are scheduled tomorrow?",
+      rawPrompt: "Which fixtures are scheduled tomorrow?",
+      createdAt: Date.now(),
+      agentConfig: {
+        executionMode: "chat",
+        executionModeSource: "user",
+        conversationMode: "chat",
+      },
+    };
+    executor.workspace = {
+      id: "ws-companion-fake-tool",
+      path: "/tmp",
+      isTemp: true,
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+    };
+    executor.daemon = { updateTaskStatus: vi.fn(), updateTask: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.getRoleContextPrompt = vi.fn().mockReturnValue("");
+    executor.buildUserProfileBlock = vi.fn().mockReturnValue("");
+    executor.buildUserContent = vi.fn().mockResolvedValue(executor.task.prompt);
+    executor.callLLMWithRetry = vi.fn(async (fn: Any) => fn());
+    executor.createMessageWithTimeout = createMessageWithTimeout;
+    executor.updateTracking = vi.fn();
+    executor.extractTextFromLLMContent = vi.fn().mockReturnValue(fakeToolText);
+    executor.updateConversationHistory = updateConversationHistory;
+    executor.saveConversationSnapshot = vi.fn();
+    executor.finalizeTaskBestEffort = vi.fn();
+    executor.capturePlaybookOutcome = vi.fn();
+    executor.generateCompanionFallbackResponse = vi.fn().mockReturnValue("fallback");
+    executor.getCumulativeInputTokens = vi.fn().mockReturnValue(0);
+    executor.getCumulativeOutputTokens = vi.fn().mockReturnValue(0);
+    executor.taskCompleted = false;
+    executor.cancelled = false;
+
+    await (TaskExecutor as Any).prototype.handleCompanionPrompt.call(executor);
+
+    const assistantMessages = executor.emitEvent.mock.calls
+      .filter(([type]: [string]) => type === "assistant_message")
+      .map(([, payload]: [string, Any]) => String(payload.message));
+    expect(assistantMessages).toEqual([expect.stringContaining("did not execute a tool")]);
+    expect(assistantMessages.some((message: string) => message.includes("search_web:0"))).toBe(
+      false,
+    );
+    expect(JSON.stringify(updateConversationHistory.mock.calls)).not.toContain("search_web:0");
+  });
+
   it("reuses a cached explicit chat summary instead of regenerating it every turn", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     const buildCompactionSummaryBlock = vi

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeToolCallTextFromAssistant } from "../tool-call-text-sanitizer";
+import {
+  responseLooksLikeUnexecutedToolCall,
+  sanitizeToolCallTextFromAssistant,
+} from "../tool-call-text-sanitizer";
 
 describe("sanitizeToolCallTextFromAssistant", () => {
   it("removes xml-style tool call markup", () => {
@@ -91,5 +94,30 @@ describe("sanitizeToolCallTextFromAssistant", () => {
 
     expect(result.text).toBe("Bu kitap için bir inceleme planı oluşturuyorum.");
     expect(result.hadToolCallText).toBe(true);
+  });
+
+  it("detects complete and partial structured tool-call text", () => {
+    expect(
+      responseLooksLikeUnexecutedToolCall('I will check. search_web:0{"queries":["fixtures"]}'),
+    ).toBe(true);
+    expect(
+      responseLooksLikeUnexecutedToolCall("I will check. search_web:0", { allowPartial: true }),
+    ).toBe(true);
+    expect(responseLooksLikeUnexecutedToolCall("I will check. search_web:0")).toBe(false);
+  });
+
+  it("detects structured invoke markup but ignores code and syntax examples", () => {
+    expect(responseLooksLikeUnexecutedToolCall('<invoke name="search_web">')).toBe(true);
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        'The syntax is `<invoke name="search_web">` and it should be explained.',
+      ),
+    ).toBe(false);
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        '```xml\n<invoke name="search_web"><parameter name="q">fixtures</parameter></invoke>\n```',
+      ),
+    ).toBe(false);
+    expect(responseLooksLikeUnexecutedToolCall("For example, search_web:0{}")).toBe(false);
   });
 });

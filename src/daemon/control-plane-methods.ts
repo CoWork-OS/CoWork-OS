@@ -1124,9 +1124,11 @@ export function registerControlPlaneMethods(
 
   server.registerMethod(Methods.TASK_SEND_MESSAGE, async (client, params) => {
     requireScope(client, "admin");
-    const { taskId, message, images, expectedTurnId } = sanitizeTaskMessageParams(params);
+    const { taskId, message, images, expectedTurnId, interactionMode } =
+      sanitizeTaskMessageParams(params);
     await agentDaemon.sendMessage(taskId, message, images, undefined, {
       ...(expectedTurnId ? { expectedTurnId } : {}),
+      ...(interactionMode ? { interactionMode } : {}),
     });
     return { ok: true };
   });

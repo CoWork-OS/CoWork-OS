@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { prepareInteractionTurn } from "./strategy/interaction-mode";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import * as path from "path";
@@ -1164,6 +1165,16 @@ export class AgentDaemon extends EventEmitter {
     agentConfigChanged: boolean;
   } {
     const route = IntentRouter.route(input.title, input.routingPrompt ?? input.prompt);
+    if (input.agentConfig?.interactionMode) {
+      input = {
+        ...input,
+        agentConfig: prepareInteractionTurn(
+          input.agentConfig,
+          input.agentConfig.interactionMode,
+          input.routingPrompt ?? input.prompt,
+        ),
+      };
+    }
     const strategy = TaskStrategyService.derive(route, input.agentConfig, {
       title: input.title,
       prompt: input.prompt,
@@ -11466,6 +11477,7 @@ export class AgentDaemon extends EventEmitter {
       | "integrationMentions"
       | "agentConfigOverride"
       | "expectedTurnId"
+      | "interactionMode"
     >,
   ): Promise<{ queued: boolean }> {
     let executor: TaskExecutor;
@@ -11589,6 +11601,7 @@ export class AgentDaemon extends EventEmitter {
         quotedAssistantMessage,
         integrationMentions,
         effectiveOptions?.agentConfigOverride,
+        effectiveOptions?.interactionMode ?? effectiveTask.agentConfig?.interactionMode,
       );
       // Emit user_message event immediately so the UI shows the message right away.
       // The executor's sendMessageLegacy won't re-emit because the message is
@@ -11623,6 +11636,8 @@ export class AgentDaemon extends EventEmitter {
     try {
       await executor.sendMessage(effectiveMessage, images, quotedAssistantMessage, {
         agentConfigOverride: effectiveOptions?.agentConfigOverride,
+        interactionMode:
+          effectiveOptions?.interactionMode ?? effectiveTask.agentConfig?.interactionMode,
       });
     } finally {
       if (effectiveOptions?.agentConfigOverride) {
@@ -11714,9 +11729,15 @@ export class AgentDaemon extends EventEmitter {
                   ...(followUp.agentConfigOverride
                     ? { agentConfigOverride: followUp.agentConfigOverride }
                     : {}),
+                  ...(followUp.interactionMode ? { interactionMode: followUp.interactionMode } : {}),
                 }
-              : followUp.agentConfigOverride
-                ? { agentConfigOverride: followUp.agentConfigOverride }
+              : followUp.agentConfigOverride || followUp.interactionMode
+                ? {
+                    ...(followUp.agentConfigOverride
+                      ? { agentConfigOverride: followUp.agentConfigOverride }
+                      : {}),
+                    ...(followUp.interactionMode ? { interactionMode: followUp.interactionMode } : {}),
+                  }
                 : undefined,
           );
         })

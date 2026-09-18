@@ -173,6 +173,16 @@ export const WorkspaceCreateSchema = z.object({
 
 // ============ Task Schemas ============
 
+export const InteractionModeSchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      mode: z.literal("smart"),
+      executionOverride: z.enum(["execute", "plan", "analyze", "debug", "verified"]).optional(),
+    })
+    .strict(),
+  z.object({ mode: z.literal("chat") }).strict(),
+]);
+
 export const AgentConfigSchema = z
   .object({
     providerType: z.enum(LLM_PROVIDER_TYPES).optional(),
@@ -218,6 +228,7 @@ export const AgentConfigSchema = z
     conversationMode: z.enum(["task", "chat", "hybrid"]).optional(),
     botConversation: z.boolean().optional(),
     executionMode: z.enum(["execute", "chat", "plan", "analyze", "verified", "debug"]).optional(),
+    interactionMode: InteractionModeSchema.optional(),
     executionModeSource: z.enum(["user", "strategy", "auto_promote"]).optional(),
     taskDomain: z
       .enum(["auto", "code", "research", "operations", "writing", "general", "media"])
@@ -443,6 +454,7 @@ export const TaskMessageSchema = z
   .object({
     taskId: z.string().uuid(),
     message: z.string().min(1).max(MAX_PROMPT_LENGTH),
+    interactionMode: InteractionModeSchema.optional(),
     expectedTurnId: z.string().trim().min(1).max(200).optional(),
     images: z.array(ImageAttachmentSchema).max(MAX_IMAGES_PER_MESSAGE).optional(),
     quotedAssistantMessage: z

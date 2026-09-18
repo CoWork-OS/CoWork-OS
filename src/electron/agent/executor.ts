@@ -87,6 +87,7 @@ import {
   splitDocumentForAnalysis,
   type DocumentAnalysisChunk,
 } from "./document-analysis-pipeline";
+import { resolveInteractionMode } from "./strategy/interaction-mode";
 import { ToolRegistry } from "./tools/registry";
 import { ToolBatchExecutor } from "./runtime/tool-batch-executor";
 import { ToolScheduler, type ToolScheduleCallReport } from "./runtime/ToolScheduler";
@@ -4903,6 +4904,7 @@ export class TaskExecutor {
 
   private shouldUseReadOnlyPdfAttachmentMode(): boolean {
     const agentConfig = this.task?.agentConfig;
+    if (agentConfig?.interactionMode?.mode === "chat") return false;
     if (agentConfig?.executionMode !== "chat") return false;
     const source = agentConfig.executionModeSource;
     const explicitlyUserSelected = source === "user" || !source;
@@ -5085,6 +5087,7 @@ export class TaskExecutor {
   private async buildExplicitChatMessages(
     message: string,
     systemPrompt: string,
+    images?: ImageAttachment[],
   ): Promise<LLMMessage[]> {
     const baseHistory = this.conversationHistory.slice().reduce<LLMMessage[]>((acc, msg) => {
       if (!Array.isArray(msg.content)) {
@@ -5103,9 +5106,10 @@ export class TaskExecutor {
       return acc;
     }, []);
 
+    const currentContent = await this.buildUserContent(message, images);
     const currentMessage: LLMMessage = {
       role: "user",
-      content: [{ type: "text", text: message }],
+      content: currentContent,
     };
 
     const fullMessages: LLMMessage[] = [...baseHistory, currentMessage];
@@ -7406,6 +7410,7 @@ ${transcript}
   }
 
   private resolveConversationMode(prompt: string, isInitialPrompt?: boolean): "task" | "chat" {
+    if (this.task.agentConfig?.interactionMode?.mode === "chat") return "chat";
     const mode = this.task.agentConfig?.conversationMode ?? "hybrid";
     if (mode === "task") return "task";
     // "Think with me" mode — Socratic reasoning, restrict to chat (no tools)
@@ -7615,7 +7620,11 @@ ${transcript}
     ].filter((block) => block.text.length > 0);
   }
 
-  private async respondInChatMode(message: string, previousStatus?: string): Promise<void> {
+  private async respondInChatMode(
+    message: string,
+    previousStatus?: string,
+    images?: ImageAttachment[],
+  ): Promise<void> {
     const personalityIdOverride = this.task.agentConfig?.personalityId;
     const contextMode = detectContextMode(
       message,
@@ -7667,8 +7676,9 @@ ${transcript}
       taskDomain: effectiveChatTaskDomain,
     });
 
+    const currentContent = await this.buildUserContent(message, images);
     const messages: LLMMessage[] = isExplicitChatMode
-      ? await this.buildExplicitChatMessages(message, systemPrompt)
+      ? await this.buildExplicitChatMessages(message, systemPrompt, images)
       : (() => {
           // Strip tool_use / tool_result blocks from history so we can send to
           // the LLM without a toolConfig (Bedrock rejects the call otherwise).
@@ -7688,7 +7698,7 @@ ${transcript}
             }
             return acc;
           }, []);
-          return [...recent, { role: "user", content: [{ type: "text", text: message }] }];
+          return [...recent, { role: "user", content: currentContent }];
         })();
 
     const onStreamProgress =
@@ -25001,6 +25011,11 @@ You are continuing a previous conversation. The context from the previous conver
       }
 
       if (this.isAcpxExternalRuntimeTask()) {
+        if (this.task.agentConfig?.interactionMode?.mode === "chat") {
+          throw new Error(
+            "This external runtime cannot enforce Chat mode. Use a native session for Chat.",
+          );
+        }
         try {
           await this.executeWithAcpxRuntime(initialPrompt || this.getContractPrompt() || "");
           return;
@@ -34825,6 +34840,7 @@ Return ONLY a JSON object:
     quotedAssistantMessage?: QuotedAssistantMessage,
     integrationMentions?: TaskFollowUpInput["integrationMentions"],
     agentConfigOverride?: TaskFollowUpInput["agentConfigOverride"],
+    interactionMode?: TaskFollowUpInput["interactionMode"],
   ): void {
     this.getSessionRuntime().queueFollowUp(
       message,
@@ -34832,6 +34848,7 @@ Return ONLY a JSON object:
       quotedAssistantMessage,
       integrationMentions,
       agentConfigOverride,
+      interactionMode,
     );
     logger.info(
       `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,
@@ -35242,7 +35259,7 @@ Return ONLY a JSON object:
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: Pick<TaskFollowUpInput, "agentConfigOverride">,
+    options?: Pick<TaskFollowUpInput, "agentConfigOverride" | "interactionMode">,
   ): Promise<void> {
     await this.getLifecycleMutex().runExclusive(async () => {
       const persistedAgentConfig =
@@ -35261,8 +35278,25 @@ Return ONLY a JSON object:
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: Pick<TaskFollowUpInput, "agentConfigOverride">,
+    options?: Pick<TaskFollowUpInput, "agentConfigOverride" | "interactionMode">,
   ): Promise<void> {
+    const selection = options?.interactionMode ?? this.task?.agentConfig?.interactionMode;
+    if (selection) {
+      if (this.isAcpxExternalRuntimeTask() && selection.mode === "chat") {
+        throw new Error(
+          "This external runtime cannot enforce Chat mode. Use a native session for Chat.",
+        );
+      }
+      const storedConfig = this.daemon.getTask?.(this.task.id)?.agentConfig;
+      const config = resolveInteractionMode(
+        storedConfig ?? (options?.agentConfigOverride ? undefined : this.task.agentConfig),
+        selection,
+        message,
+      );
+      this.updateTaskAgentConfig(config);
+      this.daemon.updateTask(this.task.id, { agentConfig: config });
+      this.systemPrompt = "";
+    }
     if (options?.agentConfigOverride) {
       this.updateTaskAgentConfig({
         ...(this.task.agentConfig || {}),
@@ -35496,10 +35530,11 @@ Return ONLY a JSON object:
     const knownContextInformationalFollowUp =
       !shouldResumeAfterFollowup && this.isKnownContextInformationalFollowUp(executionMessage);
     if (
-      !shouldResumeAfterFollowup &&
-      (this.isExplicitChatExecutionMode() || knownContextInformationalFollowUp)
+      this.task.agentConfig?.interactionMode?.mode === "chat" ||
+      (!shouldResumeAfterFollowup &&
+        (this.isExplicitChatExecutionMode() || knownContextInformationalFollowUp))
     ) {
-      await this.respondInChatMode(executionMessage, previousStatus);
+      await this.respondInChatMode(executionMessage, previousStatus, images);
       return;
     }
 

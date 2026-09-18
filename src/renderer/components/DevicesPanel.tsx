@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
+import { InteractionModePicker } from "./MainContent/InteractionModePicker";
+import type { InteractionModeSelection } from "../../shared/interaction-mode";
 import {
   Activity,
   AlertCircle,
@@ -58,6 +60,7 @@ import { RemoteFilePicker } from "./RemoteFilePicker";
 import { RemoteDeviceControlVisual } from "./RemoteDeviceControlVisual";
 
 export interface DeviceTaskOptions {
+  interactionMode?: InteractionModeSelection;
   accessProfileId?: AccessProfileId;
   /** @deprecated Kept for older callers; new tasks use accessProfileId. */
   shellAccess?: boolean;
@@ -299,14 +302,6 @@ function isTerminalDeviceTask(task: Task): boolean {
   return task.status === "completed" || task.status === "failed" || task.status === "cancelled";
 }
 
-const EXECUTION_MODE_ORDER: ExecutionMode[] = [
-  "chat",
-  "execute",
-  "plan",
-  "analyze",
-  "debug",
-  "verified",
-];
 const TASK_DOMAIN_ORDER: TaskDomain[] = [
   "auto",
   "code",
@@ -315,14 +310,6 @@ const TASK_DOMAIN_ORDER: TaskDomain[] = [
   "writing",
   "general",
 ];
-const EXECUTION_MODE_LABEL: Record<ExecutionMode, string> = {
-  chat: "Chat",
-  execute: "Execute",
-  plan: "Plan",
-  analyze: "Analyze",
-  debug: "Debug",
-  verified: "Verified",
-};
 const TASK_DOMAIN_LABEL: Record<TaskDomain, string> = {
   auto: "Auto",
   code: "Code",
@@ -366,9 +353,7 @@ export function DevicesPanel({
   const [overlay, setOverlay] = useState<PanelOverlay>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
-  const [overflowSubmenu, setOverflowSubmenu] = useState<"mode" | "domain" | "profile" | null>(
-    null,
-  );
+  const [overflowSubmenu, setOverflowSubmenu] = useState<"domain" | "profile" | null>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
 
   const [accessProfileId, setAccessProfileId] = useState<AccessProfileId | undefined>(undefined);
@@ -380,7 +365,12 @@ export function DevicesPanel({
   const [collaborativeModeEnabled, setCollaborativeModeEnabled] = useState(false);
   const [multiLlmModeEnabled, setMultiLlmModeEnabled] = useState(false);
   const [chronicleEnabledForTask, setChronicleEnabledForTask] = useState(true);
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>("execute");
+  const [interactionMode, setInteractionMode] = useState<InteractionModeSelection>({
+    mode: "smart",
+  });
+  const [showInteractionPicker, setShowInteractionPicker] = useState(false);
+  const executionMode: ExecutionMode =
+    interactionMode.mode === "chat" ? "chat" : (interactionMode.executionOverride ?? "execute");
   const [taskDomain, setTaskDomain] = useState<TaskDomain>("auto");
   const [pendingAttachments, setPendingAttachments] = useState<
     Array<{ path: string; name: string; source: "local" | "remote" }>
@@ -706,6 +696,7 @@ export function DevicesPanel({
 
   const buildTaskOptions = useCallback((): DeviceTaskOptions => {
     const opts: DeviceTaskOptions = {
+      interactionMode,
       executionMode,
       taskDomain,
       chronicleMode: chronicleEnabledForTask ? "inherit" : "disabled",
@@ -723,6 +714,7 @@ export function DevicesPanel({
     autonomousModeEnabled,
     chronicleEnabledForTask,
     collaborativeModeEnabled,
+    interactionMode,
     executionMode,
     multiLlmModeEnabled,
     accessProfileId,
@@ -1181,32 +1173,18 @@ export function DevicesPanel({
                   </button>
                 </div>
                 <div className="overflow-menu-item" role="none">
-                  <button
-                    className={`goal-mode-toggle overflow-submenu-trigger ${overflowSubmenu === "mode" ? "active" : ""}`}
-                    onClick={() => setOverflowSubmenu((c) => (c === "mode" ? null : "mode"))}
-                    role="menuitem"
-                    aria-haspopup="menu"
-                    aria-expanded={overflowSubmenu === "mode"}
-                  >
-                    <span className="overflow-submenu-trigger-content">
-                      <span className="goal-mode-toggle-text">
-                        <span className="goal-mode-label">
-                          Mode: {EXECUTION_MODE_LABEL[executionMode]}
-                        </span>
-                      </span>
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        className="overflow-submenu-chevron"
-                      >
-                        <path d="M9 6l6 6-6 6" />
-                      </svg>
-                    </span>
-                  </button>
+                  <InteractionModePicker
+                    selection={interactionMode}
+                    open={showInteractionPicker}
+                    onToggle={() => {
+                      setOverflowSubmenu(null);
+                      setShowInteractionPicker((value) => !value);
+                    }}
+                    onChange={(selection) => {
+                      setInteractionMode(selection);
+                      setShowInteractionPicker(false);
+                    }}
+                  />
                 </div>
                 <div className="overflow-menu-item" role="none">
                   <button
@@ -1243,11 +1221,7 @@ export function DevicesPanel({
                   >
                     <div className="overflow-submenu-header">
                       <span className="overflow-submenu-title">
-                        {overflowSubmenu === "mode"
-                          ? "Mode"
-                          : overflowSubmenu === "domain"
-                            ? "Domain"
-                            : "Access profile"}
+                        {overflowSubmenu === "domain" ? "Domain" : "Access profile"}
                       </span>
                     </div>
                     {overflowSubmenu === "profile" ? (
@@ -1311,48 +1285,38 @@ export function DevicesPanel({
                         })}
                       </>
                     ) : (
-                      (overflowSubmenu === "mode" ? EXECUTION_MODE_ORDER : TASK_DOMAIN_ORDER).map(
-                        (value) => {
-                          const label =
-                            overflowSubmenu === "mode"
-                              ? EXECUTION_MODE_LABEL[value as ExecutionMode]
-                              : TASK_DOMAIN_LABEL[value as TaskDomain];
-                          const selected =
-                            overflowSubmenu === "mode"
-                              ? executionMode === value
-                              : taskDomain === value;
-                          return (
-                            <button
-                              key={value}
-                              type="button"
-                              className={`overflow-submenu-option ${selected ? "active" : ""}`}
-                              onClick={() => {
-                                if (overflowSubmenu === "mode")
-                                  setExecutionMode(value as ExecutionMode);
-                                else setTaskDomain(value as TaskDomain);
-                                setOverflowSubmenu(null);
-                              }}
-                              role="menuitemradio"
-                              aria-checked={selected}
-                            >
-                              <span>{label}</span>
-                              {selected && (
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  className="check-icon"
-                                >
-                                  <path d="M20 6L9 17l-5-5" />
-                                </svg>
-                              )}
-                            </button>
-                          );
-                        },
-                      )
+                      TASK_DOMAIN_ORDER.map((value) => {
+                        const label = TASK_DOMAIN_LABEL[value];
+                        const selected = taskDomain === value;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            className={`overflow-submenu-option ${selected ? "active" : ""}`}
+                            onClick={() => {
+                              setTaskDomain(value);
+                              setOverflowSubmenu(null);
+                            }}
+                            role="menuitemradio"
+                            aria-checked={selected}
+                          >
+                            <span>{label}</span>
+                            {selected && (
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                className="check-icon"
+                              >
+                                <path d="M20 6L9 17l-5-5" />
+                              </svg>
+                            )}
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 )}

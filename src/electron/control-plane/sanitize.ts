@@ -16,7 +16,7 @@ import type { AccessProfileId } from "../../shared/access-profiles";
 import { ErrorCodes } from "./protocol";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { z } from "zod";
-import { ImageAttachmentSchema } from "../utils/validation";
+import { ImageAttachmentSchema, InteractionModeSchema } from "../utils/validation";
 
 const MAX_IMAGES_PER_MESSAGE = 5;
 
@@ -29,6 +29,7 @@ const ALLOWED_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".web
 export function sanitizeTaskMessageParams(params: unknown): {
   taskId: string;
   message: string;
+  interactionMode?: import("../../shared/interaction-mode").InteractionModeSelection;
   expectedTurnId?: string;
   images?: ImageAttachment[];
   quotedAssistantMessage?: QuotedAssistantMessage;
@@ -38,6 +39,10 @@ export function sanitizeTaskMessageParams(params: unknown): {
   integrationMentions?: IntegrationMentionSelection[];
 } {
   const p = (params ?? {}) as Record<string, unknown>;
+  const modeResult = InteractionModeSchema.optional().safeParse(p.interactionMode);
+  if (!modeResult.success) {
+    throw { code: ErrorCodes.INVALID_PARAMS, message: "Invalid interactionMode" };
+  }
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   const message = typeof p.message === "string" ? p.message.trim() : "";
   const expectedTurnId =
@@ -131,6 +136,7 @@ export function sanitizeTaskMessageParams(params: unknown): {
   return {
     taskId,
     message,
+    interactionMode: modeResult.data,
     expectedTurnId,
     images,
     quotedAssistantMessage,

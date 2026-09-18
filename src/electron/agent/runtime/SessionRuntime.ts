@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { getInteractionModeSelection } from "../../../shared/interaction-mode";
 import type {
   ImageAttachment,
   LlmProfile,
@@ -1003,6 +1004,7 @@ export class SessionRuntime {
     quotedAssistantMessage?: QuotedAssistantMessage,
     integrationMentions?: TaskFollowUpInput["integrationMentions"],
     agentConfigOverride?: TaskFollowUpInput["agentConfigOverride"],
+    interactionMode?: TaskFollowUpInput["interactionMode"],
   ): void {
     this.state.queues.pendingFollowUps.push({
       message,
@@ -1010,6 +1012,7 @@ export class SessionRuntime {
       quotedAssistantMessage,
       ...(integrationMentions !== undefined ? { integrationMentions } : {}),
       ...(agentConfigOverride !== undefined ? { agentConfigOverride } : {}),
+      ...(interactionMode !== undefined ? { interactionMode } : {}),
     });
   }
 
@@ -1041,6 +1044,20 @@ export class SessionRuntime {
   }
 
   drainPendingFollowUp(): TaskFollowUpInput | undefined {
+    // Hold a queued mode change until the current turn reaches its boundary.
+    // Same-mode follow-ups remain injectable while the executor is running.
+    const pending = this.state.queues.pendingFollowUps[0];
+    const requested = pending?.interactionMode;
+    const active = getInteractionModeSelection(this.deps.getTask().agentConfig);
+    if (
+      requested &&
+      (requested.mode !== active?.mode ||
+        (requested.mode === "smart" &&
+          active?.mode === "smart" &&
+          requested.executionOverride !== active.executionOverride))
+    ) {
+      return undefined;
+    }
     return this.state.queues.pendingFollowUps.shift();
   }
 

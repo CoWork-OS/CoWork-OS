@@ -335,7 +335,10 @@ export class TaskStrategyService {
     // stale default `execute` force non-execution intents into full task mode.
     const executionMode =
       existingExecutionMode &&
-      (existingExecutionMode !== "execute" || inferredExecutionMode === "execute")
+      ((existing?.interactionMode?.mode === "smart" &&
+        existing.interactionMode.executionOverride) ||
+        existingExecutionMode !== "execute" ||
+        inferredExecutionMode === "execute")
         ? existingExecutionMode
         : inferredExecutionMode;
     const taskDomain =
@@ -444,7 +447,11 @@ export class TaskStrategyService {
     if (!next.executionMode) {
       next.executionMode = strategy.executionMode;
       next.executionModeSource = "strategy";
-    } else if (next.executionMode === "execute" && strategy.executionMode !== "execute") {
+    } else if (
+      next.executionMode === "execute" &&
+      strategy.executionMode !== "execute" &&
+      next.interactionMode?.mode !== "smart"
+    ) {
       // Downshift stale execute defaults for non-execution intents (advice/chat/planning/thinking).
       next.executionMode = strategy.executionMode;
       next.executionModeSource = "strategy";

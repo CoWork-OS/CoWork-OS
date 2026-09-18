@@ -2801,6 +2801,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: {
       expectedTurnId?: string;
+      interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -2814,6 +2815,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       images: validatedImages,
       quotedAssistantMessage,
       ...(options?.expectedTurnId ? { expectedTurnId: options.expectedTurnId } : {}),
+      ...(options?.interactionMode ? { interactionMode: options.interactionMode } : {}),
       ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
       ...(options?.shellAccess !== undefined ? { shellAccess: options.shellAccess } : {}),
       ...(options?.accessProfileId ? { accessProfileId: options.accessProfileId } : {}),
@@ -5934,6 +5936,7 @@ export interface ElectronAPI {
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: {
       expectedTurnId?: string;
+      interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;

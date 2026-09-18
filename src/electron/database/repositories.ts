@@ -1048,7 +1048,12 @@ export class TaskRepository {
           WHEN agent_config IS NOT NULL AND json_valid(agent_config)
           THEN json_extract(agent_config, '$.executionModeSource')
           ELSE NULL
-        END AS agent_config_execution_mode_source
+        END AS agent_config_execution_mode_source,
+        CASE
+          WHEN agent_config IS NOT NULL AND json_valid(agent_config)
+          THEN json_extract(agent_config, '$.interactionMode')
+          ELSE NULL
+        END AS agent_config_interaction_mode
       FROM tasks
       ${where}
       ${orderBy}
@@ -1572,6 +1577,13 @@ export class TaskRepository {
     if (typeof row.agent_config_execution_mode_source === "string") {
       agentConfig.executionModeSource =
         row.agent_config_execution_mode_source as SidebarAgentConfig["executionModeSource"];
+    }
+    if (typeof row.agent_config_interaction_mode === "string") {
+      agentConfig.interactionMode = safeJsonParse<SidebarAgentConfig["interactionMode"]>(
+        row.agent_config_interaction_mode,
+        undefined,
+        "task.interactionMode",
+      );
     }
 
     const hasAgentConfig = Object.keys(agentConfig).length > 0;

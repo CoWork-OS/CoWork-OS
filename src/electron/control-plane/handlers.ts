@@ -1473,6 +1473,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         images,
         quotedAssistantMessage,
         expectedTurnId,
+        interactionMode,
         permissionMode,
         accessProfileId,
         shellAccess,
@@ -1485,6 +1486,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         quotedAssistantMessage,
         {
           ...(expectedTurnId ? { expectedTurnId } : {}),
+          ...(interactionMode ? { interactionMode } : {}),
           ...(permissionMode ? { permissionMode } : {}),
           ...(accessProfileId ? { accessProfileId } : {}),
           ...(shellAccess !== undefined ? { shellAccess } : {}),
@@ -3415,6 +3417,7 @@ function registerTaskAndWorkspaceMethods(
       images,
       quotedAssistantMessage,
       expectedTurnId,
+      interactionMode,
       permissionMode,
       accessProfileId,
       shellAccess,
@@ -3422,6 +3425,7 @@ function registerTaskAndWorkspaceMethods(
     } = sanitizeTaskMessageParams(params);
     await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
       ...(expectedTurnId ? { expectedTurnId } : {}),
+      ...(interactionMode ? { interactionMode } : {}),
       ...(permissionMode ? { permissionMode } : {}),
       ...(accessProfileId ? { accessProfileId } : {}),
       ...(shellAccess !== undefined ? { shellAccess } : {}),

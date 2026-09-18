@@ -709,6 +709,7 @@ type SelectedTaskWorkspaceViewProps = {
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: {
+      interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -4739,6 +4740,7 @@ export function App() {
     options?: {
       generateTitle?: boolean;
       autonomousMode?: boolean;
+      interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -4819,6 +4821,7 @@ export function App() {
     }
 
     const verificationAgent = options?.verificationAgent === true;
+    const interactionMode = options?.interactionMode;
     const executionMode = options?.executionMode;
     const taskDomain = options?.taskDomain;
     const chronicleMode = options?.chronicleMode;
@@ -4851,6 +4854,7 @@ export function App() {
       options?.multitaskMode ||
       multiLlmMode ||
       verificationAgent ||
+      interactionMode ||
       executionMode ||
       taskDomain ||
       chronicleMode ||
@@ -4883,6 +4887,7 @@ export function App() {
               ? { multiLlmMode: true, multiLlmConfig: options?.multiLlmConfig }
               : {}),
             ...(verificationAgent ? { verificationAgent: true } : {}),
+            ...(interactionMode ? { interactionMode } : {}),
             ...(executionMode ? { executionMode } : {}),
             ...(taskDomain ? { taskDomain } : {}),
             ...(chronicleMode ? { chronicleMode } : {}),
@@ -5353,6 +5358,7 @@ export function App() {
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: {
+      interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -6412,6 +6418,7 @@ export function App() {
                             collaborativeMode: options.collaborativeMode,
                             multiLlmMode: options.multiLlmMode,
                             multiLlmConfig: options.multiLlmConfig,
+                            interactionMode: options.interactionMode,
                             executionMode: options.executionMode,
                             taskDomain: options.taskDomain,
                             chronicleMode: options.chronicleMode,
@@ -6438,6 +6445,9 @@ export function App() {
                               ...(options.multiLlmMode && {
                                 multiLlmMode: true,
                                 multiLlmConfig: options.multiLlmConfig,
+                              }),
+                              ...(options.interactionMode && {
+                                interactionMode: options.interactionMode,
                               }),
                               ...(options.executionMode && {
                                 executionMode: options.executionMode,

@@ -2289,6 +2289,8 @@ export interface AgentConfig {
    * - analyze: strict analysis/read-only mode
    */
   executionMode?: ExecutionMode;
+  /** Simplified user-facing interaction mode. */
+  interactionMode?: import("./interaction-mode").InteractionModeSelection;
   /** Source of the current execution mode selection. */
   executionModeSource?: ExecutionModeSource;
   /**
@@ -3216,6 +3218,8 @@ export interface TaskFollowUpInput {
    * permissionMode/shellAccess, this must not be written back to the task.
    */
   agentConfigOverride?: AgentConfig;
+  /** Captured user preference, applied at a turn boundary. */
+  interactionMode?: import("./interaction-mode").InteractionModeSelection;
   integrationMentions?: IntegrationMentionSelection[];
 }
 

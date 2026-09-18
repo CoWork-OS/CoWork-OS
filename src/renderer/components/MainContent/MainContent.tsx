@@ -37,6 +37,11 @@ import {
   IntegrationMentionOption,
   IntegrationMentionSelection,
 } from "../../../shared/types";
+import {
+  getInteractionModeSelection,
+  isChatActionShortcut,
+  type InteractionModeSelection,
+} from "../../../shared/interaction-mode";
 import type { ChatInlineFrame } from "../../../shared/mailbox";
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
@@ -252,13 +257,10 @@ import {
   summarizeQuotedAssistantMessage,
 } from "./message-ui";
 import { ModelDropdown } from "./ModelDropdown";
+import { InteractionModePicker } from "./InteractionModePicker";
 import { StructuredInputPromptCard } from "./StructuredInputPromptCard";
 import { LegalDemandIntakePromptCard, GenericLegalWorkflowPromptCard } from "./legal-prompt-cards";
 import {
-  EXECUTION_MODE_ORDER,
-  EXECUTION_MODE_LABEL,
-  EXECUTION_MODE_HINT,
-  EXECUTION_MODE_ICON,
   TASK_DOMAIN_ORDER,
   TASK_DOMAIN_LABEL,
   TASK_DOMAIN_HINT,
@@ -484,6 +486,7 @@ interface MainContentProps {
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: {
+      interactionMode?: InteractionModeSelection;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -3684,7 +3687,42 @@ function MainContentComponent({
   const [collaborativeModeEnabled, setCollaborativeModeEnabled] = useState(false);
   const [multiLlmModeEnabled, setMultiLlmModeEnabled] = useState(false);
   const [chronicleEnabledForTask, setChronicleEnabledForTask] = useState(true);
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>("execute");
+  const [modeDrafts, setModeDrafts] = useState<Record<string, InteractionModeSelection>>({});
+  const modeDraftKey = selectedTaskId ?? "new";
+  const selectedInteractionMode =
+    modeDrafts[modeDraftKey] ??
+    getInteractionModeSelection(task?.agentConfig) ??
+    (selectedTaskId ? undefined : ({ mode: "smart" } as const));
+  const displayedInteractionMode: InteractionModeSelection =
+    selectedInteractionMode ??
+    (task?.agentConfig?.executionMode === "chat"
+      ? { mode: "chat" }
+      : { mode: "smart", executionOverride: task?.agentConfig?.executionMode });
+  const executionMode: ExecutionMode =
+    displayedInteractionMode.mode === "chat"
+      ? "chat"
+      : (displayedInteractionMode.executionOverride ?? "execute");
+  const setInteractionMode = (selection: InteractionModeSelection) => {
+    setModeDrafts((previous) => ({ ...previous, [modeDraftKey]: selection }));
+  };
+  const setExecutionMode = (mode: ExecutionMode) =>
+    setInteractionMode(
+      mode === "chat" ? { mode: "chat" } : { mode: "smart", executionOverride: mode },
+    );
+  useEffect(() => {
+    const accepted = getInteractionModeSelection(task?.agentConfig);
+    setModeDrafts((previous) => {
+      if (
+        !previous[modeDraftKey] ||
+        JSON.stringify(previous[modeDraftKey]) !== JSON.stringify(accepted)
+      ) {
+        return previous;
+      }
+      const next = { ...previous };
+      delete next[modeDraftKey];
+      return next;
+    });
+  }, [modeDraftKey, task?.agentConfig]);
   const [defaultPermissionAccessMode, setDefaultPermissionAccessMode] =
     useState<PermissionAccessMode>(BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
   const [permissionAccessMode, setPermissionAccessMode] = useState<PermissionAccessMode>(
@@ -3903,10 +3941,12 @@ function MainContentComponent({
         onCreateTask(title, text, {
           generateTitle: true,
           ...(executionMode === "chat" ? { executionMode } : {}),
+          ...(selectedInteractionMode ? { agentConfig: { interactionMode: selectedInteractionMode } } : {}),
           ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
         });
       } else {
         onSendMessage(text, undefined, undefined, {
+          ...(selectedInteractionMode ? { interactionMode: selectedInteractionMode } : {}),
           ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
         });
       }
@@ -4281,7 +4321,7 @@ function MainContentComponent({
   // Overflow menu state (welcome view only - no task)
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
-  const [overflowSubmenu, setOverflowSubmenu] = useState<"mode" | "domain" | null>(null);
+  const [overflowSubmenu, setOverflowSubmenu] = useState<"domain" | null>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
   const overflowToggleBtnRef = useRef<HTMLButtonElement>(null);
   const [showModeDropdown, setShowModeDropdown] = useState(false);
@@ -5589,41 +5629,6 @@ function MainContentComponent({
     [getOverflowMenuItems],
   );
 
-  const renderWelcomeExecutionModeRow = () => (
-    <div className="overflow-menu-item" role="none">
-      <button
-        className={`goal-mode-toggle overflow-submenu-trigger menu-tooltip-target ${
-          overflowSubmenu === "mode" ? "active" : ""
-        }`}
-        style={{ margin: 0 }}
-        onClick={() => setOverflowSubmenu((current) => (current === "mode" ? null : "mode"))}
-        data-tooltip={EXECUTION_MODE_HINT[executionMode]}
-        role="menuitem"
-        aria-haspopup="menu"
-        aria-expanded={overflowSubmenu === "mode"}
-        data-overflow-menu-item
-      >
-        <span className="overflow-submenu-trigger-content">
-          <span className="goal-mode-toggle-text">
-            <span className="goal-mode-label">Mode: {EXECUTION_MODE_LABEL[executionMode]}</span>
-          </span>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            className="overflow-submenu-chevron"
-            aria-hidden="true"
-          >
-            <path d="M9 6l6 6-6 6" />
-          </svg>
-        </span>
-      </button>
-    </div>
-  );
-
   const renderWelcomeTaskDomainRow = () => (
     <div className="overflow-menu-item" role="none">
       <button
@@ -5662,19 +5667,14 @@ function MainContentComponent({
   const renderWelcomeOverflowSubmenu = () => {
     if (overflowSubmenu === null) return null;
 
-    const isModeSubmenu = overflowSubmenu === "mode";
-    const title = isModeSubmenu ? "Mode" : "Domain";
-
     return (
-      <div className="overflow-submenu-panel" role="menu" aria-label={`${title} options`}>
+      <div className="overflow-submenu-panel" role="menu" aria-label="Domain options">
         <div className="overflow-submenu-header">
-          <span className="overflow-submenu-title">{title}</span>
+          <span className="overflow-submenu-title">Domain</span>
         </div>
-        {(isModeSubmenu ? EXECUTION_MODE_ORDER : TASK_DOMAIN_ORDER).map((value) => {
-          const label = isModeSubmenu
-            ? EXECUTION_MODE_LABEL[value as ExecutionMode]
-            : TASK_DOMAIN_LABEL[value as TaskDomain];
-          const selected = isModeSubmenu ? executionMode === value : taskDomain === value;
+        {TASK_DOMAIN_ORDER.map((value) => {
+          const label = TASK_DOMAIN_LABEL[value];
+          const selected = taskDomain === value;
 
           return (
             <button
@@ -5682,11 +5682,7 @@ function MainContentComponent({
               type="button"
               className={`overflow-submenu-option ${selected ? "active" : ""}`}
               onClick={() => {
-                if (isModeSubmenu) {
-                  setExecutionMode(value as ExecutionMode);
-                } else {
-                  setTaskDomain(value as TaskDomain);
-                }
+                setTaskDomain(value);
                 setOverflowSubmenu(null);
               }}
               role="menuitemradio"
@@ -5764,6 +5760,10 @@ function MainContentComponent({
     const modalState = selectedSkillForParams;
     setSelectedSkillForParams(null);
     if (!modalState) return;
+    if (displayedInteractionMode.mode === "chat") {
+      setAttachmentError("Switch to Smart before running a skill. Your parameters have been kept.");
+      return;
+    }
     if (onCreateTask) {
       if (modalState.launchMode === "slash") {
         const commandName = modalState.commandName || modalState.skill.id;
@@ -5787,6 +5787,10 @@ function MainContentComponent({
     const modalState = selectedSkillForParams;
     setSelectedSkillForParams(null);
     if (!modalState || modalState.launchMode !== "slash" || !onCreateTask) return;
+    if (displayedInteractionMode.mode === "chat") {
+      setAttachmentError("Switch to Smart before running a skill. Your parameters have been kept.");
+      return;
+    }
     const commandName = modalState.commandName || modalState.skill.id;
     const slashPrompt = buildSlashSkillPrompt(commandName, values);
     const title = buildTaskTitle(`Run /${commandName}`);
@@ -6426,6 +6430,16 @@ function MainContentComponent({
     const appSlashCommand = parseLeadingMessageAppShortcut(trimmedInput);
     const goalSlashCommand = parseLeadingGoalSlashCommand(trimmedInput);
 
+    if (
+      isChatActionShortcut(displayedInteractionMode, trimmedInput) &&
+      appSlashCommand.shortcut?.action !== "clear"
+    ) {
+      setAttachmentError(
+        "Switch to Smart before using action or skill shortcuts. Your message has been kept.",
+      );
+      return;
+    }
+
     if (!trimmedInput && !hasAttachments) return;
     if (
       appSlashCommand.matched &&
@@ -6773,9 +6787,12 @@ function MainContentComponent({
           taskDomain,
           chronicleMode: chronicleEnabledForTask ? "inherit" : "disabled",
           videoGenerationMode: taskDomain === "media" ? true : undefined,
-          ...(clarifyingCheckinsEnabled
-            ? { agentConfig: { humanInputPolicy: "legacy_interactive" as const } }
-            : {}),
+          agentConfig: {
+            ...(selectedInteractionMode ? { interactionMode: selectedInteractionMode } : {}),
+            ...(clarifyingCheckinsEnabled
+              ? { humanInputPolicy: "legacy_interactive" as const }
+              : {}),
+          },
           ...createIntegrationMentionOptions,
           ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
         };
@@ -6805,6 +6822,7 @@ function MainContentComponent({
       } else {
         // Task is selected (even if not in current list) - send follow-up message
         onSendMessage(message, imagePayload, quotedAssistantMessage ?? undefined, {
+          ...(selectedInteractionMode ? { interactionMode: selectedInteractionMode } : {}),
           integrationMentions: selectedIntegrationMentions,
           ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
         });
@@ -8958,7 +8976,6 @@ function MainContentComponent({
                                 </button>
                               </div>
                             )}
-                            {renderWelcomeExecutionModeRow()}
                             {renderWelcomeTaskDomainRow()}
                             <div className="overflow-menu-item" role="none">
                               <button
@@ -9015,23 +9032,16 @@ function MainContentComponent({
                 <div className="input-right-actions">
                   {uiDensity === "focused" ? (
                     <>
-                      {(executionMode !== "execute" ||
-                        collaborativeModeEnabled ||
-                        clarifyingCheckinsEnabled) && (
+                      {(collaborativeModeEnabled || clarifyingCheckinsEnabled) && (
                         <button
                           className="active-mode-badge"
                           title="Click to reset mode"
                           onClick={() => {
-                            setExecutionMode("execute");
                             setCollaborativeModeEnabled(false);
                             setClarifyingCheckinsEnabled(false);
                           }}
                         >
-                          {clarifyingCheckinsEnabled
-                            ? "Check-ins"
-                            : collaborativeModeEnabled
-                              ? "Collab"
-                              : EXECUTION_MODE_LABEL[executionMode]}
+                          {clarifyingCheckinsEnabled ? "Check-ins" : "Collab"}
                           <svg
                             width="10"
                             height="10"
@@ -9360,50 +9370,18 @@ function MainContentComponent({
                 </div>
                 <div className="input-status-right">
                   <div className="input-status-mode-wrap" ref={modeDropdownRef}>
-                    <button
-                      type="button"
-                      className="input-status-mode menu-tooltip-target"
-                      onClick={() => {
+                    <InteractionModePicker
+                      selection={displayedInteractionMode}
+                      open={showModeDropdown}
+                      onToggle={() => {
                         setShowDomainDropdown(false);
-                        setShowModeDropdown((v) => !v);
+                        setShowModeDropdown((value) => !value);
                       }}
-                      data-tooltip={`Current mode: ${EXECUTION_MODE_LABEL[executionMode]} · ${EXECUTION_MODE_HINT[executionMode]}`}
-                      aria-haspopup="listbox"
-                      aria-expanded={showModeDropdown}
-                    >
-                      {(() => {
-                        const Icon = EXECUTION_MODE_ICON[executionMode];
-                        return <Icon size={12} aria-hidden />;
-                      })()}
-                      {EXECUTION_MODE_LABEL[executionMode]}
-                    </button>
-                    {showModeDropdown && (
-                      <div
-                        className="input-status-mode-dropdown"
-                        role="listbox"
-                        aria-label="Execution mode"
-                      >
-                        {EXECUTION_MODE_ORDER.map((value) => {
-                          const Icon = EXECUTION_MODE_ICON[value];
-                          return (
-                            <button
-                              key={value}
-                              type="button"
-                              className={`input-status-mode-option ${executionMode === value ? "active" : ""}`}
-                              onClick={() => {
-                                setExecutionMode(value);
-                                setShowModeDropdown(false);
-                              }}
-                              role="option"
-                              aria-selected={executionMode === value}
-                            >
-                              <Icon size={14} aria-hidden />
-                              {EXECUTION_MODE_LABEL[value]}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                      onChange={(selection) => {
+                        setInteractionMode(selection);
+                        setShowModeDropdown(false);
+                      }}
+                    />
                   </div>
                   <div className="input-status-domain-wrap" ref={domainDropdownRef}>
                     <button
@@ -10629,50 +10607,18 @@ function MainContentComponent({
           </div>
           <div className="input-status-right">
             <div className="input-status-mode-wrap" ref={modeDropdownRef}>
-              <button
-                type="button"
-                className="input-status-mode menu-tooltip-target"
-                onClick={() => {
+              <InteractionModePicker
+                selection={displayedInteractionMode}
+                open={showModeDropdown}
+                onToggle={() => {
                   setShowDomainDropdown(false);
-                  setShowModeDropdown((v) => !v);
+                  setShowModeDropdown((value) => !value);
                 }}
-                data-tooltip={`Current mode: ${EXECUTION_MODE_LABEL[executionMode]} · ${EXECUTION_MODE_HINT[executionMode]}`}
-                aria-haspopup="listbox"
-                aria-expanded={showModeDropdown}
-              >
-                {(() => {
-                  const Icon = EXECUTION_MODE_ICON[executionMode];
-                  return <Icon size={12} aria-hidden />;
-                })()}
-                {EXECUTION_MODE_LABEL[executionMode]}
-              </button>
-              {showModeDropdown && (
-                <div
-                  className="input-status-mode-dropdown"
-                  role="listbox"
-                  aria-label="Execution mode"
-                >
-                  {EXECUTION_MODE_ORDER.map((value) => {
-                    const Icon = EXECUTION_MODE_ICON[value];
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        className={`input-status-mode-option ${executionMode === value ? "active" : ""}`}
-                        onClick={() => {
-                          setExecutionMode(value);
-                          setShowModeDropdown(false);
-                        }}
-                        role="option"
-                        aria-selected={executionMode === value}
-                      >
-                        <Icon size={14} aria-hidden />
-                        {EXECUTION_MODE_LABEL[value]}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                onChange={(selection) => {
+                  setInteractionMode(selection);
+                  setShowModeDropdown(false);
+                }}
+              />
             </div>
             <div className="input-status-domain-wrap" ref={domainDropdownRef}>
               <button

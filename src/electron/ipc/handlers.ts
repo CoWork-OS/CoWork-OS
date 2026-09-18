@@ -5510,6 +5510,7 @@ export async function setupIpcHandlers(
         validated.quotedAssistantMessage,
         {
           ...(validated.expectedTurnId ? { expectedTurnId: validated.expectedTurnId } : {}),
+          ...(validated.interactionMode ? { interactionMode: validated.interactionMode } : {}),
           ...(validated.permissionMode ? { permissionMode: validated.permissionMode } : {}),
           ...(validated.shellAccess !== undefined ? { shellAccess: validated.shellAccess } : {}),
           ...(validated.accessProfileId ? { accessProfileId: validated.accessProfileId } : {}),

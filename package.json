@@ -283,6 +283,13 @@
     ],
     "extraResources": [
       {
+        "from": "resources/persona-templates",
+        "to": "persona-templates",
+        "filter": [
+          "*.json"
+        ]
+      },
+      {
         "from": "resources/skills",
         "to": "skills",
         "filter": [

@@ -488,7 +488,7 @@ export function DigitalTwinsPanel({
         <PersonaTemplateGallery
           onClose={() => setGalleryOpen(false)}
           onActivated={handleActivated}
-          initialCategory={selectedCompany ? "operations" : "all"}
+          initialCategory="all"
           companyId={selectedCompany?.id ?? null}
           companyName={selectedCompany?.name ?? null}
           recommendedTemplateNames={selectedCompany ? COMPANY_OPERATOR_TEMPLATE_NAMES : []}

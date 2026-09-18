@@ -273,6 +273,17 @@ async function validateNumbatRuntime(resourcesRoot, targetKey) {
   );
 }
 
+async function validatePersonaTemplates(resourcesRoot) {
+  const templatesRoot = path.join(resourcesRoot, "persona-templates");
+  const companyPlanner = path.join(templatesRoot, "company-planner.json");
+  const stat = await fs.stat(companyPlanner).catch(() => null);
+  if (!stat?.isFile()) {
+    throw new Error(
+      `Packaged persona templates are missing company-planner.json: ${companyPlanner}`,
+    );
+  }
+}
+
 async function walkDirs(dir, predicate, maxDepth = 3) {
   const results = [];
   async function visit(current, depth) {
@@ -451,6 +462,7 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
       path.join(appPath, "Contents", "Resources"),
       `darwin-${process.arch}`,
     );
+    await validatePersonaTemplates(path.join(appPath, "Contents", "Resources"));
     assertMacCodeSignature(appPath, allowUnsigned);
     await smokeLaunchMac(executablePath);
     console.log(`[desktop-smoke] macOS DMG passed: ${dmg.name} (${path.basename(appPath)})`);
@@ -573,6 +585,7 @@ Write-Output $item.VersionInfo.ProductVersion
       path.join(path.dirname(appExe), "resources"),
       `win32-${process.arch}`,
     );
+    await validatePersonaTemplates(path.join(path.dirname(appExe), "resources"));
 
     if (!skipLaunch) {
       let spawnError = null;

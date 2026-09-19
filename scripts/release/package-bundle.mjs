@@ -195,6 +195,10 @@ export function readBundle(directory, { tag, sha } = {}) {
     const path = join(directory, pkg.filename);
     if (!existsSync(path) || !lstatSync(path).isFile())
       fail(`missing bundle package: ${pkg.filename}`);
+    const packageBytes = readFileSync(path);
+    const packageIntegrity = `sha512-${sha512(packageBytes)}`;
+    if (packageBytes.length !== pkg.size || packageIntegrity !== pkg.integrity)
+      fail(`bundle package checksum mismatch: ${pkg.filename}`);
     const check = validatePackageTarball(path, { name: pkg.name, version: manifest.version });
     if (check.size !== pkg.size || check.integrity !== pkg.integrity)
       fail(`bundle package checksum mismatch: ${pkg.filename}`);

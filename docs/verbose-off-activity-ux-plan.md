@@ -1,12 +1,12 @@
 # Verbose-off activity UX: recording study and implementation plan
 
-Status: planning only. Studied 19 September 2026 against the current working tree. No application code changed or runtime validation performed.
+Status: core renderer implementation complete; extended acceptance and visual tuning remain follow-up work. Studied 19 September 2026 against the current working tree, then implemented and validated the compact renderer path described below.
 
 ## Intended result
 
-With Verbose off, show one quiet, changing activity line for the current work segment. Clicking it reveals the segment's action history, including completed actions. Each action can independently reveal its details. Preserve assistant commentary, final answers, artifacts, and actionable approval/input requests as readable conversation content.
+Keep every user and assistant message in the transcript in every mode. Between those messages, render each action segment as one quiet, compact activity row that carries the latest active label or completed summary. Clicking the row reveals every user-facing step in that segment; clicking again collapses it in place. Preserve final answers, artifacts, and actionable approval/input requests as readable conversation content.
 
-The current action replaces the previous live label in place; it does not append another visible row in the collapsed view. Previous work remains inspectable. Expansion never requires turning Verbose on.
+An active row updates its label in place; completed segments remain as quiet summary rows instead of growing a detail card for every step. Expansion never requires turning Verbose on.
 
 ## Recording evidence
 
@@ -58,7 +58,7 @@ Historical group
 - Keep disclosure intent scoped to task/surface/group/action, using the existing cache. Preserve it across ordinary task switches; do not imply new persistence across app restarts.
 - Hover/focus reveals the chevron more strongly. Keep a subdued discoverable affordance at rest and visible keyboard focus; touch cannot depend on hover.
 - Scrolling upward pauses following new actions. Show the existing “N new activities” control to return to the latest activity. Preserve scroll position when inspecting a detail panel, collapsing/reopening a group, or prepending older history.
-- Prior groups remain inspectable next to their commentary. In long histories, provide an explicit earlier-history control; never silently discard actions because the live projection is bounded.
+- Prior groups remain inspectable next to their commentary. Older pages may still load automatically when the full transcript is inspected, but the live and delivery surfaces do not expose a separate “Load all earlier history” control.
 
 ### Live-label rules
 
@@ -106,7 +106,7 @@ The current checkout already contains substantial disclosure work. The older pla
 | `src/renderer/components/timeline/ActionBlock.tsx` | Renders “Working,” secondary latest label, glyph, chevron, rule, and metadata. Already animates label replacement for 110 ms. | Introduce a minimal variant with one primary label and a running-only shimmer. Retain the existing detailed variant. Update the stale comment describing unconditional active expansion. |
 | `src/renderer/utils/task-status-projection.ts` | `deriveActivityGroups` takes its label from the last block event and uses generic group summaries. | Project a meaningful current action and lifecycle state; reuse successful-outcome aggregation for historical summaries. Avoid marking a whole run failed solely because an earlier recoverable tool failed. |
 | `src/renderer/utils/task-event-derived.ts` | Centralizes normalization, visibility, pairing, groups, and status. Live mode bounds the raw window to 160 events. Group ID starts from the first retained event. | Separate compact presentation from inspectable action history; preserve correlation, group identity, and disclosure through window movement and history prepends. |
-| `src/renderer/components/MainContent/task-feed-logic.ts` | Live mode reduces visible outer rows; delivery mode primarily selects final messages, outputs, and critical events. | Keep historical groups reachable and retain an expandable run activity entry in delivery mode. Expanding history must not require Verbose-on. |
+| `src/renderer/components/MainContent/task-feed-logic.ts` | Live mode reduces visible outer rows; delivery mode primarily selects final messages, outputs, and critical events. | Keep every user/assistant message and action group visible in both modes. Compact only incidental rows; expanding a group is the path to its complete steps. |
 | `src/renderer/components/timeline/StepFeed.tsx` | Has controlled independent detail expansion and an animated disclosure. | Reuse for compact action rows; current-only animation and quieter completed indicators. Preserve typed output viewers. |
 | `src/renderer/components/timeline/VirtualizedActivityList.tsx` | Bounded viewport, virtualization above 60 children, bottom following, and new-activity control already exist. | Preserve them; fix initial/reopen anchoring for historical inspection and use stable action keys for measurements when prepending. Avoid eagerly building expensive hidden detail trees. |
 | `src/renderer/components/timeline/AnimatedDisclosure.tsx` | Supports cancellation, reduced motion, and replay. | Verify focus/inert behavior during closing and layout anchoring; reuse rather than add another animation framework. |
@@ -131,12 +131,12 @@ Do not change execution, approval policy, event persistence, provider behavior, 
 
 | Scenario | Required result |
 | --- | --- |
-| 30 sequential actions, default summary view | One current activity label; no accumulating action cards or output panels. |
+| 30 sequential actions, default summary view | Conversation messages remain visible; action segments stay as compact rows without accumulating detail cards or output panels. |
 | Expand while running | Previously completed actions and current action are reachable; each call/result pair is one action. |
 | Collapse while new events arrive | Stays collapsed; label continues updating in place. |
 | Open a command detail | Command/output/status appear inline; sibling details remain closed. |
 | Scroll into older actions while streaming | No jump to bottom; new-activity affordance works; detail selection remains stable. |
-| More than 160 events and older-page loading | Earlier actions remain accessible; IDs, expansion, and scroll anchors survive. |
+| More than 160 events and older-page loading | Earlier user/assistant messages remain visible; action rows stay reachable and their IDs, expansion, and scroll anchors survive. |
 | Parallel tools and delayed outcomes | Older completions do not hijack the current label or close another tool's running state. |
 | New commentary/run and task switching | Historical groups remain static; new groups default collapsed; cached state never leaks between tasks. |
 | Approval/input/error | Required action is visible without opening history; resolved requests stay resolved. |
@@ -158,4 +158,4 @@ Extend the existing focused tests:
 
 Add interaction coverage for live event arrival during collapse/expand, scroll anchoring with nested output, and lifecycle animation shutdown; static snapshots alone cannot establish those behaviors. Run `npm run qa:renderer-perf`, `npm run build:react`, `npm run type-check`, scoped formatting, and `git diff --check` after implementation. Use Node 24 or newer. Compare unrelated failures with the existing dirty baseline.
 
-This study creates only this plan. Runtime checks, implementation, and visual parity validation remain future work.
+The core renderer path is now implemented in `ActionBlock`, `MainContent`, the disclosure resolver, and scoped minimal-mode CSS. User/assistant rows are preserved through the live projection, compact action rows remain visible in both transcript modes, and the manual history-control row has been removed. Focused renderer tests, the React build, type-check, formatting, diff checks, and a live Electron reload have passed. The remaining items in the acceptance table are follow-up coverage for long-history paging, parallel-tool traces, and deeper visual tuning.

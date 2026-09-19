@@ -7,6 +7,7 @@ import { TaskEventRepository, TaskRepository } from "../../database/repositories
 import { DatabaseManager } from "../../database/schema";
 import { StaleWorkSessionTurnError } from "../../database/WorkSessionProtocolRepository";
 import { WorkSessionProtocolService, mapTaskEventKind } from "../WorkSessionProtocolService";
+import type { TaskEvent } from "../../../shared/types";
 
 const nativeSqliteAvailable = (() => {
   try {
@@ -61,7 +62,13 @@ describeWithSqlite("WorkSessionProtocolService", () => {
     });
   }
 
-  function addEvent(taskId: string, id: string, type: string, payload: Record<string, unknown>) {
+  function addEvent(
+    taskId: string,
+    id: string,
+    type: string,
+    payload: Record<string, unknown>,
+    options: Pick<TaskEvent, "status" | "legacyType"> = {},
+  ) {
     return eventRepo.create({
       id,
       taskId,
@@ -71,6 +78,7 @@ describeWithSqlite("WorkSessionProtocolService", () => {
       schemaVersion: 2,
       eventId: id,
       seq: Number(id.replace(/\D/g, "")) || undefined,
+      ...options,
     });
   }
 
@@ -151,6 +159,66 @@ describeWithSqlite("WorkSessionProtocolService", () => {
     const result = service.recordTaskEvent(task.id, event)!;
     expect(result.turn.status).toBe("failed");
     expect(service.replay(result.session.id)?.status).toBe("failed");
+  });
+
+  it("keeps timeline step status separate from the enclosing turn status", () => {
+    const task = createTask();
+    const stepFinished = addEvent(
+      task.id,
+      "timeline-step-finished",
+      "timeline_step_finished",
+      { legacyType: "step_completed", stepId: "step-1" },
+      { status: "completed", legacyType: "step_completed" },
+    );
+    const stepResult = service.recordTaskEvent(task.id, stepFinished)!;
+    expect(stepResult.turn.status).toBe("executing");
+
+    const stepFailed = addEvent(
+      task.id,
+      "timeline-step-failed",
+      "timeline_error",
+      { legacyType: "error", stepId: "step-2", message: "step failed" },
+      { status: "failed", legacyType: "error" },
+    );
+    const failedStepResult = service.recordTaskEvent(task.id, stepFailed)!;
+    expect(failedStepResult.turn.status).toBe("executing");
+
+    const blocked = addEvent(
+      task.id,
+      "task-status-blocked",
+      "task_status",
+      { status: "blocked", terminalStatus: "awaiting_verification" },
+      { status: "blocked", legacyType: "task_status" },
+    );
+    expect(service.recordTaskEvent(task.id, blocked)!.turn.status).toBe("waiting");
+
+    const completed = addEvent(task.id, "task-completed-after-steps", "task_completed", {
+      resultSummary: "Completed",
+    });
+    expect(service.recordTaskEvent(task.id, completed)!.turn.status).toBe("completed");
+  });
+
+  it("keeps cancellation authoritative when orchestration emits a late failure", () => {
+    const task = createTask();
+    const session = service.ensureForTask(task);
+    const cancelled = addEvent(task.id, "task-cancelled", "task_cancelled", {
+      message: "Task was stopped by user",
+    });
+    expect(service.recordTaskEvent(task.id, cancelled)!.turn.status).toBe("cancelled");
+
+    const lateFailure = addEvent(task.id, "orchestration-failed", "orchestration_run_failed", {
+      runId: "run-1",
+      status: "failed",
+    });
+    let lateResult: ReturnType<WorkSessionProtocolService["recordTaskEvent"]> | undefined;
+    expect(() => {
+      lateResult = service.recordTaskEvent(task.id, lateFailure);
+    }).not.toThrow();
+    expect(lateResult?.turn.status).toBe("cancelled");
+    expect(service.replay(session.session.id)?.status).toBe("cancelled");
+    expect(
+      service.getRepository().findItemBySourceEvent(session.session.id, "orchestration-failed"),
+    ).toBeDefined();
   });
 
   it("switches TaskEvent reads by cohort and falls back immediately on rollback", () => {

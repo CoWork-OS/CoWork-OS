@@ -9,6 +9,7 @@ import {
   waitForScrapingSlot,
 } from "../../scraping/scraping-rate-limiter";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { assertResolvedHostAllowed } from "../../security/address-classes";
 
 const SAFE_BRIDGE_ENVIRONMENT_KEYS = new Set([
   "PATH",
@@ -286,7 +287,7 @@ export class ScrapingTools {
     return await this.callBridge("status", {});
   }
 
-  private ensureNetworkAllowed(url: string, toolName: string): string {
+  private async ensureNetworkAllowed(url: string, toolName: string): Promise<string> {
     const parsedUrl = new URL(url);
     if (!["http:", "https:"].includes(parsedUrl.protocol)) {
       throw new Error("Only HTTP and HTTPS URLs are supported");
@@ -301,6 +302,11 @@ export class ScrapingTools {
     });
     this.daemon.logEvent(this.taskId, "network_policy_decision", decision);
     if (decision.action === "allow") {
+      // The policy above only inspects the literal host. Resolve the name too,
+      // so `evil.test` pointing at 169.254.169.254 or a private range is
+      // refused rather than scraped from the user's host and returned to the
+      // model.
+      await assertResolvedHostAllowed(parsedUrl.hostname);
       return normalizedUrl;
     }
     if (decision.reason === "legacy_guardrail_domain_denied") {
@@ -324,7 +330,7 @@ export class ScrapingTools {
     }
   }
 
-  private getApprovedProxyUrl(settings: Any, toolName: string): string | undefined {
+  private async getApprovedProxyUrl(settings: Any, toolName: string): Promise<string | undefined> {
     if (!settings.proxy.enabled || !settings.proxy.url) return undefined;
     return this.ensureNetworkAllowed(settings.proxy.url, `${toolName}_proxy`);
   }
@@ -341,7 +347,7 @@ export class ScrapingTools {
     max_content_length?: number;
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
-    const normalizedUrl = this.ensureNetworkAllowed(input.url, "scrape_page");
+    const normalizedUrl = await this.ensureNetworkAllowed(input.url, "scrape_page");
     this.assertScopedFetcherAllowed(input.fetcher || settings.defaultFetcher, "scrape_page");
     await waitForScrapingSlot(normalizedUrl, settings.rateLimiting);
 
@@ -359,7 +365,7 @@ export class ScrapingTools {
       max_content_length: input.max_content_length || settings.maxContentLength,
     };
 
-    const approvedProxyUrl = this.getApprovedProxyUrl(settings, "scrape_page");
+    const approvedProxyUrl = await this.getApprovedProxyUrl(settings, "scrape_page");
     if (approvedProxyUrl) params.proxy = approvedProxyUrl;
 
     const result = await this.callBridge("scrape_page", params);
@@ -385,8 +391,8 @@ export class ScrapingTools {
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
     this.assertScopedFetcherAllowed(input.fetcher || settings.defaultFetcher, "scrape_multiple");
-    const normalizedUrls = input.urls.map((url) =>
-      this.ensureNetworkAllowed(url, "scrape_multiple"),
+    const normalizedUrls = await Promise.all(
+      input.urls.map((url) => this.ensureNetworkAllowed(url, "scrape_multiple")),
     );
     if (normalizedUrls.length > 0) {
       await waitForScrapingSlot(normalizedUrls[0], settings.rateLimiting);
@@ -408,7 +414,7 @@ export class ScrapingTools {
       max_content_length: input.max_content_length || 50000,
     };
 
-    const approvedProxyUrl = this.getApprovedProxyUrl(settings, "scrape_multiple");
+    const approvedProxyUrl = await this.getApprovedProxyUrl(settings, "scrape_multiple");
     if (approvedProxyUrl) params.proxy = approvedProxyUrl;
 
     const result = await this.callBridge("scrape_multiple", params);
@@ -431,7 +437,7 @@ export class ScrapingTools {
     fetcher?: string;
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
-    const normalizedUrl = this.ensureNetworkAllowed(input.url, "scrape_extract");
+    const normalizedUrl = await this.ensureNetworkAllowed(input.url, "scrape_extract");
     this.assertScopedFetcherAllowed(input.fetcher || settings.defaultFetcher, "scrape_extract");
     await waitForScrapingSlot(normalizedUrl, settings.rateLimiting);
 
@@ -447,7 +453,7 @@ export class ScrapingTools {
       timeout: settings.timeout,
     };
 
-    const approvedProxyUrl = this.getApprovedProxyUrl(settings, "scrape_extract");
+    const approvedProxyUrl = await this.getApprovedProxyUrl(settings, "scrape_extract");
     if (approvedProxyUrl) params.proxy = approvedProxyUrl;
 
     const result = await this.callBridge("extract_structured", params);
@@ -476,10 +482,12 @@ export class ScrapingTools {
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
     this.assertScopedFetcherAllowed("playwright", "scrape_session");
-    const steps = input.steps.map((step) => ({
-      ...step,
-      ...(step.url ? { url: this.ensureNetworkAllowed(step.url, "scrape_session") } : {}),
-    }));
+    const steps = await Promise.all(
+      input.steps.map(async (step) => ({
+        ...step,
+        ...(step.url ? { url: await this.ensureNetworkAllowed(step.url, "scrape_session") } : {}),
+      })),
+    );
     const allowedHosts = Array.from(
       new Set(
         steps
@@ -506,7 +514,7 @@ export class ScrapingTools {
         : 0,
     };
 
-    const approvedProxyUrl = this.getApprovedProxyUrl(settings, "scrape_session");
+    const approvedProxyUrl = await this.getApprovedProxyUrl(settings, "scrape_session");
     if (approvedProxyUrl) params.proxy = approvedProxyUrl;
 
     const result = await this.callBridge("scrape_session", params);

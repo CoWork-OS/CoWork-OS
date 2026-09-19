@@ -792,6 +792,67 @@ describe("AzureOpenAIProvider", () => {
     expect(response.usage).toEqual({ inputTokens: 6, outputTokens: 2 });
   });
 
+  it("merges Responses argument events keyed by item_id with call_id records without a completed event", async () => {
+    const provider = Object.create(AzureOpenAIProvider.prototype) as Any;
+    const response = createStreamingResponse([
+      'data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read_file","arguments":""}}\n\n',
+      'data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_2","call_id":"call_2","name":"write_file","arguments":""}}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\\"path\\":\\"source.txt\\"}"}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","item_id":"fc_2","output_index":1,"delta":"{\\"path\\":\\"result.txt\\"}"}\n\n',
+      'data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":0,"arguments":"{\\"path\\":\\"source.txt\\"}"}\n\n',
+      'data: {"type":"response.function_call_arguments.done","item_id":"fc_2","output_index":1,"arguments":"{\\"path\\":\\"result.txt\\"}"}\n\n',
+      "data: [DONE]\n\n",
+    ]);
+
+    const result = await provider.fromResponsesStreamResponse(
+      response,
+      { onStreamProgress: vi.fn() },
+      Date.now(),
+    );
+
+    expect(result).toMatchObject({ stopReason: "tool_use" });
+    expect(result.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call_1",
+        name: "read_file",
+        input: { path: "source.txt" },
+      },
+      {
+        type: "tool_use",
+        id: "call_2",
+        name: "write_file",
+        input: { path: "result.txt" },
+      },
+    ]);
+  });
+
+  it("merges legacy Responses events that repeat call_id as item_id", async () => {
+    const provider = Object.create(AzureOpenAIProvider.prototype) as Any;
+    const response = createStreamingResponse([
+      'data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_legacy","name":"read_file","arguments":""}}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","item_id":"call_legacy","delta":"{\\"path\\":\\"legacy.txt\\"}"}\n\n',
+      'data: {"type":"response.function_call_arguments.done","item_id":"call_legacy","arguments":"{\\"path\\":\\"legacy.txt\\"}"}\n\n',
+      "data: [DONE]\n\n",
+    ]);
+
+    const result = await provider.fromResponsesStreamResponse(
+      response,
+      { onStreamProgress: vi.fn() },
+      Date.now(),
+    );
+
+    expect(result.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call_legacy",
+        name: "read_file",
+        input: { path: "legacy.txt" },
+      },
+    ]);
+    expect(result.stopReason).toBe("tool_use");
+  });
+
   it("throws a descriptive error on API failures", async () => {
     mockFetch.mockResolvedValue(
       createErrorResponse(400, "Bad Request", { error: { message: "bad stuff" } }),

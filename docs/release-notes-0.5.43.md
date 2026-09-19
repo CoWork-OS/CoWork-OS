@@ -21,4 +21,3 @@ Release `0.5.43` ships the Ask Inbox sidebar workflow, richer composer routing, 
 - Fixed duplicate `@` rendering and the React `removeChild` crash when deleting a raw mention or integration chip.
 - Cleared stale Google Workspace refresh tokens after refresh bad-request failures, including credential or scope changes before reconnect.
 - Normalized long Azure OpenAI Responses fallback tool-call ids so integration-heavy turns no longer fail on `call_id` length limits.
-

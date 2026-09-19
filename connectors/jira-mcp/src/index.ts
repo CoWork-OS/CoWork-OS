@@ -1,24 +1,24 @@
-import * as readline from 'readline';
+import * as readline from "readline";
 
 // ==================== MCP Types ====================
 
 type JSONRPCId = string | number;
 
 type JSONRPCRequest = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCNotification = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCResponse = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   result?: any;
   error?: { code: number; message: string; data?: any };
@@ -38,7 +38,7 @@ type MCPTool = {
   name: string;
   description?: string;
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties?: Record<string, MCPToolProperty>;
     required?: string[];
     additionalProperties?: boolean;
@@ -54,14 +54,14 @@ type MCPServerInfo = {
   };
 };
 
-const PROTOCOL_VERSION = '2024-11-05';
+const PROTOCOL_VERSION = "2024-11-05";
 
 const MCP_METHODS = {
-  INITIALIZE: 'initialize',
-  INITIALIZED: 'notifications/initialized',
-  SHUTDOWN: 'shutdown',
-  TOOLS_LIST: 'tools/list',
-  TOOLS_CALL: 'tools/call',
+  INITIALIZE: "initialize",
+  INITIALIZED: "notifications/initialized",
+  SHUTDOWN: "shutdown",
+  TOOLS_LIST: "tools/list",
+  TOOLS_CALL: "tools/call",
 } as const;
 
 const MCP_ERROR_CODES = {
@@ -114,45 +114,53 @@ class JiraClient {
   }
 
   async health(): Promise<RequestResult> {
-    return this.requestJson('GET', 'myself');
+    return this.requestJson("GET", "myself");
   }
 
   async listProjects(startAt?: number, maxResults?: number): Promise<RequestResult> {
     const params = new URLSearchParams();
-    if (startAt !== undefined) params.set('startAt', String(startAt));
-    if (maxResults !== undefined) params.set('maxResults', String(maxResults));
+    if (startAt !== undefined) params.set("startAt", String(startAt));
+    if (maxResults !== undefined) params.set("maxResults", String(maxResults));
     const query = params.toString();
-    return this.requestJson('GET', `project/search${query ? `?${query}` : ''}`);
+    return this.requestJson("GET", `project/search${query ? `?${query}` : ""}`);
   }
 
   async getIssue(issueIdOrKey: string, fields?: string[]): Promise<RequestResult> {
     const params = new URLSearchParams();
-    if (fields && fields.length > 0) params.set('fields', fields.join(','));
+    if (fields && fields.length > 0) params.set("fields", fields.join(","));
     const query = params.toString();
-    return this.requestJson('GET', `issue/${encodeURIComponent(issueIdOrKey)}${query ? `?${query}` : ''}`);
+    return this.requestJson(
+      "GET",
+      `issue/${encodeURIComponent(issueIdOrKey)}${query ? `?${query}` : ""}`,
+    );
   }
 
-  async searchIssues(jql: string, startAt?: number, maxResults?: number, fields?: string[]): Promise<RequestResult> {
+  async searchIssues(
+    jql: string,
+    startAt?: number,
+    maxResults?: number,
+    fields?: string[],
+  ): Promise<RequestResult> {
     const payload: Record<string, any> = { jql };
     if (startAt !== undefined) payload.startAt = startAt;
     if (maxResults !== undefined) payload.maxResults = maxResults;
     if (fields && fields.length > 0) payload.fields = fields;
-    return this.requestJson('POST', 'search', payload);
+    return this.requestJson("POST", "search", payload);
   }
 
   async createIssue(payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', 'issue', payload);
+    return this.requestJson("POST", "issue", payload);
   }
 
   async updateIssue(issueIdOrKey: string, payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('PUT', `issue/${encodeURIComponent(issueIdOrKey)}`, payload);
+    return this.requestJson("PUT", `issue/${encodeURIComponent(issueIdOrKey)}`, payload);
   }
 
   private getBaseUrl(): string {
     if (!this.config.baseUrl) {
-      throw new Error('JIRA_BASE_URL is required');
+      throw new Error("JIRA_BASE_URL is required");
     }
-    return `${this.config.baseUrl.replace(/\/$/, '')}/rest/api/${this.config.apiVersion}`;
+    return `${this.config.baseUrl.replace(/\/$/, "")}/rest/api/${this.config.apiVersion}`;
   }
 
   private canRefresh(): boolean {
@@ -164,11 +172,13 @@ class JiraClient {
       return this.config.accessToken;
     }
     if (!this.canRefresh()) {
-      throw new Error('Missing Jira credentials (provide JIRA_ACCESS_TOKEN or JIRA_EMAIL + JIRA_API_TOKEN)');
+      throw new Error(
+        "Missing Jira credentials (provide JIRA_ACCESS_TOKEN or JIRA_EMAIL + JIRA_API_TOKEN)",
+      );
     }
     await this.refreshAccessToken();
     if (!this.config.accessToken) {
-      throw new Error('Failed to refresh Jira access token');
+      throw new Error("Failed to refresh Jira access token");
     }
     return this.config.accessToken;
   }
@@ -179,28 +189,31 @@ class JiraClient {
       return `Bearer ${token}`;
     }
     if (this.config.email && this.config.apiToken) {
-      const basic = Buffer.from(`${this.config.email}:${this.config.apiToken}`).toString('base64');
+      const basic = Buffer.from(`${this.config.email}:${this.config.apiToken}`).toString("base64");
       return `Basic ${basic}`;
     }
-    throw new Error('Missing Jira credentials (provide JIRA_ACCESS_TOKEN or JIRA_EMAIL + JIRA_API_TOKEN)');
+    throw new Error(
+      "Missing Jira credentials (provide JIRA_ACCESS_TOKEN or JIRA_EMAIL + JIRA_API_TOKEN)",
+    );
   }
 
   private async requestJson(method: string, path: string, body?: any): Promise<RequestResult> {
     const start = Date.now();
-    const url = `${this.getBaseUrl()}/${path.replace(/^\//, '')}`;
+    const url = `${this.getBaseUrl()}/${path.replace(/^\//, "")}`;
     const res = await fetch(url, {
       method,
       headers: {
         Authorization: await this.getAuthHeader(),
-        'Content-Type': 'application/json',
-        'User-Agent': 'CoWork-Jira-Connector/0.1.0',
+        "Content-Type": "application/json",
+        "User-Agent": "CoWork-Jira-Connector/0.1.0",
       },
       body: body ? JSON.stringify(body) : undefined,
     });
 
     const durationMs = Date.now() - start;
     const rateLimit = parseRateLimit(res.headers);
-    const vendorRequestId = res.headers.get('x-arequestid') || res.headers.get('x-request-id') || undefined;
+    const vendorRequestId =
+      res.headers.get("x-arequestid") || res.headers.get("x-request-id") || undefined;
 
     if (res.status === 401 && this.canRefresh()) {
       await this.refreshAccessToken();
@@ -234,14 +247,14 @@ class JiraClient {
 
   private async refreshAccessToken(): Promise<void> {
     if (!this.canRefresh()) {
-      throw new Error('Missing Jira refresh credentials');
+      throw new Error("Missing Jira refresh credentials");
     }
 
-    const res = await fetch('https://auth.atlassian.com/oauth/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await fetch("https://auth.atlassian.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        grant_type: 'refresh_token',
+        grant_type: "refresh_token",
         client_id: this.config.clientId,
         client_secret: this.config.clientSecret,
         refresh_token: this.config.refreshToken,
@@ -255,7 +268,7 @@ class JiraClient {
 
     const data = await res.json();
     if (!data.access_token) {
-      throw new Error('Jira OAuth refresh returned no access_token');
+      throw new Error("Jira OAuth refresh returned no access_token");
     }
 
     this.config.accessToken = data.access_token;
@@ -269,12 +282,16 @@ class JiraClient {
 
     try {
       const parsed = JSON.parse(text);
-      if (parsed.errorMessages && Array.isArray(parsed.errorMessages) && parsed.errorMessages.length > 0) {
-        return parsed.errorMessages.join('; ');
+      if (
+        parsed.errorMessages &&
+        Array.isArray(parsed.errorMessages) &&
+        parsed.errorMessages.length > 0
+      ) {
+        return parsed.errorMessages.join("; ");
       }
-      if (parsed.errors && typeof parsed.errors === 'object') {
+      if (parsed.errors && typeof parsed.errors === "object") {
         const messages = Object.entries(parsed.errors).map(([field, msg]) => `${field}: ${msg}`);
-        return messages.join('; ');
+        return messages.join("; ");
       }
       if (parsed.message) {
         return parsed.message;
@@ -287,9 +304,9 @@ class JiraClient {
 }
 
 function parseRateLimit(headers: Headers): RateLimitInfo | undefined {
-  const limit = numberHeader(headers.get('x-ratelimit-limit'));
-  const remaining = numberHeader(headers.get('x-ratelimit-remaining'));
-  const reset = headers.get('x-ratelimit-reset');
+  const limit = numberHeader(headers.get("x-ratelimit-limit"));
+  const remaining = numberHeader(headers.get("x-ratelimit-remaining"));
+  const reset = headers.get("x-ratelimit-reset");
   if (limit === undefined || remaining === undefined) {
     return undefined;
   }
@@ -307,8 +324,12 @@ function numberHeader(value: string | null): number | undefined {
 }
 
 function deriveNextCursor(data: any): string | undefined {
-  if (!data || typeof data !== 'object') return undefined;
-  if (typeof data.startAt === 'number' && typeof data.maxResults === 'number' && typeof data.total === 'number') {
+  if (!data || typeof data !== "object") return undefined;
+  if (
+    typeof data.startAt === "number" &&
+    typeof data.maxResults === "number" &&
+    typeof data.total === "number"
+  ) {
     const next = data.startAt + data.maxResults;
     if (next < data.total) {
       return String(next);
@@ -330,7 +351,7 @@ class StdioMCPServer {
 
   constructor(
     private toolProvider: ToolProvider,
-    private serverInfo: MCPServerInfo
+    private serverInfo: MCPServerInfo,
   ) {}
 
   start(): void {
@@ -340,11 +361,11 @@ class StdioMCPServer {
       terminal: false,
     });
 
-    this.rl.on('line', (line) => this.handleLine(line));
-    this.rl.on('close', () => this.stop());
+    this.rl.on("line", (line) => this.handleLine(line));
+    this.rl.on("close", () => this.stop());
 
-    process.on('SIGINT', () => this.stop());
-    process.on('SIGTERM', () => this.stop());
+    process.on("SIGINT", () => this.stop());
+    process.on("SIGTERM", () => this.stop());
   }
 
   stop(): void {
@@ -363,17 +384,17 @@ class StdioMCPServer {
       const message = JSON.parse(trimmed);
       this.handleMessage(message);
     } catch (error) {
-      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, 'Parse error');
+      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, "Parse error");
     }
   }
 
   private async handleMessage(message: any): Promise<void> {
-    if ('id' in message && message.id !== null) {
+    if ("id" in message && message.id !== null) {
       await this.handleRequest(message as JSONRPCRequest);
       return;
     }
 
-    if ('method' in message) {
+    if ("method" in message) {
       await this.handleNotification(message as JSONRPCNotification);
     }
   }
@@ -408,7 +429,7 @@ class StdioMCPServer {
       if (error.code !== undefined) {
         this.sendError(id, error.code, error.message, error.data);
       } else {
-        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || 'Internal error');
+        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error");
       }
     }
   }
@@ -423,11 +444,11 @@ class StdioMCPServer {
 
   private handleInitialize(_params: any): {
     protocolVersion: string;
-    capabilities: MCPServerInfo['capabilities'];
+    capabilities: MCPServerInfo["capabilities"];
     serverInfo: MCPServerInfo;
   } {
     if (this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, 'Already initialized');
+      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, "Already initialized");
     }
 
     return {
@@ -444,27 +465,27 @@ class StdioMCPServer {
   private async handleToolsCall(params: any): Promise<any> {
     const { name, arguments: args } = params || {};
     if (!name) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, 'Tool name is required');
+      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, "Tool name is required");
     }
 
     try {
       const result = await this.toolProvider.executeTool(name, args || {});
 
-      if (typeof result === 'string') {
-        return { content: [{ type: 'text', text: result }] };
+      if (typeof result === "string") {
+        return { content: [{ type: "text", text: result }] };
       }
 
-      if (result && typeof result === 'object') {
+      if (result && typeof result === "object") {
         if (result.content && Array.isArray(result.content)) {
           return result;
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
-      return { content: [{ type: 'text', text: String(result) }] };
+      return { content: [{ type: "text", text: String(result) }] };
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Error: ${error?.message || 'Tool failed'}` }],
+        content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }],
         isError: true,
       };
     }
@@ -476,13 +497,13 @@ class StdioMCPServer {
   }
 
   private sendResult(id: JSONRPCId, result: any): void {
-    const response: JSONRPCResponse = { jsonrpc: '2.0', id, result };
+    const response: JSONRPCResponse = { jsonrpc: "2.0", id, result };
     this.sendMessage(response);
   }
 
   private sendError(id: JSONRPCId, code: number, message: string, data?: any): void {
     const response: JSONRPCResponse = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
       error: { code, message, data },
     };
@@ -490,116 +511,120 @@ class StdioMCPServer {
   }
 
   private sendMessage(message: JSONRPCResponse | JSONRPCNotification): void {
-    process.stdout.write(JSON.stringify(message) + '\n');
+    process.stdout.write(JSON.stringify(message) + "\n");
   }
 
   private requireInitialized(): void {
     if (!this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, 'Server not initialized');
+      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, "Server not initialized");
     }
   }
 
-  private createError(code: number, message: string, data?: any): { code: number; message: string; data?: any } {
+  private createError(
+    code: number,
+    message: string,
+    data?: any,
+  ): { code: number; message: string; data?: any } {
     return { code, message, data };
   }
 }
 
 // ==================== Tool Definitions ====================
 
-const CONNECTOR_PREFIX = 'jira';
-const DEFAULT_API_VERSION = '3';
+const CONNECTOR_PREFIX = "jira";
+const DEFAULT_API_VERSION = "3";
 
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
-    description: 'Check connector health and authentication status',
+    description: "Check connector health and authentication status",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_projects`,
-    description: 'List Jira projects',
+    description: "List Jira projects",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        limit: { type: 'number', description: 'Max results per page' },
-        cursor: { type: 'string', description: 'Pagination cursor (startAt number)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        limit: { type: "number", description: "Max results per page" },
+        cursor: { type: "string", description: "Pagination cursor (startAt number)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_issue`,
-    description: 'Fetch a Jira issue by id or key',
+    description: "Fetch a Jira issue by id or key",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        id: { type: 'string', description: 'Issue id or key (e.g., PROJ-123)' },
+        id: { type: "string", description: "Issue id or key (e.g., PROJ-123)" },
         fields: {
-          type: 'array',
-          description: 'Optional list of fields to include',
-          items: { type: 'string' },
+          type: "array",
+          description: "Optional list of fields to include",
+          items: { type: "string" },
         },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.search_issues`,
-    description: 'Run a JQL query',
+    description: "Run a JQL query",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        jql: { type: 'string', description: 'JQL query to execute' },
+        jql: { type: "string", description: "JQL query to execute" },
         fields: {
-          type: 'array',
-          description: 'Optional list of fields to include',
-          items: { type: 'string' },
+          type: "array",
+          description: "Optional list of fields to include",
+          items: { type: "string" },
         },
-        limit: { type: 'number', description: 'Max results per page' },
-        cursor: { type: 'string', description: 'Pagination cursor (startAt number)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        limit: { type: "number", description: "Max results per page" },
+        cursor: { type: "string", description: "Pagination cursor (startAt number)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['jql'],
+      required: ["jql"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.create_issue`,
-    description: 'Create a Jira issue',
+    description: "Create a Jira issue",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        projectKey: { type: 'string', description: 'Project key (e.g., PROJ)' },
-        issueType: { type: 'string', description: 'Issue type (e.g., Task, Bug)' },
-        fields: { type: 'object', description: 'Additional Jira fields to include' },
-        idempotencyKey: { type: 'string', description: 'Optional idempotency key (best-effort)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        projectKey: { type: "string", description: "Project key (e.g., PROJ)" },
+        issueType: { type: "string", description: "Issue type (e.g., Task, Bug)" },
+        fields: { type: "object", description: "Additional Jira fields to include" },
+        idempotencyKey: { type: "string", description: "Optional idempotency key (best-effort)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['projectKey', 'issueType', 'fields'],
+      required: ["projectKey", "issueType", "fields"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.update_issue`,
-    description: 'Update a Jira issue',
+    description: "Update a Jira issue",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        id: { type: 'string', description: 'Issue id or key (e.g., PROJ-123)' },
-        fields: { type: 'object', description: 'Field map for update' },
-        idempotencyKey: { type: 'string', description: 'Optional idempotency key (best-effort)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        id: { type: "string", description: "Issue id or key (e.g., PROJ-123)" },
+        fields: { type: "object", description: "Field map for update" },
+        idempotencyKey: { type: "string", description: "Optional idempotency key (best-effort)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['id', 'fields'],
+      required: ["id", "fields"],
       additionalProperties: false,
     },
   },
@@ -640,14 +665,14 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
   [`${CONNECTOR_PREFIX}.create_issue`]: async (args) => {
     const payload = buildCreatePayload(args.projectKey, args.issueType, args.fields);
     const warnings = args.idempotencyKey
-      ? ['Jira does not natively support idempotency keys; handled best-effort.']
+      ? ["Jira does not natively support idempotency keys; handled best-effort."]
       : [];
     const result = await client.createIssue(payload);
     return buildEnvelope(result, args.requestId, warnings);
   },
   [`${CONNECTOR_PREFIX}.update_issue`]: async (args) => {
     const warnings = args.idempotencyKey
-      ? ['Jira does not natively support idempotency keys; handled best-effort.']
+      ? ["Jira does not natively support idempotency keys; handled best-effort."]
       : [];
     const result = await client.updateIssue(args.id, { fields: args.fields });
     return buildEnvelope(result, args.requestId, warnings);
@@ -666,8 +691,8 @@ const toolProvider: ToolProvider = {
 };
 
 const serverInfo: MCPServerInfo = {
-  name: 'Jira Connector',
-  version: '0.1.0',
+  name: "Jira Connector",
+  version: "0.1.0",
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {
     tools: { listChanged: false },
@@ -700,7 +725,11 @@ function parseCursor(cursor?: string): number | undefined {
   return Number.isFinite(value) ? value : undefined;
 }
 
-function buildCreatePayload(projectKey: string, issueType: string, fields: Record<string, any>): Record<string, any> {
+function buildCreatePayload(
+  projectKey: string,
+  issueType: string,
+  fields: Record<string, any>,
+): Record<string, any> {
   return {
     fields: {
       ...fields,

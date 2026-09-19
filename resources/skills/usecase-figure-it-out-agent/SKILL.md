@@ -37,14 +37,14 @@ Run resilient multi-tool problem solving with explicit fallback strategy and aud
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| objective | string | Yes | Task objective to complete |
-| fallback_budget | number | No | Maximum fallback attempts after primary attempt |
-| external_action_policy | select | No | Policy for external irreversible actions |
-| completion_bar | select | No | How strict to be before calling task complete |
+| Name                   | Type   | Required | Description                                     |
+| ---------------------- | ------ | -------- | ----------------------------------------------- |
+| objective              | string | Yes      | Task objective to complete                      |
+| fallback_budget        | number | No       | Maximum fallback attempts after primary attempt |
+| external_action_policy | select | No       | Policy for external irreversible actions        |
+| completion_bar         | select | No       | How strict to be before calling task complete   |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1160 characters.
-- Runtime prompt is defined directly in `../usecase-figure-it-out-agent.json`. 
+- Runtime prompt is defined directly in `../usecase-figure-it-out-agent.json`.

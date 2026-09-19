@@ -1,0 +1,38 @@
+{
+  "id": "security-harness-regressions-2026-05-14",
+  "title": "Security harness regression coverage",
+  "source": {
+    "incident": "approval-boundary-sandbox",
+    "taskId": "approval-boundary-sandbox"
+  },
+  "categories": [
+    {
+      "id": "approval-boundary-sandbox-confirmed-fix",
+      "prompt": "Regression guard for Bounded macOS execution denies external network, sibling temporary roots and unsandboxed fallback: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "approval-boundary-sandbox",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true
+      }
+    },
+    {
+      "id": "harness-read-only-workers-20260914-confirmed-fix",
+      "prompt": "Regression guard for Prevent read-only review workers from inheriting parent bypass, shell, write, or external action permissions: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "harness-read-only-workers-20260914",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true
+      }
+    }
+  ],
+  "metrics": [
+    "confirmed_security_findings_without_proof",
+    "mission_control_security_finding_dedupe_rate",
+    "security_eval_coverage_for_confirmed_fixes"
+  ],
+  "notes": "Generated and maintained by npm run qa:security:harness -- --confirmed-fix."
+}

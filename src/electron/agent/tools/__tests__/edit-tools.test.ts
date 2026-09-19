@@ -188,3 +188,72 @@ describe("EditTools", () => {
     });
   });
 });
+
+describe("edit descriptor authority", () => {
+  it("rejects a substituted regular file before truncation", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-descriptor-"));
+    try {
+      const target = path.join(directory, "target.txt");
+      fs.writeFileSync(target, "original");
+      const originalIdentity = fs.statSync(target);
+      fs.renameSync(target, path.join(directory, "original.txt"));
+      fs.writeFileSync(target, "replacement must survive");
+      const editor = new EditTools(
+        { ...mockWorkspace, path: directory },
+        mockDaemon as Any,
+        "task",
+      );
+      expect(() =>
+        (editor as Any).writeFileThroughDescriptor(target, "edited", originalIdentity),
+      ).toThrow(/target changed/);
+      expect(fs.readFileSync(target, "utf8")).toBe("replacement must survive");
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("edit approval target identity", () => {
+  it("rejects a symlink rebound to a different external file during consent", async () => {
+    if (process.platform === "win32") return;
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-consent-"));
+    try {
+      const workspacePath = path.join(directory, "workspace");
+      fs.mkdirSync(workspacePath);
+      const first = path.join(directory, "first.txt");
+      const second = path.join(directory, "second.txt");
+      const link = path.join(workspacePath, "link.txt");
+      fs.writeFileSync(first, "old");
+      fs.writeFileSync(second, "old");
+      fs.symlinkSync(first, link);
+      const daemon = {
+        logEvent: vi.fn(),
+        requestApproval: vi.fn(async () => {
+          fs.unlinkSync(link);
+          fs.symlinkSync(second, link);
+          return true;
+        }),
+      };
+      const editor = new EditTools(
+        {
+          ...mockWorkspace,
+          path: workspacePath,
+          permissions: { read: true, write: true, delete: true, shell: false, network: false },
+        },
+        daemon as Any,
+        "task",
+      );
+      const result = await editor.editFile({
+        file_path: "link.txt",
+        old_string: "old",
+        new_string: "new",
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/changed while awaiting approval/);
+      expect(fs.readFileSync(first, "utf8")).toBe("old");
+      expect(fs.readFileSync(second, "utf8")).toBe("old");
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});

@@ -14,6 +14,7 @@ import {
   type WorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { assertResolvedHostAllowed } from "../../security/address-classes";
 import { LLMTool } from "../llm/types";
 import { MemoryService } from "../../memory/MemoryService";
 import { MemoryObservationService } from "../../memory/MemoryObservationService";
@@ -748,6 +749,9 @@ export class SystemTools {
         `Network access denied for "${parsedUrl.toString()}": ${networkDecision.reason}`,
       );
     }
+    // The policy above only inspects the literal host. Resolve the name too, so
+    // `evil.test` pointing at 169.254.169.254 or a private range is refused.
+    await assertResolvedHostAllowed(parsedUrl.hostname);
 
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "open_url",

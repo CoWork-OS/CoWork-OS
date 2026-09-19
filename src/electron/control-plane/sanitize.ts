@@ -27,9 +27,11 @@ const ALLOWED_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".web
  * Validates ImageAttachment structure via TaskMessageSchema.
  */
 export function sanitizeTaskMessageParams(params: unknown): {
+  interactionMode?: import("../../shared/interaction-mode").InteractionModeSelection;
+  deliveryMode?: "message" | "follow_up";
+  messageId?: string;
   taskId: string;
   message: string;
-  interactionMode?: import("../../shared/interaction-mode").InteractionModeSelection;
   expectedTurnId?: string;
   images?: ImageAttachment[];
   quotedAssistantMessage?: QuotedAssistantMessage;
@@ -40,14 +42,19 @@ export function sanitizeTaskMessageParams(params: unknown): {
 } {
   const p = (params ?? {}) as Record<string, unknown>;
   const modeResult = InteractionModeSchema.optional().safeParse(p.interactionMode);
-  if (!modeResult.success) {
+  if (!modeResult.success)
     throw { code: ErrorCodes.INVALID_PARAMS, message: "Invalid interactionMode" };
-  }
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   const message = typeof p.message === "string" ? p.message.trim() : "";
   const expectedTurnId =
     typeof p.expectedTurnId === "string" && p.expectedTurnId.trim().length > 0
       ? p.expectedTurnId.trim().slice(0, 200)
+      : undefined;
+  const deliveryMode =
+    p.deliveryMode === "message" || p.deliveryMode === "follow_up" ? p.deliveryMode : undefined;
+  const messageId =
+    typeof p.messageId === "string" && p.messageId.trim().length > 0
+      ? p.messageId.trim().slice(0, 200)
       : undefined;
   if (!taskId) throw { code: ErrorCodes.INVALID_PARAMS, message: "taskId is required" };
   if (!message) throw { code: ErrorCodes.INVALID_PARAMS, message: "message is required" };
@@ -137,6 +144,8 @@ export function sanitizeTaskMessageParams(params: unknown): {
     taskId,
     message,
     interactionMode: modeResult.data,
+    deliveryMode,
+    messageId,
     expectedTurnId,
     images,
     quotedAssistantMessage,

@@ -38,4 +38,4 @@ Create a workspace-local .cowork/ memory kit (rules, identity, long-term notes, 
 ## Runtime Prompt
 
 - Current runtime prompt length: 894 characters.
-- Runtime prompt is defined directly in `../memory-kit.json`. 
+- Runtime prompt is defined directly in `../memory-kit.json`.

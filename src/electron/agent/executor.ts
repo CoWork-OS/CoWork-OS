@@ -1,3 +1,4 @@
+import { resolveInteractionMode } from "./strategy/interaction-mode";
 import {
   AgentConfig,
   Task,
@@ -77,17 +78,17 @@ import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as os from "os";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { AgentDaemon } from "./daemon";
+import { APPROVAL_GATED_TOOL_TIMEOUT_MS as APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS } from "./approval-timeouts";
 import {
   discoverDocumentForAnalysis,
   extractDocumentForAnalysis,
   splitDocumentForAnalysis,
   type DocumentAnalysisChunk,
 } from "./document-analysis-pipeline";
-import { resolveInteractionMode } from "./strategy/interaction-mode";
 import { ToolRegistry } from "./tools/registry";
 import { ToolBatchExecutor } from "./runtime/tool-batch-executor";
 import { ToolScheduler, type ToolScheduleCallReport } from "./runtime/ToolScheduler";
@@ -99,6 +100,9 @@ import { createToolBatchSummaryGenerator } from "./runtime/ToolBatchSummaryGener
 import { resolveDefaultRuntimeToolSchedulerSpec } from "./runtime/runtime-tool-scheduler-spec";
 import {
   SessionRuntime,
+  CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE,
+  ContextCapacityExhaustedError,
+  type SessionRuntimeCompactionLifecycleHandle,
   type SessionRuntimeState,
   type SessionRuntimeTaskProjection,
 } from "./runtime/SessionRuntime";
@@ -203,8 +207,18 @@ import { QueryOrchestrator } from "./orchestration/QueryOrchestrator";
 import { matchesExplicitSkillInvocationPhrase } from "./skill-invocation-utils";
 import { createLogger } from "../utils/logger";
 import {
+  compactContextWithJev,
+  createConfiguredJevProvider,
+  isJevActiveHarnessEnabled,
+  rerankEligibleSkillToolsWithJev,
+  reviewOutputWithJev,
+} from "./jev";
+import { createDecisionService, type DecisionService } from "./decisions";
+import { decideLoopActionWithJev } from "./jev/loop-decision";
+import {
   AcpxRuntimeRunner,
   AcpxRuntimeUnavailableError,
+  assertAcpxExecutionAuthority,
   getAcpxAgentDisplayName,
 } from "./AcpxRuntimeRunner";
 
@@ -275,6 +289,23 @@ import {
 const DEFAULT_FAILOVER_PRIMARY_RETRY_COOLDOWN_MS = 60_000;
 const VALID_LLM_PROVIDER_TYPES = new Set<string>(LLM_PROVIDER_TYPES as readonly string[]);
 const logger = createLogger("TaskExecutor");
+
+type TaskExecutorFollowUpOptions = Pick<
+  TaskFollowUpInput,
+  | "agentConfigOverride"
+  | "interactionMode"
+  | "messageSource"
+  | "messageId"
+  | "senderTaskId"
+  | "senderLabel"
+> & {
+  /** Called after transcript and queue state are durably persisted. */
+  onAccepted?: () => void | Promise<void>;
+  /** Queue recovery already emitted the receipt; avoid a duplicate event. */
+  suppressUserMessageEvent?: boolean;
+  /** Full queue item retained until the acceptance snapshot commits. */
+  queuedFollowUp?: TaskFollowUpInput;
+};
 import {
   evaluateDomainCompletion,
   getLoopGuardrailConfig,
@@ -978,6 +1009,14 @@ export class TaskExecutor {
   private explicitChatSummaryBlock: string | null = null;
   private explicitChatSummaryCreatedAt: number = 0;
   private explicitChatSummarySourceMessageCount: number = 0;
+  private explicitChatCompactionId: string | null = null;
+  private explicitChatCompactionAttemptId: string | null = null;
+  private explicitChatCompactionHandle: SessionRuntimeCompactionLifecycleHandle | null = null;
+  private explicitChatCompactionInputTokens = 0;
+  private explicitChatCompactionInputMessageCount = 0;
+  private explicitChatCompactionInputGeneration = 0;
+  private explicitChatCompactionFallbackUsed = false;
+  private explicitChatSummaryInputSignature = "";
   private lastPreCompactionFlushAt: number = 0;
   private lastPreCompactionFlushTokenCount: number = 0;
   private observedOutputTokensPerSecond: number | null = null;
@@ -987,6 +1026,8 @@ export class TaskExecutor {
   private readonly citationTracker: CitationTracker;
   private readonly lifecycleMutex: LifecycleMutex = new LifecycleMutex();
   private lifecycleMutexFallback?: LifecycleMutex;
+  /** Set before shutdown cancellation so late lifecycle entrypoints no-op. */
+  private shutdownRequested = false;
   /** Images attached to the initial task creation (not follow-up messages). */
   private initialImages?: ImageAttachment[];
   private slashBatchExternalPolicy: SkillSlashExternalMode | null = null;
@@ -1256,7 +1297,7 @@ export class TaskExecutor {
   private static readonly PINNED_USER_PROFILE_CLOSE_TAG = "</cowork_user_profile>";
 
   private static readonly BROWSER_TOOL_TIMEOUT_MS = 90 * 1000;
-  private static readonly APPROVAL_GATED_TOOL_TIMEOUT_MS = 5 * 60 * 1000;
+  private static readonly APPROVAL_GATED_TOOL_TIMEOUT_MS = APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS;
   /** Video generation submission can take 10–30 s for job creation + initial processing. */
   private static readonly VIDEO_TOOL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly RUN_COMMAND_DEFAULT_TIMEOUT_MS = 120 * 1000;
@@ -2169,12 +2210,15 @@ export class TaskExecutor {
 
     const executableCalls: T[] = [];
     const deferredToolResults: LLMToolResult[] = [];
+    let executableCallCount = 0;
 
     for (const call of calls) {
       const toolName = String(call.toolUse?.name || "");
+      const hasInvalidArguments = Boolean(call.toolUse?.inputError);
       const shouldDeferMixedWrite =
-        hasContextExpandingCall && this.isMutationSatisfyingTool(toolName);
-      if (shouldDeferMixedWrite || executableCalls.length >= executionLimit) {
+        !hasInvalidArguments && hasContextExpandingCall && this.isMutationSatisfyingTool(toolName);
+      const shouldDeferForLimit = !hasInvalidArguments && executableCallCount >= executionLimit;
+      if (shouldDeferMixedWrite || shouldDeferForLimit) {
         deferredToolResults.push(
           this.buildLocalModelDeferredToolResult({
             toolUse: call.toolUse,
@@ -2185,6 +2229,7 @@ export class TaskExecutor {
         );
       } else {
         executableCalls.push(call);
+        if (!hasInvalidArguments) executableCallCount += 1;
       }
     }
 
@@ -3369,6 +3414,9 @@ export class TaskExecutor {
   }
 
   private getAcpxRuntimeRunner(): AcpxRuntimeRunner {
+    // Recheck on every follow-up, including when an adapter session already
+    // exists, so a narrowed task cannot reuse broader delegated authority.
+    assertAcpxExecutionAuthority(this.workspace.permissions, loadPolicies().runtime);
     if (!this.acpxRuntimeRunner) {
       this.acpxRuntimeRunner = new AcpxRuntimeRunner({
         taskId: this.task.id,
@@ -3446,6 +3494,7 @@ export class TaskExecutor {
     message: string,
     _images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
+    options?: TaskExecutorFollowUpOptions,
   ): Promise<void> {
     const runner = this.getAcpxRuntimeRunner();
     const runtimeAgentName = this.getAcpxRuntimeAgentDisplayName();
@@ -3457,12 +3506,15 @@ export class TaskExecutor {
     this.emitEvent("executing", {
       message: `Processing follow-up via ${runtimeAgentName} ACP runtime`,
     });
-    this.emitEvent("user_message", {
-      message,
-      ...this.buildIntegrationMentionEventPayload(),
-      ...this.buildUserMessageAttachmentEventPayload(_images),
-      ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
-    });
+    if (!options?.suppressUserMessageEvent) {
+      this.emitEvent("user_message", {
+        message,
+        ...this.buildMessageProvenanceEventPayload(options),
+        ...this.buildIntegrationMentionEventPayload(),
+        ...this.buildUserMessageAttachmentEventPayload(_images),
+        ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+      });
+    }
     await runner.ensureSession();
     const result = await runner.prompt(followUpConversationMessage);
     const assistantText = result.assistantText.trim();
@@ -3576,6 +3628,17 @@ export class TaskExecutor {
 
   private getLifecycleMutex(): LifecycleMutex {
     return this.lifecycleMutex ?? (this.lifecycleMutexFallback ??= new LifecycleMutex());
+  }
+
+  /** Wait until all already-admitted lifecycle work has settled. */
+  async waitForIdle(): Promise<void> {
+    await this.getLifecycleMutex().waitForIdle();
+  }
+
+  private createContextCapacityRecoveryExhaustedError(message: string): Error {
+    const error = new Error(message);
+    (error as Any).code = CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE;
+    return error;
   }
 
   /**
@@ -4904,6 +4967,7 @@ export class TaskExecutor {
 
   private shouldUseReadOnlyPdfAttachmentMode(): boolean {
     const agentConfig = this.task?.agentConfig;
+    // Interactive Chat uses only the attachment preview already ingested by the UI.
     if (agentConfig?.interactionMode?.mode === "chat") return false;
     if (agentConfig?.executionMode !== "chat") return false;
     const source = agentConfig.executionModeSource;
@@ -5084,6 +5148,147 @@ export class TaskExecutor {
     };
   }
 
+  private emitExplicitChatCompactionLifecycle(
+    type:
+      | "context_compaction_started"
+      | "context_compaction_completed"
+      | "context_compaction_failed",
+    payload: Record<string, unknown>,
+  ): void {
+    // Unit tests and lightweight executor hosts may intentionally omit the
+    // daemon/event emitter. The model-visible history path must still work in
+    // those hosts without turning observability into a hard dependency.
+    if (!(this as Any).daemon || !this.task?.id) return;
+    try {
+      this.emitEvent(type, {
+        compactionId: this.explicitChatCompactionId,
+        ...(this.explicitChatCompactionAttemptId
+          ? { attemptId: this.explicitChatCompactionAttemptId }
+          : {}),
+        status:
+          type === "context_compaction_started"
+            ? "started"
+            : type === "context_compaction_completed"
+              ? "completed"
+              : "failed",
+        trigger: "automatic",
+        phase: "pre_turn",
+        historyGenerationBefore: this._runtime?.getHistoryGeneration?.() ?? 0,
+        ...payload,
+      });
+    } catch {
+      // Compaction correctness does not depend on the optional timeline sink.
+    }
+  }
+
+  private beginExplicitChatCompaction(inputTokens: number, inputMessageCount: number): void {
+    if (this.explicitChatCompactionId) return;
+    const runtime =
+      this._runtime ??
+      (typeof (this as Any).getSessionRuntime === "function"
+        ? (this as Any).getSessionRuntime()
+        : null);
+    const lifecycleHandle =
+      runtime && typeof runtime.beginCompactionLifecycle === "function"
+        ? runtime.beginCompactionLifecycle({
+            trigger: "automatic",
+            phase: "pre_turn",
+            reason: "chat_history_threshold",
+            inputTokens,
+            inputMessageCount,
+            thresholdRatio: 0.9,
+            targetRatio: 0.55,
+            extra: { contextLabel: "chat session" },
+          })
+        : null;
+    if (runtime && typeof runtime.beginCompactionLifecycle === "function" && !lifecycleHandle) {
+      return;
+    }
+    this.explicitChatCompactionHandle = lifecycleHandle;
+    this.explicitChatCompactionId = lifecycleHandle?.compactionId ?? randomUUID();
+    this.explicitChatCompactionAttemptId = lifecycleHandle?.attemptId ?? randomUUID();
+    this.explicitChatCompactionInputTokens = inputTokens;
+    this.explicitChatCompactionInputMessageCount = inputMessageCount;
+    this.explicitChatCompactionInputGeneration = runtime?.getHistoryGeneration?.() ?? 0;
+    this.explicitChatCompactionFallbackUsed = false;
+    if (!lifecycleHandle) {
+      this.emitExplicitChatCompactionLifecycle("context_compaction_started", {
+        reason: "chat_history_threshold",
+        inputTokens,
+        inputMessageCount,
+        historyGenerationBefore: this.explicitChatCompactionInputGeneration,
+        thresholdRatio: 0.9,
+        targetRatio: 0.55,
+        accountingSource: "estimate",
+      });
+    }
+  }
+
+  private completeExplicitChatCompaction(replacementMessages: LLMMessage[]): boolean {
+    if (!this.explicitChatCompactionId) return true;
+    const inputTokens = this.explicitChatCompactionInputTokens;
+    const inputMessageCount = this.explicitChatCompactionInputMessageCount;
+    const runtime = this._runtime as Any;
+    let completed = true;
+    if (this.explicitChatCompactionHandle && runtime) {
+      completed = runtime.completeCompactionLifecycle(this.explicitChatCompactionHandle, {
+        reason: "context_replacement_installed",
+        inputTokens,
+        replacementTokens: estimateTotalTokens(replacementMessages),
+        inputMessageCount,
+        replacementMessageCount: replacementMessages.length,
+        fallbackUsed: this.explicitChatCompactionFallbackUsed,
+      });
+    } else {
+      this.emitExplicitChatCompactionLifecycle("context_compaction_completed", {
+        reason: "context_replacement_installed",
+        inputTokens,
+        replacementTokens: estimateTotalTokens(replacementMessages),
+        inputMessageCount,
+        replacementMessageCount: replacementMessages.length,
+        fallbackUsed: this.explicitChatCompactionFallbackUsed,
+        historyGenerationBefore: this.explicitChatCompactionInputGeneration,
+        historyGenerationAfter: this._runtime?.getHistoryGeneration?.() ?? 0,
+      });
+    }
+    this.explicitChatCompactionHandle = null;
+    this.explicitChatCompactionId = null;
+    this.explicitChatCompactionAttemptId = null;
+    this.explicitChatCompactionInputTokens = 0;
+    this.explicitChatCompactionInputMessageCount = 0;
+    this.explicitChatCompactionInputGeneration = 0;
+    this.explicitChatCompactionFallbackUsed = false;
+    return completed;
+  }
+
+  private failExplicitChatCompaction(reason: unknown): void {
+    if (!this.explicitChatCompactionId) return;
+    const runtime = this._runtime as Any;
+    if (this.explicitChatCompactionHandle && runtime) {
+      runtime.failCompactionLifecycle(this.explicitChatCompactionHandle, {
+        reason: String(reason || "chat compaction failed"),
+        retryable: true,
+        failureStage: "summarize",
+        inputTokens: this.explicitChatCompactionInputTokens,
+      });
+    } else {
+      this.emitExplicitChatCompactionLifecycle("context_compaction_failed", {
+        reason: String(reason || "chat compaction failed"),
+        retryable: true,
+        failureStage: "summarize",
+        inputTokens: this.explicitChatCompactionInputTokens,
+        historyGenerationBefore: this.explicitChatCompactionInputGeneration,
+      });
+    }
+    this.explicitChatCompactionHandle = null;
+    this.explicitChatCompactionId = null;
+    this.explicitChatCompactionAttemptId = null;
+    this.explicitChatCompactionInputTokens = 0;
+    this.explicitChatCompactionInputMessageCount = 0;
+    this.explicitChatCompactionInputGeneration = 0;
+    this.explicitChatCompactionFallbackUsed = false;
+  }
+
   private async buildExplicitChatMessages(
     message: string,
     systemPrompt: string,
@@ -5106,10 +5311,11 @@ export class TaskExecutor {
       return acc;
     }, []);
 
-    const currentContent = await this.buildUserContent(message, images);
     const currentMessage: LLMMessage = {
       role: "user",
-      content: currentContent,
+      content: images?.length
+        ? await this.buildUserContent(message, images)
+        : [{ type: "text", text: message }],
     };
 
     const fullMessages: LLMMessage[] = [...baseHistory, currentMessage];
@@ -5119,30 +5325,76 @@ export class TaskExecutor {
       totalTokens >= EXPLICIT_CHAT_SUMMARY_TRIGGER_TOKENS;
 
     const useCachedSummary = Boolean(this.explicitChatSummaryBlock);
-    if (
-      !useCachedSummary &&
-      (!shouldSummarize || baseHistory.length <= EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW)
-    ) {
+    const summaryInputSignature = (() => {
+      try {
+        return createHash("sha256").update(JSON.stringify(baseHistory)).digest("hex");
+      } catch {
+        return `${baseHistory.length}:${estimateTotalTokens(baseHistory, systemPrompt)}`;
+      }
+    })();
+    const previousSummaryInputSignature =
+      this._runtime?.state.transcript.explicitChatSummaryInputSignature ||
+      this.explicitChatSummaryInputSignature;
+    if (!useCachedSummary && !shouldSummarize) {
       return fullMessages;
     }
 
+    // Token pressure can be caused by a few very large messages even when the
+    // count is below the normal 16-message window. Retain a smaller tail in
+    // that case so oversized turns cannot bypass compaction entirely.
+    const recentWindowSize =
+      shouldSummarize && baseHistory.length <= EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW
+        ? baseHistory.length <= 1
+          ? 0
+          : Math.max(1, Math.floor(baseHistory.length / 2))
+        : EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW;
     const recentWindow = this.stripPinnedSummaryPrefixFromFirstUserMessage(
-      baseHistory.slice(-EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW),
+      recentWindowSize === 0 ? [] : baseHistory.slice(-recentWindowSize),
     );
-    if (recentWindow.length === 0) {
+    if (recentWindow.length === 0 && baseHistory.length === 0) {
       return fullMessages;
     }
 
-    if (!this.explicitChatSummaryBlock && shouldSummarize) {
-      const removedMessages = baseHistory.slice(0, -EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW);
-      if (removedMessages.length > 0) {
-        this.explicitChatSummaryBlock = await this.buildCompactionSummaryBlock({
-          removedMessages,
-          maxOutputTokens: EXPLICIT_CHAT_SUMMARY_MAX_OUTPUT_TOKENS,
-          contextLabel: "chat session",
-        });
+    const summaryPrefix = this.explicitChatSummaryBlock?.trimStart() || "";
+    const newlyDroppedMessages = (
+      recentWindowSize === 0 ? baseHistory : baseHistory.slice(0, -recentWindowSize)
+    ).filter((candidate) => {
+      if (typeof candidate.content !== "string") return true;
+      return !candidate.content.trimStart().startsWith(TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG);
+    });
+    const historyChangedSinceLastSummary = summaryInputSignature !== previousSummaryInputSignature;
+    const shouldRefreshSummary =
+      historyChangedSinceLastSummary &&
+      (newlyDroppedMessages.length > 0 || (!useCachedSummary && shouldSummarize));
+
+    if (shouldRefreshSummary) {
+      const summarySourceMessages: LLMMessage[] = [
+        ...(summaryPrefix
+          ? [{ role: "user" as const, content: this.explicitChatSummaryBlock as string }]
+          : []),
+        ...newlyDroppedMessages,
+      ];
+      if (summarySourceMessages.length > 0) {
+        this.beginExplicitChatCompaction(totalTokens, baseHistory.length);
+        try {
+          this.explicitChatSummaryBlock = await this.buildCompactionSummaryBlock({
+            removedMessages: summarySourceMessages,
+            maxOutputTokens: EXPLICIT_CHAT_SUMMARY_MAX_OUTPUT_TOKENS,
+            contextLabel: useCachedSummary ? "incremental chat session compaction" : "chat session",
+          });
+          this.explicitChatCompactionFallbackUsed = this.explicitChatSummaryBlock.includes(
+            "Dropped context (raw, truncated):",
+          );
+        } catch (error) {
+          this.failExplicitChatCompaction(error);
+          throw error;
+        }
         this.explicitChatSummaryCreatedAt = Date.now();
-        this.explicitChatSummarySourceMessageCount = removedMessages.length;
+        this.explicitChatSummarySourceMessageCount += newlyDroppedMessages.length;
+        this.explicitChatSummaryInputSignature = summaryInputSignature;
+        if (this._runtime) {
+          this._runtime.state.transcript.explicitChatSummaryInputSignature = summaryInputSignature;
+        }
       }
     }
 
@@ -5313,6 +5565,18 @@ ${transcript}
       "A previous agent produced the structured summary below to hand off the work. " +
       "Use this to build on the work that has already been done and avoid duplicating effort.\n\n";
 
+    const buildDeterministicFallback = (): string => {
+      const rawTranscript = InputSanitizer.sanitizeMemoryContent(transcript).trim();
+      const fallbackBody =
+        rawTranscript || `Dropped ${removed.length} messages without text content.`;
+      const fallback = truncateToTokens(fallbackBody, Math.max(1, outputBudget - 32));
+      return [
+        TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
+        SESSION_PREAMBLE + `Dropped context (raw, truncated):\n${fallback}`,
+        TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
+      ].join("\n");
+    };
+
     try {
       const response = await this.callLLMWithRetry(
         () =>
@@ -5343,9 +5607,10 @@ ${transcript}
         .map((c: Any) => c.text)
         .join("\n")
         .trim();
-      if (!text) return "";
+      if (!text) return buildDeterministicFallback();
 
       const sanitized = InputSanitizer.sanitizeMemoryContent(text).trim();
+      if (!sanitized) return buildDeterministicFallback();
       const clamped = truncateToTokens(sanitized, outputBudget);
       return [
         TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
@@ -5354,15 +5619,7 @@ ${transcript}
       ].join("\n");
     } catch {
       // Fallback: deterministic minimal summary (better than losing everything).
-      const fallback = truncateToTokens(
-        InputSanitizer.sanitizeMemoryContent(transcript).trim(),
-        outputBudget,
-      );
-      return [
-        TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
-        SESSION_PREAMBLE + `Dropped context (raw, truncated):\n${fallback}`,
-        TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
-      ].join("\n");
+      return buildDeterministicFallback();
     }
   }
 
@@ -5867,6 +6124,9 @@ ${transcript}
   private acpxRuntimeRunner: AcpxRuntimeRunner | null = null;
   private lastRoutingState: LLMRoutingRuntimeState | null = null;
   private cachedLlmSettings: ReturnType<typeof LLMProviderFactory.loadSettings> | null = null;
+  private jevLoopDecisionService: DecisionService | null | undefined;
+  private jevP2DecisionService: DecisionService | null | undefined;
+  private jevOutputGuardrailAttempts = 0;
   private providerFailoverSelections: Array<
     ReturnType<typeof LLMProviderFactory.resolveTaskModelSelection>
   > = [];
@@ -5968,6 +6228,211 @@ ${transcript}
     return registry;
   }
 
+  private async evaluateJevLoopDecision(input: {
+    progressScore: number;
+    loopRiskIndex: number;
+    repeatedFingerprintCount: number;
+    noProgressStreak: number;
+    pendingSteps: number;
+    dominantFingerprint?: string;
+    hardStopReason?: string;
+  }) {
+    const settings = this.cachedLlmSettings ?? LLMProviderFactory.loadSettings();
+    const jevSettings = settings.jev;
+    if (
+      !jevSettings ||
+      jevSettings.loopControlEnabled === false ||
+      !isJevActiveHarnessEnabled(jevSettings) ||
+      this.task.parentTaskId ||
+      this.task.source === "cron" ||
+      this.task.source === "subconscious"
+    ) {
+      return { status: "abstain" as const, action: "abstain" as const, reason: "disabled" };
+    }
+
+    if (this.jevLoopDecisionService === undefined) {
+      try {
+        const resolution = createConfiguredJevProvider(settings);
+        this.jevLoopDecisionService = resolution
+          ? createDecisionService(resolution.provider, {
+              model: resolution.model,
+              providerType: resolution.providerType,
+              telemetryContext: {
+                workspaceId: this.task.workspaceId,
+                taskId: this.task.id,
+                sourceKind: "loop-control",
+              },
+              timeoutMs: Math.min(jevSettings.timeoutMs ?? 700, 1_500),
+              maxRetries: 0,
+              maxCalls: 8,
+              maxConcurrent: 1,
+              cache: { enabled: true, ttlMs: 2_000, maxEntries: 8 },
+            })
+          : null;
+      } catch {
+        this.jevLoopDecisionService = null;
+      }
+    }
+    const service = this.jevLoopDecisionService;
+    if (!service) {
+      return {
+        status: "unavailable" as const,
+        action: "abstain" as const,
+        reason: "provider_unavailable",
+      };
+    }
+
+    const response = await decideLoopActionWithJev({
+      provider: service.getProvider(),
+      decisionService: service,
+      model: service.getModel() || "jev-latest",
+      taskPrompt: this.task.rawPrompt || this.task.userPrompt || this.task.prompt,
+      ...input,
+      timeoutMs: Math.min(jevSettings.timeoutMs ?? 700, 1_500),
+    });
+    return response;
+  }
+
+  private getJevP2DecisionService(): DecisionService | null {
+    const settings = this.cachedLlmSettings ?? LLMProviderFactory.loadSettings();
+    const jevSettings = settings.jev;
+    if (!jevSettings || !isJevActiveHarnessEnabled(jevSettings)) return null;
+    if (this.jevP2DecisionService === undefined) {
+      try {
+        const resolution = createConfiguredJevProvider(settings);
+        this.jevP2DecisionService = resolution
+          ? createDecisionService(resolution.provider, {
+              model: resolution.model,
+              providerType: resolution.providerType,
+              telemetryContext: {
+                workspaceId: this.task.workspaceId,
+                taskId: this.task.id,
+                sourceKind: "executor-harness",
+              },
+              timeoutMs: Math.min(jevSettings.timeoutMs ?? 700, 1_500),
+              maxRetries: 0,
+              maxCalls: 32,
+              maxConcurrent: 1,
+              cache: { enabled: true, ttlMs: 3_000, maxEntries: 32 },
+            })
+          : null;
+      } catch {
+        this.jevP2DecisionService = null;
+      }
+    }
+    return this.jevP2DecisionService;
+  }
+
+  private async evaluateJevContextCompaction(input: {
+    messages: LLMMessage[];
+    availableTokens: number;
+    targetTokens: number;
+    taskPrompt?: string;
+    contextLabel: string;
+  }) {
+    const settings = this.cachedLlmSettings ?? LLMProviderFactory.loadSettings();
+    const jevSettings = settings.jev;
+    const service =
+      jevSettings?.contextCompactionEnabled === false ? null : this.getJevP2DecisionService();
+    if (!service || !jevSettings || jevSettings.contextCompactionEnabled === false) {
+      return {
+        status: "skipped" as const,
+        messages: input.messages,
+        candidates: [],
+        droppedIndices: [],
+        reason: "no_candidates" as const,
+      };
+    }
+    return compactContextWithJev({
+      provider: service.getProvider(),
+      decisionService: service,
+      model: service.getModel() || "jev-latest",
+      ...input,
+      signal: this.abortController.signal,
+      timeoutMs: Math.min(jevSettings.timeoutMs ?? 700, 1_200),
+    });
+  }
+
+  private async evaluateJevSkillToolSelection(input: {
+    query: string;
+    candidates: Array<{
+      id: string;
+      label: string;
+      kind: "skill" | "tool_family";
+      description?: string;
+      whenToUse?: string;
+      allowedTools?: string[];
+      baselineScore?: number;
+    }>;
+    explicitCandidateIds?: string[];
+  }) {
+    const settings = this.cachedLlmSettings ?? LLMProviderFactory.loadSettings();
+    const jevSettings = settings.jev;
+    const service =
+      jevSettings?.skillToolSelectionEnabled === false ? null : this.getJevP2DecisionService();
+    if (!service || !jevSettings || jevSettings.skillToolSelectionEnabled === false) {
+      return {
+        status: "skipped" as const,
+        orderedIds: input.candidates.map((candidate) => candidate.id),
+        scores: {},
+        reason: "no_candidates" as const,
+      };
+    }
+    return rerankEligibleSkillToolsWithJev({
+      provider: service.getProvider(),
+      decisionService: service,
+      model: service.getModel() || "jev-latest",
+      ...input,
+      signal: this.abortController.signal,
+      timeoutMs: Math.min(jevSettings.timeoutMs ?? 700, 1_000),
+    });
+  }
+
+  private async evaluateJevOutputGuardrail(input: { output: string; contextLabel: string }) {
+    const settings = this.cachedLlmSettings ?? LLMProviderFactory.loadSettings();
+    const jevSettings = settings.jev;
+    if (
+      !jevSettings ||
+      !isJevActiveHarnessEnabled(jevSettings) ||
+      jevSettings.outputGuardrailsEnabled === false ||
+      this.jevOutputGuardrailAttempts >= 2
+    ) {
+      return {
+        status: "skipped" as const,
+        action: "abstain" as const,
+        checks: {},
+        reason: "disabled" as const,
+      };
+    }
+    const service = this.getJevP2DecisionService();
+    if (!service) {
+      return {
+        status: "unavailable" as const,
+        action: "abstain" as const,
+        checks: {},
+        reason: "provider_error" as const,
+      };
+    }
+    this.jevOutputGuardrailAttempts += 1;
+    return reviewOutputWithJev({
+      provider: service.getProvider(),
+      decisionService: service,
+      model: service.getModel() || "jev-latest",
+      taskPrompt: this.task.rawPrompt || this.task.prompt,
+      output: input.output,
+      contextLabel: input.contextLabel,
+      requiredCriteria: this.task.successCriteria
+        ? [JSON.stringify(this.task.successCriteria)]
+        : [],
+      evidence: {
+        toolSuccesses: this.taskHadAnyToolSuccess ? 1 : 0,
+        verificationPassed: this.testRunSuccessful || this.visualQARunObserved,
+      },
+      signal: this.abortController.signal,
+      timeoutMs: Math.min(jevSettings.timeoutMs ?? 700, 1_200),
+    });
+  }
+
   private createSessionRuntimeDeps() {
     return {
       getTask: () => this.task,
@@ -6023,6 +6488,13 @@ ${transcript}
       buildHybridMemoryRecallBlock: (workspaceId: string, query: string) =>
         this.buildHybridMemoryRecallBlock(workspaceId, query),
       maybePreCompactionMemoryFlush: (opts: Any) => this.maybePreCompactionMemoryFlush(opts),
+      evaluateJevContextCompaction: (input: {
+        messages: LLMMessage[];
+        availableTokens: number;
+        targetTokens: number;
+        taskPrompt?: string;
+        contextLabel: string;
+      }) => this.evaluateJevContextCompaction(input),
       buildCompactionSummaryBlock: (opts: Any) => this.buildCompactionSummaryBlock(opts),
       truncateSummaryBlock: (summary: string, maxTokens: number) =>
         this.truncateSummaryBlock(summary, maxTokens),
@@ -6093,6 +6565,15 @@ ${transcript}
       isWindowTurnLimitExceededError: (error: unknown) =>
         this.isWindowTurnLimitExceededError(error),
       assessContinuationWindow: () => this.assessContinuationWindow(),
+      evaluateJevLoopDecision: (input: {
+        progressScore: number;
+        loopRiskIndex: number;
+        repeatedFingerprintCount: number;
+        noProgressStreak: number;
+        pendingSteps: number;
+        dominantFingerprint?: string;
+        hardStopReason?: string;
+      }) => this.evaluateJevLoopDecision(input),
       getLoopWarningThreshold: () => this.loopWarningThreshold,
       getLoopCriticalThreshold: () => this.loopCriticalThreshold,
       getMinProgressScoreForAutoContinue: () => this.minProgressScoreForAutoContinue,
@@ -6187,6 +6668,10 @@ ${transcript}
         explicitChatSummarySourceMessageCount: Number(
           self.explicitChatSummarySourceMessageCount || 0,
         ),
+        explicitChatSummaryInputSignature:
+          typeof self.explicitChatSummaryInputSignature === "string"
+            ? self.explicitChatSummaryInputSignature
+            : "",
         stepOutcomeSummaries: Array.isArray(self.stepOutcomeSummaries)
           ? self.stepOutcomeSummaries
           : [],
@@ -6423,6 +6908,14 @@ ${transcript}
       () => runtime.state.transcript.explicitChatSummarySourceMessageCount,
       (value) => {
         runtime.state.transcript.explicitChatSummarySourceMessageCount = Number(value || 0);
+      },
+    );
+    this.installRuntimeFieldProxy(
+      "explicitChatSummaryInputSignature",
+      () => runtime.state.transcript.explicitChatSummaryInputSignature || "",
+      (value) => {
+        runtime.state.transcript.explicitChatSummaryInputSignature =
+          typeof value === "string" ? value : value == null ? "" : String(value);
       },
     );
     this.installRuntimeFieldProxy(
@@ -7320,6 +7813,26 @@ ${transcript}
       }
     }
 
+    if (this.task.agentConfig?.botConversation === true && this.task.agentConfig.botTeamId) {
+      lines.push("");
+      lines.push("PERSISTENT BOT TEAM:");
+      lines.push(
+        "This conversation belongs to the persistent CoWork Bot Team. Use send_agent_message with bot= to delegate or report durable teammate updates.",
+      );
+      lines.push(
+        "The available teammate handles are atlas, forge, scribe, exec, chief-community-officer, and product-engineer.",
+      );
+      if (roleId && this.daemon.getAgentRoleById(roleId)?.name === "atlas-your-chief-of-staff") {
+        lines.push(
+          "As the lead, delegate focused read-only or execution work to the relevant teammates, wait for their durable replies, and summarize only received results.",
+        );
+      } else {
+        lines.push(
+          "When the lead or another teammate sends you a request, complete the focused work and send the concise result back with bot=atlas.",
+        );
+      }
+    }
+
     const workerRole = resolveWorkerRoleKind(this.task.workerRole);
     if (workerRole) {
       lines.push("");
@@ -7521,7 +8034,9 @@ ${transcript}
       : [
           "Response rules:",
           "- Keep replies concise and conversational.",
-          "- This is a check-in conversation, not a full task execution turn.",
+          "- Discuss, explain, and draft responses using the conversation and supplied attachment content.",
+          "- You cannot take external actions in Chat. If an action needs tools, ask the user to select Smart and send the request again.",
+          "- When supplied attachment content is partial, say so; do not invent unseen content or claim to read the full file.",
           "- Respond naturally as a friendly teammate.",
           ...sideChatRules,
           ...(ctx.extraChatRules || []),
@@ -7624,6 +8139,7 @@ ${transcript}
     message: string,
     previousStatus?: string,
     images?: ImageAttachment[],
+    onIncorporated?: () => Promise<void>,
   ): Promise<void> {
     const personalityIdOverride = this.task.agentConfig?.personalityId;
     const contextMode = detectContextMode(
@@ -7676,7 +8192,6 @@ ${transcript}
       taskDomain: effectiveChatTaskDomain,
     });
 
-    const currentContent = await this.buildUserContent(message, images);
     const messages: LLMMessage[] = isExplicitChatMode
       ? await this.buildExplicitChatMessages(message, systemPrompt, images)
       : (() => {
@@ -7698,8 +8213,18 @@ ${transcript}
             }
             return acc;
           }, []);
-          return [...recent, { role: "user", content: currentContent }];
+          return [...recent, { role: "user", content: [{ type: "text", text: message }] }];
         })();
+
+    if (onIncorporated) {
+      this.appendConversationHistory({
+        role: "user",
+        content: await this.buildUserContent(message, images),
+      });
+      // Keep persistence errors outside the chat fallback handler: a failed
+      // incorporation must remain retryable without making a provider call.
+      await onIncorporated();
+    }
 
     const onStreamProgress =
       this.provider.type === "azure"
@@ -7753,6 +8278,9 @@ ${transcript}
       this.lastNonVerificationOutput = assistantText;
       this.lastAssistantText = assistantText;
       this.updateConversationHistory(turnResult.messages);
+      if (isExplicitChatMode) {
+        this.completeExplicitChatCompaction(turnResult.messages);
+      }
       this.saveConversationSnapshot();
       this.emitEvent("follow_up_completed", {
         message: "Follow-up message processed (chat mode)",
@@ -7781,6 +8309,9 @@ ${transcript}
         ...messages,
         { role: "assistant", content: [{ type: "text", text: fallback }] },
       ]);
+      if (isExplicitChatMode) {
+        this.failExplicitChatCompaction(error);
+      }
       this.saveConversationSnapshot();
       this.emitEvent("follow_up_completed", {
         message: "Follow-up fallback processed (chat mode)",
@@ -8231,7 +8762,7 @@ ${transcript}
       const normalizedMessages = assertNormalizedTurnTranscript(request.messages, (message) =>
         this.emitEvent("log", { message }),
       );
-      return await withTimeout(
+      const response = await withTimeout(
         effectiveProvider.createMessage({
           ...request,
           messages: normalizedMessages,
@@ -8243,9 +8774,30 @@ ${transcript}
         operation,
         () => requestAbort.abort(),
       );
+      if (response && !response.usage) {
+        this.recordLlmTurnWithoutUsage();
+      }
+      return response;
     } finally {
       parentSignal.removeEventListener("abort", onParentAbort);
     }
+  }
+
+  /**
+   * Provider usage telemetry is optional, but a successful response still
+   * consumes one turn. Keep turn budgets independent from token telemetry.
+   */
+  private recordLlmTurnWithoutUsage(): void {
+    if (this._runtime) {
+      this._runtime.recordLlmTurn();
+      return;
+    }
+
+    // Lightweight executor doubles used by focused tests may call this method
+    // without constructing the runtime. Preserve the same counters there.
+    this.iterationCount = Number(this.iterationCount || 0) + 1;
+    this.globalTurnCount = Number(this.globalTurnCount || 0) + 1;
+    this.lifetimeTurnCount = Number(this.lifetimeTurnCount || 0) + 1;
   }
 
   /**
@@ -8781,6 +9333,7 @@ ${transcript}
   }
 
   private isBudgetExhaustionError(error: unknown): boolean {
+    if (this.isContextCapacityExhaustedError(error)) return true;
     if (error instanceof BudgetLimitExceededError) return true;
     if (error instanceof TurnLimitExceededError) return true;
     const message = String((error as Any)?.message || error || "");
@@ -8790,6 +9343,18 @@ ${transcript}
       /Token budget exceeded/i.test(message) ||
       /Cost budget exceeded/i.test(message)
     );
+  }
+
+  /**
+   * Context preparation can fail before a provider call when retained user or
+   * pinned content alone exceeds the hard input budget. Keep this error
+   * recognizable after it crosses the turn-kernel boundary so the executor
+   * uses the normal terminal failure bookkeeping instead of treating it as a
+   * transient provider error or planning an automatic retry.
+   */
+  private isContextCapacityExhaustedError(error: unknown): error is ContextCapacityExhaustedError {
+    if (error instanceof ContextCapacityExhaustedError) return true;
+    return String((error as Any)?.code || "") === CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE;
   }
 
   private isSourceValidationGuardError(error: unknown): boolean {
@@ -8876,6 +9441,10 @@ ${transcript}
   }
 
   private shouldFinalizeAsPartialSuccess(error: unknown): boolean {
+    // Required/pinned context could not fit the provider's hard input budget.
+    // Preserve the transcript and surface a terminal budget failure rather
+    // than converting the incomplete turn into a successful-looking result.
+    if (this.isContextCapacityExhaustedError(error)) return false;
     const candidate = String(this.buildResultSummary() || this.getContentFallback() || "").trim();
     if (!candidate) return false;
     const message = String((error as Any)?.message || error || "");
@@ -9367,7 +9936,13 @@ ${transcript}
     const safeOutput = Number.isFinite(outputTokens) ? outputTokens : 0;
     const safeCached = Number.isFinite(cachedTokens) ? cachedTokens : 0;
     const safeCacheWrite = Number.isFinite(cacheWriteTokens) ? cacheWriteTokens : 0;
-    const deltaCost = calculateCost(this.modelId, safeInput, safeOutput, safeCached);
+    const deltaCost = calculateCost(
+      this.modelId,
+      safeInput,
+      safeOutput,
+      safeCached,
+      safeCacheWrite,
+    );
 
     this.totalInputTokens += safeInput;
     this.totalOutputTokens += safeOutput;
@@ -13529,6 +14104,15 @@ ${transcript}
         "Auto-report generation",
       );
 
+      if (response?.usage) {
+        this.updateTracking(
+          response.usage.inputTokens,
+          response.usage.outputTokens,
+          response.usage.cachedTokens,
+          response.usage.cacheWriteTokens,
+        );
+      }
+
       const reportText = this.extractTextFromLLMContent(response.content || []);
       if (!reportText || reportText.trim().length < 50) return;
 
@@ -15574,6 +16158,25 @@ ${transcript}
       "search_files",
     ]);
 
+    const isBotConversation = this.task.agentConfig?.botConversation === true;
+    const botTeamDelegationRequested = this.hasExplicitBotTeamDelegationRequest(stepText);
+
+    if (isBotConversation) {
+      // Team handoffs are part of the bot conversation contract. Keep the
+      // primitive available even when a legacy task has not been normalized
+      // with a team id yet; execution will validate the team at the boundary.
+      always.add("send_agent_message");
+    }
+
+    if (botTeamDelegationRequested) {
+      // An explicit bot-team request should not be diverted into unrelated
+      // shell/browser/file work by the generic execution planner. Restrict
+      // this step to the handoff primitive so the lead can dispatch the
+      // requested teammates immediately; queued replies will wake the same
+      // conversation for the follow-up summary.
+      return new Set(["send_agent_message"]);
+    }
+
     const analysis = new Set<string>([
       ...always,
       "parse_document",
@@ -15786,6 +16389,16 @@ ${transcript}
     };
   }
 
+  private hasExplicitBotTeamDelegationRequest(context?: string): boolean {
+    if (this.task.agentConfig?.botConversation !== true) return false;
+    const delegationContext = [context, this.task.title, this.task.prompt, this.lastUserMessage]
+      .filter(Boolean)
+      .join("\n");
+    return /\b(?:send_agent_message|delegate|delegat(?:e|ing)|teammate|bot team|ask\s+(?:the\s+)?(?:forge|scribe|exec|chief-community-officer|product-engineer|atlas))\b/i.test(
+      delegationContext,
+    );
+  }
+
   private getCurrentStepNativeGuiGuard(): {
     nativeGuiIntent: boolean;
     explicitShellIntent: boolean;
@@ -15826,7 +16439,17 @@ ${transcript}
       });
     }
 
-    if (this.reliabilityV2DisableStepToolScoping) {
+    // Bot handoff requests are intentionally narrow even when a follow-up
+    // has no reconstructed plan step. Returning the full catalog here lets
+    // the generic planner choose unrelated tools before it reaches the
+    // collaboration allowlist below.
+    if (this.hasExplicitBotTeamDelegationRequest()) {
+      return tools.filter(
+        (tool) => canonicalizeToolNameUtil(String(tool.name || "")) === "send_agent_message",
+      );
+    }
+
+    if (this.reliabilityV2DisableStepToolScoping && !this.hasExplicitBotTeamDelegationRequest()) {
       return tools;
     }
     if (!this.currentStepId || !this.plan?.steps?.length) {
@@ -16086,8 +16709,8 @@ You are continuing a previous conversation. The context from the previous conver
    * NOTE: Only the most recent snapshot is kept to prevent database bloat.
    * Old snapshots are automatically pruned.
    */
-  saveConversationSnapshot(): void {
-    this.getSessionRuntime().saveSnapshot();
+  saveConversationSnapshot(): boolean {
+    return this.getSessionRuntime().saveSnapshot();
   }
 
   /**
@@ -23844,7 +24467,7 @@ You are continuing a previous conversation. The context from the previous conver
       const ranked = skillLoader.rankModelInvocableSkillsForQuery(rawQuery, {
         availableToolNames: new Set(this.getAvailableTools().map((tool) => tool.name)),
         includePrereqBlockedSkills: true,
-        limit: 5,
+        limit: 12,
       });
       this.emitEvent("skill_candidates_ranked", {
         queryHash: createHash("sha1").update(rawQuery).digest("hex").slice(0, 12),
@@ -23855,6 +24478,44 @@ You are continuing a previous conversation. The context from the previous conver
           reason: entry.skill.metadata?.routing?.useWhen || entry.skill.description || "",
         })),
       });
+      if (ranked.length > 1) {
+        const normalizedQuery = rawQuery.toLowerCase();
+        const explicitCandidateIds = ranked
+          .filter(({ skill }) =>
+            [skill.id, skill.name].some(
+              (value) =>
+                typeof value === "string" &&
+                value.trim().length > 0 &&
+                normalizedQuery.includes(value.trim().toLowerCase()),
+            ),
+          )
+          .map(({ skill }) => skill.id);
+        const jevSelection = await this.evaluateJevSkillToolSelection({
+          query: rawQuery,
+          candidates: ranked.map(({ skill, score }) => ({
+            id: skill.id,
+            label: skill.name || skill.id,
+            kind: "skill" as const,
+            description: skill.description,
+            whenToUse: skill.metadata?.routing?.useWhen,
+            allowedTools: Array.isArray(skill.requires?.tools) ? skill.requires.tools : undefined,
+            baselineScore: score,
+          })),
+          explicitCandidateIds,
+        });
+        if (jevSelection.status === "selected") {
+          this.toolRegistry.setJevSkillOrder(jevSelection.orderedIds);
+        }
+        if (jevSelection.status !== "skipped") {
+          this.emitEvent("jev_skill_tool_selection", {
+            status: jevSelection.status,
+            reason: jevSelection.reason,
+            model: jevSelection.model,
+            orderedIds: jevSelection.orderedIds.slice(0, 16),
+            scores: jevSelection.scores,
+          });
+        }
+      }
     } catch (error) {
       this.emitEvent("log", {
         message: "Skill candidate ranking failed; continuing with normal planning.",
@@ -24946,6 +25607,7 @@ You are continuing a previous conversation. The context from the previous conver
 
   async execute(): Promise<void> {
     await this.getLifecycleMutex().runExclusive(async () => {
+      if (this.shutdownRequested) return;
       await this.executeUnlocked();
     });
   }
@@ -25610,6 +26272,9 @@ You are continuing a previous conversation. The context from the previous conver
         };
         errorPayload.errorCode = TASK_ERROR_CODES.TURN_LIMIT_EXCEEDED;
       }
+      if (this.isContextCapacityExhaustedError(error)) {
+        errorPayload.errorCode = CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE;
+      }
       this.emitTerminalFailureOnce(errorPayload);
     } finally {
       this.clearQueuedAgentConfigOverride();
@@ -26220,6 +26885,8 @@ Return ONLY a JSON object:
           response.usage.outputTokens,
           response.usage.cachedTokens,
         );
+      } else {
+        this.recordLlmTurnWithoutUsage();
       }
       const text = (response.content || [])
         .filter(
@@ -26597,6 +27264,15 @@ Return ONLY a JSON object:
       params.label,
       0,
     );
+    if (response?.usage) {
+      this.updateTracking(
+        response.usage.inputTokens,
+        response.usage.outputTokens,
+        response.usage.cachedTokens,
+        response.usage.cacheWriteTokens,
+      );
+    }
+
     const text = this.extractTextFromLLMContent(response?.content || []).trim();
     if (!text) {
       throw new Error(`${params.label} returned no usable analysis text.`);
@@ -28482,17 +29158,62 @@ Return ONLY a JSON object:
           let pendingMsg = this.drainPendingFollowUp();
           while (pendingMsg) {
             logger.info(`${this.logTag} Injecting queued follow-up into step execution`);
-            this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
-            const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
-            const content = await this.buildUserContent(
-              this.buildQuotedAssistantContextMessage(
-                userUpdate,
-                pendingMsg.quotedAssistantMessage,
-              ),
-              pendingMsg.images,
-            );
-            messages.push({ role: "user" as const, content });
-            this.appendConversationHistory({ role: "user", content });
+            this.daemon.logEvent(this.task.id, "agent_follow_up_started", {
+              ...(pendingMsg.messageId ? { messageId: pendingMsg.messageId } : {}),
+              deliveryMode: pendingMsg.deliveryMode || "follow_up",
+              startedAt: Date.now(),
+              ...(pendingMsg.messageSource ? { messageSource: pendingMsg.messageSource } : {}),
+              ...(pendingMsg.senderTaskId ? { senderTaskId: pendingMsg.senderTaskId } : {}),
+              ...(pendingMsg.senderLabel ? { senderLabel: pendingMsg.senderLabel } : {}),
+            });
+            const pendingMessageId =
+              typeof pendingMsg.messageId === "string" ? pendingMsg.messageId.trim() : "";
+            const isQueuedAgentMessage =
+              pendingMsg.deliveryMode === "message" && pendingMessageId.length > 0;
+            const runtime = this.getSessionRuntime();
+            if (isQueuedAgentMessage && runtime.isFollowUpMessageConsumed(pendingMessageId)) {
+              // A receipt update may have failed after the incorporated
+              // transcript was snapshotted. Retry only the acknowledgement;
+              // never inject the provider prompt a second time.
+              try {
+                if (!this.daemon.markQueuedAgentMessageDelivered(this.task.id, pendingMessageId)) {
+                  throw new Error(`Queued follow-up ${pendingMessageId} has no durable receipt.`);
+                }
+              } catch (error) {
+                runtime.requeueFollowUpAtTurnBoundary(pendingMsg);
+                throw error;
+              }
+              runtime.removeFollowUpAtTurnBoundary(pendingMessageId);
+              runtime.saveSnapshot();
+              pendingMsg = this.drainPendingFollowUp();
+              continue;
+            }
+            try {
+              this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
+              const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
+              const content = await this.buildUserContent(
+                this.buildQuotedAssistantContextMessage(
+                  userUpdate,
+                  pendingMsg.quotedAssistantMessage,
+                ),
+                pendingMsg.images,
+              );
+              messages.push({ role: "user" as const, content });
+              try {
+                this.appendConversationHistory({ role: "user", content });
+              } catch (error) {
+                messages.pop();
+                throw error;
+              }
+              if (isQueuedAgentMessage) {
+                await this.acceptQueuedFollowUpAfterSnapshot(pendingMsg, messages);
+              }
+            } catch (error) {
+              if (isQueuedAgentMessage && !runtime.isFollowUpMessageConsumed(pendingMessageId)) {
+                runtime.requeueFollowUpAtTurnBoundary(pendingMsg);
+              }
+              throw error;
+            }
             pendingMsg = this.drainPendingFollowUp();
           }
         },
@@ -28539,26 +29260,36 @@ Return ONLY a JSON object:
             );
           }
 
-          ({
-            messages,
-            lastTurnMemoryRecallQuery,
-            lastTurnMemoryRecallBlock,
-            lastSharedContextKey,
-            lastSharedContextBlock,
-          } = await this.prepareMessagesForTurnIteration({
-            messages,
-            phase: "step",
-            systemPromptTokens,
-            allowSharedContextInjection,
-            allowMemoryInjection,
-            memoryQuery: `${this.task.title}\n${this.getContractPrompt()}\nStep: ${step.description}`,
-            contextLabel: `step:${step.id} ${step.description}`,
-            lastTurnMemoryRecallQuery,
-            lastTurnMemoryRecallBlock,
-            lastSharedContextKey,
-            lastSharedContextBlock,
-          }));
-          state.messages = messages;
+          try {
+            ({
+              messages,
+              lastTurnMemoryRecallQuery,
+              lastTurnMemoryRecallBlock,
+              lastSharedContextKey,
+              lastSharedContextBlock,
+            } = await this.prepareMessagesForTurnIteration({
+              messages,
+              phase: "step",
+              systemPromptTokens,
+              allowSharedContextInjection,
+              allowMemoryInjection,
+              memoryQuery: `${this.task.title}\n${this.getContractPrompt()}\nStep: ${step.description}`,
+              contextLabel: `step:${step.id} ${step.description}`,
+              lastTurnMemoryRecallQuery,
+              lastTurnMemoryRecallBlock,
+              lastSharedContextKey,
+              lastSharedContextBlock,
+            }));
+            state.messages = messages;
+          } catch (error) {
+            if (this.isContextCapacityExhaustedError(error)) {
+              // Keep the pre-dispatch transcript visible to the outer terminal
+              // handler. No provider request or retry is allowed after the
+              // hard retained-content budget has been proven impossible.
+              state.messages = messages;
+            }
+            throw error;
+          }
         },
         requestResponse: async (state: TurnKernelIterationState) => {
           iterationCount = state.iterationCount;
@@ -28981,6 +29712,7 @@ Return ONLY a JSON object:
 
           // Handle tool calls
           const toolResults: LLMToolResult[] = [];
+          let fatalToolError: unknown;
           let batchSemanticSummary = "";
           let simpleImageGenerationStopAfterTool = false;
           const mutationStarvationToolGateActive = mutationStarvationToolGateTurnsRemaining > 0;
@@ -30698,6 +31430,9 @@ Return ONLY a JSON object:
               });
 
               toolResults.push(...scheduledOutcome.toolResults);
+              if (scheduledOutcome.fatalError !== undefined) {
+                fatalToolError = scheduledOutcome.fatalError;
+              }
               if (
                 this.isSimpleImageGenerationTask() &&
                 this.simpleImageGenerationAttempted &&
@@ -32125,6 +32860,17 @@ Return ONLY a JSON object:
                   : undefined,
             );
 
+            if (fatalToolError !== undefined) {
+              // The normal end-of-turn copy is bypassed by this throw. Persist
+              // every tool result before unwinding so recovery cannot replay an
+              // already executed call as if it never received a result.
+              this.updateConversationHistory(messages);
+              this.saveConversationSnapshot();
+              throw fatalToolError instanceof Error
+                ? fatalToolError
+                : new Error(String(fatalToolError || "Tool dispatch failed"));
+            }
+
             if (simpleImageGenerationStopAfterTool) {
               if (this.simpleImageGenerationCompleted) {
                 step.status = "completed";
@@ -32693,6 +33439,61 @@ Return ONLY a JSON object:
               blocked: true,
             });
             continueLoop = false;
+          }
+
+          if (
+            !stepFailed &&
+            !awaitingUserInput &&
+            response.stopReason === "end_turn" &&
+            hasTextInThisResponse &&
+            !responseHasToolUse &&
+            this.isLastVisibleAssistantStep(step)
+          ) {
+            const outputGuardrail = await this.evaluateJevOutputGuardrail({
+              output: this.getLatestAssistantText(messages).trim(),
+              contextLabel: `step:${step.id} ${step.description}`,
+            });
+            if (outputGuardrail.status !== "skipped") {
+              this.emitEvent("jev_output_guardrail", {
+                status: outputGuardrail.status,
+                action: outputGuardrail.action,
+                reason: outputGuardrail.reason,
+                model: outputGuardrail.model,
+                confidence: outputGuardrail.confidence,
+                probability: outputGuardrail.probability,
+                checks: outputGuardrail.checks,
+                contextLabel: `step:${step.id} ${step.description}`,
+              });
+            }
+            if (
+              outputGuardrail.status === "selected" &&
+              outputGuardrail.action !== "pass" &&
+              outputGuardrail.action !== "abstain"
+            ) {
+              if (outputGuardrail.action === "ask_user") {
+                awaitingUserInput = true;
+                awaitingUserInputReason = "jev_output_guardrail";
+                this.lastRequiredDecisionPrompt = this.getLatestAssistantText(messages).trim();
+                this.emitEvent("awaiting_user_input", {
+                  stepId: step.id,
+                  stepDescription: step.description,
+                  reasonCode: "jev_output_guardrail",
+                });
+                continueLoop = false;
+              } else {
+                const instruction =
+                  outputGuardrail.action === "run_verification"
+                    ? "Before finalizing, run the concrete verification needed to support the response, then provide an evidence-backed final answer."
+                    : outputGuardrail.action === "block_external_publication"
+                      ? "Do not publish, send, or otherwise expose the response externally. Resolve the safety concern and provide a safe internal answer or explain the blocker."
+                      : "Revise the response before finalizing: remove unsupported claims, resolve missing requirements, and keep the answer grounded in the available evidence.";
+                messages.push({
+                  role: "user",
+                  content: [{ type: "text", text: this.sanitizeFallbackInstruction(instruction) }],
+                });
+                continueLoop = true;
+              }
+            }
           }
           state.messages = messages;
           return { continueLoop, emptyResponseCount };
@@ -33737,6 +34538,7 @@ Return ONLY a JSON object:
    */
   async resumeAfterInterruption(): Promise<void> {
     await this.getLifecycleMutex().runExclusive(async () => {
+      if (this.shutdownRequested) return;
       await this.resumeAfterInterruptionUnlocked();
     });
   }
@@ -33887,6 +34689,7 @@ Return ONLY a JSON object:
    */
   async continueAfterBudgetExhausted(): Promise<void> {
     await this.getLifecycleMutex().runExclusive(async () => {
+      if (this.shutdownRequested) return;
       await this.continueAfterBudgetExhaustedUnlocked({ mode: "manual" });
     });
   }
@@ -34604,6 +35407,15 @@ Return ONLY a JSON object:
         "Canvas HTML generation",
       );
 
+      if (response?.usage) {
+        this.updateTracking(
+          response.usage.inputTokens,
+          response.usage.outputTokens,
+          response.usage.cachedTokens,
+          response.usage.cacheWriteTokens,
+        );
+      }
+
       const text = (response.content || [])
         .filter((c: Any) => c.type === "text")
         .map((c: Any) => c.text)
@@ -34841,7 +35653,15 @@ Return ONLY a JSON object:
     integrationMentions?: TaskFollowUpInput["integrationMentions"],
     agentConfigOverride?: TaskFollowUpInput["agentConfigOverride"],
     interactionMode?: TaskFollowUpInput["interactionMode"],
+    messageSource?: TaskFollowUpInput["messageSource"],
+    messageId?: TaskFollowUpInput["messageId"],
+    senderTaskId?: TaskFollowUpInput["senderTaskId"],
+    senderLabel?: TaskFollowUpInput["senderLabel"],
+    deliveryMode?: TaskFollowUpInput["deliveryMode"],
   ): void {
+    if (this.shutdownRequested) {
+      throw new Error("Task executor is shutting down; follow-up was not queued.");
+    }
     this.getSessionRuntime().queueFollowUp(
       message,
       images,
@@ -34849,6 +35669,11 @@ Return ONLY a JSON object:
       integrationMentions,
       agentConfigOverride,
       interactionMode,
+      messageSource,
+      messageId,
+      senderTaskId,
+      senderLabel,
+      deliveryMode,
     );
     logger.info(
       `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,
@@ -34860,6 +35685,10 @@ Return ONLY a JSON object:
    */
   get hasPendingFollowUps(): boolean {
     return this.getSessionRuntime().hasPendingFollowUps;
+  }
+
+  hasPendingFollowUpMessage(messageId: string): boolean {
+    return this.getSessionRuntime().hasPendingFollowUpMessage(messageId);
   }
 
   /**
@@ -34912,6 +35741,11 @@ Return ONLY a JSON object:
     return this.getSessionRuntime().drainAllPendingFollowUps();
   }
 
+  takeNextFollowUpAtTurnBoundary(): TaskFollowUpInput | undefined {
+    if (this.isRunning) return undefined;
+    return this.getSessionRuntime().takeNextFollowUpAtTurnBoundary();
+  }
+
   /**
    * Tell the executor that the next sendMessage call should NOT re-emit user_message,
    * because the caller already emitted it (e.g. orphaned follow-up re-dispatch).
@@ -34925,6 +35759,20 @@ Return ONLY a JSON object:
     | Record<string, never> {
     const mentions = this.task.agentConfig?.integrationMentions;
     return mentions && mentions.length > 0 ? { integrationMentions: mentions } : {};
+  }
+
+  private buildMessageProvenanceEventPayload(
+    context?: Pick<
+      TaskFollowUpInput,
+      "messageSource" | "messageId" | "senderTaskId" | "senderLabel"
+    >,
+  ): Record<string, string> {
+    return {
+      ...(context?.messageSource ? { messageSource: context.messageSource } : {}),
+      ...(context?.messageId ? { messageId: context.messageId } : {}),
+      ...(context?.senderTaskId ? { senderTaskId: context.senderTaskId } : {}),
+      ...(context?.senderLabel ? { senderLabel: context.senderLabel } : {}),
+    };
   }
 
   private buildUserMessageAttachmentEventPayload(images?: ImageAttachment[]) {
@@ -35259,16 +36107,28 @@ Return ONLY a JSON object:
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: Pick<TaskFollowUpInput, "agentConfigOverride" | "interactionMode">,
+    options?: TaskExecutorFollowUpOptions,
   ): Promise<void> {
     await this.getLifecycleMutex().runExclusive(async () => {
+      if (this.shutdownRequested) return;
+      if (options?.onAccepted && options.messageId) {
+        const runtime = this.getSessionRuntime();
+        if (runtime.isFollowUpMessageConsumed(options.messageId)) {
+          await options.onAccepted();
+          runtime.removeFollowUpAtTurnBoundary(options.messageId);
+          runtime.saveSnapshot();
+          return;
+        }
+      }
       const persistedAgentConfig =
         this.daemon.getTask(this.task.id)?.agentConfig ?? this.task.agentConfig;
       try {
         await this.sendMessageUnlocked(message, images, quotedAssistantMessage, options);
       } finally {
         if (options?.agentConfigOverride) {
-          this.updateTaskAgentConfig(persistedAgentConfig);
+          this.updateTaskAgentConfig(
+            this.daemon.getTask(this.task.id)?.agentConfig ?? persistedAgentConfig,
+          );
         }
       }
     });
@@ -35278,7 +36138,7 @@ Return ONLY a JSON object:
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    options?: Pick<TaskFollowUpInput, "agentConfigOverride" | "interactionMode">,
+    options?: TaskExecutorFollowUpOptions,
   ): Promise<void> {
     const selection = options?.interactionMode ?? this.task?.agentConfig?.interactionMode;
     if (selection) {
@@ -35287,6 +36147,8 @@ Return ONLY a JSON object:
           "This external runtime cannot enforce Chat mode. Use a native session for Chat.",
         );
       }
+      // The daemon may already have merged a temporary automation override into
+      // this executor. Never persist that runtime view as the session default.
       const storedConfig = this.daemon.getTask?.(this.task.id)?.agentConfig;
       const config = resolveInteractionMode(
         storedConfig ?? (options?.agentConfigOverride ? undefined : this.task.agentConfig),
@@ -35304,8 +36166,13 @@ Return ONLY a JSON object:
       });
     }
     if (this.isAcpxExternalRuntimeTask()) {
+      if (options?.onAccepted) {
+        throw new Error(
+          "Queued agent message delivery is unavailable for external ACP runtimes because they do not expose a durable prompt-acceptance boundary.",
+        );
+      }
       try {
-        await this.sendMessageWithAcpxRuntime(message, images, quotedAssistantMessage);
+        await this.sendMessageWithAcpxRuntime(message, images, quotedAssistantMessage, options);
         return;
       } catch (error) {
         if (error instanceof AcpxRuntimeUnavailableError) {
@@ -35327,21 +36194,130 @@ Return ONLY a JSON object:
     if (options?.agentConfigOverride) {
       await this.sendMessageUnified(message, images, quotedAssistantMessage, {
         agentConfigOverride: options.agentConfigOverride,
+        messageContext: options,
+        onAccepted: options.onAccepted,
+        suppressUserMessageEvent: options.suppressUserMessageEvent,
+        queuedFollowUp: options.queuedFollowUp,
       });
       return;
     }
 
-    await this.sendMessageUnified(message, images, quotedAssistantMessage);
+    await this.sendMessageUnified(message, images, quotedAssistantMessage, {
+      messageContext: options,
+      onAccepted: options?.onAccepted,
+      suppressUserMessageEvent: options?.suppressUserMessageEvent,
+      queuedFollowUp: options?.queuedFollowUp,
+    });
+  }
+
+  /**
+   * Persist the incorporated queue item before acknowledging its receipt.
+   * Once the consumed id is in the snapshot, a receipt update failure may be
+   * retried without dispatching the provider request a second time.
+   */
+  private async acceptQueuedFollowUpAfterSnapshot(
+    followUp: TaskFollowUpInput,
+    messages?: LLMMessage[],
+  ): Promise<void> {
+    const messageId = typeof followUp.messageId === "string" ? followUp.messageId.trim() : "";
+    if (followUp.deliveryMode !== "message" || !messageId) return;
+
+    await this.persistFollowUpAcceptance(
+      messageId,
+      () => {
+        if (!this.daemon.markQueuedAgentMessageDelivered(this.task.id, messageId)) {
+          throw new Error(`Queued follow-up ${messageId} has no durable receipt.`);
+        }
+      },
+      () => {
+        this.rollbackLastFollowUpIncorporation(messages);
+      },
+      followUp,
+    );
+  }
+
+  private async persistFollowUpAcceptance(
+    messageId: string,
+    onAccepted: () => void | Promise<void>,
+    onPreAcceptanceFailure?: () => void,
+    queuedFollowUp?: TaskFollowUpInput,
+  ): Promise<void> {
+    const runtime = this.getSessionRuntime();
+    // Keep the full payload in the same durable snapshot as the consumed ID.
+    // A crash or failed receipt write can then retry acknowledgement without
+    // requiring a second successful snapshot or replaying the provider turn.
+    if (queuedFollowUp && !runtime.hasPendingFollowUpMessage(messageId)) {
+      runtime.state.queues.pendingFollowUps.unshift(queuedFollowUp);
+    }
+    runtime.markFollowUpMessageConsumed(messageId);
+    if (!this.saveConversationSnapshot()) {
+      runtime.unmarkFollowUpMessageConsumed(messageId);
+      onPreAcceptanceFailure?.();
+      if (queuedFollowUp) {
+        runtime.requeueFollowUpAtTurnBoundary(queuedFollowUp);
+      }
+      throw new Error(`Queued follow-up ${messageId} could not be durably incorporated.`);
+    }
+    // The receipt is updated only after the transcript and consumed marker
+    // are durable. If this callback fails, the consumed marker prevents a
+    // provider replay while a later drain retries the receipt update.
+    await onAccepted();
+    runtime.removeFollowUpAtTurnBoundary(messageId);
+    this.saveConversationSnapshot();
+  }
+
+  private rollbackLastFollowUpIncorporation(messages?: LLMMessage[]): void {
+    const runtime = this.getSessionRuntime();
+    const history = runtime.state.transcript.conversationHistory;
+    if (
+      messages &&
+      messages !== history &&
+      messages.length > 0 &&
+      messages[messages.length - 1]?.role === "user"
+    ) {
+      messages.pop();
+    }
+    if (history.length > 0 && history[history.length - 1]?.role === "user") {
+      runtime.updateConversationHistory(history.slice(0, -1));
+    }
   }
 
   private async sendMessageUnified(
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
-    opts?: { recoveredFromTurnLimit?: boolean; agentConfigOverride?: AgentConfig },
+    opts?: {
+      recoveredFromTurnLimit?: boolean;
+      agentConfigOverride?: AgentConfig;
+      messageContext?: Pick<
+        TaskFollowUpInput,
+        "messageSource" | "messageId" | "senderTaskId" | "senderLabel"
+      >;
+      onAccepted?: () => void | Promise<void>;
+      suppressUserMessageEvent?: boolean;
+      queuedFollowUp?: TaskFollowUpInput;
+    },
   ): Promise<void> {
     let executionMessage = message;
     const recoveredFromTurnLimit = opts?.recoveredFromTurnLimit === true;
+    let followUpAcceptanceAttempted = false;
+    const followUpMessageId =
+      typeof opts?.messageContext?.messageId === "string"
+        ? opts.messageContext.messageId.trim()
+        : "";
+    const acceptFollowUp = async (): Promise<void> => {
+      if (recoveredFromTurnLimit || !opts?.onAccepted || followUpAcceptanceAttempted) return;
+      followUpAcceptanceAttempted = true;
+      if (!followUpMessageId) {
+        throw new Error("Queued follow-up is missing its durable message id.");
+      }
+      await this.persistFollowUpAcceptance(
+        followUpMessageId,
+        opts.onAccepted,
+        () => this.rollbackLastFollowUpIncorporation(),
+        opts.queuedFollowUp,
+      );
+    };
     if (!recoveredFromTurnLimit) {
       this.followUpRecoveryAttemptsInCurrentMessage = 0;
       this.lastFollowUpRecoveryBlockReason = "";
@@ -35383,6 +36359,13 @@ Return ONLY a JSON object:
     this.lastUserMessage = message;
     const goalFollowUp = this.handleGoalSlashFollowUp(message);
     if (goalFollowUp.handled) {
+      if (opts?.onAccepted) {
+        this.appendConversationHistory({
+          role: "user",
+          content: await this.buildUserContent(message, images),
+        });
+        await acceptFollowUp();
+      }
       return;
     }
     if (goalFollowUp.executionMessage) {
@@ -35444,24 +36427,31 @@ Return ONLY a JSON object:
       }
     }
 
-    // Consume the suppression flag once; when set the daemon already emitted user_message.
-    const suppressUserMessageEvent = this._suppressNextUserMessageEvent;
+    // Consume the suppression flag once; when set the daemon already emitted
+    // user_message (or this is a queue receipt replay). Keep the explicit
+    // option separate from the mutable one-shot flag so a failed preflight
+    // cannot leave suppression state attached to the next unrelated input.
+    const suppressUserMessageEvent =
+      this._suppressNextUserMessageEvent || opts?.suppressUserMessageEvent === true;
     this._suppressNextUserMessageEvent = false;
 
     if (hasPendingSkillParameterCollection) {
       if (!suppressUserMessageEvent && !recoveredFromTurnLimit) {
         this.emitEvent("user_message", {
           message,
+          ...this.buildMessageProvenanceEventPayload(opts?.messageContext),
           ...this.buildIntegrationMentionEventPayload(),
           ...this.buildUserMessageAttachmentEventPayload(images),
           ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
         });
       }
       if (!recoveredFromTurnLimit) {
+        const content = await this.buildUserContent(followUpConversationMessage, images);
         this.appendConversationHistory({
           role: "user",
-          content: await this.buildUserContent(followUpConversationMessage, images),
+          content,
         });
+        await acceptFollowUp();
       }
       const pendingOutcome = await this.handlePendingSkillParameterReply(message);
       if (pendingOutcome === "paused") {
@@ -35475,16 +36465,19 @@ Return ONLY a JSON object:
       if (!handledPendingSkillReply && !suppressUserMessageEvent && !recoveredFromTurnLimit) {
         this.emitEvent("user_message", {
           message,
+          ...this.buildMessageProvenanceEventPayload(opts?.messageContext),
           ...this.buildIntegrationMentionEventPayload(),
           ...this.buildUserMessageAttachmentEventPayload(images),
           ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
         });
       }
       if (!recoveredFromTurnLimit && !handledPendingSkillReply) {
+        const content = await this.buildUserContent(followUpConversationMessage, images);
         this.appendConversationHistory({
           role: "user",
-          content: await this.buildUserContent(followUpConversationMessage, images),
+          content,
         });
+        await acceptFollowUp();
       }
       return;
     }
@@ -35521,6 +36514,7 @@ Return ONLY a JSON object:
     if (!handledPendingSkillReply && !suppressUserMessageEvent && !recoveredFromTurnLimit) {
       this.emitEvent("user_message", {
         message,
+        ...this.buildMessageProvenanceEventPayload(opts?.messageContext),
         ...this.buildIntegrationMentionEventPayload(),
         ...this.buildUserMessageAttachmentEventPayload(images),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
@@ -35534,7 +36528,12 @@ Return ONLY a JSON object:
       (!shouldResumeAfterFollowup &&
         (this.isExplicitChatExecutionMode() || knownContextInformationalFollowUp))
     ) {
-      await this.respondInChatMode(executionMessage, previousStatus, images);
+      await this.respondInChatMode(
+        followUpConversationMessage,
+        previousStatus,
+        images,
+        opts?.onAccepted ? acceptFollowUp : undefined,
+      );
       return;
     }
 
@@ -35692,13 +36691,15 @@ Return ONLY a JSON object:
 
     // Add user message to conversation history (including any image attachments)
     if (!recoveredFromTurnLimit) {
+      const content = await this.buildUserContent(
+        this.buildQuotedAssistantContextMessage(messageWithContext, quotedAssistantMessage),
+        images,
+      );
       this.appendConversationHistory({
         role: "user",
-        content: await this.buildUserContent(
-          this.buildQuotedAssistantContextMessage(messageWithContext, quotedAssistantMessage),
-          images,
-        ),
+        content,
       });
+      await acceptFollowUp();
     }
 
     let messages = this.conversationHistory;
@@ -35788,17 +36789,56 @@ Return ONLY a JSON object:
           let pendingMsg = this.drainPendingFollowUp();
           while (pendingMsg) {
             logger.info(`${this.logTag} Injecting queued follow-up into sendMessage loop`);
-            this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
-            const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
-            const content = await this.buildUserContent(
-              this.buildQuotedAssistantContextMessage(
-                userUpdate,
-                pendingMsg.quotedAssistantMessage,
-              ),
-              pendingMsg.images,
-            );
-            // messages === this.conversationHistory here, so push persists automatically
-            messages.push({ role: "user" as const, content });
+            this.daemon.logEvent(this.task.id, "agent_follow_up_started", {
+              ...(pendingMsg.messageId ? { messageId: pendingMsg.messageId } : {}),
+              deliveryMode: pendingMsg.deliveryMode || "follow_up",
+              startedAt: Date.now(),
+              ...(pendingMsg.messageSource ? { messageSource: pendingMsg.messageSource } : {}),
+              ...(pendingMsg.senderTaskId ? { senderTaskId: pendingMsg.senderTaskId } : {}),
+              ...(pendingMsg.senderLabel ? { senderLabel: pendingMsg.senderLabel } : {}),
+            });
+            const pendingMessageId =
+              typeof pendingMsg.messageId === "string" ? pendingMsg.messageId.trim() : "";
+            const isQueuedAgentMessage =
+              pendingMsg.deliveryMode === "message" && pendingMessageId.length > 0;
+            const runtime = this.getSessionRuntime();
+            if (isQueuedAgentMessage && runtime.isFollowUpMessageConsumed(pendingMessageId)) {
+              // Receipt update failed after durable incorporation. Retry only
+              // the receipt and suppress a second provider prompt.
+              try {
+                if (!this.daemon.markQueuedAgentMessageDelivered(this.task.id, pendingMessageId)) {
+                  throw new Error(`Queued follow-up ${pendingMessageId} has no durable receipt.`);
+                }
+              } catch (error) {
+                runtime.requeueFollowUpAtTurnBoundary(pendingMsg);
+                throw error;
+              }
+              runtime.removeFollowUpAtTurnBoundary(pendingMessageId);
+              runtime.saveSnapshot();
+              pendingMsg = this.drainPendingFollowUp();
+              continue;
+            }
+            try {
+              this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
+              const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
+              const content = await this.buildUserContent(
+                this.buildQuotedAssistantContextMessage(
+                  userUpdate,
+                  pendingMsg.quotedAssistantMessage,
+                ),
+                pendingMsg.images,
+              );
+              // messages === this.conversationHistory here, so push persists automatically
+              messages.push({ role: "user" as const, content });
+              if (isQueuedAgentMessage) {
+                await this.acceptQueuedFollowUpAfterSnapshot(pendingMsg, messages);
+              }
+            } catch (error) {
+              if (isQueuedAgentMessage && !runtime.isFollowUpMessageConsumed(pendingMessageId)) {
+                runtime.requeueFollowUpAtTurnBoundary(pendingMsg);
+              }
+              throw error;
+            }
             pendingMsg = this.drainPendingFollowUp();
           }
         },
@@ -35811,26 +36851,35 @@ Return ONLY a JSON object:
               `toolCalls=${followUpToolCallCount} | maxTokensRecoveries=${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}`,
           );
 
-          ({
-            messages,
-            lastTurnMemoryRecallQuery,
-            lastTurnMemoryRecallBlock,
-            lastSharedContextKey,
-            lastSharedContextBlock,
-          } = await this.prepareMessagesForTurnIteration({
-            messages,
-            phase: "follow_up",
-            systemPromptTokens,
-            allowSharedContextInjection,
-            allowMemoryInjection,
-            memoryQuery: `${this.task.title}\n${message}\n${this.task.prompt}`,
-            contextLabel: "follow-up message",
-            lastTurnMemoryRecallQuery,
-            lastTurnMemoryRecallBlock,
-            lastSharedContextKey,
-            lastSharedContextBlock,
-          }));
-          state.messages = messages;
+          try {
+            ({
+              messages,
+              lastTurnMemoryRecallQuery,
+              lastTurnMemoryRecallBlock,
+              lastSharedContextKey,
+              lastSharedContextBlock,
+            } = await this.prepareMessagesForTurnIteration({
+              messages,
+              phase: "follow_up",
+              systemPromptTokens,
+              allowSharedContextInjection,
+              allowMemoryInjection,
+              memoryQuery: `${this.task.title}\n${message}\n${this.task.prompt}`,
+              contextLabel: "follow-up message",
+              lastTurnMemoryRecallQuery,
+              lastTurnMemoryRecallBlock,
+              lastSharedContextKey,
+              lastSharedContextBlock,
+            }));
+            state.messages = messages;
+          } catch (error) {
+            if (this.isContextCapacityExhaustedError(error)) {
+              // Preserve the accepted follow-up transcript and let the
+              // existing follow-up failure path persist it without retrying.
+              state.messages = messages;
+            }
+            throw error;
+          }
         },
         requestResponse: async (state: TurnKernelIterationState) => {
           iterationCount = state.iterationCount;
@@ -35856,7 +36905,7 @@ Return ONLY a JSON object:
               return { recovered: true as const, messages };
             }
             if (recovery.exhausted) {
-              throw new Error(
+              throw this.createContextCapacityRecoveryExhaustedError(
                 `Context capacity recovery exhausted after ${maxContextCapacityRecoveries} attempts during follow-up processing.`,
               );
             }
@@ -36071,6 +37120,7 @@ Return ONLY a JSON object:
 
           // Handle tool calls
           const toolResults: LLMToolResult[] = [];
+          let fatalToolError: unknown;
           let batchSemanticSummary = "";
           const forceFinalizeWithoutTools =
             followUpToolCallsLocked ||
@@ -37057,6 +38107,9 @@ Return ONLY a JSON object:
               });
 
               toolResults.push(...scheduledOutcome.toolResults);
+              if (scheduledOutcome.fatalError !== undefined) {
+                fatalToolError = scheduledOutcome.fatalError;
+              }
               batchSemanticSummary = this.combineBatchSemanticSummaries(scheduledOutcome.batches);
               this.recordSemanticSummary(batchSemanticSummary);
               this.emitEvent("log", {
@@ -37115,6 +38168,17 @@ Return ONLY a JSON object:
                   : "Turn budget exhausted for further tool calls. Provide a concise final response from current evidence."
                 : undefined,
             );
+
+            if (fatalToolError !== undefined) {
+              // The normal end-of-turn copy is bypassed by this throw. Persist
+              // every tool result before unwinding so recovery cannot replay an
+              // already executed call as if it never received a result.
+              this.updateConversationHistory(messages);
+              this.saveConversationSnapshot();
+              throw fatalToolError instanceof Error
+                ? fatalToolError
+                : new Error(String(fatalToolError || "Tool dispatch failed"));
+            }
 
             if (approvalBlockedForFollowUp) {
               // A denial is an explicit user decision, not a recoverable tool
@@ -37504,6 +38568,54 @@ Return ONLY a JSON object:
             }
           }
 
+          if (wantsToEnd && hasTextInThisResponse) {
+            const outputGuardrail = await this.evaluateJevOutputGuardrail({
+              output: this.getLatestAssistantText(messages).trim(),
+              contextLabel: `follow-up ${iterationCount}`,
+            });
+            if (outputGuardrail.status !== "skipped") {
+              this.emitEvent("jev_output_guardrail", {
+                status: outputGuardrail.status,
+                action: outputGuardrail.action,
+                reason: outputGuardrail.reason,
+                model: outputGuardrail.model,
+                confidence: outputGuardrail.confidence,
+                probability: outputGuardrail.probability,
+                checks: outputGuardrail.checks,
+                contextLabel: `follow-up ${iterationCount}`,
+              });
+            }
+            if (
+              outputGuardrail.status === "selected" &&
+              outputGuardrail.action !== "pass" &&
+              outputGuardrail.action !== "abstain"
+            ) {
+              if (outputGuardrail.action === "ask_user") {
+                this.waitingForUserInput = true;
+                pausedForUserInput = true;
+                this.lastRequiredDecisionPrompt = this.getLatestAssistantText(messages).trim();
+                this.emitEvent("awaiting_user_input", {
+                  reasonCode: "jev_output_guardrail",
+                  followUp: true,
+                });
+                continueLoop = false;
+              } else {
+                const instruction =
+                  outputGuardrail.action === "run_verification"
+                    ? "Before finalizing, run the concrete verification needed to support the response, then provide an evidence-backed final answer."
+                    : outputGuardrail.action === "block_external_publication"
+                      ? "Do not publish, send, or otherwise expose the response externally. Resolve the safety concern and provide a safe internal answer or explain the blocker."
+                      : "Revise the response before finalizing: remove unsupported claims, resolve missing requirements, and keep the answer grounded in the available evidence.";
+                messages.push({
+                  role: "user",
+                  content: [{ type: "text", text: this.sanitizeFallbackInstruction(instruction) }],
+                });
+                continueLoop = true;
+                wantsToEnd = false;
+              }
+            }
+          }
+
           if (wantsToEnd) {
             const reminder = this.buildPreFinalizationReminder();
             if (
@@ -37784,6 +38896,10 @@ Return ONLY a JSON object:
           });
           return await this.sendMessageUnified(message, images, quotedAssistantMessage, {
             recoveredFromTurnLimit: true,
+            onAccepted: opts?.onAccepted,
+            suppressUserMessageEvent: opts?.suppressUserMessageEvent,
+            messageContext: opts?.messageContext,
+            queuedFollowUp: opts?.queuedFollowUp,
           });
         }
 
@@ -37834,7 +38950,11 @@ Return ONLY a JSON object:
         const errorPayload: Record<string, unknown> = {
           message: error.message,
           stack: error.stack,
+          failureClass: this.classifyFailure(error),
         };
+        if (this.isContextCapacityExhaustedError(error)) {
+          errorPayload.errorCode = CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE;
+        }
         if (/API key is required|Configure it in Settings/i.test(error.message)) {
           errorPayload.actionHint = {
             type: "open_settings",
@@ -37862,6 +38982,10 @@ Return ONLY a JSON object:
       this.emitEvent("follow_up_failed", {
         error: error.message,
         userMessage: userFacingError,
+        failureClass: this.classifyFailure(error),
+        ...(this.isContextCapacityExhaustedError(error)
+          ? { errorCode: CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE }
+          : {}),
       });
       // Note: Don't re-throw - we've fully handled the error above (status updated, events emitted)
     }
@@ -37895,6 +39019,9 @@ Return ONLY a JSON object:
   async cancel(
     reason: "user" | "timeout" | "shutdown" | "system" | "unknown" = "unknown",
   ): Promise<void> {
+    if (reason === "shutdown") {
+      this.shutdownRequested = true;
+    }
     this.cancelled = true;
     this.cancelReason = reason;
     this.taskCompleted = true; // Also mark as completed to prevent any further processing
@@ -37913,6 +39040,35 @@ Return ONLY a JSON object:
     // user has stopped the task.
     this.killShellProcess(true);
 
+    if (this.isAcpxExternalRuntimeTask()) {
+      try {
+        // Cancellation is a revocation path.  Reuse only the runner that was
+        // already admitted for this task; re-running the start/follow-up
+        // authority check here can skip the kill when policy is narrowed
+        // while an unsandboxed ACP prompt is still active.  Never create a
+        // runner during cleanup.
+        await this.acpxRuntimeRunner?.cancel();
+      } catch (error) {
+        this.emitEvent("log", {
+          message: "Failed to cancel acpx runtime cleanly.",
+          error: String((error as Any)?.message || error),
+        });
+      }
+    }
+
+    // Do not release executor-owned resources during application shutdown
+    // until any admitted execute or sendMessage operation has observed
+    // cancellation and settled. User/system/tool cancellation can originate
+    // from inside the lifecycle mutex (for example a task-control tool), so it
+    // must return after aborting rather than waiting on itself.
+    if (reason === "shutdown") {
+      await this.waitForIdle();
+    }
+
+    if (this.isAcpxExternalRuntimeTask()) {
+      await this.closeAcpxRuntimeSession(`cancel (${reason})`);
+    }
+
     // Create a new controller for any future requests (in case of resume)
     this.abortController = new AbortController();
 
@@ -37921,18 +39077,6 @@ Return ONLY a JSON object:
     // not a successful deliverable, so remove unchanged scaffolding before the
     // daemon persists the cancelled terminal state.
     this.discardProvisionalBootstrapArtifacts(reason);
-
-    if (this.isAcpxExternalRuntimeTask()) {
-      try {
-        await this.getAcpxRuntimeRunner().cancel();
-      } catch (error) {
-        this.emitEvent("log", {
-          message: "Failed to cancel acpx runtime cleanly.",
-          error: String((error as Any)?.message || error),
-        });
-      }
-      await this.closeAcpxRuntimeSession(`cancel (${reason})`);
-    }
 
     this.sandboxRunner.cleanup();
   }
@@ -37957,7 +39101,9 @@ Return ONLY a JSON object:
 
     if (this.isAcpxExternalRuntimeTask()) {
       try {
-        await this.getAcpxRuntimeRunner().cancel();
+        // Wrap-up also revokes an active ACP prompt.  Cleanup must not create
+        // a new runner or be blocked by the start/follow-up authority check.
+        await this.acpxRuntimeRunner?.cancel();
       } catch (error) {
         this.emitEvent("log", {
           message: "Failed to request acpx wrap-up cleanly.",
@@ -37985,6 +39131,7 @@ Return ONLY a JSON object:
    */
   async resume(): Promise<void> {
     await this.getLifecycleMutex().runExclusive(async () => {
+      if (this.shutdownRequested) return;
       this.paused = false;
       if (this.waitingForUserInput) {
         // Resume implies the user acknowledged any workspace preflight warning.

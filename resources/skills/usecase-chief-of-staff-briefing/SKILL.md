@@ -37,14 +37,14 @@ Build a morning/evening executive brief from calendar, inbox, tasks, and optiona
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| timeframe | select | No | Time horizon for the briefing |
-| audience_style | select | No | How executive vs detailed the brief should be |
-| include_optional_signals | select | No | Include weather/ops/revenue signals when connectors exist |
-| delivery_style | select | No | Formatting style for final output |
+| Name                     | Type   | Required | Description                                               |
+| ------------------------ | ------ | -------- | --------------------------------------------------------- |
+| timeframe                | select | No       | Time horizon for the briefing                             |
+| audience_style           | select | No       | How executive vs detailed the brief should be             |
+| include_optional_signals | select | No       | Include weather/ops/revenue signals when connectors exist |
+| delivery_style           | select | No       | Formatting style for final output                         |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1219 characters.
-- Runtime prompt is defined directly in `../usecase-chief-of-staff-briefing.json`. 
+- Runtime prompt is defined directly in `../usecase-chief-of-staff-briefing.json`.

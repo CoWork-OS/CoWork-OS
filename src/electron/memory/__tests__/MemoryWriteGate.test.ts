@@ -50,6 +50,19 @@ const repoMock = vi.hoisted(() => {
         return record;
       },
     ),
+    rejectPending: vi.fn((details: Any = {}) => {
+      const pending = records.filter(
+        (record) =>
+          record.status === "pending" &&
+          (!details.workspaceId || record.workspaceId === details.workspaceId),
+      );
+      for (const record of pending) {
+        record.status = "rejected";
+        record.reviewedBy = details.reviewedBy;
+        record.resolution = details.resolution;
+      }
+      return pending.length;
+    }),
   };
 });
 
@@ -69,6 +82,7 @@ vi.mock("../../database/repositories", () => ({
     findById = repoMock.findById;
     updateStatus = repoMock.updateStatus;
     updateStatusIfCurrent = repoMock.updateStatusIfCurrent;
+    rejectPending = repoMock.rejectPending;
   },
   WorkspaceRepository: class {
     findById(id: string) {
@@ -126,6 +140,7 @@ describe("MemoryWriteGate", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete process.env.COWORK_MEMORY_WRITE_APPROVAL_MODE;
+    delete process.env.COWORK_APPROVAL_PROMPTS;
   });
 
   it("allows writes when approval mode is off", () => {
@@ -142,6 +157,23 @@ describe("MemoryWriteGate", () => {
 
     expect(decision).toEqual({ allowed: true });
     expect(MemoryWriteGate.listPending("ws-1")).toHaveLength(0);
+  });
+
+  it("auto-commits saved review settings when approval prompts are disabled", () => {
+    process.env.COWORK_APPROVAL_PROMPTS = "off";
+    vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryWriteApprovalMode: "all",
+    });
+
+    const decision = MemoryWriteGate.evaluate({
+      ...baseRequest,
+      target: "curated",
+    });
+
+    expect(decision).toEqual({ allowed: true });
+    expect(MemoryWriteGate.pendingCount("ws-1")).toBe(0);
   });
 
   it("stages curated writes in curated_only mode", () => {
@@ -263,6 +295,38 @@ describe("MemoryWriteGate", () => {
     });
 
     expect(rejected.status).toBe("rejected");
+    expect(serviceMocks.curate).not.toHaveBeenCalled();
+  });
+
+  it("rejects the pending backlog without replaying any payload", () => {
+    vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryWriteApprovalMode: "all",
+    });
+
+    const first = MemoryWriteGate.evaluate({
+      ...baseRequest,
+      target: "archive",
+    });
+    const second = MemoryWriteGate.evaluate({
+      ...baseRequest,
+      target: "curated",
+    });
+    expect(first.allowed).toBe(false);
+    expect(second.allowed).toBe(false);
+
+    const rejected = MemoryWriteGate.rejectAllPending({ reviewedBy: "migration-test" });
+
+    expect(rejected).toBe(2);
+    expect(MemoryWriteGate.pendingCount("ws-1")).toBe(0);
+    expect(repoMock.rejectPending).toHaveBeenCalledWith({
+      workspaceId: undefined,
+      reviewedBy: "migration-test",
+      resolution:
+        "Rejected by the no-prompt memory-write migration; stale queued data was not replayed.",
+    });
+    expect(serviceMocks.capture).not.toHaveBeenCalled();
     expect(serviceMocks.curate).not.toHaveBeenCalled();
   });
 

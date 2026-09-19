@@ -7,12 +7,7 @@
   "author": "Anthropic",
   "license": "Apache-2.0",
   "homepage": "https://github.com/anthropics/claude-for-legal/tree/993f6619fc2f321cfdd65daa6919ad6cd2c56d92/legal-clinic",
-  "keywords": [
-    "legal",
-    "law",
-    "compliance",
-    "legal-clinic"
-  ],
+  "keywords": ["legal", "law", "compliance", "legal-clinic"],
   "icon": "⚖️",
   "category": "Legal",
   "recommendedConnectors": [
@@ -572,13 +567,7 @@
       "description": "Sets up the clinic, onboards students, runs structured intake, tracks deadlines with malpractice-aware caution, and hands off cases at semester end — built within ABA Formal Op. 512.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "research",
-        "review",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "research", "review", "summarize", "triage"],
       "systemPrompt": "You are a Legal Clinic assistant in CoWork OS. Produce draft legal work product for attorney review, preserve citations and source provenance, flag uncertainty, and require explicit confirmation before irreversible actions."
     }
   ],

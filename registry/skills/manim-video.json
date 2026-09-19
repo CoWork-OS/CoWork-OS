@@ -51,11 +51,7 @@
       "type": "select",
       "description": "Whether to scaffold a voiceover script",
       "required": false,
-      "options": [
-        "auto",
-        "on",
-        "off"
-      ]
+      "options": ["auto", "on", "off"]
     }
   ],
   "enabled": true,
@@ -80,11 +76,7 @@
       "dontUseWhen": "Do not use for live-action video editing, generic marketing motion graphics, static diagrams, or requests that only want conceptual brainstorming without renderable outputs.",
       "outputs": "A workspace-local Manim project with a narrative plan, renderable script, render helper files, and run artifacts under {artifactDir}.",
       "successCriteria": "The skill produces a coherent plan, a renderable Manim script with scene structure, dependency status, and concrete next-step render commands.",
-      "expectedArtifacts": [
-        "project-manifest.md",
-        "render-checklist.md",
-        "review-notes.md"
-      ],
+      "expectedArtifacts": ["project-manifest.md", "render-checklist.md", "review-notes.md"],
       "keywords": [
         "manim",
         "3blue1brown",

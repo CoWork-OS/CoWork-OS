@@ -1,24 +1,24 @@
-import * as readline from 'readline';
+import * as readline from "readline";
 
 // ==================== MCP Types ====================
 
 type JSONRPCId = string | number;
 
 type JSONRPCRequest = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCNotification = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCResponse = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   result?: any;
   error?: { code: number; message: string; data?: any };
@@ -38,7 +38,7 @@ type MCPTool = {
   name: string;
   description?: string;
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties?: Record<string, MCPToolProperty>;
     required?: string[];
     additionalProperties?: boolean;
@@ -54,14 +54,14 @@ type MCPServerInfo = {
   };
 };
 
-const PROTOCOL_VERSION = '2024-11-05';
+const PROTOCOL_VERSION = "2024-11-05";
 
 const MCP_METHODS = {
-  INITIALIZE: 'initialize',
-  INITIALIZED: 'notifications/initialized',
-  SHUTDOWN: 'shutdown',
-  TOOLS_LIST: 'tools/list',
-  TOOLS_CALL: 'tools/call',
+  INITIALIZE: "initialize",
+  INITIALIZED: "notifications/initialized",
+  SHUTDOWN: "shutdown",
+  TOOLS_LIST: "tools/list",
+  TOOLS_CALL: "tools/call",
 } as const;
 
 const MCP_ERROR_CODES = {
@@ -96,28 +96,36 @@ class AsanaClient {
   constructor(private config: AsanaConfig) {}
 
   async health(): Promise<RequestResult> {
-    return this.requestJson('GET', 'users/me');
+    return this.requestJson("GET", "users/me");
   }
 
-  async listProjects(workspaceGid: string, limit?: number, offset?: string, archived?: boolean): Promise<RequestResult> {
+  async listProjects(
+    workspaceGid: string,
+    limit?: number,
+    offset?: string,
+    archived?: boolean,
+  ): Promise<RequestResult> {
     const params = new URLSearchParams();
-    if (limit !== undefined) params.set('limit', String(limit));
-    if (offset) params.set('offset', offset);
-    if (archived !== undefined) params.set('archived', archived ? 'true' : 'false');
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (offset) params.set("offset", offset);
+    if (archived !== undefined) params.set("archived", archived ? "true" : "false");
     const query = params.toString();
     return this.requestJson(
-      'GET',
-      `workspaces/${encodeURIComponent(workspaceGid)}/projects${query ? `?${query}` : ''}`
+      "GET",
+      `workspaces/${encodeURIComponent(workspaceGid)}/projects${query ? `?${query}` : ""}`,
     );
   }
 
   async getTask(taskId: string, fields?: string[]): Promise<RequestResult> {
     const params = new URLSearchParams();
     if (fields && fields.length > 0) {
-      params.set('opt_fields', fields.join(','));
+      params.set("opt_fields", fields.join(","));
     }
     const query = params.toString();
-    return this.requestJson('GET', `tasks/${encodeURIComponent(taskId)}${query ? `?${query}` : ''}`);
+    return this.requestJson(
+      "GET",
+      `tasks/${encodeURIComponent(taskId)}${query ? `?${query}` : ""}`,
+    );
   }
 
   async searchTasks(
@@ -128,11 +136,11 @@ class AsanaClient {
     completed?: boolean,
     limit?: number,
     offset?: string,
-    fields?: string[]
+    fields?: string[],
   ): Promise<RequestResult> {
     const params = new URLSearchParams();
     if (fields && fields.length > 0) {
-      params.set('opt_fields', fields.join(','));
+      params.set("opt_fields", fields.join(","));
     }
     const query = params.toString();
 
@@ -145,47 +153,47 @@ class AsanaClient {
     if (offset) payload.offset = offset;
 
     return this.requestJson(
-      'POST',
-      `workspaces/${encodeURIComponent(workspaceGid)}/tasks/search${query ? `?${query}` : ''}`,
-      { data: payload }
+      "POST",
+      `workspaces/${encodeURIComponent(workspaceGid)}/tasks/search${query ? `?${query}` : ""}`,
+      { data: payload },
     );
   }
 
   async createTask(data: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', 'tasks', { data });
+    return this.requestJson("POST", "tasks", { data });
   }
 
   async updateTask(taskId: string, data: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('PUT', `tasks/${encodeURIComponent(taskId)}`, { data });
+    return this.requestJson("PUT", `tasks/${encodeURIComponent(taskId)}`, { data });
   }
 
   private getBaseUrl(): string {
-    return this.config.baseUrl.replace(/\/$/, '');
+    return this.config.baseUrl.replace(/\/$/, "");
   }
 
   private getAuthHeader(): string {
     if (!this.config.accessToken) {
-      throw new Error('ASANA_ACCESS_TOKEN is required');
+      throw new Error("ASANA_ACCESS_TOKEN is required");
     }
     return `Bearer ${this.config.accessToken}`;
   }
 
   private async requestJson(method: string, path: string, body?: any): Promise<RequestResult> {
     const start = Date.now();
-    const url = `${this.getBaseUrl()}/${path.replace(/^\//, '')}`;
+    const url = `${this.getBaseUrl()}/${path.replace(/^\//, "")}`;
 
     const res = await fetch(url, {
       method,
       headers: {
         Authorization: this.getAuthHeader(),
-        'Content-Type': 'application/json',
-        'User-Agent': 'CoWork-Asana-Connector/0.1.0',
+        "Content-Type": "application/json",
+        "User-Agent": "CoWork-Asana-Connector/0.1.0",
       },
       body: body ? JSON.stringify(body) : undefined,
     });
 
     const durationMs = Date.now() - start;
-    const vendorRequestId = res.headers.get('x-request-id') || undefined;
+    const vendorRequestId = res.headers.get("x-request-id") || undefined;
 
     if (!res.ok) {
       const message = await res.text();
@@ -224,7 +232,7 @@ class StdioMCPServer {
 
   constructor(
     private toolProvider: ToolProvider,
-    private serverInfo: MCPServerInfo
+    private serverInfo: MCPServerInfo,
   ) {}
 
   start(): void {
@@ -234,11 +242,11 @@ class StdioMCPServer {
       terminal: false,
     });
 
-    this.rl.on('line', (line) => this.handleLine(line));
-    this.rl.on('close', () => this.stop());
+    this.rl.on("line", (line) => this.handleLine(line));
+    this.rl.on("close", () => this.stop());
 
-    process.on('SIGINT', () => this.stop());
-    process.on('SIGTERM', () => this.stop());
+    process.on("SIGINT", () => this.stop());
+    process.on("SIGTERM", () => this.stop());
   }
 
   stop(): void {
@@ -257,17 +265,17 @@ class StdioMCPServer {
       const message = JSON.parse(trimmed);
       this.handleMessage(message);
     } catch {
-      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, 'Parse error');
+      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, "Parse error");
     }
   }
 
   private async handleMessage(message: any): Promise<void> {
-    if ('id' in message && message.id !== null) {
+    if ("id" in message && message.id !== null) {
       await this.handleRequest(message as JSONRPCRequest);
       return;
     }
 
-    if ('method' in message) {
+    if ("method" in message) {
       await this.handleNotification(message as JSONRPCNotification);
     }
   }
@@ -302,7 +310,7 @@ class StdioMCPServer {
       if (error.code !== undefined) {
         this.sendError(id, error.code, error.message, error.data);
       } else {
-        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || 'Internal error');
+        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error");
       }
     }
   }
@@ -317,11 +325,11 @@ class StdioMCPServer {
 
   private handleInitialize(_params: any): {
     protocolVersion: string;
-    capabilities: MCPServerInfo['capabilities'];
+    capabilities: MCPServerInfo["capabilities"];
     serverInfo: MCPServerInfo;
   } {
     if (this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, 'Already initialized');
+      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, "Already initialized");
     }
 
     return {
@@ -338,27 +346,27 @@ class StdioMCPServer {
   private async handleToolsCall(params: any): Promise<any> {
     const { name, arguments: args } = params || {};
     if (!name) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, 'Tool name is required');
+      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, "Tool name is required");
     }
 
     try {
       const result = await this.toolProvider.executeTool(name, args || {});
 
-      if (typeof result === 'string') {
-        return { content: [{ type: 'text', text: result }] };
+      if (typeof result === "string") {
+        return { content: [{ type: "text", text: result }] };
       }
 
-      if (result && typeof result === 'object') {
+      if (result && typeof result === "object") {
         if (result.content && Array.isArray(result.content)) {
           return result;
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
-      return { content: [{ type: 'text', text: String(result) }] };
+      return { content: [{ type: "text", text: String(result) }] };
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Error: ${error?.message || 'Tool failed'}` }],
+        content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }],
         isError: true,
       };
     }
@@ -370,13 +378,13 @@ class StdioMCPServer {
   }
 
   private sendResult(id: JSONRPCId, result: any): void {
-    const response: JSONRPCResponse = { jsonrpc: '2.0', id, result };
+    const response: JSONRPCResponse = { jsonrpc: "2.0", id, result };
     this.sendMessage(response);
   }
 
   private sendError(id: JSONRPCId, code: number, message: string, data?: any): void {
     const response: JSONRPCResponse = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
       error: { code, message, data },
     };
@@ -384,100 +392,104 @@ class StdioMCPServer {
   }
 
   private sendMessage(message: JSONRPCResponse | JSONRPCNotification): void {
-    process.stdout.write(JSON.stringify(message) + '\n');
+    process.stdout.write(JSON.stringify(message) + "\n");
   }
 
   private requireInitialized(): void {
     if (!this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, 'Server not initialized');
+      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, "Server not initialized");
     }
   }
 
-  private createError(code: number, message: string, data?: any): { code: number; message: string; data?: any } {
+  private createError(
+    code: number,
+    message: string,
+    data?: any,
+  ): { code: number; message: string; data?: any } {
     return { code, message, data };
   }
 }
 
 // ==================== Tool Definitions ====================
 
-const CONNECTOR_PREFIX = 'asana';
-const DEFAULT_BASE_URL = 'https://app.asana.com/api/1.0';
+const CONNECTOR_PREFIX = "asana";
+const DEFAULT_BASE_URL = "https://app.asana.com/api/1.0";
 
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
-    description: 'Check connector health and authentication status',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    description: "Check connector health and authentication status",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_projects`,
-    description: 'List projects in a workspace',
+    description: "List projects in a workspace",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        workspaceGid: { type: 'string', description: 'Workspace GID' },
-        limit: { type: 'number', description: 'Max projects to return' },
-        offset: { type: 'string', description: 'Pagination offset' },
-        archived: { type: 'boolean', description: 'Include archived projects' },
+        workspaceGid: { type: "string", description: "Workspace GID" },
+        limit: { type: "number", description: "Max projects to return" },
+        offset: { type: "string", description: "Pagination offset" },
+        archived: { type: "boolean", description: "Include archived projects" },
       },
-      required: ['workspaceGid'],
+      required: ["workspaceGid"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_task`,
-    description: 'Fetch a task by id',
+    description: "Fetch a task by id",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        taskGid: { type: 'string', description: 'Task GID' },
-        fields: { type: 'array', description: 'Fields to return', items: { type: 'string' } },
+        taskGid: { type: "string", description: "Task GID" },
+        fields: { type: "array", description: "Fields to return", items: { type: "string" } },
       },
-      required: ['taskGid'],
+      required: ["taskGid"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.search_tasks`,
-    description: 'Search tasks in a workspace',
+    description: "Search tasks in a workspace",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        workspaceGid: { type: 'string', description: 'Workspace GID' },
-        text: { type: 'string', description: 'Search text' },
-        assigneeGid: { type: 'string', description: 'Assignee GID' },
-        projectGid: { type: 'string', description: 'Project GID' },
-        completed: { type: 'boolean', description: 'Filter by completion' },
-        limit: { type: 'number', description: 'Max tasks to return' },
-        offset: { type: 'string', description: 'Pagination offset' },
-        fields: { type: 'array', description: 'Fields to return', items: { type: 'string' } },
+        workspaceGid: { type: "string", description: "Workspace GID" },
+        text: { type: "string", description: "Search text" },
+        assigneeGid: { type: "string", description: "Assignee GID" },
+        projectGid: { type: "string", description: "Project GID" },
+        completed: { type: "boolean", description: "Filter by completion" },
+        limit: { type: "number", description: "Max tasks to return" },
+        offset: { type: "string", description: "Pagination offset" },
+        fields: { type: "array", description: "Fields to return", items: { type: "string" } },
       },
-      required: ['workspaceGid'],
+      required: ["workspaceGid"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.create_task`,
-    description: 'Create a task',
+    description: "Create a task",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        data: { type: 'object', description: 'Task payload (Asana task fields)' },
+        data: { type: "object", description: "Task payload (Asana task fields)" },
       },
-      required: ['data'],
+      required: ["data"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.update_task`,
-    description: 'Update a task',
+    description: "Update a task",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        taskGid: { type: 'string', description: 'Task GID' },
-        data: { type: 'object', description: 'Task payload to update' },
+        taskGid: { type: "string", description: "Task GID" },
+        data: { type: "object", description: "Task payload to update" },
       },
-      required: ['taskGid', 'data'],
+      required: ["taskGid", "data"],
       additionalProperties: false,
     },
   },
@@ -493,7 +505,9 @@ const client = new AsanaClient(config);
 const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
   [`${CONNECTOR_PREFIX}.health`]: async () => buildEnvelope(await client.health()),
   [`${CONNECTOR_PREFIX}.list_projects`]: async (args) =>
-    buildEnvelope(await client.listProjects(args.workspaceGid, args.limit, args.offset, args.archived)),
+    buildEnvelope(
+      await client.listProjects(args.workspaceGid, args.limit, args.offset, args.archived),
+    ),
   [`${CONNECTOR_PREFIX}.get_task`]: async (args) =>
     buildEnvelope(await client.getTask(args.taskGid, args.fields)),
   [`${CONNECTOR_PREFIX}.search_tasks`]: async (args) =>
@@ -506,8 +520,8 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
         args.completed,
         args.limit,
         args.offset,
-        args.fields
-      )
+        args.fields,
+      ),
     ),
   [`${CONNECTOR_PREFIX}.create_task`]: async (args) =>
     buildEnvelope(await client.createTask(args.data || {})),
@@ -527,8 +541,8 @@ const toolProvider: ToolProvider = {
 };
 
 const serverInfo: MCPServerInfo = {
-  name: 'Asana Connector',
-  version: '0.1.0',
+  name: "Asana Connector",
+  version: "0.1.0",
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {
     tools: { listChanged: false },

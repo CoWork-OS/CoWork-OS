@@ -47,6 +47,7 @@ import { buildTaskTitle } from "./format";
 import { NumbatService } from "../electron/security/numbat";
 import type { AgentSecurityFindingStatus } from "../shared/agent-security";
 import { requiresAgentSecurityConfirmation } from "./agent-security-confirmation";
+import { PulseService } from "../electron/telemetry/pulse-service";
 
 type Any = Record<string, any>;
 
@@ -115,7 +116,8 @@ interface DirectRunArgs {
     | "agent-security-prune"
     | "prompt-size"
     | "prompt-preview"
-    | "dashboard-status";
+    | "dashboard-status"
+    | "pulse";
   prompt: string;
   cwd: string;
   taskId?: string;
@@ -165,6 +167,7 @@ interface DirectRunArgs {
   yes?: boolean;
   dryRun?: boolean;
   refresh?: boolean;
+  pulseAction?: "status" | "show" | "on" | "off" | "send" | "reset" | "delete";
   json?: boolean;
 }
 
@@ -460,6 +463,13 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
         break;
       case "--status":
         args.command = "status";
+        break;
+      case "--pulse":
+        args.command = "pulse";
+        break;
+      case "--action":
+        args.pulseAction = next as DirectRunArgs["pulseAction"];
+        i++;
         break;
       case "--providers-list":
         args.command = "providers-list";
@@ -854,6 +864,36 @@ async function runLocalMetadataCommand(
   }
 
   switch (args.command) {
+    case "pulse": {
+      const pkg = await readPackageInfo();
+      const service = new PulseService(db, { version: pkg.version, runtime: "cli" });
+      const action = args.pulseAction || "status";
+      if (action === "on") await service.setEnabled(true);
+      if (action === "off") await service.setEnabled(false);
+      if (action === "send") await service.flush();
+      if (action === "reset") await service.resetIdentity();
+      if (action === "delete") {
+        const result = await service.deleteRemoteData();
+        if (!result.success) throw new Error(result.error || "Pulse deletion failed");
+      }
+      const settings = service.getSettings();
+      const output = action === "show" ? settings.pendingPackage : settings;
+      writeEvent(
+        args,
+        { type: "pulse", action, ...settings },
+        action === "show"
+          ? JSON.stringify(output, null, 2)
+          : [
+              `CoWork Pulse: ${settings.enabled ? "on" : "off"}`,
+              `Consent: ${settings.consentState}`,
+              `Installation: ${settings.installationId || "not created"}`,
+              `Last sent: ${settings.lastSentAt ? new Date(settings.lastSentAt).toISOString() : "never"}`,
+              `Last error: ${settings.lastErrorCode || "none"}`,
+              "Use `cowork telemetry show` to inspect the exact next payload.",
+            ].join("\n"),
+      );
+      return 0;
+    }
     case "doctor": {
       const providerStatus = LLMProviderFactory.getConfigStatus();
       const allWorkspaces = workspaces.findAll();

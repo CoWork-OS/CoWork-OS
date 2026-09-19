@@ -6,6 +6,8 @@ import { Check, X, Play, Loader2 } from "lucide-react";
 import type { Task, TaskEvent } from "../../shared/types";
 import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { AgentRosterRow, type AgentRosterEntry } from "./timeline/AgentRosterRow";
+import { stripAgentRoleSuffix } from "../../shared/subagent-presentation";
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
@@ -25,6 +27,16 @@ interface DispatchedAgentsPanelProps {
   childEvents: TaskEvent[];
   onSelectChildTask?: (taskId: string) => void;
   onOpenChildAgentSidebar?: (taskId: string) => void;
+}
+
+/** Roster names stay short so the summary line fits on one row. */
+const MAX_ROSTER_NAME_LENGTH = 28;
+
+function resolveRosterName(taskTitle: string, roleDisplayName?: string): string {
+  const fromTitle = stripAgentRoleSuffix(taskTitle.replace(/^@[^:]+:\s*/, "")).trim();
+  const name = fromTitle || roleDisplayName || "Agent";
+  if (name.length <= MAX_ROSTER_NAME_LENGTH) return name;
+  return `${name.slice(0, MAX_ROSTER_NAME_LENGTH).trimEnd()}…`;
 }
 
 const SAFE_LINK_PROTOCOL_REGEX = /^(https?:|mailto:|tel:)/i;
@@ -288,6 +300,7 @@ export function DispatchedAgentsPanel({
   onOpenChildAgentSidebar,
 }: DispatchedAgentsPanelProps) {
   const [agentRoles, setAgentRoles] = useState<Map<string, AgentRoleInfo>>(new Map());
+  const [rosterExpanded, setRosterExpanded] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -388,89 +401,118 @@ export function DispatchedAgentsPanel({
   const workingCount = childTasks.filter(
     (t) => t.status === "executing" || t.status === "planning" || t.status === "interrupted",
   ).length;
+  // Queued, pending, paused and blocked children are not "working", but the
+  // roster must not claim the burst finished while any of them is still open.
+  const allChildTasksDone =
+    childTasks.length > 0 &&
+    childTasks.every(
+      (t) => t.status === "completed" || t.status === "failed" || t.status === "cancelled",
+    );
   const openChildAgent = onOpenChildAgentSidebar ?? onSelectChildTask;
+
+  const rosterAgents = useMemo<AgentRosterEntry[]>(
+    () =>
+      agentInfos.map((info) => ({
+        id: info.task.id,
+        name: resolveRosterName(info.task.title, info.role?.displayName),
+        icon: info.role?.icon,
+        color: info.role?.color,
+      })),
+    [agentInfos],
+  );
 
   return (
     <div className="dispatched-agents-panel" ref={scrollRef}>
-      <div className="thoughts-header">
-        <span className="thoughts-title">Dispatched Agents ({childTasks.length})</span>
-      </div>
+      <AgentRosterRow
+        agents={rosterAgents}
+        state={allChildTasksDone ? "finished" : "working"}
+        expandable
+        expanded={rosterExpanded}
+        onToggle={() => setRosterExpanded((current) => !current)}
+      />
 
-      {/* Agent chips */}
-      <div className="team-announcement">
-        <div className="team-announcement-text">
-          {childTasks.length} agent{childTasks.length !== 1 ? "s" : ""} working on sub-tasks
-        </div>
-        <div className="team-members-grid">
-          {agentInfos.map((info) => (
-            <div
-              key={info.task.id}
-              className="team-member-chip"
-              style={{
-                borderColor: info.role?.color || "#6366f1",
-                cursor: openChildAgent ? "pointer" : undefined,
-              }}
-              onClick={() => openChildAgent?.(info.task.id)}
-              title={`Click to view ${info.role?.displayName || "agent"}'s task`}
-            >
-              <span className="team-member-icon">
-                {(() => {
-                  const Icon = getEmojiIcon(info.role?.icon || "🤖");
-                  return <Icon size={16} strokeWidth={1.5} />;
-                })()}
-              </span>
-              <span className="team-member-name" style={{ color: info.role?.color || "#6366f1" }}>
-                {info.role?.displayName || "Agent"}
-              </span>
-              <span className={`dispatched-agent-status status-${info.status}`}>
-                {info.status === "executing" || info.status === "interrupted"
-                  ? "working"
-                  : info.status === "planning"
-                    ? "planning"
-                    : info.status}
-              </span>
+      {!rosterExpanded ? null : (
+        <>
+          {/* Agent chips */}
+          <div className="team-announcement">
+            <div className="team-members-grid">
+              {agentInfos.map((info) => (
+                <div
+                  key={info.task.id}
+                  className="team-member-chip"
+                  style={{
+                    borderColor: info.role?.color || "#6366f1",
+                    cursor: openChildAgent ? "pointer" : undefined,
+                  }}
+                  onClick={() => openChildAgent?.(info.task.id)}
+                  title={`Click to view ${info.role?.displayName || "agent"}'s task`}
+                >
+                  <span className="team-member-icon">
+                    {(() => {
+                      const Icon = getEmojiIcon(info.role?.icon || "🤖");
+                      return <Icon size={16} strokeWidth={1.5} />;
+                    })()}
+                  </span>
+                  <span
+                    className="team-member-name"
+                    style={{ color: info.role?.color || "#6366f1" }}
+                  >
+                    {info.role?.displayName || "Agent"}
+                  </span>
+                  <span className={`dispatched-agent-status status-${info.status}`}>
+                    {info.status === "executing" || info.status === "interrupted"
+                      ? "working"
+                      : info.status === "planning"
+                        ? "planning"
+                        : info.status}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
 
-      <DispatchPhaseIndicator childTasks={childTasks} />
+          <DispatchPhaseIndicator childTasks={childTasks} />
 
-      {/* Event stream */}
-      <div className="thoughts-stream">
-        {streamItems.length === 0 && (
-          <div className="thoughts-empty">Dispatching agents and waiting for results...</div>
-        )}
-        {streamItems.map((item, i) => {
-          const prev = i > 0 ? streamItems[i - 1] : null;
-          const showHeader = !prev || prev.agentRoleId !== item.agentRoleId;
-          const isCompactEvent = isCompactStreamEventType(item.type);
+          {/* Event stream */}
+          <div className="thoughts-stream">
+            {streamItems.length === 0 && (
+              <div className="thoughts-empty">Dispatching agents and waiting for results...</div>
+            )}
+            {streamItems.map((item, i) => {
+              const prev = i > 0 ? streamItems[i - 1] : null;
+              const showHeader = !prev || prev.agentRoleId !== item.agentRoleId;
+              const isCompactEvent = isCompactStreamEventType(item.type);
 
-          return (
-            <div key={item.id}>
-              <div
-                className={`stream-thought ${isCompactEvent ? "stream-thought-compact" : ""}`}
-                style={{ borderLeftColor: item.agentColor }}
-              >
-                {showHeader && (
-                  <div className="stream-agent-header-inline">
-                    <span className="stream-agent-icon">
-                      {(() => {
-                        const Icon = getEmojiIcon(item.agentIcon);
-                        return <Icon size={14} strokeWidth={1.5} />;
-                      })()}
-                    </span>
-                    <span className="stream-agent-name-inline" style={{ color: item.agentColor }}>
-                      {item.agentName}
-                    </span>
+              return (
+                <div key={item.id}>
+                  <div
+                    className={`stream-thought ${isCompactEvent ? "stream-thought-compact" : ""}`}
+                    style={{ borderLeftColor: item.agentColor }}
+                  >
+                    {showHeader && (
+                      <div className="stream-agent-header-inline">
+                        <span className="stream-agent-icon">
+                          {(() => {
+                            const Icon = getEmojiIcon(item.agentIcon);
+                            return <Icon size={14} strokeWidth={1.5} />;
+                          })()}
+                        </span>
+                        <span
+                          className="stream-agent-name-inline"
+                          style={{ color: item.agentColor }}
+                        >
+                          {item.agentName}
+                        </span>
+                      </div>
+                    )}
+                    <StreamBubble item={item} isCompactEvent={isCompactEvent} />
                   </div>
-                )}
-                <StreamBubble item={item} isCompactEvent={isCompactEvent} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {/* Sticky status bar */}
       {workingCount > 0 && (

@@ -97,7 +97,10 @@ async function alignMacPlatformMetadata(metadataPath) {
   } else {
     const versionLine = /^version:\s*.+$/m;
     content = versionLine.test(content)
-      ? content.replace(versionLine, (line) => `${line}\nminimumSystemVersion: ${minimumDarwinVersion}`)
+      ? content.replace(
+          versionLine,
+          (line) => `${line}\nminimumSystemVersion: ${minimumDarwinVersion}`,
+        )
       : `minimumSystemVersion: ${minimumDarwinVersion}\n${content}`;
   }
   await fs.writeFile(metadataPath, content, "utf8");

@@ -37,15 +37,15 @@ Summarize a chat and draft 2 reply options. Stops before sending.
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| channel | select | Yes | Which channel to read from |
-| chat_hint | string | Yes | Name/keyword to identify the chat in channel_list_chats results |
-| since | string | No | Time window (e.g., "15m", "24h", "7d") |
-| message_limit | number | No | How many recent messages to fetch |
-| tone | select | No | Desired tone for the draft |
+| Name          | Type   | Required | Description                                                     |
+| ------------- | ------ | -------- | --------------------------------------------------------------- |
+| channel       | select | Yes      | Which channel to read from                                      |
+| chat_hint     | string | Yes      | Name/keyword to identify the chat in channel_list_chats results |
+| since         | string | No       | Time window (e.g., "15m", "24h", "7d")                          |
+| message_limit | number | No       | How many recent messages to fetch                               |
+| tone          | select | No       | Desired tone for the draft                                      |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 917 characters.
-- Runtime prompt is defined directly in `../usecase-draft-reply.json`. 
+- Runtime prompt is defined directly in `../usecase-draft-reply.json`.

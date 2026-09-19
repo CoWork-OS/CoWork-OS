@@ -56,20 +56,29 @@ function cleanupPath(targetPath) {
 function main() {
   let tmpDir = null;
   let tarballPath = null;
+  const suppliedTarball = process.env.COWORK_RELEASE_TARBALL;
+  const packageName = process.env.COWORK_RELEASE_PACKAGE_NAME || "cowork-os";
+  if (!["cowork-os", "@cowork-os/cowork-os"].includes(packageName)) {
+    throw new Error("Unexpected release package name.");
+  }
 
   try {
-    const packRes = runNpm(["pack", "--ignore-scripts", "--silent"], { echoOutput: false });
-    const tarball = String(packRes.stdout || "")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .at(-1);
+    if (suppliedTarball) {
+      tarballPath = path.resolve(suppliedTarball);
+    } else {
+      const packRes = runNpm(["pack", "--ignore-scripts", "--silent"], { echoOutput: false });
+      const tarball = String(packRes.stdout || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .at(-1);
 
-    if (!tarball) {
-      throw new Error("npm pack did not report a tarball path.");
+      if (!tarball) {
+        throw new Error("npm pack did not report a tarball path.");
+      }
+
+      tarballPath = path.join(repoRoot, tarball);
     }
-
-    tarballPath = path.join(repoRoot, tarball);
     if (!fs.existsSync(tarballPath)) {
       throw new Error(`Expected tarball at ${tarballPath}`);
     }
@@ -81,10 +90,10 @@ function main() {
     runNpm(["init", "-y"], { cwd: testDir, echoOutput: false });
     runNpm(
       ["install", "--ignore-scripts", "--omit=optional", "--no-audit", "--no-fund", tarballPath],
-      { cwd: testDir }
+      { cwd: testDir },
     );
 
-    const setupRes = runNpm(["run", "--prefix", "node_modules/cowork-os", "setup"], {
+    const setupRes = runNpm(["run", "--prefix", `node_modules/${packageName}`, "setup"], {
       cwd: testDir,
     });
     const combinedSetupOutput = `${setupRes.stdout || ""}${setupRes.stderr || ""}`;
@@ -92,16 +101,20 @@ function main() {
 
     if (/^\[cowork\] setup:bootstrap/m.test(combinedSetupOutput)) {
       throw new Error(
-        "Setup unexpectedly triggered dependency bootstrap fallback; electron should resolve from parent node_modules."
+        "Setup unexpectedly triggered dependency bootstrap fallback; electron should resolve from parent node_modules.",
       );
     }
 
-    const smokeCheck = spawnSync(process.execPath, [path.join(repoRoot, "scripts/release-smoke-check.mjs")], {
-      cwd: testDir,
-      env: process.env,
-      encoding: "utf8",
-      stdio: "pipe",
-    });
+    const smokeCheck = spawnSync(
+      process.execPath,
+      [path.join(repoRoot, "scripts/release-smoke-check.mjs")],
+      {
+        cwd: testDir,
+        env: process.env,
+        encoding: "utf8",
+        stdio: "pipe",
+      },
+    );
     if (typeof smokeCheck.stdout === "string" && smokeCheck.stdout.length > 0) {
       process.stdout.write(smokeCheck.stdout);
     }
@@ -116,7 +129,8 @@ function main() {
     }
   } finally {
     cleanupPath(tmpDir);
-    cleanupPath(tarballPath);
+    // Retained publication artifacts belong to the caller and must survive smoke checks.
+    if (!suppliedTarball) cleanupPath(tarballPath);
   }
 }
 

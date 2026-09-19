@@ -1,5 +1,19 @@
 import { randomUUID } from "crypto";
 import { getInteractionModeSelection } from "../../../shared/interaction-mode";
+import {
+  compactPreview,
+  CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+  DEFAULT_CONTEXT_COMPACTION_TARGET_RATIO,
+  DEFAULT_CONTEXT_COMPACTION_TRIGGER_RATIO,
+  isContextCompactionEventPayload,
+  isContextCompactionEventType,
+  resolveContextCompactionPolicy,
+  type ContextCompactionEventType,
+  type ContextCompactionEventPayload,
+  type ContextCompactionPhase,
+  type ContextCompactionStatus,
+  type ContextCompactionTrigger,
+} from "../../../shared/context-compaction";
 import type {
   ImageAttachment,
   LlmProfile,
@@ -47,13 +61,20 @@ import { filterToolsByPolicy } from "../tool-policy-engine";
 import { DeferredToolCatalog } from "./DeferredToolCatalog";
 import { ToolSearchService } from "./ToolSearchService";
 import {
+  QueuedAttachmentRecoveryError,
+  QueuedAttachmentStore,
+  type QueuedAttachmentRef,
+} from "./queued-attachment-store";
+import {
   TurnKernel,
   type TurnKernelInput,
   type TurnKernelOutcome,
   type TurnKernelPolicy,
 } from "./turn-kernel";
 import type { ToolRegistry } from "../tools/registry";
+import type { JevContextCompactionResult } from "../jev/context-compaction-decision";
 import { DurableContextService } from "../../memory/DurableContextService";
+import { InputSanitizer } from "../security/input-sanitizer";
 
 interface WebEvidenceEntry {
   tool: "web_search" | "web_fetch";
@@ -86,6 +107,39 @@ export interface SessionRuntimeOutputState {
   explicitChatSummaryBlock: string | null;
   explicitChatSummaryCreatedAt: number;
   explicitChatSummarySourceMessageCount: number;
+  explicitChatSummaryInputSignature?: string;
+}
+
+export interface SessionRuntimeCompactionSnapshot {
+  historyGeneration: number;
+  activeCompactionId?: string | null;
+  activeCompactionAttemptId?: string | null;
+  lastCompactionId?: string | null;
+  lastCompactionAttemptId?: string | null;
+  lastCompactionStatus?: ContextCompactionStatus | null;
+  lastCompactionTrigger?: ContextCompactionTrigger | null;
+  lastCompactionPhase?: ContextCompactionPhase | null;
+  lastCompactionInputGeneration?: number;
+  lastCompactionInstalledGeneration?: number;
+}
+
+export interface SessionRuntimeCompactionLifecycleHandle {
+  compactionId: string;
+  attemptId: string;
+  trigger: ContextCompactionTrigger;
+  phase: ContextCompactionPhase;
+}
+
+export interface SessionRuntimeCompactionLifecycleOptions {
+  trigger: ContextCompactionTrigger;
+  phase: ContextCompactionPhase;
+  reason: string;
+  inputTokens?: number;
+  inputMessageCount?: number;
+  thresholdRatio?: number;
+  targetRatio?: number;
+  contextWindowTokens?: number;
+  extra?: Record<string, unknown>;
 }
 
 export interface SessionRuntimeVerificationState {
@@ -144,6 +198,7 @@ export interface SessionRuntimeSnapshotV2 {
     explicitChatSummaryBlock: string | null;
     explicitChatSummaryCreatedAt: number;
     explicitChatSummarySourceMessageCount: number;
+    explicitChatSummaryInputSignature?: string;
     stepOutcomeSummaries: Array<{
       stepId: string;
       description: string;
@@ -203,7 +258,10 @@ export interface SessionRuntimeSnapshotV2 {
   };
   queues: {
     pendingFollowUps: TaskFollowUpInput[];
+    /** Queue-only follow-ups incorporated into transcript and persisted. */
+    consumedFollowUpMessageIds?: string[];
     stepFeedbackSignal: {
+      feedbackId?: string;
       stepId: string;
       action: "retry" | "skip" | "stop" | "drift";
       message?: string;
@@ -244,6 +302,8 @@ export interface SessionRuntimeSnapshotV2 {
     outputTokens: number;
     cost: number;
   };
+  /** Versioned replacement-history metadata. Optional for legacy V2 snapshots. */
+  compaction?: SessionRuntimeCompactionSnapshot;
 }
 
 export interface SessionRuntimeState {
@@ -256,6 +316,7 @@ export interface SessionRuntimeState {
     explicitChatSummaryBlock: string | null;
     explicitChatSummaryCreatedAt: number;
     explicitChatSummarySourceMessageCount: number;
+    explicitChatSummaryInputSignature?: string;
     stepOutcomeSummaries: Array<{
       stepId: string;
       description: string;
@@ -326,7 +387,10 @@ export interface SessionRuntimeState {
   };
   queues: {
     pendingFollowUps: TaskFollowUpInput[];
+    /** Queue-only follow-ups incorporated into transcript and persisted. */
+    consumedFollowUpMessageIds?: Set<string>;
     stepFeedbackSignal: {
+      feedbackId?: string;
       stepId: string;
       action: "retry" | "skip" | "stop" | "drift";
       message?: string;
@@ -366,6 +430,8 @@ export interface SessionRuntimeState {
 }
 
 export interface SessionRuntimeDeps {
+  /** Shared durable store used to recover queue-only visual attachments. */
+  queuedAttachmentStore?: QueuedAttachmentStore;
   getTask: () => Task;
   getDefaultPermissionMode: () => PermissionMode;
   getWorkspace: () => Workspace;
@@ -410,6 +476,13 @@ export interface SessionRuntimeDeps {
   buildSharedContextBlock: () => string;
   buildHybridMemoryRecallBlock: (workspaceId: string, query: string) => Promise<string>;
   maybePreCompactionMemoryFlush: (opts: Any) => Promise<void>;
+  evaluateJevContextCompaction?: (input: {
+    messages: LLMMessage[];
+    availableTokens: number;
+    targetTokens: number;
+    taskPrompt?: string;
+    contextLabel: string;
+  }) => Promise<JevContextCompactionResult>;
   buildCompactionSummaryBlock: (opts: Any) => Promise<string>;
   truncateSummaryBlock: (summary: string, maxTokens: number) => string;
   flushCompactionSummaryToMemory: (opts: Any) => Promise<void>;
@@ -456,6 +529,23 @@ export interface SessionRuntimeDeps {
   getEmergencyFuseMaxTurns: () => number;
   isWindowTurnLimitExceededError: (error: unknown) => boolean;
   assessContinuationWindow: () => Any;
+  /** Optional bounded Jev advice after deterministic loop evidence is available. */
+  evaluateJevLoopDecision?: (input: {
+    progressScore: number;
+    loopRiskIndex: number;
+    repeatedFingerprintCount: number;
+    noProgressStreak: number;
+    pendingSteps: number;
+    dominantFingerprint?: string;
+    hardStopReason?: string;
+  }) => Promise<{
+    status: "selected" | "abstain" | "unavailable";
+    action: "continue" | "change_strategy" | "stop" | "ask_user" | "abstain";
+    model?: string;
+    reason?: string;
+    confidence?: number;
+    probability?: number;
+  }>;
   getLoopWarningThreshold: () => number;
   getLoopCriticalThreshold: () => number;
   getMinProgressScoreForAutoContinue: () => number;
@@ -497,15 +587,69 @@ export interface SessionRuntimePreparedTurnInput extends Omit<TurnKernelInput, "
   policy: TurnKernelPolicy;
 }
 
+interface RuntimeRecoverySourceFreshness {
+  sequence: number | null;
+  timestamp: number | null;
+  position: number;
+}
+
+export const CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE =
+  "CONTEXT_CAPACITY_RECOVERY_EXHAUSTED" as const;
+
+export class ContextCapacityExhaustedError extends Error {
+  readonly code = CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE;
+  readonly phase: "step" | "follow_up";
+  readonly contextLabel: string;
+  readonly availableTokens: number;
+  readonly tokensBefore: number;
+  readonly tokensAfter: number;
+  readonly reason = "required_content_exceeds_available_budget" as const;
+
+  constructor(opts: {
+    phase: "step" | "follow_up";
+    contextLabel: string;
+    availableTokens: number;
+    tokensBefore: number;
+    tokensAfter: number;
+  }) {
+    super(
+      `Context capacity recovery exhausted during ${opts.contextLabel}: retained user and pinned ` +
+        `context requires ${opts.tokensAfter} tokens but only ${opts.availableTokens} are available.`,
+    );
+    this.name = "ContextCapacityExhaustedError";
+    this.phase = opts.phase;
+    this.contextLabel = opts.contextLabel;
+    this.availableTokens = opts.availableTokens;
+    this.tokensBefore = opts.tokensBefore;
+    this.tokensAfter = opts.tokensAfter;
+  }
+}
+
 export class SessionRuntime {
   private deferredToolCatalog: DeferredToolCatalog | null = null;
   private toolSearchService: ToolSearchService | null = null;
   private taskListVerificationReminderPending = false;
+  private readonly queuedAttachmentStore: QueuedAttachmentStore;
+  /** Monotonic identity for the live model-visible history projection. */
+  private historyGeneration = 0;
+  private activeCompactionId: string | null = null;
+  private activeCompactionAttemptId: string | null = null;
+  private lastCompactionId: string | null = null;
+  private lastCompactionAttemptId: string | null = null;
+  private lastCompactionStatus: ContextCompactionStatus | null = null;
+  private lastCompactionTrigger: ContextCompactionTrigger | null = null;
+  private lastCompactionPhase: ContextCompactionPhase | null = null;
+  private lastCompactionInputGeneration = 0;
+  private lastCompactionInstalledGeneration = 0;
+  private readonly restartRecoveredCompactionIds = new Set<string>();
 
   constructor(
     readonly deps: SessionRuntimeDeps,
     readonly state: SessionRuntimeState,
-  ) {}
+  ) {
+    this.queuedAttachmentStore = deps.queuedAttachmentStore ?? new QueuedAttachmentStore();
+    this.historyGeneration = state.transcript.conversationHistory.length > 0 ? 1 : 0;
+  }
 
   createTaskList(items: SessionChecklistToolItemInput[]): SessionChecklistState {
     if (this.state.checklist.items.length > 0) {
@@ -931,18 +1075,13 @@ export class SessionRuntime {
       safeInput,
       safeOutput,
       safeCached,
+      safeCacheWrite,
     );
 
     this.state.usage.totalInputTokens += safeInput;
     this.state.usage.totalOutputTokens += safeOutput;
     this.state.usage.totalCost += deltaCost;
-    this.state.loop.iterationCount += 1;
-    this.state.loop.globalTurnCount += 1;
-    this.state.loop.lifetimeTurnCount += 1;
-
-    if (this.state.loop.lifetimeTurnCount % 5 === 0) {
-      this.deps.updateTask({ ...this.projectTaskState() });
-    }
+    this.recordLlmTurn();
 
     if (safeInput > 0 || safeOutput > 0 || safeCached > 0 || safeCacheWrite > 0 || deltaCost > 0) {
       const cumulativeInput = this.getCumulativeInputTokens();
@@ -967,6 +1106,21 @@ export class SessionRuntime {
     }
   }
 
+  /**
+   * Record one successful LLM response even when the provider omitted usage
+   * telemetry. Token/cost accounting stays in updateTracking; turn budgets
+   * must not depend on provider-specific usage fields.
+   */
+  recordLlmTurn(): void {
+    this.state.loop.iterationCount += 1;
+    this.state.loop.globalTurnCount += 1;
+    this.state.loop.lifetimeTurnCount += 1;
+
+    if (this.state.loop.lifetimeTurnCount % 5 === 0) {
+      this.deps.updateTask({ ...this.projectTaskState() });
+    }
+  }
+
   getCumulativeInputTokens(): number {
     return this.state.usage.usageOffsetInputTokens + this.state.usage.totalInputTokens;
   }
@@ -979,9 +1133,323 @@ export class SessionRuntime {
     return this.state.usage.usageOffsetCost + this.state.usage.totalCost;
   }
 
+  getHistoryGeneration(): number {
+    return this.historyGeneration;
+  }
+
+  getCompactionSnapshot(): SessionRuntimeCompactionSnapshot {
+    return {
+      historyGeneration: this.historyGeneration,
+      activeCompactionId: this.activeCompactionId,
+      activeCompactionAttemptId: this.activeCompactionAttemptId,
+      lastCompactionId: this.lastCompactionId,
+      lastCompactionAttemptId: this.lastCompactionAttemptId,
+      lastCompactionStatus: this.lastCompactionStatus,
+      lastCompactionTrigger: this.lastCompactionTrigger,
+      lastCompactionPhase: this.lastCompactionPhase,
+      lastCompactionInputGeneration: this.lastCompactionInputGeneration,
+      lastCompactionInstalledGeneration: this.lastCompactionInstalledGeneration,
+    };
+  }
+
+  private captureHistoryProjection(): {
+    generation: number;
+    history: LLMMessage[];
+    length: number;
+    lastMessage: LLMMessage | undefined;
+    fingerprint: string;
+  } {
+    const history = this.state.transcript.conversationHistory;
+    return {
+      generation: this.historyGeneration,
+      history,
+      length: history.length,
+      lastMessage: history.at(-1),
+      fingerprint: this.getHistoryProjectionFingerprint(history),
+    };
+  }
+
+  private getHistoryProjectionFingerprint(history: LLMMessage[]): string {
+    try {
+      return JSON.stringify(history);
+    } catch {
+      return history
+        .map(
+          (message) =>
+            `${message.role}:${typeof message.content === "string" ? message.content : "[content]"}`,
+        )
+        .join("\u0000");
+    }
+  }
+
+  private isHistoryProjectionCurrent(
+    projection: ReturnType<SessionRuntime["captureHistoryProjection"]>,
+  ): boolean {
+    const current = this.state.transcript.conversationHistory;
+    return (
+      this.historyGeneration === projection.generation &&
+      current === projection.history &&
+      current.length === projection.length &&
+      current.at(-1) === projection.lastMessage &&
+      this.getHistoryProjectionFingerprint(current) === projection.fingerprint
+    );
+  }
+
+  private emitCompactionEvent(
+    type: ContextCompactionEventType,
+    payload: ContextCompactionEventPayload,
+  ): void {
+    try {
+      this.deps.emitEvent(type, payload);
+    } catch {
+      // Timeline persistence is best-effort for compaction. The runtime must
+      // still release its lock and persist replacement history when a
+      // transient event sink/database failure occurs.
+    }
+  }
+
+  private emitBestEffortEvent(type: string, payload: Record<string, unknown>): void {
+    try {
+      this.deps.emitEvent(type, payload);
+    } catch {
+      // Telemetry and timeline narration must never turn a committed context
+      // replacement into a reported recovery failure.
+    }
+  }
+
+  private beginCompaction(opts: {
+    trigger: ContextCompactionTrigger;
+    phase: ContextCompactionPhase;
+    reason: string;
+    inputTokens?: number;
+    inputMessageCount?: number;
+    thresholdRatio?: number;
+    targetRatio?: number;
+    contextWindowTokens?: number;
+    extra?: Record<string, unknown>;
+  }): {
+    compactionId: string;
+    attemptId: string;
+    projection: ReturnType<SessionRuntime["captureHistoryProjection"]>;
+  } | null {
+    if (this.activeCompactionId) return null;
+
+    const projection = this.captureHistoryProjection();
+    const compactionId = randomUUID();
+    const attemptId = randomUUID();
+    this.activeCompactionId = compactionId;
+    this.activeCompactionAttemptId = attemptId;
+    this.lastCompactionId = compactionId;
+    this.lastCompactionAttemptId = attemptId;
+    this.lastCompactionStatus = "started";
+    this.lastCompactionTrigger = opts.trigger;
+    this.lastCompactionPhase = opts.phase;
+    this.lastCompactionInputGeneration = projection.generation;
+    const startPayload = {
+      compactionId,
+      attemptId,
+      status: "started",
+      trigger: opts.trigger,
+      phase: opts.phase,
+      reason: opts.reason,
+      historyGenerationBefore: projection.generation,
+      ...(typeof opts.inputTokens === "number" ? { inputTokens: opts.inputTokens } : {}),
+      ...(typeof opts.inputMessageCount === "number"
+        ? { inputMessageCount: opts.inputMessageCount }
+        : {}),
+      ...(typeof opts.thresholdRatio === "number" ? { thresholdRatio: opts.thresholdRatio } : {}),
+      ...(typeof opts.targetRatio === "number" ? { targetRatio: opts.targetRatio } : {}),
+      ...(typeof opts.contextWindowTokens === "number"
+        ? { contextWindowTokens: opts.contextWindowTokens }
+        : {}),
+      accountingSource: "estimate",
+      ...(opts.extra || {}),
+    } satisfies ContextCompactionEventPayload;
+    // Timeline persistence is best-effort for compaction. A transient event
+    // sink or database failure must not skip the actual history replacement
+    // or send an otherwise recoverable turn with its oversized history.
+    this.emitCompactionEvent("context_compaction_started", startPayload);
+    // Persist the in-flight marker as a best-effort checkpoint. Event replay
+    // also reconciles unmatched starts, but this closes the window where the
+    // process dies before the event stream flushes the lifecycle start.
+    this.saveSnapshot();
+    return { compactionId, attemptId, projection };
+  }
+
+  /**
+   * Start a compaction owned by a caller that builds a replacement history
+   * outside the normal turn-preparation method (for example explicit Chat).
+   * The runtime owns the durable lifecycle marker so a restart can recover it.
+   */
+  beginCompactionLifecycle(
+    opts: SessionRuntimeCompactionLifecycleOptions,
+  ): SessionRuntimeCompactionLifecycleHandle | null {
+    const session = this.beginCompaction(opts);
+    if (!session) return null;
+    return {
+      compactionId: session.compactionId,
+      attemptId: session.attemptId,
+      trigger: opts.trigger,
+      phase: opts.phase,
+    };
+  }
+
+  completeCompactionLifecycle(
+    handle: SessionRuntimeCompactionLifecycleHandle,
+    opts: Omit<
+      Parameters<SessionRuntime["completeCompaction"]>[0],
+      "compactionId" | "trigger" | "phase"
+    > = {},
+  ): boolean {
+    if (this.activeCompactionId !== handle.compactionId) return false;
+    this.completeCompaction({
+      ...opts,
+      compactionId: handle.compactionId,
+      trigger: handle.trigger,
+      phase: handle.phase,
+    });
+    return this.lastCompactionStatus === "completed";
+  }
+
+  failCompactionLifecycle(
+    handle: SessionRuntimeCompactionLifecycleHandle,
+    opts: Omit<
+      Parameters<SessionRuntime["failCompaction"]>[0],
+      "compactionId" | "trigger" | "phase"
+    >,
+  ): void {
+    if (this.activeCompactionId !== handle.compactionId) return;
+    this.failCompaction({
+      ...opts,
+      compactionId: handle.compactionId,
+      trigger: handle.trigger,
+      phase: handle.phase,
+    });
+  }
+
+  private completeCompaction(opts: {
+    compactionId: string;
+    trigger: ContextCompactionTrigger;
+    phase: ContextCompactionPhase;
+    reason?: string;
+    inputTokens?: number;
+    replacementTokens?: number;
+    inputMessageCount?: number;
+    replacementMessageCount?: number;
+    removedMessageCount?: number;
+    removedApproxTokens?: number;
+    thresholdRatio?: number;
+    targetRatio?: number;
+    summaryPreview?: string;
+    fallbackUsed?: boolean;
+    extra?: Record<string, unknown>;
+  }): void {
+    const attemptId = this.activeCompactionAttemptId ?? this.lastCompactionAttemptId;
+    this.lastCompactionId = opts.compactionId;
+    this.lastCompactionAttemptId = attemptId ?? null;
+    this.lastCompactionStatus = "completed";
+    this.lastCompactionInstalledGeneration = this.historyGeneration;
+    this.activeCompactionId = null;
+    this.activeCompactionAttemptId = null;
+    const completionPayload = {
+      compactionId: opts.compactionId,
+      ...(attemptId ? { attemptId } : {}),
+      status: "completed",
+      trigger: opts.trigger,
+      phase: opts.phase,
+      reason: opts.reason,
+      historyGenerationBefore: this.lastCompactionInputGeneration,
+      historyGenerationAfter: this.historyGeneration,
+      ...(typeof opts.inputTokens === "number" ? { inputTokens: opts.inputTokens } : {}),
+      ...(typeof opts.replacementTokens === "number"
+        ? { replacementTokens: opts.replacementTokens }
+        : {}),
+      ...(typeof opts.inputMessageCount === "number"
+        ? { inputMessageCount: opts.inputMessageCount }
+        : {}),
+      ...(typeof opts.replacementMessageCount === "number"
+        ? { replacementMessageCount: opts.replacementMessageCount }
+        : {}),
+      ...(typeof opts.removedMessageCount === "number"
+        ? { removedMessageCount: opts.removedMessageCount }
+        : {}),
+      ...(typeof opts.removedApproxTokens === "number"
+        ? { removedApproxTokens: opts.removedApproxTokens }
+        : {}),
+      ...(typeof opts.thresholdRatio === "number" ? { thresholdRatio: opts.thresholdRatio } : {}),
+      ...(typeof opts.targetRatio === "number" ? { targetRatio: opts.targetRatio } : {}),
+      ...(opts.summaryPreview
+        ? {
+            summaryPreview: compactPreview(
+              InputSanitizer.sanitizeMemoryContent(opts.summaryPreview),
+            ),
+          }
+        : {}),
+      ...(opts.fallbackUsed !== undefined ? { fallbackUsed: opts.fallbackUsed } : {}),
+      accountingSource: "estimate",
+      ...(opts.extra || {}),
+    } satisfies ContextCompactionEventPayload;
+    const snapshotSaved = this.saveSnapshot();
+    if (snapshotSaved) {
+      this.emitCompactionEvent("context_compaction_completed", completionPayload);
+      return;
+    }
+
+    // Do not publish completion before the replacement history crosses the
+    // snapshot durability boundary. If the first snapshot attempt fails,
+    // retain the in-memory replacement but make the lifecycle retryable and
+    // try to persist that state once more.
+    this.lastCompactionStatus = "failed";
+    this.emitCompactionEvent("context_compaction_failed", {
+      ...completionPayload,
+      status: "failed",
+      reason: "compaction_snapshot_persistence_failed",
+      retryable: true,
+      failureStage: "snapshot",
+    });
+    this.saveSnapshot();
+  }
+
+  private failCompaction(opts: {
+    compactionId: string;
+    trigger: ContextCompactionTrigger;
+    phase: ContextCompactionPhase;
+    reason: string;
+    retryable?: boolean;
+    failureStage?: string;
+    errorCode?: string;
+    inputTokens?: number;
+    extra?: Record<string, unknown>;
+  }): void {
+    const attemptId = this.activeCompactionAttemptId ?? this.lastCompactionAttemptId;
+    this.lastCompactionId = opts.compactionId;
+    this.lastCompactionAttemptId = attemptId ?? null;
+    this.lastCompactionStatus = "failed";
+    this.activeCompactionId = null;
+    this.activeCompactionAttemptId = null;
+    const failurePayload = {
+      compactionId: opts.compactionId,
+      ...(attemptId ? { attemptId } : {}),
+      status: "failed",
+      trigger: opts.trigger,
+      phase: opts.phase,
+      reason: opts.reason,
+      historyGenerationBefore: this.lastCompactionInputGeneration,
+      ...(typeof opts.inputTokens === "number" ? { inputTokens: opts.inputTokens } : {}),
+      ...(opts.retryable !== undefined ? { retryable: opts.retryable } : {}),
+      ...(opts.failureStage ? { failureStage: opts.failureStage } : {}),
+      ...(opts.errorCode ? { errorCode: opts.errorCode } : {}),
+      accountingSource: "estimate",
+      ...(opts.extra || {}),
+    } satisfies ContextCompactionEventPayload;
+    this.saveSnapshot();
+    this.emitCompactionEvent("context_compaction_failed", failurePayload);
+  }
+
   updateConversationHistory(messages: LLMMessage[]): void {
     const sanitized = this.deps.sanitizeConversationHistory(messages);
     this.state.transcript.conversationHistory = sanitized;
+    this.historyGeneration += 1;
     try {
       DurableContextService.recordHistory({
         workspaceId: this.deps.getWorkspace().id,
@@ -1005,6 +1473,11 @@ export class SessionRuntime {
     integrationMentions?: TaskFollowUpInput["integrationMentions"],
     agentConfigOverride?: TaskFollowUpInput["agentConfigOverride"],
     interactionMode?: TaskFollowUpInput["interactionMode"],
+    messageSource?: TaskFollowUpInput["messageSource"],
+    messageId?: TaskFollowUpInput["messageId"],
+    senderTaskId?: TaskFollowUpInput["senderTaskId"],
+    senderLabel?: TaskFollowUpInput["senderLabel"],
+    deliveryMode?: TaskFollowUpInput["deliveryMode"],
   ): void {
     this.state.queues.pendingFollowUps.push({
       message,
@@ -1013,11 +1486,54 @@ export class SessionRuntime {
       ...(integrationMentions !== undefined ? { integrationMentions } : {}),
       ...(agentConfigOverride !== undefined ? { agentConfigOverride } : {}),
       ...(interactionMode !== undefined ? { interactionMode } : {}),
+      ...(deliveryMode !== undefined ? { deliveryMode } : {}),
+      ...(messageSource !== undefined ? { messageSource } : {}),
+      ...(messageId !== undefined ? { messageId } : {}),
+      ...(senderTaskId !== undefined ? { senderTaskId } : {}),
+      ...(senderLabel !== undefined ? { senderLabel } : {}),
     });
+    this.saveSnapshot();
   }
 
   get hasPendingFollowUps(): boolean {
     return this.state.queues.pendingFollowUps.length > 0;
+  }
+
+  hasPendingFollowUpMessage(messageId: string): boolean {
+    const normalized = typeof messageId === "string" ? messageId.trim() : "";
+    return (
+      normalized.length > 0 &&
+      this.state.queues.pendingFollowUps.some(
+        (followUp) =>
+          followUp.deliveryMode === "message" && followUp.messageId?.trim() === normalized,
+      )
+    );
+  }
+
+  private getConsumedFollowUpMessageIds(): Set<string> {
+    if (!(this.state.queues.consumedFollowUpMessageIds instanceof Set)) {
+      this.state.queues.consumedFollowUpMessageIds = new Set<string>();
+    }
+    return this.state.queues.consumedFollowUpMessageIds;
+  }
+
+  markFollowUpMessageConsumed(messageId: string): void {
+    const normalized = typeof messageId === "string" ? messageId.trim() : "";
+    if (normalized) this.getConsumedFollowUpMessageIds().add(normalized);
+  }
+
+  unmarkFollowUpMessageConsumed(messageId: string): void {
+    const normalized = typeof messageId === "string" ? messageId.trim() : "";
+    if (normalized) this.getConsumedFollowUpMessageIds().delete(normalized);
+  }
+
+  isFollowUpMessageConsumed(messageId: string): boolean {
+    const normalized = typeof messageId === "string" ? messageId.trim() : "";
+    return normalized.length > 0 && this.getConsumedFollowUpMessageIds().has(normalized);
+  }
+
+  getConsumedFollowUpMessageIdsSnapshot(): string[] {
+    return Array.from(this.getConsumedFollowUpMessageIds());
   }
 
   setStepFeedback(
@@ -1025,7 +1541,8 @@ export class SessionRuntime {
     action: "retry" | "skip" | "stop" | "drift",
     message?: string,
   ): void {
-    this.state.queues.stepFeedbackSignal = { stepId, action, message };
+    const feedbackId = randomUUID();
+    this.state.queues.stepFeedbackSignal = { feedbackId, stepId, action, message };
     if (action === "drift" && message) {
       const prefix =
         stepId === "current" ? "[USER FEEDBACK]" : `[STEP FEEDBACK - Step "${stepId}"]`;
@@ -1033,19 +1550,71 @@ export class SessionRuntime {
         message: `${prefix}: ${message}`,
       });
     }
+
+    // The daemon records the legacy timeline event before routing the signal
+    // here. Emit a second known step_feedback event with the stable id so the
+    // bounded resume query can reconstruct feedback even when the next
+    // conversation snapshot never ran. (The resume query already retains this
+    // event family for the legacy feedback path.)
+    try {
+      this.deps.emitEvent("step_feedback", {
+        feedbackId,
+        stepId,
+        action,
+        ...(message !== undefined ? { message } : {}),
+        feedbackSignature: this.getStepFeedbackSignature(stepId, action, message),
+      });
+    } catch {
+      // The snapshot below remains a best-effort fallback if event persistence
+      // is unavailable for a lightweight host or a transient database error.
+    }
+    this.saveSnapshot();
   }
 
   consumeStepFeedback(currentStepId: string): SessionRuntimeState["queues"]["stepFeedbackSignal"] {
     if (!this.state.queues.stepFeedbackSignal) return null;
     if (this.state.queues.stepFeedbackSignal.stepId !== currentStepId) return null;
     const signal = this.state.queues.stepFeedbackSignal;
+
+    // Persist the consumed marker before clearing the in-memory signal. If the
+    // process dies after the action is observed but before the next snapshot,
+    // replay can still suppress the already-applied feedback. Reuse the
+    // retained step_feedback event family so this marker survives the bounded
+    // daemon resume query without widening daemon-owned allowlists.
+    try {
+      this.deps.emitEvent("step_feedback", {
+        ...(signal.feedbackId ? { feedbackId: signal.feedbackId } : {}),
+        stepId: signal.stepId,
+        action: signal.action,
+        consumed: true,
+        feedbackSignature: this.getStepFeedbackSignature(
+          signal.stepId,
+          signal.action,
+          signal.message,
+        ),
+        consumedAt: Date.now(),
+      });
+    } catch {
+      // Do not consume a signal that could not be durably acknowledged; the
+      // next iteration can retry it instead of silently dropping user input.
+      return null;
+    }
     this.state.queues.stepFeedbackSignal = null;
+    this.saveSnapshot();
     return signal;
   }
 
+  private getStepFeedbackSignature(
+    stepId: string,
+    action: "retry" | "skip" | "stop" | "drift",
+    message?: string,
+  ): string {
+    return `${stepId}\u0000${action}\u0000${message || ""}`;
+  }
+
   drainPendingFollowUp(): TaskFollowUpInput | undefined {
-    // Hold a queued mode change until the current turn reaches its boundary.
-    // Same-mode follow-ups remain injectable while the executor is running.
+    // Only a change in user preference requires a new turn. Keep ordinary
+    // same-mode steering available, without letting later messages jump the queue.
     const pending = this.state.queues.pendingFollowUps[0];
     const requested = pending?.interactionMode;
     const active = getInteractionModeSelection(this.deps.getTask().agentConfig);
@@ -1053,11 +1622,19 @@ export class SessionRuntime {
       requested &&
       (requested.mode !== active?.mode ||
         (requested.mode === "smart" &&
-          active?.mode === "smart" &&
+          active.mode === "smart" &&
           requested.executionOverride !== active.executionOverride))
-    ) {
+    )
       return undefined;
-    }
+    // Preserve the complete queue-only payload until the executor's acceptance
+    // snapshot commits. The acceptance helper removes this exact message ID;
+    // pre-acceptance failures can therefore retry images and quoted context.
+    // Trim to match the executor's consume path, which requires
+    // `messageId.trim().length > 0` before it will accept and remove the item.
+    // An untrimmed truthiness test here made a whitespace-only id peek forever
+    // without ever shifting: the executor could not consume it, and the drain
+    // loop returned the same object on every pass.
+    if (pending?.deliveryMode === "message" && pending.messageId?.trim()) return pending;
     return this.state.queues.pendingFollowUps.shift();
   }
 
@@ -1065,6 +1642,43 @@ export class SessionRuntime {
     const drained = [...this.state.queues.pendingFollowUps];
     this.state.queues.pendingFollowUps = [];
     return drained;
+  }
+
+  takeNextFollowUpAtTurnBoundary(): TaskFollowUpInput | undefined {
+    const followUp = this.state.queues.pendingFollowUps[0];
+    // Queue-only messages carry a durable receipt and may include payload data
+    // (for example image bytes) that the compact receipt event intentionally
+    // does not store. Keep the full item in the runtime snapshot until the
+    // executor has incorporated it and removes it at the acceptance boundary.
+    // Legacy/non-receipted follow-ups retain the old drain semantics.
+    if (followUp?.deliveryMode === "message" && followUp.messageId) return followUp;
+    const drained = this.state.queues.pendingFollowUps.shift();
+    if (drained) this.saveSnapshot();
+    return drained;
+  }
+
+  removeFollowUpAtTurnBoundary(messageId: string): boolean {
+    const normalized = typeof messageId === "string" ? messageId.trim() : "";
+    if (!normalized) return false;
+    const index = this.state.queues.pendingFollowUps.findIndex(
+      (followUp) =>
+        followUp.deliveryMode === "message" && followUp.messageId?.trim() === normalized,
+    );
+    if (index < 0) return false;
+    this.state.queues.pendingFollowUps.splice(index, 1);
+    return true;
+  }
+
+  requeueFollowUpAtTurnBoundary(followUp: TaskFollowUpInput): boolean {
+    const messageId = typeof followUp.messageId === "string" ? followUp.messageId.trim() : "";
+    const alreadyPending = messageId
+      ? this.state.queues.pendingFollowUps.some(
+          (pending) =>
+            pending.deliveryMode === "message" && pending.messageId?.trim() === messageId,
+        )
+      : this.state.queues.pendingFollowUps.includes(followUp);
+    if (!alreadyPending) this.state.queues.pendingFollowUps.unshift(followUp);
+    return this.saveSnapshot();
   }
 
   getPendingSkillParameterCollection(): PendingSkillParameterCollection | null {
@@ -1285,6 +1899,71 @@ export class SessionRuntime {
     });
   }
 
+  private getHardContextBudget(
+    messages: LLMMessage[],
+    systemPromptTokens: number,
+  ): { availableTokens: number; currentTokens: number } | null {
+    const contextManager = this.deps.getContextManager() as Any;
+    let availableTokens: unknown;
+    try {
+      if (typeof contextManager?.getContextUtilization === "function") {
+        availableTokens = contextManager.getContextUtilization(
+          messages,
+          systemPromptTokens,
+        )?.availableTokens;
+      }
+      if (
+        (typeof availableTokens !== "number" || !Number.isFinite(availableTokens)) &&
+        typeof contextManager?.getAvailableTokens === "function"
+      ) {
+        availableTokens = contextManager.getAvailableTokens(systemPromptTokens);
+      }
+    } catch {
+      return null;
+    }
+
+    if (typeof availableTokens !== "number" || !Number.isFinite(availableTokens)) return null;
+    return {
+      availableTokens: Math.max(0, Math.floor(availableTokens)),
+      currentTokens: estimateTotalTokens(messages),
+    };
+  }
+
+  private createContextCapacityExhaustedError(opts: {
+    phase: "step" | "follow_up";
+    contextLabel: string;
+    availableTokens: number;
+    tokensBefore: number;
+    tokensAfter: number;
+  }): ContextCapacityExhaustedError {
+    return new ContextCapacityExhaustedError(opts);
+  }
+
+  private emitContextCapacityRecoveryExhausted(
+    error: ContextCapacityExhaustedError,
+    opts: {
+      phase: "step" | "follow_up";
+      contextLabel: string;
+      stepId?: string;
+      attempt?: number;
+      maxAttempts?: number;
+    },
+  ): void {
+    this.emitBestEffortEvent("context_capacity_recovery_exhausted", {
+      phase: opts.phase,
+      contextLabel: opts.contextLabel,
+      ...(opts.stepId ? { stepId: opts.stepId } : {}),
+      ...(typeof opts.attempt === "number" ? { attempt: opts.attempt } : {}),
+      ...(typeof opts.maxAttempts === "number" ? { maxAttempts: opts.maxAttempts } : {}),
+      reason: error.reason,
+      errorCode: error.code,
+      availableTokens: error.availableTokens,
+      tokensBefore: error.tokensBefore,
+      tokensAfter: error.tokensAfter,
+      message: error.message,
+    });
+  }
+
   async prepareMessagesForTurnIteration(opts: {
     messages: LLMMessage[];
     phase: "step" | "follow_up";
@@ -1311,6 +1990,15 @@ export class SessionRuntime {
       lastSharedContextKey,
       lastSharedContextBlock,
     } = opts;
+
+    // Whether `messages` IS the session transcript, or a turn-local array that
+    // merely starts from it. Plan steps build their own array
+    // (`[{ role: "user", content: stepUserContent }]`), so installing a
+    // compaction of it into the transcript would replace the whole
+    // conversation with those few messages — and then alias the caller's
+    // `messages` to the live history, so later pushes mutate it directly.
+    // recoverFromContextCapacityOverflow computes the same fact.
+    const installsInHistory = this.state.transcript.conversationHistory === opts.messages;
 
     this.deps.maybeInjectTurnBudgetSoftLanding(
       messages,
@@ -1395,95 +2083,305 @@ export class SessionRuntime {
     });
 
     let didProactiveCompact = false;
+    let compactionSession: ReturnType<SessionRuntime["beginCompaction"]> = null;
+    let compactionChanged = false;
+    let compactionSummaryBlock: string | undefined;
+    let compactionSummaryRemovedMessages: LLMMessage[] = [];
+    let compactionSummaryProactive = false;
+    let compactionRemovedCount = 0;
+    let compactionOriginalTokens = 0;
+    let jevCompactionRemovedMessages: LLMMessage[] = [];
     const contextManager = this.deps.getContextManager();
+    const contextTokensBeforeCompaction = estimateTotalTokens(messages);
     const ctxUtil = contextManager.getContextUtilization(messages, opts.systemPromptTokens);
-    if (ctxUtil.utilization >= 0.85) {
-      const proactiveResult = contextManager.proactiveCompactWithMeta(
-        messages,
-        opts.systemPromptTokens,
-        0.7,
-      );
-      messages = proactiveResult.messages;
-
-      if (
-        proactiveResult.meta.removedMessages.didRemove &&
-        proactiveResult.meta.removedMessages.messages.length > 0
-      ) {
-        didProactiveCompact = true;
-        const postCompactTokens = estimateTotalTokens(messages);
-        const slack = Math.max(0, ctxUtil.availableTokens - postCompactTokens);
-        const summaryBudget = Math.min(4000, Math.max(800, Math.floor(slack * 0.6)));
-        const summaryResult = await this.installCompactionSummary({
-          messages,
-          removedMessages: proactiveResult.meta.removedMessages.messages,
-          systemPromptTokens: opts.systemPromptTokens,
-          maxOutputTokens: summaryBudget,
-          availableTokens: ctxUtil.availableTokens,
-          contextLabel: opts.contextLabel,
-          proactive: true,
-          allowMemoryInjection: opts.allowMemoryInjection,
-        });
-        messages = summaryResult.messages;
-
-        if (summaryResult.summaryBlock) {
-          const summaryText = this.deps.extractPinnedBlockContent(
-            summaryResult.summaryBlock,
-            "PINNED_COMPACTION_SUMMARY",
-            "PINNED_COMPACTION_SUMMARY_CLOSE",
-          );
-          this.deps.emitEvent("context_summarized", {
-            summary: summaryText,
-            removedCount: proactiveResult.meta.removedMessages.count,
-            tokensBefore: proactiveResult.meta.originalTokens,
-            tokensAfter: estimateTotalTokens(messages),
-            proactive: true,
+    const compactionPolicy = resolveContextCompactionPolicy({
+      availableTokens: ctxUtil.availableTokens,
+      currentTokens:
+        typeof ctxUtil.currentTokens === "number"
+          ? ctxUtil.currentTokens
+          : contextTokensBeforeCompaction,
+      triggerRatio: DEFAULT_CONTEXT_COMPACTION_TRIGGER_RATIO,
+      targetRatio: DEFAULT_CONTEXT_COMPACTION_TARGET_RATIO,
+    });
+    if (compactionPolicy.shouldCompact) {
+      compactionSession = this.beginCompaction({
+        trigger: "automatic",
+        phase: opts.phase === "follow_up" ? "mid_turn" : "pre_turn",
+        reason:
+          (typeof ctxUtil.currentTokens === "number"
+            ? ctxUtil.currentTokens
+            : contextTokensBeforeCompaction) > ctxUtil.availableTokens
+            ? "context_capacity"
+            : "threshold",
+        inputTokens: contextTokensBeforeCompaction,
+        thresholdRatio: compactionPolicy.triggerRatio,
+        targetRatio: compactionPolicy.targetRatio,
+        contextWindowTokens: ctxUtil.availableTokens,
+        extra: { contextLabel: opts.contextLabel },
+      });
+    }
+    if (compactionSession) {
+      try {
+        const messagesBeforeJevCompaction = messages;
+        if (this.deps.evaluateJevContextCompaction) {
+          const jevResult = await this.deps.evaluateJevContextCompaction({
+            messages: messagesBeforeJevCompaction,
+            availableTokens: ctxUtil.availableTokens,
+            targetTokens: Math.floor(ctxUtil.availableTokens * compactionPolicy.targetRatio),
+            taskPrompt: this.deps.getTask().rawPrompt || this.deps.getTask().prompt,
+            contextLabel: opts.contextLabel,
           });
+          if (jevResult.status === "applied" && jevResult.droppedIndices.length > 0) {
+            const dropped = new Set(jevResult.droppedIndices);
+            jevCompactionRemovedMessages = messagesBeforeJevCompaction.filter((_message, index) =>
+              dropped.has(index),
+            );
+            messages = jevResult.messages;
+            this.emitBestEffortEvent("jev_context_compaction", {
+              compactionId: compactionSession.compactionId,
+              status: jevResult.status,
+              reason: jevResult.reason,
+              model: jevResult.model,
+              candidateCount: jevResult.candidates.length,
+              droppedIndices: jevResult.droppedIndices.slice(0, 32),
+              droppedCount: jevCompactionRemovedMessages.length,
+              tokensBefore: estimateTotalTokens(messagesBeforeJevCompaction),
+              tokensAfter: estimateTotalTokens(messages),
+              reversible: true,
+              contextLabel: opts.contextLabel,
+            });
+          } else if (jevResult.status !== "skipped") {
+            this.emitBestEffortEvent("jev_context_compaction", {
+              compactionId: compactionSession.compactionId,
+              status: jevResult.status,
+              reason: jevResult.reason,
+              model: jevResult.model,
+              candidateCount: jevResult.candidates.length,
+              droppedCount: 0,
+              reversible: true,
+              contextLabel: opts.contextLabel,
+            });
+          }
         }
+        const proactiveResult = contextManager.proactiveCompactWithMeta(
+          messages,
+          opts.systemPromptTokens,
+          compactionPolicy.targetRatio,
+        );
+        messages = proactiveResult.messages;
+        compactionOriginalTokens = proactiveResult.meta.originalTokens;
+        const proactiveRemovedMessages = proactiveResult.meta.removedMessages.messages;
+        const allProactiveRemovedMessages = [
+          ...jevCompactionRemovedMessages,
+          ...proactiveRemovedMessages,
+        ];
+        compactionRemovedCount = allProactiveRemovedMessages.length;
+        compactionChanged =
+          jevCompactionRemovedMessages.length > 0 ||
+          proactiveResult.meta.removedMessages.didRemove ||
+          proactiveResult.meta.truncatedToolResults.didTruncate;
+        if (jevCompactionRemovedMessages.length > 0) {
+          compactionOriginalTokens = contextTokensBeforeCompaction;
+        }
+
+        if (allProactiveRemovedMessages.length > 0) {
+          didProactiveCompact = true;
+          const postCompactTokens = estimateTotalTokens(messages);
+          const slack = Math.max(0, ctxUtil.availableTokens - postCompactTokens);
+          const summaryBudget = Math.min(6144, Math.max(800, Math.floor(slack * 0.6)));
+          const summaryResult = await this.installCompactionSummary({
+            messages,
+            removedMessages: allProactiveRemovedMessages,
+            systemPromptTokens: opts.systemPromptTokens,
+            maxOutputTokens: summaryBudget,
+            availableTokens: ctxUtil.availableTokens,
+            contextLabel: opts.contextLabel,
+            proactive: true,
+            allowMemoryInjection: opts.allowMemoryInjection,
+          });
+          messages = summaryResult.messages;
+          compactionSummaryBlock = summaryResult.summaryBlock;
+          if (summaryResult.summaryBlock) {
+            compactionSummaryRemovedMessages = allProactiveRemovedMessages;
+            compactionSummaryProactive = true;
+          }
+
+          if (summaryResult.summaryBlock) {
+            const summaryText = this.deps.extractPinnedBlockContent(
+              summaryResult.summaryBlock,
+              "PINNED_COMPACTION_SUMMARY",
+              "PINNED_COMPACTION_SUMMARY_CLOSE",
+            );
+            this.emitBestEffortEvent("context_summarized", {
+              compactionId: compactionSession.compactionId,
+              summaryPreview: compactPreview(InputSanitizer.sanitizeMemoryContent(summaryText)),
+              summaryRef: `compaction:${compactionSession.compactionId}`,
+              removedCount: allProactiveRemovedMessages.length,
+              tokensBefore: proactiveResult.meta.originalTokens,
+              tokensAfter: estimateTotalTokens(messages),
+              proactive: true,
+            });
+          }
+        }
+        if (!didProactiveCompact && compactionSession) {
+          const compaction = contextManager.compactMessagesWithMeta(
+            messages,
+            opts.systemPromptTokens,
+          );
+          messages = compaction.messages;
+          compactionOriginalTokens = compaction.meta.originalTokens;
+          compactionRemovedCount = compaction.meta.removedMessages.count;
+          compactionChanged =
+            compaction.meta.removedMessages.didRemove ||
+            compaction.meta.truncatedToolResults.didTruncate;
+
+          if (
+            compaction.meta.removedMessages.didRemove &&
+            compaction.meta.removedMessages.messages.length > 0
+          ) {
+            const availableTokens = contextManager.getAvailableTokens(opts.systemPromptTokens);
+            const tokensNow = estimateTotalTokens(messages);
+            const slack = Math.max(0, availableTokens - tokensNow);
+            const summaryBudget = Math.min(6144, Math.max(800, Math.floor(slack * 0.6)));
+            const summaryResult = await this.installCompactionSummary({
+              messages,
+              removedMessages: compaction.meta.removedMessages.messages,
+              systemPromptTokens: opts.systemPromptTokens,
+              maxOutputTokens: summaryBudget,
+              availableTokens,
+              contextLabel: opts.contextLabel,
+              proactive: false,
+              allowMemoryInjection: opts.allowMemoryInjection,
+            });
+            messages = summaryResult.messages;
+            compactionSummaryBlock = summaryResult.summaryBlock;
+            if (summaryResult.summaryBlock) {
+              compactionSummaryRemovedMessages = compaction.meta.removedMessages.messages;
+              compactionSummaryProactive = false;
+            }
+
+            if (summaryResult.summaryBlock) {
+              const summaryText = this.deps.extractPinnedBlockContent(
+                summaryResult.summaryBlock,
+                "PINNED_COMPACTION_SUMMARY",
+                "PINNED_COMPACTION_SUMMARY_CLOSE",
+              );
+              this.emitBestEffortEvent("context_summarized", {
+                compactionId: compactionSession.compactionId,
+                summaryPreview: compactPreview(InputSanitizer.sanitizeMemoryContent(summaryText)),
+                summaryRef: `compaction:${compactionSession.compactionId}`,
+                removedCount: compaction.meta.removedMessages.count,
+                tokensBefore: compaction.meta.originalTokens,
+                tokensAfter: compaction.meta.removedMessages.tokensAfter,
+              });
+            }
+          }
+        }
+      } catch (compactionError: Any) {
+        this.failCompaction({
+          compactionId: compactionSession.compactionId,
+          trigger: "automatic",
+          phase: opts.phase === "follow_up" ? "mid_turn" : "pre_turn",
+          reason: compactionError?.message || String(compactionError),
+          retryable: true,
+          failureStage: "summarize",
+          inputTokens: contextTokensBeforeCompaction,
+          extra: { contextLabel: opts.contextLabel },
+        });
+        if (installsInHistory) messages = this.state.transcript.conversationHistory;
+        compactionSession = null;
       }
     }
 
-    if (!didProactiveCompact) {
-      const compaction = contextManager.compactMessagesWithMeta(messages, opts.systemPromptTokens);
-      messages = compaction.messages;
-
-      if (
-        compaction.meta.removedMessages.didRemove &&
-        compaction.meta.removedMessages.messages.length > 0
-      ) {
-        const availableTokens = contextManager.getAvailableTokens(opts.systemPromptTokens);
-        const tokensNow = estimateTotalTokens(messages);
-        const slack = Math.max(0, availableTokens - tokensNow);
-        const summaryBudget = Math.min(4000, Math.max(800, Math.floor(slack * 0.6)));
-        const summaryResult = await this.installCompactionSummary({
-          messages,
-          removedMessages: compaction.meta.removedMessages.messages,
-          systemPromptTokens: opts.systemPromptTokens,
-          maxOutputTokens: summaryBudget,
-          availableTokens,
-          contextLabel: opts.contextLabel,
-          proactive: false,
-          allowMemoryInjection: opts.allowMemoryInjection,
+    if (compactionSession && compactionChanged) {
+      if (installsInHistory && !this.isHistoryProjectionCurrent(compactionSession.projection)) {
+        this.failCompaction({
+          compactionId: compactionSession.compactionId,
+          trigger: "automatic",
+          phase: opts.phase === "follow_up" ? "mid_turn" : "pre_turn",
+          reason: "history_changed_while_compacting",
+          retryable: true,
+          failureStage: "install",
+          inputTokens: contextTokensBeforeCompaction,
+          extra: { contextLabel: opts.contextLabel },
         });
-        messages = summaryResult.messages;
-
-        if (summaryResult.summaryBlock) {
-          const summaryText = this.deps.extractPinnedBlockContent(
-            summaryResult.summaryBlock,
-            "PINNED_COMPACTION_SUMMARY",
-            "PINNED_COMPACTION_SUMMARY_CLOSE",
-          );
-          this.deps.emitEvent("context_summarized", {
-            summary: summaryText,
-            removedCount: compaction.meta.removedMessages.count,
-            tokensBefore: compaction.meta.originalTokens,
-            tokensAfter: compaction.meta.removedMessages.tokensAfter,
+        messages = this.state.transcript.conversationHistory;
+      } else {
+        // Only write back when `messages` is the transcript. A turn-local
+        // array (plan steps) keeps its own compacted copy.
+        if (installsInHistory) {
+          this.updateConversationHistory(messages);
+          messages = this.state.transcript.conversationHistory;
+        }
+        if (compactionSummaryBlock && compactionSummaryRemovedMessages.length > 0) {
+          await this.persistCompactionSummaryMemory({
+            removedMessages: compactionSummaryRemovedMessages,
+            summaryBlock: compactionSummaryBlock,
+            contextLabel: opts.contextLabel,
+            proactive: compactionSummaryProactive,
+            allowMemoryInjection: opts.allowMemoryInjection,
           });
         }
+        const summaryText = compactionSummaryBlock
+          ? this.deps.extractPinnedBlockContent(
+              compactionSummaryBlock,
+              "PINNED_COMPACTION_SUMMARY",
+              "PINNED_COMPACTION_SUMMARY_CLOSE",
+            )
+          : undefined;
+        this.completeCompaction({
+          compactionId: compactionSession.compactionId,
+          trigger: "automatic",
+          phase: opts.phase === "follow_up" ? "mid_turn" : "pre_turn",
+          reason: "context_replacement_installed",
+          inputTokens: contextTokensBeforeCompaction,
+          replacementTokens: estimateTotalTokens(messages),
+          inputMessageCount: compactionSession.projection.length,
+          replacementMessageCount: messages.length,
+          removedMessageCount: compactionRemovedCount,
+          removedApproxTokens: Math.max(
+            0,
+            compactionOriginalTokens - estimateTotalTokens(messages),
+          ),
+          thresholdRatio: compactionPolicy.triggerRatio,
+          targetRatio: compactionPolicy.targetRatio,
+          summaryPreview: summaryText,
+          fallbackUsed: !compactionSummaryBlock,
+          extra: { contextLabel: opts.contextLabel },
+        });
       }
+    }
+    if (compactionSession && !compactionChanged) {
+      this.failCompaction({
+        compactionId: compactionSession.compactionId,
+        trigger: "automatic",
+        phase: opts.phase === "follow_up" ? "mid_turn" : "pre_turn",
+        reason: "compaction_produced_no_replacement",
+        retryable: false,
+        failureStage: "compact",
+        inputTokens: contextTokensBeforeCompaction,
+        extra: { contextLabel: opts.contextLabel },
+      });
     }
 
     this.deps.pruneStaleToolErrors(messages);
     this.deps.consolidateConsecutiveUserMessages(messages);
+
+    const hardBudget = this.getHardContextBudget(messages, opts.systemPromptTokens);
+    if (hardBudget && hardBudget.currentTokens > hardBudget.availableTokens) {
+      const error = this.createContextCapacityExhaustedError({
+        phase: opts.phase,
+        contextLabel: opts.contextLabel,
+        availableTokens: hardBudget.availableTokens,
+        tokensBefore: contextTokensBeforeCompaction,
+        tokensAfter: hardBudget.currentTokens,
+      });
+      this.emitContextCapacityRecoveryExhausted(error, {
+        phase: opts.phase,
+        contextLabel: opts.contextLabel,
+      });
+      throw error;
+    }
 
     return {
       messages,
@@ -1516,19 +2414,12 @@ export class SessionRuntime {
     const removedMessages = (opts.removedMessages || []).filter(Boolean);
     if (removedMessages.length === 0) return { messages: opts.messages };
 
-    // Even when a test/minimal runtime does not provide a summary builder, keep
-    // the source transcript durable so a later restart can reconstruct it.
-    DurableContextService.recordHistory({
-      workspaceId: this.deps.getWorkspace().id,
-      taskId: this.deps.getTask().id,
-      messages: removedMessages,
-      source: opts.historySource || "compaction_source",
-    });
-
     const buildSummary = (this.deps as Any).buildCompactionSummaryBlock as
       | ((args: Any) => Promise<string>)
       | undefined;
-    if (typeof buildSummary !== "function") return { messages: opts.messages };
+    if (typeof buildSummary !== "function") {
+      throw new Error("compaction_summary_generator_unavailable");
+    }
 
     const contextManager = this.deps.getContextManager() as Any;
     const contextManagerAvailableTokens =
@@ -1555,7 +2446,7 @@ export class SessionRuntime {
       contextLabel: opts.contextLabel,
     });
     if (typeof summaryBlock !== "string" || summaryBlock.trim().length === 0) {
-      return { messages: opts.messages };
+      throw new Error("compaction_summary_empty");
     }
 
     const truncateSummaryBlock = (this.deps as Any).truncateSummaryBlock as
@@ -1567,40 +2458,76 @@ export class SessionRuntime {
       const maxSummaryTokens = Math.max(200, availableTokens - currentTokens - 2000);
       summaryBlock = truncateSummaryBlock(summaryBlock, maxSummaryTokens);
     }
-    if (summaryBlock.trim().length === 0) return { messages: opts.messages };
+    if (summaryBlock.trim().length === 0) {
+      throw new Error("compaction_summary_empty_after_truncation");
+    }
 
+    const replacementMessages = opts.messages.slice();
     const upsertPinnedUserBlock = (this.deps as Any).upsertPinnedUserBlock as
       | ((messages: LLMMessage[], opts: Any) => void)
       | undefined;
     if (typeof upsertPinnedUserBlock === "function") {
-      upsertPinnedUserBlock(opts.messages, {
+      upsertPinnedUserBlock(replacementMessages, {
         tag: "PINNED_COMPACTION_SUMMARY",
         content: summaryBlock,
       });
     }
 
-    DurableContextService.recordCompactionSummary({
-      workspaceId: this.deps.getWorkspace().id,
-      taskId: this.deps.getTask().id,
-      removedMessages,
-      summaryBlock,
-      contextLabel: opts.contextLabel,
-      proactive: opts.proactive === true,
-    });
+    return { messages: replacementMessages, summaryBlock };
+  }
 
+  /**
+   * Commit compaction source/summary memory only after the caller has fenced
+   * the replacement against the live history generation. These writes are
+   * best-effort continuity aids and must never invalidate a committed model
+   * history when a memory backend or optional flush fails.
+   */
+  private async persistCompactionSummaryMemory(opts: {
+    removedMessages: LLMMessage[];
+    summaryBlock: string;
+    contextLabel: string;
+    historySource?: string;
+    proactive?: boolean;
+    allowMemoryInjection?: boolean;
+  }): Promise<void> {
+    try {
+      DurableContextService.recordHistory({
+        workspaceId: this.deps.getWorkspace().id,
+        taskId: this.deps.getTask().id,
+        messages: opts.removedMessages,
+        source: opts.historySource || "compaction_source",
+      });
+    } catch {
+      // Optional durable context must not block the replacement transcript.
+    }
+    try {
+      DurableContextService.recordCompactionSummary({
+        workspaceId: this.deps.getWorkspace().id,
+        taskId: this.deps.getTask().id,
+        removedMessages: opts.removedMessages,
+        summaryBlock: opts.summaryBlock,
+        contextLabel: opts.contextLabel,
+        proactive: opts.proactive === true,
+      });
+    } catch {
+      // Optional durable context must not block the replacement transcript.
+    }
+
+    if (!opts.allowMemoryInjection) return;
     const flushSummary = (this.deps as Any).flushCompactionSummaryToMemory as
       | ((args: Any) => Promise<void>)
       | undefined;
-    if (typeof flushSummary === "function") {
+    if (typeof flushSummary !== "function") return;
+    try {
       await flushSummary({
         workspaceId: this.deps.getWorkspace().id,
         taskId: this.deps.getTask().id,
-        allowMemoryInjection: opts.allowMemoryInjection === true,
-        summaryBlock,
+        allowMemoryInjection: true,
+        summaryBlock: opts.summaryBlock,
       });
+    } catch {
+      // Memory injection is an optional side effect.
     }
-
-    return { messages: opts.messages, summaryBlock };
   }
 
   async recoverFromContextCapacityOverflow(opts: {
@@ -1620,7 +2547,7 @@ export class SessionRuntime {
     const reason = String((opts.error as Any)?.message || opts.error || "context_capacity_error");
     const exhausted = attemptNumber > opts.maxAttempts;
     if (exhausted) {
-      this.deps.emitEvent("context_capacity_recovery_failed", {
+      this.emitBestEffortEvent("context_capacity_recovery_failed", {
         phase: opts.phase,
         stepId: opts.stepId,
         attempt: attemptNumber,
@@ -1632,7 +2559,22 @@ export class SessionRuntime {
     }
 
     const tokensBefore = estimateTotalTokens(opts.messages);
-    this.deps.emitEvent("context_capacity_recovery_started", {
+    const installsInHistory = this.state.transcript.conversationHistory === opts.messages;
+    const compactionSession = this.beginCompaction({
+      trigger: "capacity_recovery",
+      phase: "mid_turn",
+      reason: "provider_context_capacity_error",
+      inputTokens: tokensBefore,
+      targetRatio: CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+      extra: {
+        phase: opts.phase,
+        stepId: opts.stepId,
+        attempt: attemptNumber,
+        maxAttempts: opts.maxAttempts,
+        historyInstall: installsInHistory,
+      },
+    });
+    this.emitBestEffortEvent("context_capacity_recovery_started", {
       phase: opts.phase,
       stepId: opts.stepId,
       attempt: attemptNumber,
@@ -1644,7 +2586,11 @@ export class SessionRuntime {
     try {
       const proactive = this.deps
         .getContextManager()
-        .proactiveCompactWithMeta(opts.messages, opts.systemPromptTokens, 0.35);
+        .proactiveCompactWithMeta(
+          opts.messages,
+          opts.systemPromptTokens,
+          CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+        );
       let compactedMessages = proactive.messages;
       let removedMessages = proactive.meta.removedMessages.messages;
       if (!proactive.meta.removedMessages.didRemove) {
@@ -1667,8 +2613,95 @@ export class SessionRuntime {
 
       this.deps.pruneStaleToolErrors(compactedMessages);
       this.deps.consolidateConsecutiveUserMessages(compactedMessages);
-      const tokensAfter = estimateTotalTokens(compactedMessages);
-      this.deps.emitEvent("context_capacity_recovery_completed", {
+      const hardBudget = this.getHardContextBudget(compactedMessages, opts.systemPromptTokens);
+      const tokensAfter = hardBudget?.currentTokens ?? estimateTotalTokens(compactedMessages);
+      if (hardBudget && tokensAfter > hardBudget.availableTokens) {
+        const exhaustedError = this.createContextCapacityExhaustedError({
+          phase: opts.phase,
+          contextLabel: `${opts.phase} context-capacity recovery`,
+          availableTokens: hardBudget.availableTokens,
+          tokensBefore,
+          tokensAfter,
+        });
+        this.emitContextCapacityRecoveryExhausted(exhaustedError, {
+          phase: opts.phase,
+          contextLabel: `${opts.phase} context-capacity recovery`,
+          stepId: opts.stepId,
+          attempt: attemptNumber,
+          maxAttempts: opts.maxAttempts,
+        });
+        if (compactionSession) {
+          this.failCompaction({
+            compactionId: compactionSession.compactionId,
+            trigger: "capacity_recovery",
+            phase: "mid_turn",
+            reason: exhaustedError.reason,
+            retryable: attemptNumber < opts.maxAttempts,
+            failureStage: "budget_check",
+            inputTokens: tokensBefore,
+            extra: { phase: opts.phase, stepId: opts.stepId },
+          });
+        }
+        return { recovered: false, exhausted: true, messages: opts.messages };
+      }
+
+      if (compactionSession) {
+        if (installsInHistory && !this.isHistoryProjectionCurrent(compactionSession.projection)) {
+          this.failCompaction({
+            compactionId: compactionSession.compactionId,
+            trigger: "capacity_recovery",
+            phase: "mid_turn",
+            reason: "history_changed_while_compacting",
+            retryable: true,
+            failureStage: "install",
+            inputTokens: tokensBefore,
+            extra: { phase: opts.phase, stepId: opts.stepId },
+          });
+          return { recovered: false, exhausted: false, messages: opts.messages };
+        }
+        if (installsInHistory) {
+          this.updateConversationHistory(compactedMessages);
+          compactedMessages = this.state.transcript.conversationHistory;
+        }
+        if (summaryResult.summaryBlock && removedMessages.length > 0) {
+          await this.persistCompactionSummaryMemory({
+            removedMessages,
+            summaryBlock: summaryResult.summaryBlock,
+            contextLabel: `${opts.phase} context-capacity recovery`,
+            historySource: "context_capacity_recovery_source",
+            proactive: true,
+          });
+        }
+        this.completeCompaction({
+          compactionId: compactionSession.compactionId,
+          trigger: "capacity_recovery",
+          phase: "mid_turn",
+          reason: "context_replacement_installed",
+          inputTokens: tokensBefore,
+          replacementTokens: tokensAfter,
+          inputMessageCount: installsInHistory
+            ? compactionSession.projection.length
+            : opts.messages.length,
+          replacementMessageCount: compactedMessages.length,
+          removedMessageCount: removedMessages.length,
+          removedApproxTokens: Math.max(0, tokensBefore - tokensAfter),
+          targetRatio: CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+          summaryPreview: summaryResult.summaryBlock
+            ? this.deps.extractPinnedBlockContent(
+                summaryResult.summaryBlock,
+                "PINNED_COMPACTION_SUMMARY",
+                "PINNED_COMPACTION_SUMMARY_CLOSE",
+              )
+            : undefined,
+          fallbackUsed: !summaryResult.summaryBlock,
+          extra: {
+            phase: opts.phase,
+            stepId: opts.stepId,
+            historyInstalled: installsInHistory,
+          },
+        });
+      }
+      this.emitBestEffortEvent("context_capacity_recovery_completed", {
         phase: opts.phase,
         stepId: opts.stepId,
         attempt: attemptNumber,
@@ -1677,7 +2710,7 @@ export class SessionRuntime {
         tokensAfter,
         removedApproxTokens: Math.max(0, tokensBefore - tokensAfter),
       });
-      this.deps.emitEvent("log", {
+      this.emitBestEffortEvent("log", {
         metric: "context_capacity_recovery_completed",
         phase: opts.phase,
         stepId: opts.stepId,
@@ -1688,7 +2721,19 @@ export class SessionRuntime {
       });
       return { recovered: true, exhausted: false, messages: compactedMessages };
     } catch (compactionError: Any) {
-      this.deps.emitEvent("context_capacity_recovery_failed", {
+      if (compactionSession) {
+        this.failCompaction({
+          compactionId: compactionSession.compactionId,
+          trigger: "capacity_recovery",
+          phase: "mid_turn",
+          reason: compactionError?.message || String(compactionError),
+          retryable: true,
+          failureStage: "summarize",
+          inputTokens: tokensBefore,
+          extra: { phase: opts.phase, stepId: opts.stepId },
+        });
+      }
+      this.emitBestEffortEvent("context_capacity_recovery_failed", {
         phase: opts.phase,
         stepId: opts.stepId,
         attempt: attemptNumber,
@@ -1699,7 +2744,7 @@ export class SessionRuntime {
     }
   }
 
-  async maybeCompactBeforeContinuation(assessment: Any): Promise<void> {
+  async maybeCompactBeforeContinuation(_assessment: Any): Promise<void> {
     if (!this.deps.shouldCompactOnContinuation()) return;
 
     const windowEvents = this.deps.getWindowEventsSinceLastReset();
@@ -1713,14 +2758,21 @@ export class SessionRuntime {
 
     const systemPromptTokens = estimateTokens(this.deps.getSystemPrompt() || "");
     const tokensBefore = estimateTotalTokens(this.state.transcript.conversationHistory);
-    this.deps.emitEvent("context_compaction_started", {
-      continuationWindow: this.state.loop.continuationWindow,
-      contextRatio,
+    const compactionSession = this.beginCompaction({
+      trigger: "continuation",
+      phase: "mid_turn",
+      reason: toolUseStopStreak >= 6 && noMutation ? "no_progress" : "threshold",
+      inputTokens: tokensBefore,
       thresholdRatio: this.deps.getCompactionThresholdRatio(),
-      toolUseStopStreak,
-      noMutation,
-      tokensBefore,
+      targetRatio: DEFAULT_CONTEXT_COMPACTION_TARGET_RATIO,
+      extra: {
+        continuationWindow: this.state.loop.continuationWindow,
+        contextRatio,
+        toolUseStopStreak,
+        noMutation,
+      },
     });
+    if (!compactionSession) return;
 
     try {
       const compacted = this.deps
@@ -1754,7 +2806,30 @@ export class SessionRuntime {
         continuationMessages = summaryResult.messages;
         summaryBlock = summaryResult.summaryBlock;
       }
+      if (!this.isHistoryProjectionCurrent(compactionSession.projection)) {
+        this.failCompaction({
+          compactionId: compactionSession.compactionId,
+          trigger: "continuation",
+          phase: "mid_turn",
+          reason: "history_changed_while_compacting",
+          retryable: true,
+          failureStage: "install",
+          inputTokens: tokensBefore,
+          extra: { continuationWindow: this.state.loop.continuationWindow },
+        });
+        return;
+      }
+
       this.updateConversationHistory(continuationMessages);
+      if (summaryBlock && compacted.meta.removedMessages.messages.length > 0) {
+        await this.persistCompactionSummaryMemory({
+          removedMessages: compacted.meta.removedMessages.messages,
+          summaryBlock,
+          contextLabel: "continuation compaction",
+          proactive: false,
+          allowMemoryInjection: true,
+        });
+      }
       const tokensAfter = estimateTotalTokens(this.state.transcript.conversationHistory);
       this.state.loop.compactionCount += 1;
       this.state.loop.lastCompactionAt = Date.now();
@@ -1763,28 +2838,45 @@ export class SessionRuntime {
       this.deps.updateTask({
         ...this.projectTaskState(),
       });
-      this.deps.emitEvent("context_compaction_completed", {
-        continuationWindow: this.state.loop.continuationWindow,
-        tokensBefore,
-        tokensAfter,
-        removedMessages: compacted.meta.removedMessages.count,
-        ...(summaryBlock
-          ? {
-              summary: this.deps.extractPinnedBlockContent(
+      const summaryText = summaryBlock
+        ? this.deps.extractPinnedBlockContent(
+            summaryBlock,
+            "PINNED_COMPACTION_SUMMARY",
+            "PINNED_COMPACTION_SUMMARY_CLOSE",
+          )
+        : undefined;
+      this.completeCompaction({
+        compactionId: compactionSession.compactionId,
+        trigger: "continuation",
+        phase: "mid_turn",
+        reason: "context_replacement_installed",
+        inputTokens: tokensBefore,
+        replacementTokens: tokensAfter,
+        inputMessageCount: compactionSession.projection.length,
+        replacementMessageCount: this.state.transcript.conversationHistory.length,
+        removedMessageCount: compacted.meta.removedMessages.count,
+        removedApproxTokens: Math.max(0, tokensBefore - tokensAfter),
+        thresholdRatio: this.deps.getCompactionThresholdRatio(),
+        targetRatio: DEFAULT_CONTEXT_COMPACTION_TARGET_RATIO,
+        summaryPreview: summaryText,
+        fallbackUsed: !summaryBlock,
+        extra: {
+          continuationWindow: this.state.loop.continuationWindow,
+        },
+      });
+      if (summaryBlock) {
+        this.emitBestEffortEvent("context_summarized", {
+          compactionId: compactionSession.compactionId,
+          summaryPreview: compactPreview(
+            InputSanitizer.sanitizeMemoryContent(
+              this.deps.extractPinnedBlockContent(
                 summaryBlock,
                 "PINNED_COMPACTION_SUMMARY",
                 "PINNED_COMPACTION_SUMMARY_CLOSE",
               ),
-            }
-          : {}),
-      });
-      if (summaryBlock) {
-        this.deps.emitEvent("context_summarized", {
-          summary: this.deps.extractPinnedBlockContent(
-            summaryBlock,
-            "PINNED_COMPACTION_SUMMARY",
-            "PINNED_COMPACTION_SUMMARY_CLOSE",
+            ),
           ),
+          summaryRef: `compaction:${compactionSession.compactionId}`,
           removedCount: compacted.meta.removedMessages.count,
           tokensBefore: compacted.meta.originalTokens,
           tokensAfter,
@@ -1792,10 +2884,15 @@ export class SessionRuntime {
         });
       }
     } catch (error: Any) {
-      this.deps.emitEvent("context_compaction_failed", {
-        continuationWindow: this.state.loop.continuationWindow,
+      this.failCompaction({
+        compactionId: compactionSession.compactionId,
+        trigger: "continuation",
+        phase: "mid_turn",
         reason: error?.message || String(error),
-        tokensBefore,
+        retryable: true,
+        failureStage: "summarize",
+        inputTokens: tokensBefore,
+        extra: { continuationWindow: this.state.loop.continuationWindow },
       });
     }
   }
@@ -1830,6 +2927,9 @@ export class SessionRuntime {
         assessment.dominantFingerprint || this.state.loop.lastLoopFingerprint;
       const noProgressCircuitBreak =
         this.state.loop.noProgressStreak >= this.deps.getGlobalNoProgressCircuitBreaker();
+      const lowProgressBlockReason = belowProgressThreshold
+        ? `Recent progress score (${assessment.progressScore.toFixed(2)}) is below threshold (${threshold.toFixed(2)}).`
+        : "";
 
       let blockReason = "";
       if (lifetimeCapHit) {
@@ -1848,7 +2948,67 @@ export class SessionRuntime {
       } else if (hasLoopRisk) {
         blockReason = `Loop risk is high (${assessment.loopRiskIndex.toFixed(2)}). Try changing strategy or constraints.`;
       } else if (belowProgressThreshold) {
-        blockReason = `Recent progress score (${assessment.progressScore.toFixed(2)}) is below threshold (${threshold.toFixed(2)}).`;
+        blockReason = lowProgressBlockReason;
+      }
+
+      // Low progress is a soft stop: Jev may recommend one changed-strategy
+      // continuation, while hard caps and policy circuit breakers remain
+      // non-overridable by an external decision provider.
+      const softProgressBlock = Boolean(
+        lowProgressBlockReason && blockReason === lowProgressBlockReason,
+      );
+      const hardStopReason = blockReason && !softProgressBlock ? blockReason : undefined;
+
+      let jevLoopAction:
+        | "continue"
+        | "change_strategy"
+        | "stop"
+        | "ask_user"
+        | "abstain"
+        | undefined;
+      const shouldAskJevForLoopAdvice =
+        !hardStopReason &&
+        Boolean(this.deps.evaluateJevLoopDecision) &&
+        (reachedLoopWarning || belowProgressThreshold || this.state.loop.noProgressStreak > 0);
+      if (shouldAskJevForLoopAdvice) {
+        try {
+          const jevDecision = await this.deps.evaluateJevLoopDecision!({
+            progressScore: assessment.progressScore,
+            loopRiskIndex: assessment.loopRiskIndex,
+            repeatedFingerprintCount: assessment.repeatedFingerprintCount,
+            noProgressStreak: this.state.loop.noProgressStreak,
+            pendingSteps,
+            dominantFingerprint: assessment.dominantFingerprint,
+            hardStopReason,
+          });
+          jevLoopAction = jevDecision.action;
+          this.deps.emitEvent("jev_loop_decision", {
+            action: jevDecision.action,
+            status: jevDecision.status,
+            reason: jevDecision.reason,
+            model: jevDecision.model,
+            repeatedFingerprintCount: assessment.repeatedFingerprintCount,
+            progressScore: assessment.progressScore,
+            ...(typeof jevDecision.confidence === "number"
+              ? { confidence: jevDecision.confidence }
+              : {}),
+            ...(typeof jevDecision.probability === "number"
+              ? { probability: jevDecision.probability }
+              : {}),
+          });
+          if (jevDecision.action === "change_strategy") {
+            if (softProgressBlock) blockReason = "";
+            this.state.loop.pendingLoopStrategySwitchMessage =
+              "Jev loop advice: change strategy before retrying the same target.";
+          } else if (jevDecision.action === "stop" || jevDecision.action === "ask_user") {
+            blockReason =
+              jevDecision.action === "ask_user"
+                ? "Jev loop controller requested a user decision before continuing."
+                : "Jev loop controller recommended stopping the repeated or low-progress path.";
+          }
+        } catch {
+          jevLoopAction = "abstain";
+        }
       }
 
       this.deps.emitEvent("continuation_decision", {
@@ -1862,6 +3022,7 @@ export class SessionRuntime {
         repeatedFingerprintCount: assessment.repeatedFingerprintCount,
         dominantFingerprint: assessment.dominantFingerprint,
         noProgressStreak: this.state.loop.noProgressStreak,
+        jevLoopAction,
         loopWarningThreshold: this.deps.getLoopWarningThreshold(),
         loopCriticalThreshold: this.deps.getLoopCriticalThreshold(),
         allowed: !blockReason,
@@ -2171,10 +3332,14 @@ export class SessionRuntime {
     }
   }
 
-  saveSnapshot(planSummary?: Any): void {
+  saveSnapshot(planSummary?: Any): boolean {
     try {
-      if (this.state.transcript.conversationHistory.length === 0) {
-        return;
+      if (
+        this.state.transcript.conversationHistory.length === 0 &&
+        !this.hasPendingFollowUps &&
+        this.getConsumedFollowUpMessageIds().size === 0
+      ) {
+        return true;
       }
 
       const serializedHistory = this.serializeConversationWithSizeLimit(
@@ -2197,6 +3362,12 @@ export class SessionRuntime {
           explicitChatSummaryCreatedAt: this.state.transcript.explicitChatSummaryCreatedAt,
           explicitChatSummarySourceMessageCount:
             this.state.transcript.explicitChatSummarySourceMessageCount,
+          ...(this.state.transcript.explicitChatSummaryInputSignature
+            ? {
+                explicitChatSummaryInputSignature:
+                  this.state.transcript.explicitChatSummaryInputSignature,
+              }
+            : {}),
           stepOutcomeSummaries: [...this.state.transcript.stepOutcomeSummaries],
         },
         tooling: {
@@ -2224,6 +3395,7 @@ export class SessionRuntime {
         },
         queues: {
           pendingFollowUps: [...this.state.queues.pendingFollowUps],
+          consumedFollowUpMessageIds: this.getConsumedFollowUpMessageIdsSnapshot(),
           stepFeedbackSignal: this.state.queues.stepFeedbackSignal,
         },
         skills: {
@@ -2273,15 +3445,24 @@ export class SessionRuntime {
           outputTokens: this.getCumulativeOutputTokens(),
           cost: this.getCumulativeCost(),
         },
+        compaction: this.getCompactionSnapshot(),
       };
       const estimatedSize = JSON.stringify(payload).length;
       this.deps.emitEvent("conversation_snapshot", {
         ...payload,
         estimatedSizeBytes: estimatedSize,
       });
-      this.deps.pruneOldSnapshots();
+      try {
+        this.deps.pruneOldSnapshots();
+      } catch {
+        // Pruning is housekeeping. The snapshot event above is the durability
+        // boundary and remains successful when cleanup fails.
+      }
+      return true;
     } catch {
-      // Best-effort snapshotting.
+      // Callers that use this as a durability boundary must be able to retain
+      // their queue item and retry when persistence fails.
+      return false;
     }
   }
 
@@ -2336,46 +3517,277 @@ export class SessionRuntime {
     });
   }
 
+  private getRuntimeEventFreshness(
+    event: TaskEvent,
+    position: number,
+  ): RuntimeRecoverySourceFreshness {
+    const sequence = typeof event.seq === "number" && Number.isFinite(event.seq) ? event.seq : null;
+    const rawTimestamp = typeof event.ts === "number" ? event.ts : event.timestamp;
+    const timestamp =
+      typeof rawTimestamp === "number" && Number.isFinite(rawTimestamp) ? rawTimestamp : null;
+    return { sequence, timestamp, position };
+  }
+
+  private compareRuntimeRecoveryFreshness(
+    left: RuntimeRecoverySourceFreshness,
+    right: RuntimeRecoverySourceFreshness,
+  ): number {
+    // Sequence numbers are the canonical ordering signal when both sources
+    // have them. Timestamps remain the compatible fallback for older events
+    // and checkpoints that predate sequence persistence.
+    if (left.sequence !== null && right.sequence !== null && left.sequence !== right.sequence) {
+      return left.sequence - right.sequence;
+    }
+    if (left.timestamp !== null || right.timestamp !== null) {
+      if (left.timestamp === null) return -1;
+      if (right.timestamp === null) return 1;
+      if (left.timestamp !== right.timestamp) return left.timestamp - right.timestamp;
+    }
+    return left.position - right.position;
+  }
+
+  private getCheckpointRecoveryFreshness(
+    checkpointPayload: Any,
+    events: TaskEvent[],
+  ): RuntimeRecoverySourceFreshness {
+    const sourceEventId =
+      typeof checkpointPayload?.sourceEventId === "string"
+        ? checkpointPayload.sourceEventId.trim()
+        : "";
+    if (sourceEventId) {
+      const sourcePosition = events.findIndex(
+        (event) => event.id === sourceEventId || event.eventId === sourceEventId,
+      );
+      if (sourcePosition >= 0) {
+        const sourceEvent = events[sourcePosition];
+        if (sourceEvent) {
+          return this.getRuntimeEventFreshness(sourceEvent, sourcePosition);
+        }
+      }
+    }
+
+    const rawTimestamp =
+      typeof checkpointPayload?.sourceTimestamp === "number"
+        ? checkpointPayload.sourceTimestamp
+        : checkpointPayload?.timestamp;
+    const timestamp =
+      typeof rawTimestamp === "number" && Number.isFinite(rawTimestamp) ? rawTimestamp : null;
+    return { sequence: null, timestamp, position: -1 };
+  }
+
+  private getLatestSnapshotEvent(
+    events: TaskEvent[],
+  ): { event: TaskEvent; freshness: RuntimeRecoverySourceFreshness } | null {
+    let latest: { event: TaskEvent; freshness: RuntimeRecoverySourceFreshness } | null = null;
+    events.forEach((event, position) => {
+      if (this.deps.getReplayEventType(event) !== "conversation_snapshot") return;
+      const freshness = this.getRuntimeEventFreshness(event, position);
+      if (!latest || this.compareRuntimeRecoveryFreshness(freshness, latest.freshness) > 0) {
+        latest = { event, freshness };
+      }
+    });
+    return latest;
+  }
+
+  private restoreStepFeedbackStateFromEvents(
+    events: TaskEvent[],
+    snapshotFreshness?: RuntimeRecoverySourceFreshness | null,
+  ): void {
+    const consumedFeedbackIds = new Set<string>();
+    const consumedFeedbackSignatures = new Set<string>();
+    const relevantEvents = events
+      .map((event, position) => ({
+        event,
+        position,
+        freshness: this.getRuntimeEventFreshness(event, position),
+      }))
+      .filter(({ event, freshness }) => {
+        if (
+          snapshotFreshness &&
+          this.compareRuntimeRecoveryFreshness(freshness, snapshotFreshness) <= 0
+        ) {
+          return false;
+        }
+        const type = this.deps.getReplayEventType(event);
+        const payload = event.payload as Any;
+        const isFeedbackEvent =
+          type === "step_feedback_received" ||
+          (type === "step_feedback" && payload?.consumed !== true) ||
+          event.legacyType === "step_feedback" ||
+          payload?.legacyType === "step_feedback";
+        const isConsumedEvent =
+          type === "step_feedback_consumed" ||
+          (type === "step_feedback" && payload?.consumed === true);
+        return isFeedbackEvent || isConsumedEvent;
+      })
+      .sort((left, right) => this.compareRuntimeRecoveryFreshness(left.freshness, right.freshness));
+
+    let signal = this.state.queues.stepFeedbackSignal;
+    for (const { event } of relevantEvents) {
+      const type = this.deps.getReplayEventType(event);
+      const payload = event.payload as Any;
+      if (
+        type === "step_feedback_consumed" ||
+        (type === "step_feedback" && payload?.consumed === true)
+      ) {
+        const feedbackId = typeof payload?.feedbackId === "string" ? payload.feedbackId.trim() : "";
+        const signature =
+          typeof payload?.feedbackSignature === "string" && payload.feedbackSignature
+            ? payload.feedbackSignature
+            : typeof payload?.stepId === "string" &&
+                typeof payload?.action === "string" &&
+                this.isStepFeedbackAction(payload.action)
+              ? this.getStepFeedbackSignature(
+                  payload.stepId,
+                  payload.action,
+                  typeof payload.message === "string" ? payload.message : undefined,
+                )
+              : "";
+        if (feedbackId) consumedFeedbackIds.add(feedbackId);
+        if (signature) consumedFeedbackSignatures.add(signature);
+        if (
+          signal &&
+          ((feedbackId && signal.feedbackId === feedbackId) ||
+            (signature &&
+              this.getStepFeedbackSignature(signal.stepId, signal.action, signal.message) ===
+                signature))
+        ) {
+          signal = null;
+        }
+        continue;
+      }
+
+      const stepId =
+        typeof payload?.stepId === "string"
+          ? payload.stepId.trim()
+          : typeof payload?.step?.id === "string"
+            ? payload.step.id.trim()
+            : "";
+      const action = this.isStepFeedbackAction(payload?.action) ? payload.action : null;
+      if (!stepId || !action) continue;
+      const message = typeof payload?.message === "string" ? payload.message : undefined;
+      const feedbackId = typeof payload?.feedbackId === "string" ? payload.feedbackId.trim() : "";
+      const signature =
+        typeof payload?.feedbackSignature === "string" && payload.feedbackSignature
+          ? payload.feedbackSignature
+          : this.getStepFeedbackSignature(stepId, action, message);
+
+      if (feedbackId && consumedFeedbackIds.has(feedbackId)) {
+        continue;
+      }
+      // A new explicitly identified feedback supersedes an older legacy
+      // fallback with the same text; preserve repeated identical decisions.
+      if (feedbackId) consumedFeedbackSignatures.delete(signature);
+      if (!feedbackId && consumedFeedbackSignatures.has(signature)) continue;
+
+      signal = {
+        ...(feedbackId ? { feedbackId } : {}),
+        stepId,
+        action,
+        ...(message !== undefined ? { message } : {}),
+      };
+    }
+    this.state.queues.stepFeedbackSignal = signal;
+  }
+
+  private isStepFeedbackAction(value: unknown): value is "retry" | "skip" | "stop" | "drift" {
+    return value === "retry" || value === "skip" || value === "stop" || value === "drift";
+  }
+
+  private hasPersistedStepFeedbackState(payload: Any): boolean {
+    return Boolean(
+      payload?.queues &&
+      typeof payload.queues === "object" &&
+      Object.prototype.hasOwnProperty.call(payload.queues, "stepFeedbackSignal"),
+    );
+  }
+
   restoreFromEvents(events: TaskEvent[]): void {
     const checkpointPayload = this.deps.loadCheckpointPayload();
-    const snapshotEvents = events.filter(
-      (e) => this.deps.getReplayEventType(e) === "conversation_snapshot",
-    );
-    const latestSnapshotPayload =
-      snapshotEvents.length > 0 ? snapshotEvents[snapshotEvents.length - 1]?.payload : null;
+    const latestSnapshot = this.getLatestSnapshotEvent(events);
+    const latestSnapshotPayload = latestSnapshot?.event.payload || null;
+
+    const checkpointFreshness = checkpointPayload
+      ? this.getCheckpointRecoveryFreshness(checkpointPayload, events)
+      : null;
+    const snapshotFreshness = latestSnapshot?.freshness || null;
+    // A checkpoint is a durable fallback, while the event stream is the
+    // authoritative source when both represent the same or a newer state.
+    // Prefer the snapshot on ties so an asynchronous checkpoint capture cannot
+    // roll a restarted task back to an older conversation.
+    const checkpointFirst =
+      Boolean(checkpointPayload) &&
+      (!latestSnapshot ||
+        (checkpointFreshness &&
+          snapshotFreshness &&
+          this.compareRuntimeRecoveryFreshness(checkpointFreshness, snapshotFreshness) > 0));
 
     const v2Candidates: Array<{ payload: Any; sourceLabel: string }> = [];
-    if (checkpointPayload?.schema === "session_runtime_v2" && checkpointPayload?.version === 2) {
-      v2Candidates.push({ payload: checkpointPayload, sourceLabel: "checkpoint" });
-    }
-    if (
-      latestSnapshotPayload?.schema === "session_runtime_v2" &&
-      latestSnapshotPayload?.version === 2
-    ) {
-      v2Candidates.push({ payload: latestSnapshotPayload, sourceLabel: "snapshot" });
+    const orderedCandidates = checkpointFirst
+      ? (["checkpoint", "snapshot"] as const)
+      : (["snapshot", "checkpoint"] as const);
+    for (const sourceLabel of orderedCandidates) {
+      const payload = sourceLabel === "checkpoint" ? checkpointPayload : latestSnapshotPayload;
+      if (payload?.schema === "session_runtime_v2" && payload?.version === 2) {
+        v2Candidates.push({ payload, sourceLabel });
+      }
     }
     for (const candidate of v2Candidates) {
-      if (this.restoreConversationFromPayload(candidate.payload, candidate.sourceLabel)) {
+      const restored = this.restoreConversationFromPayload(
+        candidate.payload,
+        candidate.sourceLabel,
+      );
+      if (restored.restored) {
         this.restorePendingSkillStateFromEvents(events);
         this.restoreTaskListStateFromEvents(events);
+        this.restoreStepFeedbackStateFromEvents(
+          events,
+          this.hasPersistedStepFeedbackState(candidate.payload)
+            ? candidate.sourceLabel === "checkpoint"
+              ? checkpointFreshness
+              : snapshotFreshness
+            : null,
+        );
+        this.restoreQueuedAgentFollowUpsFromEvents(events);
+        this.reconcileCompactionLifecycleFromEvents(
+          events,
+          restored.interruptedCompaction ? [restored.interruptedCompaction] : [],
+        );
         return;
       }
     }
 
     const legacyCandidates: Array<{ payload: Any; sourceLabel: string }> = [];
-    if (Array.isArray(checkpointPayload?.conversationHistory)) {
-      legacyCandidates.push({ payload: checkpointPayload, sourceLabel: "checkpoint" });
-    }
-    if (Array.isArray(latestSnapshotPayload?.conversationHistory)) {
-      legacyCandidates.push({ payload: latestSnapshotPayload, sourceLabel: "snapshot" });
+    for (const sourceLabel of orderedCandidates) {
+      const payload = sourceLabel === "checkpoint" ? checkpointPayload : latestSnapshotPayload;
+      if (Array.isArray(payload?.conversationHistory)) {
+        legacyCandidates.push({ payload, sourceLabel });
+      }
     }
     for (const candidate of legacyCandidates) {
-      if (this.restoreConversationFromPayload(candidate.payload, candidate.sourceLabel)) {
+      const restored = this.restoreConversationFromPayload(
+        candidate.payload,
+        candidate.sourceLabel,
+      );
+      if (restored.restored) {
         this.restorePendingSkillStateFromEvents(events);
         if (this.state.usage.totalInputTokens === 0 && this.state.usage.totalOutputTokens === 0) {
           this.restoreUsageTotalsFromEvents(events);
         }
         this.restoreTaskListStateFromEvents(events);
+        this.restoreStepFeedbackStateFromEvents(
+          events,
+          this.hasPersistedStepFeedbackState(candidate.payload)
+            ? candidate.sourceLabel === "checkpoint"
+              ? checkpointFreshness
+              : snapshotFreshness
+            : null,
+        );
+        this.restoreQueuedAgentFollowUpsFromEvents(events);
+        this.reconcileCompactionLifecycleFromEvents(
+          events,
+          restored.interruptedCompaction ? [restored.interruptedCompaction] : [],
+        );
         return;
       }
     }
@@ -2473,14 +3885,391 @@ export class SessionRuntime {
 
     this.restorePendingSkillStateFromEvents(events);
     this.restoreTaskListStateFromEvents(events);
+    this.restoreStepFeedbackStateFromEvents(events);
+    this.restoreQueuedAgentFollowUpsFromEvents(events);
+    this.reconcileCompactionLifecycleFromEvents(events);
   }
 
-  private restoreConversationFromPayload(payload: Any, _sourceLabel: string): boolean {
+  /**
+   * A lifecycle start is intentionally durable before provider work begins,
+   * but a hard process crash can still occur before the terminal event or its
+   * replacement snapshot is written. Reconcile the event stream on restart
+   * so an orphaned spinner becomes an explicit, retryable interruption.
+   */
+  private reconcileCompactionLifecycleFromEvents(
+    events: TaskEvent[],
+    snapshotPending: Array<{
+      compactionId: string;
+      attemptId?: string;
+      historyGenerationBefore: number;
+      trigger: ContextCompactionTrigger;
+      phase: ContextCompactionPhase;
+    }> = [],
+  ): void {
+    const latestByCompactionId = new Map<
+      string,
+      {
+        type: ContextCompactionEventType;
+        payload: ContextCompactionEventPayload;
+      }
+    >();
+
+    for (const event of events) {
+      const type = this.deps.getReplayEventType(event);
+      if (!isContextCompactionEventType(type)) continue;
+      if (!isContextCompactionEventPayload(event.payload)) continue;
+      latestByCompactionId.set(event.payload.compactionId, {
+        type,
+        payload: event.payload,
+      });
+    }
+
+    const pendingByCompactionId = new Map<
+      string,
+      {
+        compactionId: string;
+        attemptId?: string;
+        historyGenerationBefore: number;
+        trigger: ContextCompactionTrigger;
+        phase: ContextCompactionPhase;
+      }
+    >();
+    for (const pending of snapshotPending) {
+      pendingByCompactionId.set(pending.compactionId, pending);
+    }
+    for (const [compactionId, lifecycle] of latestByCompactionId) {
+      if (lifecycle.type !== "context_compaction_started") continue;
+      pendingByCompactionId.set(compactionId, {
+        compactionId,
+        ...(lifecycle.payload.attemptId ? { attemptId: lifecycle.payload.attemptId } : {}),
+        historyGenerationBefore: lifecycle.payload.historyGenerationBefore,
+        trigger: lifecycle.payload.trigger,
+        phase: lifecycle.payload.phase,
+      });
+    }
+
+    for (const [compactionId, pending] of pendingByCompactionId) {
+      const latest = latestByCompactionId.get(compactionId);
+      if (latest && latest.type !== "context_compaction_started") {
+        this.lastCompactionId = compactionId;
+        this.lastCompactionAttemptId = latest.payload.attemptId ?? pending.attemptId ?? null;
+        this.lastCompactionStatus =
+          latest.type === "context_compaction_completed" ? "completed" : "failed";
+        this.lastCompactionTrigger = latest.payload.trigger;
+        this.lastCompactionPhase = latest.payload.phase;
+        this.lastCompactionInputGeneration = latest.payload.historyGenerationBefore;
+        this.lastCompactionInstalledGeneration =
+          latest.payload.historyGenerationAfter ?? this.historyGeneration;
+        continue;
+      }
+
+      // A snapshot already records a terminal state for this unique ID. This
+      // can happen when the terminal event itself was lost after the snapshot
+      // crossed the durability boundary.
+      if (
+        this.lastCompactionId === compactionId &&
+        (this.lastCompactionStatus === "completed" ||
+          this.lastCompactionStatus === "failed" ||
+          this.lastCompactionStatus === "interrupted")
+      ) {
+        if (!this.restartRecoveredCompactionIds.has(compactionId)) {
+          this.restartRecoveredCompactionIds.add(compactionId);
+          const trigger = this.lastCompactionTrigger ?? pending.trigger;
+          const phase = this.lastCompactionPhase ?? pending.phase;
+          if (this.lastCompactionStatus === "completed") {
+            this.emitCompactionEvent("context_compaction_completed", {
+              compactionId,
+              ...(this.lastCompactionAttemptId || pending.attemptId
+                ? { attemptId: this.lastCompactionAttemptId ?? pending.attemptId }
+                : {}),
+              status: "completed",
+              trigger,
+              phase,
+              reason: "compaction_terminal_state_restored_from_snapshot",
+              historyGenerationBefore: this.lastCompactionInputGeneration,
+              historyGenerationAfter:
+                this.lastCompactionInstalledGeneration || this.historyGeneration,
+              restoredFromSnapshot: true,
+              accountingSource: "estimate",
+            });
+          } else {
+            this.emitCompactionEvent("context_compaction_failed", {
+              compactionId,
+              ...(this.lastCompactionAttemptId || pending.attemptId
+                ? { attemptId: this.lastCompactionAttemptId ?? pending.attemptId }
+                : {}),
+              status: "failed",
+              trigger,
+              phase,
+              reason:
+                this.lastCompactionStatus === "interrupted"
+                  ? "compaction_interrupted_by_restart"
+                  : "compaction_failure_restored_from_snapshot",
+              historyGenerationBefore: this.lastCompactionInputGeneration,
+              historyGenerationAfter:
+                this.lastCompactionInstalledGeneration || this.historyGeneration,
+              retryable: this.lastCompactionStatus !== "failed",
+              failureStage: "restart",
+              restoredFromSnapshot: true,
+              accountingSource: "estimate",
+            });
+          }
+        }
+        continue;
+      }
+      if (this.restartRecoveredCompactionIds.has(compactionId)) continue;
+
+      this.restartRecoveredCompactionIds.add(compactionId);
+      this.activeCompactionId = null;
+      this.activeCompactionAttemptId = null;
+      this.lastCompactionId = compactionId;
+      this.lastCompactionAttemptId = pending.attemptId ?? null;
+      this.lastCompactionTrigger = pending.trigger;
+      this.lastCompactionPhase = pending.phase;
+      this.lastCompactionInputGeneration = pending.historyGenerationBefore;
+      this.lastCompactionInstalledGeneration = this.historyGeneration;
+      this.lastCompactionStatus = "interrupted";
+      this.emitCompactionEvent("context_compaction_failed", {
+        compactionId,
+        ...(pending.attemptId ? { attemptId: pending.attemptId } : {}),
+        status: "failed",
+        trigger: pending.trigger,
+        phase: pending.phase,
+        reason: "compaction_interrupted_by_restart",
+        historyGenerationBefore: pending.historyGenerationBefore,
+        historyGenerationAfter: this.historyGeneration,
+        retryable: true,
+        failureStage: "restart",
+        interrupted: true,
+        accountingSource: "estimate",
+      });
+      // Persist the terminal marker even if the event sink was unavailable so
+      // a repeated restore cannot recreate the same in-flight operation.
+      this.saveSnapshot();
+    }
+  }
+
+  /**
+   * Reconcile queue-only agent receipts with the last runtime snapshot.
+   *
+   * A receipt is written before the in-memory queue snapshot during enqueue,
+   * and the queue item is removed before a recovery turn starts. Either order
+   * can therefore leave a short crash window. The event is the durable source
+   * for a queued message that is missing from the snapshot; a delivered
+   * receipt suppresses any stale snapshot copy so an accepted message is not
+   * dispatched twice after restart.
+   */
+  private restoreQueuedAgentFollowUpsFromEvents(events: TaskEvent[]): void {
+    const latestReceipts = new Map<string, Record<string, unknown>>();
+    const blockedMessageIds = new Set<string>();
+    for (const event of events) {
+      const payload = event.payload;
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
+      const eventType = this.deps.getReplayEventType(event);
+      if (
+        eventType === "error" &&
+        payload.code === "QUEUED_ATTACHMENT_RECOVERY_BLOCKED" &&
+        payload.recoveryBlocked === true &&
+        typeof payload.messageId === "string" &&
+        payload.messageId.trim()
+      ) {
+        blockedMessageIds.add(payload.messageId.trim());
+        continue;
+      }
+      if (eventType !== "user_message") continue;
+      const messageId = typeof payload.messageId === "string" ? payload.messageId.trim() : "";
+      if (!messageId || payload.deliveryMode !== "message") continue;
+      latestReceipts.set(messageId, payload as Record<string, unknown>);
+    }
+
+    const deliveredMessageIds = new Set<string>();
+    for (const [messageId, payload] of latestReceipts) {
+      const status = payload.deliveryStatus ?? payload.status;
+      if (status === "delivered") {
+        deliveredMessageIds.add(messageId);
+        this.markFollowUpMessageConsumed(messageId);
+      }
+    }
+
+    const pending: TaskFollowUpInput[] = [];
+    for (const originalFollowUp of this.state.queues.pendingFollowUps) {
+      const messageId =
+        originalFollowUp.deliveryMode === "message" &&
+        typeof originalFollowUp.messageId === "string"
+          ? originalFollowUp.messageId.trim()
+          : "";
+      if (messageId && (deliveredMessageIds.has(messageId) || blockedMessageIds.has(messageId))) {
+        continue;
+      }
+      let followUp = originalFollowUp;
+      if (
+        messageId &&
+        Array.isArray(originalFollowUp.images) &&
+        originalFollowUp.images.length > 0
+      ) {
+        try {
+          const recoveredImages = this.queuedAttachmentStore.hydrateStoredImages(
+            this.deps.getTask().id,
+            messageId,
+            originalFollowUp.images,
+          );
+          if (recoveredImages) followUp = { ...originalFollowUp, images: recoveredImages };
+        } catch (error) {
+          this.blockQueuedAttachmentRecovery(messageId, error);
+          continue;
+        }
+      }
+      pending.push(followUp);
+    }
+    const pendingMessageIds = new Set(
+      pending
+        .filter(
+          (followUp) =>
+            followUp.deliveryMode === "message" && typeof followUp.messageId === "string",
+        )
+        .map((followUp) => followUp.messageId as string),
+    );
+
+    for (const [messageId, payload] of latestReceipts) {
+      if (
+        deliveredMessageIds.has(messageId) ||
+        blockedMessageIds.has(messageId) ||
+        pendingMessageIds.has(messageId)
+      ) {
+        continue;
+      }
+      if (typeof payload.message !== "string") continue;
+
+      let recoveredImages: ImageAttachment[] | undefined;
+      const hasLegacyAttachmentMetadata =
+        Array.isArray(payload.images) && payload.images.length > 0;
+      const hasQueuedAttachmentRefs = Object.prototype.hasOwnProperty.call(
+        payload,
+        "queuedAttachmentRefs",
+      );
+      if (hasQueuedAttachmentRefs) {
+        try {
+          if (
+            !Array.isArray(payload.queuedAttachmentRefs) ||
+            (payload.queuedAttachmentRefs.length === 0 && hasLegacyAttachmentMetadata)
+          ) {
+            throw new QueuedAttachmentRecoveryError(
+              this.deps.getTask().id,
+              messageId,
+              "Queued attachment recovery blocked: attachment references are incomplete. Resend the message with its attachments.",
+            );
+          }
+          recoveredImages = this.queuedAttachmentStore.hydrate(
+            this.deps.getTask().id,
+            messageId,
+            payload.queuedAttachmentRefs as QueuedAttachmentRef[],
+          );
+        } catch (error) {
+          this.blockQueuedAttachmentRecovery(messageId, error);
+          continue;
+        }
+      } else if (hasLegacyAttachmentMetadata) {
+        // Older receipts intentionally persisted only display metadata. Once
+        // the runtime snapshot is gone those bytes cannot be reconstructed;
+        // never silently execute the text-only prompt.
+        this.blockQueuedAttachmentRecovery(
+          messageId,
+          new QueuedAttachmentRecoveryError(
+            this.deps.getTask().id,
+            messageId,
+            "Queued attachment recovery blocked: this receipt has metadata but no durable attachment reference. Resend the message with its attachments.",
+          ),
+        );
+        continue;
+      }
+
+      const interactionMode = payload.interactionMode;
+      pending.push({
+        message: payload.message,
+        deliveryMode: "message",
+        ...(recoveredImages ? { images: recoveredImages } : {}),
+        messageSource:
+          payload.messageSource === "agent" || payload.messageSource === "user"
+            ? payload.messageSource
+            : undefined,
+        messageId,
+        ...(typeof payload.senderTaskId === "string" ? { senderTaskId: payload.senderTaskId } : {}),
+        ...(typeof payload.senderLabel === "string" ? { senderLabel: payload.senderLabel } : {}),
+        ...(interactionMode && typeof interactionMode === "object"
+          ? { interactionMode: interactionMode as TaskFollowUpInput["interactionMode"] }
+          : {}),
+        ...(Array.isArray(payload.integrationMentions)
+          ? {
+              integrationMentions:
+                payload.integrationMentions as TaskFollowUpInput["integrationMentions"],
+            }
+          : {}),
+        ...(payload.quotedAssistantMessage &&
+        typeof payload.quotedAssistantMessage === "object" &&
+        !Array.isArray(payload.quotedAssistantMessage)
+          ? {
+              quotedAssistantMessage:
+                payload.quotedAssistantMessage as TaskFollowUpInput["quotedAssistantMessage"],
+            }
+          : {}),
+      });
+      pendingMessageIds.add(messageId);
+    }
+
+    this.state.queues.pendingFollowUps = pending;
+  }
+
+  private blockQueuedAttachmentRecovery(messageId: string, error: unknown): void {
+    const reason =
+      error instanceof QueuedAttachmentRecoveryError
+        ? error.message
+        : "Queued attachment recovery blocked: durable attachment validation failed. Resend the message with its attachments.";
+    try {
+      this.deps.updateTask({
+        awaitingUserInputReasonCode: "queued_attachment_unavailable",
+        error: reason,
+      });
+    } catch {
+      // Recovery must still suppress the incomplete follow-up if task status
+      // persistence is unavailable in a lightweight host.
+    }
+    try {
+      this.deps.emitEvent("error", {
+        code: "QUEUED_ATTACHMENT_RECOVERY_BLOCKED",
+        messageId,
+        recoveryBlocked: true,
+        message: reason,
+      });
+    } catch {
+      // The durable task update above is the primary block marker.
+    }
+  }
+
+  private restoreConversationFromPayload(
+    payload: Any,
+    _sourceLabel: string,
+  ): {
+    restored: boolean;
+    interruptedCompaction?: {
+      compactionId: string;
+      attemptId?: string;
+      historyGenerationBefore: number;
+      trigger: ContextCompactionTrigger;
+      phase: ContextCompactionPhase;
+    } | null;
+  } {
     if (!payload?.conversationHistory || !Array.isArray(payload.conversationHistory)) {
-      return false;
+      return { restored: false };
     }
 
     try {
+      let interruptedCompaction: {
+        compactionId: string;
+        attemptId?: string;
+        historyGenerationBefore: number;
+        trigger: ContextCompactionTrigger;
+        phase: ContextCompactionPhase;
+      } | null = null;
       let restoredHistory: LLMMessage[] = payload.conversationHistory.map((msg: Any) => ({
         role: msg.role as "user" | "assistant",
         content: msg.content,
@@ -2539,7 +4328,7 @@ export class SessionRuntime {
       }
 
       if (payload.schema === "session_runtime_v2" && payload.version === 2) {
-        this.restoreFromV2Payload(payload as SessionRuntimeSnapshotV2);
+        interruptedCompaction = this.restoreFromV2Payload(payload as SessionRuntimeSnapshotV2);
       } else {
         this.state.transcript.explicitChatSummaryBlock =
           typeof payload.explicitChatSummaryBlock === "string" &&
@@ -2554,6 +4343,10 @@ export class SessionRuntime {
           typeof payload.explicitChatSummarySourceMessageCount === "number"
             ? payload.explicitChatSummarySourceMessageCount
             : 0;
+        this.state.transcript.explicitChatSummaryInputSignature =
+          typeof payload.explicitChatSummaryInputSignature === "string"
+            ? payload.explicitChatSummaryInputSignature
+            : "";
       }
 
       const lastAssistant = [...restoredHistory]
@@ -2575,13 +4368,84 @@ export class SessionRuntime {
       if (payload.schema !== "session_runtime_v2") {
         this.saveSnapshot(payload.planSummary);
       }
-      return true;
+      return { restored: true, interruptedCompaction };
     } catch {
-      return false;
+      return { restored: false };
     }
   }
 
-  private restoreFromV2Payload(payload: SessionRuntimeSnapshotV2): void {
+  private restoreFromV2Payload(payload: SessionRuntimeSnapshotV2): {
+    compactionId: string;
+    attemptId?: string;
+    historyGenerationBefore: number;
+    trigger: ContextCompactionTrigger;
+    phase: ContextCompactionPhase;
+  } | null {
+    let interruptedCompaction: {
+      compactionId: string;
+      attemptId?: string;
+      historyGenerationBefore: number;
+      trigger: ContextCompactionTrigger;
+      phase: ContextCompactionPhase;
+    } | null = null;
+    if (payload.compaction && typeof payload.compaction === "object") {
+      this.historyGeneration = Math.max(
+        0,
+        Number(payload.compaction.historyGeneration || this.historyGeneration),
+      );
+      // Provider calls cannot survive a process restart.  A snapshot that was
+      // captured mid-compaction must therefore reopen the operation instead
+      // of restoring an in-memory lock that can never be released.
+      this.activeCompactionId = null;
+      this.activeCompactionAttemptId = null;
+      this.lastCompactionId =
+        typeof payload.compaction.lastCompactionId === "string"
+          ? payload.compaction.lastCompactionId
+          : null;
+      this.lastCompactionAttemptId =
+        typeof payload.compaction.lastCompactionAttemptId === "string"
+          ? payload.compaction.lastCompactionAttemptId
+          : null;
+      this.lastCompactionTrigger =
+        payload.compaction.lastCompactionTrigger === "automatic" ||
+        payload.compaction.lastCompactionTrigger === "manual" ||
+        payload.compaction.lastCompactionTrigger === "continuation" ||
+        payload.compaction.lastCompactionTrigger === "capacity_recovery"
+          ? payload.compaction.lastCompactionTrigger
+          : null;
+      this.lastCompactionPhase =
+        payload.compaction.lastCompactionPhase === "pre_turn" ||
+        payload.compaction.lastCompactionPhase === "mid_turn" ||
+        payload.compaction.lastCompactionPhase === "post_turn" ||
+        payload.compaction.lastCompactionPhase === "manual"
+          ? payload.compaction.lastCompactionPhase
+          : null;
+      const restoredStatus =
+        payload.compaction.lastCompactionStatus === "started" ||
+        payload.compaction.lastCompactionStatus === "completed" ||
+        payload.compaction.lastCompactionStatus === "failed" ||
+        payload.compaction.lastCompactionStatus === "interrupted"
+          ? payload.compaction.lastCompactionStatus
+          : null;
+      this.lastCompactionStatus = restoredStatus;
+      this.lastCompactionInputGeneration = Number(
+        payload.compaction.lastCompactionInputGeneration || 0,
+      );
+      this.lastCompactionInstalledGeneration = Number(
+        payload.compaction.lastCompactionInstalledGeneration || 0,
+      );
+      if (restoredStatus === "started") {
+        if (this.lastCompactionId) {
+          interruptedCompaction = {
+            compactionId: this.lastCompactionId,
+            ...(this.lastCompactionAttemptId ? { attemptId: this.lastCompactionAttemptId } : {}),
+            historyGenerationBefore: this.lastCompactionInputGeneration,
+            trigger: this.lastCompactionTrigger ?? "automatic",
+            phase: this.lastCompactionPhase ?? "pre_turn",
+          };
+        }
+      }
+    }
     this.state.transcript.lastUserMessage = payload.transcript.lastUserMessage || "";
     this.state.transcript.lastAssistantOutput = payload.transcript.lastAssistantOutput;
     this.state.transcript.lastNonVerificationOutput = payload.transcript.lastNonVerificationOutput;
@@ -2591,6 +4455,10 @@ export class SessionRuntime {
       payload.transcript.explicitChatSummaryCreatedAt;
     this.state.transcript.explicitChatSummarySourceMessageCount =
       payload.transcript.explicitChatSummarySourceMessageCount;
+    this.state.transcript.explicitChatSummaryInputSignature =
+      typeof payload.transcript.explicitChatSummaryInputSignature === "string"
+        ? payload.transcript.explicitChatSummaryInputSignature
+        : "";
     this.state.transcript.stepOutcomeSummaries = payload.transcript.stepOutcomeSummaries || [];
 
     this.state.tooling.toolResultMemory = payload.tooling.toolResultMemory || [];
@@ -2613,6 +4481,9 @@ export class SessionRuntime {
       recoveredFailureStepIds: new Set(payload.recovery.recoveredFailureStepIds || []),
     };
     this.state.queues.pendingFollowUps = payload.queues.pendingFollowUps || [];
+    this.state.queues.consumedFollowUpMessageIds = new Set(
+      payload.queues.consumedFollowUpMessageIds || [],
+    );
     this.state.queues.stepFeedbackSignal = payload.queues.stepFeedbackSignal;
     this.state.skills.pendingParameterCollection = payload.skills?.pendingParameterCollection
       ? { ...payload.skills.pendingParameterCollection }
@@ -2650,6 +4521,7 @@ export class SessionRuntime {
     this.state.promptCache.promptCacheInvalidationReason =
       payload.promptCache?.promptCacheInvalidationReason || null;
     this.restoreTaskListState(this.getTaskListStateFromPayload(payload));
+    return interruptedCompaction;
   }
 
   private restorePendingSkillStateFromEvents(events: TaskEvent[]): void {
@@ -2750,6 +4622,8 @@ export class SessionRuntime {
       explicitChatSummaryCreatedAt: this.state.transcript.explicitChatSummaryCreatedAt,
       explicitChatSummarySourceMessageCount:
         this.state.transcript.explicitChatSummarySourceMessageCount,
+      explicitChatSummaryInputSignature:
+        this.state.transcript.explicitChatSummaryInputSignature || "",
     };
   }
 

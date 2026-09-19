@@ -205,7 +205,9 @@ const expectedHitRate = expectedTotal === 0 ? 1 : expectedHits / expectedTotal;
 const forbiddenMisfireRate = forbiddenTotal === 0 ? 0 : forbiddenMisfires / forbiddenTotal;
 
 console.log(`[skills-eval-routing] Skills: ${skills.length}`);
-console.log(`[skills-eval-routing] Expected hit rate: ${(expectedHitRate * 100).toFixed(2)}% (${expectedHits}/${expectedTotal})`);
+console.log(
+  `[skills-eval-routing] Expected hit rate: ${(expectedHitRate * 100).toFixed(2)}% (${expectedHits}/${expectedTotal})`,
+);
 console.log(
   `[skills-eval-routing] Forbidden misfire rate: ${(forbiddenMisfireRate * 100).toFixed(2)}% (${forbiddenMisfires}/${forbiddenTotal})`,
 );

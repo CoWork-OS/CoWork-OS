@@ -343,7 +343,7 @@ export function GuardrailSettings() {
             onChange={(e) =>
               setSettings({
                 ...settings,
-                compactionThresholdRatio: parseFloat(e.target.value) || 0.75,
+                compactionThresholdRatio: parseFloat(e.target.value) || 0.9,
               })
             }
             min={0.5}

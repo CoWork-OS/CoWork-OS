@@ -11,6 +11,7 @@ Provide credentials via environment variables:
 - `ZENDESK_API_TOKEN` (required for API token auth)
 
 Optional:
+
 - `ZENDESK_ACCESS_TOKEN` (OAuth bearer token)
 - `ZENDESK_BASE_URL` (override full base URL, e.g., `https://your-domain.zendesk.com`)
 - Optional refresh: `ZENDESK_CLIENT_ID`, `ZENDESK_CLIENT_SECRET`, `ZENDESK_REFRESH_TOKEN`

@@ -1,24 +1,24 @@
-import * as readline from 'readline';
+import * as readline from "readline";
 
 // ==================== MCP Types ====================
 
 type JSONRPCId = string | number;
 
 type JSONRPCRequest = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCNotification = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCResponse = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   result?: any;
   error?: { code: number; message: string; data?: any };
@@ -38,7 +38,7 @@ type MCPTool = {
   name: string;
   description?: string;
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties?: Record<string, MCPToolProperty>;
     required?: string[];
     additionalProperties?: boolean;
@@ -54,14 +54,14 @@ type MCPServerInfo = {
   };
 };
 
-const PROTOCOL_VERSION = '2024-11-05';
+const PROTOCOL_VERSION = "2024-11-05";
 
 const MCP_METHODS = {
-  INITIALIZE: 'initialize',
-  INITIALIZED: 'notifications/initialized',
-  SHUTDOWN: 'shutdown',
-  TOOLS_LIST: 'tools/list',
-  TOOLS_CALL: 'tools/call',
+  INITIALIZE: "initialize",
+  INITIALIZED: "notifications/initialized",
+  SHUTDOWN: "shutdown",
+  TOOLS_LIST: "tools/list",
+  TOOLS_CALL: "tools/call",
 } as const;
 
 const MCP_ERROR_CODES = {
@@ -100,31 +100,31 @@ class ZendeskClient {
   constructor(private config: ZendeskConfig) {}
 
   async health(): Promise<RequestResult> {
-    return this.requestJson('GET', 'api/v2/users/me.json');
+    return this.requestJson("GET", "api/v2/users/me.json");
   }
 
   async searchTickets(query: string): Promise<RequestResult> {
     const params = new URLSearchParams({ query });
-    return this.requestJson('GET', `api/v2/search.json?${params.toString()}`);
+    return this.requestJson("GET", `api/v2/search.json?${params.toString()}`);
   }
 
   async getTicket(ticketId: string): Promise<RequestResult> {
-    return this.requestJson('GET', `api/v2/tickets/${encodeURIComponent(ticketId)}.json`);
+    return this.requestJson("GET", `api/v2/tickets/${encodeURIComponent(ticketId)}.json`);
   }
 
   async createTicket(payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', 'api/v2/tickets.json', payload);
+    return this.requestJson("POST", "api/v2/tickets.json", payload);
   }
 
   async updateTicket(ticketId: string, payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('PUT', `api/v2/tickets/${encodeURIComponent(ticketId)}.json`, payload);
+    return this.requestJson("PUT", `api/v2/tickets/${encodeURIComponent(ticketId)}.json`, payload);
   }
 
   private getBaseUrl(): string {
     if (!this.config.baseUrl) {
-      throw new Error('ZENDESK_BASE_URL or ZENDESK_SUBDOMAIN is required');
+      throw new Error("ZENDESK_BASE_URL or ZENDESK_SUBDOMAIN is required");
     }
-    return this.config.baseUrl.replace(/\/$/, '');
+    return this.config.baseUrl.replace(/\/$/, "");
   }
 
   private canRefresh(): boolean {
@@ -136,11 +136,13 @@ class ZendeskClient {
       return this.config.accessToken;
     }
     if (!this.canRefresh()) {
-      throw new Error('Missing Zendesk credentials (ZENDESK_ACCESS_TOKEN or ZENDESK_EMAIL + ZENDESK_API_TOKEN)');
+      throw new Error(
+        "Missing Zendesk credentials (ZENDESK_ACCESS_TOKEN or ZENDESK_EMAIL + ZENDESK_API_TOKEN)",
+      );
     }
     await this.refreshAccessToken();
     if (!this.config.accessToken) {
-      throw new Error('Failed to refresh Zendesk access token');
+      throw new Error("Failed to refresh Zendesk access token");
     }
     return this.config.accessToken;
   }
@@ -151,28 +153,32 @@ class ZendeskClient {
       return `Bearer ${token}`;
     }
     if (this.config.email && this.config.apiToken) {
-      const basic = Buffer.from(`${this.config.email}/token:${this.config.apiToken}`).toString('base64');
+      const basic = Buffer.from(`${this.config.email}/token:${this.config.apiToken}`).toString(
+        "base64",
+      );
       return `Basic ${basic}`;
     }
-    throw new Error('Missing Zendesk credentials (ZENDESK_ACCESS_TOKEN or ZENDESK_EMAIL + ZENDESK_API_TOKEN)');
+    throw new Error(
+      "Missing Zendesk credentials (ZENDESK_ACCESS_TOKEN or ZENDESK_EMAIL + ZENDESK_API_TOKEN)",
+    );
   }
 
   private async requestJson(method: string, path: string, body?: any): Promise<RequestResult> {
     const start = Date.now();
-    const url = `${this.getBaseUrl()}/${path.replace(/^\//, '')}`;
+    const url = `${this.getBaseUrl()}/${path.replace(/^\//, "")}`;
 
     const res = await fetch(url, {
       method,
       headers: {
         Authorization: await this.getAuthHeader(),
-        'Content-Type': 'application/json',
-        'User-Agent': 'CoWork-Zendesk-Connector/0.1.0',
+        "Content-Type": "application/json",
+        "User-Agent": "CoWork-Zendesk-Connector/0.1.0",
       },
       body: body ? JSON.stringify(body) : undefined,
     });
 
     const durationMs = Date.now() - start;
-    const vendorRequestId = res.headers.get('x-request-id') || undefined;
+    const vendorRequestId = res.headers.get("x-request-id") || undefined;
 
     if (res.status === 401 && this.canRefresh()) {
       await this.refreshAccessToken();
@@ -201,14 +207,14 @@ class ZendeskClient {
 
   private async refreshAccessToken(): Promise<void> {
     if (!this.canRefresh()) {
-      throw new Error('Missing Zendesk refresh credentials');
+      throw new Error("Missing Zendesk refresh credentials");
     }
 
     const res = await fetch(`${this.getBaseUrl()}/oauth/tokens`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        grant_type: 'refresh_token',
+        grant_type: "refresh_token",
         client_id: this.config.clientId,
         client_secret: this.config.clientSecret,
         refresh_token: this.config.refreshToken,
@@ -222,7 +228,7 @@ class ZendeskClient {
 
     const data = await res.json();
     if (!data.access_token) {
-      throw new Error('Zendesk OAuth refresh returned no access_token');
+      throw new Error("Zendesk OAuth refresh returned no access_token");
     }
 
     this.config.accessToken = data.access_token;
@@ -245,7 +251,7 @@ class StdioMCPServer {
 
   constructor(
     private toolProvider: ToolProvider,
-    private serverInfo: MCPServerInfo
+    private serverInfo: MCPServerInfo,
   ) {}
 
   start(): void {
@@ -255,11 +261,11 @@ class StdioMCPServer {
       terminal: false,
     });
 
-    this.rl.on('line', (line) => this.handleLine(line));
-    this.rl.on('close', () => this.stop());
+    this.rl.on("line", (line) => this.handleLine(line));
+    this.rl.on("close", () => this.stop());
 
-    process.on('SIGINT', () => this.stop());
-    process.on('SIGTERM', () => this.stop());
+    process.on("SIGINT", () => this.stop());
+    process.on("SIGTERM", () => this.stop());
   }
 
   stop(): void {
@@ -278,17 +284,17 @@ class StdioMCPServer {
       const message = JSON.parse(trimmed);
       this.handleMessage(message);
     } catch {
-      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, 'Parse error');
+      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, "Parse error");
     }
   }
 
   private async handleMessage(message: any): Promise<void> {
-    if ('id' in message && message.id !== null) {
+    if ("id" in message && message.id !== null) {
       await this.handleRequest(message as JSONRPCRequest);
       return;
     }
 
-    if ('method' in message) {
+    if ("method" in message) {
       await this.handleNotification(message as JSONRPCNotification);
     }
   }
@@ -323,7 +329,7 @@ class StdioMCPServer {
       if (error.code !== undefined) {
         this.sendError(id, error.code, error.message, error.data);
       } else {
-        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || 'Internal error');
+        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error");
       }
     }
   }
@@ -338,11 +344,11 @@ class StdioMCPServer {
 
   private handleInitialize(_params: any): {
     protocolVersion: string;
-    capabilities: MCPServerInfo['capabilities'];
+    capabilities: MCPServerInfo["capabilities"];
     serverInfo: MCPServerInfo;
   } {
     if (this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, 'Already initialized');
+      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, "Already initialized");
     }
 
     return {
@@ -359,27 +365,27 @@ class StdioMCPServer {
   private async handleToolsCall(params: any): Promise<any> {
     const { name, arguments: args } = params || {};
     if (!name) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, 'Tool name is required');
+      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, "Tool name is required");
     }
 
     try {
       const result = await this.toolProvider.executeTool(name, args || {});
 
-      if (typeof result === 'string') {
-        return { content: [{ type: 'text', text: result }] };
+      if (typeof result === "string") {
+        return { content: [{ type: "text", text: result }] };
       }
 
-      if (result && typeof result === 'object') {
+      if (result && typeof result === "object") {
         if (result.content && Array.isArray(result.content)) {
           return result;
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
-      return { content: [{ type: 'text', text: String(result) }] };
+      return { content: [{ type: "text", text: String(result) }] };
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Error: ${error?.message || 'Tool failed'}` }],
+        content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }],
         isError: true,
       };
     }
@@ -391,13 +397,13 @@ class StdioMCPServer {
   }
 
   private sendResult(id: JSONRPCId, result: any): void {
-    const response: JSONRPCResponse = { jsonrpc: '2.0', id, result };
+    const response: JSONRPCResponse = { jsonrpc: "2.0", id, result };
     this.sendMessage(response);
   }
 
   private sendError(id: JSONRPCId, code: number, message: string, data?: any): void {
     const response: JSONRPCResponse = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
       error: { code, message, data },
     };
@@ -405,29 +411,33 @@ class StdioMCPServer {
   }
 
   private sendMessage(message: JSONRPCResponse | JSONRPCNotification): void {
-    process.stdout.write(JSON.stringify(message) + '\n');
+    process.stdout.write(JSON.stringify(message) + "\n");
   }
 
   private requireInitialized(): void {
     if (!this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, 'Server not initialized');
+      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, "Server not initialized");
     }
   }
 
-  private createError(code: number, message: string, data?: any): { code: number; message: string; data?: any } {
+  private createError(
+    code: number,
+    message: string,
+    data?: any,
+  ): { code: number; message: string; data?: any } {
     return { code, message, data };
   }
 }
 
 // ==================== Tool Definitions ====================
 
-const CONNECTOR_PREFIX = 'zendesk';
+const CONNECTOR_PREFIX = "zendesk";
 
 const baseUrl = process.env.ZENDESK_BASE_URL
   ? process.env.ZENDESK_BASE_URL
   : process.env.ZENDESK_SUBDOMAIN
     ? `https://${process.env.ZENDESK_SUBDOMAIN}.zendesk.com`
-    : '';
+    : "";
 
 const config: ZendeskConfig = {
   baseUrl,
@@ -444,55 +454,55 @@ const client = new ZendeskClient(config);
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
-    description: 'Check connector health and authentication status',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    description: "Check connector health and authentication status",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: `${CONNECTOR_PREFIX}.search_tickets`,
-    description: 'Search Zendesk tickets with a query string',
+    description: "Search Zendesk tickets with a query string",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        query: { type: 'string', description: 'Search query (Zendesk search syntax)' },
+        query: { type: "string", description: "Search query (Zendesk search syntax)" },
       },
-      required: ['query'],
+      required: ["query"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_ticket`,
-    description: 'Fetch a ticket by ID',
+    description: "Fetch a ticket by ID",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        id: { type: 'string', description: 'Ticket ID' },
+        id: { type: "string", description: "Ticket ID" },
       },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.create_ticket`,
-    description: 'Create a new ticket',
+    description: "Create a new ticket",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        ticket: { type: 'object', description: 'Zendesk ticket payload (ticket object)' },
+        ticket: { type: "object", description: "Zendesk ticket payload (ticket object)" },
       },
-      required: ['ticket'],
+      required: ["ticket"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.update_ticket`,
-    description: 'Update a ticket',
+    description: "Update a ticket",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        id: { type: 'string', description: 'Ticket ID' },
-        ticket: { type: 'object', description: 'Zendesk ticket payload (ticket object)' },
+        id: { type: "string", description: "Ticket ID" },
+        ticket: { type: "object", description: "Zendesk ticket payload (ticket object)" },
       },
-      required: ['id', 'ticket'],
+      required: ["id", "ticket"],
       additionalProperties: false,
     },
   },
@@ -500,10 +510,14 @@ const tools: MCPTool[] = [
 
 const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
   [`${CONNECTOR_PREFIX}.health`]: async () => buildEnvelope(await client.health()),
-  [`${CONNECTOR_PREFIX}.search_tickets`]: async (args) => buildEnvelope(await client.searchTickets(args.query)),
-  [`${CONNECTOR_PREFIX}.get_ticket`]: async (args) => buildEnvelope(await client.getTicket(args.id)),
-  [`${CONNECTOR_PREFIX}.create_ticket`]: async (args) => buildEnvelope(await client.createTicket({ ticket: args.ticket })),
-  [`${CONNECTOR_PREFIX}.update_ticket`]: async (args) => buildEnvelope(await client.updateTicket(args.id, { ticket: args.ticket })),
+  [`${CONNECTOR_PREFIX}.search_tickets`]: async (args) =>
+    buildEnvelope(await client.searchTickets(args.query)),
+  [`${CONNECTOR_PREFIX}.get_ticket`]: async (args) =>
+    buildEnvelope(await client.getTicket(args.id)),
+  [`${CONNECTOR_PREFIX}.create_ticket`]: async (args) =>
+    buildEnvelope(await client.createTicket({ ticket: args.ticket })),
+  [`${CONNECTOR_PREFIX}.update_ticket`]: async (args) =>
+    buildEnvelope(await client.updateTicket(args.id, { ticket: args.ticket })),
 };
 
 const toolProvider: ToolProvider = {
@@ -518,8 +532,8 @@ const toolProvider: ToolProvider = {
 };
 
 const serverInfo: MCPServerInfo = {
-  name: 'Zendesk Connector',
-  version: '0.1.0',
+  name: "Zendesk Connector",
+  version: "0.1.0",
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {
     tools: { listChanged: false },

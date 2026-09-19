@@ -49,7 +49,9 @@ function installGitHooks() {
     env: process.env,
   });
   if (res.status !== 0) {
-    console.warn("[cowork] setup:hooks install failed. You can retry with `npm run hooks:install`.");
+    console.warn(
+      "[cowork] setup:hooks install failed. You can retry with `npm run hooks:install`.",
+    );
   }
 }
 
@@ -57,7 +59,7 @@ async function main() {
   // 1. Bootstrap: install deps if electron is missing
   if (!electronPresent()) {
     console.log(
-      "[cowork] setup:bootstrap electron not found in local or parent node_modules; running fallback install."
+      "[cowork] setup:bootstrap electron not found in local or parent node_modules; running fallback install.",
     );
     const installRes = spawnNpm(["install", "--ignore-scripts", "--no-audit", "--no-fund"], {
       stdio: "inherit",

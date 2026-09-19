@@ -16,65 +16,11 @@ const EXPORTABLE_EVENT_TYPES = new Set([
   "permission_mode_overridden",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /(token|api[_-]?key|secret|password|authorization|cookie|private[_-]?key)/i;
-const SENSITIVE_VALUE_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
-  { pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b/gi, replacement: "Bearer [REDACTED]" },
-  { pattern: /\bsk-[A-Za-z0-9_-]{16,}\b/g, replacement: "[REDACTED_OPENAI_KEY]" },
-  { pattern: /\bsk-ant-[A-Za-z0-9_-]{16,}\b/g, replacement: "[REDACTED_ANTHROPIC_KEY]" },
-  { pattern: /\bgh[pousr]_[A-Za-z0-9_]{16,}\b/g, replacement: "[REDACTED_GITHUB_TOKEN]" },
-  { pattern: /\bAKIA[0-9A-Z]{16}\b/g, replacement: "[REDACTED_AWS_ACCESS_KEY]" },
-  {
-    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-    replacement: "[REDACTED_JWT]",
-  },
-  {
-    pattern:
-      /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z]+)? PRIVATE KEY-----/g,
-    replacement: "[REDACTED_PRIVATE_KEY]",
-  },
-];
-
-function redactString(value: string): string {
-  let out = value;
-  for (const { pattern, replacement } of SENSITIVE_VALUE_PATTERNS) {
-    out = out.replace(pattern, replacement);
-  }
-  return out.length > 512 ? `${out.slice(0, 512)}[TRUNCATED]` : out;
-}
-
-function redactPayload(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
-  if (depth > 8) return "[TRUNCATED]";
-  if (value === null || value === undefined) return value;
-  if (typeof value === "string") return redactString(value);
-  if (typeof value !== "object") return value;
-  if (seen.has(value as object)) return "[CIRCULAR]";
-  seen.add(value as object);
-
-  if (Array.isArray(value)) {
-    return value.map((item) => redactPayload(item, depth + 1, seen));
-  }
-
-  const out: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = SENSITIVE_KEY_RE.test(key) ? "[REDACTED]" : redactPayload(child, depth + 1, seen);
-  }
-  return out;
-}
-
 function stableHexId(input: string, bytes: number): string {
   return createHash("sha256")
     .update(input)
     .digest("hex")
     .slice(0, bytes * 2);
-}
-
-function payloadKeys(payload: unknown): string {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
-  return Object.keys(payload as Record<string, unknown>)
-    .map((key) => (SENSITIVE_KEY_RE.test(key) ? "[REDACTED_KEY]" : redactString(key)))
-    .slice(0, 32)
-    .join(",");
 }
 
 function toHrTime(timestampMs: number): string {
@@ -96,6 +42,23 @@ function toAttributes(
   });
 }
 
+function eventKind(
+  type: string,
+): "tool" | "approval" | "sandbox" | "network" | "permission" | "other" {
+  if (
+    type === "tool_call" ||
+    type === "tool_result" ||
+    type === "tool_error" ||
+    type === "tool_warning"
+  )
+    return "tool";
+  if (type.startsWith("approval_")) return "approval";
+  if (type === "sandbox_denied" || type === "shell_sandbox_bypassed") return "sandbox";
+  if (type === "network_policy_decision") return "network";
+  if (type === "permission_mode_overridden") return "permission";
+  return "other";
+}
+
 export function enqueueTaskEventTelemetry(event: TaskEvent): void {
   if (!EXPORTABLE_EVENT_TYPES.has(String(event.type))) return;
 
@@ -108,7 +71,6 @@ export function enqueueTaskEventTelemetry(event: TaskEvent): void {
   const endpoint = policies.runtime.telemetry.otlpEndpoint?.trim();
   if (policies.runtime.telemetry.enabled !== true || !endpoint) return;
 
-  const payload = redactPayload(event.payload);
   const body = {
     resourceSpans: [
       {
@@ -130,10 +92,7 @@ export function enqueueTaskEventTelemetry(event: TaskEvent): void {
                 startTimeUnixNano: toHrTime(event.timestamp),
                 endTimeUnixNano: toHrTime(event.timestamp),
                 attributes: toAttributes({
-                  "cowork.task_id": event.taskId,
-                  "cowork.event_id": event.id,
-                  "cowork.event_type": String(event.type),
-                  "cowork.payload_keys": payloadKeys(payload),
+                  "cowork.event_kind": eventKind(String(event.type)),
                 }),
               },
             ],

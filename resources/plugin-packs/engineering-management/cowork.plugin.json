@@ -25,7 +25,12 @@
       "category": "Management",
       "prompt": "Review the current sprint status.\n\nSprint data:\n{{sprint_data}}\n\nPlease provide:\n1. Sprint progress percentage\n2. Items completed vs. planned\n3. At-risk items (stalled 3+ days, blocked, failing CI)\n4. Team member workload balance\n5. Predicted sprint outcome (on track/at risk/behind)\n6. Recommended actions for this week",
       "parameters": [
-        { "name": "sprint_data", "type": "string", "description": "Sprint board status, tasks, or JIRA export", "required": true }
+        {
+          "name": "sprint_data",
+          "type": "string",
+          "description": "Sprint board status, tasks, or JIRA export",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -38,7 +43,12 @@
       "prompt": "Prepare a 1-on-1 meeting brief.\n\nTeam member: {{person}}\nRecent context: {{context}}\n\nPlease prepare:\n1. Recent accomplishments to recognize\n2. Current work and progress\n3. Potential blockers or concerns\n4. Open action items from previous meetings\n5. Suggested discussion topics (2-3)\n6. Career development talking points",
       "parameters": [
         { "name": "person", "type": "string", "description": "Team member name", "required": true },
-        { "name": "context", "type": "string", "description": "Recent activity, PRs, tasks, or notes about this person", "required": false }
+        {
+          "name": "context",
+          "type": "string",
+          "description": "Recent activity, PRs, tasks, or notes about this person",
+          "required": false
+        }
       ],
       "enabled": true
     },
@@ -50,7 +60,12 @@
       "category": "Management",
       "prompt": "Generate a team status report.\n\nTeam info:\n{{team_info}}\n\nFormat:\n1. Executive summary (3 bullets)\n2. Key achievements this period\n3. In-progress work and timelines\n4. Blockers and risks\n5. Team health indicators\n6. Next period priorities",
       "parameters": [
-        { "name": "team_info", "type": "string", "description": "Team activity, sprint data, or notes", "required": true }
+        {
+          "name": "team_info",
+          "type": "string",
+          "description": "Team activity, sprint data, or notes",
+          "required": true
+        }
       ],
       "enabled": true
     }

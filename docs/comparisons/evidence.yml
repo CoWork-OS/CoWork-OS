@@ -53,4 +53,3 @@ products:
         supports: open agent repository and runtime scope
       - url: https://github.com/hermes-agent-org/hermes/blob/main/website/docs/integrations/providers.md
         supports: provider integrations
-

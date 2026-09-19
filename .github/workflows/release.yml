@@ -463,7 +463,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_SHA: ${{ github.sha }}
-      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      RELEASE_BUNDLE_DIR: registry-bundle
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
@@ -499,7 +499,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_SHA: ${{ github.sha }}
-      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      RELEASE_BUNDLE_DIR: registry-bundle
       RELEASE_TARGET: npm
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -525,7 +525,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_SHA: ${{ github.sha }}
-      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      RELEASE_BUNDLE_DIR: registry-bundle
       RELEASE_TARGET: github
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -552,7 +552,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_SHA: ${{ github.sha }}
-      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      RELEASE_BUNDLE_DIR: registry-bundle
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6

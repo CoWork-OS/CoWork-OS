@@ -31,20 +31,13 @@
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "digital-twin",
-      "status",
-      "reporting",
-      "standup"
-    ],
+    "tags": ["digital-twin", "status", "reporting", "standup"],
     "routing": {
       "useWhen": "Use when generating status updates, standup reports, progress summaries, or sprint reviews.",
       "dontUseWhen": "Don't use for detailed technical analysis or code review.",
       "outputs": "Markdown status report organized by completion status",
       "successCriteria": "Report covers all active work streams with clear status and action items",
-      "expectedArtifacts": [
-        "status-report.md"
-      ],
+      "expectedArtifacts": ["status-report.md"],
       "examples": {
         "positive": [
           "Use the twin-status-report skill for this request.",

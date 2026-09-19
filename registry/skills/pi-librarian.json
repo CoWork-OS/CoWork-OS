@@ -36,10 +36,7 @@
   ],
   "enabled": true,
   "requires": {
-    "bins": [
-      "pi",
-      "gh"
-    ]
+    "bins": ["pi", "gh"]
   },
   "install": [
     {
@@ -47,9 +44,7 @@
       "kind": "npm",
       "package": "@mariozechner/pi-coding-agent",
       "label": "Install Pi CLI (npm i -g @mariozechner/pi-coding-agent)",
-      "bins": [
-        "pi"
-      ]
+      "bins": ["pi"]
     },
     {
       "id": "librarian-package",
@@ -62,33 +57,21 @@
       "kind": "brew",
       "formula": "gh",
       "label": "Install GitHub CLI (brew install gh)",
-      "bins": [
-        "gh"
-      ],
-      "os": [
-        "darwin"
-      ]
+      "bins": ["gh"],
+      "os": ["darwin"]
     }
   ],
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
     "homepage": "https://www.npmjs.com/package/pi-librarian",
-    "tags": [
-      "pi",
-      "subagent",
-      "github",
-      "research"
-    ],
+    "tags": ["pi", "subagent", "github", "research"],
     "routing": {
       "useWhen": "Use when users ask to research external GitHub repositories, compare implementation patterns, or gather cited repo evidence before coding.",
       "dontUseWhen": "Do not use for local-workspace-only discovery or when GitHub access is unnecessary; use pi-finder-subagent instead.",
       "outputs": "A cited GitHub research report in {artifactDir}/librarian-report.md plus an actionable summary in {artifactDir}/librarian-summary.md.",
       "successCriteria": "Librarian returns concrete repositories, file paths with citations, and clear unknowns/access limits that guide implementation decisions.",
-      "expectedArtifacts": [
-        "librarian-report.md",
-        "librarian-summary.md"
-      ],
+      "expectedArtifacts": ["librarian-report.md", "librarian-summary.md"],
       "examples": {
         "positive": [
           "Use the pi-librarian skill for this request.",

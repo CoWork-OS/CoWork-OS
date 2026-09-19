@@ -205,10 +205,15 @@ function parseGitUrl(input: string): { url: string; name: string } | null {
     name = parts[parts.length - 1].replace(/\.git$/, "");
     url = `https://github.com/${parts.join("/")}`;
   }
-  // HTTPS URL
-  else if (url.startsWith("https://") || url.startsWith("http://")) {
+  // HTTPS URL. Plain http:// is refused: the cloned tree's entry point is
+  // require()'d into the Electron main process, and there is no signature or
+  // pinned checksum on this path, so an on-path attacker answering the clone
+  // would get code execution with full main-process privileges.
+  else if (url.startsWith("https://")) {
     const urlParts = url.split("/").filter(Boolean);
     name = urlParts[urlParts.length - 1].replace(/\.git$/, "");
+  } else if (url.startsWith("http://")) {
+    return null;
   }
   // SSH URL
   else if (url.startsWith("git@")) {
@@ -269,7 +274,22 @@ export async function installFromGit(
     // Shallow clone (single branch, depth 1) for speed
     await execFileAsync(
       "git",
-      ["clone", "--depth", "1", "--single-branch", parsed.url, workingDir],
+      [
+        // Refuse redirects and any credential helper: without these, an
+        // approved host could 302 the clone onto a different origin, or a
+        // helper could hand the user's git credentials to it. The cloned tree
+        // is require()'d into the main process, so its provenance matters.
+        "-c",
+        "http.followRedirects=false",
+        "-c",
+        "credential.helper=",
+        "clone",
+        "--depth",
+        "1",
+        "--single-branch",
+        parsed.url,
+        workingDir,
+      ],
       { timeout: GIT_CLONE_TIMEOUT_MS },
     );
 
@@ -406,6 +426,12 @@ export async function installFromUrl(
   let tempDir: string | null = null;
 
   try {
+    // https only: the manifest this returns designates the entry point that
+    // gets require()'d into the main process. evaluateNetworkPolicy matches on
+    // hostname and does not inspect the scheme.
+    if (!url.startsWith("https://")) {
+      return { success: false, error: "Plugin packs must be installed over https" };
+    }
     assertNetworkPolicyAllowed({ url, toolName: "plugin_pack_url_install" });
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);

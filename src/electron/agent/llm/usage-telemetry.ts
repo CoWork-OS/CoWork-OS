@@ -49,11 +49,12 @@ export function recordLlmCallSuccess(
   const inputTokens = Math.max(0, Number(usage?.inputTokens || 0));
   const outputTokens = Math.max(0, Number(usage?.outputTokens || 0));
   const cachedTokens = Math.max(0, Number(usage?.cachedTokens || 0));
+  const cacheWriteTokens = Math.max(0, Number(usage?.cacheWriteTokens || 0));
   const modelId = input.modelId || input.modelKey || "";
   const providerType = normalizeLlmProviderType(input.providerType) || null;
   const cost =
-    inputTokens > 0 || outputTokens > 0 || cachedTokens > 0
-      ? calculateCost(modelId, inputTokens, outputTokens, cachedTokens)
+    inputTokens > 0 || outputTokens > 0 || cachedTokens > 0 || cacheWriteTokens > 0
+      ? calculateCost(modelId, inputTokens, outputTokens, cachedTokens, cacheWriteTokens)
       : 0;
 
   try {

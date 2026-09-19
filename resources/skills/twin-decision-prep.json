@@ -18,31 +18,20 @@
       "description": "Number of options to analyze",
       "required": false,
       "default": "2-4",
-      "options": [
-        "2",
-        "2-4",
-        "3-5"
-      ]
+      "options": ["2", "2-4", "3-5"]
     }
   ],
   "enabled": true,
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "digital-twin",
-      "decision",
-      "analysis",
-      "trade-off"
-    ],
+    "tags": ["digital-twin", "decision", "analysis", "trade-off"],
     "routing": {
       "useWhen": "Use when preparing analysis for a decision, architecture choice, technology selection, or any trade-off evaluation.",
       "dontUseWhen": "Don't use when the user has already made a decision and just needs implementation help.",
       "outputs": "Structured decision package with options, trade-offs, and recommendation",
       "successCriteria": "Package presents clear options with honest trade-offs and sufficient data for an informed decision",
-      "expectedArtifacts": [
-        "decision-package.md"
-      ],
+      "expectedArtifacts": ["decision-package.md"],
       "examples": {
         "positive": [
           "Use the twin-decision-prep skill for this request.",

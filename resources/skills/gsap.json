@@ -11,23 +11,9 @@
     "version": "0.4.3",
     "author": "HeyGen",
     "homepage": "https://github.com/heygen-com/hyperframes",
-    "tags": [
-      "gsap",
-      "animation",
-      "timelines",
-      "easing",
-      "video",
-      "hyperframes"
-    ],
+    "tags": ["gsap", "animation", "timelines", "easing", "video", "hyperframes"],
     "routing": {
-      "keywords": [
-        "gsap",
-        "timeline",
-        "stagger",
-        "easing",
-        "matchMedia",
-        "audio reactive"
-      ],
+      "keywords": ["gsap", "timeline", "stagger", "easing", "matchMedia", "audio reactive"],
       "useWhen": "Use when the user asks to build or refine GSAP tweens, timelines, easing, stagger, responsive animation, or performance-aware motion for a HyperFrames composition.",
       "dontUseWhen": "Do not use for non-GSAP animation systems, pure CLI setup, or general composition structure questions that belong in the hyperframes skill.",
       "outputs": "Concrete GSAP code patterns, timeline guidance, or effect snippets suitable for HyperFrames.",

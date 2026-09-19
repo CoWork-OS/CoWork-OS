@@ -10,6 +10,8 @@ export interface ModelPricing {
   outputPer1M: number; // Cost per 1M output tokens in USD
   /** Cost per 1M cached-read tokens. Defaults to 50% of inputPer1M (OpenAI/Azure rate) if omitted. */
   cachedInputPer1M?: number;
+  /** Cost per 1M cache-write tokens. Defaults to inputPer1M for legacy providers. */
+  cacheWritePer1M?: number;
 }
 
 /**
@@ -102,6 +104,12 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "gemini-1.5-flash": { inputPer1M: 0.075, outputPer1M: 0.3 },
 
   // OpenAI models (direct API)
+  "gpt-6-astra": {
+    inputPer1M: 10.0,
+    outputPer1M: 50.0,
+    cachedInputPer1M: 1.0,
+    cacheWritePer1M: 12.5,
+  },
   "gpt-4o": { inputPer1M: 2.5, outputPer1M: 10.0 },
   "gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.6 },
   "gpt-4-turbo": { inputPer1M: 10.0, outputPer1M: 30.0 },
@@ -143,9 +151,11 @@ export const IMAGE_GENERATION_PRICING: Record<string, number> = {
 /**
  * Calculate the cost of an LLM API call.
  * @param modelId The model identifier
- * @param inputTokens Number of input tokens (includes cachedTokens)
+ * @param inputTokens Number of input tokens. May or may not include the cache
+ *   counters below — see the inclusive/disjoint note in the body.
  * @param outputTokens Number of output tokens
- * @param cachedTokens Tokens served from the provider's prompt cache (billed at 50% of input price)
+ * @param cachedTokens Tokens served from the provider's prompt cache (billed at a discount)
+ * @param cacheWriteTokens Tokens written to the provider's prompt cache (billed at a premium)
  * @returns Cost in USD
  */
 export function calculateCost(
@@ -153,6 +163,7 @@ export function calculateCost(
   inputTokens: number,
   outputTokens: number,
   cachedTokens = 0,
+  cacheWriteTokens = 0,
 ): number {
   // Try exact match first
   let pricing = MODEL_PRICING[modelId];
@@ -173,15 +184,48 @@ export function calculateCost(
     return 0;
   }
 
+  const normalizedModelId = String(modelId || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:openai-codex|openai)\//, "")
+    .split("@", 1)[0];
+  // Astra applies the long-context multiplier to the whole request once the
+  // input crosses 272K tokens: input/cache rates are doubled and output is
+  // charged at 1.5x.
+  const isAstraLongContext = normalizedModelId === "gpt-6-astra" && inputTokens > 272_000;
+  const inputRateMultiplier = isAstraLongContext ? 2 : 1;
+  const outputRateMultiplier = isAstraLongContext ? 1.5 : 1;
+
   // Cached tokens are already counted in inputTokens but billed at a discount.
   // Discount rate varies by provider: Anthropic = 10% of input price, OpenAI/Azure = 50%.
   // Models with a known cachedInputPer1M use it; others fall back to 50% of inputPer1M.
   const cachedRate = pricing.cachedInputPer1M ?? pricing.inputPer1M * 0.5;
-  const safeCached = Math.min(cachedTokens, inputTokens);
-  const regularInputTokens = inputTokens - safeCached;
+  const cacheWriteRate = pricing.cacheWritePer1M ?? pricing.inputPer1M;
+
+  // Providers disagree on whether the cache counters live INSIDE inputTokens:
+  //
+  //   OpenAI/Azure — `prompt_tokens` is inclusive of
+  //     `prompt_tokens_details.cached_tokens`, so the cached portion has to be
+  //     subtracted out to avoid charging it twice.
+  //   Anthropic    — `input_tokens`, `cache_read_input_tokens` and
+  //     `cache_creation_input_tokens` are three DISJOINT counts. Subtracting
+  //     there clamps a 100K cache read down to whatever tiny `input_tokens`
+  //     was and bills it at ~$0, which is what made every Anthropic total and
+  //     the budgetCost guard under-report by orders of magnitude.
+  //
+  // The counters not fitting inside inputTokens is the unambiguous signal that
+  // they are disjoint; treat them as additive in that case.
+  const safeCached = Math.max(0, cachedTokens);
+  const safeCacheWrite = Math.max(0, cacheWriteTokens);
+  const cacheCountersAreInclusive = safeCached + safeCacheWrite <= inputTokens;
+  const regularInputTokens = cacheCountersAreInclusive
+    ? inputTokens - safeCached - safeCacheWrite
+    : inputTokens;
   const inputCost =
-    (regularInputTokens / 1_000_000) * pricing.inputPer1M + (safeCached / 1_000_000) * cachedRate;
-  const outputCost = (outputTokens / 1_000_000) * pricing.outputPer1M;
+    (regularInputTokens / 1_000_000) * pricing.inputPer1M * inputRateMultiplier +
+    (safeCached / 1_000_000) * cachedRate * inputRateMultiplier +
+    (safeCacheWrite / 1_000_000) * cacheWriteRate * inputRateMultiplier;
+  const outputCost = (outputTokens / 1_000_000) * pricing.outputPer1M * outputRateMultiplier;
 
   return inputCost + outputCost;
 }

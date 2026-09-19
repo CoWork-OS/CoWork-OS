@@ -10,6 +10,7 @@ import type { WorkerRoleKind, VerificationVerdict } from "../../../shared/types"
 export interface VerificationRuntimeChildResult {
   childTaskId: string;
   status: "completed" | "failed" | "cancelled" | "timeout" | "missing";
+  terminalStatus?: Task["terminalStatus"];
   summary: string;
 }
 
@@ -96,7 +97,10 @@ export class VerificationRuntime {
     });
 
     const report = String(result.summary || "").trim();
-    const verdict = parseVerificationVerdict(report);
+    // A stale/partial summary cannot certify an unfinished verification run.
+    const completedSuccessfully =
+      result.status === "completed" && (!result.terminalStatus || result.terminalStatus === "ok");
+    const verdict = completedSuccessfully ? parseVerificationVerdict(report) : "FAIL";
     const highRisk = this.isHighRiskTask(request.parentTask, request);
     const shouldBlock = verdict === "FAIL" || (highRisk && verdict !== "PASS");
 
@@ -124,6 +128,7 @@ export class VerificationRuntime {
   }
 
   private isHighRiskTask(task: Task, request: VerificationRuntimeRequest): boolean {
+    if (request.highRisk) return true;
     const text = this.getTaskText(task, request.parentSummary);
     const outputSummary = request.outputSummary;
     const mutatedCount =

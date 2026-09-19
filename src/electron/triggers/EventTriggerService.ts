@@ -32,6 +32,7 @@ export class EventTriggerService {
   private db: Any; // better-sqlite3 database instance
   private queueTimer: NodeJS.Timeout | null = null;
   private drainingQueue = false;
+  private drainPromise: Promise<void> | null = null;
   private fireInterceptor:
     | ((
         trigger: EventTrigger,
@@ -66,10 +67,11 @@ export class EventTriggerService {
     this.log("[EventTriggerService] Started with", this.triggers.size, "triggers");
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.running = false;
     if (this.queueTimer) clearInterval(this.queueTimer);
     this.queueTimer = null;
+    await this.drainPromise;
     this.log("[EventTriggerService] Stopped");
   }
 
@@ -85,7 +87,10 @@ export class EventTriggerService {
   }
 
   async drainPendingEvents(): Promise<void> {
-    await this.drainQueuedEvents();
+    const drainPromise = this.drainQueuedEvents();
+    await drainPromise;
+    if (this.drainPromise === drainPromise) this.drainPromise = null;
+    if (this.running) await this.drainQueuedEvents();
   }
 
   // ── CRUD ────────────────────────────────────────────────────────
@@ -309,12 +314,31 @@ export class EventTriggerService {
     }
   }
 
-  private async drainQueuedEvents(): Promise<void> {
+  private drainQueuedEvents(): Promise<void> {
+    if (!this.running || !this.db) return Promise.resolve();
+    if (this.drainPromise) return this.drainPromise;
+
+    const promise = this.runDrainQueuedEvents().catch((error) => {
+      this.log("[EventTriggerService] Failed to drain queued events:", error);
+    });
+    this.drainPromise = promise;
+    void promise.then(
+      () => {
+        if (this.drainPromise === promise) this.drainPromise = null;
+      },
+      () => {
+        if (this.drainPromise === promise) this.drainPromise = null;
+      },
+    );
+    return promise;
+  }
+
+  private async runDrainQueuedEvents(): Promise<void> {
     if (!this.running || !this.db || this.drainingQueue) return;
     if ((this.deps.getActiveTaskCount?.() ?? 0) >= 4) return;
     this.drainingQueue = true;
     try {
-      while ((this.deps.getActiveTaskCount?.() ?? 0) < 4) {
+      while (this.running && (this.deps.getActiveTaskCount?.() ?? 0) < 4) {
         const now = Date.now();
         const row = this.db
           .prepare(
@@ -332,8 +356,10 @@ export class EventTriggerService {
         try {
           const event = JSON.parse(String(row.event_json)) as TriggerEvent;
           await this.evaluateEventNow(event);
+          if (!this.running) return;
           this.db.prepare("DELETE FROM event_trigger_queue WHERE id = ?").run(row.id);
         } catch (error) {
+          if (!this.running) return;
           const attemptCount = Number(row.attempt_count || 0) + 1;
           const message = error instanceof Error ? error.message : String(error);
           if (attemptCount >= 5) {

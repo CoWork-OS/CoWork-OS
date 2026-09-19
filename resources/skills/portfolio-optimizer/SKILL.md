@@ -37,15 +37,15 @@ Modern portfolio theory optimization including Markowitz mean-variance, Black-Li
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| holdings | string | Yes | Current portfolio holdings and weights (e.g., SPY 40%, AGG 30%, GLD 10%, VWO 20%) |
-| objective | select | Yes | Optimization objective |
-| question | string | Yes | Your specific optimization question |
-| constraints | string | No | Portfolio constraints (e.g., long-only, max 25% per position, no emerging markets) |
-| targetReturn | string | No | Target annual return for optimization (e.g., 8%) |
+| Name         | Type   | Required | Description                                                                        |
+| ------------ | ------ | -------- | ---------------------------------------------------------------------------------- |
+| holdings     | string | Yes      | Current portfolio holdings and weights (e.g., SPY 40%, AGG 30%, GLD 10%, VWO 20%)  |
+| objective    | select | Yes      | Optimization objective                                                             |
+| question     | string | Yes      | Your specific optimization question                                                |
+| constraints  | string | No       | Portfolio constraints (e.g., long-only, max 25% per position, no emerging markets) |
+| targetReturn | string | No       | Target annual return for optimization (e.g., 8%)                                   |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1094 characters.
-- Runtime prompt is defined directly in `../portfolio-optimizer.json`. 
+- Runtime prompt is defined directly in `../portfolio-optimizer.json`.

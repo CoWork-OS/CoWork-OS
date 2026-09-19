@@ -38,4 +38,4 @@ Run Codex CLI, Claude Code, OpenCode, or Pi Coding Agent via background process 
 ## Runtime Prompt
 
 - Current runtime prompt length: 982 characters.
-- Runtime prompt is defined directly in `../coding-agent.json`. 
+- Runtime prompt is defined directly in `../coding-agent.json`.

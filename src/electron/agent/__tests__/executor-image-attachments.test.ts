@@ -1,7 +1,39 @@
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import * as path from "path";
+
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { QueuedAttachmentStore } from "../runtime/queued-attachment-store";
 
 describe("TaskExecutor image attachment routing", () => {
+  it("loads a queued durable image through the executor after a receipt-only restart", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "cowork-executor-attachments-"));
+    try {
+      const store = new QueuedAttachmentStore(path.join(root, "store"));
+      const persisted = store.persist("task-1", "message-1", [
+        { data: "aGVsbG8=", mimeType: "image/png", filename: "hello.png", sizeBytes: 5 },
+      ]);
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.provider = { type: "openai" };
+      executor.emitEvent = vi.fn();
+
+      const result = await executor.buildUserContent("Inspect this image", persisted.images);
+
+      expect(result).toEqual([
+        { type: "text", text: "Inspect this image" },
+        {
+          type: "image",
+          data: "aGVsbG8=",
+          mimeType: "image/png",
+          originalSizeBytes: 5,
+        },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("emits a user-facing switch-model message when the active provider cannot accept images", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.provider = { type: "gemini" };

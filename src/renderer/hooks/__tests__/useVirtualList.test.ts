@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computeOffsets, findStartIndex } from "../useVirtualList";
+import { computeOffsets, findStartIndex, shouldAutoScrollOnItemsChange } from "../useVirtualList";
 
 describe("computeOffsets", () => {
   it("returns empty arrays for zero items", () => {
@@ -56,5 +56,29 @@ describe("findStartIndex", () => {
 
   it("handles single-item offsets", () => {
     expect(findStartIndex([0], 0)).toBe(0);
+  });
+});
+
+describe("shouldAutoScrollOnItemsChange", () => {
+  it("does not move a list when callers suppress item-change auto-scroll", () => {
+    expect(
+      shouldAutoScrollOnItemsChange({
+        itemCountChanged: true,
+        enabled: true,
+        suppressAutoScrollOnItemsChange: true,
+        isAtBottom: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the existing bottom-follow behavior when not suppressed", () => {
+    expect(
+      shouldAutoScrollOnItemsChange({
+        itemCountChanged: true,
+        enabled: true,
+        suppressAutoScrollOnItemsChange: false,
+        isAtBottom: true,
+      }),
+    ).toBe(true);
   });
 });

@@ -37,12 +37,12 @@ Get a detailed explanation of how code works
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to the file to explain |
-| level | select | Yes | Explanation depth |
+| Name  | Type   | Required | Description                 |
+| ----- | ------ | -------- | --------------------------- |
+| path  | string | Yes      | Path to the file to explain |
+| level | select | Yes      | Explanation depth           |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 268 characters.
-- Runtime prompt is defined directly in `../explain-code.json`. 
+- Runtime prompt is defined directly in `../explain-code.json`.

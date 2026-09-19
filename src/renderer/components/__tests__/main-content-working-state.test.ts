@@ -155,7 +155,7 @@ describe("completion summary delivery", () => {
 
     const result = selectVisibleTaskFeedRows(rows, "delivery");
     expect(result.visibleFeedRows.map((row) => row.key)).toEqual(["assistant-final"]);
-    expect(result.hiddenLiveFeedRowCount).toBe(1);
+    expect(result.hiddenLiveFeedRowCount).toBe(0);
   });
 
   it("does not hide a clipped completion that carries an action-required state", () => {
@@ -1409,6 +1409,97 @@ describe("isTaskActivelyWorking", () => {
     expect(result.visibleFeedRows.some((row) => row.key === "assistant-1")).toBe(true);
   });
 
+  it("keeps every conversation message and compact action row while trimming incidental steps", () => {
+    const rows = [
+      {
+        kind: "timeline",
+        key: "user-1",
+        estimatedHeight: 100,
+        timelineIndex: 0,
+        visiblePerfEventId: "user-1",
+        revision: "user-1",
+        item: {
+          kind: "event",
+          event: makeEvent("user-1", 100, "user_message", { message: "First request" }),
+        },
+      },
+      ...Array.from({ length: 18 }, (_, index) => ({
+        kind: "timeline",
+        key: `progress-${index}`,
+        estimatedHeight: 100,
+        timelineIndex: index + 1,
+        visiblePerfEventId: `progress-${index}`,
+        revision: `progress-${index}`,
+        item: {
+          kind: "event",
+          event: makeEvent(`progress-${index}`, 200 + index, "timeline_step_updated", {
+            legacyType: "progress_update",
+            message: `Progress ${index}`,
+          }),
+        },
+      })),
+      {
+        kind: "timeline",
+        key: "assistant-1",
+        estimatedHeight: 100,
+        timelineIndex: 19,
+        visiblePerfEventId: "assistant-1",
+        revision: "assistant-1",
+        item: {
+          kind: "event",
+          event: makeEvent("assistant-1", 300, "assistant_message", { message: "First answer" }),
+        },
+      },
+      {
+        kind: "timeline",
+        key: "action-block-1",
+        estimatedHeight: 34,
+        timelineIndex: 20,
+        visiblePerfEventId: "step-1",
+        revision: "action-block-1",
+        item: {
+          kind: "action_block",
+          blockId: "action-block-1",
+          events: [
+            makeEvent("step-1", 400, "tool_call", { tool: "read_file" }),
+            makeEvent("step-2", 401, "tool_result", { tool: "read_file" }),
+          ],
+        },
+      },
+      {
+        kind: "timeline",
+        key: "user-2",
+        estimatedHeight: 100,
+        timelineIndex: 21,
+        visiblePerfEventId: "user-2",
+        revision: "user-2",
+        item: {
+          kind: "event",
+          event: makeEvent("user-2", 500, "user_message", { message: "Follow-up" }),
+        },
+      },
+      {
+        kind: "timeline",
+        key: "assistant-2",
+        estimatedHeight: 100,
+        timelineIndex: 22,
+        visiblePerfEventId: "assistant-2",
+        revision: "assistant-2",
+        item: {
+          kind: "event",
+          event: makeEvent("assistant-2", 600, "assistant_message", { message: "Second answer" }),
+        },
+      },
+    ] as Any[];
+
+    const result = selectVisibleTaskFeedRows(rows, "live");
+
+    expect(result.visibleFeedRows.map((row) => row.key)).toEqual(
+      expect.arrayContaining(["user-1", "assistant-1", "action-block-1", "user-2", "assistant-2"]),
+    );
+    expect(result.hiddenLiveFeedRowCount).toBeGreaterThan(0);
+  });
+
   it("keeps the full transcript visible in inspect mode", () => {
     const rows = [
       {
@@ -1452,12 +1543,12 @@ describe("isTaskActivelyWorking", () => {
 
     const result = selectVisibleTaskFeedRows(rows, "inspect");
 
-    expect(result.visibleFeedRows).toHaveLength(rows.length);
+    expect(result.visibleFeedRows).toHaveLength(rows.length - 1);
     expect(result.hiddenLiveFeedRowCount).toBe(0);
-    expect(result.visibleFeedRows[0]?.key).toBe("timeline-history-control");
+    expect(result.visibleFeedRows[0]?.key).toBe("budget-1");
   });
 
-  it("pins the history control above the bounded live transcript", () => {
+  it("does not render a history control in the bounded live transcript", () => {
     const rows = [
       {
         kind: "history-control",
@@ -1488,14 +1579,11 @@ describe("isTaskActivelyWorking", () => {
 
     const result = selectVisibleTaskFeedRows(rows, "live");
 
-    expect(result.visibleFeedRows[0]?.key).toBe("timeline-history-control");
-    expect(result.hiddenLiveFeedRowCount).toBe(
-      rows.filter((row) => row.kind !== "history-control").length -
-        result.visibleFeedRows.filter((row) => row.kind !== "history-control").length,
-    );
+    expect(result.visibleFeedRows[0]?.key).not.toBe("timeline-history-control");
+    expect(result.hiddenLiveFeedRowCount).toBeGreaterThan(0);
   });
 
-  it("keeps the history control in short live transcripts", () => {
+  it("keeps short live transcripts free of the history control", () => {
     const rows = [
       {
         kind: "history-control",
@@ -1523,14 +1611,11 @@ describe("isTaskActivelyWorking", () => {
 
     const result = selectVisibleTaskFeedRows(rows, "live");
 
-    expect(result.visibleFeedRows.map((row) => row.key)).toEqual([
-      "timeline-history-control",
-      "assistant-1",
-    ]);
+    expect(result.visibleFeedRows.map((row) => row.key)).toEqual(["assistant-1"]);
     expect(result.hiddenLiveFeedRowCount).toBe(0);
   });
 
-  it("pins the history control above the delivery transcript", () => {
+  it("keeps conversation messages in the delivery transcript", () => {
     const rows = [
       {
         kind: "history-control",
@@ -1573,7 +1658,7 @@ describe("isTaskActivelyWorking", () => {
 
     const result = selectVisibleTaskFeedRows(rows, "delivery");
 
-    expect(result.visibleFeedRows[0]?.key).toBe("timeline-history-control");
+    expect(result.visibleFeedRows[0]?.key).toBe("assistant-1");
     expect(result.visibleFeedRows.some((row) => row.key === "assistant-1")).toBe(true);
   });
 
@@ -1653,18 +1738,12 @@ describe("isTaskActivelyWorking", () => {
     const result = selectVisibleTaskFeedRows(rows, "delivery");
 
     expect(result.visibleFeedRows.map((row) => row.key)).toEqual([
-      "delivery-event:complete-1:2",
+      "user-1",
+      "action-block-1",
       "assistant-1",
       "end-artifact-stack",
     ]);
-    const completionRow = result.visibleFeedRows[0];
-    expect(completionRow?.kind).toBe("timeline");
-    if (completionRow?.kind !== "timeline") {
-      throw new Error("Expected completion row to be a timeline event");
-    }
-    expect(completionRow.item.kind).toBe("event");
-    expect(completionRow.item.event.id).toBe("complete-1");
-    expect(result.hiddenLiveFeedRowCount).toBe(1);
+    expect(result.hiddenLiveFeedRowCount).toBe(0);
   });
 
   it("keeps action-required and critical terminal rows in delivery mode", () => {

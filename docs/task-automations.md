@@ -93,20 +93,25 @@ Routine-level approval or retry settings can reduce interruption for actions alr
 the profile, but they cannot widen its filesystem, network, command-tool, or export boundary. See
 [Access Profiles](access-profiles.md) for inheritance and unattended-run behavior.
 
+In-scope reads, writes, and sandboxed local commands need no approval request. An unattended run
+that needs additional authority must have a valid existing grant or an eligible automatic review;
+otherwise the operation is denied without an interactive wait. Choosing `approval: never` does
+not grant additional filesystem or network access.
+
 `Worktree` is shown only for tasks with a worktree path. It is disabled for same-thread automations because a thread follow-up must run against the original task context, while a worktree automation needs an isolated run target.
 
 ## Schedule Presets
 
 The modal supports these presets:
 
-| Preset | Scheduler payload |
-|--------|-------------------|
-| `Every 30m` | `{ kind: "every", everyMs: 1800000 }` |
-| `Hourly` | `{ kind: "every", everyMs: 3600000 }` |
-| `Daily` | `{ kind: "cron", expr: "0 9 * * *" }` |
-| `Weekdays` | `{ kind: "cron", expr: "0 9 * * 1-5" }` |
-| `Weekly` | `{ kind: "cron", expr: "0 9 * * 1" }` |
-| `Custom` | user-entered cron expression |
+| Preset      | Scheduler payload                       |
+| ----------- | --------------------------------------- |
+| `Every 30m` | `{ kind: "every", everyMs: 1800000 }`   |
+| `Hourly`    | `{ kind: "every", everyMs: 3600000 }`   |
+| `Daily`     | `{ kind: "cron", expr: "0 9 * * *" }`   |
+| `Weekdays`  | `{ kind: "cron", expr: "0 9 * * 1-5" }` |
+| `Weekly`    | `{ kind: "cron", expr: "0 9 * * 1" }`   |
+| `Custom`    | user-entered cron expression            |
 
 Custom schedules use the existing cron-expression path and are invalid until the expression is non-empty.
 

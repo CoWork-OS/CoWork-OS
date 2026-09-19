@@ -37,12 +37,12 @@ Monitor web pages for changes and extract updated content with scheduling suppor
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| url | string | Yes | URL to monitor for changes |
-| selector | string | No | CSS selector for the section to monitor (optional) |
+| Name     | Type   | Required | Description                                        |
+| -------- | ------ | -------- | -------------------------------------------------- |
+| url      | string | Yes      | URL to monitor for changes                         |
+| selector | string | No       | CSS selector for the section to monitor (optional) |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 997 characters.
-- Runtime prompt is defined directly in `../content-monitor.json`. 
+- Runtime prompt is defined directly in `../content-monitor.json`.

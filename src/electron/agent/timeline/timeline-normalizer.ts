@@ -123,15 +123,31 @@ function toCanonicalKind(event: NormalizerInputEvent): CanonicalActionKind {
   if (type === "task_completed") return "task.complete";
 
   // Sub-agent lifecycle
-  if (type === "subagent_start" || type === "agent_start" || type === "agent_started")
+  if (
+    type === "subagent_start" ||
+    type === "agent_start" ||
+    type === "agent_started" ||
+    type === "agent_spawn_requested" ||
+    type === "agent_spawned"
+  )
     return "agent.start";
   if (
     type === "subagent_stop" ||
     type === "agent_stop" ||
     type === "agent_stopped" ||
-    type === "agent_finished"
+    type === "agent_finished" ||
+    type === "agent_completed" ||
+    type === "agent_failed" ||
+    type === "agent_interrupt_requested" ||
+    type === "agent_interrupt_confirmed"
   )
     return "agent.stop";
+  if (
+    type === "agent_message" ||
+    type === "agent_follow_up_scheduled" ||
+    type === "agent_follow_up_started"
+  )
+    return "agent.message";
 
   // Memory
   if (MEMORY_READ_TYPES.has(type)) return "memory.read";
@@ -198,7 +214,7 @@ const EXECUTE_KINDS = new Set<CanonicalActionKind>([
 function inferPhase(event: NormalizerInputEvent, kind: CanonicalActionKind): TimelinePhase {
   if (kind === "task.complete" || kind === "artifact.create") return "complete";
   if (kind === "approval.request" || kind === "approval.resolve") return "execute";
-  if (kind === "agent.start" || kind === "agent.stop") return "execute";
+  if (kind === "agent.start" || kind === "agent.stop" || kind === "agent.message") return "execute";
 
   // Use stage hint from payload if present (timeline_group_* events)
   const payload = asObject(event.payload);
@@ -512,12 +528,33 @@ function buildSummary(events: NormalizerInputEvent[], kind: CanonicalActionKind)
       return "Stored new memory";
 
     case "agent.start": {
-      const actor = safeStr(payload.actor) || safeStr(payload.agentName) || "agent";
+      const actor =
+        safeStr(payload.childTaskTitle) ||
+        safeStr(payload.actor) ||
+        safeStr(payload.agentName) ||
+        "agent";
+      if (events[0].type === "agent_spawn_requested") return `Starting ${actor}`;
+      if (events[0].type === "agent_spawned") return `Created ${actor} agent`;
       return `Spawned ${actor} agent`;
     }
     case "agent.stop": {
-      const actor = safeStr(payload.actor) || safeStr(payload.agentName) || "agent";
+      const actor =
+        safeStr(payload.childTaskTitle) ||
+        safeStr(payload.actor) ||
+        safeStr(payload.agentName) ||
+        "agent";
+      if (events[0].type === "agent_failed") return `${actor} failed`;
+      if (events[0].type === "agent_interrupt_requested") return "Interruption requested";
+      if (events[0].type === "agent_interrupt_confirmed") return "Interruption confirmed";
       return `${capitalise(actor)} agent finished`;
+    }
+    case "agent.message": {
+      const recipient = safeStr(payload.recipientLabel) || safeStr(payload.targetTaskId) || "agent";
+      if (safeStr(payload.status) === "failed") return `Couldn't message ${recipient}`;
+      if (events[0].type === "agent_follow_up_scheduled")
+        return `Queued follow-up for ${recipient}`;
+      if (events[0].type === "agent_follow_up_started") return `Started follow-up for ${recipient}`;
+      return `Messaged ${recipient}`;
     }
 
     case "task.complete":
@@ -591,6 +628,19 @@ function resolveStatus(events: NormalizerInputEvent[]): SemanticTimelineStatus {
   const last = events[events.length - 1];
   if (!last) return "success";
   if (last.status === "failed" || last.type === "timeline_error") return "error";
+  if (last.type === "agent_failed") return "error";
+  if (last.type === "agent_interrupt_requested") return "running";
+  if (last.type === "agent_interrupt_confirmed") return "success";
+  if (
+    last.type === "agent_message" ||
+    last.type === "agent_follow_up_scheduled" ||
+    last.type === "agent_follow_up_started"
+  ) {
+    const payload = asObject(last.payload);
+    const messageStatus = safeStr(payload.status || payload.deliveryStatus);
+    if (messageStatus === "failed") return "error";
+    if (messageStatus === "queued") return "running";
+  }
   if (last.status === "blocked") return "blocked";
   if (last.type === "approval_denied") return "blocked";
   if (last.type === "approval_granted") return "success";
@@ -621,10 +671,19 @@ const BATCH_BREAKERS = new Set<string>([
   "subagent_start",
   "agent_start",
   "agent_started",
+  "agent_spawn_requested",
+  "agent_spawned",
   "subagent_stop",
   "agent_stop",
   "agent_stopped",
   "agent_finished",
+  "agent_completed",
+  "agent_failed",
+  "agent_message",
+  "agent_follow_up_scheduled",
+  "agent_follow_up_started",
+  "agent_interrupt_requested",
+  "agent_interrupt_confirmed",
 ]);
 
 /** Action kind families that can be batched together */
@@ -644,6 +703,7 @@ const BATCHABLE_FAMILIES: Record<CanonicalActionKind, string> = {
   "memory.write": "memory",
   "agent.start": "_none_",
   "agent.stop": "_none_",
+  "agent.message": "_none_",
   "task.complete": "_none_",
   "step.update": "step",
   generic: "_none_",
@@ -685,7 +745,11 @@ function resolveActor(event: NormalizerInputEvent, defaultActor = "Main"): strin
     return event.actor.trim();
   }
   const payload = asObject(event.payload);
-  const actor = safeStr(payload.actor) || safeStr(payload.agentName);
+  const actor =
+    safeStr(payload.childTaskTitle) ||
+    safeStr(payload.actor) ||
+    safeStr(payload.agentName) ||
+    safeStr(payload.senderLabel);
   return actor || defaultActor;
 }
 

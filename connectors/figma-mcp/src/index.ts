@@ -1,24 +1,24 @@
-import * as readline from 'readline';
+import * as readline from "readline";
 
 // ==================== MCP Types ====================
 
 type JSONRPCId = string | number;
 
 type JSONRPCRequest = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCNotification = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCResponse = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   result?: any;
   error?: { code: number; message: string; data?: any };
@@ -38,7 +38,7 @@ type MCPTool = {
   name: string;
   description?: string;
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties?: Record<string, MCPToolProperty>;
     required?: string[];
     additionalProperties?: boolean;
@@ -54,14 +54,14 @@ type MCPServerInfo = {
   };
 };
 
-const PROTOCOL_VERSION = '2024-11-05';
+const PROTOCOL_VERSION = "2024-11-05";
 
 const MCP_METHODS = {
-  INITIALIZE: 'initialize',
-  INITIALIZED: 'notifications/initialized',
-  SHUTDOWN: 'shutdown',
-  TOOLS_LIST: 'tools/list',
-  TOOLS_CALL: 'tools/call',
+  INITIALIZE: "initialize",
+  INITIALIZED: "notifications/initialized",
+  SHUTDOWN: "shutdown",
+  TOOLS_LIST: "tools/list",
+  TOOLS_CALL: "tools/call",
 } as const;
 
 const MCP_ERROR_CODES = {
@@ -75,14 +75,14 @@ const MCP_ERROR_CODES = {
 
 // ==================== Figma Client ====================
 
-const FIGMA_BASE_URL = 'https://api.figma.com/v1';
+const FIGMA_BASE_URL = "https://api.figma.com/v1";
 
 class FigmaClient {
   constructor(private token: string | undefined) {}
 
   private getAuthHeader(): string {
     if (!this.token?.trim()) {
-      throw new Error('FIGMA_ACCESS_TOKEN is required');
+      throw new Error("FIGMA_ACCESS_TOKEN is required");
     }
     return this.token.trim();
   }
@@ -94,11 +94,11 @@ class FigmaClient {
     }
 
     const res = await fetch(url.toString(), {
-      method: 'GET',
+      method: "GET",
       headers: {
-        'X-Figma-Token': this.getAuthHeader(),
-        'Accept': 'application/json',
-        'User-Agent': 'CoWork-Figma-Connector/0.1.0',
+        "X-Figma-Token": this.getAuthHeader(),
+        Accept: "application/json",
+        "User-Agent": "CoWork-Figma-Connector/0.1.0",
       },
     });
 
@@ -112,13 +112,13 @@ class FigmaClient {
 
   async health(): Promise<{ ok: boolean; data: any }> {
     // Use /v1/me to verify token
-    const me = await this.request<{ handle: string; id: string }>('/me');
+    const me = await this.request<{ handle: string; id: string }>("/me");
     return {
       ok: true,
       data: {
-        status: 'ok',
+        status: "ok",
         user: me.handle || me.id,
-        connector: 'figma',
+        connector: "figma",
       },
     };
   }
@@ -131,19 +131,19 @@ class FigmaClient {
     return {
       ok: true,
       data: file,
-      meta: { connector: 'figma' },
+      meta: { connector: "figma" },
     };
   }
 
   async getFileNodes(fileKey: string, ids: string): Promise<any> {
     if (!ids?.trim()) {
-      throw new Error('ids is required (comma-separated node ids)');
+      throw new Error("ids is required (comma-separated node ids)");
     }
     const file = await this.request<any>(`/files/${fileKey}`, { ids: ids.trim() });
     return {
       ok: true,
       data: file,
-      meta: { connector: 'figma' },
+      meta: { connector: "figma" },
     };
   }
 
@@ -152,7 +152,7 @@ class FigmaClient {
     return {
       ok: true,
       data: file,
-      meta: { connector: 'figma' },
+      meta: { connector: "figma" },
     };
   }
 
@@ -161,7 +161,7 @@ class FigmaClient {
     return {
       ok: true,
       data: file,
-      meta: { connector: 'figma' },
+      meta: { connector: "figma" },
     };
   }
 }
@@ -179,7 +179,7 @@ class StdioMCPServer {
 
   constructor(
     private toolProvider: ToolProvider,
-    private serverInfo: MCPServerInfo
+    private serverInfo: MCPServerInfo,
   ) {}
 
   start(): void {
@@ -189,11 +189,11 @@ class StdioMCPServer {
       terminal: false,
     });
 
-    this.rl.on('line', (line) => this.handleLine(line));
-    this.rl.on('close', () => this.stop());
+    this.rl.on("line", (line) => this.handleLine(line));
+    this.rl.on("close", () => this.stop());
 
-    process.on('SIGINT', () => this.stop());
-    process.on('SIGTERM', () => this.stop());
+    process.on("SIGINT", () => this.stop());
+    process.on("SIGTERM", () => this.stop());
   }
 
   stop(): void {
@@ -212,17 +212,17 @@ class StdioMCPServer {
       const message = JSON.parse(trimmed);
       this.handleMessage(message);
     } catch {
-      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, 'Parse error');
+      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, "Parse error");
     }
   }
 
   private async handleMessage(message: any): Promise<void> {
-    if ('id' in message && message.id !== null) {
+    if ("id" in message && message.id !== null) {
       await this.handleRequest(message as JSONRPCRequest);
       return;
     }
 
-    if ('method' in message) {
+    if ("method" in message) {
       await this.handleNotification(message as JSONRPCNotification);
     }
   }
@@ -257,7 +257,7 @@ class StdioMCPServer {
       if (error.code !== undefined) {
         this.sendError(id, error.code, error.message, error.data);
       } else {
-        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || 'Internal error');
+        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error");
       }
     }
   }
@@ -270,7 +270,7 @@ class StdioMCPServer {
 
   private handleInitialize(_params: any): any {
     if (this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, 'Already initialized');
+      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, "Already initialized");
     }
     return {
       protocolVersion: PROTOCOL_VERSION,
@@ -286,27 +286,27 @@ class StdioMCPServer {
   private async handleToolsCall(params: any): Promise<any> {
     const { name, arguments: args } = params || {};
     if (!name) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, 'Tool name is required');
+      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, "Tool name is required");
     }
 
     try {
       const result = await this.toolProvider.executeTool(name, args || {});
 
-      if (typeof result === 'string') {
-        return { content: [{ type: 'text', text: result }] };
+      if (typeof result === "string") {
+        return { content: [{ type: "text", text: result }] };
       }
 
-      if (result && typeof result === 'object') {
+      if (result && typeof result === "object") {
         if (result.content && Array.isArray(result.content)) {
           return result;
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
-      return { content: [{ type: 'text', text: String(result) }] };
+      return { content: [{ type: "text", text: String(result) }] };
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Error: ${error?.message || 'Tool failed'}` }],
+        content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }],
         isError: true,
       };
     }
@@ -318,86 +318,90 @@ class StdioMCPServer {
   }
 
   private sendResult(id: JSONRPCId, result: any): void {
-    this.sendMessage({ jsonrpc: '2.0', id, result });
+    this.sendMessage({ jsonrpc: "2.0", id, result });
   }
 
   private sendError(id: JSONRPCId, code: number, message: string, data?: any): void {
-    this.sendMessage({ jsonrpc: '2.0', id, error: { code, message, data } });
+    this.sendMessage({ jsonrpc: "2.0", id, error: { code, message, data } });
   }
 
   private sendMessage(message: any): void {
-    process.stdout.write(JSON.stringify(message) + '\n');
+    process.stdout.write(JSON.stringify(message) + "\n");
   }
 
   private requireInitialized(): void {
     if (!this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, 'Server not initialized');
+      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, "Server not initialized");
     }
   }
 
-  private createError(code: number, message: string, data?: any): { code: number; message: string; data?: any } {
+  private createError(
+    code: number,
+    message: string,
+    data?: any,
+  ): { code: number; message: string; data?: any } {
     return { code, message, data };
   }
 }
 
 // ==================== Tool Definitions ====================
 
-const CONNECTOR_PREFIX = 'figma';
+const CONNECTOR_PREFIX = "figma";
 
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
-    description: 'Check connector health and authentication status',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    description: "Check connector health and authentication status",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_file`,
-    description: 'Get a Figma file by key',
+    description: "Get a Figma file by key",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        fileKey: { type: 'string', description: 'Figma file key (from URL)' },
-        ids: { type: 'string', description: 'Comma-separated node IDs to fetch' },
-        depth: { type: 'number', description: 'Depth of node tree to return' },
+        fileKey: { type: "string", description: "Figma file key (from URL)" },
+        ids: { type: "string", description: "Comma-separated node IDs to fetch" },
+        depth: { type: "number", description: "Depth of node tree to return" },
       },
-      required: ['fileKey'],
+      required: ["fileKey"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_file_nodes`,
-    description: 'Get specific nodes from a Figma file',
+    description: "Get specific nodes from a Figma file",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        fileKey: { type: 'string', description: 'Figma file key' },
-        ids: { type: 'string', description: 'Comma-separated node IDs' },
+        fileKey: { type: "string", description: "Figma file key" },
+        ids: { type: "string", description: "Comma-separated node IDs" },
       },
-      required: ['fileKey', 'ids'],
+      required: ["fileKey", "ids"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_file_components`,
-    description: 'Get components from a Figma file',
+    description: "Get components from a Figma file",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        fileKey: { type: 'string', description: 'Figma file key' },
+        fileKey: { type: "string", description: "Figma file key" },
       },
-      required: ['fileKey'],
+      required: ["fileKey"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_file_styles`,
-    description: 'Get styles from a Figma file',
+    description: "Get styles from a Figma file",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        fileKey: { type: 'string', description: 'Figma file key' },
+        fileKey: { type: "string", description: "Figma file key" },
       },
-      required: ['fileKey'],
+      required: ["fileKey"],
       additionalProperties: false,
     },
   },
@@ -413,8 +417,7 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
     client.getFileNodes(args.fileKey, args.ids),
   [`${CONNECTOR_PREFIX}.get_file_components`]: async (args) =>
     client.getFileComponents(args.fileKey),
-  [`${CONNECTOR_PREFIX}.get_file_styles`]: async (args) =>
-    client.getFileStyles(args.fileKey),
+  [`${CONNECTOR_PREFIX}.get_file_styles`]: async (args) => client.getFileStyles(args.fileKey),
 };
 
 const toolProvider: ToolProvider = {
@@ -429,8 +432,8 @@ const toolProvider: ToolProvider = {
 };
 
 const serverInfo: MCPServerInfo = {
-  name: 'Figma Connector',
-  version: '0.1.0',
+  name: "Figma Connector",
+  version: "0.1.0",
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {
     tools: { listChanged: false },

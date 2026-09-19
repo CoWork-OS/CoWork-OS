@@ -13,6 +13,7 @@ pip install weasyprint pypdf --break-system-packages --quiet
 ```
 
 Linux 初次使用可能需要：
+
 ```bash
 apt install -y libpango-1.0-0 libpangoft2-1.0-0 fonts-noto-cjk
 ```
@@ -37,19 +38,21 @@ python3 -c "from weasyprint import HTML; HTML('doc.html').write_pdf('out.pdf')"
 
 ```html
 <style>
-@font-face {
-  font-family: "TsangerJinKai02";
-  src: url("TsangerJinKai02-W04.ttf");
-}
-body { font-family: "TsangerJinKai02", serif; }
+  @font-face {
+    font-family: "TsangerJinKai02";
+    src: url("TsangerJinKai02-W04.ttf");
+  }
+  body {
+    font-family: "TsangerJinKai02", serif;
+  }
 </style>
 ```
 
 **商业字体不可得时**，fallback 链已内嵌在所有模板中：
+
 ```css
-font-family: "TsangerJinKai02",
-             "Source Han Serif SC", "Noto Serif CJK SC",
-             "Songti SC", Georgia, serif;
+font-family:
+  "TsangerJinKai02", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", Georgia, serif;
 ```
 
 **字体 fallback 影响页数**：换字体必须重新跑页数验证。溢出时优先调 `font-size`，再调 margin，最后砍内容。
@@ -58,9 +61,9 @@ font-family: "TsangerJinKai02",
 
 ```css
 @page {
-  size: A4;                  /* 或 210mm 297mm / A4 landscape / 13in 10in */
+  size: A4; /* 或 210mm 297mm / A4 landscape / 13in 10in */
   margin: 20mm 22mm;
-  background: #f5f4ed;       /* 背景延伸到 margin 外，避免打印白边 */
+  background: #f5f4ed; /* 背景延伸到 margin 外，避免打印白边 */
 }
 ```
 
@@ -70,30 +73,37 @@ font-family: "TsangerJinKai02",
 @page {
   @top-right {
     content: counter(page);
-    font-family: serif; font-size: 9pt; color: #87867f;
+    font-family: serif;
+    font-size: 9pt;
+    color: #87867f;
   }
   @bottom-center {
     content: "{{文档名}} · {{作者}}";
-    font-size: 8.5pt; color: #87867f;
+    font-size: 8.5pt;
+    color: #87867f;
   }
 }
 
 @page:first {
-  @top-right { content: ""; }
-  @bottom-center { content: ""; }
+  @top-right {
+    content: "";
+  }
+  @bottom-center {
+    content: "";
+  }
 }
 ```
 
 ### WeasyPrint 支持矩阵
 
-| 支持良好 | 支持有限 | 不支持 |
-|---|---|---|
-| CSS Grid / Flexbox | CSS filter / transform（部分） | JavaScript |
-| `@page` 规则 | inline SVG（部分属性） | `position: sticky` |
-| `@font-face` | gradient（性能差，少用） | CSS 动画 / transition |
-| `break-before` / `break-inside: avoid` | | |
-| CSS 变量 `var(--name)` | | |
-| 伪元素 `::before` `::after` | | |
+| 支持良好                               | 支持有限                       | 不支持                |
+| -------------------------------------- | ------------------------------ | --------------------- |
+| CSS Grid / Flexbox                     | CSS filter / transform（部分） | JavaScript            |
+| `@page` 规则                           | inline SVG（部分属性）         | `position: sticky`    |
+| `@font-face`                           | gradient（性能差，少用）       | CSS 动画 / transition |
+| `break-before` / `break-inside: avoid` |                                |                       |
+| CSS 变量 `var(--name)`                 |                                |                       |
+| 伪元素 `::before` `::after`            |                                |                       |
 
 ---
 
@@ -145,17 +155,18 @@ const theme = {
 
 ### 字号（屏幕投影优先易读性，比 PDF 大）
 
-| 角色 | 字号 | 字体 |
-|---|---|---|
-| Title | 44pt | Serif 500 |
-| Subtitle | 24pt | Sans 400 |
-| H2 章节 | 32pt | Serif 500 |
+| 角色      | 字号 | 字体      |
+| --------- | ---- | --------- |
+| Title     | 44pt | Serif 500 |
+| Subtitle  | 24pt | Sans 400  |
+| H2 章节   | 32pt | Serif 500 |
 | H3 小标题 | 20pt | Serif 500 |
-| Body | 18pt | Sans 400 |
-| Caption | 14pt | Sans 400 |
-| Footer | 12pt | Sans 400 |
+| Body      | 18pt | Sans 400  |
+| Caption   | 14pt | Sans 400  |
+| Footer    | 12pt | Sans 400  |
 
 中文字体栈：
+
 - Serif：`TsangerJinKai02` -> `Source Han Serif SC` -> `宋体`
 - Sans：`Source Han Sans SC` -> `PingFang SC` -> `微软雅黑`
 
@@ -196,10 +207,7 @@ export default {
       kind: "content",
       eyebrow: "问题",
       title: "当前流程仍然碎片化。",
-      points: [
-        "团队在文档、表格和聊天之间反复切换。",
-        "状态同步吃掉了本应投入执行的时间。",
-      ],
+      points: ["团队在文档、表格和聊天之间反复切换。", "状态同步吃掉了本应投入执行的时间。"],
     },
   ],
 };
@@ -325,19 +333,25 @@ for variant, vars_css in [
 **解法**：Tag 背景必须用实色 hex，禁用 rgba。
 
 ```css
-/* ❌ */ .tag { background: rgba(201, 100, 66, 0.18); }
-/* ✅ */ .tag { background: #E4ECF5; }
+/* ❌ */
+.tag {
+  background: rgba(201, 100, 66, 0.18);
+}
+/* ✅ */
+.tag {
+  background: #e4ecf5;
+}
 ```
 
 **rgba -> 实色对照表**（底 parchment `#f5f4ed` + 前景油墨蓝 `#1B365D`）：
 
-| rgba 透明度 | 等效实色 hex |
-|---|---|
-| 0.08 | `#EEF2F7` |
-| 0.14 | `#E4ECF5` |
-| **0.18** | **`#E4ECF5`** ← 默认 |
-| 0.22 | `#D0DCE9` |
-| 0.30 | `#D6E1EE` |
+| rgba 透明度 | 等效实色 hex         |
+| ----------- | -------------------- |
+| 0.08        | `#EEF2F7`            |
+| 0.14        | `#E4ECF5`            |
+| **0.18**    | **`#E4ECF5`** ← 默认 |
+| 0.22        | `#D0DCE9`            |
+| 0.30        | `#D6E1EE`            |
 
 公式：`实色通道 = 底 + (前景 - 底) × 透明度`。其他底色要重算。
 
@@ -345,7 +359,7 @@ for variant, vars_css in [
 
 ```css
 .tag {
-  background: linear-gradient(to right, #D6E1EE, #E4ECF5 70%, #EEF2F7);
+  background: linear-gradient(to right, #d6e1ee, #e4ecf5 70%, #eef2f7);
 }
 ```
 
@@ -358,6 +372,7 @@ for variant, vars_css in [
 **根因**：WeasyPrint 对 < 1pt border + 圆角，分别 stroke 内外 path，薄宽度没法重合。
 
 **解法**三选一：
+
 1. 改用背景填充（首选，设计语言一致）
 2. border ≥ 1pt
 3. 去掉 border-radius
@@ -371,6 +386,7 @@ for variant, vars_css in [
 **诊断**：`pdffonts output.pdf` 看实际加载字体。
 
 **解法（按优先级）**：
+
 1. 删冗余副词（"深入研究" -> "研究"）
 2. 合并同义数据
 3. 砍次要项
@@ -410,8 +426,13 @@ mkdir -p ~/.fonts && cp *.ttf ~/.fonts/ && fc-cache -f
   <span class="metric-label">GitHub Stars</span>
 </div>
 ```
+
 ```css
-.metric { display: flex; align-items: baseline; gap: 6pt; }
+.metric {
+  display: flex;
+  align-items: baseline;
+  gap: 6pt;
+}
 ```
 
 ### 6. 全角 vs 半角空格
@@ -422,13 +443,14 @@ mkdir -p ~/.fonts && cp *.ttf ~/.fonts/ && fc-cache -f
 
 ### 7. 千分位 · 百分号 · 箭头
 
-| 正确 | 错误 |
-|---|---|
+| 正确     | 错误                            |
+| -------- | ------------------------------- |
 | `5,000+` | `5000+` / `5，000+`（全角逗号） |
-| `90%` | `90 %`（前有空格） |
-| `->` | `->` / `-&gt;` |
+| `90%`    | `90 %`（前有空格）              |
+| `->`     | `->` / `-&gt;`                  |
 
 自查：
+
 ```bash
 grep -oE '->|->|⟶|⇒' doc.html | sort | uniq -c
 grep -oE '[0-9]{4,}' doc.html | sort -u
@@ -453,8 +475,10 @@ grep -oE '[0-9]{4,}' doc.html | sort -u
 
 ```css
 .cover {
-  min-height: 257mm;    /* A4 高 297 - 上下 margin 40 */
-  display: flex; flex-direction: column; justify-content: center;
+  min-height: 257mm; /* A4 高 297 - 上下 margin 40 */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 ```
 
@@ -467,16 +491,23 @@ grep -oE '[0-9]{4,}' doc.html | sort -u
   <div class="card-wrapper"><div class="card">...</div></div>
 </div>
 ```
+
 ```css
-.row { display: flex; }
-.card-wrapper { break-inside: avoid; }
+.row {
+  display: flex;
+}
+.card-wrapper {
+  break-inside: avoid;
+}
 ```
 
 ### 11. 首页不要页码
 
 ```css
 @page:first {
-  @top-right { content: ""; }
+  @top-right {
+    content: "";
+  }
 }
 ```
 
@@ -490,8 +521,9 @@ grep -oE '[0-9]{4,}' doc.html | sort -u
 
 ```css
 @page {
-  size: A4; margin: 20mm;
-  background: #f5f4ed;    /* 让背景延伸到 margin 外 */
+  size: A4;
+  margin: 20mm;
+  background: #f5f4ed; /* 让背景延伸到 margin 外 */
 }
 ```
 
@@ -538,12 +570,12 @@ pdftoppm -png -r 300 out.pdf inspect    # 视觉怀疑时
 
 四个方向的 chevron 模板（tip 在端点，arm 长度 8px）：
 
-| 方向 | chevron path |
-|---|---|
-| ↓ | `M (x-8) (y-8) L x y L (x+8) (y-8)` |
-| ← | `M (x+8) (y-8) L x y L (x+8) (y+8)` |
-| ↑ | `M (x-8) (y+8) L x y L (x+8) (y+8)` |
-| → | `M (x-8) (y-8) L x y L (x-8) (y+8)` |
+| 方向 | chevron path                        |
+| ---- | ----------------------------------- |
+| ↓    | `M (x-8) (y-8) L x y L (x+8) (y-8)` |
+| ←    | `M (x+8) (y-8) L x y L (x+8) (y+8)` |
+| ↑    | `M (x-8) (y+8) L x y L (x+8) (y+8)` |
+| →    | `M (x-8) (y-8) L x y L (x-8) (y+8)` |
 
 ### 16. Slide letter-spacing 减半
 
@@ -555,8 +587,12 @@ pdftoppm -png -r 300 out.pdf inspect    # 视觉怀疑时
 
 ```css
 /* 印刷品 eyebrow */
-.eyebrow { letter-spacing: 6px; }
+.eyebrow {
+  letter-spacing: 6px;
+}
 
 /* ✅ Slide eyebrow */
-.slide .eyebrow { letter-spacing: 3px; }   /* 减半 */
+.slide .eyebrow {
+  letter-spacing: 3px;
+} /* 减半 */
 ```

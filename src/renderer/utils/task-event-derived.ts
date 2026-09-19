@@ -222,10 +222,19 @@ function liveAnchorKey(event: TaskEvent): string | null {
   return null;
 }
 
+function isConversationMessageEvent(event: TaskEvent): boolean {
+  const effectiveType = getEffectiveTaskEventType(event);
+  return effectiveType === "user_message" || effectiveType === "assistant_message";
+}
+
 function selectLiveProjectionRawEvents(events: TaskEvent[], liveWindowSize: number): TaskEvent[] {
   if (events.length <= liveWindowSize) return events;
 
   const keepIds = new Set<string>();
+  const keepEvents = new Set<TaskEvent>();
+  for (const event of events) {
+    if (isConversationMessageEvent(event)) keepEvents.add(event);
+  }
   const anchorSeen = new Set<string>();
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -240,7 +249,7 @@ function selectLiveProjectionRawEvents(events: TaskEvent[], liveWindowSize: numb
   const selected: TaskEvent[] = [];
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index];
-    if (index >= startIndex || keepIds.has(event.id)) {
+    if (index >= startIndex || keepIds.has(event.id) || keepEvents.has(event)) {
       selected.push(event);
     }
   }

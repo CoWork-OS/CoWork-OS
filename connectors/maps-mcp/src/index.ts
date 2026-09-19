@@ -114,7 +114,10 @@ class StdioMCPServer {
   private rl: readline.Interface | null = null;
 
   constructor(
-    private readonly toolProvider: { getTools(): MCPTool[]; executeTool(name: string, args: Record<string, any>): Promise<any> },
+    private readonly toolProvider: {
+      getTools(): MCPTool[];
+      executeTool(name: string, args: Record<string, any>): Promise<any>;
+    },
     private readonly serverInfo: MCPServerInfo,
   ) {}
 
@@ -176,11 +179,19 @@ class StdioMCPServer {
           setImmediate(() => this.stop());
           break;
         default:
-          throw { code: MCP_ERROR_CODES.METHOD_NOT_FOUND, message: `Method not found: ${request.method}` };
+          throw {
+            code: MCP_ERROR_CODES.METHOD_NOT_FOUND,
+            message: `Method not found: ${request.method}`,
+          };
       }
       this.sendResult(request.id, result);
     } catch (error: any) {
-      this.sendError(request.id, error?.code || MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error", error?.data);
+      this.sendError(
+        request.id,
+        error?.code || MCP_ERROR_CODES.INTERNAL_ERROR,
+        error?.message || "Internal error",
+        error?.data,
+      );
     }
   }
 
@@ -261,7 +272,10 @@ const tools: MCPTool[] = [
         location: locationSchema,
         radiusMeters: { type: "number", description: "Search radius in meters, default 1500" },
         maxResults: { type: "number", description: "Maximum results, default 5" },
-        openNow: { type: "boolean", description: "Prefer places currently open when provider supports it" },
+        openNow: {
+          type: "boolean",
+          description: "Prefer places currently open when provider supports it",
+        },
       },
       required: ["query", "location"],
       additionalProperties: false,
@@ -295,7 +309,8 @@ const tools: MCPTool[] = [
   },
   {
     name: "maps.rank_nearby_options",
-    description: "Search nearby places and rank options by walking time and relevance for urgent errands",
+    description:
+      "Search nearby places and rank options by walking time and relevance for urgent errands",
     inputSchema: {
       type: "object",
       properties: {
@@ -365,14 +380,17 @@ async function fetchJson(url: string, init?: RequestInit): Promise<any> {
   const response = await fetch(url, init);
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`HTTP ${response.status} ${response.statusText}${body ? `: ${body.slice(0, 200)}` : ""}`);
+    throw new Error(
+      `HTTP ${response.status} ${response.statusText}${body ? `: ${body.slice(0, 200)}` : ""}`,
+    );
   }
   return response.json();
 }
 
 function radiusViewbox(location: Coordinates, radiusMeters: number): string {
   const latDelta = radiusMeters / 111_320;
-  const lonDelta = radiusMeters / (111_320 * Math.max(0.2, Math.cos((location.latitude * Math.PI) / 180)));
+  const lonDelta =
+    radiusMeters / (111_320 * Math.max(0.2, Math.cos((location.latitude * Math.PI) / 180)));
   const left = location.longitude - lonDelta;
   const right = location.longitude + lonDelta;
   const top = location.latitude + latDelta;
@@ -530,13 +548,16 @@ async function googlePlaceDetails(placeId: string): Promise<NormalizedPlace> {
   const key = envValue("GOOGLE_MAPS_API_KEY");
   if (!key) throw new Error("GOOGLE_MAPS_API_KEY is required for Google provider");
   const rawId = placeId.replace(/^google:/, "");
-  const data = await fetchJson(`https://places.googleapis.com/v1/places/${encodeURIComponent(rawId)}`, {
-    headers: {
-      "X-Goog-Api-Key": key,
-      "X-Goog-FieldMask":
-        "id,displayName,formattedAddress,location,types,rating,userRatingCount,currentOpeningHours,googleMapsUri",
+  const data = await fetchJson(
+    `https://places.googleapis.com/v1/places/${encodeURIComponent(rawId)}`,
+    {
+      headers: {
+        "X-Goog-Api-Key": key,
+        "X-Goog-FieldMask":
+          "id,displayName,formattedAddress,location,types,rating,userRatingCount,currentOpeningHours,googleMapsUri",
+      },
     },
-  });
+  );
   return normalizeGooglePlace(data);
 }
 
@@ -546,13 +567,15 @@ function haversineMeters(a: Coordinates, b: Coordinates): number {
   const dLon = ((b.longitude - a.longitude) * Math.PI) / 180;
   const lat1 = (a.latitude * Math.PI) / 180;
   const lat2 = (b.latitude * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
   return 2 * radius * Math.asin(Math.sqrt(h));
 }
 
-function fallbackWalkingRoute(origin: Coordinates, destination: Coordinates, warning: string): NormalizedRoute {
+function fallbackWalkingRoute(
+  origin: Coordinates,
+  destination: Coordinates,
+  warning: string,
+): NormalizedRoute {
   const straightLine = haversineMeters(origin, destination);
   const distanceMeters = Math.round(straightLine * 1.25);
   return {
@@ -586,11 +609,18 @@ async function osmRoute(origin: Coordinates, destination: Coordinates): Promise<
       attribution: OSRM_ATTRIBUTION,
     };
   } catch (error: any) {
-    return fallbackWalkingRoute(origin, destination, `OSRM walking route unavailable: ${error?.message || "unknown error"}`);
+    return fallbackWalkingRoute(
+      origin,
+      destination,
+      `OSRM walking route unavailable: ${error?.message || "unknown error"}`,
+    );
   }
 }
 
-async function googleRoute(origin: Coordinates, destination: Coordinates): Promise<NormalizedRoute> {
+async function googleRoute(
+  origin: Coordinates,
+  destination: Coordinates,
+): Promise<NormalizedRoute> {
   const key = envValue("GOOGLE_MAPS_API_KEY");
   if (!key) throw new Error("GOOGLE_MAPS_API_KEY is required for Google provider");
   const data = await fetchJson("https://routes.googleapis.com/directions/v2:computeRoutes", {
@@ -626,9 +656,12 @@ function parseGoogleDuration(value: unknown): number {
   return match ? Math.round(Number(match[1])) : 0;
 }
 
-async function searchPlaces(args: Record<string, any>): Promise<{ provider: ProviderName; places: NormalizedPlace[] }> {
+async function searchPlaces(
+  args: Record<string, any>,
+): Promise<{ provider: ProviderName; places: NormalizedPlace[] }> {
   const provider = resolveProvider();
-  const places = provider === "google" ? await googleSearchPlaces(args) : await osmSearchPlaces(args);
+  const places =
+    provider === "google" ? await googleSearchPlaces(args) : await osmSearchPlaces(args);
   return { provider, places };
 }
 
@@ -644,7 +677,12 @@ async function route(args: Record<string, any>): Promise<{ route: NormalizedRout
   const origin = requireLocation(args.origin, "origin");
   const destination = requireLocation(args.destination, "destination");
   const provider = resolveProvider();
-  return { route: provider === "google" ? await googleRoute(origin, destination) : await osmRoute(origin, destination) };
+  return {
+    route:
+      provider === "google"
+        ? await googleRoute(origin, destination)
+        : await osmRoute(origin, destination),
+  };
 }
 
 async function rankNearbyOptions(args: Record<string, any>): Promise<{
@@ -665,7 +703,11 @@ async function rankNearbyOptions(args: Record<string, any>): Promise<{
       const routeResult =
         search.provider === "google"
           ? await googleRoute(origin, place.location).catch((error: any) =>
-              fallbackWalkingRoute(origin, place.location, `Google walking route unavailable: ${error?.message || "unknown error"}`),
+              fallbackWalkingRoute(
+                origin,
+                place.location,
+                `Google walking route unavailable: ${error?.message || "unknown error"}`,
+              ),
             )
           : await osmRoute(origin, place.location);
       return {
@@ -687,9 +729,10 @@ async function rankNearbyOptions(args: Record<string, any>): Promise<{
     query: requireString(args.query, "query"),
     ...(deadlineMinutes !== undefined ? { deadlineMinutes } : {}),
     options,
-    warnings: search.provider === "osm"
-      ? ["OSM place metadata may not include ratings, phone numbers, or current opening status."]
-      : [],
+    warnings:
+      search.provider === "osm"
+        ? ["OSM place metadata may not include ratings, phone numbers, or current opening status."]
+        : [],
   };
 }
 
@@ -722,7 +765,10 @@ export function listMapsToolsForTest(): MCPTool[] {
   return tools;
 }
 
-export async function executeMapsToolForTest(name: string, args: Record<string, any>): Promise<any> {
+export async function executeMapsToolForTest(
+  name: string,
+  args: Record<string, any>,
+): Promise<any> {
   return toolProvider.executeTool(name, args);
 }
 

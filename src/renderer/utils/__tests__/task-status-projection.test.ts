@@ -132,6 +132,66 @@ describe("activity and status projections", () => {
     expect(groups[0].latestActivityLabel).not.toContain("must not become");
   });
 
+  it("keeps a just-started pending task running while its row catches up", () => {
+    const startedAt = Date.now() - 10;
+    const groups = deriveActivityGroups({
+      timelineItems: [
+        {
+          kind: "action_block",
+          blockId: "group-1",
+          timestamp: startedAt,
+          events: [
+            {
+              ...event("started", 1, "timeline_group_started", {
+                stage: "DISCOVER",
+                message: "Starting DISCOVER",
+              }),
+              timestamp: startedAt,
+            },
+            {
+              ...event("created", 2, "task_created"),
+              timestamp: startedAt + 1,
+            },
+          ],
+        },
+      ],
+      planSteps: [],
+      task: { id: "task-1", status: "pending" } as Any,
+    });
+
+    expect(groups).toMatchObject([
+      {
+        id: "group-1",
+        status: "running",
+        summary: "Working",
+      },
+    ]);
+    expect(groups[0].latestActivityLabel).not.toBe("Activity complete");
+  });
+
+  it("strips markdown emphasis from plan-step derived group summaries", () => {
+    const groups = deriveActivityGroups({
+      timelineItems: [
+        {
+          kind: "action_block",
+          blockId: "group-1",
+          timestamp: 1_001,
+          events: [event("done", 1, "step_completed", { step: { id: "collect" } })],
+        },
+      ],
+      planSteps: [
+        {
+          id: "collect",
+          description: "**Collect the required company-specific details**",
+          status: "completed" as const,
+        },
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+    });
+
+    expect(groups[0].summary).toBe("Collect the required company-specific details");
+  });
+
   it("lets approval and input waits override ordinary progress", () => {
     const planSteps = [
       { id: "one", description: "Open browser", status: "in_progress" as const },
@@ -179,5 +239,50 @@ describe("activity and status projections", () => {
     expect(model.state).toBe("waiting_for_approval");
     expect(model.blockingEventId).toBe("approval-b");
     expect(model.blockingLabel).toBe("Send email");
+  });
+
+  it("drops a phase label that just repeats the primary state label", () => {
+    const model = deriveTaskStatusStrip({
+      task: { id: "task-1", status: "executing", updatedAt: 1_001 } as Any,
+      events: [event("tool", 1, "tool_call", { tool: "run_command" })],
+      planSteps: [],
+      activityGroups: [
+        {
+          id: "group-1",
+          status: "running",
+          summary: "Working",
+          latestActivityLabel: "Working",
+          activityIds: ["tool"],
+          startedAt: 1_001,
+        },
+      ],
+      outcomeMetrics: [],
+      outputSummary: null,
+    });
+
+    expect(model.primaryLabel).toBe("Working");
+    expect(model.phaseLabel).toBeUndefined();
+  });
+
+  it("keeps a phase label that adds information", () => {
+    const model = deriveTaskStatusStrip({
+      task: { id: "task-1", status: "executing", updatedAt: 1_001 } as Any,
+      events: [event("tool", 1, "tool_call", { tool: "run_command" })],
+      planSteps: [],
+      activityGroups: [
+        {
+          id: "group-1",
+          status: "running",
+          summary: "Working",
+          latestActivityLabel: "Running a command",
+          activityIds: ["tool"],
+          startedAt: 1_001,
+        },
+      ],
+      outcomeMetrics: [],
+      outputSummary: null,
+    });
+
+    expect(model.phaseLabel).toBe("Running a command");
   });
 });

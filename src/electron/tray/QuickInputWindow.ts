@@ -301,6 +301,13 @@ export class QuickInputWindow {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- This document is loaded from a data: URL and receives agent-derived text
+       via innerHTML, so it needs its own CSP: the renderer's policy does not
+       apply here. 'unsafe-inline' for script is required by the page's own
+       inline <script> below; the value of the CSP is blocking injected
+       img/frame/connect sinks and any external script. -->
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'; frame-src 'none'; connect-src 'none';" />
   <title>Quick Task</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }

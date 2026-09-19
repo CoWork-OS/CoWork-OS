@@ -94,6 +94,80 @@ function createDaemonLike() {
 }
 
 describe("AgentDaemon.completeTask", () => {
+  it("fails required verification at the depth limit instead of silently skipping it", async () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.runReadOnlyChildTaskAndWait = vi.fn();
+    const result = await (AgentDaemon.prototype as Any).runPostCompletionVerification.call(
+      daemonLike,
+      { id: "task-1", agentType: "main", depth: 3 },
+      "done",
+      undefined,
+      120_000,
+      { explicit: true },
+    );
+    expect(result).toMatchObject({ gated: true, ran: false, verdict: "FAIL", shouldBlock: true });
+    expect(daemonLike.runReadOnlyChildTaskAndWait).not.toHaveBeenCalled();
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "verification_failed",
+      expect.anything(),
+    );
+  });
+
+  it("carries policy risk into the actual verifier for neutral task wording", async () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "verifier-risk",
+      status: "completed",
+      summary: "VERDICT: PARTIAL\nRequired evidence unavailable",
+    });
+    const parentTask = {
+      id: "task-1",
+      title: "Review the result",
+      prompt: "Check it",
+      agentType: "main",
+      agentConfig: { verificationAgent: false },
+    };
+    const result = await (AgentDaemon.prototype as Any).runPostCompletionVerification.call(
+      daemonLike,
+      parentTask,
+      "done",
+      undefined,
+      120_000,
+      { explicit: true, highRisk: true },
+    );
+    expect(daemonLike.runReadOnlyChildTaskAndWait).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ gated: true, verdict: "PARTIAL", shouldBlock: true });
+  });
+
+  it("does not emit verification_passed for a timed-out verifier with stale PASS text", async () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "verifier-timeout",
+      status: "timeout",
+      summary: "VERDICT: PASS\nUnfinished review",
+    });
+    const result = await (AgentDaemon.prototype as Any).runPostCompletionVerification.call(
+      daemonLike,
+      { id: "task-1", title: "Review", prompt: "Check", agentType: "main" },
+      "done",
+      undefined,
+      120_000,
+      { explicit: true },
+    );
+    expect(result).toMatchObject({ verdict: "FAIL", shouldBlock: true });
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "verification_failed",
+      expect.anything(),
+    );
+    expect(daemonLike.logEvent).not.toHaveBeenCalledWith(
+      "task-1",
+      "verification_passed",
+      expect.anything(),
+    );
+  });
+
   it("holds terminal persistence until the required verifier returns", async () => {
     const daemonLike = createDaemonLike();
     daemonLike.taskRepo.findById.mockReturnValue({
@@ -1338,6 +1412,8 @@ describe("AgentDaemon.completeTask", () => {
       expect.objectContaining({ id: "task-1" }),
       "done",
       verificationEvidenceBundle,
+      120_000,
+      expect.objectContaining({ explicit: true }),
     );
   });
 

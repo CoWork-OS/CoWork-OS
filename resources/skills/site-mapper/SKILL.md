@@ -37,11 +37,11 @@ Crawl a website and build a structured content map with page summaries.
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| url | string | Yes | Root URL of the website to map |
+| Name | Type   | Required | Description                    |
+| ---- | ------ | -------- | ------------------------------ |
+| url  | string | Yes      | Root URL of the website to map |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 972 characters.
-- Runtime prompt is defined directly in `../site-mapper.json`. 
+- Runtime prompt is defined directly in `../site-mapper.json`.

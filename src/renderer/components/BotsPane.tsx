@@ -1,9 +1,18 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, Bot, CircleDashed, LoaderCircle, Plus, Search, X } from "lucide-react";
+import { AlertCircle, CircleDashed, LoaderCircle, Plus, Search, X } from "lucide-react";
+import { BotGlyph } from "./BotGlyph";
 import type { Task } from "../../shared/types";
+import {
+  BOT_PROFILE_DESCRIPTION_MAX_LENGTH,
+  BOT_PROFILE_INSTRUCTIONS_MAX_LENGTH,
+  normalizeBotProfileText,
+} from "../utils/bot-profile";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { LUCIDE_TWIN_ICONS, TWIN_ICON_KEYS, type TwinIconKey } from "../utils/twin-icons";
+import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
+import { BotProfileDialog } from "./BotProfileDialog";
+import { selectLatestBotConversation } from "../utils/bot-conversations";
 
 export interface BotRole {
   id: string;
@@ -31,6 +40,8 @@ interface BotsPaneProps {
   onOpenBot?: (bot: BotRole) => void | Promise<void>;
   onOpenAgents?: () => void;
   onBotCreated?: (bot: BotRole) => void | Promise<void>;
+  onBotUpdated?: (bot: BotRole) => void | Promise<void>;
+  onBotDeleted?: (botId: string) => void | Promise<void>;
 }
 
 const ACTIVE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set([
@@ -41,7 +52,6 @@ const ACTIVE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set([
 
 const AWAITING_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["paused", "blocked"]);
 
-const DEFAULT_BOT_COLOR = "#6366f1";
 const DEFAULT_BOT_ICON: TwinIconKey = "Bot";
 const MAX_BOT_PREVIEW_LENGTH = 140;
 
@@ -63,18 +73,46 @@ function flattenTaskText(value: string | undefined): string {
     .trim();
 }
 
+export function stripMarkdownForBotPreview(value: string | undefined): string {
+  return (value || "")
+    .replace(/\\([\\`*_\[\]{}()#+.!~-])/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^\)\n]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^\)\n]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
+    .replace(/```[ \t]*[A-Za-z0-9_+-]*[ \t]*(?:\r?\n|$)/g, "")
+    .replace(/```/g, "")
+    .replace(/(^|\n)\s{0,3}(?:[-+*]|\d+[.)])\s+/gm, "$1")
+    .replace(/(^|\n)\s{0,3}>\s?/gm, "$1")
+    .replace(/(^|\n)\s{0,3}(?:([-*_])\s*){3,}(?=\n|$)/gm, "$1")
+    .replace(/(^|[\s])#{1,6}(?=[\s]|$)/g, "$1")
+    .replace(/(\*\*|__)([\s\S]*?)\1/g, "$2")
+    .replace(/~~([\s\S]*?)~~/g, "$1")
+    .replace(/(^|[^\p{L}\p{N}])([*_])(?=\S)([\s\S]*?\S)\2(?=$|[^\p{L}\p{N}])/gu, "$1$3")
+    .replace(/(^|[\s([{])[*_~`]+(?=\S)/g, "$1")
+    .replace(/[*_~`]+(?=$|[\s)\]}.,!?;:])/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function flattenBotPreviewText(value: string | undefined): string {
+  return stripAllEmojis(stripMarkdownForBotPreview(value));
+}
+
 export function getBotLatestTask(tasks: Task[], roleId: string): Task | undefined {
-  return tasks
-    .filter((task) => task.assignedAgentRoleId === roleId && isBotConversationTask(task))
-    .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))[0];
+  return selectLatestBotConversation(tasks, roleId);
 }
 
 export function getBotPreview(task: Task | undefined): string {
-  if (!task) return "No sessions yet";
+  if (!task) return "No messages yet";
+  const promptPreview = flattenBotPreviewText(task.userPrompt);
+  const sidebarPreview = flattenBotPreviewText(task.sidebarPromptPreview);
+  const resultPreview = flattenBotPreviewText(task.resultSummary);
+  const isDormantSeed = (value: string) =>
+    /^start (?:a )?(?:conversation|chatting) with /i.test(value);
   const preview =
-    flattenTaskText(task.resultSummary) ||
-    flattenTaskText(task.sidebarPromptPreview) ||
-    flattenTaskText(task.userPrompt) ||
+    (!isDormantSeed(resultPreview) ? resultPreview : "") ||
+    (!isDormantSeed(sidebarPreview) ? sidebarPreview : "") ||
+    (!isDormantSeed(promptPreview) ? promptPreview : "") ||
     "No messages yet";
   return preview.length > MAX_BOT_PREVIEW_LENGTH
     ? `${preview.slice(0, MAX_BOT_PREVIEW_LENGTH - 1).trimEnd()}…`
@@ -124,7 +162,7 @@ function getSafeBotIcon(icon: string | undefined) {
   if (icon && TWIN_ICON_KEYS.includes(icon as TwinIconKey)) {
     return LUCIDE_TWIN_ICONS[icon as TwinIconKey];
   }
-  return Bot;
+  return BotGlyph;
 }
 
 function getBotTimestamp(bot: BotRole, task: Task | undefined): number {
@@ -152,6 +190,7 @@ function BotRow({
   onSelect,
   onOpenBot,
   onOpenAgents,
+  onEditBot,
 }: {
   bot: BotRole;
   latestTask?: Task;
@@ -159,53 +198,65 @@ function BotRow({
   onSelect: () => void;
   onOpenBot?: () => void | Promise<void>;
   onOpenAgents?: () => void;
+  onEditBot?: () => void;
 }) {
   const Icon = getSafeBotIcon(bot.icon);
   const isActive = latestTask ? ACTIVE_BOT_STATUSES.has(latestTask.status) : false;
   const isAwaiting = latestTask ? AWAITING_BOT_STATUSES.has(latestTask.status) : false;
   const displayName = flattenTaskText(bot.displayName) || "Unnamed bot";
-  const handle = getBotHandle(bot);
   const preview = getBotPreview(latestTask);
   const age = getBotRelativeTime(latestTask?.updatedAt || latestTask?.createdAt || bot.updatedAt);
 
   return (
-    <button
-      type="button"
-      className={[
-        "sidebar-bot-row",
-        selected ? "selected" : null,
-        bot.isActive === false ? "inactive" : null,
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      onClick={onOpenBot || (latestTask ? onSelect : onOpenAgents)}
-      aria-current={selected ? "page" : undefined}
-      aria-label={`${displayName}, @${handle}${latestTask ? `, ${preview}` : ", no sessions yet"}`}
-      title={latestTask ? preview : "Open bot chat"}
-    >
-      <span
-        className="sidebar-bot-avatar"
-        style={{ backgroundColor: bot.color || DEFAULT_BOT_COLOR }}
-        aria-hidden="true"
+    <div className="sidebar-bot-row-wrap">
+      <button
+        type="button"
+        className={[
+          "sidebar-bot-row",
+          selected ? "selected" : null,
+          bot.isActive === false ? "inactive" : null,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        onClick={onOpenBot || (latestTask ? onSelect : onOpenAgents)}
+        aria-current={selected ? "page" : undefined}
+        aria-label={`${displayName}, ${preview}`}
+        title={latestTask ? preview : "Open bot chat"}
       >
-        <Icon size={18} strokeWidth={2.1} />
         <span
-          className={`sidebar-bot-status ${isActive ? "active" : ""} ${isAwaiting ? "awaiting" : ""}`}
-        />
-      </span>
-      <span className="sidebar-bot-copy">
-        <span className="sidebar-bot-primary-line">
-          <span className="sidebar-bot-identity">
-            <span className="sidebar-bot-name">{displayName}</span>
-            <span className="sidebar-bot-handle">@{handle}</span>
+          className="sidebar-bot-avatar"
+          style={{ backgroundColor: bot.color || DEFAULT_BOT_COLOR }}
+          aria-hidden="true"
+        >
+          <Icon size={18} />
+          <span
+            className={`sidebar-bot-status ${isActive ? "active" : ""} ${isAwaiting ? "awaiting" : ""}`}
+          />
+        </span>
+        <span className="sidebar-bot-copy">
+          <span className="sidebar-bot-primary-line">
+            <span className="sidebar-bot-identity">
+              <span className="sidebar-bot-name">{displayName}</span>
+            </span>
+            {age && <span className="sidebar-bot-age">{age}</span>}
           </span>
-          {age && <span className="sidebar-bot-age">{age}</span>}
+          <span className="sidebar-bot-secondary-line">
+            <span className="sidebar-bot-preview">{preview}</span>
+          </span>
         </span>
-        <span className="sidebar-bot-secondary-line">
-          <span className="sidebar-bot-preview">{preview}</span>
-        </span>
-      </span>
-    </button>
+      </button>
+      {onEditBot && (
+        <button
+          type="button"
+          className="sidebar-bot-edit-button"
+          onClick={onEditBot}
+          aria-label={`Edit ${displayName}`}
+          title="Edit bot"
+        >
+          <span aria-hidden="true">⋯</span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -218,6 +269,7 @@ function CreateBotDialog({
 }) {
   const [displayName, setDisplayName] = useState("");
   const [description, setDescription] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
   const [icon, setIcon] = useState<TwinIconKey>(DEFAULT_BOT_ICON);
   const [color, setColor] = useState(DEFAULT_BOT_COLOR);
   const [isCreating, setIsCreating] = useState(false);
@@ -243,7 +295,8 @@ function CreateBotDialog({
       const created = await api.createAgentRole({
         name: normalizeBotHandle(cleanName),
         displayName: cleanName,
-        description: flattenTaskText(description) || undefined,
+        description: normalizeBotProfileText(description) || undefined,
+        systemPrompt: normalizeBotProfileText(systemPrompt) || undefined,
         icon,
         color,
         capabilities: ["code"],
@@ -298,9 +351,21 @@ function CreateBotDialog({
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             placeholder="What should this bot help with?"
-            maxLength={240}
-            rows={2}
+            maxLength={BOT_PROFILE_DESCRIPTION_MAX_LENGTH}
+            rows={4}
           />
+          <small>Line breaks are preserved.</small>
+        </label>
+        <label className="sidebar-bot-field">
+          <span>Instructions</span>
+          <textarea
+            value={systemPrompt}
+            onChange={(event) => setSystemPrompt(event.target.value)}
+            placeholder="How should this bot work?"
+            maxLength={BOT_PROFILE_INSTRUCTIONS_MAX_LENGTH}
+            rows={4}
+          />
+          <small>Used when this bot starts its next run.</small>
         </label>
         <div className="sidebar-bot-field-row">
           <label className="sidebar-bot-field">
@@ -357,9 +422,12 @@ export function BotsPane({
   onOpenBot,
   onOpenAgents,
   onBotCreated,
+  onBotUpdated,
+  onBotDeleted,
 }: BotsPaneProps) {
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingBot, setEditingBot] = useState<BotRole | null>(null);
 
   const visibleBots = useMemo(
     () => sortBots(filterBots(roles, tasks, query), tasks),
@@ -370,7 +438,7 @@ export function BotsPane({
     <div className="sidebar-bots-pane">
       <div className="sidebar-bots-header">
         <div className="sidebar-bots-title-group">
-          <Bot size={15} strokeWidth={2.1} aria-hidden="true" />
+          <BotGlyph size={16} weight="regular" />
           <h2>Bots</h2>
           {!isLoading && roles.length > 0 && (
             <span className="sidebar-bots-count">{roles.length}</span>
@@ -433,7 +501,7 @@ export function BotsPane({
         </div>
       ) : roles.length === 0 ? (
         <div className="sidebar-bots-state">
-          <Bot size={25} />
+          <BotGlyph size={26} />
           <strong>No bots yet</strong>
           <span>Create a bot to give recurring work a stable identity.</span>
           <button
@@ -458,13 +526,19 @@ export function BotsPane({
               key={bot.id}
               bot={bot}
               latestTask={getBotLatestTask(tasks, bot.id)}
-              selected={getBotLatestTask(tasks, bot.id)?.id === selectedTaskId}
+              selected={tasks.some(
+                (task) =>
+                  task.id === selectedTaskId &&
+                  task.assignedAgentRoleId === bot.id &&
+                  isBotConversationTask(task),
+              )}
               onSelect={() => {
                 const latestTask = getBotLatestTask(tasks, bot.id);
                 if (latestTask) onSelectTask(latestTask.id);
               }}
               onOpenBot={onOpenBot ? () => onOpenBot(bot) : undefined}
               onOpenAgents={onOpenAgents}
+              onEditBot={() => setEditingBot(bot)}
             />
           ))}
         </div>
@@ -472,6 +546,20 @@ export function BotsPane({
 
       {createOpen && onBotCreated && (
         <CreateBotDialog onClose={() => setCreateOpen(false)} onCreated={onBotCreated} />
+      )}
+      {editingBot && (
+        <BotProfileDialog
+          botId={editingBot.id}
+          onClose={() => setEditingBot(null)}
+          onSaved={async (bot) => {
+            await onBotUpdated?.(bot as BotRole);
+            setEditingBot(null);
+          }}
+          onDeleted={async (botId) => {
+            await onBotDeleted?.(botId);
+            setEditingBot(null);
+          }}
+        />
       )}
     </div>
   );

@@ -6,13 +6,13 @@ Advanced and compatibility controls remain under **Settings → Automations**. T
 
 ## Choose the right automation surface
 
-| Need | Use |
-| --- | --- |
-| Build a multi-step flow with typed fields, variables, branches, testing, approvals, and versioned activation | Main sidebar **Automations** |
-| Turn the current task into a recurring same-thread or new-task automation | Task menu **… → Add automation…** |
-| Create or inspect a prompt-based routine | **Settings → Automations → Routines** |
-| Manage the cron, inbound hook, or event-trigger engine directly | **Settings → Automations → Scheduled Tasks / Webhooks / Event Triggers** |
-| Configure the always-on cognitive loop | Mission Control and **Settings → Automations → Workflow Intelligence** |
+| Need                                                                                                         | Use                                                                      |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Build a multi-step flow with typed fields, variables, branches, testing, approvals, and versioned activation | Main sidebar **Automations**                                             |
+| Turn the current task into a recurring same-thread or new-task automation                                    | Task menu **… → Add automation…**                                        |
+| Create or inspect a prompt-based routine                                                                     | **Settings → Automations → Routines**                                    |
+| Manage the cron, inbound hook, or event-trigger engine directly                                              | **Settings → Automations → Scheduled Tasks / Webhooks / Event Triggers** |
+| Configure the always-on cognitive loop                                                                       | Mission Control and **Settings → Automations → Workflow Intelligence**   |
 
 Structured flows are stored as Routines for compatibility, but each activation points to an immutable structured workflow version and executes through the deterministic workflow engine.
 
@@ -87,19 +87,19 @@ Saving and activation are intentionally separate. A draft may contain missing re
 
 A structured flow must contain exactly one starter, and the starter cannot have an incoming edge.
 
-| Starter | Behavior |
-| --- | --- |
-| Manual | Runs on demand after the flow has been saved and turned on. |
-| Schedule | Supports cron, recurring-minute, and one-time schedules with timezone-aware cron configuration. |
-| Gmail message | Matches Gmail search, sender, subject, and flow-generated-message settings. |
-| Google Chat message | Receives normalized Google Chat channel events from the event-trigger bridge. |
-| Sheet changed | Watches the selected spreadsheet through Google Drive change signals. |
-| Item added to Drive folder | Matches a newly created direct child of the selected folder. |
-| Drive file edited | Matches changes to one file. |
-| Item in Drive folder edited | Matches changes to direct children of one folder. |
-| Meeting relative | Polls Calendar and runs before or after a matching meeting. |
-| Meeting outputs ready | Detects matching Google Docs meeting-note or transcript output through Drive changes. |
-| Form response | Watches the selected linked response spreadsheet. |
+| Starter                     | Behavior                                                                                        |
+| --------------------------- | ----------------------------------------------------------------------------------------------- |
+| Manual                      | Runs on demand after the flow has been saved and turned on.                                     |
+| Schedule                    | Supports cron, recurring-minute, and one-time schedules with timezone-aware cron configuration. |
+| Gmail message               | Matches Gmail search, sender, subject, and flow-generated-message settings.                     |
+| Google Chat message         | Receives normalized Google Chat channel events from the event-trigger bridge.                   |
+| Sheet changed               | Watches the selected spreadsheet through Google Drive change signals.                           |
+| Item added to Drive folder  | Matches a newly created direct child of the selected folder.                                    |
+| Drive file edited           | Matches changes to one file.                                                                    |
+| Item in Drive folder edited | Matches changes to direct children of one folder.                                               |
+| Meeting relative            | Polls Calendar and runs before or after a matching meeting.                                     |
+| Meeting outputs ready       | Detects matching Google Docs meeting-note or transcript output through Drive changes.           |
+| Form response               | Watches the selected linked response spreadsheet.                                               |
 
 Google Chat mention, reaction, and space-membership starters appear as **Preview**. Preview starters and actions can be kept in a draft but block activation until a supported event source/runtime is available. NotebookLM, Confluence page creation, and Mailchimp contact actions are also preview-only in the current catalog.
 
@@ -185,12 +185,12 @@ Turning a flow off stops new queued events from starting runs. Events claimed af
 
 New Studio flows default to `confirm_external`. The routine-level policy and optional step override are evaluated against the highest risk of the step and its nested actions.
 
-| Flow policy | Read | Local write | External write | Data export |
-| --- | --- | --- | --- | --- |
-| `inherit` | Run | Run | Confirm | Confirm |
-| `auto_safe` | Run | Run | Confirm | Confirm |
-| `confirm_external` | Run | Run | Confirm | Confirm |
-| `strict_confirm` | Run | Confirm | Confirm | Confirm |
+| Flow policy        | Read | Local write | External write | Data export |
+| ------------------ | ---- | ----------- | -------------- | ----------- |
+| `inherit`          | Run  | Run         | Confirm        | Confirm     |
+| `auto_safe`        | Run  | Run         | Confirm        | Confirm     |
+| `confirm_external` | Run  | Run         | Confirm        | Confirm     |
+| `strict_confirm`   | Run  | Confirm     | Confirm        | Confirm     |
 
 All step-level approval decisions remain beneath the effective access profile and administrator
 policy. `data_export` always requires approval in a live run. A step set to **Always confirm**
@@ -227,18 +227,18 @@ The last rule deliberately prefers a visible verification pause over silently re
 
 ## Runtime limits
 
-| Limit | Default | Allowed range |
-| --- | ---: | ---: |
-| Run duration | 30 minutes | 1 second–30 minutes |
-| Total operations, including nested loop actions | 100 | 1–100 |
-| Items per for-each | 100 | 1–100 |
-| Parallel-step ceiling | 4 | 1–4 |
-| Step data retention | 30 days | 1–365 days |
-| Workflow nesting depth | — | Maximum 4 levels |
-| Per-step retry attempts for safe work | 1 | 1–10 |
-| Signed webhook request body | — | Maximum 1 MiB |
-| Signed webhook response body | — | Maximum 1 MiB |
-| Signed webhook timeout | 15 seconds | 1–60 seconds |
+| Limit                                           |    Default |       Allowed range |
+| ----------------------------------------------- | ---------: | ------------------: |
+| Run duration                                    | 30 minutes | 1 second–30 minutes |
+| Total operations, including nested loop actions |        100 |               1–100 |
+| Items per for-each                              |        100 |               1–100 |
+| Parallel-step ceiling                           |          4 |                 1–4 |
+| Step data retention                             |    30 days |          1–365 days |
+| Workflow nesting depth                          |          — |    Maximum 4 levels |
+| Per-step retry attempts for safe work           |          1 |                1–10 |
+| Signed webhook request body                     |          — |       Maximum 1 MiB |
+| Signed webhook response body                    |          — |       Maximum 1 MiB |
+| Signed webhook timeout                          | 15 seconds |        1–60 seconds |
 
 The shared run deadline and total-operation budget are checked inside nested loops as well as between top-level steps. A workflow cannot evade the limits by placing work inside `Repeat for each`.
 
@@ -357,25 +357,25 @@ Do not delete the CoWork database. `RoutineService.ensureSchema()` adds legacy r
 
 ### Main components
 
-| Area | Implementation |
-| --- | --- |
-| Shared workflow contract | `src/shared/routine-workflow.ts` |
-| IPC channel names and renderer API types | `src/shared/types.ts` |
-| Main Automations route | `src/renderer/App.tsx`, `src/renderer/components/Sidebar.tsx` |
-| Studio UI | `src/renderer/components/AutomationStudioPanel.tsx` |
-| Studio layout | `src/renderer/components/automation-studio.css` |
-| IPC handlers and preload bridge | `src/electron/ipc/routine-handlers.ts`, `src/electron/preload.ts` |
-| Routine lifecycle and trigger compilation | `src/electron/routines/service.ts` |
-| Operation catalog and templates | `src/electron/routines/workflow/catalog.ts`, `templates.ts` |
-| Prompt-to-draft matching | `src/electron/routines/workflow/generator.ts` |
-| Graph and settings validation | `src/electron/routines/workflow/validation.ts` |
-| Variable resolution and comparisons | `src/electron/routines/workflow/variables.ts` |
-| Deterministic execution | `src/electron/routines/workflow/engine.ts` |
-| Action adapters | `src/electron/routines/workflow/action-executor.ts` |
-| Versions, runs, steps, inbox, and samples | `src/electron/routines/workflow/repository.ts` |
-| Google polling starters | `src/electron/routines/workflow/google-starter-watcher.ts` |
-| Secure webhook secrets | `src/electron/routines/workflow/secret-store.ts` |
-| Signed webhook transport | `src/electron/routines/workflow/signed-webhook.ts` |
+| Area                                      | Implementation                                                                                      |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Shared workflow contract                  | `src/shared/routine-workflow.ts`                                                                    |
+| IPC channel names and renderer API types  | `src/shared/types.ts`                                                                               |
+| Main Automations route                    | `src/renderer/App.tsx`, `src/renderer/components/Sidebar.tsx`                                       |
+| Studio UI                                 | `src/renderer/components/AutomationStudioPanel.tsx`                                                 |
+| Studio layout                             | `src/renderer/components/automation-studio.css`                                                     |
+| IPC handlers and preload bridge           | `src/electron/ipc/routine-handlers.ts`, `src/electron/preload.ts`                                   |
+| Routine lifecycle and trigger compilation | `src/electron/routines/service.ts`                                                                  |
+| Operation catalog and templates           | `src/electron/routines/workflow/catalog.ts`, `templates.ts`                                         |
+| Prompt-to-draft matching                  | `src/electron/routines/workflow/generator.ts`                                                       |
+| Graph and settings validation             | `src/electron/routines/workflow/validation.ts`                                                      |
+| Variable resolution and comparisons       | `src/electron/routines/workflow/variables.ts`                                                       |
+| Deterministic execution                   | `src/electron/routines/workflow/engine.ts`                                                          |
+| Action adapters                           | `src/electron/routines/workflow/action-executor.ts`                                                 |
+| Versions, runs, steps, inbox, and samples | `src/electron/routines/workflow/repository.ts`                                                      |
+| Google polling starters                   | `src/electron/routines/workflow/google-starter-watcher.ts`                                          |
+| Secure webhook secrets                    | `src/electron/routines/workflow/secret-store.ts`                                                    |
+| Signed webhook transport                  | `src/electron/routines/workflow/signed-webhook.ts`                                                  |
 | Access-profile resolution and enforcement | `src/electron/security/access-profile-resolver.ts`, `src/electron/security/access-profile-paths.ts` |
 
 ### Persistent tables

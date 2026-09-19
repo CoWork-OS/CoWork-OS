@@ -87,8 +87,10 @@ function coerceNumber(value, fallback = 0) {
 }
 
 function compareEvents(a, b) {
-  const aSeq = Number.isFinite(Number(a.seq)) && Number(a.seq) > 0 ? Math.floor(Number(a.seq)) : null;
-  const bSeq = Number.isFinite(Number(b.seq)) && Number(b.seq) > 0 ? Math.floor(Number(b.seq)) : null;
+  const aSeq =
+    Number.isFinite(Number(a.seq)) && Number(a.seq) > 0 ? Math.floor(Number(a.seq)) : null;
+  const bSeq =
+    Number.isFinite(Number(b.seq)) && Number(b.seq) > 0 ? Math.floor(Number(b.seq)) : null;
   if (aSeq !== null && bSeq !== null && aSeq !== bSeq) return aSeq - bSeq;
   const aTs = Number.isFinite(Number(a.ts)) ? Number(a.ts) : Number(a.timestamp) || 0;
   const bTs = Number.isFinite(Number(b.ts)) ? Number(b.ts) : Number(b.timestamp) || 0;
@@ -133,7 +135,9 @@ function computeTelemetry(events) {
     if (
       event.type === "timeline_error" &&
       (Number.isFinite(Number(event.payload_rejected_seq)) ||
-        String(event.payload_message || "").toLowerCase().includes("out-of-order"))
+        String(event.payload_message || "")
+          .toLowerCase()
+          .includes("out-of-order"))
     ) {
       orderViolations += 1;
       droppedEvents += 1;
@@ -141,7 +145,11 @@ function computeTelemetry(events) {
     if (gate === "completion_failed_step_gate") {
       completionGateBlocks += 1;
     }
-    if (gate === "key_claim_evidence_gate" && event.type === "timeline_step_updated" && event.status === "blocked") {
+    if (
+      gate === "key_claim_evidence_gate" &&
+      event.type === "timeline_step_updated" &&
+      event.status === "blocked"
+    ) {
       evidenceGateFails += 1;
     }
 
@@ -163,7 +171,11 @@ function computeTelemetry(events) {
       activeSteps.delete(stepId);
       continue;
     }
-    if (event.status === "completed" || event.status === "skipped" || event.status === "cancelled") {
+    if (
+      event.status === "completed" ||
+      event.status === "skipped" ||
+      event.status === "cancelled"
+    ) {
       activeSteps.delete(stepId);
     }
   }
@@ -257,7 +269,10 @@ ORDER BY COALESCE(seq, timestamp) ASC, timestamp ASC;
       const boundarySeq = Number.isFinite(Number(completionEvent.seq))
         ? Number(completionEvent.seq)
         : null;
-      const boundaryTs = coerceNumber(completionEvent.ts, coerceNumber(completionEvent.timestamp, 0));
+      const boundaryTs = coerceNumber(
+        completionEvent.ts,
+        coerceNumber(completionEvent.timestamp, 0),
+      );
       const snapshot = taskEvents.filter((event) => {
         const eventSeq = Number.isFinite(Number(event.seq)) ? Number(event.seq) : null;
         const eventTs = coerceNumber(event.ts, coerceNumber(event.timestamp, 0));
@@ -268,20 +283,25 @@ ORDER BY COALESCE(seq, timestamp) ASC, timestamp ASC;
       });
 
       const telemetry = computeTelemetry(snapshot);
-      const payload = completionEvent.payload && typeof completionEvent.payload === "object"
-        ? { ...completionEvent.payload }
-        : {};
+      const payload =
+        completionEvent.payload && typeof completionEvent.payload === "object"
+          ? { ...completionEvent.payload }
+          : {};
       const existingTelemetry =
-        payload.telemetry && typeof payload.telemetry === "object" && !Array.isArray(payload.telemetry)
+        payload.telemetry &&
+        typeof payload.telemetry === "object" &&
+        !Array.isArray(payload.telemetry)
           ? payload.telemetry
           : null;
 
       const changed =
         !existingTelemetry ||
         Number(existingTelemetry.timeline_event_drop_rate) !== telemetry.timeline_event_drop_rate ||
-        Number(existingTelemetry.timeline_order_violation_rate) !== telemetry.timeline_order_violation_rate ||
+        Number(existingTelemetry.timeline_order_violation_rate) !==
+          telemetry.timeline_order_violation_rate ||
         Number(existingTelemetry.step_state_mismatch_rate) !== telemetry.step_state_mismatch_rate ||
-        Number(existingTelemetry.completion_gate_block_count) !== telemetry.completion_gate_block_count ||
+        Number(existingTelemetry.completion_gate_block_count) !==
+          telemetry.completion_gate_block_count ||
         Number(existingTelemetry.evidence_gate_fail_count) !== telemetry.evidence_gate_fail_count ||
         String(existingTelemetry.telemetry_source || "") !== "backfill_v2";
       if (!changed) continue;

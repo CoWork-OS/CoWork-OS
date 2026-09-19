@@ -7,14 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.53] - 2026-09-20
+
 ### Added
 
+- **Release notes for 0.5.53**: see [Release Notes 0.5.53](release-notes-0.5.53.md).
 - **MLX-LM local inference**: added a first-class Apple Silicon `mlx` provider with native-platform and Python-runtime checks, quantized-model quick picks, local `mlx_lm.server` lifecycle controls, OpenAI-compatible `/v1` routing, legacy endpoint normalization, and a complete [MLX-LM Local Inference guide](mlx-lm.md).
 - **Atomic Chat and local execution profile**: added an opt-in Atomic Chat `/v1` adapter with exact model discovery, typed connection failures, and CoWork-owned task/permission boundaries, plus the versioned `local-balanced-v1` profile for bounded local output budgets, capability evidence, and single-generation admission. See [Atomic Chat inference](atomic-chat.md) and [local-model execution](local-model-execution.md).
 - **Access profiles**: added Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles combining sandbox, approvals, reviewer behavior, network, filesystem, and domain policy across desktop, CLI, remote, managed, automation, channel, and child-task surfaces.
 - **Access profile documentation**: added the canonical [Access Profiles guide](access-profiles.md) covering selection, defaults, custom profile fields, inheritance, fail-closed behavior, migration, compatibility, and verification.
 - **Approval-boundary validation**: added the [migration plan](approval-boundary-migration-plan.md), [validation record](approval-boundary-validation.md), real SQLite smoke harness, and regression specification for routine in-scope work, scoped exceptions, grant invalidation, sandbox enforcement, and bounded ACP behavior.
 - **Jev Decision Support and Active harness**: added the [Jev Decision Support and Harness guide](jev.md) and [JEV harness validation record](jev-harness-validation.md) covering typed provider routing, bounded model/strategy/team/tool decisions, separate Jev usage accounting, and headless execution behavior.
+- **Durable WorkSessions**: added canonical lifecycle contracts, activity leases, projections, operational metrics, replay evaluation, rollout controls, turn guards, and control-plane/daemon integration. See [WorkSession model](work-session-model.md).
+- **Bots and collaboration**: added persistent bot profiles and conversations, team messaging, agent rosters, session dashboards, and improved collaborative execution status. See [Bots and Conversations](bots-and-conversations.md).
+- **Box Brain and CoWork Pulse**: added Box-backed memory/search integration and an explicitly opt-in, content-free Pulse collector with consent, deletion, update-check separation, D1 schema, and validation coverage. See [Box Brain](box-brain.md) and [CoWork Pulse](cowork-pulse.md).
+- **Local preview and task-surface state**: added governed local preview processes, session-aware preview cards, composer draft/attachment fencing, task-event scheduling, and task selection restoration.
+- **Skills and connectors**: expanded bundled and registry-managed guidance, including Box and TypeSafe AI entries, architecture-design workflows, and stronger skill/import validation.
 
 ### Changed
 
@@ -25,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Governed cross-surface execution**: documented that browser, computer-use, connector, MCP tunnel, memory, skill, channel, automation, terminal, remote, and managed-agent surfaces inherit the effective profile and cannot widen it.
 - **Fail-closed policy documentation**: documented unavailable or backend-incompatible profiles, finite filesystem/domain boundaries, protected paths, and the separation between logical profiles, sandbox backends, approval behavior, and execution modes.
 - **Active JEV routing documentation**: documented the eligibility gates, decision purposes, deterministic authority boundaries, CLI/runtime build split, telemetry inspection, and repeated benchmark methodology for standard-versus-JEV comparisons.
+- **Task and artifact surfaces**: improved composer drafts/attachments, timeline projection, task selection, disclosure, session progress, artifact previews, and large-session rendering/replay stability.
+- **Provider and release tooling**: added MuAPI transcription recovery, OpenRouter onboarding recovery, Vite 8/Vitest migration coverage, documentation-version validation, registry-publication recovery, bundle/smoke helpers, and detached updater-signature verification.
 
 ### Security
 
@@ -63,6 +73,8 @@ for the defect, fix, and enforcement point of each item.
 - **Deployment-posture evaluation reads unredacted settings**, so redacting the `config.get` response does not affect posture checks.
 - **Headless Active JEV tool review**: concerning Jev observations no longer create a second approval request when a headless task already has explicit non-interactive authority; the observation remains in the policy trace while hard policy, permissions, security, and OS consent stay authoritative.
 - **Jev telemetry migration isolation**: a repairable legacy LLM source-id index failure no longer prevents creation of the independent `jev_call_events` table and indexes.
+- **Runtime lifecycle isolation**: preserved terminal outcomes, normalized tool results, isolated report projections by database, guarded stale session messages, improved graceful shutdown, and repaired legacy migration edge cases.
+- **Provider and mailbox resilience**: improved provider onboarding/routing, transcription responses, mailbox retries, automation recovery, and local-model admission failures.
 
 ## [0.5.52] - 2026-08-27
 
@@ -1397,6 +1409,7 @@ for the defect, fix, and enforcement point of each item.
 
 | Version | Date       | Highlights                                                                                                                                                                                                        |
 | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0.5.53  | 2026-09-20 | Profile-first approvals, MLX/Atomic Chat/Jev execution, durable WorkSessions, bot collaboration, Box Brain, CoWork Pulse, security hardening, and release tooling                   |
 | 0.5.52  | 2026-08-27 | OpenRouter image generation, OpenCode Zen/Go, SearXNG/Web Search Plus, Atlas Cloud, Electron 44, macOS 13 minimum, and reliability hardening                                                                      |
 | 0.5.51  | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery                               |
 | 0.5.50  | 2026-07-20 | GPT-5.6 subscription controls, Mixture of Agents, browser annotations, inline mail review, video analysis, governed memory writes, safer visible automation, session retention, and new connector/skill workflows |
@@ -1426,7 +1439,8 @@ for the defect, fix, and enforcement point of each item.
 | 0.1.0   | 2025-01-24 | First public release with core features                                                                                                                                                                           |
 | 0.0.1   | 2025-01-20 | Initial development setup                                                                                                                                                                                         |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.52...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.53...HEAD
+[0.5.53]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.52...v0.5.53
 [0.5.52]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.51...v0.5.52
 [0.5.51]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.50...v0.5.51
 [0.5.50]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.49...v0.5.50

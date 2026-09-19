@@ -8,12 +8,8 @@
   "parameters": [],
   "enabled": true,
   "requires": {
-    "tools": [
-      "run_command"
-    ],
-    "bins": [
-      "python3"
-    ]
+    "tools": ["run_command"],
+    "bins": ["python3"]
   },
   "metadata": {
     "version": "1.0.0",
@@ -21,16 +17,7 @@
     "homepage": "https://github.com/NousResearch/hermes-agent/tree/main/optional-skills/security/unbroker",
     "repository": "https://github.com/NousResearch/hermes-agent",
     "license": "Code MIT; broker dataset includes CC BY-NC-SA 4.0-derived BADBOOL data",
-    "tags": [
-      "privacy",
-      "security",
-      "data-broker",
-      "opt-out",
-      "ccpa",
-      "cpra",
-      "gdpr",
-      "doxxing"
-    ],
+    "tags": ["privacy", "security", "data-broker", "opt-out", "ccpa", "cpra", "gdpr", "doxxing"],
     "routing": {
       "keywords": [
         "unbroker",

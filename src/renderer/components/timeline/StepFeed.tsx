@@ -5,6 +5,9 @@ import { AnimatedDisclosure } from "./AnimatedDisclosure";
 interface StepFeedProps {
   title: ReactNode;
   titleTooltip?: string;
+  /** Muted one-line recap rendered under the headline (e.g. a spawn brief). */
+  subtitle?: ReactNode;
+  subtitleTooltip?: string;
   timeLabel: string;
   hideTime?: boolean;
   indicator: TimelineIndicatorSpec;
@@ -21,6 +24,8 @@ interface StepFeedProps {
 export function StepFeed({
   title,
   titleTooltip,
+  subtitle,
+  subtitleTooltip,
   timeLabel,
   hideTime = false,
   indicator,
@@ -104,6 +109,11 @@ export function StepFeed({
           </div>
           {!hideTime && <div className="event-time">{timeLabel}</div>}
         </button>
+        {subtitle ? (
+          <div className="event-subtitle" title={subtitleTooltip}>
+            {subtitle}
+          </div>
+        ) : null}
         <div ref={contentRef}>
           <AnimatedDisclosure
             open={expandable && visibleExpanded}

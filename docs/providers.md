@@ -39,60 +39,62 @@ let organizations use existing routing infrastructure while keeping the CoWork w
 
 ### Local models
 
-Ollama, MLX-LM, and Hugging Face local routes can keep inference on the machine. Cloud routes send
+Ollama, MLX-LM, Hugging Face local routes, and the optional Atomic Chat adapter can keep inference on the machine. Cloud routes send
 prompts and authentication data to the configured provider as required to complete requests. See
 the dedicated [MLX-LM Local Inference guide](mlx-lm.md) for Apple Silicon setup, runtime details,
-and troubleshooting.
+and troubleshooting. See [Atomic Chat inference](atomic-chat.md) for the inference-only local API
+integration.
 
 ## Built-in Model Routes
 
-| Provider | Configuration | Billing |
-|----------|---------------|---------|
-| Claude | Claude API key or supported account token in Settings | API or provider-controlled extra usage; verify current Anthropic terms |
-| Azure Anthropic | API key + endpoint + deployment in Settings | Pay-per-token via Azure |
-| Google Gemini | API key in Settings | Free usage available through Google AI Studio subject to Google's current limits; pay-per-token beyond free limits |
-| OpenRouter | API key in Settings (default provider) | Free model options available; pay-per-token for premium models |
-| DeepSeek | API key in Settings | Provider billing |
-| OpenAI (API Key) | API key in Settings | Pay-per-token |
-| OpenAI (ChatGPT OAuth) | Sign in with an eligible ChatGPT account | Provider-controlled plan eligibility and usage limits apply |
-| AWS Bedrock | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS |
-| Azure OpenAI | API key + endpoint in Settings | Pay-per-token via Azure |
-| Mixture of Agents | Presets composed from already-configured providers | No separate billing; each selected provider bills normally |
-| Ollama (Local) | Install Ollama and pull models | No hosted-model usage charge; compute runs locally |
-| HuggingFace Local AI | Install `hf-agents` and run `llama.cpp` locally | No hosted-model usage charge; compute runs locally |
-| MLX (Apple Silicon) | Install `mlx-lm` and use a quantized MLX model | No hosted-model usage charge; Apple Silicon compute runs locally |
-| Groq | API key in Settings | Free usage available subject to Groq's current limits; pay-per-token beyond free limits |
-| xAI (Grok API) | API key in Settings | Pay-per-token |
-| xAI Grok OAuth | Browser sign-in in Settings | Experimental; provider authorization and plan eligibility apply |
-| Kimi (Moonshot) | API key in Settings | Pay-per-token |
-| Pi (Multi-LLM) | Unified API via pi-ai | Routes to multiple providers |
+| Provider               | Configuration                                                  | Billing                                                                                                            |
+| ---------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Claude                 | Claude API key or supported account token in Settings          | API or provider-controlled extra usage; verify current Anthropic terms                                             |
+| Azure Anthropic        | API key + endpoint + deployment in Settings                    | Pay-per-token via Azure                                                                                            |
+| Google Gemini          | API key in Settings                                            | Free usage available through Google AI Studio subject to Google's current limits; pay-per-token beyond free limits |
+| OpenRouter             | API key in Settings (default provider)                         | Free model options available; pay-per-token for premium models                                                     |
+| DeepSeek               | API key in Settings                                            | Provider billing                                                                                                   |
+| OpenAI (API Key)       | API key in Settings                                            | Pay-per-token                                                                                                      |
+| OpenAI (ChatGPT OAuth) | Sign in with an eligible ChatGPT account                       | Provider-controlled plan eligibility and usage limits apply                                                        |
+| AWS Bedrock            | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS                                                                                              |
+| Azure OpenAI           | API key + endpoint in Settings                                 | Pay-per-token via Azure                                                                                            |
+| Mixture of Agents      | Presets composed from already-configured providers             | No separate billing; each selected provider bills normally                                                         |
+| Ollama (Local)         | Install Ollama and pull models                                 | No hosted-model usage charge; compute runs locally                                                                 |
+| HuggingFace Local AI   | Install `hf-agents` and run `llama.cpp` locally                | No hosted-model usage charge; compute runs locally                                                                 |
+| MLX (Apple Silicon)    | Install `mlx-lm` and use a quantized MLX model                 | No hosted-model usage charge; Apple Silicon compute runs locally                                                   |
+| Atomic Chat (local)    | Start Atomic Chat, then refresh the running `/v1/models` endpoint in Settings | No hosted-model usage charge from CoWork; Atomic Chat's selected backend and any configured upstream service still apply |
+| Groq                   | API key in Settings                                            | Free usage available subject to Groq's current limits; pay-per-token beyond free limits                            |
+| xAI (Grok API)         | API key in Settings                                            | Pay-per-token                                                                                                      |
+| xAI Grok OAuth         | Browser sign-in in Settings                                    | Experimental; provider authorization and plan eligibility apply                                                    |
+| Kimi (Moonshot)        | API key in Settings                                            | Pay-per-token                                                                                                      |
+| Pi (Multi-LLM)         | Unified API via pi-ai                                          | Routes to multiple providers                                                                                       |
 
 ## Compatible, Gateway, and Additional Routes
 
-| Provider | Configuration | Billing |
-|----------|---------------|---------|
-| OpenCode Zen | API key + base URL in Settings | Provider billing |
-| OpenCode Go | API key or supported account token in Settings | Provider-controlled plan eligibility and usage limits apply |
-| Google Vertex | Access token + base URL in Settings | Provider billing |
-| Google Antigravity | Access token + base URL in Settings | Provider billing |
-| Google Gemini CLI | Access token + base URL in Settings | Provider billing |
-| Z.AI | API key + base URL in Settings | Provider billing |
-| GLM | API key + base URL in Settings | Provider billing |
-| Vercel AI Gateway | API key in Settings | Provider billing |
-| Cerebras | API key in Settings | Provider billing |
-| Mistral | API key in Settings | Provider billing |
-| GitHub Copilot | GitHub token in Settings | Experimental; provider authorization and subscription eligibility apply |
-| Moonshot (Kimi) | API key in Settings | Provider billing |
-| Qwen Portal | API key in Settings | Provider billing |
-| MiniMax | API key in Settings | Provider billing |
-| MiniMax Portal | API key in Settings | Provider billing |
-| Xiaomi MiMo | API key in Settings | Provider billing |
-| Venice AI | API key in Settings | Provider billing |
-| Synthetic | API key in Settings | Provider billing |
-| Kimi Code | API key in Settings | Provider billing |
-| Kimi Coding | API key in Settings | Provider billing |
-| OpenAI-Compatible (Custom) | API key + base URL in Settings | Provider billing |
-| Anthropic-Compatible (Custom) | API key + base URL in Settings | Provider billing |
+| Provider                      | Configuration                                  | Billing                                                                 |
+| ----------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------- |
+| OpenCode Zen                  | API key + base URL in Settings                 | Provider billing                                                        |
+| OpenCode Go                   | API key or supported account token in Settings | Provider-controlled plan eligibility and usage limits apply             |
+| Google Vertex                 | Access token + base URL in Settings            | Provider billing                                                        |
+| Google Antigravity            | Access token + base URL in Settings            | Provider billing                                                        |
+| Google Gemini CLI             | Access token + base URL in Settings            | Provider billing                                                        |
+| Z.AI                          | API key + base URL in Settings                 | Provider billing                                                        |
+| GLM                           | API key + base URL in Settings                 | Provider billing                                                        |
+| Vercel AI Gateway             | API key in Settings                            | Provider billing                                                        |
+| Cerebras                      | API key in Settings                            | Provider billing                                                        |
+| Mistral                       | API key in Settings                            | Provider billing                                                        |
+| GitHub Copilot                | GitHub token in Settings                       | Experimental; provider authorization and subscription eligibility apply |
+| Moonshot (Kimi)               | API key in Settings                            | Provider billing                                                        |
+| Qwen Portal                   | API key in Settings                            | Provider billing                                                        |
+| MiniMax                       | API key in Settings                            | Provider billing                                                        |
+| MiniMax Portal                | API key in Settings                            | Provider billing                                                        |
+| Xiaomi MiMo                   | API key in Settings                            | Provider billing                                                        |
+| Venice AI                     | API key in Settings                            | Provider billing                                                        |
+| Synthetic                     | API key in Settings                            | Provider billing                                                        |
+| Kimi Code                     | API key in Settings                            | Provider billing                                                        |
+| Kimi Coding                   | API key in Settings                            | Provider billing                                                        |
+| OpenAI-Compatible (Custom)    | API key + base URL in Settings                 | Provider billing                                                        |
+| Anthropic-Compatible (Custom) | API key + base URL in Settings                 | Provider billing                                                        |
 
 **Your usage is billed directly by your provider.** CoWork OS does not proxy or resell model
 access or promise that a commercial provider includes third-party-harness usage in a plan.
@@ -288,11 +290,11 @@ ollama serve
 
 ### Recommended Models
 
-| Model | Size | Best For |
-|-------|------|----------|
-| `llama3.2` | 3B | Quick tasks |
-| `qwen2.5:14b` | 14B | Balanced performance |
-| `deepseek-r1:14b` | 14B | Coding tasks |
+| Model             | Size | Best For             |
+| ----------------- | ---- | -------------------- |
+| `llama3.2`        | 3B   | Quick tasks          |
+| `qwen2.5:14b`     | 14B  | Balanced performance |
+| `deepseek-r1:14b` | 14B  | Coding tasks         |
 
 ---
 
@@ -343,6 +345,33 @@ intended for local development, not as a production-exposed service.
 
 ---
 
+## Atomic Chat (Local)
+
+CoWork can connect to an already-running [Atomic Chat](https://atomic.chat/)
+instance through its OpenAI-compatible API. This route is an inference adapter:
+CoWork keeps ownership of the task loop, tools, permissions, approvals,
+evidence, and persistence. It does not start Atomic Chat, install models, or
+import Atomic Agent's tool loop.
+
+### Setup
+
+1. Start Atomic Chat and load a model.
+2. Open **Settings > AI & Models > Model Access** and choose **Atomic Chat
+   (local)**.
+3. Keep the default endpoint `http://127.0.0.1:1337/v1`, or enter the endpoint
+   exposed by the running instance.
+4. Use **Refresh Models** and select the exact model ID returned by `/v1/models`.
+5. Add an API key only when the Atomic Chat proxy requires authentication.
+
+The initial adapter uses non-streaming `/v1/chat/completions` requests with a
+60-second inference deadline. Discovery has a five-second deadline and retains
+the existing model selection when discovery fails. See [Atomic Chat inference](atomic-chat.md)
+for typed failure states, troubleshooting, and qualification limits. The
+optional [local-model execution profile](local-model-execution.md) adds bounded
+budgets and local admission control without changing the permission model.
+
+---
+
 ## Google Gemini
 
 1. Get API key from [Google AI Studio](https://aistudio.google.com/apikey)
@@ -361,13 +390,26 @@ Access multiple AI providers through one API.
 
 Available: Claude, GPT-4, Gemini, Llama, Mistral, and more — see [openrouter.ai/models](https://openrouter.ai/models)
 
+### Jev decision support
+
+CoWork also supports [Jev Decision Support](jev.md) as a separate structured
+decision route. Jev can choose an agent team and leader for Collaborative mode
+and `/multitask`, and Active harness mode can make bounded model-routing,
+task-strategy, lane, browser, loop, context, skill/tool, output, and tool-review
+decisions without replacing the OpenRouter chat model that executes the work.
+Jev tokens and provider-reported cost are recorded separately from normal LLM
+usage; Jev does not use the LLM pricing table.
+To use the OpenRouter route for Jev, save the OpenRouter key here,
+then select **OpenRouter** in **Settings > AI & Models > Jev** and leave key
+reuse enabled. The same key is used once for both routes.
+
 ### Pareto Code Router
 
 OpenRouter's Pareto Code Router is available as a normal OpenRouter model selection, not as a separate provider:
 
-| Model ID | Display name | Use when |
-|----------|--------------|----------|
-| `openrouter/pareto-code` | Pareto Code Router | You want OpenRouter to choose a strong coding model from its coding frontier |
+| Model ID                       | Display name               | Use when                                                                                           |
+| ------------------------------ | -------------------------- | -------------------------------------------------------------------------------------------------- |
+| `openrouter/pareto-code`       | Pareto Code Router         | You want OpenRouter to choose a strong coding model from its coding frontier                       |
 | `openrouter/pareto-code:nitro` | Pareto Code Router (Nitro) | You want the same coding-score routing, but prefer the fastest measured model in the selected tier |
 
 When one of those models is selected, **Settings > AI & Models > OpenRouter** shows a **Pareto Router** field for the optional minimum coding score.
@@ -408,11 +450,11 @@ The current built-in catalog includes the following GPT-5.6 Codex routes. The
 signed-in account and OpenAI backend remain the source of truth for which models
 and controls are actually available:
 
-| Model ID | Reasoning efforts |
-|----------|-------------------|
-| `gpt-5.6-sol` | Low, Medium, High, Extra High (`xhigh`), Max, Ultra |
+| Model ID        | Reasoning efforts                                   |
+| --------------- | --------------------------------------------------- |
+| `gpt-5.6-sol`   | Low, Medium, High, Extra High (`xhigh`), Max, Ultra |
 | `gpt-5.6-terra` | Low, Medium, High, Extra High (`xhigh`), Max, Ultra |
-| `gpt-5.6-luna` | Low, Medium, High, Extra High (`xhigh`), Max |
+| `gpt-5.6-luna`  | Low, Medium, High, Extra High (`xhigh`), Max        |
 
 Reasoning effort is a request control, not a separate model ID. Choose the
 model first, then set its effort from either:
@@ -468,12 +510,12 @@ Use this when you want pay-per-token API billing through the xAI developer conso
 
 The built-in Grok catalog provides fallback model metadata for the OAuth route. Refreshing models against the connected account is the source of truth:
 
-| Model ID | Notes |
-|----------|-------|
-| `grok-4.3` | Default OAuth model for chat and reasoning |
-| `grok-4.20-0309-reasoning` | Reasoning variant |
-| `grok-4.20-0309-non-reasoning` | Non-reasoning variant |
-| `grok-4.20-multi-agent-0309` | Multi-agent variant |
+| Model ID                       | Notes                                      |
+| ------------------------------ | ------------------------------------------ |
+| `grok-4.3`                     | Default OAuth model for chat and reasoning |
+| `grok-4.20-0309-reasoning`     | Reasoning variant                          |
+| `grok-4.20-0309-non-reasoning` | Non-reasoning variant                      |
+| `grok-4.20-multi-agent-0309`   | Multi-agent variant                        |
 
 ### Transport and endpoint
 
@@ -494,14 +536,14 @@ References: [xAI Grok + Hermes announcement](https://x.ai/news/grok-hermes) and 
 
 Multi-provider web search for research tasks with automatic retry and fallback. DuckDuckGo is built-in and requires no setup — it serves as a free fallback so web search always works, even without API keys.
 
-| Provider | Types | API Key | Best For |
-|----------|-------|---------|----------|
-| **DuckDuckGo** | Web | Not required (built-in) | Zero-config free fallback |
-| **Tavily** | Web, News | Required | AI-optimized results (recommended) |
-| **Exa** | Web, News | Required | Semantic search and research-heavy retrieval |
-| **Brave Search** | Web, News, Images | Required | Privacy-focused |
-| **SerpAPI** | Web, News, Images | Required | Google results |
-| **Google Custom Search** | Web, Images | Required | Direct Google integration |
+| Provider                 | Types             | API Key                 | Best For                                     |
+| ------------------------ | ----------------- | ----------------------- | -------------------------------------------- |
+| **DuckDuckGo**           | Web               | Not required (built-in) | Zero-config free fallback                    |
+| **Tavily**               | Web, News         | Required                | AI-optimized results (recommended)           |
+| **Exa**                  | Web, News         | Required                | Semantic search and research-heavy retrieval |
+| **Brave Search**         | Web, News, Images | Required                | Privacy-focused                              |
+| **SerpAPI**              | Web, News, Images | Required                | Google results                               |
+| **Google Custom Search** | Web, Images       | Required                | Direct Google integration                    |
 
 DuckDuckGo is always available as the last-resort fallback. When paid providers are configured, they are tried first in the configured order, with DuckDuckGo only used if all others fail. Search settings also support explicit primary/fallback ordering and provider cooldown behavior after repeated failures.
 

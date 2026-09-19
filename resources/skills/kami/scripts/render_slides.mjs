@@ -458,7 +458,8 @@ function renderHtml(deck, theme) {
   <div class="rule"></div>
   <div class="toc-list">${lineArray(slideDef.items)
     .map(
-      (item, itemIndex) => `<div class="toc-row"><span class="toc-number">${String(itemIndex + 1).padStart(2, "0")}</span><span class="toc-item">${escapeHtml(item)}</span></div>`,
+      (item, itemIndex) =>
+        `<div class="toc-row"><span class="toc-number">${String(itemIndex + 1).padStart(2, "0")}</span><span class="toc-item">${escapeHtml(item)}</span></div>`,
     )
     .join("")}</div>
 </section>`;
@@ -473,7 +474,8 @@ function renderHtml(deck, theme) {
   <div class="center-line"></div>
   <div class="metrics-grid">${(Array.isArray(slideDef.metrics) ? slideDef.metrics : [])
     .map(
-      (metric) => `<div class="metric-card"><div class="metric-value">${escapeHtml(metric.value || "")}</div><div class="metric-label">${escapeHtml(metric.label || "")}</div></div>`,
+      (metric) =>
+        `<div class="metric-card"><div class="metric-value">${escapeHtml(metric.value || "")}</div><div class="metric-label">${escapeHtml(metric.label || "")}</div></div>`,
     )
     .join("")}</div>
 </section>`;

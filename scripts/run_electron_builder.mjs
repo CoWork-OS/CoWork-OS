@@ -10,7 +10,11 @@ const PACKAGE_JSON_PATH = path.join(ROOT, "package.json");
 const ELECTRON_DEPS = ["electron", "@electron/rebuild"];
 
 function isFalseEnv(value) {
-  return ["0", "false", "no", "off"].includes(String(value || "").trim().toLowerCase());
+  return ["0", "false", "no", "off"].includes(
+    String(value || "")
+      .trim()
+      .toLowerCase(),
+  );
 }
 
 function isMacBuild(args) {

@@ -37,15 +37,15 @@ Build and analyze three-statement financial models with integrated income statem
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| modelType | select | Yes | Type of financial model to build |
-| company | string | Yes | Company name or ticker symbol |
-| question | string | Yes | Your specific modeling question |
-| historicalData | string | No | Historical financial data or key metrics (e.g., last 3 years revenue, margins) |
-| assumptions | string | No | Key assumptions to use (e.g., 15% revenue growth, 30% EBITDA margin target) |
+| Name           | Type   | Required | Description                                                                    |
+| -------------- | ------ | -------- | ------------------------------------------------------------------------------ |
+| modelType      | select | Yes      | Type of financial model to build                                               |
+| company        | string | Yes      | Company name or ticker symbol                                                  |
+| question       | string | Yes      | Your specific modeling question                                                |
+| historicalData | string | No       | Historical financial data or key metrics (e.g., last 3 years revenue, margins) |
+| assumptions    | string | No       | Key assumptions to use (e.g., 15% revenue growth, 30% EBITDA margin target)    |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1117 characters.
-- Runtime prompt is defined directly in `../financial-modeling.json`. 
+- Runtime prompt is defined directly in `../financial-modeling.json`.

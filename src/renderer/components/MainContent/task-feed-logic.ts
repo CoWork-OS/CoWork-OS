@@ -71,6 +71,22 @@ export function getTaskFeedRowEvent(row: TaskFeedRow): TaskEvent | null {
   return row.item.event as TaskEvent;
 }
 
+/**
+ * Conversation messages are never part of the live activity cap. Action rows
+ * may be compacted or paged, but the user's prompts and the assistant's
+ * responses remain in the transcript in every presentation mode.
+ */
+export function isConversationMessageRow(row: TaskFeedRow): boolean {
+  const event = getTaskFeedRowEvent(row);
+  if (!event) return false;
+  const effectiveType = getEffectiveTaskEventType(event);
+  return (
+    effectiveType === "user_message" ||
+    effectiveType === "assistant_message" ||
+    getCompletionSummaryText(event).length > 0
+  );
+}
+
 export function getTaskFeedRowVisiblePerfEventId(row: TaskFeedRow): string | null {
   return row.visiblePerfEventId ?? null;
 }
@@ -425,15 +441,12 @@ export function selectVisibleTaskFeedRows(
   transcriptMode: TranscriptMode,
 ): { visibleFeedRows: TaskFeedRow[]; hiddenLiveFeedRowCount: number } {
   const getHiddenContentRowCount = (visibleRows: TaskFeedRow[]) => {
-    const totalContentRows = feedRows.filter((row) => row.kind !== "history-control").length;
-    const visibleContentRows = visibleRows.filter((row) => row.kind !== "history-control").length;
+    const isHiddenStepRow = (row: TaskFeedRow) =>
+      row.kind !== "history-control" && !isConversationMessageRow(row);
+    const totalContentRows = feedRows.filter(isHiddenStepRow).length;
+    const visibleContentRows = visibleRows.filter(isHiddenStepRow).length;
     return Math.max(0, totalContentRows - visibleContentRows);
   };
-  // The history control stays pinned in every mode: bounded transcripts still need a
-  // way to reach steps that were never paged into the renderer.
-  const historyControlIndex = feedRows.findIndex((row) => row.kind === "history-control");
-  const historyControlRow = historyControlIndex >= 0 ? feedRows[historyControlIndex] : null;
-
   if (transcriptMode === "delivery") {
     const eventStream = collectTaskFeedRowEventStream(feedRows);
     const candidates: Array<{ order: number; row: TaskFeedRow }> = [];
@@ -443,31 +456,31 @@ export function selectVisibleTaskFeedRows(
     };
 
     for (const [rowIndex, row] of feedRows.entries()) {
+      if (row.kind === "history-control") continue;
       if (row.kind === "artifact-stack") {
+        pushCandidate(rowIndex, row);
+        continue;
+      }
+      if (row.kind === "timeline" && row.item.kind === "action_block") {
         pushCandidate(rowIndex, row);
         continue;
       }
       const rowEvents = getTaskFeedRowEvents(row);
       for (const { event, eventIndex, eventOrder } of rowEvents) {
         const order = rowIndex + eventOrder / 1000;
-        if (
-          getEffectiveTaskEventType(event) === "assistant_message" &&
-          event.payload?.internal !== true
-        ) {
-          finalAssistant = {
-            order,
-            row: createDeliveryEventRow(row, event, eventIndex, eventOrder),
-          };
+        const effectiveType = getEffectiveTaskEventType(event);
+        if (effectiveType === "user_message" || effectiveType === "assistant_message") {
+          const messageRow = createDeliveryEventRow(row, event, eventIndex, eventOrder);
+          pushCandidate(order, messageRow);
+          if (effectiveType === "assistant_message" && event.payload?.internal !== true) {
+            finalAssistant = { order, row: messageRow };
+          }
           continue;
         }
         if (isDeliveryEvent(event, eventStream)) {
           pushCandidate(order, createDeliveryEventRow(row, event, eventIndex, eventOrder));
         }
       }
-    }
-
-    if (finalAssistant) {
-      pushCandidate(finalAssistant.order, finalAssistant.row);
     }
 
     const finalAssistantEvent = finalAssistant ? getTaskFeedRowEvent(finalAssistant.row) : null;
@@ -489,21 +502,20 @@ export function selectVisibleTaskFeedRows(
         return true;
       });
 
-    const deliveryRows = historyControlRow
-      ? [historyControlRow, ...visibleFeedRows]
-      : visibleFeedRows;
-
     return {
-      visibleFeedRows: deliveryRows,
-      hiddenLiveFeedRowCount: getHiddenContentRowCount(deliveryRows),
+      visibleFeedRows,
+      hiddenLiveFeedRowCount: getHiddenContentRowCount(visibleFeedRows),
     };
   }
 
   if (transcriptMode !== "live") {
-    return { visibleFeedRows: feedRows, hiddenLiveFeedRowCount: 0 };
+    return {
+      visibleFeedRows: feedRows.filter((row) => row.kind !== "history-control"),
+      hiddenLiveFeedRowCount: 0,
+    };
   }
   if (feedRows.length <= 8) {
-    const visibleFeedRows = feedRows;
+    const visibleFeedRows = feedRows.filter((row) => row.kind !== "history-control");
     return {
       visibleFeedRows,
       hiddenLiveFeedRowCount: getHiddenContentRowCount(visibleFeedRows),
@@ -511,6 +523,16 @@ export function selectVisibleTaskFeedRows(
   }
 
   const keepIndexes = new Set<number>();
+  const alwaysVisibleIndexes = new Set<number>();
+  for (const [index, row] of feedRows.entries()) {
+    if (
+      isConversationMessageRow(row) ||
+      (row.kind === "timeline" && row.item.kind === "action_block")
+    ) {
+      alwaysVisibleIndexes.add(index);
+      keepIndexes.add(index);
+    }
+  }
   const keepLastMatch = (predicate: (row: TaskFeedRow) => boolean) => {
     for (let index = feedRows.length - 1; index >= 0; index -= 1) {
       if (predicate(feedRows[index])) {
@@ -539,14 +561,17 @@ export function selectVisibleTaskFeedRows(
 
   const visibleIndexes = [...keepIndexes]
     .sort((a, b) => a - b)
-    .filter((index) => index !== historyControlIndex);
+    .filter((index) => feedRows[index]?.kind !== "history-control");
   const cappedIndexes =
     visibleIndexes.length > LIVE_TRANSCRIPT_MAX_VISIBLE_ROWS
-      ? visibleIndexes.slice(-LIVE_TRANSCRIPT_MAX_VISIBLE_ROWS)
+      ? [
+          ...visibleIndexes.filter((index) => alwaysVisibleIndexes.has(index)),
+          ...visibleIndexes
+            .filter((index) => !alwaysVisibleIndexes.has(index))
+            .slice(-Math.max(0, LIVE_TRANSCRIPT_MAX_VISIBLE_ROWS - alwaysVisibleIndexes.size)),
+        ].sort((a, b) => a - b)
       : visibleIndexes;
   const cappedKeepIndexes = new Set(cappedIndexes);
-  // Pinned on top of the row cap so it never costs a step its slot.
-  if (historyControlIndex >= 0) cappedKeepIndexes.add(historyControlIndex);
   const visibleFeedRows = feedRows.filter((_, index) => cappedKeepIndexes.has(index));
   return {
     visibleFeedRows,

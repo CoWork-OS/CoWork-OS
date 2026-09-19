@@ -41,6 +41,8 @@ export interface VirtualListProps<T> {
   onScrollNearEnd?: () => void;
   /** Allow near-end callbacks before the user has scrolled, for explicit auto-fill use cases. */
   triggerNearEndOnMount?: boolean;
+  /** Keep the current scroll position when items are appended or prepended. */
+  suppressAutoScrollOnItemsChange?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +62,7 @@ export function VirtualList<T>({
   role = "list",
   onScrollNearEnd,
   triggerNearEndOnMount = false,
+  suppressAutoScrollOnItemsChange = false,
 }: VirtualListProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null);
   const nearEndTriggeredRef = useRef(false);
@@ -73,6 +76,7 @@ export function VirtualList<T>({
     estimatedItemHeight,
     overscan,
     enabled,
+    suppressAutoScrollOnItemsChange,
   });
 
   useEffect(() => {

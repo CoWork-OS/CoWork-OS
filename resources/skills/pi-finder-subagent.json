@@ -22,9 +22,7 @@
   ],
   "enabled": true,
   "requires": {
-    "bins": [
-      "pi"
-    ]
+    "bins": ["pi"]
   },
   "install": [
     {
@@ -32,9 +30,7 @@
       "kind": "npm",
       "package": "@mariozechner/pi-coding-agent",
       "label": "Install Pi CLI (npm i -g @mariozechner/pi-coding-agent)",
-      "bins": [
-        "pi"
-      ]
+      "bins": ["pi"]
     },
     {
       "id": "finder-package",
@@ -47,20 +43,13 @@
     "version": "1.0.0",
     "author": "CoWork OS",
     "homepage": "https://www.npmjs.com/package/pi-finder-subagent",
-    "tags": [
-      "pi",
-      "subagent",
-      "context",
-      "code-search"
-    ],
+    "tags": ["pi", "subagent", "context", "code-search"],
     "routing": {
       "useWhen": "Use when users ask to scout the local repository, identify relevant files/snippets, or reduce context before coding.",
       "dontUseWhen": "Do not use for remote GitHub-first research across external repositories; use pi-librarian instead.",
       "outputs": "A cited local-file shortlist with line ranges plus a saved report at {artifactDir}/finder-report.md.",
       "successCriteria": "Finder completes with concrete file paths, line ranges, and focused next steps that reduce implementation context.",
-      "expectedArtifacts": [
-        "finder-report.md"
-      ],
+      "expectedArtifacts": ["finder-report.md"],
       "examples": {
         "positive": [
           "Use the pi-finder-subagent skill for this request.",

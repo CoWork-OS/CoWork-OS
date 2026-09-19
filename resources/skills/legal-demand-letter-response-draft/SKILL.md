@@ -37,16 +37,16 @@ Map allegations to contract language and draft a response letter with no uninten
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| agreement_path | string | No | Optional explicit path to the governing contract |
-| demand_letter_path | string | No | Optional explicit path to the demand letter |
-| facts_path | string | No | Optional chronology/facts memo path |
-| client_role | select | No | Role of your client in the dispute |
-| response_output_path | string | No | Where to write the draft response letter |
-| issues_table_output_path | string | No | Where to write the allegation mapping table |
+| Name                     | Type   | Required | Description                                      |
+| ------------------------ | ------ | -------- | ------------------------------------------------ |
+| agreement_path           | string | No       | Optional explicit path to the governing contract |
+| demand_letter_path       | string | No       | Optional explicit path to the demand letter      |
+| facts_path               | string | No       | Optional chronology/facts memo path              |
+| client_role              | select | No       | Role of your client in the dispute               |
+| response_output_path     | string | No       | Where to write the draft response letter         |
+| issues_table_output_path | string | No       | Where to write the allegation mapping table      |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1932 characters.
-- Runtime prompt is defined directly in `../legal-demand-letter-response-draft.json`. 
+- Runtime prompt is defined directly in `../legal-demand-letter-response-draft.json`.

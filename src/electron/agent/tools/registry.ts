@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import mermaid from "mermaid";
 import {
   ApprovalType,
@@ -17,6 +17,7 @@ import {
   TOOL_GROUPS,
   ToolGroupName,
   RuntimeToolApprovalKind,
+  RuntimeToolSideEffectLevel,
   WorkspacePathAliasPolicy,
   WorkerRoleKind,
 } from "../../../shared/types";
@@ -113,10 +114,21 @@ import {
 } from "../../../shared/types";
 import { parseLeadingSkillSlashCommand } from "../../../shared/skill-slash-commands";
 import {
+  buildSpawnInstructionsPreview,
+  formatSpawnedAgentLabel,
+} from "../../../shared/subagent-presentation";
+import {
   resolveModelPreferenceToModelKey,
   resolvePersonalityPreference,
 } from "../../../shared/agent-preferences";
 import { ModelCapabilityRegistry } from "../llm/ModelCapabilityRegistry";
+import { LLMProviderFactory } from "../llm/provider-factory";
+import {
+  createConfiguredJevProvider,
+  reviewToolCallWithJev,
+  shouldObserveJevToolCall,
+} from "../jev";
+import { createDecisionService, type DecisionService } from "../decisions";
 import { CodeExecTools } from "./code-exec-tools";
 import { DocumentParserTools } from "./document-parser-tools";
 import { isHeadlessMode } from "../../utils/runtime-mode";
@@ -176,6 +188,7 @@ import {
 } from "./tool-prompting";
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
 import { getNumbatService } from "../../security/numbat";
+import { approvalPromptsDisabled } from "../approval-policy";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -583,10 +596,12 @@ export class ToolRegistry {
   private cachedToolDefinitionsKey: string | null = null;
   private cachedToolDefinitions: LLMTool[] | null = null;
   private toolDescriptionsCache = new Map<string, string>();
+  private jevSkillOrder: string[] = [];
   private resolvedSkillInvocations = new Map<string, SkillApplication>();
   private skillInvocationSequence = 0;
   private readonly handlerRegistry = new ToolHandlerRegistry();
   private readonly executionMiddlewares: ToolExecutionMiddleware[];
+  private jevSemanticDecisionService: DecisionService | null | undefined;
   private taskListHandler?: {
     create: (items: SessionChecklistToolItemInput[]) => SessionChecklistState;
     update: (items: SessionChecklistToolItemInput[]) => SessionChecklistState;
@@ -701,6 +716,19 @@ export class ToolRegistry {
   private invalidateToolCaches(): void {
     this.cachedToolDefinitionsKey = null;
     this.cachedToolDefinitions = null;
+    this.toolDescriptionsCache.clear();
+  }
+
+  /**
+   * Apply a bounded ordering over eligible skills for prompt rendering.
+   * This never changes tool eligibility or skill invocation permissions.
+   */
+  setJevSkillOrder(order: readonly string[]): void {
+    const normalized = Array.from(
+      new Set(order.map((skillId) => String(skillId || "").trim()).filter(Boolean)),
+    ).slice(0, 32);
+    if (JSON.stringify(normalized) === JSON.stringify(this.jevSkillOrder)) return;
+    this.jevSkillOrder = normalized;
     this.toolDescriptionsCache.clear();
   }
 
@@ -839,6 +867,7 @@ export class ToolRegistry {
         skillShortlistSize: options?.skillShortlistSize ?? null,
         skillLowConfidenceThreshold: options?.skillLowConfidenceThreshold ?? null,
         skillTextBudgetChars: options?.skillTextBudgetChars ?? null,
+        jevSkillOrder: this.jevSkillOrder,
         skillRoutingQueryHash: options?.skillRoutingQuery
           ? createHash("sha1").update(options.skillRoutingQuery).digest("hex")
           : null,
@@ -934,6 +963,7 @@ export class ToolRegistry {
         lowConfidenceThreshold: resolvedSkillLowConfidenceThreshold,
         textBudgetChars: resolvedSkillTextBudgetChars,
         includePrereqBlockedSkills: true,
+        preferredSkillOrder: this.jevSkillOrder,
       });
       if (skillDescriptions) {
         sections.push(`Skills Available Through The Skill Tool:\n${skillDescriptions}`);
@@ -1803,6 +1833,10 @@ export class ToolRegistry {
     ) {
       return "external_file_access";
     }
+    // Batch image processing asks the daemon's filesystem approval adapter
+    // directly for each external input/output path. Advertise that boundary to
+    // the executor so the outer tool timeout includes the human response.
+    if (canonicalToolName === "batch_image_process") return "external_file_access";
     if (TOOL_GROUPS["group:write"].includes(canonicalToolName as Any)) {
       return "workspace_write";
     }
@@ -1914,6 +1948,97 @@ export class ToolRegistry {
     });
   }
 
+  private buildJevSemanticReviewEvaluation(input: {
+    toolName: string;
+    toolInput: unknown;
+    toolCallId: string;
+    approvalType?: ApprovalType | null;
+    sideEffectLevel?: RuntimeToolSideEffectLevel;
+    signal?: AbortSignal;
+  }) {
+    if (!shouldObserveJevToolCall(input.toolName, input.approvalType, input.sideEffectLevel)) {
+      return undefined;
+    }
+
+    let settings: ReturnType<typeof LLMProviderFactory.loadSettings>;
+    try {
+      settings = LLMProviderFactory.loadSettings();
+    } catch {
+      return undefined;
+    }
+
+    const jevSettings = settings.jev;
+    const toolReviewMode = jevSettings?.toolReviewMode;
+    if (
+      !jevSettings?.enabled ||
+      !jevSettings.harnessEnabled ||
+      (toolReviewMode !== "observe" && toolReviewMode !== "active")
+    ) {
+      return undefined;
+    }
+
+    let resolution: ReturnType<typeof createConfiguredJevProvider>;
+    try {
+      resolution = createConfiguredJevProvider(settings);
+    } catch {
+      resolution = null;
+    }
+
+    const task =
+      typeof (this.daemon as Any)?.getTask === "function"
+        ? (this.daemon as Any).getTask(this.taskId)
+        : undefined;
+    const taskPrompt = task?.userPrompt || task?.rawPrompt || task?.prompt;
+    if (!resolution) {
+      return {
+        mode: toolReviewMode,
+        evaluate: async () => ({
+          mode: toolReviewMode,
+          status: "unavailable" as const,
+          reasonCodes: ["provider_unavailable"],
+        }),
+      };
+    }
+
+    if (this.jevSemanticDecisionService === undefined) {
+      this.jevSemanticDecisionService = createDecisionService(resolution.provider, {
+        model: resolution.model,
+        providerType: resolution.providerType,
+        telemetryContext: {
+          workspaceId: this.workspace.id,
+          taskId: this.taskId,
+          sourceKind: "tool-review",
+        },
+        timeoutMs: Math.min(jevSettings.timeoutMs ?? 5_000, 5_000),
+        maxRetries: 0,
+        maxCalls: 128,
+        maxConcurrent: 2,
+        cache: { enabled: true, ttlMs: 2_000, maxEntries: 128 },
+      });
+    }
+    const decisionService = this.jevSemanticDecisionService ?? undefined;
+
+    return {
+      mode: toolReviewMode,
+      evaluate: async () => ({
+        mode: toolReviewMode,
+        ...(await reviewToolCallWithJev({
+          provider: resolution.provider,
+          decisionService,
+          model: resolution.model,
+          taskPrompt,
+          toolName: input.toolName,
+          toolInput: input.toolInput,
+          toolCallId: input.toolCallId,
+          approvalType: input.approvalType,
+          sideEffectLevel: input.sideEffectLevel,
+          signal: input.signal,
+          timeoutMs: Math.min(jevSettings.timeoutMs ?? 5_000, 5_000),
+        })),
+      }),
+    };
+  }
+
   private buildExecutionMiddlewares(): ToolExecutionMiddleware[] {
     const policyMiddleware: ToolExecutionMiddleware = async (context, next) => {
       const executionStartedAt = Date.now();
@@ -1959,6 +2084,34 @@ export class ToolRegistry {
       };
       const runtimeApprovalRequired =
         runtime.approvalKind !== "none" && runtime.approvalKind !== "workspace_policy";
+      const semanticReview = this.buildJevSemanticReviewEvaluation({
+        toolName: context.request.name,
+        toolInput: context.request.input,
+        toolCallId,
+        approvalType: effectiveApprovalType,
+        sideEffectLevel: runtime.sideEffectLevel,
+        signal:
+          context.request.runtime?.signal instanceof AbortSignal
+            ? context.request.runtime.signal
+            : undefined,
+      });
+      const taskForApproval =
+        typeof (this.daemon as Any)?.getTaskById === "function"
+          ? await (this.daemon as Any).getTaskById(this.taskId)
+          : undefined;
+      const effectiveAccessProfile =
+        typeof (this.daemon as Any)?.getEffectiveAccessProfile === "function"
+          ? (this.daemon as Any).getEffectiveAccessProfile(
+              this.taskId,
+              taskForApproval,
+              this.workspace,
+            )
+          : undefined;
+      const isHeadlessTask =
+        isHeadlessMode() || taskForApproval?.agentConfig?.cli?.owner === "cowork-run";
+      const hasExplicitNonInteractiveAuthority =
+        effectiveAccessProfile?.permissionMode === "bypass_permissions" &&
+        effectiveAccessProfile?.definition?.approval === "never";
       const pipeline = await evaluateToolPolicyPipeline({
         workspace: this.workspace,
         toolName: context.request.name,
@@ -1995,6 +2148,12 @@ export class ToolRegistry {
                   runtime.approvalKind === "shell_sensitive",
               })
           : undefined,
+        semanticReviewEvaluation: semanticReview?.evaluate,
+        semanticReviewMode: semanticReview?.mode,
+        headlessSemanticReviewPolicy:
+          isHeadlessTask && hasExplicitNonInteractiveAuthority && semanticReview?.mode === "active"
+            ? "allow_if_authorized"
+            : undefined,
       });
 
       if (pipeline.decision === "deny") {
@@ -2011,7 +2170,12 @@ export class ToolRegistry {
       }
 
       if (pipeline.decision === "require_approval") {
-        if (!this.toolHandlesApprovalInternally(context.request.name)) {
+        if (
+          pipeline.approvalSource === "semantic_review" ||
+          !this.toolHandlesApprovalInternally(context.request.name) ||
+          pipeline.approvalSource === "workspace_policy" ||
+          pipeline.approvalSource === "runtime_metadata"
+        ) {
           const requester = (this.daemon as Any)?.requestApproval;
           if (typeof requester !== "function") {
             throw Object.assign(
@@ -2021,27 +2185,44 @@ export class ToolRegistry {
               { policyTrace: pipeline.trace },
             );
           }
-          const approved = await requester.call(
-            this.daemon,
-            this.taskId,
-            effectiveApprovalType || "external_service",
-            browserUseApproval
-              ? `Allow Browser Use to access ${browserUseApproval.origin}?`
-              : effectiveApprovalType === "location_access"
-                ? "Allow CoWork OS to access your current location once?"
-                : `Approve tool call: ${context.request.name}`,
-            {
-              ...approvalDetails,
-              reason: pipeline.reason || null,
-            },
-            {
-              allowAutoApprove: effectiveApprovalType !== "location_access",
-              signal:
-                context.request.runtime?.signal instanceof AbortSignal
-                  ? context.request.runtime.signal
-                  : undefined,
-            },
-          );
+          const description = browserUseApproval
+            ? `Allow Browser Use to access ${browserUseApproval.origin}?`
+            : effectiveApprovalType === "location_access"
+              ? "Allow CoWork OS to access your current location once?"
+              : `Allow ${context.request.name} to access the requested resource?`;
+          const details = { ...approvalDetails, reason: pipeline.reason || null };
+          const options = {
+            allowAutoApprove:
+              pipeline.approvalSource === "semantic_review"
+                ? false
+                : effectiveApprovalType !== "location_access",
+            signal:
+              context.request.runtime?.signal instanceof AbortSignal
+                ? context.request.runtime.signal
+                : undefined,
+            requireExplicitApproval:
+              pipeline.approvalSource === "semantic_review" ||
+              pipeline.approvalSource === "workspace_policy" ||
+              pipeline.approvalSource === "runtime_metadata",
+          };
+          const authorizer = (this.daemon as Any)?.authorizeToolAction;
+          const approved =
+            typeof authorizer === "function"
+              ? await authorizer.call(this.daemon, this.taskId, {
+                  toolName: context.request.name,
+                  approvalType: effectiveApprovalType || "external_service",
+                  description,
+                  details,
+                  ...options,
+                })
+              : await requester.call(
+                  this.daemon,
+                  this.taskId,
+                  effectiveApprovalType || "external_service",
+                  description,
+                  details,
+                  options,
+                );
           if (approved !== true) {
             throw Object.assign(new Error(`Tool "${context.request.name}" approval denied`), {
               policyTrace: pipeline.trace,
@@ -3756,7 +3937,7 @@ Web Search (for finding URLs, not reading them):
       descriptions += `
 
 Shell Commands:
-- run_command: Execute shell commands (requires user approval)`;
+- run_command: Execute commands within the active access profile`;
     }
 
     descriptions += `
@@ -3969,6 +4150,7 @@ Channel Message Log (Local Gateway):
       lowConfidenceThreshold: resolvedSkillLowConfidenceThreshold,
       textBudgetChars: resolvedSkillTextBudgetChars,
       includePrereqBlockedSkills: true,
+      preferredSkillOrder: this.jevSkillOrder,
     });
     if (skillDescriptions) {
       descriptions += `
@@ -4071,7 +4253,8 @@ ${skillDescriptions}`;
       }
     }
     // Optional workspace-local policy hook (.cowork/policy/tools.monty).
-    // Fail-open on policy script errors to avoid bricking tool execution.
+    // An unavailable policy or consent system cannot grant execution authority.
+    let legacyPolicyRequiresApproval = false;
     try {
       const policy = await evaluateMontyToolPolicy({
         workspace: this.workspace,
@@ -4086,8 +4269,16 @@ ${skillDescriptions}`;
       }
 
       // Avoid double-prompts for tools that already enforce approvals internally.
-      const selfGated = name === "run_command" || name === "delete_file";
-      if (policy.decision === "require_approval" && !selfGated) {
+      if (policy.decision === "require_approval") {
+        legacyPolicyRequiresApproval = true;
+        if (
+          this.workspace.permissions.accessApprovalPolicy === "never" &&
+          !approvalPromptsDisabled()
+        ) {
+          throw new Error(
+            `Tool "${name}" blocked by workspace policy: approval requests are disabled`,
+          );
+        }
         const requester = (this.daemon as Any)?.requestApproval;
         if (typeof requester !== "function") {
           throw new Error(
@@ -4104,6 +4295,7 @@ ${skillDescriptions}`;
             params: input ?? null,
             reason: policy.reason || null,
           },
+          { requireExplicitApproval: true },
         );
         if (approved !== true) {
           const reason = policy.reason ? `: ${policy.reason}` : "";
@@ -4113,9 +4305,15 @@ ${skillDescriptions}`;
     } catch (err) {
       // Only block if the policy explicitly denied or required approval and was not approved.
       const msg = String((err as Any)?.message || "");
-      if (/blocked by workspace policy|approval denied|requires approval/i.test(msg)) {
+      if (
+        legacyPolicyRequiresApproval ||
+        /blocked by workspace policy|approval denied|requires approval/i.test(msg)
+      ) {
         throw err;
       }
+      throw new Error(`Tool "${name}" blocked because workspace policy evaluation failed`, {
+        cause: err,
+      });
     }
 
     // File tools
@@ -8661,7 +8859,7 @@ ${skillDescriptions}`;
       {
         name: "run_command",
         description:
-          "Execute a shell command in the workspace directory. IMPORTANT: This tool requires user approval before execution. The user will see the command and can approve or deny it. Use this for installing packages (npm, pip, brew), running build commands, git operations, or terminal commands. Do not use shell heredocs or echo/printf redirection to create artifact files when write_file or edit_file is available; use file tools for file creation and editing.",
+          "Execute a shell command in the workspace directory. IMPORTANT: Commands run within the active access profile. Additional authority is requested only when the operation requires it. If additional authority is needed, the request identifies that boundary. Use this for installing packages (npm, pip, brew), running build commands, git operations, or terminal commands. Do not use shell heredocs or echo/printf redirection to create artifact files when write_file or edit_file is available; use file tools for file creation and editing.",
         input_schema: {
           type: "object",
           properties: {
@@ -10827,9 +11025,18 @@ ${skillDescriptions}`;
       };
     }
 
-    // Log spawn attempt
-    this.daemon.logEvent(this.taskId, "agent_spawned", {
+    // Record the request separately from confirmed dispatch. A failed graph
+    // submission must never render as a successfully created agent.
+    const instructionsPreview = buildSpawnInstructionsPreview(prompt);
+    const agentLabel = formatSpawnedAgentLabel({
+      title: prepared.taskTitle,
+      workerRole: prepared.workerRole,
+    });
+
+    this.daemon.logEvent(this.taskId, "agent_spawn_requested", {
       childTaskTitle: prepared.taskTitle,
+      childAgentLabel: agentLabel,
+      instructionsPreview,
       modelPreference: model_preference,
       personality: personality,
       runtime: runtime || (prepared.externalRuntime ? "acpx" : "native"),
@@ -10875,6 +11082,12 @@ ${skillDescriptions}`;
         });
         const node = snapshot.nodes[0];
         if (!node.publicHandle && node.status !== "completed") {
+          this.daemon.logEvent(this.taskId, "agent_failed", {
+            childTaskTitle: prepared.taskTitle,
+            childAgentLabel: agentLabel,
+            error: node.error || "DISPATCH_FAILED",
+            phase: "dispatch",
+          });
           return {
             success: false,
             title: prepared.taskTitle,
@@ -10885,6 +11098,12 @@ ${skillDescriptions}`;
         handle = node.publicHandle || node.taskId || node.remoteTaskId || node.id;
       } else {
         if (prepared.dispatchTarget === "remote_acp") {
+          this.daemon.logEvent(this.taskId, "agent_failed", {
+            childTaskTitle: prepared.taskTitle,
+            childAgentLabel: agentLabel,
+            error: "GRAPH_ENGINE_REQUIRED",
+            phase: "dispatch",
+          });
           return {
             success: false,
             title: prepared.taskTitle,
@@ -10905,6 +11124,20 @@ ${skillDescriptions}`;
         });
         handle = childTask.id;
       }
+
+      this.daemon.logEvent(this.taskId, "agent_spawned", {
+        childTaskId: handle,
+        childTaskTitle: prepared.taskTitle,
+        childAgentLabel: agentLabel,
+        instructionsPreview,
+        modelPreference: model_preference,
+        personality,
+        runtime: runtime || (prepared.externalRuntime ? "acpx" : "native"),
+        runtimeAgent: prepared.externalRuntime?.agent,
+        workerRole: prepared.workerRole,
+        maxTurns: normalizedMaxTurns,
+        parentDepth: currentDepth,
+      });
 
       // If wait=true, wait for completion
       if (wait) {
@@ -10927,6 +11160,12 @@ ${skillDescriptions}`;
       };
     } catch (error: Any) {
       console.error(`[ToolRegistry] Failed to spawn agent:`, error);
+      this.daemon.logEvent(this.taskId, "agent_failed", {
+        childTaskTitle: prepared.taskTitle,
+        childAgentLabel: agentLabel,
+        error: error?.message || String(error),
+        phase: "dispatch",
+      });
       this.daemon.logEvent(this.taskId, "error", {
         tool: "spawn_agent",
         error: error.message,
@@ -10961,6 +11200,12 @@ ${skillDescriptions}`;
       if (result.node) {
         this.daemon.logEvent(this.taskId, result.success ? "agent_completed" : "agent_failed", {
           childTaskId: result.node.taskId || result.node.remoteTaskId || taskId,
+          childTaskTitle: result.node.title,
+          childAgentLabel: formatSpawnedAgentLabel({
+            title: result.node.title,
+            workerRole: result.node.workerRole,
+            fallback: "the agent",
+          }),
           childStatus: result.status,
           resultSummary: result.resultSummary,
           error: result.error,
@@ -11004,6 +11249,12 @@ ${skillDescriptions}`;
         // Log result event to parent
         this.daemon.logEvent(this.taskId, isSuccess ? "agent_completed" : "agent_failed", {
           childTaskId: resolvedTaskId,
+          childTaskTitle: task.title,
+          childAgentLabel: formatSpawnedAgentLabel({
+            title: task.title,
+            workerRole: task.workerRole,
+            fallback: "the agent",
+          }),
           childStatus: task.status,
           resultSummary: task.resultSummary,
           error: task.error,
@@ -11555,13 +11806,55 @@ ${skillDescriptions}`;
     }
   }
 
-  private async sendAgentMessage(input: { task_id: unknown; message: unknown }): Promise<{
+  private async sendAgentMessage(input: {
+    task_id?: unknown;
+    bot?: unknown;
+    message: unknown;
+    message_id?: unknown;
+  }): Promise<{
     success: boolean;
     task_id?: string;
+    message_id?: string;
+    queued?: boolean;
+    duplicate?: boolean;
+    teammate_reply?: string;
     message: string;
     error?: string;
   }> {
-    const resolved = await this.resolveDescendantTask(input?.task_id);
+    const requestedTaskId = typeof input?.task_id === "string" ? input.task_id.trim() : "";
+    const botName = typeof input?.bot === "string" ? input.bot.trim() : "";
+    let resolved = requestedTaskId
+      ? await this.resolveDescendantTask(requestedTaskId)
+      : {
+          ok: false as const,
+          error: "TASK_ID_REQUIRED" as const,
+          message: "task_id or bot is required",
+        };
+    let botPeer = false;
+    let botPeerRoleId: string | undefined;
+    let botPeerTeamId: string | undefined;
+    if (
+      !resolved.ok &&
+      (Boolean(botName) || Boolean(requestedTaskId)) &&
+      typeof (this.daemon as Any).resolveBotTeamPeer === "function"
+    ) {
+      const peer = await (this.daemon as Any).resolveBotTeamPeer(this.taskId, {
+        taskId: requestedTaskId || undefined,
+        botName: botName || undefined,
+      });
+      if (peer?.ok && peer.task) {
+        resolved = { ok: true, taskId: peer.task.id, task: peer.task };
+        botPeer = true;
+        botPeerRoleId = peer.role?.id;
+        botPeerTeamId = peer.task.agentConfig?.botTeamId;
+      } else if (!requestedTaskId && peer?.message) {
+        return {
+          success: false,
+          message: peer.message,
+          error: peer.error || "BOT_NOT_FOUND",
+        };
+      }
+    }
     if (!resolved.ok) {
       return {
         success: false,
@@ -11581,8 +11874,161 @@ ${skillDescriptions}`;
       };
     }
 
-    await this.daemon.sendMessage(resolved.taskId, message);
-    return { success: true, task_id: resolved.taskId, message: "Message sent" };
+    const requestedMessageId = typeof input?.message_id === "string" ? input.message_id.trim() : "";
+    const messageId = requestedMessageId || randomUUID();
+    const recipient = await this.daemon.getTaskById?.(resolved.taskId);
+    const sender = await this.daemon.getTaskById?.(this.taskId);
+    const senderLabel = sender?.title || this.taskId;
+    // A bot teammate is a persistent conversation, so its first handoff must
+    // enter the conversation as a normal turn. Queue-only admission would wake
+    // the synthetic "Start chatting with ..." seed task and make it execute a
+    // generic plan before it ever sees the delegated request. Ordinary
+    // task-to-task messages retain the durable queue-only contract below.
+    const botPeerDirectTurn = botPeer === true;
+    const dispatchStartedAt = Date.now();
+    try {
+      const result = (await this.daemon.sendMessage(
+        resolved.taskId,
+        message,
+        undefined,
+        undefined,
+        {
+          ...(botPeerDirectTurn ? {} : { deliveryMode: "message" as const }),
+          messageSource: "agent",
+          messageId,
+          senderTaskId: this.taskId,
+          senderLabel,
+        },
+      )) || { queued: false };
+      let teammateReply = "";
+      let teammateSentExplicitReply = false;
+      if (botPeerDirectTurn && !result.queued) {
+        try {
+          const childEvents = this.daemon.getTaskEvents(resolved.taskId, {
+            limit: 80,
+            types: ["assistant_message"],
+          });
+          const latestAssistant = [...(childEvents || [])].reverse().find((event) => {
+            if (Number(event.timestamp || 0) < dispatchStartedAt) return false;
+            const payload = (event.payload || {}) as Record<string, unknown>;
+            if (payload.internal === true) return false;
+            const text =
+              (typeof payload.message === "string" && payload.message.trim()) ||
+              (typeof payload.content === "string" && payload.content.trim()) ||
+              "";
+            if (!text) return false;
+            teammateReply = text;
+            return true;
+          });
+          if (!latestAssistant) teammateReply = "";
+
+          // A teammate may have used its own send_agent_message call to reply
+          // explicitly. In that case the durable agent-message queue already
+          // carries the reply, so avoid injecting a second copy into the lead.
+          const outboundEvents = this.daemon.getTaskEvents(resolved.taskId, {
+            limit: 80,
+            types: ["agent_message"],
+          });
+          teammateSentExplicitReply = (outboundEvents || []).some((event) => {
+            if (Number(event.timestamp || 0) < dispatchStartedAt) return false;
+            const payload = (event.payload || {}) as Record<string, unknown>;
+            return (
+              payload.targetTaskId === this.taskId &&
+              payload.deliveryStatus !== "failed" &&
+              payload.status !== "failed"
+            );
+          });
+        } catch {
+          // Best-effort enrichment; delivery itself has already succeeded.
+          teammateReply = "";
+          teammateSentExplicitReply = false;
+        }
+      }
+
+      if (botPeerDirectTurn && teammateReply && !teammateSentExplicitReply) {
+        const replyMessageId = `${messageId}:reply`;
+        try {
+          // Persist the reply as an inbound timeline message without starting
+          // a second parent turn while this tool call is still in flight. The
+          // tool result already contains the reply for the current turn; the
+          // timeline event keeps the bot conversation visibly shared and
+          // avoids racing the parent's tool_result persistence boundary.
+          this.daemon.logEvent(this.taskId, "user_message", {
+            message: `Reply from ${recipient?.title || "teammate"}: ${teammateReply}`,
+            messageSource: "agent",
+            messageId: replyMessageId,
+            deliveryMode: "follow_up",
+            deliveryStatus: "delivered",
+            acceptedAt: Date.now(),
+            deliveredAt: Date.now(),
+            senderTaskId: resolved.taskId,
+            senderLabel: recipient?.title || resolved.taskId,
+          });
+        } catch {
+          // The direct tool result still contains the reply even if the parent
+          // is already completing and cannot persist the timeline relay.
+        }
+      }
+      const status = result.queued ? "queued" : "delivered";
+      const acceptedAt = result.acceptedAt ?? Date.now();
+      this.daemon.logEvent(this.taskId, "agent_message", {
+        messageId,
+        correlationId: messageId,
+        targetTaskId: resolved.taskId,
+        message,
+        status,
+        deliveryStatus: status,
+        deliveryMode: botPeerDirectTurn ? "follow_up" : "message",
+        acceptedAt,
+        ...(result.queued ? { queuedAt: result.queuedAt ?? acceptedAt } : {}),
+        ...(!result.queued ? { deliveredAt: result.deliveredAt ?? acceptedAt } : {}),
+        senderType: "agent",
+        senderTaskId: this.taskId,
+        senderLabel,
+        recipientLabel: recipient?.title || resolved.taskId,
+        ...(botPeerRoleId ? { recipientBotRoleId: botPeerRoleId } : {}),
+        ...(botPeerTeamId ? { botTeamId: botPeerTeamId } : {}),
+        ...(teammateReply ? { teammateReply } : {}),
+        duplicate: result.duplicate === true,
+      });
+      return {
+        success: true,
+        task_id: resolved.taskId,
+        message_id: messageId,
+        queued: result.queued,
+        duplicate: result.duplicate === true,
+        ...(teammateReply ? { teammate_reply: teammateReply } : {}),
+        message: result.queued
+          ? "Message queued for the agent's next turn"
+          : teammateReply
+            ? `Message delivered. Teammate reply: ${teammateReply}`
+            : "Message delivered",
+      };
+    } catch (error: Any) {
+      const errorMessage = error?.message || String(error);
+      this.daemon.logEvent(this.taskId, "agent_message", {
+        messageId,
+        correlationId: messageId,
+        targetTaskId: resolved.taskId,
+        message,
+        status: "failed",
+        deliveryStatus: "failed",
+        deliveryMode: "message",
+        failedAt: Date.now(),
+        senderType: "agent",
+        senderTaskId: this.taskId,
+        senderLabel,
+        recipientLabel: recipient?.title || resolved.taskId,
+        error: errorMessage,
+      });
+      return {
+        success: false,
+        task_id: resolved.taskId,
+        message_id: messageId,
+        message: `Failed to message agent: ${errorMessage}`,
+        error: errorMessage,
+      };
+    }
   }
 
   private async captureAgentEvents(input: {
@@ -12972,21 +13418,32 @@ ${skillDescriptions}`;
       {
         name: "send_agent_message",
         description:
-          "Send a follow-up message to a descendant child agent task. Use this to clarify instructions, provide missing " +
-          "context, or steer a running sub-agent. This tool only works for tasks spawned by the current task (descendants).",
+          "Send a focused message to a descendant child agent or to a named teammate in the current persistent bot team. " +
+          "Use task_id for a child task, or bot for a teammate handle such as forge or scribe. Bot-team messages are durably queued and wake the addressed bot; child-agent messages remain queue-only. Reuse message_id when retrying the same message.",
         input_schema: {
           type: "object",
           properties: {
             task_id: {
               type: "string",
-              description: "The descendant child task ID",
+              description:
+                "The descendant child task ID, or an existing teammate conversation task ID",
+            },
+            bot: {
+              type: "string",
+              description:
+                "A teammate handle in the current bot team (for example forge, scribe, exec, or chief-community-officer)",
             },
             message: {
               type: "string",
               description: "The message to send to the child task",
             },
+            message_id: {
+              type: "string",
+              description:
+                "Optional stable retry identity. Reuse it when retrying the same message so delivery is idempotent.",
+            },
           },
-          required: ["task_id", "message"],
+          required: ["message"],
         },
       },
       {

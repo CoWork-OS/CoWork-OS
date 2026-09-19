@@ -30,6 +30,36 @@ export function loadWorkspacePermissionManifest(
   }
 }
 
+/**
+ * Filter manifest rules down to the ones that are safe to honor.
+ *
+ * The manifest is a checked-in *mirror* of the workspace's SQLite rules, which
+ * makes it untrusted input: anything with workspace write access can author it
+ * — including the agent itself, and including a repository the user merely
+ * cloned. Honoring a permissive rule straight from the file would let a
+ * prompt-injected agent grant itself `run_command` by writing one JSON file.
+ *
+ * Restrictive rules (`deny`, `ask`) are honored as-is: they can only narrow
+ * access, so a hostile author gains nothing by adding them. A permissive
+ * (`allow`) rule is honored only when an equivalent row exists in the
+ * workspace database, i.e. a rule the user actually approved on this machine —
+ * which is exactly what the approval flow writes alongside the manifest entry.
+ *
+ * Consequence for shared repositories: a teammate's `allow` rules do not take
+ * effect on first clone. They re-approve once, which creates their own database
+ * row and from then on the mirror matches.
+ */
+export function filterTrustedManifestRules(
+  manifestRules: PermissionRule[],
+  workspaceDbRules: PermissionRule[],
+): { rules: PermissionRule[]; droppedCount: number } {
+  const trusted = new Set(workspaceDbRules.map((rule) => permissionRuleFingerprint(rule)));
+  const rules = manifestRules.filter(
+    (rule) => rule.effect !== "allow" || trusted.has(permissionRuleFingerprint(rule)),
+  );
+  return { rules, droppedCount: manifestRules.length - rules.length };
+}
+
 export function appendWorkspacePermissionManifestRule(
   workspacePath: string,
   rule: PermissionRule,

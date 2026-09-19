@@ -5,10 +5,7 @@
   "icon": "📈",
   "category": "Tools",
   "requires": {
-    "anyBins": [
-      "python3",
-      "curl"
-    ]
+    "anyBins": ["python3", "curl"]
   },
   "prompt": "# Stock Analysis\n\nUse this skill only when the request is in scope:\n- User asks about stock prices, company fundamentals, market analysis, investment research, portfolio review, technical indicators, options, dividends, earnings, or crypto prices\n\nDo not use this skill when:\n- User asks about prediction markets (use polymarket skill), personal banking, or tax advice\n\nExecution workflow:\n1. Read `{baseDir}/SKILL.md` for routing boundaries and expected outputs.\n2. Read `{baseDir}/references/full-guidance.md` for detailed procedures/examples.\n3. If `{baseDir}/scripts` exists, execute scripts instead of rewriting logic.\n4. Return outputs matching: Stock quotes, fundamental analysis, technical indicators, analyst ratings, comparison tables, screening results, 8-dimensional scores.\n5. Verify success criteria: User receives accurate financial data with clear formatting, relevant context, and actionable insights.",
   "parameters": [
@@ -24,15 +21,7 @@
       "description": "Type of analysis to perform",
       "required": false,
       "default": "full",
-      "options": [
-        "full",
-        "technical",
-        "fundamental",
-        "compare",
-        "screen",
-        "dividends",
-        "options"
-      ]
+      "options": ["full", "technical", "fundamental", "compare", "screen", "dividends", "options"]
     }
   ],
   "enabled": true,

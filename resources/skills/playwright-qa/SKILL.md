@@ -55,11 +55,11 @@ Automated visual QA testing for web applications. Uses Playwright to launch a he
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| url | string | No | Target URL to test (defaults to http://localhost:3000) |
-| server_command | string | No | Command to start the dev server (e.g., "npm run dev") |
-| checks | string | No | Comma-separated list of checks: visual_snapshot, console_errors, network_errors, interaction_test, responsive_check, accessibility_check, performance_check |
+| Name           | Type   | Required | Description                                                                                                                                                 |
+| -------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| url            | string | No       | Target URL to test (defaults to http://localhost:3000)                                                                                                      |
+| server_command | string | No       | Command to start the dev server (e.g., "npm run dev")                                                                                                       |
+| checks         | string | No       | Comma-separated list of checks: visual_snapshot, console_errors, network_errors, interaction_test, responsive_check, accessibility_check, performance_check |
 
 ## Runtime Prompt
 
@@ -98,6 +98,7 @@ You are running automated visual QA on a web application using Playwright.
    - Always call `qa_cleanup` when done
 
 **Key tools:**
+
 - `qa_run` — Full automated pipeline (recommended starting point)
 - `qa_navigate` — Navigate to a URL
 - `qa_interact` — Click, fill, hover, scroll
@@ -107,6 +108,7 @@ You are running automated visual QA on a web application using Playwright.
 - `qa_cleanup` — Tear down browser and server
 
 **Best practices:**
+
 - Always start with `qa_run` for a comprehensive first pass
 - Fix critical issues before minor ones
 - Re-run after fixes to verify

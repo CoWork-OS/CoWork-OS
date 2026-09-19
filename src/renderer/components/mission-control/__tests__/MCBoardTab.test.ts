@@ -95,7 +95,9 @@ describe("MCBoardTab", () => {
     expect(markup).toContain("lucide-zap");
     expect(markup).toContain("lucide-arrow-right");
     expect(markup).toContain("mc-v2-task-assignee-avatar");
-    expect(markup).toContain("lucide-bot");
+    // The default assignee glyph is the shared Phosphor bot mark (a 256 unit
+    // viewBox), not a lucide icon.
+    expect(markup).toMatch(/mc-v2-task-assignee-avatar[^>]*>\s*<svg[^>]*viewBox="0 0 256 256"/);
   });
 
   it("keeps unassigned tasks to the three non-owner action icons", () => {

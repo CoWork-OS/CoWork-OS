@@ -24,6 +24,7 @@ docker compose config                    # Validate and view resolved config
 ## Compose File Patterns
 
 ### Full-Stack Web Application
+
 ```yaml
 version: "3.8"
 
@@ -89,6 +90,7 @@ volumes:
 ```
 
 ### Multi-Stage Dockerfile
+
 ```dockerfile
 # Build stage
 FROM node:20-alpine AS builder
@@ -111,6 +113,7 @@ CMD ["node", "dist/index.js"]
 ## Environment Variables
 
 ### .env File
+
 ```bash
 # .env (loaded automatically by docker compose)
 POSTGRES_USER=user
@@ -119,10 +122,11 @@ NODE_ENV=development
 ```
 
 ### Variable Interpolation
+
 ```yaml
 services:
   web:
-    image: myapp:${APP_VERSION:-latest}     # Default value
+    image: myapp:${APP_VERSION:-latest} # Default value
     environment:
       - DB_HOST=${DB_HOST:?DB_HOST required} # Fail if not set
 ```
@@ -130,6 +134,7 @@ services:
 ## Override Pattern (Dev vs Prod)
 
 ### docker-compose.yml (base)
+
 ```yaml
 services:
   web:
@@ -138,6 +143,7 @@ services:
 ```
 
 ### docker-compose.override.yml (dev - loaded automatically)
+
 ```yaml
 services:
   web:
@@ -151,6 +157,7 @@ services:
 ```
 
 ### docker-compose.prod.yml (production)
+
 ```yaml
 services:
   web:
@@ -158,7 +165,7 @@ services:
       replicas: 3
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
     environment:
       - NODE_ENV=production
@@ -189,7 +196,7 @@ services:
 networks:
   frontend:
   backend:
-    internal: true   # No external access
+    internal: true # No external access
 ```
 
 ## Health Checks
@@ -206,6 +213,7 @@ services:
 ```
 
 ## Debugging
+
 ```bash
 docker compose config                    # Resolve and validate full config
 docker compose events                    # Watch container events
@@ -215,6 +223,7 @@ docker compose exec db psql -U user app  # Interactive DB shell
 ```
 
 ## Best Practices
+
 - Always use named volumes for persistent data (not bind mounts in production)
 - Set `restart: unless-stopped` for production services
 - Use health checks with `depends_on: condition: service_healthy`

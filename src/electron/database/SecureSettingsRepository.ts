@@ -86,6 +86,7 @@ export type SettingsCategory =
   | "awareness-state"
   | "autonomy-chief-of-staff"
   | "supermemory"
+  | "pulse"
   | "plugin-packs"
   | `plugin:${string}`;
 
@@ -190,7 +191,12 @@ export class SecureSettingsRepository {
     const now = Date.now();
     const jsonData = JSON.stringify(settings);
     const encryptedData = this.encrypt(jsonData);
-    const checksum = this.computeChecksum(jsonData);
+    // Checksum the ciphertext, not the plaintext. An unkeyed SHA-256 of the
+    // plaintext stored beside the ciphertext is a brute-force oracle for
+    // low-entropy secrets. Integrity of the plaintext is already guaranteed by
+    // AES-GCM's auth tag (and by safeStorage for `os:` records); this column
+    // only needs to detect a corrupted or swapped stored blob.
+    const checksum = this.computeChecksum(encryptedData);
 
     const existing = this.findByCategory(category);
 
@@ -246,9 +252,12 @@ export class SecureSettingsRepository {
     try {
       const decrypted = this.decrypt(row.encrypted_data);
 
-      // Verify checksum to detect tampering
-      const checksum = this.computeChecksum(decrypted);
-      if (checksum !== row.checksum) {
+      // Verify checksum to detect tampering. Records written before the
+      // checksum moved off the plaintext still carry a plaintext digest, so
+      // accept either; `save()` rewrites them to the ciphertext form.
+      const ciphertextChecksum = this.computeChecksum(row.encrypted_data);
+      const legacyPlaintextChecksum = this.computeChecksum(decrypted);
+      if (ciphertextChecksum !== row.checksum && legacyPlaintextChecksum !== row.checksum) {
         const result: LoadResult<never> = {
           status: "checksum_mismatch",
           error: "Data integrity check failed. Settings may be corrupted.",
@@ -262,9 +271,42 @@ export class SecureSettingsRepository {
         return result;
       }
 
+      const parsed = JSON.parse(decrypted) as T;
+
+      // Opportunistic migration, for two independent legacy conditions:
+      //
+      // 1. `app:` records were encrypted with the v1 key derivation, whose
+      //    fallback is derivable from public paths.
+      // 2. A stored checksum that only matches the plaintext is an unkeyed
+      //    SHA-256 of the secret sitting next to its ciphertext — a
+      //    brute-force oracle for low-entropy values. This applies to `os:`
+      //    (safeStorage) records too, which is the common case on desktop;
+      //    keying the migration off the `app:` prefix alone would leave those
+      //    oracles in the database indefinitely, since nothing else rewrites a
+      //    category that is only ever read.
+      const usesLegacyKeyDerivation = row.encrypted_data.startsWith("app:");
+      const usesLegacyPlaintextChecksum =
+        ciphertextChecksum !== row.checksum && legacyPlaintextChecksum === row.checksum;
+      if (usesLegacyKeyDerivation || usesLegacyPlaintextChecksum) {
+        try {
+          this.save(category, parsed as object);
+          console.info(
+            `[SecureSettingsRepository] Re-wrote secure settings category ${category} in the current format.`,
+          );
+        } catch (migrationError) {
+          // Non-fatal: the caller still gets its settings. A failure here just
+          // means the record stays readable in the old format.
+          console.warn(
+            `[SecureSettingsRepository] Could not re-encrypt category ${category}: ${
+              migrationError instanceof Error ? migrationError.message : migrationError
+            }`,
+          );
+        }
+      }
+
       return {
         status: "success",
-        data: JSON.parse(decrypted) as T,
+        data: parsed,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -496,9 +538,22 @@ export class SecureSettingsRepository {
       const encryptedBuffer = this.safeStorage.encryptString(data);
       return "os:" + encryptedBuffer.toString("base64");
     } else {
-      // Fallback: Use app-level AES encryption
-      // The key is derived from a combination of app identity and machine-specific data
-      const key = this.deriveAppKey();
+      // Fallback: app-level AES-256-GCM with a key derived from the per-install
+      // machine ID and a fresh random salt stored with the ciphertext.
+      //
+      // Refuses to run when no machine ID could be established. The previous
+      // code fell back to a key derived from well-known paths plus a constant,
+      // which made the ciphertext decryptable by anyone who knew the platform's
+      // default user-data location — i.e. not encrypted in any useful sense.
+      const machineId = this.machineId;
+      if (!machineId) {
+        throw new Error(
+          "Secure settings cannot be written: OS keychain encryption is unavailable and no machine identifier could be established.",
+        );
+      }
+
+      const salt = crypto.randomBytes(16);
+      const key = this.deriveAppKeyV2(machineId, salt);
       const iv = crypto.randomBytes(16);
       const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
 
@@ -507,8 +562,10 @@ export class SecureSettingsRepository {
 
       const authTag = cipher.getAuthTag();
 
-      // Format: app:<iv>:<authTag>:<encrypted>
-      return `app:${iv.toString("base64")}:${authTag.toString("base64")}:${encrypted}`;
+      // Format: app2:<salt>:<iv>:<authTag>:<encrypted>
+      return `app2:${salt.toString("base64")}:${iv.toString("base64")}:${authTag.toString(
+        "base64",
+      )}:${encrypted}`;
     }
   }
 
@@ -524,15 +581,39 @@ export class SecureSettingsRepository {
       const base64Data = encryptedData.slice(3);
       const encryptedBuffer = Buffer.from(base64Data, "base64");
       return this.safeStorage.decryptString(encryptedBuffer);
+    } else if (encryptedData.startsWith("app2:")) {
+      // Current app-level format: salt is stored with the ciphertext.
+      const parts = encryptedData.slice(5).split(":");
+      if (parts.length !== 4) {
+        throw new Error("Invalid encrypted data format");
+      }
+      const [saltBase64, ivBase64, authTagBase64, encrypted] = parts;
+      const machineId = this.machineId;
+      if (!machineId) {
+        throw new Error(
+          "Secure settings cannot be read: no machine identifier could be established.",
+        );
+      }
+      const key = this.deriveAppKeyV2(machineId, Buffer.from(saltBase64, "base64"));
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivBase64, "base64"));
+      decipher.setAuthTag(Buffer.from(authTagBase64, "base64"));
+
+      let decrypted = decipher.update(encrypted, "base64", "utf8");
+      decrypted += decipher.final("utf8");
+      return decrypted;
     } else if (encryptedData.startsWith("app:")) {
-      // App-level AES decryption
+      // Legacy v1 format, kept only so existing installs can still be read and
+      // migrated. Its key derivation put a hardcoded constant in the password
+      // position and the machine ID in the salt position, and fell back to a
+      // fully path-derived value. `save()` re-writes anything read through here
+      // in the v2 format.
       const parts = encryptedData.slice(4).split(":");
       if (parts.length !== 3) {
         throw new Error("Invalid encrypted data format");
       }
 
       const [ivBase64, authTagBase64, encrypted] = parts;
-      const key = this.deriveAppKey();
+      const key = this.deriveLegacyAppKey();
       const iv = Buffer.from(ivBase64, "base64");
       const authTag = Buffer.from(authTagBase64, "base64");
 
@@ -551,37 +632,46 @@ export class SecureSettingsRepository {
   }
 
   /**
-   * Derive an app-specific encryption key
-   * This key is deterministic per machine but not stored anywhere
+   * Derive the v2 app-level key.
+   *
+   * The per-install random machine ID is the PBKDF2 *password* and a random
+   * per-record value is the *salt* — the way round PBKDF2 expects. v1 had these
+   * inverted, passing a constant shared by every installation as the password.
    */
-  private deriveAppKey(): Buffer {
-    // Use a combination of:
-    // 1. App identifier (hardcoded, same for all installations)
-    // 2. Process info (changes per machine but is consistent)
-    const appSalt = "cowork-os-secure-settings-v1";
-    const machineId = this.getMachineIdentifier();
+  private deriveAppKeyV2(machineId: string, salt: Buffer): Buffer {
+    return crypto.pbkdf2Sync(machineId, salt, 210000, 32, "sha512");
+  }
 
-    // Derive a 256-bit key using PBKDF2
+  /**
+   * Reproduce the v1 key so existing records can be read once and re-saved in
+   * the v2 format. Do not use for new writes.
+   */
+  private deriveLegacyAppKey(): Buffer {
+    const appSalt = "cowork-os-secure-settings-v1";
+    const machineId = this.getLegacyMachineIdentifier();
     return crypto.pbkdf2Sync(appSalt, machineId, 100000, 32, "sha512");
   }
 
   /**
-   * Get a machine-specific identifier for key derivation
-   * Uses a stable persistent ID to survive hostname changes, user renames, etc.
+   * v1 machine identifier, including its path-derived fallback.
+   *
+   * The fallback is why v1 records need migrating: it is fully derivable from
+   * the platform's default user-data path, so anyone who obtained the database
+   * could recompute the key. Retained for reading old records only.
    */
-  private getMachineIdentifier(): string {
-    // Use stable machine ID if available (generated at first launch)
+  private getLegacyMachineIdentifier(): string {
     if (this.machineId) {
       return this.machineId;
     }
 
-    // Fallback: derive from app-specific stable paths rather than volatile host metadata.
     const factors = [
       getUserDataDir(),
       path.join(getUserDataDir(), MACHINE_ID_FILE),
       "cowork-os-secure-settings-fallback-v2",
     ];
-    console.warn("[SecureSettingsRepository] Using path-derived fallback machine identifier");
+    console.warn(
+      "[SecureSettingsRepository] Reading a legacy record with the path-derived fallback identifier; it will be re-encrypted on next save.",
+    );
     return factors.join(":");
   }
 

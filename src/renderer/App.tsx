@@ -14,8 +14,17 @@ import {
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useReplayMode, type ReplayControls } from "./hooks/useReplayMode";
 import { useTaskDuration } from "./hooks/useTaskDuration";
+import { useComposerDraft } from "./hooks/useComposerDraft";
 import { Sidebar } from "./components/Sidebar";
+import { BotDetailsRail } from "./components/BotDetailsRail";
 import type { BotRole } from "./components/BotsPane";
+import {
+  BOT_CONVERSATION_HISTORY_OPEN_EVENT,
+  createBotConversationOptions,
+  isBotConversation,
+  matchesBotConversation,
+  selectLatestBotConversation,
+} from "./utils/bot-conversations";
 import type { SpreadsheetTurnContext } from "./components/SpreadsheetArtifactViewer";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
 import { DisclaimerModal } from "./components/DisclaimerModal";
@@ -46,6 +55,7 @@ import {
   VisualTheme,
   AccentColor,
   UiDensity,
+  CommandOutputStyle,
   QueueStatus,
   ToastNotification,
   ApprovalRequest,
@@ -67,13 +77,20 @@ import {
   TaskTimelinePageCursor,
   TaskTimelinePageResult,
   TaskEventDetailResult,
+  BotNotificationPolicy,
 } from "../shared/types";
+import type { ComposerDraft, DraftAttachmentRef } from "../shared/composer-drafts";
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { getEffectiveTaskEventType } from "./utils/task-event-compat";
 import { isLlmRequestCancelledEvent } from "./utils/task-event-visibility";
 import { markSessionAutoResolvingApproval } from "./utils/approval-event-state";
 import { appendRendererTaskEvents, capTaskEvents } from "./utils/task-event-append";
 import { TaskTimelineCache } from "./utils/task-timeline-cache";
+import {
+  createTaskEventScheduler,
+  getTaskEventTargetKey,
+  type TaskEventTarget,
+} from "./state/task-event-scheduler";
 import {
   buildTaskEventDetailCacheKey,
   estimateTaskEventPayloadBytes,
@@ -90,6 +107,11 @@ import {
 } from "../shared/task-timeline-limits";
 import { invalidateGlobalMeasurer } from "./utils/pretext-adapter";
 import { applyUiDensityClass } from "./utils/ui-density";
+import {
+  isCommandOutputStyle,
+  publishCommandOutputStyle,
+  readCommandOutputStyle,
+} from "./utils/command-output-style";
 import { hasTaskOutputs, resolveTaskOutputSummaryFromCompletionEvent } from "./utils/task-outputs";
 import {
   addUniqueTaskId,
@@ -152,6 +174,9 @@ import {
   persistSelectedTaskId,
   readPersistedSelectedTaskId,
 } from "./utils/selected-task-restoration";
+import { resolveComposerDraftOwnerContext } from "./utils/composer-draft-owner";
+import { taskSurfaceStore } from "./state/task-surface-store";
+import { serializeTaskSurfaceKey, type TaskSurfaceKey } from "./state/task-view-cache";
 
 const Settings = lazy(() =>
   import("./components/Settings").then((module) => ({ default: module.Settings })),
@@ -665,6 +690,27 @@ type SelectedTaskWorkspaceViewProps = {
   replayControls: ReplayControls;
   sharedTaskEventUi: SharedTaskEventUiState | null;
   remoteTaskView: RemoteTaskView | null;
+  botConversations: Task[];
+  isLoadingBotConversations: boolean;
+  draftValue: string;
+  draftRevision: number;
+  onDraftValueChange: (value: string) => ComposerDraft | void;
+  onDraftAccepted: (revision: number) => void | boolean | Promise<void | boolean>;
+  draftSnapshot: ComposerDraft | null;
+  onDraftPatch: (
+    patch: Partial<Pick<ComposerDraft, "mentions" | "quotedAssistantMessage" | "attachments">>,
+  ) => ComposerDraft | void;
+  onStageDraftAttachment: (attachment: {
+    name: string;
+    size: number;
+    mimeType?: string;
+    path?: string;
+    dataBase64?: string;
+  }) => Promise<DraftAttachmentRef | null>;
+  onResolveDraftAttachment: (
+    refId: string,
+  ) => Promise<{ ref: DraftAttachmentRef; path: string } | null>;
+  onReleaseDraftAttachment: (refId: string) => Promise<void>;
   childTasks: Task[];
   childEvents: TaskEvent[];
   activeInputRequest: InputRequest | null;
@@ -682,13 +728,18 @@ type SelectedTaskWorkspaceViewProps = {
   hasMoreTimelineHistory: boolean;
   isLoadingTimelineHistory: boolean;
   timelineHistoryError: string | null;
-  onLoadMoreTimelineHistory: () => void | Promise<void>;
+  onLoadMoreTimelineHistory: (options?: { loadAll?: boolean }) => void | Promise<void>;
   onLoadTaskEventDetail: (eventId: string, taskId: string) => void | Promise<void>;
   onReleaseTaskEventDetail: (eventId: string, taskId: string) => void;
   effectiveRightCollapsed: boolean;
+  onCloseRightPanel: () => void;
   terminalTabsOpen: boolean;
   browserWorkbenchRequest: BrowserWorkbenchOpenRequest | null;
   sideChat: SideChatState | null;
+  sideChatDraftValue: string;
+  sideChatDraftRevision: number;
+  onSideChatDraftValueChange: (value: string) => ComposerDraft | void;
+  onSideChatDraftAccepted: (revision: number) => void | boolean | Promise<void | boolean>;
   rightPanelInput: {
     task: Task | undefined;
     workspace: Workspace | null;
@@ -703,6 +754,8 @@ type SelectedTaskWorkspaceViewProps = {
     highlightOutputPath: string | null;
   };
   onSelectChildTask: (taskId: string) => void;
+  onSelectBotConversation: (conversationId: string) => void | Promise<void>;
+  onNewBotConversation: (botRoleId: string) => void | Promise<void>;
   onSelectTask: (taskId: string | null) => void;
   onSendMessage: (
     message: string,
@@ -715,7 +768,7 @@ type SelectedTaskWorkspaceViewProps = {
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
     },
-  ) => Promise<void>;
+  ) => Promise<void | boolean>;
   onOpenSideChat: (request: {
     taskId: string;
     fromEventId?: string;
@@ -732,7 +785,7 @@ type SelectedTaskWorkspaceViewProps = {
     options?: Any,
     images?: ImageAttachment[],
     workspace?: Workspace,
-  ) => Promise<void>;
+  ) => Promise<void | boolean>;
   onAskInbox: (query: string) => void;
   onChangeWorkspace: () => void;
   onSelectWorkspace: (workspace: Workspace) => void;
@@ -806,6 +859,17 @@ const SelectedTaskWorkspaceView = memo(
     replayControls,
     sharedTaskEventUi,
     remoteTaskView,
+    botConversations,
+    isLoadingBotConversations,
+    draftValue,
+    draftRevision,
+    onDraftValueChange,
+    onDraftAccepted,
+    draftSnapshot,
+    onDraftPatch,
+    onStageDraftAttachment,
+    onResolveDraftAttachment,
+    onReleaseDraftAttachment,
     childTasks,
     childEvents,
     activeInputRequest,
@@ -827,11 +891,18 @@ const SelectedTaskWorkspaceView = memo(
     onLoadTaskEventDetail,
     onReleaseTaskEventDetail,
     effectiveRightCollapsed,
+    onCloseRightPanel,
     terminalTabsOpen,
     browserWorkbenchRequest,
     sideChat,
+    sideChatDraftValue,
+    sideChatDraftRevision,
+    onSideChatDraftValueChange,
+    onSideChatDraftAccepted,
     rightPanelInput,
     onSelectChildTask,
+    onSelectBotConversation,
+    onNewBotConversation,
     onSelectTask,
     onSendMessage,
     onOpenSideChat,
@@ -1431,9 +1502,22 @@ const SelectedTaskWorkspaceView = memo(
               events={replayControls.replayEvents}
               sharedTaskEventUi={replayControls.isReplayMode ? null : sharedTaskEventUi}
               replayControls={replayControls}
+              botConversations={botConversations}
+              isLoadingBotConversations={isLoadingBotConversations}
+              draftValue={draftValue}
+              draftRevision={draftRevision}
+              onDraftValueChange={onDraftValueChange}
+              onDraftAccepted={onDraftAccepted}
+              draftSnapshot={draftSnapshot}
+              onDraftPatch={onDraftPatch}
+              onStageDraftAttachment={onStageDraftAttachment}
+              onResolveDraftAttachment={onResolveDraftAttachment}
+              onReleaseDraftAttachment={onReleaseDraftAttachment}
               childTasks={remoteTaskView ? [] : childTasks}
               childEvents={remoteTaskView ? [] : childEvents}
               onSelectChildTask={onSelectChildTask}
+              onSelectBotConversation={onSelectBotConversation}
+              onNewBotConversation={onNewBotConversation}
               onSelectTask={onSelectTask}
               onSendMessage={onSendMessage}
               onStartOnboarding={onStartOnboarding}
@@ -1516,6 +1600,10 @@ const SelectedTaskWorkspaceView = memo(
                     loading={sideChat.loading}
                     sending={sideChat.sending}
                     onSendMessage={onSendSideChatMessage}
+                    draftValue={sideChatDraftValue}
+                    draftRevision={sideChatDraftRevision}
+                    onDraftValueChange={onSideChatDraftValueChange}
+                    onDraftAccepted={onSideChatDraftAccepted}
                     onClose={onCloseSideChat}
                     onOpenSideTask={onOpenSideChatFullThread}
                   />
@@ -1626,6 +1714,25 @@ const SelectedTaskWorkspaceView = memo(
                 </Suspense>
               </div>
             </>
+          ) : task?.agentConfig?.botConversation && !remoteTaskView && !effectiveRightCollapsed ? (
+            <BotDetailsRail
+              task={task}
+              workspace={workspace}
+              onEdit={() => {
+                // The bot identity header owns the profile dialog; focus it
+                // through the same history action rather than duplicating the
+                // editor here.
+                const profileButton = document.querySelector<HTMLButtonElement>(
+                  ".bot-conversation-identity",
+                );
+                profileButton?.click();
+              }}
+              onOpenHistory={() => {
+                window.dispatchEvent(new Event(BOT_CONVERSATION_HISTORY_OPEN_EVENT));
+              }}
+              onOpenComputerSettings={() => onOpenSettings("tools")}
+              onClose={onCloseRightPanel}
+            />
           ) : !effectiveRightCollapsed && !remoteTaskView ? (
             <Suspense fallback={<RightPanelFallback />}>
               <RightPanel
@@ -1670,11 +1777,24 @@ const SelectedTaskWorkspaceView = memo(
     prev.workspace?.path === next.workspace?.path &&
     prev.replayControls === next.replayControls &&
     prev.sharedTaskEventUi === next.sharedTaskEventUi &&
+    prev.botConversations === next.botConversations &&
+    prev.isLoadingBotConversations === next.isLoadingBotConversations &&
     prev.remoteTaskView?.deviceId === next.remoteTaskView?.deviceId &&
     prev.remoteTaskView?.task.id === next.remoteTaskView?.task.id &&
     prev.remoteTaskView?.events === next.remoteTaskView?.events &&
+    prev.draftValue === next.draftValue &&
+    prev.draftRevision === next.draftRevision &&
+    prev.onDraftValueChange === next.onDraftValueChange &&
+    prev.onDraftAccepted === next.onDraftAccepted &&
+    prev.draftSnapshot === next.draftSnapshot &&
+    prev.onDraftPatch === next.onDraftPatch &&
+    prev.onStageDraftAttachment === next.onStageDraftAttachment &&
+    prev.onResolveDraftAttachment === next.onResolveDraftAttachment &&
+    prev.onReleaseDraftAttachment === next.onReleaseDraftAttachment &&
     prev.childTasks === next.childTasks &&
     prev.childEvents === next.childEvents &&
+    prev.onSelectBotConversation === next.onSelectBotConversation &&
+    prev.onNewBotConversation === next.onNewBotConversation &&
     getInputRequestSignature(prev.activeInputRequest) ===
       getInputRequestSignature(next.activeInputRequest) &&
     getInputRequestsSignature(prev.pendingInputRequests) ===
@@ -1692,6 +1812,10 @@ const SelectedTaskWorkspaceView = memo(
     prev.terminalTabsOpen === next.terminalTabsOpen &&
     prev.browserWorkbenchRequest?.requestId === next.browserWorkbenchRequest?.requestId &&
     prev.sideChat === next.sideChat &&
+    prev.sideChatDraftValue === next.sideChatDraftValue &&
+    prev.sideChatDraftRevision === next.sideChatDraftRevision &&
+    prev.onSideChatDraftValueChange === next.onSideChatDraftValueChange &&
+    prev.onSideChatDraftAccepted === next.onSideChatDraftAccepted &&
     prev.rightPanelInput === next.rightPanelInput,
 );
 
@@ -1699,6 +1823,9 @@ const MAX_RENDERER_CHILD_EVENTS = 300;
 const MAX_TIMELINE_HISTORY_EVENTS = 1200;
 const MAX_TIMELINE_HISTORY_PAYLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_TIMELINE_HISTORY_PAGE_PAYLOAD_BYTES = 512 * 1024;
+// Safety stop for a one-click "load all" expansion so a very long task cannot
+// issue unbounded history requests.
+const TIMELINE_HISTORY_LOAD_ALL_MAX_PAGES = 40;
 const MAX_EVENT_DETAIL_NEGATIVE_CACHE_ENTRIES = 120;
 const EVENT_DETAIL_NEGATIVE_CACHE_MS = 30 * 1000;
 const APPROVAL_TOAST_PREFIX = "approval-request-";
@@ -1900,6 +2027,10 @@ function extractInputRequestId(event: TaskEvent): string | null {
 export function App() {
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  // Bot transcripts use a dedicated feed so the paged Sessions list cannot
+  // hide older conversations belonging to a bot.
+  const [botConversationTasks, setBotConversationTasks] = useState<Task[]>([]);
+  const [isLoadingBotConversations, setIsLoadingBotConversations] = useState(false);
   const [hasMoreTasks, setHasMoreTasks] = useState(true);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [remoteTaskView, setRemoteTaskView] = useState<RemoteTaskView | null>(null);
@@ -1931,6 +2062,7 @@ export function App() {
     | "x"
     | "morechannels"
     | "integrations"
+    | "tools"
     | "updates"
     | "system"
     | "queue"
@@ -1944,6 +2076,8 @@ export function App() {
     | "subconscious"
     | "health"
     | "suggestions"
+    | "insights"
+    | "pulse"
     | "traces"
     | "everydayAgent"
   >("appearance");
@@ -1959,8 +2093,11 @@ export function App() {
   const selectedTask = useMemo(
     () =>
       remoteTaskView?.task ||
-      (selectedTaskId ? tasks.find((task) => task.id === selectedTaskId) : undefined),
-    [remoteTaskView, tasks, selectedTaskId],
+      (selectedTaskId
+        ? tasks.find((task) => task.id === selectedTaskId) ||
+          botConversationTasks.find((task) => task.id === selectedTaskId)
+        : undefined),
+    [botConversationTasks, remoteTaskView, tasks, selectedTaskId],
   );
   const completedTaskIdsSignature = useMemo(
     () =>
@@ -2010,6 +2147,8 @@ export function App() {
   const [accentColor, setAccentColor] = useState<AccentColor>("cyan");
   const [transparencyEffectsEnabled, setTransparencyEffectsEnabled] = useState(true);
   const [uiDensity, setUiDensity] = useState<UiDensity>("focused");
+  const [commandOutputStyle, setCommandOutputStyle] =
+    useState<CommandOutputStyle>(readCommandOutputStyle);
   const [devRunLoggingEnabled, setDevRunLoggingEnabled] = useState(false);
   const [selectedTaskSwitchId, setSelectedTaskSwitchId] = useState<string | null>(null);
   const [selectedTaskTimelineHistory, setSelectedTaskTimelineHistory] = useState<{
@@ -2066,6 +2205,11 @@ export function App() {
   const pendingApprovalsRef = useRef<Map<string, ApprovalRequest>>(new Map());
   const pendingInputRequestsRef = useRef<Map<string, InputRequest>>(new Map());
   const eventsRef = useRef<TaskEvent[]>([]);
+  const taskEventSchedulerRef = useRef(createTaskEventScheduler());
+  const taskEventTargetRef = useRef<TaskEventTarget | null>(null);
+  const taskEventGenerationRef = useRef(0);
+  const sideChatEventTargetRef = useRef<TaskEventTarget | null>(null);
+  const sideChatEventGenerationRef = useRef(0);
   const sideChatRef = useRef<SideChatState | null>(null);
   const sideChatRequestSeqRef = useRef(0);
   const selectedTaskIdRef = useRef<string | null>(null);
@@ -2085,6 +2229,7 @@ export function App() {
   const taskSwitchStartedAtRef = useRef<Map<string, number>>(new Map());
   const taskSwitchIdByTaskIdRef = useRef<Map<string, string>>(new Map());
   const taskSwitchSequenceRef = useRef(0);
+  const selectedTaskRequestSeqRef = useRef(0);
   const taskHeaderMarkedRef = useRef<Set<string>>(new Set());
   const sidebarFirstPaintMarkedRef = useRef(false);
   const taskTimelinePageStateRef = useRef<
@@ -2098,6 +2243,349 @@ export function App() {
   const remoteTaskViewRef = useRef<RemoteTaskView | null>(remoteTaskView);
   const remoteTaskOpenRequestSeqRef = useRef(0);
   remoteTaskViewRef.current = remoteTaskView;
+
+  const composerDraftContext = resolveComposerDraftOwnerContext({
+    currentWorkspaceId: currentWorkspace?.id,
+    selectedTaskId,
+    selectedTask,
+    remoteTask: remoteTaskView?.task,
+  });
+  const composerDraftScope = remoteTaskView ? "remote" : "local";
+  const composerDraftWorkspaceId = composerDraftContext.workspaceId || currentWorkspace?.id || "";
+  const composerDraftTaskId = composerDraftContext.taskId;
+  const composerDraftReady = composerDraftContext.ready && Boolean(composerDraftWorkspaceId);
+
+  const taskSurfaceKey = useMemo<TaskSurfaceKey>(
+    () => ({
+      scope: composerDraftScope,
+      workspaceId: composerDraftContext.workspaceId || currentWorkspace?.id || "unscoped-workspace",
+      taskId: composerDraftTaskId || selectedTaskId || "new",
+      ...(remoteTaskView?.deviceId ? { deviceId: remoteTaskView.deviceId } : {}),
+      surface: "main",
+    }),
+    [
+      composerDraftContext.workspaceId,
+      composerDraftScope,
+      composerDraftTaskId,
+      currentWorkspace?.id,
+      remoteTaskView?.deviceId,
+      selectedTaskId,
+    ],
+  );
+  const taskTimelineCacheKey = useMemo(
+    () => serializeTaskSurfaceKey(taskSurfaceKey),
+    [taskSurfaceKey],
+  );
+
+  useLayoutEffect(() => {
+    const activeKey = taskSurfaceStore.getActiveKey();
+    if (
+      !activeKey ||
+      serializeTaskSurfaceKey(activeKey) !== serializeTaskSurfaceKey(taskSurfaceKey)
+    ) {
+      taskSurfaceStore.switchTo(taskSurfaceKey);
+    }
+  }, [taskSurfaceKey]);
+
+  const composerDraft = useComposerDraft({
+    scope: composerDraftScope,
+    workspaceId: composerDraftWorkspaceId,
+    taskId: composerDraftTaskId,
+    surface: "main",
+    ...(remoteTaskView?.deviceId ? { remoteDeviceId: remoteTaskView.deviceId } : {}),
+    enabled: composerDraftReady,
+  });
+  const sideChatTask = sideChat?.task;
+  const sideChatWorkspaceId = sideChatTask?.workspaceId?.trim() || "";
+  const sideChatDraftReady = Boolean(sideChatWorkspaceId && sideChatTask?.id);
+  const sideChatDraft = useComposerDraft({
+    scope: "local",
+    workspaceId: sideChatWorkspaceId,
+    taskId: sideChatTask?.id ?? null,
+    surface: "side-chat",
+    enabled: sideChatDraftReady,
+  });
+  const selectTaskAfterDraftFlush = useCallback(
+    async (nextTaskId: string | null): Promise<void> => {
+      const requestId = ++selectedTaskRequestSeqRef.current;
+      await composerDraft.flush();
+      if (selectedTaskRequestSeqRef.current !== requestId) return;
+      setSelectedTaskId(nextTaskId);
+    },
+    [composerDraft.flush],
+  );
+  useEffect(() => {
+    taskSurfaceStore.setDraft(taskSurfaceKey, composerDraft.draft ?? undefined);
+  }, [composerDraft.draft, taskSurfaceKey]);
+  useEffect(() => {
+    taskSurfaceStore.setTask(taskSurfaceKey, selectedTask ?? null);
+  }, [selectedTask, taskSurfaceKey]);
+  const handleComposerDraftValueChange = useCallback(
+    (value: string): ComposerDraft | undefined => {
+      if (!composerDraftReady) return undefined;
+      return composerDraft.update({ text: value });
+    },
+    [composerDraft.update, composerDraftReady],
+  );
+  const handleComposerDraftAccepted = useCallback(
+    async (revision: number): Promise<boolean> => {
+      if (!composerDraftReady) return false;
+      return composerDraft.clearAfterAccepted(revision);
+    },
+    [composerDraft.clearAfterAccepted, composerDraftReady],
+  );
+  const handleComposerDraftPatch = useCallback(
+    (
+      patch: Partial<Pick<ComposerDraft, "mentions" | "quotedAssistantMessage" | "attachments">>,
+    ): ComposerDraft | undefined => {
+      if (!composerDraftReady) return undefined;
+      return composerDraft.update(patch);
+    },
+    [composerDraft.update, composerDraftReady],
+  );
+  const handleSideChatDraftValueChange = useCallback(
+    (value: string): ComposerDraft | undefined => {
+      if (!sideChatDraftReady) return undefined;
+      return sideChatDraft.update({ text: value });
+    },
+    [sideChatDraft.update, sideChatDraftReady],
+  );
+  const handleSideChatDraftAccepted = useCallback(
+    async (revision: number): Promise<boolean> => {
+      if (!sideChatDraftReady) return false;
+      return sideChatDraft.clearAfterAccepted(revision);
+    },
+    [sideChatDraft.clearAfterAccepted, sideChatDraftReady],
+  );
+  const handleStageDraftAttachment = useCallback(
+    async (attachment: {
+      name: string;
+      size: number;
+      mimeType?: string;
+      path?: string;
+      dataBase64?: string;
+    }): Promise<DraftAttachmentRef | null> => {
+      const put = window.electronAPI.putComposerDraftAttachment;
+      if (!put || !composerDraftReady) return null;
+      try {
+        const draft = composerDraft.draft ?? composerDraft.update({});
+        const result = await put({
+          draftKey: draft.draftKey,
+          scope: composerDraftScope,
+          workspaceId: composerDraftWorkspaceId,
+          surface: "main",
+          taskId: composerDraftTaskId,
+          ...(remoteTaskView?.deviceId ? { remoteDeviceId: remoteTaskView.deviceId } : {}),
+          name: attachment.name,
+          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+          ...(attachment.path ? { sourcePath: attachment.path } : {}),
+          ...(attachment.dataBase64 ? { dataBase64: attachment.dataBase64 } : {}),
+        });
+        return result && typeof result.refId === "string" ? (result as DraftAttachmentRef) : null;
+      } catch (error) {
+        console.error("Failed to stage composer draft attachment:", error);
+        return null;
+      }
+    },
+    [
+      composerDraft.draft?.draftKey,
+      composerDraftReady,
+      composerDraftScope,
+      composerDraftTaskId,
+      composerDraftWorkspaceId,
+      composerDraft.update,
+      remoteTaskView,
+    ],
+  );
+  const handleReleaseDraftAttachment = useCallback(
+    async (refId: string) => {
+      const release = window.electronAPI.releaseComposerDraftAttachment;
+      if (!release || !composerDraftReady) return;
+      await release({
+        draftKey: composerDraft.draftKey,
+        scope: composerDraftScope,
+        workspaceId: composerDraftWorkspaceId,
+        surface: "main",
+        taskId: composerDraftTaskId,
+        ...(remoteTaskView?.deviceId ? { remoteDeviceId: remoteTaskView.deviceId } : {}),
+        refId,
+      }).catch(() => undefined);
+    },
+    [
+      composerDraft.draftKey,
+      composerDraftReady,
+      composerDraftScope,
+      composerDraftTaskId,
+      composerDraftWorkspaceId,
+      remoteTaskView,
+    ],
+  );
+  const handleResolveDraftAttachment = useCallback(
+    async (refId: string): Promise<{ ref: DraftAttachmentRef; path: string } | null> => {
+      const resolve = window.electronAPI.resolveComposerDraftAttachment;
+      if (!resolve || !composerDraftReady) return null;
+      try {
+        const result = await resolve({
+          draftKey: composerDraft.draftKey,
+          scope: composerDraftScope,
+          workspaceId: composerDraftWorkspaceId,
+          surface: "main",
+          taskId: composerDraftTaskId,
+          ...(remoteTaskView?.deviceId ? { remoteDeviceId: remoteTaskView.deviceId } : {}),
+          refId,
+        });
+        if (!result || typeof result.path !== "string" || !result.ref?.refId) return null;
+        return result as { ref: DraftAttachmentRef; path: string };
+      } catch {
+        return null;
+      }
+    },
+    [
+      composerDraft.draftKey,
+      composerDraftReady,
+      composerDraftScope,
+      composerDraftTaskId,
+      composerDraftWorkspaceId,
+      remoteTaskView,
+    ],
+  );
+  const taskEventTarget = useMemo<TaskEventTarget>(
+    () => ({
+      surfaceId: "main",
+      taskId: taskSurfaceKey.taskId,
+      source: taskSurfaceKey.scope,
+      ...(taskSurfaceKey.deviceId ? { deviceId: taskSurfaceKey.deviceId } : {}),
+    }),
+    [taskSurfaceKey],
+  );
+
+  useEffect(() => {
+    const scheduler = taskEventSchedulerRef.current;
+    const generation = scheduler.switchTarget(taskEventTarget);
+    taskEventTargetRef.current = taskEventTarget;
+    taskEventGenerationRef.current = generation;
+    const targetKey = getTaskEventTargetKey(taskEventTarget);
+
+    const applySchedulerSnapshot = () => {
+      if (
+        taskEventGenerationRef.current !== generation ||
+        !taskEventTargetRef.current ||
+        getTaskEventTargetKey(taskEventTargetRef.current) !== targetKey
+      ) {
+        return;
+      }
+      const snapshot = scheduler.getSnapshot(taskEventTarget);
+      if (snapshot.events.length === 0) return;
+      const incomingEvents = snapshot.events;
+      const surfaceGeneration = taskSurfaceStore.getSelectionGeneration();
+      const activeSurfaceKey = taskSurfaceStore.getActiveKey();
+      const isCurrentSurface =
+        Boolean(activeSurfaceKey) &&
+        serializeTaskSurfaceKey(activeSurfaceKey as TaskSurfaceKey) === taskTimelineCacheKey;
+      const surfaceSnapshot = taskSurfaceStore.getSnapshot(taskSurfaceKey);
+      taskSurfaceStore.setTimeline(
+        taskSurfaceKey,
+        {
+          events: incomingEvents,
+          cursor: surfaceSnapshot?.timeline.cursor ?? null,
+          hasMoreHistory: surfaceSnapshot?.timeline.hasMoreHistory ?? false,
+        },
+        isCurrentSurface ? surfaceGeneration : undefined,
+      );
+      const cachedTimeline = taskTimelineCacheRef.current.get(taskTimelineCacheKey);
+      taskTimelineCacheRef.current.set(taskTimelineCacheKey, {
+        taskId: taskEventTarget.taskId,
+        events: appendRendererTaskEvents(cachedTimeline?.events ?? [], incomingEvents),
+        cursor: cachedTimeline?.cursor ?? null,
+        hasMoreHistory: cachedTimeline?.hasMoreHistory ?? false,
+      });
+      if (!isCurrentSurface) return;
+      startTransition(() => {
+        setEvents((previous) => capTaskEvents(appendRendererTaskEvents(previous, incomingEvents)));
+        if (taskEventTarget.source === "remote" && taskEventTarget.deviceId) {
+          setRemoteTaskView((previous) =>
+            previous &&
+            previous.deviceId === taskEventTarget.deviceId &&
+            previous.task.id === taskEventTarget.taskId
+              ? {
+                  ...previous,
+                  events: capTaskEvents(appendRendererTaskEvents(previous.events, incomingEvents)),
+                }
+              : previous,
+          );
+        }
+      });
+    };
+
+    const unsubscribe = scheduler.subscribe(taskEventTarget, applySchedulerSnapshot);
+    // A target can already have retained events when it becomes active again.
+    // Seed the surface from that snapshot instead of waiting for a new event.
+    applySchedulerSnapshot();
+
+    return () => {
+      // Keep the listener attached while unsubscribe flushes the final batch;
+      // otherwise pending task-A events are committed into a buffer nobody
+      // observes during an A -> B switch.
+      scheduler.unsubscribe(taskEventTarget);
+      unsubscribe();
+    };
+  }, [taskEventTarget, taskTimelineCacheKey]);
+
+  const sideChatEventTarget = useMemo<TaskEventTarget | null>(() => {
+    const taskId = sideChat?.task?.id;
+    return taskId ? { surfaceId: "side-chat", taskId, source: "local" } : null;
+  }, [sideChat?.task?.id]);
+
+  useEffect(() => {
+    const target = sideChatEventTarget;
+    const scheduler = taskEventSchedulerRef.current;
+    if (!target) {
+      sideChatEventTargetRef.current = null;
+      return;
+    }
+    const generation = scheduler.switchTarget(target);
+    const targetKey = getTaskEventTargetKey(target);
+    sideChatEventTargetRef.current = target;
+    sideChatEventGenerationRef.current = generation;
+    const applySideChatSnapshot = () => {
+      if (
+        sideChatEventGenerationRef.current !== generation ||
+        !sideChatEventTargetRef.current ||
+        getTaskEventTargetKey(sideChatEventTargetRef.current) !== targetKey
+      ) {
+        return;
+      }
+      const snapshot = scheduler.getSnapshot(target);
+      if (snapshot.events.length === 0) return;
+      setSideChat((previous) =>
+        previous?.task?.id === target.taskId
+          ? {
+              ...previous,
+              events: capTaskEvents(mergeUniqueTaskEvents(previous.events, snapshot.events)),
+              loading: false,
+              sending: snapshot.events.some(
+                (event) => getEffectiveTaskEventType(event) === "assistant_message",
+              )
+                ? false
+                : previous.sending,
+            }
+          : previous,
+      );
+    };
+    const unsubscribe = scheduler.subscribe(target, applySideChatSnapshot);
+    applySideChatSnapshot();
+    return () => {
+      scheduler.unsubscribe(target);
+      unsubscribe();
+      if (
+        sideChatEventTargetRef.current &&
+        getTaskEventTargetKey(sideChatEventTargetRef.current) === targetKey
+      ) {
+        sideChatEventTargetRef.current = null;
+      }
+    };
+  }, [sideChatEventTarget]);
+
   const timelineHistoryLoadInFlightRef = useRef(false);
   const selectedTaskHydrationInFlightRef = useRef<Set<string>>(new Set());
   const selectedTaskHydrationAttemptedRef = useRef<Set<string>>(new Set());
@@ -2105,6 +2593,55 @@ export function App() {
   const selectionRestorationSettledWorkspaceRef = useRef<string | null>(null);
   /** Tracks output paths we've already shown completion toast for (suppresses repeat toasts on follow-ups) */
   const completionToastNotifiedPathsRef = useRef<Map<string, Set<string>>>(new Map());
+  const botNotificationPoliciesRef = useRef<Map<string, BotNotificationPolicy>>(new Map());
+
+  const updateBotConversationSnapshot = useCallback((taskId: string, updates: Partial<Task>) => {
+    setBotConversationTasks((previous) =>
+      updateTaskPreservingIdentity(previous, taskId, (task) =>
+        mergeTaskPreservingIdentity(task, updates),
+      ),
+    );
+  }, []);
+
+  const upsertBotConversationSnapshot = useCallback((task: Task) => {
+    if (!isBotConversation(task) || task.source === "side_chat") return;
+    setBotConversationTasks((previous) =>
+      upsertTaskPreservingIdentity(previous, task, { prependIfMissing: true }),
+    );
+  }, []);
+
+  const getBotNotificationPolicy = useCallback(async (agentRoleId: string) => {
+    const id = String(agentRoleId || "").trim();
+    if (!id) return { agentRoleId: id, onFinish: true, onInputRequired: true, updatedAt: 0 };
+    const cached = botNotificationPoliciesRef.current.get(id);
+    if (cached) return cached;
+    try {
+      const loaded = await window.electronAPI.getBotNotificationPolicy?.(id);
+      const policy =
+        loaded ||
+        ({
+          agentRoleId: id,
+          onFinish: true,
+          onInputRequired: true,
+          updatedAt: 0,
+        } as BotNotificationPolicy);
+      botNotificationPoliciesRef.current.set(id, policy);
+      return policy;
+    } catch {
+      const fallback = { agentRoleId: id, onFinish: true, onInputRequired: true, updatedAt: 0 };
+      botNotificationPoliciesRef.current.set(id, fallback);
+      return fallback;
+    }
+  }, []);
+
+  useEffect(() => {
+    const updatePolicy = (event: Event) => {
+      const policy = (event as CustomEvent<BotNotificationPolicy>).detail;
+      if (policy?.agentRoleId) botNotificationPoliciesRef.current.set(policy.agentRoleId, policy);
+    };
+    window.addEventListener("cowork:bot-notification-policy-updated", updatePolicy);
+    return () => window.removeEventListener("cowork:bot-notification-policy-updated", updatePolicy);
+  }, []);
 
   useEffect(() => {
     eventDetailCacheRef.current.clear();
@@ -2349,7 +2886,7 @@ export function App() {
                 error: null,
               });
             }
-            taskTimelineCacheRef.current.set(taskId, {
+            taskTimelineCacheRef.current.set(taskTimelineCacheKey, {
               taskId,
               events: timelinePage.events,
               cursor: timelinePage.nextCursor,
@@ -2377,7 +2914,7 @@ export function App() {
         terminalEventRefreshInFlightRef.current.delete(taskId);
       }
     },
-    [mergeSelectedTaskTimelineEvents],
+    [mergeSelectedTaskTimelineEvents, taskTimelineCacheKey],
   );
 
   // Platform detection for window chrome and platform-specific surfaces.
@@ -2544,6 +3081,10 @@ export function App() {
         setAccentColor(settings.accentColor);
         setTransparencyEffectsEnabled(settings.transparencyEffectsEnabled !== false);
         setUiDensity(settings.uiDensity || "focused");
+        if (isCommandOutputStyle(settings.commandOutputStyle)) {
+          setCommandOutputStyle(settings.commandOutputStyle);
+          publishCommandOutputStyle(settings.commandOutputStyle);
+        }
         setDevRunLoggingEnabled(settings.devRunLoggingEnabled === true);
         setHomeResearchVaultEnabled(settings.homeResearchVaultEnabled === true);
         setHomeNextActionsEnabled(settings.homeNextActionsEnabled === true);
@@ -2744,7 +3285,7 @@ export function App() {
   // Load tasks when workspace is set
   useEffect(() => {
     if (currentWorkspace) {
-      loadTasks();
+      void refreshTaskLists();
     }
   }, [currentWorkspace?.id]);
 
@@ -3026,12 +3567,12 @@ export function App() {
     return window.electronAPI.onBrowserWorkbenchOpenRequest((request) => {
       if (!request?.taskId) return;
       setCurrentView("main");
-      setSelectedTaskId(request.taskId);
+      void selectTaskAfterDraftFlush(request.taskId);
       setRemoteTaskView(null);
       setRightSidebarCollapsed(false);
       setBrowserWorkbenchRequest(request);
     });
-  }, []);
+  }, [selectTaskAfterDraftFlush]);
 
   // Restore session auto-approve state from main process (survives HMR and renderer resets)
   useEffect(() => {
@@ -3075,19 +3616,29 @@ export function App() {
 
   // Subscribe to live remote task events when viewing a remote task
   useEffect(() => {
-    if (!window.electronAPI?.onTaskEvent || !remoteTaskView) return;
-    const view = remoteTaskView;
+    const remoteDeviceId = remoteTaskView?.deviceId;
+    const remoteTaskId = remoteTaskView?.task.id;
+    if (!window.electronAPI?.onTaskEvent || !remoteDeviceId || !remoteTaskId) return;
     const unsubscribe = window.electronAPI.onTaskEvent(
       (rawEvent: TaskEvent & { deviceId?: string }) => {
-        if (rawEvent.deviceId !== view.deviceId || rawEvent.taskId !== view.task.id) return;
+        if (rawEvent.deviceId !== remoteDeviceId || rawEvent.taskId !== remoteTaskId) return;
         const effectiveType = getEffectiveTaskEventType(rawEvent);
         const event = { ...rawEvent, type: effectiveType } as TaskEvent;
-        setEvents((prev) => capTaskEvents([...prev, event]));
-        setRemoteTaskView((prev) =>
-          prev && prev.deviceId === view.deviceId && prev.task.id === view.task.id
-            ? { ...prev, events: capTaskEvents([...prev.events, event]) }
-            : prev,
-        );
+        const activeTarget = taskEventTargetRef.current;
+        if (
+          !activeTarget ||
+          activeTarget.source !== "remote" ||
+          activeTarget.taskId !== remoteTaskId ||
+          activeTarget.deviceId !== remoteDeviceId
+        ) {
+          return;
+        }
+        if (RENDERER_DROPPED_EVENT_TYPES.has(event.type)) return;
+        taskEventSchedulerRef.current.enqueue({
+          target: activeTarget,
+          generation: taskEventGenerationRef.current,
+          event,
+        });
         const newStatus = isLlmRequestCancelledEvent(event)
           ? undefined
           : event.type === "task_status"
@@ -3095,7 +3646,7 @@ export function App() {
             : TASK_EVENT_STATUS_MAP[event.type];
         if (newStatus) {
           setRemoteTaskView((prev) =>
-            prev && prev.task.id === view.task.id
+            prev && prev.task.id === remoteTaskId && prev.deviceId === remoteDeviceId
               ? {
                   ...prev,
                   task: {
@@ -3111,12 +3662,14 @@ export function App() {
       },
     );
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
-  }, [remoteTaskView]);
+  }, [remoteTaskView?.deviceId, remoteTaskView?.task.id]);
 
   // Subscribe to all task events to update task status (local tasks only when not viewing remote)
   useEffect(() => {
     if (!window.electronAPI?.onTaskEvent) return;
     if (remoteTaskView) return;
+    const effectSelectedTaskId = selectedTaskId;
+    const effectTaskTimelineCacheKey = taskTimelineCacheKey;
 
     const unsubscribe = window.electronAPI.onTaskEvent((rawEvent: TaskEvent) => {
       const effectiveType = getEffectiveTaskEventType(rawEvent);
@@ -3158,6 +3711,14 @@ export function App() {
         });
       }
       if (isSideChatTaskEvent) {
+        const sideTarget = sideChatEventTargetRef.current;
+        if (sideTarget && sideTarget.taskId === event.taskId) {
+          taskEventSchedulerRef.current.enqueue({
+            target: sideTarget,
+            generation: sideChatEventGenerationRef.current,
+            event,
+          });
+        }
         setSideChat((prev) => {
           if (!prev?.task || prev.task.id !== event.taskId) return prev;
           const sideStatus = isLlmRequestCancelledEvent(event)
@@ -3181,7 +3742,6 @@ export function App() {
           return {
             ...prev,
             task: nextTask,
-            events: capTaskEvents(mergeUniqueTaskEvents(prev.events, [event])),
             sending:
               event.type === "assistant_message" || isTerminalTaskStatus(nextTask.status)
                 ? false
@@ -3197,6 +3757,21 @@ export function App() {
         typeof rawEvent?.timestamp === "number" && Number.isFinite(rawEvent.timestamp)
           ? rawEvent.timestamp
           : Date.now();
+
+      if (
+        (event.type === "user_message" || event.type === "assistant_message") &&
+        event.payload?.internal !== true
+      ) {
+        const message = [event.payload?.message, event.payload?.content, event.payload?.text].find(
+          (value): value is string => typeof value === "string" && value.trim().length > 0,
+        );
+        if (message) {
+          updateBotConversationSnapshot(event.taskId, {
+            sidebarPromptPreview: message.trim().slice(0, 1024),
+            updatedAt: eventTimestamp,
+          });
+        }
+      }
 
       if (event.type === "task_title_updated") {
         const title = typeof event.payload?.title === "string" ? event.payload.title.trim() : "";
@@ -3218,10 +3793,17 @@ export function App() {
             }),
           ),
         );
+        updateBotConversationSnapshot(event.taskId, {
+          title,
+          updatedAt: eventTimestamp,
+        });
 
         // The helper can finish before the createTask IPC promise resolves.
         // Refresh in that narrow window so the persisted title is not missed.
-        if (!taskWasKnown) void loadTasks();
+        if (!taskWasKnown) {
+          void loadTasks();
+          void loadBotConversations();
+        }
         return;
       }
 
@@ -3268,11 +3850,13 @@ export function App() {
           setTasks((prev) =>
             upsertTaskPreservingIdentity(prev, eventTask, { prependIfMissing: true }),
           );
+          upsertBotConversationSnapshot(eventTask);
         }
         // Refresh the task list to include the new task (or sub-agent). The
         // event-backed upsert above makes this refresh safe even if the query
         // began before the row became visible.
         void loadTasks();
+        void loadBotConversations();
         return;
       }
 
@@ -3325,41 +3909,44 @@ export function App() {
           isTerminalTaskStatus(tasksRef.current.find((t) => t.id === event.taskId)?.status));
       const nextStatus = newStatus as Task["status"] | undefined;
       if (newStatus && !skipBlockedStateForAutoApproval && !hasOtherPendingApproval) {
-        const applyTaskStatusUpdate = () =>
-          setTasks((prev) =>
-            updateTaskPreservingIdentity(prev, event.taskId, (t) => {
-              if (isTerminalInputResolution && isTerminalTaskStatus(t.status)) {
-                return t;
-              }
-              const resolvedStatus = isNewRunStarted
-                ? (newStatus as Task["status"])
-                : (resolveTaskStatusUpdateFromEvent(t, newStatus as Task["status"]) ?? t.status);
-              const updates: Partial<Task> = {
-                status: resolvedStatus,
-                updatedAt: Math.max(t.updatedAt || 0, eventTimestamp),
-              };
-              if (isNewRunStarted) {
-                updates.completedAt = undefined;
-                updates.lastRunDurationMs = undefined;
-              }
-              if (shouldClearTerminalStatus) {
-                updates.terminalStatus = undefined;
-                updates.failureClass = undefined;
-              } else if (eventTerminalStatus !== undefined) {
-                updates.terminalStatus = eventTerminalStatus;
-              }
-              if (payloadFailureClass !== undefined) {
-                updates.failureClass = payloadFailureClass;
-              }
-              if (payloadBestKnownOutcome) {
-                updates.bestKnownOutcome = payloadBestKnownOutcome;
-              }
-              if (payloadLastRunDurationMs !== undefined) {
-                updates.lastRunDurationMs = payloadLastRunDurationMs;
-              }
-              return mergeTaskPreservingIdentity(t, updates);
-            }),
+        const updateTaskStatus = (t: Task): Task => {
+          if (isTerminalInputResolution && isTerminalTaskStatus(t.status)) {
+            return t;
+          }
+          const resolvedStatus = isNewRunStarted
+            ? (newStatus as Task["status"])
+            : (resolveTaskStatusUpdateFromEvent(t, newStatus as Task["status"]) ?? t.status);
+          const updates: Partial<Task> = {
+            status: resolvedStatus,
+            updatedAt: Math.max(t.updatedAt || 0, eventTimestamp),
+          };
+          if (isNewRunStarted) {
+            updates.completedAt = undefined;
+            updates.lastRunDurationMs = undefined;
+          }
+          if (shouldClearTerminalStatus) {
+            updates.terminalStatus = undefined;
+            updates.failureClass = undefined;
+          } else if (eventTerminalStatus !== undefined) {
+            updates.terminalStatus = eventTerminalStatus;
+          }
+          if (payloadFailureClass !== undefined) {
+            updates.failureClass = payloadFailureClass;
+          }
+          if (payloadBestKnownOutcome) {
+            updates.bestKnownOutcome = payloadBestKnownOutcome;
+          }
+          if (payloadLastRunDurationMs !== undefined) {
+            updates.lastRunDurationMs = payloadLastRunDurationMs;
+          }
+          return mergeTaskPreservingIdentity(t, updates);
+        };
+        const applyTaskStatusUpdate = () => {
+          setTasks((prev) => updateTaskPreservingIdentity(prev, event.taskId, updateTaskStatus));
+          setBotConversationTasks((prev) =>
+            updateTaskPreservingIdentity(prev, event.taskId, updateTaskStatus),
           );
+        };
 
         if (event.taskId === selectedTaskIdRef.current) {
           applyTaskStatusUpdate();
@@ -3368,6 +3955,13 @@ export function App() {
             applyTaskStatusUpdate();
           });
         }
+      }
+
+      if (event.type === "task_completed" || event.type === "task_cancelled") {
+        // Completion payloads carry the latest preview/result fields, so
+        // refresh the dedicated bot roster once per terminal run instead of
+        // querying it for every streaming event.
+        void loadBotConversations();
       }
 
       if (
@@ -3522,6 +4116,10 @@ export function App() {
 
         void (async () => {
           try {
+            if (task?.agentConfig?.botConversation && task.assignedAgentRoleId) {
+              const policy = await getBotNotificationPolicy(task.assignedAgentRoleId);
+              if (!policy.onInputRequired) return;
+            }
             const existing = await window.electronAPI.listNotifications();
             const existingForTask = existing
               .filter((n) => n.type === "input_required" && n.taskId === event.taskId)
@@ -3609,10 +4207,15 @@ export function App() {
             : typeof task?.terminalStatus === "string"
               ? task.terminalStatus
               : undefined;
+        const botCompletionPolicy =
+          task?.agentConfig?.botConversation && task.assignedAgentRoleId
+            ? botNotificationPoliciesRef.current.get(task.assignedAgentRoleId)
+            : undefined;
         const shouldShowToast =
           toastDecision.show &&
           shouldNotifyForTaskCompletionTerminalStatus(terminalStatus) &&
-          !isAutomatedTaskLike(task);
+          !isAutomatedTaskLike(task) &&
+          botCompletionPolicy?.onFinish !== false;
         if (shouldShowToast) {
           recordCompletionToastShown(
             event.taskId,
@@ -3653,7 +4256,7 @@ export function App() {
                       window.electronAPI.showInFinder(path, workspacePath),
                     onViewInFiles: () => {
                       setCurrentView("main");
-                      setSelectedTaskId(event.taskId);
+                      void selectTaskAfterDraftFlush(event.taskId);
                       setRightSidebarCollapsed(false);
                       if (primaryOutputPath) {
                         setRightPanelHighlight({ taskId: event.taskId, path: primaryOutputPath });
@@ -3730,6 +4333,23 @@ export function App() {
           noiseEventThrottleRef.current.set(throttleKey, now);
         }
 
+        if (
+          isSelectedTask &&
+          taskEventTargetRef.current?.source === "local" &&
+          taskEventTargetRef.current.taskId === event.taskId
+        ) {
+          noteRendererTaskEventsAppendDispatched([event], rendererPerfLoggingEnabled);
+          if (
+            taskEventSchedulerRef.current.enqueue({
+              target: taskEventTargetRef.current,
+              generation: taskEventGenerationRef.current,
+              event,
+            })
+          ) {
+            return;
+          }
+        }
+
         const lane = classifyLiveTaskEvent(event);
         const isMilestone = lane === "immediate" || EVENT_TYPES_MILESTONE.has(event.type);
         const isBatchable =
@@ -3755,10 +4375,10 @@ export function App() {
               return appendRendererTaskEvents(prev, incomingEvents);
             });
             if (isSelectedTask) {
-              const cachedTimeline = taskTimelineCacheRef.current.get(event.taskId);
+              const cachedTimeline = taskTimelineCacheRef.current.get(taskTimelineCacheKey);
               if (cachedTimeline) {
                 const nextEvents = appendRendererTaskEvents(cachedTimeline.events, incomingEvents);
-                taskTimelineCacheRef.current.set(event.taskId, {
+                taskTimelineCacheRef.current.set(taskTimelineCacheKey, {
                   ...cachedTimeline,
                   events: nextEvents,
                 });
@@ -3877,21 +4497,46 @@ export function App() {
         );
         const queuedEvents = queuedEntries.map((entry) => entry.event);
         noteRendererTaskEventsAppendDispatched(queuedEvents, rendererPerfLoggingEnabled);
-        setEvents((prev) => {
-          noteRendererTaskEventsAppended(
-            queuedEvents.map((queuedEvent) => ({
-              event: queuedEvent,
-              queuedAtMs: queuedAtByEventId.get(queuedEvent.id),
-            })),
-            rendererPerfLoggingEnabled,
-          );
-          return appendRendererTaskEvents(prev, queuedEvents);
+        const activeSurfaceKey = taskSurfaceStore.getActiveKey();
+        const isStillActive =
+          selectedTaskIdRef.current === effectSelectedTaskId &&
+          activeSurfaceKey &&
+          serializeTaskSurfaceKey(activeSurfaceKey) === effectTaskTimelineCacheKey;
+        const cachedTimeline = taskTimelineCacheRef.current.get(effectTaskTimelineCacheKey);
+        const nextCachedEvents = appendRendererTaskEvents(
+          cachedTimeline?.events ?? [],
+          queuedEvents,
+        );
+        taskTimelineCacheRef.current.set(effectTaskTimelineCacheKey, {
+          taskId: effectSelectedTaskId ?? "new",
+          events: nextCachedEvents,
+          cursor: cachedTimeline?.cursor ?? null,
+          hasMoreHistory: cachedTimeline?.hasMoreHistory ?? false,
         });
+        if (isStillActive) {
+          setEvents((prev) => {
+            noteRendererTaskEventsAppended(
+              queuedEvents.map((queuedEvent) => ({
+                event: queuedEvent,
+                queuedAtMs: queuedAtByEventId.get(queuedEvent.id),
+              })),
+              rendererPerfLoggingEnabled,
+            );
+            return appendRendererTaskEvents(prev, queuedEvents);
+          });
+        }
       }
       lastBatchableAppendAtRef.current = 0;
       if (typeof unsubscribe === "function") unsubscribe();
     };
-  }, [selectedTaskId, remoteTaskView, rendererPerfLoggingEnabled]);
+  }, [
+    rendererPerfLoggingEnabled,
+    remoteTaskView,
+    selectTaskAfterDraftFlush,
+    selectedTaskId,
+    taskTimelineCacheKey,
+    updateBotConversationSnapshot,
+  ]);
 
   // Load historical events when task is selected
   useEffect(() => {
@@ -3938,9 +4583,11 @@ export function App() {
     }
 
     const requestedTaskId = selectedTaskId;
+    const requestedSurfaceKey = taskSurfaceStore.getActiveKey();
+    const requestedSurfaceGeneration = taskSurfaceStore.getSelectionGeneration();
     let cancelled = false;
     const latestAttentionEvent = latestAttentionEventByTaskIdRef.current.get(requestedTaskId);
-    const cachedTimeline = taskTimelineCacheRef.current.get(requestedTaskId);
+    const cachedTimeline = taskTimelineCacheRef.current.get(taskTimelineCacheKey);
     if (cachedTimeline) {
       setEvents(
         latestAttentionEvent
@@ -3978,7 +4625,13 @@ export function App() {
           : null;
         const historicalEvents =
           timelinePage?.events ?? (await window.electronAPI.getTaskEvents(requestedTaskId));
-        if (cancelled) return;
+        if (
+          cancelled ||
+          !requestedSurfaceKey ||
+          !taskSurfaceStore.isCurrent(requestedSurfaceKey, requestedSurfaceGeneration)
+        ) {
+          return;
+        }
         const receiveMs = performance.now() - startedAt;
         taskTimelinePageStateRef.current.set(requestedTaskId, {
           cursor: timelinePage?.nextCursor ?? null,
@@ -3991,14 +4644,28 @@ export function App() {
           error: null,
         });
         if (timelinePage) {
-          taskTimelineCacheRef.current.set(requestedTaskId, {
+          const cachedBeforeHistory = taskTimelineCacheRef.current.get(taskTimelineCacheKey);
+          taskTimelineCacheRef.current.set(taskTimelineCacheKey, {
             taskId: requestedTaskId,
-            events: historicalEvents,
+            events: mergeSelectedTaskTimelineEvents(
+              requestedTaskId,
+              cachedBeforeHistory?.events ?? [],
+              historicalEvents,
+            ),
             cursor: timelinePage.nextCursor,
             hasMoreHistory: timelinePage.hasMoreHistory,
-            payloadBytes: timelinePage.summary.payloadBytes,
           });
         }
+        taskSurfaceStore.setTimeline(
+          requestedSurfaceKey,
+          {
+            events: historicalEvents,
+            cursor: timelinePage?.nextCursor ?? null,
+            hasMoreHistory: timelinePage?.hasMoreHistory === true,
+            replace: true,
+          },
+          requestedSurfaceGeneration,
+        );
         recordRendererPerfSample(
           "task-switch.timeline_receive_ms",
           receiveMs,
@@ -4025,6 +4692,7 @@ export function App() {
           receiveMs: Number(receiveMs.toFixed(1)),
         });
         startTransition(() => {
+          if (!taskSurfaceStore.isCurrent(requestedSurfaceKey, requestedSurfaceGeneration)) return;
           setEvents((prev) =>
             capTaskEvents(mergeSelectedTaskTimelineEvents(requestedTaskId, prev, historicalEvents)),
           );
@@ -4034,7 +4702,13 @@ export function App() {
           taskLastEventTimestampRef.current.set(requestedTaskId, latestTimestamp);
         }
       } catch (error) {
-        if (cancelled) return;
+        if (
+          cancelled ||
+          !requestedSurfaceKey ||
+          !taskSurfaceStore.isCurrent(requestedSurfaceKey, requestedSurfaceGeneration)
+        ) {
+          return;
+        }
         console.error("Failed to load historical events:", error);
         setEvents([]);
       }
@@ -4044,7 +4718,13 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [mergeSelectedTaskTimelineEvents, rendererPerfLoggingEnabled, selectedTaskId, remoteTaskView]);
+  }, [
+    mergeSelectedTaskTimelineEvents,
+    rendererPerfLoggingEnabled,
+    selectedTaskId,
+    remoteTaskView,
+    taskTimelineCacheKey,
+  ]);
 
   const handleReleaseTaskEventDetail = useCallback((eventId: string, taskId: string) => {
     const normalizedEventId = typeof eventId === "string" ? eventId.trim() : "";
@@ -4153,136 +4833,163 @@ export function App() {
     }
   }, []);
 
-  const handleLoadMoreTaskTimelineHistory = useCallback(async () => {
-    if (timelineHistoryLoadInFlightRef.current) return;
-    const taskId = selectedTaskIdRef.current;
-    const state = remoteTaskView
-      ? {
-          cursor: remoteTaskView.cursor,
-          hasMoreHistory: remoteTaskView.hasMoreHistory,
-        }
-      : taskId
-        ? taskTimelinePageStateRef.current.get(taskId)
-        : null;
-    if (!taskId || !state?.hasMoreHistory || !state.cursor) return;
-    if (!remoteTaskView && !window.electronAPI?.getTaskTimelinePage) return;
-    const requestedRemoteDeviceId = remoteTaskView?.deviceId ?? null;
-    timelineHistoryLoadInFlightRef.current = true;
-    setSelectedTaskTimelineHistory((current) => ({
-      ...current,
-      isLoadingMore: true,
-      error: null,
-    }));
-    try {
-      let timelinePage: TaskTimelinePageResult;
-      if (remoteTaskView) {
-        const result = await window.electronAPI?.deviceProxyRequest?.({
-          deviceId: remoteTaskView.deviceId,
-          method: "task.timelinePage",
-          params: {
-            taskId,
-            cursor: state.cursor,
-            limit: TASK_TIMELINE_HISTORY_LIMIT,
-            byteLimit: TASK_TIMELINE_HISTORY_BYTE_LIMIT,
-            singleEventByteLimit: TASK_TIMELINE_SINGLE_EVENT_BYTE_LIMIT,
-          },
-        });
-        timelinePage = result?.payload as TaskTimelinePageResult;
-        if (!timelinePage?.events) throw new Error("Remote timeline page was unavailable.");
-      } else {
-        timelinePage = await window.electronAPI.getTaskTimelinePage({
-          taskId,
-          cursor: state.cursor,
-          limit: TASK_TIMELINE_HISTORY_LIMIT,
-          byteLimit: TASK_TIMELINE_HISTORY_BYTE_LIMIT,
-          singleEventByteLimit: TASK_TIMELINE_SINGLE_EVENT_BYTE_LIMIT,
-        });
-      }
-      const currentRemoteView = remoteTaskViewRef.current;
-      if (
-        selectedTaskIdRef.current !== taskId ||
-        (requestedRemoteDeviceId
-          ? currentRemoteView?.deviceId !== requestedRemoteDeviceId ||
-            currentRemoteView.task.id !== taskId
-          : Boolean(currentRemoteView))
-      ) {
-        return;
-      }
-      if (remoteTaskView) {
-        setRemoteTaskView((current) =>
-          current && current.deviceId === remoteTaskView.deviceId && current.task.id === taskId
-            ? {
-                ...current,
-                events: capTaskEventsPreservingIncoming(
-                  mergeSelectedTaskTimelineEvents(taskId, current.events, timelinePage.events),
-                  timelinePage.events,
-                ),
-                cursor: timelinePage.nextCursor,
-                hasMoreHistory: timelinePage.hasMoreHistory,
-              }
-            : current,
-        );
-      } else {
-        taskTimelinePageStateRef.current.set(taskId, {
-          cursor: timelinePage.nextCursor,
-          hasMoreHistory: timelinePage.hasMoreHistory,
-        });
-      }
-      setSelectedTaskTimelineHistory({
-        cursor: timelinePage.nextCursor,
-        hasMoreHistory: timelinePage.hasMoreHistory,
-        isLoadingMore: false,
-        error: null,
-      });
-      setEvents((prev) => {
-        const merged = mergeSelectedTaskTimelineEvents(taskId, prev, timelinePage.events);
-        const nextEvents = capTaskEventsPreservingIncoming(merged, timelinePage.events);
-        if (!remoteTaskView) {
-          taskTimelineCacheRef.current.set(taskId, {
-            taskId,
-            events: nextEvents,
-            cursor: timelinePage.nextCursor,
-            hasMoreHistory: timelinePage.hasMoreHistory,
-          });
-        }
-        return nextEvents;
-      });
-      markRendererPerfEvent("timeline_history_page_received", rendererPerfLoggingEnabled, {
-        taskId,
-        eventCount: timelinePage.events.length,
-        hasMoreHistory: timelinePage.hasMoreHistory,
-        payloadBytes: timelinePage.summary.payloadBytes,
-        truncatedEventCount: timelinePage.summary.truncatedEventCount,
-      });
-    } catch (error) {
-      console.error("Failed to load older timeline history:", error);
-      const currentRemoteView = remoteTaskViewRef.current;
-      if (
-        selectedTaskIdRef.current !== taskId ||
-        (requestedRemoteDeviceId
-          ? currentRemoteView?.deviceId !== requestedRemoteDeviceId ||
-            currentRemoteView.task.id !== taskId
-          : Boolean(currentRemoteView))
-      ) {
-        return;
-      }
+  const handleLoadMoreTaskTimelineHistory = useCallback(
+    async (options?: { loadAll?: boolean }) => {
+      if (timelineHistoryLoadInFlightRef.current) return;
+      const taskId = selectedTaskIdRef.current;
+      const initialState = remoteTaskView
+        ? {
+            cursor: remoteTaskView.cursor,
+            hasMoreHistory: remoteTaskView.hasMoreHistory,
+          }
+        : taskId
+          ? taskTimelinePageStateRef.current.get(taskId)
+          : null;
+      if (!taskId || !initialState?.hasMoreHistory || !initialState.cursor) return;
+      if (!remoteTaskView && !window.electronAPI?.getTaskTimelinePage) return;
+      const requestedRemoteDeviceId = remoteTaskView?.deviceId ?? null;
+      // The history control expands everything in one click; the scroll-triggered
+      // prefetch keeps pulling a single page at a time.
+      const loadAll = options?.loadAll === true;
+      timelineHistoryLoadInFlightRef.current = true;
       setSelectedTaskTimelineHistory((current) => ({
         ...current,
-        isLoadingMore: false,
-        error:
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : "Failed to load earlier history.",
+        isLoadingMore: true,
+        error: null,
       }));
-    } finally {
-      timelineHistoryLoadInFlightRef.current = false;
-    }
-  }, [
-    capTaskEventsPreservingIncoming,
-    mergeSelectedTaskTimelineEvents,
-    remoteTaskView,
-    rendererPerfLoggingEnabled,
-  ]);
+
+      const isStaleSelection = () => {
+        const currentRemoteView = remoteTaskViewRef.current;
+        return (
+          selectedTaskIdRef.current !== taskId ||
+          (requestedRemoteDeviceId
+            ? currentRemoteView?.deviceId !== requestedRemoteDeviceId ||
+              currentRemoteView.task.id !== taskId
+            : Boolean(currentRemoteView))
+        );
+      };
+
+      let cursor: TaskTimelinePageCursor | null = initialState.cursor;
+      let pagesLoaded = 0;
+      let loadedEventCount = 0;
+      let loadedPayloadBytes = 0;
+
+      try {
+        while (cursor) {
+          let timelinePage: TaskTimelinePageResult;
+          if (remoteTaskView) {
+            const result = await window.electronAPI?.deviceProxyRequest?.({
+              deviceId: remoteTaskView.deviceId,
+              method: "task.timelinePage",
+              params: {
+                taskId,
+                cursor,
+                limit: TASK_TIMELINE_HISTORY_LIMIT,
+                byteLimit: TASK_TIMELINE_HISTORY_BYTE_LIMIT,
+                singleEventByteLimit: TASK_TIMELINE_SINGLE_EVENT_BYTE_LIMIT,
+              },
+            });
+            timelinePage = result?.payload as TaskTimelinePageResult;
+            if (!timelinePage?.events) throw new Error("Remote timeline page was unavailable.");
+          } else {
+            timelinePage = await window.electronAPI.getTaskTimelinePage({
+              taskId,
+              cursor,
+              limit: TASK_TIMELINE_HISTORY_LIMIT,
+              byteLimit: TASK_TIMELINE_HISTORY_BYTE_LIMIT,
+              singleEventByteLimit: TASK_TIMELINE_SINGLE_EVENT_BYTE_LIMIT,
+            });
+          }
+          if (isStaleSelection()) return;
+
+          pagesLoaded += 1;
+          loadedEventCount += timelinePage.events.length;
+          loadedPayloadBytes += timelinePage.summary.payloadBytes;
+
+          const nextCursor = timelinePage.hasMoreHistory ? timelinePage.nextCursor : null;
+          // Stop once the renderer's retention budget is spent: paging further would
+          // only evict the events we just prepended.
+          const budgetExhausted =
+            pagesLoaded >= TIMELINE_HISTORY_LOAD_ALL_MAX_PAGES ||
+            loadedEventCount >= MAX_TIMELINE_HISTORY_EVENTS ||
+            loadedPayloadBytes >= MAX_TIMELINE_HISTORY_PAYLOAD_BYTES;
+          const willContinue = loadAll && Boolean(nextCursor) && !budgetExhausted;
+
+          if (remoteTaskView) {
+            setRemoteTaskView((current) =>
+              current && current.deviceId === remoteTaskView.deviceId && current.task.id === taskId
+                ? {
+                    ...current,
+                    events: capTaskEventsPreservingIncoming(
+                      mergeSelectedTaskTimelineEvents(taskId, current.events, timelinePage.events),
+                      timelinePage.events,
+                    ),
+                    cursor: timelinePage.nextCursor,
+                    hasMoreHistory: timelinePage.hasMoreHistory,
+                  }
+                : current,
+            );
+          } else {
+            taskTimelinePageStateRef.current.set(taskId, {
+              cursor: timelinePage.nextCursor,
+              hasMoreHistory: timelinePage.hasMoreHistory,
+            });
+          }
+          setSelectedTaskTimelineHistory({
+            cursor: timelinePage.nextCursor,
+            hasMoreHistory: timelinePage.hasMoreHistory,
+            isLoadingMore: willContinue,
+            error: null,
+          });
+          setEvents((prev) => {
+            const merged = mergeSelectedTaskTimelineEvents(taskId, prev, timelinePage.events);
+            const nextEvents = capTaskEventsPreservingIncoming(merged, timelinePage.events);
+            if (!remoteTaskView) {
+              taskTimelineCacheRef.current.set(taskTimelineCacheKey, {
+                taskId,
+                events: nextEvents,
+                cursor: timelinePage.nextCursor,
+                hasMoreHistory: timelinePage.hasMoreHistory,
+              });
+            }
+            return nextEvents;
+          });
+          markRendererPerfEvent("timeline_history_page_received", rendererPerfLoggingEnabled, {
+            taskId,
+            eventCount: timelinePage.events.length,
+            hasMoreHistory: timelinePage.hasMoreHistory,
+            payloadBytes: timelinePage.summary.payloadBytes,
+            truncatedEventCount: timelinePage.summary.truncatedEventCount,
+          });
+
+          if (!willContinue) break;
+          cursor = nextCursor;
+          // Yield so the freshly prepended rows paint before the next page lands.
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          if (isStaleSelection()) return;
+        }
+      } catch (error) {
+        console.error("Failed to load older timeline history:", error);
+        if (isStaleSelection()) return;
+        setSelectedTaskTimelineHistory((current) => ({
+          ...current,
+          isLoadingMore: false,
+          error:
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : "Failed to load earlier history.",
+        }));
+      } finally {
+        timelineHistoryLoadInFlightRef.current = false;
+      }
+    },
+    [
+      capTaskEventsPreservingIncoming,
+      mergeSelectedTaskTimelineEvents,
+      remoteTaskView,
+      rendererPerfLoggingEnabled,
+    ],
+  );
 
   // Reconcile stale executing/interrupted task state if event delivery falls behind.
   useEffect(() => {
@@ -4484,6 +5191,7 @@ export function App() {
         limit: INITIAL_TASK_LOAD + TASK_PAGE_LOOKAHEAD,
         offset: 0,
         prioritizeSidebar: true,
+        excludeBotConversations: true,
         excludeSources: MAIN_SIDEBAR_EXCLUDED_TASK_SOURCES,
       });
       const receiveMs = performance.now() - startedAt;
@@ -4524,6 +5232,66 @@ export function App() {
     }
   }, [rendererPerfLoggingEnabled, toSidebarTaskCursor]);
 
+  const loadBotConversations = useCallback(async () => {
+    const workspaceId = currentWorkspace?.id;
+    if (!workspaceId) {
+      setBotConversationTasks([]);
+      setIsLoadingBotConversations(false);
+      return;
+    }
+    setIsLoadingBotConversations(true);
+    try {
+      const api = window.electronAPI;
+      if (!api) {
+        setBotConversationTasks([]);
+        return;
+      }
+      const includeAllWorkspaces = isTempWorkspaceId(workspaceId);
+      const loaded = api?.listBotConversations
+        ? await api.listBotConversations({
+            workspaceId,
+            includeAllWorkspaces,
+            includeArchivedSessions: true,
+            limit: 500,
+            offset: 0,
+          })
+        : await api.listTasks({ limit: 500, offset: 0, includeArchivedSessions: true });
+      const filtered = (loaded as Task[]).filter(
+        (task) =>
+          (includeAllWorkspaces || task.workspaceId === workspaceId) &&
+          task.agentConfig?.botConversation === true &&
+          task.source !== "side_chat",
+      );
+      const roleIds = Array.from(
+        new Set(filtered.map((task) => task.assignedAgentRoleId).filter(Boolean) as string[]),
+      );
+      await Promise.all(roleIds.map((roleId) => getBotNotificationPolicy(roleId)));
+      setBotConversationTasks((previous) => {
+        const byId = new Map(filtered.map((task) => [task.id, task]));
+        // Preserve a just-created/selected transcript if a refresh races the
+        // insert event and returns the previous snapshot.
+        for (const task of previous) {
+          if (!byId.has(task.id) && (includeAllWorkspaces || task.workspaceId === workspaceId)) {
+            byId.set(task.id, task);
+          }
+        }
+        return Array.from(byId.values()).sort(
+          (a, b) =>
+            (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt) ||
+            b.createdAt - a.createdAt,
+        );
+      });
+    } catch (error) {
+      console.error("Failed to load bot conversations:", error);
+    } finally {
+      setIsLoadingBotConversations(false);
+    }
+  }, [currentWorkspace?.id, getBotNotificationPolicy]);
+
+  const refreshTaskLists = useCallback(async () => {
+    await Promise.allSettled([loadTasks(), loadBotConversations()]);
+  }, [loadBotConversations, loadTasks]);
+
   const loadMoreTasks = useCallback(async () => {
     const listSidebarTasks = window.electronAPI?.listSidebarTasks ?? window.electronAPI?.listTasks;
     if (!listSidebarTasks || isLoadingMoreRef.current || !hasMoreTasksRef.current) {
@@ -4539,6 +5307,7 @@ export function App() {
         offset: cursor ? undefined : offset,
         cursor: cursor ?? undefined,
         prioritizeSidebar: true,
+        excludeBotConversations: true,
         excludeSources: MAIN_SIDEBAR_EXCLUDED_TASK_SOURCES,
       });
       const moreTasks = moreTaskPage.slice(0, TASK_LOAD_MORE);
@@ -4594,7 +5363,7 @@ export function App() {
         return false;
       }
       setTasks((prev) => upsertTaskPreservingIdentity(prev, task!, { prependIfMissing: true }));
-      setSelectedTaskId(task!.id);
+      void selectTaskAfterDraftFlush(task!.id);
       setCurrentView("main");
       return true;
     };
@@ -4641,7 +5410,7 @@ export function App() {
         selectionRestorationSettledWorkspaceRef.current = null;
       }
     };
-  }, [currentWorkspace?.id, isInitialTaskListLoading, remoteTaskView]);
+  }, [currentWorkspace?.id, isInitialTaskListLoading, remoteTaskView, selectTaskAfterDraftFlush]);
 
   useEffect(() => {
     // Do not erase the persisted selection while the initial sidebar page is
@@ -4740,7 +5509,6 @@ export function App() {
     options?: {
       generateTitle?: boolean;
       autonomousMode?: boolean;
-      interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -4763,9 +5531,9 @@ export function App() {
     },
     images?: ImageAttachment[],
     workspaceOverride?: Workspace,
-  ) => {
+  ): Promise<boolean> => {
     const effectiveWorkspace = workspaceOverride ?? currentWorkspace;
-    if (!effectiveWorkspace) return;
+    if (!effectiveWorkspace) return false;
 
     const multitaskCommand = findMultitaskCommand(prompt, title);
     if (multitaskCommand?.isMultitask && !multitaskCommand.valid) {
@@ -4774,7 +5542,7 @@ export function App() {
         title: "Multitask request needed",
         message: multitaskCommand.error || "Add a request after /multitask.",
       });
-      return;
+      return false;
     }
     const isMultitaskCommand = Boolean(multitaskCommand?.valid);
     const effectivePrompt = isMultitaskCommand ? multitaskCommand!.prompt : prompt;
@@ -4817,11 +5585,10 @@ export function App() {
       const shouldContinue = window.confirm(
         "Autonomous mode allows the agent to proceed without manual confirmation on gated actions. Continue?",
       );
-      if (!shouldContinue) return;
+      if (!shouldContinue) return false;
     }
 
     const verificationAgent = options?.verificationAgent === true;
-    const interactionMode = options?.interactionMode;
     const executionMode = options?.executionMode;
     const taskDomain = options?.taskDomain;
     const chronicleMode = options?.chronicleMode;
@@ -4854,7 +5621,6 @@ export function App() {
       options?.multitaskMode ||
       multiLlmMode ||
       verificationAgent ||
-      interactionMode ||
       executionMode ||
       taskDomain ||
       chronicleMode ||
@@ -4887,7 +5653,6 @@ export function App() {
               ? { multiLlmMode: true, multiLlmConfig: options?.multiLlmConfig }
               : {}),
             ...(verificationAgent ? { verificationAgent: true } : {}),
-            ...(interactionMode ? { interactionMode } : {}),
             ...(executionMode ? { executionMode } : {}),
             ...(taskDomain ? { taskDomain } : {}),
             ...(chronicleMode ? { chronicleMode } : {}),
@@ -4920,7 +5685,7 @@ export function App() {
               },
             },
           });
-          return;
+          return false;
         }
       }
 
@@ -4945,8 +5710,9 @@ export function App() {
       });
       tasksRef.current = optimisticTasks;
       setTasks((prev) => upsertTaskPreservingIdentity(prev, task, { prependIfMissing: true }));
-      setSelectedTaskId(task.id);
+      await selectTaskAfterDraftFlush(task.id);
       setCurrentView("main");
+      return true;
     } catch (error: unknown) {
       console.error("Failed to create task:", error);
       // Check if it's an API key error and prompt user to configure settings
@@ -4967,21 +5733,25 @@ export function App() {
       } else {
         addToast({ type: "error", title: "Task Error", message: errorMessage });
       }
+      return false;
     }
   };
 
-  const handleOpenManagedAgentTask = useCallback(async (taskId: string) => {
-    setCurrentView("main");
-    setSelectedTaskId(taskId);
-    try {
-      const task = (await window.electronAPI.getTask(taskId)) as Task | null;
-      if (task) {
-        setTasks((prev) => upsertTaskPreservingIdentity(prev, task, { prependIfMissing: true }));
+  const handleOpenManagedAgentTask = useCallback(
+    async (taskId: string) => {
+      setCurrentView("main");
+      void selectTaskAfterDraftFlush(taskId);
+      try {
+        const task = (await window.electronAPI.getTask(taskId)) as Task | null;
+        if (task) {
+          setTasks((prev) => upsertTaskPreservingIdentity(prev, task, { prependIfMissing: true }));
+        }
+      } catch (error) {
+        console.error("Failed to open managed agent task:", error);
       }
-    } catch (error) {
-      console.error("Failed to open managed agent task:", error);
-    }
-  }, []);
+    },
+    [selectTaskAfterDraftFlush],
+  );
 
   const handleAskInboxFromComposer = useCallback((query: string) => {
     const trimmed = query.trim();
@@ -5029,21 +5799,24 @@ export function App() {
     }
   }, []);
 
-  const handleOpenSideChatFullThread = useCallback(async (taskId: string) => {
-    sideChatRequestSeqRef.current += 1;
-    setSideChat(null);
-    sideChatRef.current = null;
-    setCurrentView("main");
-    setSelectedTaskId(taskId);
-    try {
-      const task = (await window.electronAPI.getTask(taskId)) as Task | null;
-      if (task) {
-        setTasks((prev) => upsertTaskPreservingIdentity(prev, task, { prependIfMissing: true }));
+  const handleOpenSideChatFullThread = useCallback(
+    async (taskId: string) => {
+      sideChatRequestSeqRef.current += 1;
+      setSideChat(null);
+      sideChatRef.current = null;
+      setCurrentView("main");
+      void selectTaskAfterDraftFlush(taskId);
+      try {
+        const task = (await window.electronAPI.getTask(taskId)) as Task | null;
+        if (task) {
+          setTasks((prev) => upsertTaskPreservingIdentity(prev, task, { prependIfMissing: true }));
+        }
+      } catch (error) {
+        console.error("Failed to open sidechat as full thread:", error);
       }
-    } catch (error) {
-      console.error("Failed to open sidechat as full thread:", error);
-    }
-  }, []);
+    },
+    [selectTaskAfterDraftFlush],
+  );
 
   const handleOpenSideChat = useCallback(
     async (request: { taskId: string; fromEventId?: string; initialMessage?: string }) => {
@@ -5168,6 +5941,9 @@ export function App() {
       selectedTaskUsesLiveProjection,
     ],
   );
+  useEffect(() => {
+    taskSurfaceStore.setProjection(taskSurfaceKey, sharedTaskEventUi ?? undefined);
+  }, [sharedTaskEventUi, taskSurfaceKey]);
   const rightPanelReplayTask = useMemo(
     () =>
       replayControls.isReplayMode
@@ -5338,7 +6114,7 @@ export function App() {
           cursor: timelinePage.nextCursor,
           hasMoreHistory: timelinePage.hasMoreHistory,
         });
-        setSelectedTaskId(remoteTask.id);
+        await selectTaskAfterDraftFlush(remoteTask.id);
         setCurrentView("main");
         setRightSidebarCollapsed(true);
       } catch (error) {
@@ -5350,7 +6126,7 @@ export function App() {
         });
       }
     },
-    [],
+    [selectTaskAfterDraftFlush],
   );
 
   const handleSendMessage = async (
@@ -5429,10 +6205,12 @@ export function App() {
           nextOptions,
         );
       }
+      return true;
     } catch (error: unknown) {
       console.error("Failed to send message:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to send message";
       addToast({ type: "error", title: "Error", message: errorMessage });
+      return false;
     }
   };
 
@@ -5543,7 +6321,7 @@ export function App() {
 
   const handleNewSession = async () => {
     setCurrentView("main");
-    setSelectedTaskId(null);
+    await selectTaskAfterDraftFlush(null);
     setEvents([]);
     clearRemoteTaskView();
 
@@ -5566,7 +6344,7 @@ export function App() {
 
   const handleClearTaskView = () => {
     setCurrentView("main");
-    setSelectedTaskId(null);
+    void selectTaskAfterDraftFlush(null);
     setEvents([]);
     clearRemoteTaskView();
   };
@@ -5600,7 +6378,7 @@ export function App() {
     }
     // When model changes during a task, clear the current task to start fresh
     if (selectedTaskId) {
-      setSelectedTaskId(null);
+      void selectTaskAfterDraftFlush(null);
       setEvents([]);
       clearRemoteTaskView();
     }
@@ -5650,6 +6428,15 @@ export function App() {
     });
   };
 
+  const handleCommandOutputStyleChange = (style: CommandOutputStyle) => {
+    setCommandOutputStyle(style);
+    // Cache + broadcast so open task views re-render without a reload.
+    publishCommandOutputStyle(style);
+    void window.electronAPI?.saveAppearanceSettings?.({
+      commandOutputStyle: style,
+    });
+  };
+
   const handleTransparencyEffectsEnabledChange = (enabled: boolean) => {
     setTransparencyEffectsEnabled(enabled);
     void window.electronAPI?.saveAppearanceSettings?.({
@@ -5679,9 +6466,8 @@ export function App() {
   };
 
   // Smart right panel visibility: auto-collapse on welcome screen in focused mode
-  const isSelectedBotConversation = selectedTask?.agentConfig?.botConversation === true;
   const effectiveRightCollapsed =
-    currentView !== "main" || isSelectedBotConversation
+    currentView !== "main"
       ? true
       : uiDensity === "full"
         ? rightSidebarCollapsed
@@ -5724,68 +6510,114 @@ export function App() {
     (taskId: string | null) => {
       clearRemoteTaskView();
       markTaskSwitchStart(taskId);
-      setSelectedTaskId(taskId);
+      void selectTaskAfterDraftFlush(taskId);
       if (taskId) {
         setUnseenCompletedTaskIds((prev) => removeTaskId(prev, taskId));
       }
       setCurrentView("main");
     },
-    [clearRemoteTaskView, markTaskSwitchStart],
+    [clearRemoteTaskView, markTaskSwitchStart, selectTaskAfterDraftFlush],
   );
+  const handleNewBotConversation = useCallback(
+    async (botRoleId: string) => {
+      if (!currentWorkspace?.id || !botRoleId) return;
+      try {
+        const role = await window.electronAPI.getAgentRole(botRoleId);
+        const botName = role?.displayName || "Bot";
+        await handleCreateTask(
+          botName,
+          `Start chatting with ${botName}.`,
+          createBotConversationOptions(botRoleId),
+        );
+        await loadBotConversations();
+      } catch (error) {
+        console.error("Failed to create bot conversation:", error);
+        addToast({
+          type: "error",
+          title: "Could not start conversation",
+          message: error instanceof Error ? error.message : "Please try again.",
+        });
+      }
+    },
+    [addToast, currentWorkspace?.id, handleCreateTask, loadBotConversations],
+  );
+  const openingBotRef = useRef(false);
   const handleOpenBot = useCallback(
     async (bot: BotRole) => {
       const workspaceId = currentWorkspace?.id;
-      if (!workspaceId) return;
-
-      clearRemoteTaskView();
-
-      const matchesBot = (candidate: Task) =>
-        candidate.workspaceId === workspaceId &&
-        candidate.assignedAgentRoleId === bot.id &&
-        candidate.agentConfig?.botConversation === true;
-      const newestFirst = (a: Task, b: Task) =>
-        (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
-
-      let botTask = tasksRef.current.filter(matchesBot).sort(newestFirst)[0];
-
-      // Bot tasks are intentionally hidden from the Sessions list, so a bot
-      // conversation may be outside the normal sidebar page after restart.
-      if (!botTask && window.electronAPI?.listTasks) {
-        try {
-          const allTasks = (await window.electronAPI.listTasks({ limit: 500 })) as Task[];
-          botTask = allTasks.filter(matchesBot).sort(newestFirst)[0];
-          if (botTask) {
-            tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, botTask, {
-              prependIfMissing: true,
-            });
-            setTasks((prev) =>
-              upsertTaskPreservingIdentity(prev, botTask!, { prependIfMissing: true }),
-            );
-          }
-        } catch (error) {
-          console.error("Failed to find bot conversation:", error);
+      if (!workspaceId || openingBotRef.current) return;
+      openingBotRef.current = true;
+      try {
+        // Query the bot's canonical transcript, including records beyond the
+        // sidebar page. Temporary UI workspaces are recreated on every launch,
+        // so search prior temporary workspaces and adopt the latest transcript
+        // into the current workspace before resuming it.
+        const includeAllWorkspaces = isTempWorkspaceId(workspaceId);
+        const candidates = (await window.electronAPI.listBotConversations({
+          workspaceId,
+          includeAllWorkspaces,
+          agentRoleId: bot.id,
+          includeArchivedSessions: false,
+          limit: 500,
+          offset: 0,
+        })) as Task[];
+        let botTask = selectLatestBotConversation(candidates, bot.id);
+        if (botTask && botTask.workspaceId !== workspaceId && includeAllWorkspaces) {
+          const adopted = (await window.electronAPI.updateTaskWorkspace(botTask.id, workspaceId)) as
+            | Task
+            | undefined;
+          botTask = adopted || { ...botTask, workspaceId };
         }
+        if (botTask && !matchesBotConversation(botTask, workspaceId, bot.id)) {
+          throw new Error("Restart CoWork OS to load the updated bot transcript service.");
+        }
+        clearRemoteTaskView();
+        if (botTask) {
+          setBotConversationTasks((prev) =>
+            prev.some((candidate) => candidate.id === botTask.id)
+              ? prev.map((candidate) => (candidate.id === botTask.id ? botTask : candidate))
+              : [botTask, ...prev],
+          );
+          tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, botTask, {
+            prependIfMissing: true,
+          });
+          setTasks((prev) =>
+            upsertTaskPreservingIdentity(prev, botTask, { prependIfMissing: true }),
+          );
+          markTaskSwitchStart(botTask.id);
+          void selectTaskAfterDraftFlush(botTask.id);
+          setCurrentView("main");
+          return;
+        }
+        await handleCreateTask(
+          bot.displayName,
+          `Start chatting with ${bot.displayName}.`,
+          createBotConversationOptions(bot.id),
+        );
+        await loadBotConversations();
+      } catch (error) {
+        console.error("Failed to open bot transcript:", error);
+        addToast({
+          type: "error",
+          title: "Could not open bot",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Please try again. Your bot transcript has not been changed.",
+        });
+      } finally {
+        openingBotRef.current = false;
       }
-
-      if (botTask) {
-        markTaskSwitchStart(botTask.id);
-        setSelectedTaskId(botTask.id);
-        setCurrentView("main");
-        return;
-      }
-
-      await handleCreateTask(bot.displayName, `Start a conversation with ${bot.displayName}.`, {
-        executionMode: "chat",
-        assignedAgentRoleId: bot.id,
-        agentConfig: {
-          botConversation: true,
-          conversationMode: "chat",
-          executionMode: "chat",
-          executionModeSource: "user",
-        },
-      });
     },
-    [clearRemoteTaskView, currentWorkspace?.id, handleCreateTask, markTaskSwitchStart],
+    [
+      addToast,
+      clearRemoteTaskView,
+      currentWorkspace?.id,
+      handleCreateTask,
+      loadBotConversations,
+      markTaskSwitchStart,
+      selectTaskAfterDraftFlush,
+    ],
   );
   const handleOpenSettings = useCallback(() => setCurrentView("settings"), []);
   const handleOpenMissionControl = useCallback(() => {
@@ -5799,9 +6631,9 @@ export function App() {
       const task = tasksRef.current.find((candidate) => candidate.id === taskId);
       if (task && isSynthesisChildTask(task)) return;
       markTaskSwitchStart(taskId);
-      setSelectedTaskId(taskId);
+      void selectTaskAfterDraftFlush(taskId);
     },
-    [markTaskSwitchStart],
+    [markTaskSwitchStart, selectTaskAfterDraftFlush],
   );
   const handleSubmitInputRequestFromMainContent = useCallback(
     (requestId: string, answers: Record<string, { optionLabel?: string; otherText?: string }>) => {
@@ -5827,7 +6659,7 @@ export function App() {
       setCurrentView("main");
       clearRemoteTaskView();
       markTaskSwitchStart(taskId);
-      setSelectedTaskId(taskId);
+      void selectTaskAfterDraftFlush(taskId);
       setRightSidebarCollapsed(false);
       if (primaryOutputPath) {
         setRightPanelHighlight({ taskId, path: primaryOutputPath });
@@ -5835,7 +6667,7 @@ export function App() {
       setUnseenOutputTaskIds((prev) => prev.filter((id) => id !== taskId));
       setUnseenCompletedTaskIds((prev) => prev.filter((id) => id !== taskId));
     },
-    [clearRemoteTaskView, markTaskSwitchStart],
+    [clearRemoteTaskView, markTaskSwitchStart, selectTaskAfterDraftFlush],
   );
   const handleRightPanelHighlightConsumed = useCallback(() => {
     setRightPanelHighlight((prev) => (prev && prev.taskId === selectedTaskId ? null : prev));
@@ -5887,7 +6719,7 @@ export function App() {
       const existingTask = tasksRef.current.find((task) => task.id === taskId);
       if (existingTask) {
         markTaskSwitchStart(taskId);
-        setSelectedTaskId(taskId);
+        void selectTaskAfterDraftFlush(taskId);
         return;
       }
 
@@ -5899,12 +6731,125 @@ export function App() {
 
         setTasks((prev) => upsertTaskPreservingIdentity(prev, task, { prependIfMissing: true }));
         markTaskSwitchStart(task.id);
-        setSelectedTaskId(task.id);
+        void selectTaskAfterDraftFlush(task.id);
       } catch (error) {
         console.error("Failed to open task from shell navigation:", error);
       }
     },
-    [clearRemoteTaskView, markTaskSwitchStart],
+    [clearRemoteTaskView, markTaskSwitchStart, selectTaskAfterDraftFlush],
+  );
+
+  const handleSelectBotConversation = useCallback(
+    async (conversationId: string) => {
+      const workspaceId = currentWorkspaceRef.current?.id || currentWorkspace?.id;
+      const knownConversation = botConversationTasks.find(
+        (candidate) =>
+          candidate.id === conversationId &&
+          candidate.workspaceId === workspaceId &&
+          isBotConversation(candidate),
+      );
+      if (!knownConversation) {
+        await openTaskById(conversationId);
+        return;
+      }
+
+      clearRemoteTaskView();
+      tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, knownConversation, {
+        prependIfMissing: true,
+      });
+      setTasks((prev) =>
+        upsertTaskPreservingIdentity(prev, knownConversation, { prependIfMissing: true }),
+      );
+      markTaskSwitchStart(knownConversation.id);
+      void selectTaskAfterDraftFlush(knownConversation.id);
+      setCurrentView("main");
+    },
+    [
+      botConversationTasks,
+      clearRemoteTaskView,
+      currentWorkspace?.id,
+      markTaskSwitchStart,
+      openTaskById,
+      selectTaskAfterDraftFlush,
+    ],
+  );
+
+  const openBotConversationByDeepLink = useCallback(
+    async (route: { botId: string; conversationId?: string }) => {
+      if (!route?.botId) return;
+      try {
+        const workspaceId = currentWorkspaceRef.current?.id || currentWorkspace?.id;
+        if (!workspaceId) throw new Error("Select a workspace before opening a bot.");
+        let task: Task | null | undefined;
+        if (route.conversationId) {
+          task = (await window.electronAPI.getTask(route.conversationId)) as Task | null;
+          if (
+            !task ||
+            !isBotConversation(task) ||
+            task.assignedAgentRoleId !== route.botId ||
+            (task.workspaceId !== workspaceId && !isTempWorkspaceId(workspaceId))
+          ) {
+            throw new Error("That bot conversation could not be found.");
+          }
+          if (task.workspaceId !== workspaceId && isTempWorkspaceId(workspaceId)) {
+            const adopted = (await window.electronAPI.updateTaskWorkspace(task.id, workspaceId)) as
+              | Task
+              | undefined;
+            task = adopted || { ...task, workspaceId };
+          }
+        } else {
+          const candidates = (await window.electronAPI.listBotConversations({
+            workspaceId,
+            includeAllWorkspaces: isTempWorkspaceId(workspaceId),
+            agentRoleId: route.botId,
+            includeArchivedSessions: false,
+            limit: 500,
+            offset: 0,
+          })) as Task[];
+          task = selectLatestBotConversation(candidates, route.botId);
+          if (task && task.workspaceId !== workspaceId && isTempWorkspaceId(workspaceId)) {
+            const adopted = (await window.electronAPI.updateTaskWorkspace(task.id, workspaceId)) as
+              | Task
+              | undefined;
+            task = adopted || { ...task, workspaceId };
+          }
+          if (!task) {
+            const role = await window.electronAPI.getAgentRole(route.botId);
+            if (!role) throw new Error("That bot could not be found.");
+            await handleNewBotConversation(route.botId);
+            return;
+          }
+        }
+        const resolvedTask = task as Task;
+        clearRemoteTaskView();
+        setTasks((prev) =>
+          upsertTaskPreservingIdentity(prev, resolvedTask, { prependIfMissing: true }),
+        );
+        setBotConversationTasks((prev) =>
+          prev.some((candidate) => candidate.id === resolvedTask.id)
+            ? prev.map((candidate) => (candidate.id === resolvedTask.id ? resolvedTask : candidate))
+            : [resolvedTask, ...prev],
+        );
+        markTaskSwitchStart(resolvedTask.id);
+        void selectTaskAfterDraftFlush(resolvedTask.id);
+        setCurrentView("main");
+      } catch (error) {
+        console.error("Failed to open bot deeplink:", error);
+        addToast({
+          type: "error",
+          title: "Could not open bot conversation",
+          message: error instanceof Error ? error.message : "Please try again.",
+        });
+      }
+    },
+    [
+      addToast,
+      clearRemoteTaskView,
+      currentWorkspace?.id,
+      handleNewBotConversation,
+      markTaskSwitchStart,
+      selectTaskAfterDraftFlush,
+    ],
   );
 
   useEffect(() => {
@@ -5941,6 +6886,14 @@ export function App() {
 
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
   }, [openTaskById]);
+
+  useEffect(() => {
+    if (!window.electronAPI?.onNavigateToBotConversation) return;
+    const unsubscribe = window.electronAPI.onNavigateToBotConversation((route) => {
+      void openBotConversationByDeepLink(route);
+    });
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [openBotConversationByDeepLink]);
 
   if (!hasElectronAPI) {
     const isHttpContext =
@@ -6219,7 +7172,7 @@ export function App() {
               </svg>
             )}
           </button>
-          {currentView === "main" && !isSelectedBotConversation && (
+          {currentView === "main" && (
             <button
               type="button"
               className="title-bar-btn title-bar-panel-toggle"
@@ -6308,7 +7261,13 @@ export function App() {
               <Sidebar
                 workspace={currentWorkspace}
                 tasks={tasks}
+                botTasks={botConversationTasks}
                 selectedTaskId={selectedTaskId}
+                isBotViewActive={
+                  currentView === "main" &&
+                  !remoteTaskView &&
+                  selectedTask?.agentConfig?.botConversation === true
+                }
                 isAutomationsActive={currentView === "automations"}
                 isIdeasActive={currentView === "ideas"}
                 isInboxAgentActive={currentView === "inboxAgent"}
@@ -6326,13 +7285,18 @@ export function App() {
                 onOpenInboxAgent={() => setCurrentView("inboxAgent")}
                 onOpenAgents={() => setCurrentView("agents")}
                 onOpenBot={handleOpenBot}
+                onBotDeleted={(botId) => {
+                  if (selectedTask?.assignedAgentRoleId === botId) {
+                    handleClearTaskView();
+                  }
+                }}
                 onOpenEverydayAgent={() => setCurrentView("everydayAgent")}
                 onOpenHealth={() => setCurrentView("health")}
                 onOpenDevices={() => setCurrentView("devices")}
                 onNewSession={handleNewSession}
                 onOpenSettings={handleOpenSettings}
                 onOpenMissionControl={handleOpenMissionControl}
-                onTasksChanged={loadTasks}
+                onTasksChanged={refreshTaskLists}
                 onLoadMoreTasks={loadMoreTasks}
                 hasMoreTasks={hasMoreTasks}
                 uiDensity={uiDensity}
@@ -6351,7 +7315,7 @@ export function App() {
                   <AutomationStudioPanel
                     workspaceId={currentWorkspace?.id}
                     onOpenTask={(taskId) => {
-                      setSelectedTaskId(taskId);
+                      void selectTaskAfterDraftFlush(taskId);
                       setCurrentView("main");
                     }}
                   />
@@ -6365,7 +7329,7 @@ export function App() {
                   providers={availableProviders}
                   automationInboxFocusTick={homeAutomationFocusTick}
                   onOpenTask={(taskId) => {
-                    setSelectedTaskId(taskId);
+                    void selectTaskAfterDraftFlush(taskId);
                     setCurrentView("main");
                   }}
                   onNewSession={handleNewSession}
@@ -6404,7 +7368,7 @@ export function App() {
                       return;
                     }
                     clearRemoteTaskView();
-                    setSelectedTaskId(taskId);
+                    void selectTaskAfterDraftFlush(taskId);
                     setCurrentView("main");
                   }}
                   onCreateTaskHere={async (prompt, options) => {
@@ -6418,8 +7382,8 @@ export function App() {
                             collaborativeMode: options.collaborativeMode,
                             multiLlmMode: options.multiLlmMode,
                             multiLlmConfig: options.multiLlmConfig,
-                            interactionMode: options.interactionMode,
                             executionMode: options.executionMode,
+                            agentConfig: { interactionMode: options.interactionMode },
                             taskDomain: options.taskDomain,
                             chronicleMode: options.chronicleMode,
                             accessProfileId: options.accessProfileId,
@@ -6436,6 +7400,9 @@ export function App() {
                         workspaceId: currentWorkspace?.id,
                         agentConfig: options
                           ? {
+                              ...(options.interactionMode
+                                ? { interactionMode: options.interactionMode }
+                                : {}),
                               ...(options.autonomousMode && {
                                 autonomousMode: true,
                                 allowUserInput: false,
@@ -6445,9 +7412,6 @@ export function App() {
                               ...(options.multiLlmMode && {
                                 multiLlmMode: true,
                                 multiLlmConfig: options.multiLlmConfig,
-                              }),
-                              ...(options.interactionMode && {
-                                interactionMode: options.interactionMode,
                               }),
                               ...(options.executionMode && {
                                 executionMode: options.executionMode,
@@ -6584,6 +7548,17 @@ export function App() {
                   replayControls={replayControls}
                   sharedTaskEventUi={sharedTaskEventUi}
                   remoteTaskView={remoteTaskView}
+                  botConversations={botConversationTasks}
+                  isLoadingBotConversations={isLoadingBotConversations}
+                  draftValue={composerDraft.draft?.text ?? ""}
+                  draftRevision={composerDraft.draft?.revision ?? 0}
+                  onDraftValueChange={handleComposerDraftValueChange}
+                  onDraftAccepted={handleComposerDraftAccepted}
+                  draftSnapshot={composerDraft.draft}
+                  onDraftPatch={handleComposerDraftPatch}
+                  onStageDraftAttachment={handleStageDraftAttachment}
+                  onResolveDraftAttachment={handleResolveDraftAttachment}
+                  onReleaseDraftAttachment={handleReleaseDraftAttachment}
                   childTasks={childTasks}
                   childEvents={childEvents}
                   activeInputRequest={activeInputRequest}
@@ -6605,11 +7580,18 @@ export function App() {
                   onLoadTaskEventDetail={handleLoadTaskEventDetail}
                   onReleaseTaskEventDetail={handleReleaseTaskEventDetail}
                   effectiveRightCollapsed={effectiveRightCollapsed}
+                  onCloseRightPanel={handleRightSidebarToggle}
                   terminalTabsOpen={terminalTabsOpen}
                   browserWorkbenchRequest={browserWorkbenchRequest}
                   sideChat={sideChat}
+                  sideChatDraftValue={sideChatDraft.draft?.text ?? ""}
+                  sideChatDraftRevision={sideChatDraft.draft?.revision ?? 0}
+                  onSideChatDraftValueChange={handleSideChatDraftValueChange}
+                  onSideChatDraftAccepted={handleSideChatDraftAccepted}
                   rightPanelInput={visibleRightPanelInput}
                   onSelectChildTask={handleSelectChildTaskFromMainContent}
+                  onSelectBotConversation={handleSelectBotConversation}
+                  onNewBotConversation={handleNewBotConversation}
                   onSelectTask={handleSelectTaskFromShell}
                   onSendMessage={handleSendMessage}
                   onOpenSideChat={handleOpenSideChat}
@@ -6636,7 +7618,7 @@ export function App() {
                   onOpenBrowserView={handleOpenBrowserView}
                   onRevealRightSidebar={handleRevealRightSidebar}
                   onViewTaskOutputs={handleViewTaskOutputsFromMainContent}
-                  onTasksChanged={loadTasks}
+                  onTasksChanged={refreshTaskLists}
                   onCancelTaskById={handleCancelTaskById}
                   onHighlightConsumed={handleRightPanelHighlightConsumed}
                   onCloseTerminalTabs={handleCloseTerminalTabs}
@@ -6692,7 +7674,7 @@ export function App() {
             toasts={toasts}
             onDismiss={dismissToast}
             onTaskClick={(taskId) => {
-              setSelectedTaskId(taskId);
+              void selectTaskAfterDraftFlush(taskId);
               setCurrentView("main");
             }}
           />
@@ -6713,6 +7695,8 @@ export function App() {
             onTransparencyEffectsEnabledChange={handleTransparencyEffectsEnabledChange}
             uiDensity={uiDensity}
             onUiDensityChange={handleUiDensityChange}
+            commandOutputStyle={commandOutputStyle}
+            onCommandOutputStyleChange={handleCommandOutputStyleChange}
             devRunLoggingEnabled={devRunLoggingEnabled}
             onDevRunLoggingEnabledChange={handleDevRunLoggingEnabledChange}
             homeResearchVaultEnabled={homeResearchVaultEnabled}
@@ -6729,7 +7713,7 @@ export function App() {
             }}
             onOpenTask={(taskId) => {
               setCurrentView("main");
-              setSelectedTaskId(taskId);
+              void selectTaskAfterDraftFlush(taskId);
               setRightSidebarCollapsed(false);
             }}
             onNavigateToMissionControl={(companyId) => {

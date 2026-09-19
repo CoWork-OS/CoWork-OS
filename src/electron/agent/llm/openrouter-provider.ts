@@ -16,7 +16,10 @@ import {
   extractOpenAICompatibleCacheUsage,
   normalizeSystemBlocks,
 } from "./prompt-cache";
-import { buildOpenAICompatibleSystemMessages } from "./openai-compatible";
+import {
+  buildOpenAICompatibleSystemMessages,
+  parseOpenAICompatibleToolArguments,
+} from "./openai-compatible";
 import { createLogger } from "../../utils/logger";
 
 const logger = createLogger("OpenRouter");
@@ -569,26 +572,13 @@ export class OpenRouterProvider implements LLMProvider {
     if (message.tool_calls) {
       for (const toolCall of message.tool_calls) {
         if (toolCall.type === "function") {
-          let input: Record<string, Any>;
-          try {
-            input =
-              typeof toolCall.function.arguments === "string"
-                ? JSON.parse(toolCall.function.arguments || "{}")
-                : (toolCall.function.arguments as Record<string, Any>) || {};
-          } catch (err) {
-            logger.error(
-              `Failed to parse OpenRouter tool arguments for "${toolCall.function.name}":`,
-              err,
-            );
-            throw new Error(
-              `OpenRouter tool call "${toolCall.function.name}" has malformed arguments: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
+          const parsedArguments = parseOpenAICompatibleToolArguments(toolCall.function?.arguments);
           content.push({
             type: "tool_use",
             id: toolCall.id,
             name: toolCall.function.name,
-            input,
+            input: parsedArguments.input,
+            ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
           });
         }
       }

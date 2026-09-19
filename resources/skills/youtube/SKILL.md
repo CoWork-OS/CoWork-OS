@@ -37,11 +37,11 @@ Fetch transcripts, metadata, and captions from YouTube videos. Use when you need
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| url | string | No | YouTube video URL or video ID |
+| Name | Type   | Required | Description                   |
+| ---- | ------ | -------- | ----------------------------- |
+| url  | string | No       | YouTube video URL or video ID |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 821 characters.
-- Runtime prompt is defined directly in `../youtube.json`. 
+- Runtime prompt is defined directly in `../youtube.json`.

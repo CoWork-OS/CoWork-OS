@@ -107,6 +107,26 @@ describeWithSqlite("EvalService isolated replay", () => {
     expect(run.passCount).toBe(1);
     expect(run.caseRuns[0]?.details).toContain("isolated replay passed");
     expect(run.caseRuns[0]?.details).not.toContain("stale snapshot text");
+
+    db.prepare("UPDATE eval_suites SET case_ids = ? WHERE id = ?").run(
+      JSON.stringify(["case-replay", "deleted-case"]),
+      "suite-replay",
+    );
+    const incompleteRun = evalService.runSuite("suite-replay");
+    expect(incompleteRun).toMatchObject({ status: "failed", passCount: 1, failCount: 1 });
+    db.prepare("UPDATE eval_suites SET case_ids = ? WHERE id = ?").run(
+      JSON.stringify(["case-replay"]),
+      "suite-replay",
+    );
+    for (const assertions of ["{", JSON.stringify({ mustUseTools: ["run_tests"] })]) {
+      db.prepare("UPDATE eval_cases SET assertions = ? WHERE id = ?").run(
+        assertions,
+        "case-replay",
+      );
+      const invalidRun = evalService.runSuite("suite-replay");
+      expect(invalidRun).toMatchObject({ status: "failed", passCount: 0, failCount: 1 });
+      expect(invalidRun.caseRuns[0]?.details).toMatch(/invalid_assertions|unsupported_assertion/);
+    }
   });
 
   it("falls back to complete legacy evidence while canonical backfill is partial", () => {

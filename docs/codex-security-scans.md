@@ -27,11 +27,11 @@ instead of falling back to unrestricted repository access.
 
 ## Scan Modes
 
-| Mode | Slash command | Skill ID | Scope |
-|------|---------------|----------|-------|
-| Repository scan | `/security-scan` | `codex-security:security-scan` | Repository-wide or scoped-path scan |
-| Diff scan | `/security-diff-scan` | `codex-security:security-diff-scan` | Git revision, branch, commit, staged, or unstaged diff review |
-| Deep scan | `/deep-security-scan` | `codex-security:deep-security-scan` | Repository-wide multi-pass scan with six independent discovery workers per round |
+| Mode            | Slash command         | Skill ID                            | Scope                                                                            |
+| --------------- | --------------------- | ----------------------------------- | -------------------------------------------------------------------------------- |
+| Repository scan | `/security-scan`      | `codex-security:security-scan`      | Repository-wide or scoped-path scan                                              |
+| Diff scan       | `/security-diff-scan` | `codex-security:security-diff-scan` | Git revision, branch, commit, staged, or unstaged diff review                    |
+| Deep scan       | `/deep-security-scan` | `codex-security:deep-security-scan` | Repository-wide multi-pass scan with six independent discovery workers per round |
 
 The top-level skills preserve the upstream Codex Security phase model:
 
@@ -50,16 +50,16 @@ Deep scans repeat the variance-sensitive discovery phase before centralized vali
 
 The pack uses directory-backed skills via `skillDirectories` in `cowork.plugin.json`.
 
-| Skill ID | Purpose |
-|----------|---------|
-| `codex-security:security-scan` | Repository-wide or scoped-path security scan entrypoint |
-| `codex-security:security-diff-scan` | Security review for Git diffs |
-| `codex-security:deep-security-scan` | Exhaustive repository-wide multi-pass scan |
-| `codex-security:threat-model` | Threat modeling phase |
-| `codex-security:finding-discovery` | Candidate discovery phase |
-| `codex-security:validation` | Finding validation phase |
-| `codex-security:attack-path-analysis` | Attack-path and severity analysis |
-| `codex-security:fix-finding` | Fix and verify a validated or plausible finding |
+| Skill ID                              | Purpose                                                 |
+| ------------------------------------- | ------------------------------------------------------- |
+| `codex-security:security-scan`        | Repository-wide or scoped-path security scan entrypoint |
+| `codex-security:security-diff-scan`   | Security review for Git diffs                           |
+| `codex-security:deep-security-scan`   | Exhaustive repository-wide multi-pass scan              |
+| `codex-security:threat-model`         | Threat modeling phase                                   |
+| `codex-security:finding-discovery`    | Candidate discovery phase                               |
+| `codex-security:validation`           | Finding validation phase                                |
+| `codex-security:attack-path-analysis` | Attack-path and severity analysis                       |
+| `codex-security:fix-finding`          | Fix and verify a validated or plausible finding         |
 
 Directory-backed skills read `SKILL.md` and relative `references/`, `scripts/`, `assets/`, and `agents/` files from their pack directory. CoWork uses the manifest definition first, then `SKILL.md` frontmatter, then a title generated from the skill ID for display metadata.
 
@@ -163,13 +163,13 @@ npm run skills:check
 
 ## Implementation Landmarks
 
-| Area | Files |
-|------|-------|
-| Bundled pack | `resources/plugin-packs/codex-security/` |
-| Scan orchestration | `resources/plugin-packs/codex-security/skills/**/SKILL.md` and pack scripts/references |
-| Tool catalog behavior | `src/electron/agent/tools/registry.ts` |
-| Directory-backed pack skills | `src/electron/extensions/registry.ts`, `src/electron/extensions/types.ts` |
-| Pack discovery/loading | `src/electron/extensions/loader.ts`, `src/electron/ipc/plugin-pack-handlers.ts` |
-| Packaged resource inclusion | `package.json` `build.extraResources` |
+| Area                         | Files                                                                                  |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| Bundled pack                 | `resources/plugin-packs/codex-security/`                                               |
+| Scan orchestration           | `resources/plugin-packs/codex-security/skills/**/SKILL.md` and pack scripts/references |
+| Tool catalog behavior        | `src/electron/agent/tools/registry.ts`                                                 |
+| Directory-backed pack skills | `src/electron/extensions/registry.ts`, `src/electron/extensions/types.ts`              |
+| Pack discovery/loading       | `src/electron/extensions/loader.ts`, `src/electron/ipc/plugin-pack-handlers.ts`        |
+| Packaged resource inclusion  | `package.json` `build.extraResources`                                                  |
 
 If this feature changes, update this guide, [Plugin Packs](plugin-packs.md), [Security Guide](security-guide.md), and [Development](development.md) in the same PR.

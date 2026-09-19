@@ -107,7 +107,9 @@ function main() {
     );
   }
 
-  process.stdout.write("[macos-signing] Developer ID signing and notarization inputs are configured.\n");
+  process.stdout.write(
+    "[macos-signing] Developer ID signing and notarization inputs are configured.\n",
+  );
 }
 
 main();

@@ -73,6 +73,15 @@ export interface PolicyContext {
 
 /**
  * Security Policy Manager implementing monotonic deny-wins precedence
+ *
+ * NOT WIRED UP. Nothing in the running app calls this class or
+ * `createPolicyManager`; only `isToolAllowedQuick` from this module is used in
+ * production. Live tool-permission decisions are made by
+ * `src/electron/security/monty-tool-policy.ts`, `ToolPolicyPipeline`, and
+ * `PermissionEngine`. Do not treat this as an enforcement point, and do not add
+ * checks here expecting them to take effect. Kept for now because it is
+ * exercised by tests and re-exported from `security/index.ts`; remove both
+ * along with it if you delete this.
  */
 export class SecurityPolicyManager {
   private deniedTools: Set<string> = new Set();

@@ -42,6 +42,7 @@ Junior writes "what they did". Mid writes "how they did it". **Senior writes "wh
 **Single purpose**: the reader grasps the point in 30 seconds.
 
 **Structure**:
+
 1. **Headline** (serif display) + one-line subtitle (sans body)
 2. **Metrics** - 3-4 cards, numbers first
 3. **Core argument** (1-2 paragraphs)
@@ -49,6 +50,7 @@ Junior writes "what they did". Mid writes "how they did it". **Senior writes "wh
 5. **Next step / contact** (footer)
 
 **Rules**:
+
 - Total: 200-350 words
 - All section headlines should work as a standalone outline - reading just the headlines should deliver the gist
 - Data must fill 30%+ of the body
@@ -57,6 +59,7 @@ Junior writes "what they did". Mid writes "how they did it". **Senior writes "wh
 ### Long Document
 
 **Structure**:
+
 1. **Cover** - big title + subtitle + author + date
 2. **Contents** (auto-generated or hand-written TOC)
 3. **Executive Summary** (≤ 1 page + 3-5 takeaways)
@@ -64,6 +67,7 @@ Junior writes "what they did". Mid writes "how they did it". **Senior writes "wh
 5. **Appendix / references** (if applicable)
 
 **Rules**:
+
 - Every chapter opens with a "claim paragraph" (2-3 sentences summarizing the argument)
 - After long paragraphs (>5 lines), intersperse callouts / quotes / figures to relieve eye fatigue
 - Highlight key data / conclusions with `<span class="hl">`
@@ -72,6 +76,7 @@ Junior writes "what they did". Mid writes "how they did it". **Senior writes "wh
 ### Letter
 
 **Structure**:
+
 1. Letterhead (sender info, top right or centered)
 2. Date (right-aligned)
 3. Recipient salutation (left-aligned)
@@ -81,12 +86,14 @@ Junior writes "what they did". Mid writes "how they did it". **Senior writes "wh
 7. Enclosures (if any)
 
 **Rules**:
+
 - Minimal - no decorative elements
 - Body prefers serif (editorial feel)
 - Slightly larger type (11-12pt body) - this will be read, not scanned
 - Paragraph spacing ≥ 10pt
 
 **Common use cases**:
+
 - Resignation / notice
 - Recommendation letter
 - Formal collaboration proposal
@@ -95,6 +102,7 @@ Junior writes "what they did". Mid writes "how they did it". **Senior writes "wh
 ### Portfolio
 
 **Structure**:
+
 1. **Cover** (name + one-line positioning + contact)
 2. **About** (half-page introduction)
 3. **Per-project 1-2 pages**:
@@ -106,6 +114,7 @@ Junior writes "what they did". Mid writes "how they did it". **Senior writes "wh
 5. **Contact** (return to contact details)
 
 **Rules**:
+
 - Visuals first, text supports
 - Every project's outcome must be quantifiable
 - Photos > design mockups > code screenshots (the more abstract, the better)
@@ -116,12 +125,14 @@ Junior writes "what they did". Mid writes "how they did it". **Senior writes "wh
 The most constrained document type in kami.
 
 **Hard constraints**:
+
 - Strictly 2 A4 pages
 - Every project follows three-part: Role / Actions / Impact
 - 5 core skills, each with at least one brand-color emphasis
 - Team size, tech stack, narrative voice must stay consistent throughout
 
 **Key sections**:
+
 - Header + 4 metric cards
 - Summary (~50 words)
 - Timeline (3 steps - long-range evolution signal)
@@ -131,6 +142,7 @@ The most constrained document type in kami.
 - Education
 
 **Metric card selection rule**:
+
 - 1 card on **time** (years, consistency)
 - 1 card on **scale** (team, users, projects, or other quantifiable scope)
 - 2 cards on **results** (quantifiable external proof)
@@ -142,19 +154,20 @@ The most constrained document type in kami.
 ### Emphasis rhythm
 
 Across any document:
+
 - ≤ 2 emphasized items per line
 - Emphasis must be a **quantifiable number** or a **distinctive phrase**
 - Do not emphasize adjectives
 
 ### Number formatting
 
-| ✅ | ❌ |
-|---|---|
-| 5,000+ | 5000+ (missing thousands separator) |
-| 90% | 90 % (space before percent) |
-| ~$10M | $9,876,543 (false precision reads fake) |
+| ✅      | ❌                                          |
+| ------- | ------------------------------------------- |
+| 5,000+  | 5000+ (missing thousands separator)         |
+| 90%     | 90 % (space before percent)                 |
+| ~$10M   | $9,876,543 (false precision reads fake)     |
 | 2026.04 | April 2026 (when horizontal space is tight) |
-| -> | → |
+| ->      | →                                           |
 
 ### Emphasis is not bold
 

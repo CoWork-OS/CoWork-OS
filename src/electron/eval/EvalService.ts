@@ -16,6 +16,7 @@ import { WorkSessionProtocolRepository } from "../database/WorkSessionProtocolRe
 import { mapTaskEventKind } from "../sessions/WorkSessionProtocolService";
 import {
   evaluateIsolatedReplay,
+  validateReplayAssertions,
   type WorkSessionReplayAssertions,
 } from "../sessions/WorkSessionReplayEvaluationService";
 
@@ -167,7 +168,7 @@ export class EvalService {
       prompt: row.prompt,
       sanitizedPrompt: row.sanitized_prompt,
       assertions: row.assertions
-        ? safeJsonParse<EvalCase["assertions"]>(row.assertions, undefined)
+        ? safeJsonParse<EvalCase["assertions"]>(row.assertions, row.assertions)
         : undefined,
       metadata: row.metadata ? safeJsonParse<Record<string, unknown>>(row.metadata, {}) : undefined,
       createdAt: row.created_at,
@@ -466,24 +467,9 @@ export class EvalService {
       const caseRunStartedAt = Date.now();
 
       if (!caseDef) {
-        skippedCount += 1;
-        this.db
-          .prepare(
-            `
-            INSERT INTO eval_case_runs (
-              id, run_id, case_id, status, details, started_at, completed_at, duration_ms
-            ) VALUES (?, ?, ?, 'skipped', ?, ?, ?, ?)
-          `,
-          )
-          .run(
-            uuidv4(),
-            runId,
-            caseId,
-            "Missing eval case definition",
-            caseRunStartedAt,
-            Date.now(),
-            Date.now() - caseRunStartedAt,
-          );
+        // A missing selected definition is failed coverage. It cannot have a
+        // case-run row because that row requires an existing case foreign key.
+        failCount += 1;
         continue;
       }
 
@@ -514,7 +500,8 @@ export class EvalService {
 
     const executedCount = passCount + failCount;
     const completedAt = Date.now();
-    const status: EvalRun["status"] = failCount > 0 || executedCount === 0 ? "failed" : "completed";
+    const status: EvalRun["status"] =
+      failCount > 0 || skippedCount > 0 || executedCount === 0 ? "failed" : "completed";
 
     this.db
       .prepare(
@@ -537,6 +524,10 @@ export class EvalService {
     status: "pass" | "fail" | "skipped";
     details: string;
   } {
+    const assertionErrors = validateReplayAssertions(evalCase.assertions);
+    if (assertionErrors.length > 0) {
+      return { status: "fail", details: assertionErrors.join("; ") };
+    }
     if (!evalCase.sourceTaskId) {
       return { status: "skipped", details: "No source task linked to eval case" };
     }

@@ -22,6 +22,7 @@ import {
   resolvePreferredTaskOutputSummary,
 } from "./task-outputs";
 import { hasAssistantMediaDirective } from "./assistant-media-directives";
+import { hasDisplayableAssistantText } from "../components/MainContent/markdown-normalization";
 import {
   filterAdjacentDuplicateTimelineFailures,
   filterResolvedApprovalNarration,
@@ -154,6 +155,15 @@ const LIVE_COALESCE_WINDOW_MS = 10_000;
 const LIVE_PROJECTION_FORCE_VISIBLE_TYPES = new Set([
   "assistant_message",
   "user_message",
+  "agent_spawn_requested",
+  "agent_spawned",
+  "agent_message",
+  "agent_follow_up_scheduled",
+  "agent_follow_up_started",
+  "agent_interrupt_requested",
+  "agent_interrupt_confirmed",
+  "agent_completed",
+  "agent_failed",
   "approval_requested",
   "input_request_created",
   "task_completed",
@@ -168,6 +178,15 @@ function isLiveAnchorEvent(event: TaskEvent): boolean {
   const effectiveType = getEffectiveTaskEventType(event);
   return (
     effectiveType === "user_message" ||
+    effectiveType === "agent_message" ||
+    effectiveType === "agent_follow_up_scheduled" ||
+    effectiveType === "agent_follow_up_started" ||
+    effectiveType === "agent_interrupt_requested" ||
+    effectiveType === "agent_interrupt_confirmed" ||
+    effectiveType === "agent_spawn_requested" ||
+    effectiveType === "agent_spawned" ||
+    effectiveType === "agent_completed" ||
+    effectiveType === "agent_failed" ||
     effectiveType === "assistant_message" ||
     effectiveType === "approval_requested" ||
     effectiveType === "input_request_created" ||
@@ -246,6 +265,10 @@ const TASK_STATUS_HISTORY_TYPES = new Set([
   "agent_spawned",
   "agent_completed",
   "agent_failed",
+  "agent_follow_up_scheduled",
+  "agent_follow_up_started",
+  "agent_interrupt_requested",
+  "agent_interrupt_confirmed",
   "approval_requested",
   "approval_granted",
   "approval_denied",
@@ -256,6 +279,12 @@ const TASK_STATUS_HISTORY_TYPES = new Set([
   "input_request_resolved",
   "input_request_dismissed",
   "user_message",
+  "agent_spawn_requested",
+  "agent_message",
+  "agent_follow_up_scheduled",
+  "agent_follow_up_started",
+  "agent_interrupt_requested",
+  "agent_interrupt_confirmed",
   "task_completed",
   "task_cancelled",
   "error",
@@ -845,11 +874,38 @@ function deriveBaseTimelineItems(filteredEvents: TaskEvent[]): BaseTimelineItem[
     currentBlockIndices = [];
   };
 
+  /**
+   * Assistant turns that carry only tool-call markup sanitize away to an empty bubble. They
+   * still used to split the feed, which left two action block headers stacked with a blank gap
+   * between them — one activity stream shown as two. Keep those turns inside the surrounding
+   * block (rather than dropping them) so any command output anchored to them still renders.
+   */
+  const rendersAnAssistantBubble = (event: TaskEvent) => {
+    const payload = asObject(event.payload);
+    const message =
+      getCompletionSummaryText(event) ||
+      (typeof payload.message === "string" ? payload.message : "");
+    // Media directives survive sanitization as text, so this also covers attachment-only turns.
+    return hasDisplayableAssistantText(message);
+  };
+
   const isBoundaryEvent = (event: TaskEvent) => {
     const effectiveType = getEffectiveTaskEventType(event);
+    if (effectiveType === "assistant_message" && !rendersAnAssistantBubble(event)) {
+      return false;
+    }
     return (
       effectiveType === "user_message" ||
       effectiveType === "assistant_message" ||
+      effectiveType === "agent_message" ||
+      effectiveType === "agent_follow_up_scheduled" ||
+      effectiveType === "agent_follow_up_started" ||
+      effectiveType === "agent_interrupt_requested" ||
+      effectiveType === "agent_interrupt_confirmed" ||
+      effectiveType === "agent_spawn_requested" ||
+      effectiveType === "agent_spawned" ||
+      effectiveType === "agent_completed" ||
+      effectiveType === "agent_failed" ||
       effectiveType === "follow_up_completed" ||
       (effectiveType === "task_completed" && getCompletionSummaryText(event).length > 0) ||
       effectiveType === "artifact_created" ||

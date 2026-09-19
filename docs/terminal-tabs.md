@@ -32,10 +32,10 @@ That division is the important product shift. CoWork can keep the terminal insid
 
 Terminal Tabs are split across three layers:
 
-| Layer | Responsibility |
-| --- | --- |
-| Renderer | `TerminalTabsDock` creates xterm instances, fits them to the dock, forwards keyboard input, renders PTY output, and exposes tab controls. |
-| Preload / IPC | Typed terminal-tab channels create, list, write, resize, stop, and close tabs while keeping renderer access narrow. |
+| Layer         | Responsibility                                                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Renderer      | `TerminalTabsDock` creates xterm instances, fits them to the dock, forwards keyboard input, renders PTY output, and exposes tab controls.                           |
+| Preload / IPC | Typed terminal-tab channels create, list, write, resize, stop, and close tabs while keeping renderer access narrow.                                                 |
 | Electron main | `TerminalPtyManager` creates and owns `node-pty` processes, keeps per-tab output replay buffers, tracks cwd/status metadata, and enforces per-workspace tab limits. |
 
 The dock lazy-loads xterm so the main renderer bundle does not pay the terminal cost until the terminal is opened.

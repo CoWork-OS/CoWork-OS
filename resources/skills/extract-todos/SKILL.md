@@ -37,11 +37,11 @@ Find all TODO/FIXME comments in codebase
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to search |
+| Name | Type   | Required | Description    |
+| ---- | ------ | -------- | -------------- |
+| path | string | Yes      | Path to search |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 517 characters.
-- Runtime prompt is defined directly in `../extract-todos.json`. 
+- Runtime prompt is defined directly in `../extract-todos.json`.

@@ -128,20 +128,21 @@ AI text is relentlessly balanced and never commits:
 
 If the user specifies a tone, apply it:
 
-| Tone | Characteristics |
-|------|----------------|
-| **Casual** | Contractions, short sentences, conversational asides, informal vocab |
-| **Professional** | Clean and direct, no jargon for jargon's sake, confident but not stiff |
-| **Academic** | Precise language, longer sentences OK, hedging where scientifically appropriate, citations preserved |
-| **Journalistic** | Lead with the news, inverted pyramid, active voice, tight prose |
-| **Technical** | Exact terminology, no fluff, imperative mood for instructions |
-| **Warm/Personal** | First person, anecdotes welcome, emotional honesty, contractions |
+| Tone              | Characteristics                                                                                      |
+| ----------------- | ---------------------------------------------------------------------------------------------------- |
+| **Casual**        | Contractions, short sentences, conversational asides, informal vocab                                 |
+| **Professional**  | Clean and direct, no jargon for jargon's sake, confident but not stiff                               |
+| **Academic**      | Precise language, longer sentences OK, hedging where scientifically appropriate, citations preserved |
+| **Journalistic**  | Lead with the news, inverted pyramid, active voice, tight prose                                      |
+| **Technical**     | Exact terminology, no fluff, imperative mood for instructions                                        |
+| **Warm/Personal** | First person, anecdotes welcome, emotional honesty, contractions                                     |
 
 ---
 
 ## Output Format
 
 Return only the rewritten text. Do not include:
+
 - Explanations of what you changed
 - Before/after comparisons (unless the user asks)
 - Meta-commentary about the rewriting process

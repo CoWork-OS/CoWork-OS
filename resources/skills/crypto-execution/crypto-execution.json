@@ -12,11 +12,7 @@
       "description": "Exchange for execution",
       "required": true,
       "default": "binance",
-      "options": [
-        "binance",
-        "bybit",
-        "coinbase"
-      ]
+      "options": ["binance", "bybit", "coinbase"]
     },
     {
       "name": "symbol",
@@ -30,10 +26,7 @@
       "type": "select",
       "description": "Buy or sell direction",
       "required": true,
-      "options": [
-        "buy",
-        "sell"
-      ]
+      "options": ["buy", "sell"]
     },
     {
       "name": "order_type",
@@ -41,10 +34,7 @@
       "description": "Order type",
       "required": true,
       "default": "market",
-      "options": [
-        "market",
-        "limit"
-      ]
+      "options": ["market", "limit"]
     },
     {
       "name": "amount",
@@ -61,12 +51,8 @@
   ],
   "enabled": true,
   "requires": {
-    "tools": [
-      "run_command"
-    ],
-    "bins": [
-      "python3"
-    ]
+    "tools": ["run_command"],
+    "bins": ["python3"]
   },
   "metadata": {
     "routing": {

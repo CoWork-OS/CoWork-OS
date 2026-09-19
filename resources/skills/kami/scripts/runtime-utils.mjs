@@ -69,21 +69,10 @@ export function resolveBrowserExecutable() {
       : process.platform === "win32"
         ? [
             process.env.LOCALAPPDATA
-              ? path.join(
-                  process.env.LOCALAPPDATA,
-                  "Google",
-                  "Chrome",
-                  "Application",
-                  "chrome.exe",
-                )
+              ? path.join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe")
               : "",
             process.env.LOCALAPPDATA
-              ? path.join(
-                  process.env.LOCALAPPDATA,
-                  "Chromium",
-                  "Application",
-                  "chrome.exe",
-                )
+              ? path.join(process.env.LOCALAPPDATA, "Chromium", "Application", "chrome.exe")
               : "",
             "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
             "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
@@ -138,6 +127,8 @@ export function ensureNoPlaceholders(sourcePath) {
   const text = fs.readFileSync(sourcePath, "utf-8");
   const placeholders = Array.from(new Set(text.match(/\{\{[^}]+\}\}/g) || []));
   if (placeholders.length > 0) {
-    throw new Error(`Unfilled placeholders in ${path.basename(sourcePath)}: ${placeholders.join(", ")}`);
+    throw new Error(
+      `Unfilled placeholders in ${path.basename(sourcePath)}: ${placeholders.join(", ")}`,
+    );
   }
 }

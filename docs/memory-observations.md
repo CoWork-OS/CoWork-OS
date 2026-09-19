@@ -93,9 +93,10 @@ suppressed and redacted observations are excluded from both search-based recall 
 prompt recall.
 
 Supermemory mirroring remains additive and opt-in. Private, redacted, and suppressed local entries
-must not be mirrored. When Memory Write Approval is enabled for external or background writes,
-eligible mirror attempts are staged for review before leaving the device. Sensitive external-memory
-payloads are blocked before they can be stored in the pending approval queue.
+must not be mirrored. The normal no-prompt runtime commits eligible mirror attempts immediately
+after the same privacy and sensitive-payload checks. A controlled run can opt into the review queue
+with `COWORK_MEMORY_WRITE_APPROVAL_MODE=external_only` or `background_only`; sensitive
+external-memory payloads are blocked before they can be stored in that queue.
 
 ## Access profile boundary
 
@@ -104,8 +105,10 @@ memory reads remain subject to the effective task [access
 profile](access-profiles.md), workspace scope, and tool restrictions. Memory
 tools cannot use a recall request to widen filesystem, network, command-tool,
 or cross-task access. Memory writes also remain subject to the separate Memory
-Write Approval policy; an access profile cannot turn a blocked or unavailable
-write into an allowed one.
+Write policy; an access profile cannot turn a blocked or unavailable write into
+an allowed one. The no-prompt runtime controls whether an optional review queue
+is used, while sensitive external payloads remain blocked regardless of queue
+mode.
 
 ## Backfill And Migration
 

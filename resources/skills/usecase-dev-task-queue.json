@@ -32,13 +32,7 @@
       "description": "Where progress updates should be formatted for",
       "required": false,
       "default": "slack",
-      "options": [
-        "slack",
-        "telegram",
-        "discord",
-        "email",
-        "none"
-      ]
+      "options": ["slack", "telegram", "discord", "email", "none"]
     }
   ],
   "enabled": true,

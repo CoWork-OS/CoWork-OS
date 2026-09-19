@@ -293,10 +293,12 @@ function isScopedProfileAtMostPrivileged(
   child: AccessProfileDefinition,
   parent: AccessProfileDefinition,
 ): boolean {
-  // Full-access parents intentionally have no finite path or domain boundary.
-  // Treating their implicit `.` root as a real scope would reject a perfectly
-  // safe child profile that narrows access to an absolute directory.
-  if (isFullAccessProfile(parent) && !hasAccessProfileScope(parent)) return true;
+  // Danger-full parents intentionally have no finite path or domain boundary.
+  // Approval is an independent dimension, so this also covers a parent that
+  // keeps `on-request` for external consent. Treating the implicit `.` root as
+  // a real scope would reject a safe child that narrows access to an absolute
+  // directory.
+  if (parent.sandbox === "danger-full-access" && !hasAccessProfileScope(parent)) return true;
 
   const parentRoots = profileWorkspaceRoots(parent);
   if (child.workspaceRoots !== undefined) {
@@ -427,20 +429,26 @@ export function resolveAccessProfileDefinitionWithStatus(
     const parentResult = resolve(base.extends, nextVisiting);
     if (!parentResult.definition) return { status: "invalid" };
     const parent = parentResult.definition;
+    const merged: AccessProfileDefinition = {
+      ...parent,
+      ...base,
+      shellAccess: base.shellAccess ?? parent.shellAccess,
+      workspaceRoots: mergeInheritedWorkspaceRoots(parent.workspaceRoots, base.workspaceRoots),
+      filesystemRules: mergeInheritedFilesystemRules(parent.filesystemRules, base.filesystemRules),
+      domainRules: mergeInheritedDomainRules(parent.domainRules, base.domainRules),
+    };
+
+    // Runtime resolution is also a security boundary. Callers can construct
+    // settings directly (for example a restored task or an imported profile)
+    // without first invoking the settings validator, so do not return a
+    // widened child merely because the inheritance graph is acyclic.
+    if (!isAccessProfileAtMostPrivileged(merged, parent)) {
+      return { status: "invalid" };
+    }
 
     return {
       status: "resolved",
-      definition: {
-        ...parent,
-        ...base,
-        shellAccess: base.shellAccess ?? parent.shellAccess,
-        workspaceRoots: mergeInheritedWorkspaceRoots(parent.workspaceRoots, base.workspaceRoots),
-        filesystemRules: mergeInheritedFilesystemRules(
-          parent.filesystemRules,
-          base.filesystemRules,
-        ),
-        domainRules: mergeInheritedDomainRules(parent.domainRules, base.domainRules),
-      },
+      definition: merged,
     };
   };
 
@@ -529,8 +537,22 @@ export function validateAccessProfileInheritance(
     if (profile.extends) {
       if (builtinIds.has(profile.extends)) {
         const parent = getBuiltinAccessProfile(profile.extends);
-        const resolvedChild = resolveAccessProfileDefinition(profile.id, customProfiles);
-        if (parent && !isAccessProfileAtMostPrivileged(resolvedChild, parent)) {
+        const childResolution = resolveAccessProfileDefinitionWithStatus(
+          profile.id,
+          customProfiles,
+        );
+        const resolvedChild = childResolution.definition;
+        if (parent && childResolution.status !== "resolved") {
+          addIssue(
+            profile.id,
+            `Profile cannot be resolved safely through inherited profile "${parent.id}".`,
+          );
+          valid = false;
+        } else if (
+          parent &&
+          resolvedChild &&
+          !isAccessProfileAtMostPrivileged(resolvedChild, parent)
+        ) {
           addIssue(
             profile.id,
             `Profile cannot widen the inherited sandbox, approval, reviewer, shell, filesystem, or network access from "${parent.id}".`,
@@ -573,6 +595,11 @@ export function isFullAccessProfile(profile: AccessProfileDefinition): boolean {
 }
 
 export function isRestrictedAccessProfile(profile: AccessProfileDefinition): boolean {
+  // Exactly the complement of isFullAccessProfile, so the two can never
+  // disagree. A `danger-full-access` profile that still asks for approval is
+  // not full access, and must keep its process sandbox: treating the sandbox
+  // mode as the only dimension reported requiresSandbox: false for a profile
+  // that isFullAccessProfile explicitly rejects.
   return !isFullAccessProfile(profile);
 }
 

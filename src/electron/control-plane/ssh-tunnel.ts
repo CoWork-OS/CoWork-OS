@@ -14,6 +14,27 @@ import * as net from "net";
 import type { SSHTunnelConfig, SSHTunnelStatus, SSHTunnelState } from "../../shared/types";
 
 /**
+ * Reject anything OpenSSH could read as an option rather than a login name.
+ * A username of `-oProxyCommand=<cmd>` becomes `-oProxyCommand=<cmd>@host`,
+ * which ssh parses as an option and executes via /bin/sh.
+ */
+export function isSafeSshUsername(username: string): boolean {
+  return /^[A-Za-z0-9_][A-Za-z0-9._@-]*$/.test(username);
+}
+
+/**
+ * Accept a DNS hostname or an IP literal (including bracketed IPv6). Same
+ * reasoning as isSafeSshUsername: the value lands in a bare argv element.
+ */
+export function isSafeSshHost(host: string): boolean {
+  if (/^\[[0-9A-Fa-f:.]+\]$/.test(host)) return true;
+  if (/^[0-9A-Fa-f:]+$/.test(host) && host.includes(":")) return true;
+  return /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(
+    host,
+  );
+}
+
+/**
  * Default SSH tunnel configuration
  */
 export const DEFAULT_SSH_TUNNEL_CONFIG: SSHTunnelConfig = {
@@ -174,6 +195,13 @@ export class SSHTunnelManager extends EventEmitter {
   async testConnection(): Promise<{ success: boolean; error?: string; latencyMs?: number }> {
     const startTime = Date.now();
 
+    // connect() validates before spawning; this path must too. It is reachable
+    // directly from the renderer via SSH_TUNNEL_TEST_CONNECTION with a
+    // caller-supplied config and no workspace or permission gate.
+    if (!this.validateConfig()) {
+      return { success: false, error: this.lastError || "Invalid SSH tunnel configuration" };
+    }
+
     return new Promise((resolve) => {
       const args = this.buildSSHArgs(true); // Test mode
       console.log("[SSHTunnel] Testing connection:", this.maskCommand(args));
@@ -225,6 +253,23 @@ export class SSHTunnelManager extends EventEmitter {
 
     if (!this.config.username || !this.config.username.trim()) {
       this.lastError = "SSH username is required";
+      return false;
+    }
+
+    // buildSSHArgs passes `${username}@${host}` as a bare positional argument.
+    // spawn() uses an argv array so there is no shell, but OpenSSH still parses
+    // a leading "-" as an option — and `-oProxyCommand=...` executes its value
+    // via /bin/sh. Reject anything that could be read as an option or inject a
+    // second token.
+    if (!isSafeSshUsername(this.config.username.trim())) {
+      this.lastError =
+        "SSH username contains unsupported characters. Use letters, digits, and . _ - @ only.";
+      return false;
+    }
+
+    if (!isSafeSshHost(this.config.host.trim())) {
+      this.lastError =
+        "SSH host must be a hostname or IP address, without spaces or leading dashes.";
       return false;
     }
 

@@ -5,10 +5,7 @@
   "icon": "📺",
   "category": "Tools",
   "requires": {
-    "anyBins": [
-      "yt-dlp",
-      "python3"
-    ]
+    "anyBins": ["yt-dlp", "python3"]
   },
   "install": [
     {
@@ -16,22 +13,15 @@
       "kind": "brew",
       "label": "Install yt-dlp (brew)",
       "formula": "yt-dlp",
-      "bins": [
-        "yt-dlp"
-      ],
-      "os": [
-        "darwin",
-        "linux"
-      ]
+      "bins": ["yt-dlp"],
+      "os": ["darwin", "linux"]
     },
     {
       "id": "pip-transcript-api",
       "kind": "npm",
       "label": "Install youtube-transcript-api (pipx)",
       "package": "youtube-transcript-api",
-      "bins": [
-        "youtube_transcript_api"
-      ]
+      "bins": ["youtube_transcript_api"]
     }
   ],
   "prompt": "# YouTube\n\nUse this skill only when the request is in scope:\n- User shares a YouTube link, asks to summarize a video, wants to know what a video says, asks to extract information from a YouTube video, or needs video transcripts\n\nDo not use this skill when:\n- User wants to upload or stream video, manage a YouTube channel, or edit video files\n\nExecution workflow:\n1. Read `{baseDir}/SKILL.md` for routing boundaries and expected outputs.\n2. Read `{baseDir}/references/full-guidance.md` for detailed procedures/examples.\n3. If `{baseDir}/scripts` exists, execute scripts instead of rewriting logic.\n4. Return outputs matching: Video transcripts with timestamps, summaries, key quotes, metadata, chapter breakdowns.\n5. Verify success criteria: User receives accurate transcript content with timestamps and clear formatting.",
@@ -50,14 +40,7 @@
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "youtube",
-      "video",
-      "transcript",
-      "captions",
-      "subtitles",
-      "summary"
-    ],
+    "tags": ["youtube", "video", "transcript", "captions", "subtitles", "summary"],
     "routing": {
       "useWhen": "User shares a YouTube link, asks to summarize a video, wants to know what a video says, asks to extract information from a YouTube video, or needs video transcripts",
       "dontUseWhen": "User wants to upload or stream video, manage a YouTube channel, or edit video files",

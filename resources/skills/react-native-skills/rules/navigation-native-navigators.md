@@ -22,34 +22,34 @@ tabs. Avoid `@react-navigation/bottom-tabs` when native feel matters.
 **Incorrect (JS stack navigator):**
 
 ```tsx
-import { createStackNavigator } from '@react-navigation/stack'
+import { createStackNavigator } from "@react-navigation/stack";
 
-const Stack = createStackNavigator()
+const Stack = createStackNavigator();
 
 function App() {
   return (
     <Stack.Navigator>
-      <Stack.Screen name='Home' component={HomeScreen} />
-      <Stack.Screen name='Details' component={DetailsScreen} />
+      <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="Details" component={DetailsScreen} />
     </Stack.Navigator>
-  )
+  );
 }
 ```
 
 **Correct (native stack with react-navigation):**
 
 ```tsx
-import { createNativeStackNavigator } from '@react-navigation/native-stack'
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
-const Stack = createNativeStackNavigator()
+const Stack = createNativeStackNavigator();
 
 function App() {
   return (
     <Stack.Navigator>
-      <Stack.Screen name='Home' component={HomeScreen} />
-      <Stack.Screen name='Details' component={DetailsScreen} />
+      <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="Details" component={DetailsScreen} />
     </Stack.Navigator>
-  )
+  );
 }
 ```
 
@@ -57,10 +57,10 @@ function App() {
 
 ```tsx
 // app/_layout.tsx
-import { Stack } from 'expo-router'
+import { Stack } from "expo-router";
 
 export default function Layout() {
-  return <Stack />
+  return <Stack />;
 }
 ```
 
@@ -69,46 +69,46 @@ export default function Layout() {
 **Incorrect (JS bottom tabs):**
 
 ```tsx
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 
-const Tab = createBottomTabNavigator()
+const Tab = createBottomTabNavigator();
 
 function App() {
   return (
     <Tab.Navigator>
-      <Tab.Screen name='Home' component={HomeScreen} />
-      <Tab.Screen name='Settings' component={SettingsScreen} />
+      <Tab.Screen name="Home" component={HomeScreen} />
+      <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
-  )
+  );
 }
 ```
 
 **Correct (native bottom tabs with react-navigation):**
 
 ```tsx
-import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation'
+import { createNativeBottomTabNavigator } from "@bottom-tabs/react-navigation";
 
-const Tab = createNativeBottomTabNavigator()
+const Tab = createNativeBottomTabNavigator();
 
 function App() {
   return (
     <Tab.Navigator>
       <Tab.Screen
-        name='Home'
+        name="Home"
         component={HomeScreen}
         options={{
-          tabBarIcon: () => ({ sfSymbol: 'house' }),
+          tabBarIcon: () => ({ sfSymbol: "house" }),
         }}
       />
       <Tab.Screen
-        name='Settings'
+        name="Settings"
         component={SettingsScreen}
         options={{
-          tabBarIcon: () => ({ sfSymbol: 'gear' }),
+          tabBarIcon: () => ({ sfSymbol: "gear" }),
         }}
       />
     </Tab.Navigator>
-  )
+  );
 }
 ```
 
@@ -116,21 +116,21 @@ function App() {
 
 ```tsx
 // app/(tabs)/_layout.tsx
-import { NativeTabs } from 'expo-router/unstable-native-tabs'
+import { NativeTabs } from "expo-router/unstable-native-tabs";
 
 export default function TabLayout() {
   return (
     <NativeTabs>
-      <NativeTabs.Trigger name='index'>
+      <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf='house.fill' md='home' />
+        <NativeTabs.Trigger.Icon sf="house.fill" md="home" />
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name='settings'>
+      <NativeTabs.Trigger name="settings">
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf='gear' md='settings' />
+        <NativeTabs.Trigger.Icon sf="gear" md="settings" />
       </NativeTabs.Trigger>
     </NativeTabs>
-  )
+  );
 }
 ```
 
@@ -145,10 +145,10 @@ behind the translucent tab bar. If you need to disable this, use
 
 ```tsx
 <Stack.Screen
-  name='Profile'
+  name="Profile"
   component={ProfileScreen}
   options={{
-    header: () => <CustomHeader title='Profile' />,
+    header: () => <CustomHeader title="Profile" />,
   }}
 />
 ```
@@ -157,13 +157,13 @@ behind the translucent tab bar. If you need to disable this, use
 
 ```tsx
 <Stack.Screen
-  name='Profile'
+  name="Profile"
   component={ProfileScreen}
   options={{
-    title: 'Profile',
+    title: "Profile",
     headerLargeTitleEnabled: true,
     headerSearchBarOptions: {
-      placeholder: 'Search',
+      placeholder: "Search",
     },
   }}
 />

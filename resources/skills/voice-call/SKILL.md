@@ -38,4 +38,4 @@ Initiate outbound phone calls via ElevenLabs Agents.
 ## Runtime Prompt
 
 - Current runtime prompt length: 930 characters.
-- Runtime prompt is defined directly in `../voice-call.json`. 
+- Runtime prompt is defined directly in `../voice-call.json`.

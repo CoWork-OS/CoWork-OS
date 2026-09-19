@@ -19,14 +19,7 @@
       "description": "How to operate on the wiki: auto, init, ingest, query, lint, or refresh",
       "required": false,
       "default": "auto",
-      "options": [
-        "auto",
-        "init",
-        "ingest",
-        "query",
-        "lint",
-        "refresh"
-      ]
+      "options": ["auto", "init", "ingest", "query", "lint", "refresh"]
     },
     {
       "name": "path",
@@ -41,11 +34,7 @@
       "description": "Whether to optimize for Obsidian-style vault usage",
       "required": false,
       "default": "auto",
-      "options": [
-        "auto",
-        "on",
-        "off"
-      ]
+      "options": ["auto", "on", "off"]
     }
   ],
   "enabled": true,

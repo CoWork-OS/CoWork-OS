@@ -455,6 +455,8 @@ export const TaskMessageSchema = z
     taskId: z.string().uuid(),
     message: z.string().min(1).max(MAX_PROMPT_LENGTH),
     interactionMode: InteractionModeSchema.optional(),
+    deliveryMode: z.enum(["message", "follow_up"]).optional(),
+    messageId: z.string().trim().min(1).max(200).optional(),
     expectedTurnId: z.string().trim().min(1).max(200).optional(),
     images: z.array(ImageAttachmentSchema).max(MAX_IMAGES_PER_MESSAGE).optional(),
     quotedAssistantMessage: z
@@ -603,14 +605,45 @@ export const ApprovalResponseSchema = z
     message: "Either approved or action must be provided",
   });
 
+const PermissionSettingsMigrationSnapshotSchema = z
+  .object({
+    version: z.number().int().positive(),
+    defaultMode: PermissionModeSchema.optional(),
+    defaultShellEnabled: z.boolean().optional(),
+    defaultPermissionAccess: z.enum(["default", "full"]).optional(),
+    defaultAccessProfileId: AccessProfileIdSchema.optional(),
+    // The backup is diagnostic/recoverable data and may contain a legacy
+    // record that the active normalizer rejected. It is bounded but never
+    // trusted as executable policy.
+    accessProfiles: z.array(z.unknown()).max(50).optional(),
+    rules: z.array(z.unknown()).max(100).optional(),
+  })
+  .strict();
+
+const PermissionSettingsMigrationSchema = z
+  .object({
+    version: z.literal(2),
+    sourceVersion: z.number().int().positive(),
+    migratedAt: z.number().int().nonnegative(),
+    previous: PermissionSettingsMigrationSnapshotSchema,
+    defaultProvenance: z.enum([
+      "existing_profile",
+      "legacy_mode",
+      "legacy_full_access",
+      "fail_closed_unknown_profile",
+    ]),
+  })
+  .strict();
+
 export const PermissionSettingsSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   defaultMode: PermissionModeSchema,
   defaultShellEnabled: z.boolean().default(false),
   defaultPermissionAccess: z.enum(["default", "full"]).default("default"),
   defaultAccessProfileId: AccessProfileIdSchema.optional(),
   accessProfiles: z.array(AccessProfileDefinitionSchema).max(50).default([]),
   rules: z.array(PermissionRuleSchema).default([]),
+  migration: PermissionSettingsMigrationSchema.optional(),
 });
 
 const InputRequestAnswerSchema = z.object({
@@ -698,6 +731,41 @@ export const OpenRouterSettingsSchema = z
     ...ProviderRoutingSettingsSchema,
   })
   .optional();
+
+const JevProviderSettingsSchema = z.object({
+  apiKey: z.string().max(500).optional(),
+  clearApiKey: z.boolean().optional(),
+  baseUrl: z.string().max(500).optional(),
+  model: z.string().max(200).optional(),
+});
+
+const JevSettingsSchemaShape = z.object({
+  enabled: z.boolean().optional(),
+  provider: z.enum(["typesafe", "openrouter"]).optional(),
+  typesafe: JevProviderSettingsSchema.optional(),
+  openrouter: JevProviderSettingsSchema.extend({
+    reuseOpenRouterKey: z.boolean().optional(),
+  }).optional(),
+  teamSelectionEnabled: z.boolean().optional(),
+  harnessEnabled: z.boolean().optional(),
+  toolReviewMode: z.enum(["off", "observe", "active"]).optional(),
+  modelRoutingEnabled: z.boolean().optional(),
+  adaptiveStrategyEnabled: z.boolean().optional(),
+  browserActionSelectionEnabled: z.boolean().optional(),
+  loopControlEnabled: z.boolean().optional(),
+  contextCompactionEnabled: z.boolean().optional(),
+  skillToolSelectionEnabled: z.boolean().optional(),
+  outputGuardrailsEnabled: z.boolean().optional(),
+  timeoutMs: z.number().int().min(1000).max(120000).optional(),
+  maxRetries: z.number().int().min(0).max(5).optional(),
+});
+
+export const JevSettingsSchema = JevSettingsSchemaShape.optional();
+
+export const JevTestProviderRequestSchema = z.object({
+  settings: JevSettingsSchemaShape,
+  mainOpenRouterApiKey: z.string().max(500).optional(),
+});
 
 export const DeepSeekSettingsSchema = z
   .object({
@@ -931,6 +999,7 @@ export const LLMSettingsSchema = z.object({
     .optional(),
   failoverPrimaryRetryCooldownSeconds: z.number().int().min(0).max(3600).optional(),
   promptCaching: PromptCachingSettingsSchema,
+  jev: JevSettingsSchema,
   anthropic: AnthropicSettingsSchema,
   bedrock: BedrockSettingsSchema,
   ollama: OllamaSettingsSchema,
@@ -1236,7 +1305,7 @@ export const GuardrailSettingsSchema = z.object({
   lifetimeTurnCapEnabled: z.boolean().default(true),
   defaultLifetimeTurnCap: z.number().int().min(20).max(5000).default(320),
   compactOnContinuation: z.boolean().default(true),
-  compactionThresholdRatio: z.number().min(0.5).max(0.95).default(0.75),
+  compactionThresholdRatio: z.number().min(0.5).max(0.95).default(0.9),
   loopWarningThreshold: z.number().int().min(1).max(200).default(8),
   loopCriticalThreshold: z.number().int().min(1).max(400).default(14),
   globalNoProgressCircuitBreaker: z.number().int().min(1).max(1000).default(20),
@@ -2567,7 +2636,17 @@ export const MCPSettingsSchema = z.object({
   maxReconnectAttempts: z.number().int().min(0).max(20).default(5),
   reconnectDelayMs: z.number().int().min(100).max(60000).default(1000),
   registryEnabled: z.boolean().default(true),
-  registryUrl: z.string().url().max(500).optional(),
+  // https only: the registry response designates the command that gets
+  // spawned for an installed server, so a plaintext fetch would let any
+  // on-path attacker choose it.
+  registryUrl: z
+    .string()
+    .url()
+    .max(500)
+    .refine((value) => value.startsWith("https://"), {
+      message: "MCP registry URL must use https://",
+    })
+    .optional(),
   hostEnabled: z.boolean().default(false),
   hostPort: z.number().int().min(1024).max(65535).optional(),
 });

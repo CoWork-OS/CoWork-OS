@@ -19,11 +19,7 @@
     "staggerOffset": 12
   },
   "cognitiveOffload": {
-    "primaryCategories": [
-      "information-triage",
-      "dependency-tracking",
-      "routine-automation"
-    ],
+    "primaryCategories": ["information-triage", "dependency-tracking", "routine-automation"],
     "proactiveTasks": [
       {
         "id": "commitment-follow-up",

@@ -34,10 +34,37 @@ through this order:
 3. coarse workspace capability gates
 4. workspace policy script results
 5. explicit permission rules
-6. mode defaults
-7. denial fallback escalation
+6. effective access-profile boundaries (legacy mode defaults only for legacy tasks)
+7. interactive exception routing, or denial when approval is unavailable
 
 Later stages never override earlier hard blocks.
+
+## Boundary authorization
+
+Named profiles are evaluated directly. A workspace mutation is not, by itself,
+an approval requirement. Granted writes, document generation, and routine commands
+inside an available enforced sandbox proceed without an approval lifecycle.
+`AgentDaemon.authorizeToolAction` coordinates tool-specific authorization with the
+same permission engine; only real exceptions reach `requestApproval`.
+
+`approval: "never"` never creates a harness approval request. An explicit ask rule,
+missing consent, or additional scope instead produces a denial unless authority
+is already validly granted. Mandatory OS permission dialogs are separate.
+Pending approvals are revalidated against their operation and current policy;
+argument changes or revoked authority cannot reuse the old grant.
+
+The local runtime does not render the legacy approval queue by default. An
+`allow` decision executes silently. When policy still returns `ask`—including
+network/on-request access, credential use, data export, MCP or other external
+side effects, eligible outside-workspace paths, or an explicit
+`allowAutoApprove: false` request—the daemon emits an assistant message and a
+durable inline input card with **Deny** and **Allow once**. It does not create an
+`approval_requested` row or open a modal. Hard denials, administrator policy,
+protected operating-system paths, and `approval: "never"` remain fail-closed;
+automated tasks without a human-input channel are denied. Set
+`COWORK_APPROVAL_PROMPTS=on` before launch only to restore the legacy queue for
+diagnostics. Pending approval rows and assistant approval cards fail closed on
+restart rather than resuming an unconfirmed action.
 
 ## Rule Sources
 
@@ -46,6 +73,8 @@ Permission rules can come from several places:
 - `session` - temporary grants and session-local rules stored in `SessionRuntime`
 - `workspace_db` - workspace-local rules stored in SQLite
 - `workspace_manifest` - checked-in workspace policy file at `.cowork/policy/permissions.json`
+  (mirror only; see [Manifest trust](#manifest-trust) — its `allow` rules are not trusted on
+  their own)
 - `profile` - encrypted profile-level rules in secure settings
 - `legacy_guardrails` - compatibility rules derived from older trusted-command patterns
 - `legacy_builtin_settings` - compatibility rules derived from earlier settings models
@@ -77,7 +106,8 @@ stable matching.
 `get_current_location` uses a dedicated `location_access` approval type that is separate from
 other tool scopes. Location access:
 
-- always requires explicit one-time user consent via a dedicated dialog
+- always requires explicit one-time consent through the operating system's native permission
+  flow; this is OS consent, not the CoWork approval modal or an assistant approval card
 - cannot be auto-approved by any permission mode, including `dont_ask` and `bypass_permissions`
 - cannot be persisted as a session, workspace, or profile rule
 - delegates the actual permission grant to the operating system's native location dialog
@@ -86,7 +116,8 @@ other tool scopes. Location access:
 
 Older tasks and API callers may still supply a permission mode. It remains supported as a
 compatibility input, but new task-level access should use [Access Profiles](access-profiles.md).
-Default behavior depends on the selected legacy permission mode:
+These compatibility behaviors apply only to legacy authority. New named profiles
+use boundary authorization above. Legacy behavior depends on the selected mode:
 
 - `default` - allow safe reads, ask on writes, deletes, shell, data export, external services, and side-effecting MCP tools
 - `plan` - allow read-only tools, deny mutating and external tools by default
@@ -100,6 +131,37 @@ Default behavior depends on the selected legacy permission mode:
 `dont_ask` and `bypass_permissions` are no longer wildcard escape hatches for outbound transfer.
 If the request is classified as `data_export`, the engine switches back to an explicit approval.
 
+### What counts as a mutating tool
+
+`plan` denying "mutating" tools and `default` asking on "writes" both depend on
+classifying each tool. That classification derives from the canonical taxonomy in
+`src/shared/types.ts` — `TOOL_GROUPS["group:write"]` and
+`["group:destructive"]` — via `isCanonicalWriteToolName`, which both
+`PermissionEngine` and `tool-policy-engine` consult first before falling back to
+name-prefix heuristics.
+
+Adding a tool to `group:write` or `group:destructive` is therefore sufficient to
+make every layer treat it as mutating. A regression test asserts that every
+member of those groups classifies as mutating, because the previous
+hand-maintained tables had drifted and let several write tools through as
+read-only.
+
+### Trusted command patterns
+
+When "auto-approve trusted commands" is enabled, a pattern such as `echo *`
+matches a **single** command only. Any command line containing a shell control
+operator — `;`, `&&`, `||`, `|`, backticks, `$(…)`, `${…}`, redirection, or a
+newline — is ineligible for pattern trust and prompts instead, so a trusted
+prefix cannot carry an unrelated chained command. Trusted commands are also
+subject to the same auto-approval safety check as the general auto-approve path,
+so a command bearing `rm` or `sudo` does not auto-approve on a prefix match.
+
+Approvals are briefly reusable for a repeated command. That reuse normalizes
+arguments so a batch over many files takes one approval, **except** when the
+command chains/pipes or its executable is an interpreter (`sh`, `bash`, `python`,
+`node`, `sudo`, `env`, `osascript`, …). For those, the whole command line is the
+key, so approving one interpreter invocation never covers a different one.
+
 ## Access Profiles
 
 The main composer exposes four access choices modeled on Codex's access selector. The complete
@@ -108,12 +170,12 @@ an access profile combines the process sandbox boundary, approval behavior, revi
 network boundary, and optional filesystem/domain scope. The reviewer can reduce friction, but it
 cannot widen the sandbox or override an explicit deny rule.
 
-| Access choice | Sandbox | Approval/reviewer | Network |
-|---|---|---|---|
-| **Ask for approval** | Workspace-write | On request / user | On request |
-| **Approve for me** | Workspace-write | On request / automatic safety review | On request |
-| **Full access** | Danger-full-access | No approval / no reviewer | Enabled |
-| **Custom** | Named profile | Named profile | Named profile |
+| Access choice        | Sandbox            | Approval/reviewer                    | Network       |
+| -------------------- | ------------------ | ------------------------------------ | ------------- |
+| **Ask for approval** | Workspace-write    | On request / user                    | On request    |
+| **Approve for me**   | Workspace-write    | On request / automatic safety review | On request    |
+| **Full access**      | Danger-full-access | No approval / no reviewer            | Enabled       |
+| **Custom**           | Named profile      | Named profile                        | Named profile |
 
 Custom profiles are saved in the encrypted permission settings store rather than a plain-text
 `config.toml`. They can define sandbox, approval, reviewer, network, additional roots, filesystem
@@ -220,11 +282,33 @@ Different rule sources persist in different places:
 Workspace-local rule removal updates both the database row and the manifest mirror. If the
 manifest write fails, the database removal still succeeds and the UI reports the partial state.
 
+## Manifest trust
+
+`.cowork/policy/permissions.json` lives inside the workspace, so anything with workspace write
+access can author it — including the agent, and including a repository that was merely cloned.
+It is therefore treated as untrusted input rather than as a source of authority:
+
+- `deny` and `ask` rules from the manifest apply immediately. They can only narrow access, so a
+  hostile author gains nothing by adding them.
+- `allow` rules apply only when the workspace database already contains the same rule (same
+  effect and scope). That row is written by the approval flow at the moment the user chooses to
+  persist a grant, so a rule the user actually approved on this machine always matches.
+
+The practical effect for shared repositories is that a teammate's `allow` rules do not take
+effect on first clone. The teammate approves the action once, which creates their own database
+row, and from then on the mirror matches. Ignored grants are logged once per workspace.
+
+The enforcement point is `filterTrustedManifestRules` in
+`src/electron/security/workspace-permission-manifest.ts`, applied where the daemon assembles the
+rule set. Separately, `.cowork/policy/**` is a protected path: file tools may read it but never
+write or delete it, so the agent cannot author or remove policy files at all.
+
 ## User Surfaces
 
 Users can manage permission state from two places:
 
-- approval prompts, which can create one-shot or persisted rules
+- the optional legacy approval queue (`COWORK_APPROVAL_PROMPTS=on`), which can create one-shot or persisted rules
+- inline assistant decision cards for interactive exceptions in the normal runtime
 - the main composer access selector, which chooses an access profile for the next task or follow-up
 - Settings > System & Security, which manages default profiles, custom profiles, profile rules, and workspace-local rules
 
@@ -261,8 +345,11 @@ The always-on automation runtime layers on top of this by spawning tasks with ex
 - [Security Model](security/security-model.md)
 - [Security Configuration](security/configuration-guide.md)
 - [Security Guide](security-guide.md)
+- [Security Hardening Record](security-hardening.md)
 - [Access Profiles](access-profiles.md)
 - [Architecture](architecture.md)
 - [Session Runtime](session-runtime.md)
 - [Features](features.md)
 - [Changelog](changelog.md)
+- [Approval Boundary Migration Plan](approval-boundary-migration-plan.md)
+- [Approval Boundary Validation](approval-boundary-validation.md)

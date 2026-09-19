@@ -17,17 +17,55 @@ task.
 
 The main composer exposes these built-in profiles:
 
-| Profile | Sandbox | Approval and reviewer | Network | Best for |
-|---|---|---|---|---|
-| **Ask for approval** | `workspace-write` | `on-request` / `user` | `on-request` | Interactive work where boundary-crossing or risky actions should be shown to the operator |
-| **Approve for me** | `workspace-write` | `on-request` / `auto-review` | `on-request` | The same bounded workspace posture with fewer interruptions for actions that pass automatic review |
-| **Full access** | `danger-full-access` | `never` / `none` | `enabled` | Trusted local work that needs high autonomy |
-| **Custom** | Named profile | Named profile | Named profile | A repeatable policy for a workspace, team, automation, or integration |
+| Profile              | Sandbox              | Approval and reviewer        | Network       | Best for                                                                                           |
+| -------------------- | -------------------- | ---------------------------- | ------------- | -------------------------------------------------------------------------------------------------- |
+| **Ask for approval** | `workspace-write`    | `on-request` / `user`        | `on-request`  | Interactive work where boundary-crossing or risky actions should be shown to the operator          |
+| **Approve for me**   | `workspace-write`    | `on-request` / `auto-review` | `on-request`  | The same bounded workspace posture with fewer interruptions for actions that pass automatic review |
+| **Full access**      | `danger-full-access` | `never` / `none`             | `enabled`     | Trusted local work that needs high autonomy                                                        |
+| **Custom**           | Named profile        | Named profile                | Named profile | A repeatable policy for a workspace, team, automation, or integration                              |
+
+The local runtime runs without popup approvals by default. An `allow` decision
+executes silently. A decision that remains `ask` is presented as an assistant
+message with a durable inline **Deny** / **Allow once** input card, including for
+network access, credentials, exports, MCP or external side effects, eligible
+outside-workspace paths, and operations that explicitly opt out of automatic
+approval. This keeps the interaction aligned with Codex-style harnesses while
+preserving an explicit human decision where policy requires one. Set
+`COWORK_APPROVAL_PROMPTS=on` before launching CoWork only when you need the
+legacy approval queue for diagnostics. Hard denials, administrator policy,
+protected operating-system paths, and `approval: "never"` remain fail-closed.
 
 Full access is still subject to hard guardrails, protected operating-system
-paths, administrator policy, explicit export/location consent, and any other
-non-bypassable safety boundary. It is not a promise that every possible native
-operation will be allowed.
+paths, administrator policy, and explicit export/location/credential consent.
+Its `never` approval policy does not open a consent dialog: an operation that
+needs missing authority is denied. Full access is not a promise that every
+native operation will be allowed.
+
+## Ordinary work and exceptions
+
+The default **Ask for approval** profile authorizes file creation, editing, and
+artifact generation inside the selected workspace, including an isolated
+temporary session folder. Routine commands run without approval when the
+required sandbox is available. These actions create normal tool activity, not
+requested/granted approval events. **Approve for me** uses the same boundary;
+its reviewer handles only eligible exceptions.
+
+Explicit ask rules, external side effects, protected credentials, and eligible
+filesystem/network boundary crossings remain separate requirements. In an
+interactive task they produce the inline assistant decision card; in an
+automated task with no human-input channel they fail closed. Explicit denials
+and custom scope ceilings cannot be overridden by an approval. A bounded profile
+can also use `approval: "never"`: allowed work runs; missing authority is
+reported as a denial, without entering an approval wait. Approval cards and
+legacy approval rows do not survive a restart; the operation must be requested
+again so it can receive a fresh decision.
+
+Allowed subprocess network access requires actual backend enforcement. A missing
+sandbox does not itself authorize an unsandboxed retry. External ACP runtimes
+cannot enforce CoWork's bounded filesystem and network rules, so bounded tasks
+must use the native runtime. ACP requires explicit unrestricted Full access and
+compatible administrator policy, and retains its separate consent flags. A
+CoWork profile never silently sets the adapter to `approve-all`.
 
 ## Select a profile
 
@@ -75,16 +113,16 @@ when a trusted task genuinely needs the full-access profile.
 
 An access profile has these independent dimensions:
 
-| Field | Values | Meaning |
-|---|---|---|
-| `sandbox` | `read-only`, `workspace-write`, `danger-full-access` | Process/filesystem boundary applied to spawned commands and code execution |
-| `approval` | `untrusted`, `on-request`, `never` | Baseline approval posture; hard denials remain hard |
-| `reviewer` | `user`, `auto-review`, `none` | Whether a user or automatic safety reviewer handles approval decisions |
-| `network` | `disabled`, `on-request`, `enabled` | Coarse network capability and approval posture |
-| `workspaceRoots` | Relative or absolute paths | Additional roots that the profile may reach |
-| `filesystemRules` | `read`, `write`, `deny` | Deny-first path rules; `write` includes reads but never deletes |
-| `domainRules` | `allow` or `deny` patterns | Built-in network-tool destination boundaries |
-| `extends` | Another profile id | Inherit a profile and narrow it without widening the parent |
+| Field             | Values                                               | Meaning                                                                    |
+| ----------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| `sandbox`         | `read-only`, `workspace-write`, `danger-full-access` | Process/filesystem boundary applied to spawned commands and code execution |
+| `approval`        | `untrusted`, `on-request`, `never`                   | Baseline approval posture; hard denials remain hard                        |
+| `reviewer`        | `user`, `auto-review`, `none`                        | Whether a user or automatic safety reviewer handles approval decisions     |
+| `network`         | `disabled`, `on-request`, `enabled`                  | Coarse network capability and approval posture                             |
+| `workspaceRoots`  | Relative or absolute paths                           | Additional roots that the profile may reach                                |
+| `filesystemRules` | `read`, `write`, `deny`                              | Deny-first path rules; `write` includes reads but never deletes            |
+| `domainRules`     | `allow` or `deny` patterns                           | Built-in network-tool destination boundaries                               |
+| `extends`         | Another profile id                                   | Inherit a profile and narrow it without widening the parent                |
 
 The profile also determines whether command tools can be materialized for the
 task. A legacy `shellAccess: false` value can preserve an old denial, but new
@@ -208,10 +246,15 @@ unprofiled legacy tasks.
 ## Network and command behavior
 
 Built-in browser, web, and HTTP tools evaluate profile network and domain rules
-in-process. Network `on-request` means the tool may reach an approval boundary;
-it does not mean every request is automatically allowed. `data_export` remains
-an explicit approval class even in high-autonomy profiles, and location access
-always uses a separate operating-system consent flow.
+in-process. Read-only public lookups through `web_search`, `web_fetch`,
+`x_search`, and GET/HEAD `http_request` use the normal read lane when the
+workspace has network access. Network `on-request` remains useful as policy
+metadata for browser navigation, MCP and other network-capable tools, code or
+shell egress, credential-backed reads, and explicit domain or workspace
+boundaries, but the default local runtime does not turn those decisions into a
+durable approval wait. `data_export` remains an explicit approval class even in
+high-autonomy profiles, and location access always uses a separate
+operating-system consent flow.
 
 Arbitrary subprocess and code-execution networking is stricter. The native
 macOS and Docker sandbox boundaries provide coarse network isolation, not a
@@ -226,17 +269,17 @@ revalidated when the profile changes, and a downgrade prevents further use.
 
 ## Surfaces and inheritance
 
-| Surface | Profile contract |
-|---|---|
-| Desktop composer | Shows the four access choices and carries the selected id with the task |
-| CLI | `cowork run "task" --access-profile <id>` uses the same resolver; `--permission-mode` and `--shell` are compatibility inputs |
-| Remote Control Plane | Sends the requested profile id to the target node, where it is resolved and enforced; local credentials/cookies are not transferred |
-| Managed Agents | `ManagedEnvironment.config.accessProfileId` is the canonical environment setting; `enableShell` is legacy compatibility |
-| Task automations and cron | New jobs inherit an explicit profile and cannot widen it through a step or trigger setting |
-| Agent Teams and child tasks | Child profiles are capped by the parent profile |
-| Side Chat | Does not expose command tools and cannot widen the inherited profile |
-| Browser, connector, native, and device tools | Use the same profile, admin policy, and hard guardrails before execution |
-| Heartbeat/Dreaming | Background memory reads use a profile-derived read guard; unavailable or denied profiles skip analysis rather than bypassing the boundary |
+| Surface                                      | Profile contract                                                                                                                          |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop composer                             | Shows the four access choices and carries the selected id with the task                                                                   |
+| CLI                                          | `cowork run "task" --access-profile <id>` uses the same resolver; `--permission-mode` and `--shell` are compatibility inputs              |
+| Remote Control Plane                         | Sends the requested profile id to the target node, where it is resolved and enforced; local credentials/cookies are not transferred       |
+| Managed Agents                               | `ManagedEnvironment.config.accessProfileId` is the canonical environment setting; `enableShell` is legacy compatibility                   |
+| Task automations and cron                    | New jobs inherit an explicit profile and cannot widen it through a step or trigger setting                                                |
+| Agent Teams and child tasks                  | Child profiles are capped by the parent profile                                                                                           |
+| Side Chat                                    | Does not expose command tools and cannot widen the inherited profile                                                                      |
+| Browser, connector, native, and device tools | Use the same profile, admin policy, and hard guardrails before execution                                                                  |
+| Heartbeat/Dreaming                           | Background memory reads use a profile-derived read guard; unavailable or denied profiles skip analysis rather than bypassing the boundary |
 
 ## Migration from the shell toggle
 
@@ -296,5 +339,27 @@ npm run build:react
 - [Task Automations](task-automations.md) — unattended profile behavior
 - [Terminal Tabs](terminal-tabs.md) — interactive command sessions
 - [Remote Access](remote-access.md) — target-node enforcement
+- [Approval Boundary Migration Plan](approval-boundary-migration-plan.md) — implementation contract and migration decisions
+- [Approval Boundary Validation](approval-boundary-validation.md) — executable scenario and platform evidence
 
 ---
+
+## Policy rollout and migration
+
+Permission settings are migrated to version 2 with a bounded copy of the prior
+policy and migration provenance. New root tasks use one normalizer across the
+standard daemon entry point and direct creators such as tray, gateway, mailbox,
+and ACP. Explicit profiles win over defaults. Old profile-less tasks keep their
+legacy per-task authority; resuming them does not adopt a broader global default.
+Read-only helpers and child-task ceilings remain restrictive.
+
+`COWORK_ACCESS_POLICY_VERSION=boundary` is the default runtime policy. Set
+`legacy` for a diagnostic rollback or `shadow` to retain legacy decisions while
+recording the compared boundary decision in the local policy trace. Shadow
+comparison does not execute tools, create grants, or emit approval requests of
+its own. It does not disable hard restrictions. Restore old settings only from a
+reviewed migration snapshot; do not replay pending approvals during rollback.
+
+Boundary grants are tied to operation arguments and policy identity. Changing
+the task scope invalidates incompatible cached grants. Existing approval history
+remains readable; new allowed actions do not manufacture approval history.

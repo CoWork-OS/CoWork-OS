@@ -76,8 +76,21 @@ export function isTimelineEventType(value: unknown): value is TimelineEventType 
   return typeof value === "string" && TIMELINE_EVENT_SET.has(value);
 }
 
+/**
+ * Timeline headers render plain text, so markdown emphasis coming from model-authored
+ * step descriptions (e.g. "**Collect the details**") must be unwrapped instead of shown raw.
+ */
+function stripInlineMarkdown(value: string): string {
+  return value
+    .replace(/\*\*\*([^*]+)\*\*\*/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=$|[\s).,;:!?])/g, "$1$2")
+    .replace(/(^|[\s(])__([^_\s][^_]*)__(?=$|[\s).,;:!?])/g, "$1$2")
+    .replace(/`([^`]+)`/g, "$1");
+}
+
 export function formatTimelineActivityLabel(raw: string, maxLength = 72): string {
-  let text = String(raw || "").trim();
+  let text = stripInlineMarkdown(String(raw || "").trim()).trim();
   if (!text) return "";
 
   text = text.replace(/^["\u201c\u201d'`]+/, "").replace(/["\u201c\u201d'`]+$/, "");
@@ -87,6 +100,9 @@ export function formatTimelineActivityLabel(raw: string, maxLength = 72): string
   }
   text = (text.split(/(?<=[.!?])\s+|\s+[\u2014\u2013-]\s+/)[0] || text).trim();
   text = text.replace(/^Working on:\s*/i, "").trim();
+  // Upstream messages sometimes prefix an already-progressive label ("Starting Adjusting the
+  // plan"). Keep a single verb so headers don't stack two of them.
+  text = text.replace(/^Start(?:ing)?\s+(?=[A-Za-z]+ing\b)/i, "").trim();
 
   const upper = text.toUpperCase();
   if (upper in TIMELINE_STAGE_ACTIVITY_LABELS) {
@@ -213,6 +229,27 @@ function inferLegacyTimelineType(
     return "timeline_evidence_attached";
   }
 
+  if (
+    legacyType === "agent_spawn_requested" ||
+    legacyType === "agent_spawned" ||
+    legacyType === "agent_message" ||
+    legacyType === "agent_follow_up_scheduled" ||
+    legacyType === "agent_follow_up_started"
+  ) {
+    return "timeline_step_updated";
+  }
+
+  if (legacyType === "agent_interrupt_requested") return "timeline_step_updated";
+  if (legacyType === "agent_interrupt_confirmed") return "timeline_step_finished";
+
+  if (legacyType === "agent_completed") {
+    return "timeline_step_finished";
+  }
+
+  if (legacyType === "agent_failed") {
+    return "timeline_error";
+  }
+
   if (legacyType === "step_started") {
     return "timeline_step_started";
   }
@@ -282,11 +319,21 @@ function inferLegacyStatus(
     case "task_resumed":
     case "task_dequeued":
     case "executing":
+    case "agent_spawn_requested":
+    case "agent_spawned":
+    case "agent_message":
+    case "agent_follow_up_scheduled":
+    case "agent_follow_up_started":
       return "in_progress";
+    case "agent_interrupt_requested":
+      return "in_progress";
+    case "agent_interrupt_confirmed":
+      return "completed";
     case "step_completed":
     case "verification_passed":
     case "task_completed":
     case "input_request_resolved":
+    case "agent_completed":
       return "completed";
     case "verification_pending_user_action":
       return "blocked";
@@ -317,6 +364,7 @@ function inferLegacyStatus(
     case "tool_protocol_violation":
     case "llm_error":
     case "step_timeout":
+    case "agent_failed":
     case "approval_denied":
       return "failed";
     default:
@@ -340,9 +388,15 @@ function inferLegacyActor(legacyType: EventType): TimelineEventActor {
     return "tool";
   }
   if (
+    legacyType === "agent_spawn_requested" ||
     legacyType === "agent_spawned" ||
     legacyType === "agent_completed" ||
     legacyType === "agent_failed" ||
+    legacyType === "agent_message" ||
+    legacyType === "agent_follow_up_scheduled" ||
+    legacyType === "agent_follow_up_started" ||
+    legacyType === "agent_interrupt_requested" ||
+    legacyType === "agent_interrupt_confirmed" ||
     legacyType === "sub_agent_result"
   ) {
     return "subagent";
@@ -465,9 +519,12 @@ export function inferTimelineSubStageLabel(type: EventType): string | undefined 
     case "auto_continuation_started":
       return "Continuing";
     case "context_compaction_started":
+      return "Context automatically compacting";
     case "context_compaction_completed":
+    case "context_summarized":
+      return "Context automatically compacted";
     case "context_compaction_failed":
-      return "Making room to continue";
+      return "Context compaction failed";
     // Plan / contract reconciliation
     case "step_contract_escalated":
     case "plan_contract_conflict":
@@ -494,6 +551,10 @@ export function inferTimelineSubStageLabel(type: EventType): string | undefined 
     case "follow_up_turn_recovery_started":
     case "follow_up_turn_recovery_completed":
     case "follow_up_turn_recovery_blocked":
+    case "agent_follow_up_scheduled":
+    case "agent_follow_up_started":
+    case "agent_interrupt_requested":
+    case "agent_interrupt_confirmed":
     case "safety_stop_triggered":
     case "turn_policy_selected":
     case "no_progress_circuit_breaker":
@@ -559,6 +620,10 @@ export function inferTimelineStageForLegacyType(type: EventType): TimelineStage 
     case "follow_up_turn_recovery_started":
     case "follow_up_turn_recovery_completed":
     case "follow_up_turn_recovery_blocked":
+    case "agent_follow_up_scheduled":
+    case "agent_follow_up_started":
+    case "agent_interrupt_requested":
+    case "agent_interrupt_confirmed":
     case "safety_stop_triggered":
     case "verification_preflight_policy_applied":
     case "verification_artifact_output_downgraded":

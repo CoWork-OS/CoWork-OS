@@ -1,0 +1,182 @@
+/* Conversation history card, shown between the bot header and the message
+   stream. It is laid out to the same 760px column as `.bot-conversation
+   .task-content` so it reads as part of the thread rather than a full-bleed
+   banner stretched across the window. */
+.bot-conversation-history {
+  --bot-history-accent: var(--accent-color, #8f72ed);
+
+  width: 100%;
+  max-width: min(760px, 100% - 64px);
+  margin: 2px auto 4px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.bot-conversation-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px 9px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+/* The old heading stacked an eyebrow over "<bot name> conversations", which
+   repeated the name already shown in the header directly above it. */
+.bot-conversation-history-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bot-conversation-history-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.bot-conversation-new-button {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 5px 10px 5px 8px;
+  color: var(--color-text);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.bot-conversation-new-button:hover {
+  border-color: color-mix(in srgb, var(--bot-history-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--bot-history-accent) 12%, transparent);
+}
+
+.bot-conversation-history-list {
+  display: grid;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.bot-conversation-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding: 9px 14px;
+  color: var(--color-text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bot-conversation-history-row:last-child {
+  border-bottom: 0;
+}
+
+.bot-conversation-history-row:hover,
+.bot-conversation-history-row.selected {
+  background: color-mix(in srgb, var(--bot-history-accent) 10%, transparent);
+}
+
+.bot-conversation-history-row-icon {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 25px;
+  border-radius: 50%;
+  color: var(--bot-history-accent);
+  background: color-mix(in srgb, var(--bot-history-accent) 13%, transparent);
+}
+
+.bot-conversation-history-row-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  flex: 1;
+}
+
+.bot-conversation-history-row-copy strong,
+.bot-conversation-history-row-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-conversation-history-row-copy strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.bot-conversation-history-row-copy span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.bot-conversation-history-row.archived {
+  opacity: 0.65;
+}
+
+.bot-conversation-history-running {
+  color: var(--color-success);
+  animation: bot-history-pulse 1.4s ease-in-out infinite;
+}
+
+.bot-conversation-history-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.bot-conversation-history-empty-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--bot-history-accent);
+  background: color-mix(in srgb, var(--bot-history-accent) 13%, transparent);
+}
+
+@keyframes bot-history-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-conversation-history-running {
+    animation: none;
+  }
+}

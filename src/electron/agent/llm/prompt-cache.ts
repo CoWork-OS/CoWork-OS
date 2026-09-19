@@ -366,8 +366,11 @@ export function extractOpenAICompatibleCacheUsage(usage: Any): {
       0,
   );
   const cacheWriteTokens = Number(
-    usage.prompt_tokens_details?.cache_creation_input_tokens ??
+    usage.prompt_tokens_details?.cache_write_tokens ??
+      usage.input_tokens_details?.cache_write_tokens ??
+      usage.prompt_tokens_details?.cache_creation_input_tokens ??
       usage.input_tokens_details?.cache_creation_input_tokens ??
+      usage.cache_write_tokens ??
       usage.cache_creation_input_tokens ??
       0,
   );
@@ -384,9 +387,13 @@ export function mapPromptCacheTtlToOpenAIRetention(
   return ttl === "1h" ? "24h" : undefined;
 }
 
-export function buildOpenAIPromptCacheFields(promptCache?: LLMPromptCacheConfig): {
+export function buildOpenAIPromptCacheFields(
+  promptCache?: LLMPromptCacheConfig,
+  modelId?: string,
+): {
   prompt_cache_key?: string;
   prompt_cache_retention?: "24h";
+  prompt_cache_options?: { mode: "implicit"; ttl: "30m" };
 } {
   if (!promptCache || promptCache.mode !== "openai_key") {
     return {};
@@ -395,6 +402,21 @@ export function buildOpenAIPromptCacheFields(promptCache?: LLMPromptCacheConfig)
   const promptCacheKey = String(promptCache.cacheKey || "").trim();
   if (!promptCacheKey) {
     return {};
+  }
+
+  const normalizedModelId = String(modelId || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:openai-codex|openai)\//, "")
+    .split("@", 1)[0];
+  const modernCacheModel =
+    normalizedModelId === "gpt-6-astra" || normalizedModelId.startsWith("gpt-5.6");
+
+  if (modernCacheModel) {
+    return {
+      prompt_cache_key: promptCacheKey,
+      prompt_cache_options: { mode: "implicit", ttl: "30m" },
+    };
   }
 
   return {

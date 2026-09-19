@@ -7,18 +7,33 @@ import {
   type DisclosureIntentState,
   type DisclosureScope,
 } from "../utils/disclosure-state";
+import { taskSurfaceStore, useTaskSurface } from "../state/task-surface-store";
+import type { TaskSurfaceKey } from "../state/task-view-cache";
 
 const MAX_CACHED_TASK_DISCLOSURE_STATES = 20;
 
-export function useTaskDisclosureIntents(taskId: string | null | undefined) {
+export function useTaskDisclosureIntents(
+  taskId: string | null | undefined,
+  surfaceKey: TaskSurfaceKey | null = null,
+) {
   const normalizedTaskId = taskId ?? "";
+  const cachedSurface = useTaskSurface(taskSurfaceStore, surfaceKey);
   const [statesByTask, setStatesByTask] = useState<Record<string, DisclosureIntentState>>({});
   const taskOrderRef = useRef<string[]>([]);
-  const state = statesByTask[normalizedTaskId] ?? { groups: {}, activities: {} };
+  const state = surfaceKey
+    ? (cachedSurface?.disclosureState ?? { groups: {}, activities: {} })
+    : (statesByTask[normalizedTaskId] ?? { groups: {}, activities: {} });
 
   const apply = useCallback(
     (action: Parameters<typeof disclosureIntentReducer>[1]) => {
-      if (!normalizedTaskId) return;
+      if (!normalizedTaskId && !surfaceKey) return;
+      if (surfaceKey) {
+        taskSurfaceStore.update(surfaceKey, (snapshot) => ({
+          ...snapshot,
+          disclosureState: disclosureIntentReducer(snapshot.disclosureState, action),
+        }));
+        return;
+      }
       setStatesByTask((current) => {
         const nextTaskState = disclosureIntentReducer(
           current[normalizedTaskId] ?? { groups: {}, activities: {} },
@@ -36,7 +51,7 @@ export function useTaskDisclosureIntents(taskId: string | null | undefined) {
         return next;
       });
     },
-    [normalizedTaskId],
+    [normalizedTaskId, surfaceKey],
   );
 
   const intentFor = useCallback(

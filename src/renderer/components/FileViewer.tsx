@@ -667,10 +667,16 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
 
       case "html":
         return (
+          // No `allow-same-origin`: this renders the raw bytes of an arbitrary
+          // workspace .html file (cloned repo, extracted archive, agent
+          // download). Combined with `allow-scripts` it would keep the
+          // renderer's origin, letting the previewed file reach
+          // window.parent.electronAPI. Matches WebArtifactViewer and
+          // InlineHtmlPreview, which both omit it.
           <iframe
             className="file-viewer-html"
             srcDoc={fileData.htmlContent || ""}
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts"
             title={fileData.fileName}
           />
         );

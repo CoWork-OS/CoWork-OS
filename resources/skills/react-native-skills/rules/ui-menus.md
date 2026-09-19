@@ -14,11 +14,11 @@ Use [zeego](https://zeego.dev) for cross-platform native menus.
 **Incorrect (custom JS menu):**
 
 ```tsx
-import { useState } from 'react'
-import { View, Pressable, Text } from 'react-native'
+import { useState } from "react";
+import { View, Pressable, Text } from "react-native";
 
 function MyMenu() {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(false);
 
   return (
     <View>
@@ -26,24 +26,24 @@ function MyMenu() {
         <Text>Open Menu</Text>
       </Pressable>
       {open && (
-        <View style={{ position: 'absolute', top: 40 }}>
-          <Pressable onPress={() => console.log('edit')}>
+        <View style={{ position: "absolute", top: 40 }}>
+          <Pressable onPress={() => console.log("edit")}>
             <Text>Edit</Text>
           </Pressable>
-          <Pressable onPress={() => console.log('delete')}>
+          <Pressable onPress={() => console.log("delete")}>
             <Text>Delete</Text>
           </Pressable>
         </View>
       )}
     </View>
-  )
+  );
 }
 ```
 
 **Correct (native menu with zeego):**
 
 ```tsx
-import * as DropdownMenu from 'zeego/dropdown-menu'
+import * as DropdownMenu from "zeego/dropdown-menu";
 
 function MyMenu() {
   return (
@@ -55,27 +55,23 @@ function MyMenu() {
       </DropdownMenu.Trigger>
 
       <DropdownMenu.Content>
-        <DropdownMenu.Item key='edit' onSelect={() => console.log('edit')}>
+        <DropdownMenu.Item key="edit" onSelect={() => console.log("edit")}>
           <DropdownMenu.ItemTitle>Edit</DropdownMenu.ItemTitle>
         </DropdownMenu.Item>
 
-        <DropdownMenu.Item
-          key='delete'
-          destructive
-          onSelect={() => console.log('delete')}
-        >
+        <DropdownMenu.Item key="delete" destructive onSelect={() => console.log("delete")}>
           <DropdownMenu.ItemTitle>Delete</DropdownMenu.ItemTitle>
         </DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Root>
-  )
+  );
 }
 ```
 
 **Context menu (long-press):**
 
 ```tsx
-import * as ContextMenu from 'zeego/context-menu'
+import * as ContextMenu from "zeego/context-menu";
 
 function MyContextMenu() {
   return (
@@ -87,26 +83,26 @@ function MyContextMenu() {
       </ContextMenu.Trigger>
 
       <ContextMenu.Content>
-        <ContextMenu.Item key='copy' onSelect={() => console.log('copy')}>
+        <ContextMenu.Item key="copy" onSelect={() => console.log("copy")}>
           <ContextMenu.ItemTitle>Copy</ContextMenu.ItemTitle>
         </ContextMenu.Item>
 
-        <ContextMenu.Item key='paste' onSelect={() => console.log('paste')}>
+        <ContextMenu.Item key="paste" onSelect={() => console.log("paste")}>
           <ContextMenu.ItemTitle>Paste</ContextMenu.ItemTitle>
         </ContextMenu.Item>
       </ContextMenu.Content>
     </ContextMenu.Root>
-  )
+  );
 }
 ```
 
 **Checkbox items:**
 
 ```tsx
-import * as DropdownMenu from 'zeego/dropdown-menu'
+import * as DropdownMenu from "zeego/dropdown-menu";
 
 function SettingsMenu() {
-  const [notifications, setNotifications] = useState(true)
+  const [notifications, setNotifications] = useState(true);
 
   return (
     <DropdownMenu.Root>
@@ -118,7 +114,7 @@ function SettingsMenu() {
 
       <DropdownMenu.Content>
         <DropdownMenu.CheckboxItem
-          key='notifications'
+          key="notifications"
           value={notifications}
           onValueChange={() => setNotifications((prev) => !prev)}
         >
@@ -127,14 +123,14 @@ function SettingsMenu() {
         </DropdownMenu.CheckboxItem>
       </DropdownMenu.Content>
     </DropdownMenu.Root>
-  )
+  );
 }
 ```
 
 **Submenus:**
 
 ```tsx
-import * as DropdownMenu from 'zeego/dropdown-menu'
+import * as DropdownMenu from "zeego/dropdown-menu";
 
 function MenuWithSubmenu() {
   return (
@@ -146,28 +142,28 @@ function MenuWithSubmenu() {
       </DropdownMenu.Trigger>
 
       <DropdownMenu.Content>
-        <DropdownMenu.Item key='home' onSelect={() => console.log('home')}>
+        <DropdownMenu.Item key="home" onSelect={() => console.log("home")}>
           <DropdownMenu.ItemTitle>Home</DropdownMenu.ItemTitle>
         </DropdownMenu.Item>
 
         <DropdownMenu.Sub>
-          <DropdownMenu.SubTrigger key='more'>
+          <DropdownMenu.SubTrigger key="more">
             <DropdownMenu.ItemTitle>More Options</DropdownMenu.ItemTitle>
           </DropdownMenu.SubTrigger>
 
           <DropdownMenu.SubContent>
-            <DropdownMenu.Item key='settings'>
+            <DropdownMenu.Item key="settings">
               <DropdownMenu.ItemTitle>Settings</DropdownMenu.ItemTitle>
             </DropdownMenu.Item>
 
-            <DropdownMenu.Item key='help'>
+            <DropdownMenu.Item key="help">
               <DropdownMenu.ItemTitle>Help</DropdownMenu.ItemTitle>
             </DropdownMenu.Item>
           </DropdownMenu.SubContent>
         </DropdownMenu.Sub>
       </DropdownMenu.Content>
     </DropdownMenu.Root>
-  )
+  );
 }
 ```
 

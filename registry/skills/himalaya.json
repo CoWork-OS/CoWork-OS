@@ -8,9 +8,7 @@
   "parameters": [],
   "enabled": true,
   "requires": {
-    "bins": [
-      "himalaya"
-    ]
+    "bins": ["himalaya"]
   },
   "invocation": {
     "disableModelInvocation": true

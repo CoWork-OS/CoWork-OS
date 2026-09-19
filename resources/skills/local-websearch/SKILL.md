@@ -39,4 +39,4 @@ Search the web privately via a self-hosted SearXNG metasearch engine.
 ## Runtime Prompt
 
 - Current runtime prompt length: 1364 characters.
-- Runtime prompt is defined directly in `../local-websearch.json`. 
+- Runtime prompt is defined directly in `../local-websearch.json`.

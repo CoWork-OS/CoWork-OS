@@ -38,4 +38,4 @@ Use the mcporter CLI to list, configure, auth, and call MCP servers/tools direct
 ## Runtime Prompt
 
 - Current runtime prompt length: 1065 characters.
-- Runtime prompt is defined directly in `../mcporter.json`. 
+- Runtime prompt is defined directly in `../mcporter.json`.

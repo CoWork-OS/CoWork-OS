@@ -6,7 +6,16 @@ import * as _path from "path";
 import * as _fs from "fs";
 import { UpdateInfo, UpdateProgress, AppVersionInfo, IPC_CHANNELS } from "../../shared/types";
 import { compareVersions, getUpdatePlatformCompatibility } from "../../shared/platform-support";
+import {
+  fetchArtifactSignature,
+  isReleaseSignatureEnforced,
+  verifyReleaseArtifact,
+  type ReleaseSignatureResult,
+} from "./release-signature";
+import { createLogger } from "../utils/logger";
+import { isPulseConsentGranted } from "../telemetry/pulse-service";
 
+const log = createLogger("UpdateManager");
 const execAsync = promisify(exec);
 
 interface GitHubRelease {
@@ -33,6 +42,8 @@ export class UpdateManager {
   private repoName = "CoWork-OS";
   private isUpdating = false;
   private updaterEventsConfigured = false;
+  /** Signature check started by the update-downloaded handler, awaited by electronUpdaterUpdate. */
+  private pendingVerification: Promise<void> | null = null;
   private pendingUpdateInfo: UpdateInfo | null = null;
   private checkedGitTarget: GitUpdateTarget | null = null;
   private pendingGitTarget: GitUpdateTarget | null = null;
@@ -118,6 +129,47 @@ export class UpdateManager {
     return npmGlobalPatterns.some((pattern) => normalizedPath.includes(pattern));
   }
 
+  /**
+   * Verify the detached Ed25519 signature of the artifact electron-updater just
+   * downloaded, using the public key embedded in this build.
+   *
+   * The `update-downloaded` event carries the local path of the downloaded file
+   * (`downloadedFile`); the signature is published as `<asset>.sig` on the same
+   * release. A missing key means enforcement is off and this returns verified
+   * with a reason the caller logs.
+   *
+   * The asset name is derived from `downloadedFile` and NOT from `event.files`:
+   * a release can publish several artifacts for one platform (macOS ships both
+   * a .zip and a .dmg), and `files[0]` is not necessarily the one
+   * electron-updater chose. Verifying one asset's signature against another
+   * asset's bytes always fails, which would block every update once a signing
+   * key is embedded.
+   */
+  private async verifyDownloadedArtifact(event: Any): Promise<ReleaseSignatureResult> {
+    if (!isReleaseSignatureEnforced()) {
+      return { status: "unverified", reason: "no_public_key_configured" };
+    }
+
+    const artifactPath: string | undefined =
+      typeof event?.downloadedFile === "string" ? event.downloadedFile : undefined;
+    if (!artifactPath) {
+      return { status: "failed", reason: "downloaded_artifact_path_unavailable" };
+    }
+
+    const assetName = _path.basename(artifactPath);
+    const version = event?.version || this.pendingUpdateInfo?.latestVersion;
+    if (!assetName || !version) {
+      return { status: "failed", reason: "release_asset_url_unavailable" };
+    }
+
+    const signature = await fetchArtifactSignature(
+      `https://github.com/${this.repoOwner}/${this.repoName}/releases/download/v${version}/${encodeURIComponent(
+        assetName,
+      )}`,
+    );
+    return verifyReleaseArtifact(artifactPath, signature);
+  }
+
   async checkForUpdates(): Promise<UpdateInfo> {
     const versionInfo = await this.getVersionInfo();
     const currentVersion = versionInfo.version;
@@ -127,36 +179,25 @@ export class UpdateManager {
     this.sendProgress({ phase: "checking", message: "Checking for updates..." });
 
     try {
-      // Fetch latest release from GitHub
-      const response = await net.fetch(
-        `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/releases/latest`,
-        {
-          headers: {
-            Accept: "application/vnd.github.v3+json",
-            "User-Agent": "CoWork-OS-Updater",
-          },
-        },
-      );
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          return this.recordCheckedUpdate({
-            available: false,
-            currentVersion,
-            latestVersion: currentVersion,
-            updateMode: this.getUpdateMode(versionInfo),
-            supported: true,
-          });
-        }
-        throw new Error(`GitHub API error: ${response.status}`);
-      }
-
-      const release = (await response.json()) as GitHubRelease;
-      const latestVersion = release.tag_name.replace(/^v/, "");
-      const available = this.isNewerVersion(latestVersion, currentVersion);
+      const release = await this.fetchLatestRelease(currentVersion);
 
       // Determine update mode based on installation type
       const updateMode = this.getUpdateMode(versionInfo);
+
+      if (!release) {
+        // The repository has no published release to compare against. Report
+        // "up to date" rather than an error — this is not a failed check.
+        return this.recordCheckedUpdate({
+          available: false,
+          currentVersion,
+          latestVersion: currentVersion,
+          updateMode,
+          supported: true,
+        });
+      }
+
+      const latestVersion = release.tag_name.replace(/^v/, "");
+      const available = this.isNewerVersion(latestVersion, currentVersion);
 
       if (versionInfo.isGitRepo) {
         // A source checkout updates from origin/main, so validate that exact
@@ -184,7 +225,7 @@ export class UpdateManager {
         available: updateMode === "git" ? false : available,
         currentVersion,
         latestVersion,
-        releaseNotes: release.body,
+        releaseNotes: typeof release.body === "string" ? release.body : undefined,
         releaseUrl: release.html_url,
         publishedAt: release.published_at,
         updateMode,
@@ -199,6 +240,130 @@ export class UpdateManager {
   private recordCheckedUpdate(updateInfo: UpdateInfo): UpdateInfo {
     this.lastCheckedUpdateInfo = updateInfo;
     return updateInfo;
+  }
+
+  /**
+   * Resolve the latest published release.
+   *
+   * Returns `null` when the release endpoint reports that there is no release
+   * to compare against (HTTP 404: repository has none published yet, or was
+   * renamed/made private). That is "you are up to date", not an error, and the
+   * caller must not surface it as a failed check.
+   *
+   * The Pulse collector is consulted only when the user has explicitly opted
+   * into Pulse. It is an adoption-reporting side channel that carries version,
+   * platform, arch and surface, so it is subject to the same consent gate as
+   * the rest of Pulse — a user who declined must not be fingerprinted by the
+   * update check. GitHub is always the fallback, so update discovery never
+   * depends on Pulse being reachable or enabled.
+   *
+   * The on-disk copy is a *fallback for an unreachable network*, not a
+   * short-circuit: serving it ahead of the network made an explicit "Check for
+   * updates" unable to see a release published in the last 24 hours.
+   */
+  private async fetchLatestRelease(currentVersion: string): Promise<GitHubRelease | null> {
+    const cachePath =
+      typeof app.getPath === "function"
+        ? _path.join(app.getPath("userData"), "update-check-cache.json")
+        : null;
+
+    let release: GitHubRelease | null = null;
+    if (isPulseConsentGranted() && !process.env.CI && process.env.NODE_ENV !== "test") {
+      try {
+        const params = new URLSearchParams({
+          version: currentVersion,
+          platform:
+            this.runtimePlatform === "darwin"
+              ? "macos"
+              : this.runtimePlatform === "win32"
+                ? "windows"
+                : this.runtimePlatform === "linux"
+                  ? "linux"
+                  : "other",
+          arch: process.arch === "arm64" || process.arch === "x64" ? process.arch : "other",
+          surface: "desktop",
+        });
+        const pulseResponse = await net.fetch(
+          `https://pulse.coworkosapp.com/v1/latest-version?${params.toString()}`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (pulseResponse.ok) {
+          const candidate = (await pulseResponse.json()) as GitHubRelease;
+          if (this.isReleaseShape(candidate)) release = candidate;
+        }
+      } catch {
+        // The public collector is optional; use GitHub directly below.
+      }
+    }
+
+    if (!release) {
+      let response: Awaited<ReturnType<typeof net.fetch>>;
+      try {
+        response = await net.fetch(
+          `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/releases/latest`,
+          {
+            headers: {
+              Accept: "application/vnd.github.v3+json",
+              "User-Agent": "CoWork-OS-Updater",
+            },
+          },
+        );
+      } catch (error) {
+        // Offline or DNS failure: fall back to the last known release rather
+        // than failing the check outright.
+        const cached = await this.readCachedRelease(cachePath);
+        if (cached) return cached;
+        throw error;
+      }
+
+      // No published release is a valid answer, not a failure.
+      if (response.status === 404) return null;
+      if (!response.ok) {
+        const cached = await this.readCachedRelease(cachePath);
+        if (cached) return cached;
+        throw new Error(`GitHub API error: ${response.status}`);
+      }
+      release = (await response.json()) as GitHubRelease;
+    }
+
+    if (cachePath) {
+      try {
+        await _fs.promises.mkdir(_path.dirname(cachePath), { recursive: true });
+        await _fs.promises.writeFile(
+          cachePath,
+          JSON.stringify({ checkedAt: Date.now(), release }),
+          {
+            mode: 0o600,
+          },
+        );
+      } catch {
+        // Cache failures must not make updates fail.
+      }
+    }
+    return release;
+  }
+
+  private async readCachedRelease(cachePath: string | null): Promise<GitHubRelease | null> {
+    if (!cachePath) return null;
+    try {
+      const cached = JSON.parse(await _fs.promises.readFile(cachePath, "utf8")) as {
+        checkedAt?: number;
+        release?: GitHubRelease;
+      };
+      if (cached.release && this.isReleaseShape(cached.release)) return cached.release;
+    } catch {
+      // No cache, or an interrupted write.
+    }
+    return null;
+  }
+
+  private isReleaseShape(value: GitHubRelease): value is GitHubRelease {
+    return Boolean(
+      value &&
+      typeof value.tag_name === "string" &&
+      typeof value.html_url === "string" &&
+      Array.isArray(value.assets),
+    );
   }
 
   private runGitCommand(command: string, options: { cwd: string }) {
@@ -527,19 +692,48 @@ export class UpdateManager {
           },
         );
 
-        autoUpdater.on("update-downloaded", () => {
-          this.updateReadyToInstall = true;
-          this.sendProgress({
-            phase: "complete",
-            percent: 100,
-            message: "Update downloaded. Ready to install.",
-          });
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, {
-              requiresRestart: true,
-              message: 'Update downloaded. Click "Install & Restart" to apply.',
+        autoUpdater.on("update-downloaded", (event: Any) => {
+          // Verify the detached release signature before marking the update
+          // installable. Neither shipped platform is code-signed, so without
+          // this the only integrity control is the sha512 in latest.yml, which
+          // is published to the same release as the artifact it describes.
+          //
+          // The promise is handed to electronUpdaterUpdate() so downloadUpdate()
+          // cannot resolve — and report success to the caller — while
+          // verification is still running. A rejection here must be able to
+          // reach downloadUpdate()'s catch, which is what clears
+          // pendingUpdateInfo.
+          const verification = this.verifyDownloadedArtifact(event).then((result) => {
+            if (result.status === "failed") {
+              this.updateReadyToInstall = false;
+              const message = `Update rejected: release signature could not be verified (${result.reason}). Download the release manually from GitHub instead.`;
+              log.error(message);
+              this.sendProgress({ phase: "error", message });
+              this.sendError(message);
+              throw new Error(message);
+            }
+            if (result.status === "unverified") {
+              log.warn(
+                "Installing an update without signature verification: no release signing key is embedded in this build. See src/electron/updater/release-signing-key.ts.",
+              );
+            }
+            this.updateReadyToInstall = true;
+            this.sendProgress({
+              phase: "complete",
+              percent: 100,
+              message: "Update downloaded. Ready to install.",
             });
-          }
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+              this.mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, {
+                requiresRestart: true,
+                message: 'Update downloaded. Click "Install & Restart" to apply.',
+              });
+            }
+          });
+          // Keep a settled rejection from becoming an unhandled rejection if
+          // downloadUpdate() throws first and nothing ever awaits this.
+          this.pendingVerification = verification;
+          void verification.catch(() => undefined);
         });
 
         autoUpdater.on("error", (error: Error) => {
@@ -562,7 +756,17 @@ export class UpdateManager {
           `Packaged updater resolved ${checkedVersion}, but ${this.pendingUpdateInfo.latestVersion} was checked. Check for updates again.`,
         );
       }
+      this.pendingVerification = null;
       await autoUpdater.downloadUpdate();
+      // downloadUpdate() resolves as soon as the bytes land; the signature
+      // check runs in the update-downloaded handler. Await it here so a
+      // verification failure surfaces as a rejection from this method rather
+      // than after the caller has already been told the download succeeded.
+      if (this.pendingVerification) {
+        const verification = this.pendingVerification;
+        this.pendingVerification = null;
+        await verification;
+      }
     } catch (error: Any) {
       this.sendProgress({
         phase: "error",
@@ -576,8 +780,13 @@ export class UpdateManager {
 
   async installUpdateAndRestart(): Promise<void> {
     const versionInfo = await this.getVersionInfo();
+    // `updateReadyToInstall` is cleared when signature verification fails, so
+    // this single guard is what keeps an unverified artifact away from
+    // quitAndInstall. Do not relax it without replacing the check downstream.
     if (!this.pendingUpdateInfo || !this.updateReadyToInstall) {
-      throw new Error("No verified update is ready to install.");
+      throw new Error(
+        "No verified update is ready to install. Download the release manually from GitHub.",
+      );
     }
     this.assertUpdateSupported(
       this.pendingUpdateInfo.updateMode === "git" && this.pendingGitTarget

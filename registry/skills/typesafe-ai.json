@@ -1,0 +1,44 @@
+{
+  "id": "typesafe-ai",
+  "name": "TypeSafe",
+  "description": "Design and implement TypeSafe System One integrations using Jev's typed Choice, Score, and Noul judgments. Use when the user explicitly asks for TypeSafe or Jev, or wants semantic model decisions expressed as typed, confidence-aware primitives.",
+  "icon": "🧭",
+  "category": "Development",
+  "prompt": "# TypeSafe / Jev\n\nUse this skill when the task explicitly mentions TypeSafe, Jev, System One, Choice, Score, or Noul, or asks to replace a semantic LLM decision with a typed, confidence-aware primitive.\n\nDo not use this skill for generic LLM provider selection, ordinary deterministic branching, or classifier design that does not involve TypeSafe.\n\nExecution workflow:\n1. Read `{baseDir}/SKILL.md` before designing or implementing a TypeSafe workflow.\n2. Read the live TypeSafe documentation index and the current API or SDK page before writing integration code. For new workflows, inspect the closest cookbook; do not invent version-dependent endpoints, payloads, model names, or thresholds.\n3. Map the decision to the narrowest primitive: Choice for a defined candidate set, Noul for a yes/no condition, and Score for an ordered degree. Build candidate lists and state in code; never ask the model to invent options.\n4. Batch independent questions over the same state, preserve raw judgments and probabilities, and set escalation or irreversible-action thresholds from representative target-domain tests. Confidence is not permission to act.\n5. Keep exact rules, calculations, lookups, permissions, approvals, and tool execution in code. Keep TypeSafe credentials server-side, avoid logging them, and use only an explicitly configured provider route.\n6. Validate representative cases and the resulting application behavior. When working on CoWork OS's native Jev route, also consult `docs/jev.md` and preserve the normal chat model, access profiles, approvals, and tool policies as authoritative.\n\nSuccess criteria:\n- The implementation uses current TypeSafe documentation and a narrowly defined typed judgment.\n- Candidate coverage, uncertainty handling, credentials, and policy boundaries are explicit.\n- The final response reports targeted tests or live verification and any remaining account or API setup required.",
+  "parameters": [],
+  "enabled": true,
+  "type": "task",
+  "metadata": {
+    "version": "1.0.0",
+    "author": "TypeSafe AI",
+    "homepage": "https://typesafe.ai",
+    "repository": "https://github.com/typesafe-ai/skills/tree/main/skills/typesafe-ai",
+    "license": "MIT",
+    "primaryEnv": "TYPESAFE_API_KEY",
+    "tags": ["typesafe", "jev", "system-one", "structured-decisions", "routing", "ranking", "verification"],
+    "routing": {
+      "useWhen": "Use when the task explicitly mentions TypeSafe, Jev, System One, Choice, Score, or Noul, or asks to implement semantic decisions as typed, confidence-aware primitives for routing, ranking, extraction, verification, or escalation.",
+      "dontUseWhen": "Do not use for generic LLM provider selection, ordinary deterministic branching, or classifier design that does not involve TypeSafe; use the normal provider or coding workflow instead.",
+      "outputs": "A TypeSafe/Jev design, integration, review, or targeted implementation with typed judgments, explicit candidates and state, uncertainty handling, and verification notes.",
+      "successCriteria": "Uses current TypeSafe documentation, chooses a narrow primitive, keeps policy and execution in code, protects credentials, validates representative behavior, and reports remaining account or API setup.",
+      "keywords": ["typesafe", "jev", "system one", "choice primitive", "score primitive", "noul", "typed judgment"],
+      "examples": {
+        "positive": [
+          "Use the TypeSafe skill to replace our tool router's model call with Jev Choice.",
+          "Build a TypeSafe System One integration that scores support-ticket urgency.",
+          "Use Jev's Noul judgment to gate whether this tool call needs human review.",
+          "Review this TypeSafe API integration and check the confidence thresholds."
+        ],
+        "negative": [
+          "Choose the best LLM provider for this application.",
+          "Add an ordinary if statement for the checkout state machine.",
+          "Build a generic text classifier without using TypeSafe.",
+          "Fix a React component's loading state."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
+    }
+  }
+}

@@ -262,6 +262,7 @@ export interface RoutineServiceDeps {
     title: string;
     prompt: string;
     workspaceId: string;
+    assignedAgentRoleId?: string;
     agentConfig?: AgentConfig;
     source?: "manual" | "cron" | "hook" | "api";
   }) => Promise<{ id: string }>;

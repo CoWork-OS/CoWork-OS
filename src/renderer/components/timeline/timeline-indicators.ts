@@ -2,11 +2,13 @@ import type { TaskEvent } from "../../../shared/types";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
+  Bot,
   Check,
   Circle,
   FileOutput,
   FileText,
   Link2,
+  ListTree,
   Loader2,
   Package,
   Play,
@@ -175,6 +177,23 @@ export function resolveTimelineIndicator(
     return { icon: RotateCcw, tone: "active", label: "Retry started" };
   }
 
+  if (effectiveType === "context_compaction_started") {
+    return {
+      icon: ListTree,
+      tone: "active",
+      spin: true,
+      label: "Context automatically compacting",
+    };
+  }
+
+  if (effectiveType === "context_compaction_completed" || effectiveType === "context_summarized") {
+    return { icon: ListTree, tone: "success", label: "Context automatically compacted" };
+  }
+
+  if (effectiveType === "context_compaction_failed") {
+    return { icon: ListTree, tone: "error", label: "Context compaction failed" };
+  }
+
   if (isSkillReadToolEvent(event)) {
     const completed = effectiveType === "tool_result" || isTaskCompleted;
     return {
@@ -242,6 +261,37 @@ export function resolveTimelineIndicator(
     effectiveType === "file_deleted"
   ) {
     return { icon: FileText, tone: "neutral", label: "File change" };
+  }
+
+  if (effectiveType === "agent_spawn_requested") {
+    return { icon: Bot, tone: "active", label: "Creating an agent" };
+  }
+
+  if (effectiveType === "agent_spawned") {
+    return { icon: Bot, tone: "neutral", label: "Created an agent" };
+  }
+
+  if (effectiveType === "agent_failed") {
+    return { icon: Bot, tone: "error", label: "Agent failed" };
+  }
+
+  if (effectiveType === "agent_completed") {
+    return { icon: Bot, tone: "success", label: "Agent finished" };
+  }
+
+  if (
+    effectiveType === "agent_message" ||
+    effectiveType === "agent_follow_up_scheduled" ||
+    effectiveType === "agent_follow_up_started"
+  ) {
+    return { icon: Bot, tone: "neutral", label: "Agent message" };
+  }
+
+  if (
+    effectiveType === "agent_interrupt_requested" ||
+    effectiveType === "agent_interrupt_confirmed"
+  ) {
+    return { icon: Bot, tone: "warning", label: "Agent interruption" };
   }
 
   return { icon: Circle, tone: "neutral", label: "Event" };

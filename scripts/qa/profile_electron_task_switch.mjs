@@ -398,26 +398,14 @@ function getBudget(profile, env = process.env) {
       "COWORK_PROFILE_TIMELINE_ROWS_P95_MS",
       base.timelineFirstRowsReadyP95Ms,
     ),
-    longTaskMaxMs: readBudgetOverride(
-      env,
-      "COWORK_PROFILE_LONG_TASK_MAX_MS",
-      base.longTaskMaxMs,
-    ),
-    frameGapMaxMs: readBudgetOverride(
-      env,
-      "COWORK_PROFILE_FRAME_GAP_MAX_MS",
-      base.frameGapMaxMs,
-    ),
+    longTaskMaxMs: readBudgetOverride(env, "COWORK_PROFILE_LONG_TASK_MAX_MS", base.longTaskMaxMs),
+    frameGapMaxMs: readBudgetOverride(env, "COWORK_PROFILE_FRAME_GAP_MAX_MS", base.frameGapMaxMs),
     appShellReadyMs: readBudgetOverride(
       env,
       "COWORK_PROFILE_APP_SHELL_READY_MS",
       base.appShellReadyMs,
     ),
-    sidebarReadyMs: readBudgetOverride(
-      env,
-      "COWORK_PROFILE_SIDEBAR_READY_MS",
-      base.sidebarReadyMs,
-    ),
+    sidebarReadyMs: readBudgetOverride(env, "COWORK_PROFILE_SIDEBAR_READY_MS", base.sidebarReadyMs),
     timelinePageSerializedP95Bytes: readBudgetOverride(
       env,
       "COWORK_PROFILE_TIMELINE_SERIALIZED_P95_BYTES",
@@ -605,10 +593,7 @@ function seedFixtureProfile(userDataDir, options, env) {
   fs.mkdirSync(userDataDir, { recursive: true });
   const workspacePath = path.join(userDataDir, "fixture-workspace");
   fs.mkdirSync(workspacePath, { recursive: true });
-  const seedScript = path.join(
-    os.tmpdir(),
-    `cowork-perf-seed-${process.pid}-${Date.now()}.cjs`,
-  );
+  const seedScript = path.join(os.tmpdir(), `cowork-perf-seed-${process.pid}-${Date.now()}.cjs`);
   const script = `
 process.env.COWORK_USER_DATA_DIR = ${JSON.stringify(userDataDir)};
 delete process.env.COWORK_PROFILE;
@@ -787,7 +772,9 @@ async function launchApp(options, logs) {
     !hasDesktopSession() &&
     process.env.COWORK_PROFILE_ALLOW_HEADLESS !== "1"
   ) {
-    throw new Error("Desktop profiling requires a GUI session. Set COWORK_PROFILE_ALLOW_HEADLESS=1 or omit --require-desktop only when an xvfb-style display is configured.");
+    throw new Error(
+      "Desktop profiling requires a GUI session. Set COWORK_PROFILE_ALLOW_HEADLESS=1 or omit --require-desktop only when an xvfb-style display is configured.",
+    );
   }
 
   const cdpPort = options.cdpPort ?? (await findAvailablePort(DEFAULT_CDP_PORT));
@@ -834,7 +821,16 @@ async function launchApp(options, logs) {
     env.COWORK_DEV_SERVER_URL = devServerUrl;
     const react = spawn(
       npmCommand,
-      ["run", "dev:react", "--", "--host", "127.0.0.1", "--port", String(devServerPort), "--strictPort"],
+      [
+        "run",
+        "dev:react",
+        "--",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(devServerPort),
+        "--strictPort",
+      ],
       {
         cwd: repoRoot,
         env,
@@ -854,9 +850,9 @@ async function launchApp(options, logs) {
     getElectronBinary(),
     ["--enable-precise-memory-info", `--remote-debugging-port=${cdpPort}`, "."],
     {
-    cwd: repoRoot,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
+      cwd: repoRoot,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
     },
   );
   createLineCapture(electron, "electron", logs);
@@ -1045,11 +1041,15 @@ function snapshotInPage(metricNames) {
         const titleElement = element.querySelector(
           ".cli-task-title, .cli-task-agent-name, .task-item-rename-input",
         );
-        const title =
-          (titleElement?.textContent || element.getAttribute("title") || element.textContent || "")
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 160);
+        const title = (
+          titleElement?.textContent ||
+          element.getAttribute("title") ||
+          element.textContent ||
+          ""
+        )
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 160);
         return {
           index,
           taskId: element.getAttribute("data-task-id") || null,
@@ -1133,11 +1133,15 @@ function clickTaskInPage(request) {
       const titleElement = element.querySelector(
         ".cli-task-title, .cli-task-agent-name, .task-item-rename-input",
       );
-      const title =
-        (titleElement?.textContent || element.getAttribute("title") || element.textContent || "")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, 160);
+      const title = (
+        titleElement?.textContent ||
+        element.getAttribute("title") ||
+        element.textContent ||
+        ""
+      )
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 160);
       return {
         element,
         domIndex,
@@ -1339,8 +1343,7 @@ async function runTaskSwitches(cdp, options) {
       startedAt: effectiveStartedAt,
       wallMs: after.performanceNow - clicked.startedAt,
       headerReadyMs: headerMark == null ? null : headerMark.atMs - effectiveStartedAt,
-      timelineDataReceivedMs:
-        timelineMark == null ? null : timelineMark.atMs - effectiveStartedAt,
+      timelineDataReceivedMs: timelineMark == null ? null : timelineMark.atMs - effectiveStartedAt,
       timelineFirstRowsReadyMs:
         firstRowsMark == null ? null : firstRowsMark.atMs - effectiveStartedAt,
       frameGapsMs: metricDelta(before, after, "renderer.frame_gap_ms"),
@@ -1348,7 +1351,8 @@ async function runTaskSwitches(cdp, options) {
       rendererHeapBeforeBytes: before.rendererHeapUsedBytes,
       rendererHeapAfterBytes: after.rendererHeapUsedBytes,
       rendererHeapDeltaBytes:
-        Number.isFinite(before.rendererHeapUsedBytes) && Number.isFinite(after.rendererHeapUsedBytes)
+        Number.isFinite(before.rendererHeapUsedBytes) &&
+        Number.isFinite(after.rendererHeapUsedBytes)
           ? after.rendererHeapUsedBytes - before.rendererHeapUsedBytes
           : null,
       documentNodeCount: after.documentNodeCount,
@@ -1400,7 +1404,9 @@ function summarizeChannelMetrics(channelMap) {
   return Object.fromEntries(
     Object.entries(channelMap).map(([channel, bucket]) => [
       channel,
-      Object.fromEntries(Object.entries(bucket).map(([key, values]) => [key, summarizeValues(values)])),
+      Object.fromEntries(
+        Object.entries(bucket).map(([key, values]) => [key, summarizeValues(values)]),
+      ),
     ]),
   );
 }
@@ -1420,7 +1426,9 @@ export function parseLogMetrics(logs) {
     if (
       !sidebarReadySeen &&
       BACKGROUND_BEFORE_SIDEBAR_PATTERN.test(message) &&
-      !/quiet mode; not started|auto-connect skipped in quiet mode|background autostart is disabled/i.test(message) &&
+      !/quiet mode; not started|auto-connect skipped in quiet mode|background autostart is disabled/i.test(
+        message,
+      ) &&
       backgroundBeforeSidebar.length < 20
     ) {
       backgroundBeforeSidebar.push({
@@ -1469,9 +1477,10 @@ function startupMarkValue(startupMarks, name) {
 
 function buildReport(options, launchInfo, target, initialSnapshot, finalSnapshot, switches, logs) {
   const logMetrics = parseLogMetrics(logs);
-  const startupMarks = finalSnapshot.startupMarks.length > 0
-    ? finalSnapshot.startupMarks
-    : initialSnapshot.startupMarks;
+  const startupMarks =
+    finalSnapshot.startupMarks.length > 0
+      ? finalSnapshot.startupMarks
+      : initialSnapshot.startupMarks;
   const headerValues = switches.map((item) => item.headerReadyMs).filter(Number.isFinite);
   const timelineValues = switches
     .map((item) => item.timelineDataReceivedMs)
@@ -1676,12 +1685,18 @@ function printReport(report, budget, budgetFailures, outputPath) {
   console.log("Electron task switch profile");
   console.log(`  mode: ${report.options.mode}`);
   console.log(`  target: ${report.target.title || "(untitled)"} ${report.target.url || ""}`);
-  console.log(`  switches: ${report.summary.taskSwitch.ok}/${report.summary.taskSwitch.attempted} ok`);
+  console.log(
+    `  switches: ${report.summary.taskSwitch.ok}/${report.summary.taskSwitch.attempted} ok`,
+  );
   console.log(`  app shell ready: ${formatMaybeMs(report.startup.appShellReadyMs)}`);
   console.log(`  sidebar ready: ${formatMaybeMs(report.startup.sidebarReadyMs)}`);
   console.log(`  header ready: ${formatSummary(report.summary.taskSwitch.headerReadyMs)}`);
-  console.log(`  timeline data: ${formatSummary(report.summary.taskSwitch.timelineDataReceivedMs)}`);
-  console.log(`  timeline rows: ${formatSummary(report.summary.taskSwitch.timelineFirstRowsReadyMs)}`);
+  console.log(
+    `  timeline data: ${formatSummary(report.summary.taskSwitch.timelineDataReceivedMs)}`,
+  );
+  console.log(
+    `  timeline rows: ${formatSummary(report.summary.taskSwitch.timelineFirstRowsReadyMs)}`,
+  );
   console.log(`  frame gaps: ${formatSummary(report.summary.renderer.frameGapMs)}`);
   console.log(`  long tasks: ${formatSummary(report.summary.renderer.longTaskMs)}`);
   console.log(`  renderer heap growth: ${report.summary.renderer.heapGrowthBytes || 0}B`);

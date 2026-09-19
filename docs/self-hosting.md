@@ -39,18 +39,18 @@ network access. Invalid profiles fail closed and require operator action.
 Where the “UI” lives:
 
 - The daemon serves a minimal Web UI at `http://127.0.0.1:18789/` (on the server).
-- You view it from your laptop via tunnel/Tailscale (so it still *looks like* `http://127.0.0.1:18789/` locally).
+- You view it from your laptop via tunnel/Tailscale (so it still _looks like_ `http://127.0.0.1:18789/` locally).
 
 ## Choose Your Runtime
 
 Pick one of these. They all run the same underlying agent runtime, DB, and settings:
 
-| Option | Best For | What You Get | What You Don’t |
-|---|---|---|---|
-| **Packaged server release** (recommended) | Production VPS installs | Prebuilt Linux x64 tarball, Node daemon entrypoint, systemd templates, full resources/connectors, no source build | Linux x64/glibc only in the first release; not a desktop app package |
-| **Node-only daemon from source/npm** | VPS/headless | No desktop window or Xvfb, source-build flexibility | Desktop-only features (Live Canvas, visible Browser V2 Workbench, clipboard, desktop screenshots, etc.) |
-| **Headless Electron daemon** | Max parity with desktop runtime | More desktop parity | Heavier deps (Electron + Xvfb on Linux) |
-| **Docker** (Node-only or Electron) | “Just run it” installs | Easy persistence via volumes | You still access it via Control Plane (web/CLI) |
+| Option                                    | Best For                        | What You Get                                                                                                      | What You Don’t                                                                                          |
+| ----------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Packaged server release** (recommended) | Production VPS installs         | Prebuilt Linux x64 tarball, Node daemon entrypoint, systemd templates, full resources/connectors, no source build | Linux x64/glibc only in the first release; not a desktop app package                                    |
+| **Node-only daemon from source/npm**      | VPS/headless                    | No desktop window or Xvfb, source-build flexibility                                                               | Desktop-only features (Live Canvas, visible Browser V2 Workbench, clipboard, desktop screenshots, etc.) |
+| **Headless Electron daemon**              | Max parity with desktop runtime | More desktop parity                                                                                               | Heavier deps (Electron + Xvfb on Linux)                                                                 |
+| **Docker** (Node-only or Electron)        | “Just run it” installs          | Easy persistence via volumes                                                                                      | You still access it via Control Plane (web/CLI)                                                         |
 
 Docs:
 

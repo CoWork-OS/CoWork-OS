@@ -3,18 +3,14 @@
   "name": "Addresses.com",
   "category": "people_search",
   "priority": "standard",
-  "jurisdictions": [
-    "US"
-  ],
+  "jurisdictions": ["US"],
   "covered_by": "intelius",
   "search": {
     "method": "url_pattern",
     "url": "https://www.addresses.com/",
     "fetch": "web_extract",
     "match_signal": "result",
-    "by": [
-      "name"
-    ],
+    "by": ["name"],
     "url_patterns": {
       "name": "https://www.addresses.com/people/{First}+{Last}"
     },
@@ -36,9 +32,7 @@
       "phone_callback": false,
       "payment": false
     },
-    "inputs": [
-      "contact_email"
-    ],
+    "inputs": ["contact_email"],
     "notes": "COVERED BY THE INTELIUS/PEOPLECONNECT CLUSTER -- do NOT file a separate opt-out. addresses.com is a front-end (report links -> tracking.intelius.com), and 'addresses' is listed in intelius.owns, so one PeopleConnect suppression (see intelius.json) removes it too. Recorded here only so the scan cross-check has the URL pattern and knows it maps to the parent. After the intelius suppression confirms, re-scan this URL to verify it dropped.",
     "quirks": [
       "Front-end only; holds no independent removal channel. The PeopleConnect Suppression Center is the lever."

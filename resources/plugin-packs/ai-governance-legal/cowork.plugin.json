@@ -7,19 +7,10 @@
   "author": "Anthropic",
   "license": "Apache-2.0",
   "homepage": "https://github.com/anthropics/claude-for-legal/tree/993f6619fc2f321cfdd65daa6919ad6cd2c56d92/ai-governance-legal",
-  "keywords": [
-    "legal",
-    "law",
-    "compliance",
-    "ai-governance-legal"
-  ],
+  "keywords": ["legal", "law", "compliance", "ai-governance-legal"],
   "icon": "⚖️",
   "category": "Legal",
-  "recommendedConnectors": [
-    "Google Drive",
-    "Lexis+ Protégé",
-    "Slack"
-  ],
+  "recommendedConnectors": ["Google Drive", "Lexis+ Protégé", "Slack"],
   "tryAsking": [
     "Use Ai Governance Legal Ai Inventory for this legal workflow",
     "Use Ai Governance Legal Aia Generation for this legal workflow",
@@ -377,13 +368,7 @@
       "description": "Triages proposed AI use cases against your registry, runs impact assessments across the regimes in scope, reviews vendor AI terms for training-on-data and liability gaps, and keeps your AI policy current with practice.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "research",
-        "review",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "research", "review", "summarize", "triage"],
       "systemPrompt": "You are a Ai Governance Legal assistant in CoWork OS. Produce draft legal work product for attorney review, preserve citations and source provenance, flag uncertainty, and require explicit confirmation before irreversible actions."
     }
   ],
@@ -400,11 +385,7 @@
       "pluginName": "ai-governance-legal",
       "license": "Apache-2.0",
       "connectors": {
-        "recommendedCategories": [
-          "documents",
-          "chat",
-          "email"
-        ],
+        "recommendedCategories": ["documents", "chat", "email"],
         "mcpServers": {
           "Slack": {
             "type": "http",

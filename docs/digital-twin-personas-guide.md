@@ -76,18 +76,18 @@ This keeps persona selection separate from cognition ownership.
 
 Digital twins target categories of work that fragment attention:
 
-| Category | What It Absorbs |
-|----------|----------------|
-| `context-switching` | Gathering context when moving between projects or discussions |
-| `status-reporting` | Compiling progress updates, standup summaries, executive briefs |
-| `information-triage` | Filtering, prioritizing, and routing incoming information |
-| `decision-preparation` | Assembling data, options, and trade-offs for pending decisions |
-| `documentation` | Keeping docs current, writing summaries, audit trails |
-| `review-preparation` | Building review queues, risk assessments, review checklists |
-| `dependency-tracking` | Monitoring dependencies, vulnerabilities, blockers |
-| `compliance-checks` | Checking against standards, SLAs, and policies |
-| `knowledge-curation` | Organizing and surfacing institutional knowledge |
-| `routine-automation` | Repetitive checks and operational housekeeping |
+| Category               | What It Absorbs                                                 |
+| ---------------------- | --------------------------------------------------------------- |
+| `context-switching`    | Gathering context when moving between projects or discussions   |
+| `status-reporting`     | Compiling progress updates, standup summaries, executive briefs |
+| `information-triage`   | Filtering, prioritizing, and routing incoming information       |
+| `decision-preparation` | Assembling data, options, and trade-offs for pending decisions  |
+| `documentation`        | Keeping docs current, writing summaries, audit trails           |
+| `review-preparation`   | Building review queues, risk assessments, review checklists     |
+| `dependency-tracking`  | Monitoring dependencies, vulnerabilities, blockers              |
+| `compliance-checks`    | Checking against standards, SLAs, and policies                  |
+| `knowledge-curation`   | Organizing and surfacing institutional knowledge                |
+| `routine-automation`   | Repetitive checks and operational housekeeping                  |
 
 Each template declares a small set of primary categories. Those categories shape the twin's persona and suggest the kinds of playbooks that role should handle well.
 
@@ -97,13 +97,13 @@ Each template declares a small set of primary categories. Those categories shape
 
 Each persona template is a JSON blueprint with:
 
-| Component | What It Defines |
-|-----------|----------------|
-| Role configuration | Capabilities, autonomy level, personality, system prompt |
-| Cognitive offload categories | The kinds of mental load the role should absorb |
-| Suggested playbooks | Example recurring routines for the role; descriptive only |
-| Skill references | Recommended skills with reasons and required/optional flags |
-| Metadata | Category, tags, seniority range, industry-agnostic flags |
+| Component                    | What It Defines                                             |
+| ---------------------------- | ----------------------------------------------------------- |
+| Role configuration           | Capabilities, autonomy level, personality, system prompt    |
+| Cognitive offload categories | The kinds of mental load the role should absorb             |
+| Suggested playbooks          | Example recurring routines for the role; descriptive only   |
+| Skill references             | Recommended skills with reasons and required/optional flags |
+| Metadata                     | Category, tags, seniority range, industry-agnostic flags    |
 
 Suggested playbooks are intentionally not runtime policy. They describe good default operating patterns, but they do not schedule automation or create background ownership by themselves.
 
@@ -316,9 +316,7 @@ To add a persona for any job function:
       }
     ]
   },
-  "skills": [
-    { "skillId": "skill-id", "reason": "Why this skill", "required": true }
-  ],
+  "skills": [{ "skillId": "skill-id", "reason": "Why this skill", "required": true }],
   "tags": ["tag1", "tag2"],
   "seniorityRange": ["junior", "mid", "senior", "staff", "principal"],
   "industryAgnostic": true
@@ -339,16 +337,16 @@ To add a persona for any job function:
 
 Twins can still be reached from any supported surface:
 
-| Channel | Example Usage |
-|---------|--------------|
-| Slack | `/inbox @twin-engineering-manager prepare 1-on-1 notes for tomorrow` |
-| Microsoft Teams | `@twin-sw-engineer summarize auth module changes this week` |
-| Discord | `!ask @twin-devops check deployment pipeline status` |
-| Email | Forward a thread for context extraction and summarization |
-| Telegram | Send the twin a task description |
-| WhatsApp | Quick voice-to-text task assignment |
-| iMessage | Personal device access to the twin |
-| Signal | Secure channel for sensitive queries |
+| Channel         | Example Usage                                                        |
+| --------------- | -------------------------------------------------------------------- |
+| Slack           | `/inbox @twin-engineering-manager prepare 1-on-1 notes for tomorrow` |
+| Microsoft Teams | `@twin-sw-engineer summarize auth module changes this week`          |
+| Discord         | `!ask @twin-devops check deployment pipeline status`                 |
+| Email           | Forward a thread for context extraction and summarization            |
+| Telegram        | Send the twin a task description                                     |
+| WhatsApp        | Quick voice-to-text task assignment                                  |
+| iMessage        | Personal device access to the twin                                   |
+| Signal          | Secure channel for sensitive queries                                 |
 
 If a role is paired with automation, its downstream task results or notifications can also be delivered to these channels.
 

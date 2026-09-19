@@ -24,7 +24,10 @@ import {
 import { OpenAIOAuth, OpenAIOAuthTokens } from "./openai-oauth";
 import { imageToTextFallback } from "./image-utils";
 import { loadPiAiModule } from "./pi-ai-loader";
-import { toOpenAICompatibleMessages } from "./openai-compatible";
+import {
+  parseOpenAICompatibleToolArguments,
+  toOpenAICompatibleMessages,
+} from "./openai-compatible";
 import { resolveOutputTokenParamName } from "./output-token-policy";
 import {
   buildOpenAIPromptCacheFields,
@@ -34,11 +37,12 @@ import {
 import { createLogger } from "../../utils/logger";
 
 // Default model for openai-codex (ChatGPT backend)
-const DEFAULT_CODEX_MODEL = "gpt-5.5";
+const DEFAULT_CODEX_MODEL = "gpt-6-astra";
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const OPENAI_CODEX_API = "openai-codex-responses";
 const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -204,10 +208,9 @@ export class OpenAIProvider implements LLMProvider {
 
   private normalizeCodexModelId(modelId: string): string {
     const trimmed = String(modelId || "").trim();
-    const withoutProvider =
-      trimmed.startsWith("openai-codex/") || trimmed.startsWith("openai/")
-        ? trimmed.slice(trimmed.indexOf("/") + 1)
-        : trimmed;
+    const withoutProvider = /^(?:openai-codex|openai)\//i.test(trimmed)
+      ? trimmed.slice(trimmed.indexOf("/") + 1)
+      : trimmed;
     const withoutProfile = withoutProvider.includes("@")
       ? withoutProvider.slice(0, withoutProvider.indexOf("@"))
       : withoutProvider;
@@ -224,6 +227,12 @@ export class OpenAIProvider implements LLMProvider {
     logger.debug(
       `Model ${normalizedId} not found in pi-ai registry; using OpenAI Codex model compatibility shim.`,
     );
+    const contextWindow =
+      normalizedId === "gpt-6-astra" || normalizedId === "gpt-5.4"
+        ? 1_050_000
+        : normalizedId === "gpt-5.5"
+          ? 400_000
+          : 272_000;
     return {
       ...template,
       id: normalizedId,
@@ -233,8 +242,7 @@ export class OpenAIProvider implements LLMProvider {
       baseUrl: OPENAI_CODEX_BASE_URL,
       reasoning: true,
       input: normalizedId.includes("spark") ? ["text"] : ["text", "image"],
-      contextWindow:
-        normalizedId === "gpt-5.5" ? 400_000 : normalizedId === "gpt-5.4" ? 1_050_000 : 272_000,
+      contextWindow,
       maxTokens: 128_000,
     } as Model<Any>;
   }
@@ -251,19 +259,20 @@ export class OpenAIProvider implements LLMProvider {
       return this.createResponsesMessageWithApiKey(request);
     }
 
+    const model = this.normalizeCodexModelId(request.model || this.model || DEFAULT_CODEX_MODEL);
     const messages = this.convertMessages(request.messages, request.system, request.systemBlocks);
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
 
     try {
-      logger.debug(`Calling API with model: ${request.model}`);
+      logger.debug(`Calling API with model: ${model}`);
       const tokenField = resolveOutputTokenParamName({
         providerType: this.type,
-        modelId: request.model || this.model || "gpt-4o",
+        modelId: model,
         apiMode: "chat_completions",
       });
 
       const body: Any = {
-        model: request.model,
+        model,
         [tokenField]: request.maxTokens,
         messages,
         ...(tools && tools.length > 0
@@ -272,7 +281,7 @@ export class OpenAIProvider implements LLMProvider {
               tool_choice: request.toolChoice || "auto",
             }
           : {}),
-        ...buildOpenAIPromptCacheFields(request.promptCache),
+        ...buildOpenAIPromptCacheFields(request.promptCache, model),
       };
       const response = await this.client.chat.completions.create(
         body,
@@ -297,14 +306,19 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private shouldUseResponsesApi(modelId: string | undefined): boolean {
+    const normalizedModelId = this.normalizeCodexModelId(modelId || this.model).toLowerCase();
     return (
       this.forceResponsesApi ||
-      this.normalizeCodexModelId(modelId || this.model).startsWith("gpt-5")
+      normalizedModelId === "gpt-6-astra" ||
+      normalizedModelId.startsWith("gpt-5")
     );
   }
 
   private getOpenAIReasoningEffort(request: LLMRequest): OpenAIReasoningEffort | undefined {
-    return request.reasoningEffort || this.openaiReasoningEffort || "medium";
+    const configured = request.reasoningEffort || this.openaiReasoningEffort || "medium";
+    // The public API exposes Astra's highest setting as `max`; `ultra` is
+    // reserved for the ChatGPT subscription compatibility backend.
+    return this.authMethod === "api_key" && configured === "ultra" ? "max" : configured;
   }
 
   private getOpenAITextVerbosity(request: LLMRequest): LLMTextVerbosity | undefined {
@@ -437,7 +451,7 @@ export class OpenAIProvider implements LLMProvider {
     const reasoningEffort = this.getOpenAIReasoningEffort(request);
     const textVerbosity = this.getOpenAITextVerbosity(request);
     return {
-      model: request.model,
+      model: this.normalizeCodexModelId(request.model || this.model || DEFAULT_CODEX_MODEL),
       input: this.buildResponsesInput(request.messages, request.system, request.systemBlocks),
       ...(instructions ? { instructions } : {}),
       max_output_tokens: request.maxTokens,
@@ -449,7 +463,10 @@ export class OpenAIProvider implements LLMProvider {
             tool_choice: request.toolChoice || "auto",
           }
         : {}),
-      ...buildOpenAIPromptCacheFields(request.promptCache),
+      ...buildOpenAIPromptCacheFields(
+        request.promptCache,
+        request.model || this.model || DEFAULT_CODEX_MODEL,
+      ),
     };
   }
 
@@ -477,16 +494,6 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
-  private parseJsonObject(value: string | undefined): Record<string, Any> {
-    if (!value) return {};
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
   private convertResponsesResponse(response: Any): LLMResponse {
     const content: LLMContent[] = [];
     for (const item of response?.output || []) {
@@ -504,11 +511,13 @@ export class OpenAIProvider implements LLMProvider {
           }
         }
       } else if (item?.type === "function_call") {
+        const parsedArguments = parseOpenAICompatibleToolArguments(item.arguments);
         content.push({
           type: "tool_use",
           id: item.call_id || item.id,
           name: item.name,
-          input: this.parseJsonObject(item.arguments),
+          input: parsedArguments.input,
+          ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
         });
       } else if (item?.type === "output_text" && item.text) {
         content.push({ type: "text", text: item.text });
@@ -536,8 +545,11 @@ export class OpenAIProvider implements LLMProvider {
               usage.prompt_tokens_details?.cached_tokens ||
               undefined,
             cacheWriteTokens:
-              usage.input_tokens_details?.cache_creation_input_tokens ||
-              usage.prompt_tokens_details?.cache_creation_input_tokens ||
+              usage.input_tokens_details?.cache_write_tokens ??
+              usage.prompt_tokens_details?.cache_write_tokens ??
+              usage.input_tokens_details?.cache_creation_input_tokens ??
+              usage.prompt_tokens_details?.cache_creation_input_tokens ??
+              usage.cache_write_tokens ??
               undefined,
           }
         : undefined,
@@ -680,8 +692,7 @@ export class OpenAIProvider implements LLMProvider {
 
         // Get a model from the available models
         const availableModels = getModels(OPENAI_CODEX_PROVIDER);
-        const model =
-          availableModels.find((m) => m.id === DEFAULT_CODEX_MODEL) || availableModels[0];
+        const model = this.createCodexModel(this.mapToCodexModel(this.model), availableModels);
 
         await piAiComplete(
           model,
@@ -704,9 +715,10 @@ export class OpenAIProvider implements LLMProvider {
           return { success: false, error: "OpenAI client not initialized" };
         }
 
+        const model = this.normalizeCodexModelId(this.model || DEFAULT_CODEX_MODEL);
         if (this.forceResponsesApi || this.shouldUseResponsesApi(this.model)) {
           await (this.client as Any).responses.create({
-            model: this.model || "gpt-5.5",
+            model,
             input: [{ role: "user", content: [{ type: "input_text", text: "Hi" }] }],
             max_output_tokens: 10,
           });
@@ -714,7 +726,7 @@ export class OpenAIProvider implements LLMProvider {
         }
 
         await this.client.chat.completions.create({
-          model: "gpt-4o-mini",
+          model,
           max_tokens: 10,
           messages: [{ role: "user", content: "Hi" }],
         });
@@ -770,7 +782,7 @@ export class OpenAIProvider implements LLMProvider {
         });
 
         logger.debug(`Found ${models.length} models via pi-ai SDK`);
-        return models;
+        return models.length > 0 ? models : this.getDefaultCodexModels();
       } catch (error) {
         logger.error("Failed to get models from pi-ai SDK:", error);
         // Return defaults on error
@@ -791,6 +803,7 @@ export class OpenAIProvider implements LLMProvider {
           }))
           .sort((a, b) => {
             const priority = (id: string) => {
+              if (id === "gpt-6-astra") return -1;
               if (id.includes("gpt-4o")) return 0;
               if (id.includes("gpt-4")) return 1;
               if (id.includes("gpt-3.5")) return 2;
@@ -800,7 +813,7 @@ export class OpenAIProvider implements LLMProvider {
             };
             return priority(a.id) - priority(b.id);
           });
-        return models;
+        return models.length > 0 ? models : this.getDefaultModels();
       } catch (error: Any) {
         logger.error("Failed to fetch OpenAI models:", error);
       }
@@ -812,6 +825,11 @@ export class OpenAIProvider implements LLMProvider {
 
   private getDefaultModels(): Array<{ id: string; name: string; description: string }> {
     return [
+      {
+        id: "gpt-6-astra",
+        name: "GPT-6 Astra",
+        description: "Flagship model for complex reasoning and coding",
+      },
       { id: "gpt-4o", name: "GPT-4o", description: "Most capable model for complex tasks" },
       { id: "gpt-4o-mini", name: "GPT-4o Mini", description: "Fast and affordable for most tasks" },
       { id: "o1", name: "o1", description: "Advanced reasoning model" },
@@ -823,6 +841,11 @@ export class OpenAIProvider implements LLMProvider {
 
   private getDefaultCodexModels(): Array<{ id: string; name: string; description: string }> {
     return [
+      {
+        id: "gpt-6-astra",
+        name: "GPT-6 Astra",
+        description: "GPT-6 Astra for ChatGPT subscription access",
+      },
       {
         id: "gpt-5.6-sol",
         name: "GPT-5.6 Sol",
@@ -893,6 +916,7 @@ export class OpenAIProvider implements LLMProvider {
     if (modelId === "o1-preview") return "o1 Preview";
     if (modelId === "o3-mini") return "o3 Mini";
     // ChatGPT internal models
+    if (modelId === "gpt-6-astra") return "GPT-6 Astra";
     if (modelId === "gpt-5.6-sol") return "GPT-5.6 Sol";
     if (modelId === "gpt-5.6-terra") return "GPT-5.6 Terra";
     if (modelId === "gpt-5.6-luna") return "GPT-5.6 Luna";
@@ -921,6 +945,7 @@ export class OpenAIProvider implements LLMProvider {
     if (modelId === "o1-mini") return "Fast reasoning model";
     if (modelId.includes("o3")) return "Next generation reasoning";
     // ChatGPT internal models
+    if (modelId === "gpt-6-astra") return "GPT-6 Astra for ChatGPT subscription access";
     if (modelId === "gpt-5.6-sol") return "GPT-5.6 Sol for ChatGPT subscription access";
     if (modelId === "gpt-5.6-terra") return "GPT-5.6 Terra for ChatGPT subscription access";
     if (modelId === "gpt-5.6-luna") return "GPT-5.6 Luna for ChatGPT subscription access";
@@ -1099,11 +1124,13 @@ export class OpenAIProvider implements LLMProvider {
             text: block.text,
           });
         } else if (block.type === "toolCall") {
+          const parsedArguments = parseOpenAICompatibleToolArguments(block.arguments);
           content.push({
             type: "tool_use",
             id: block.id,
             name: block.name,
-            input: block.arguments || {},
+            input: parsedArguments.input,
+            ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
           });
         }
       }
@@ -1173,11 +1200,13 @@ export class OpenAIProvider implements LLMProvider {
       for (const toolCall of choice.message.tool_calls) {
         // Only handle function-type tool calls
         if (toolCall.type === "function") {
+          const parsedArguments = parseOpenAICompatibleToolArguments(toolCall.function?.arguments);
           content.push({
             type: "tool_use",
             id: toolCall.id,
             name: toolCall.function.name,
-            input: JSON.parse(toolCall.function.arguments || "{}"),
+            input: parsedArguments.input,
+            ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
           });
         }
       }

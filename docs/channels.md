@@ -25,29 +25,29 @@ See [Gateway Message Lifecycle](gateway-message-lifecycle.md) for the shared rou
 
 These commands are available across all channels:
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show compact channel help |
-| `/commands [category]` | Show the remote command catalog |
-| `/status` | Check gateway and task status |
-| `/workspaces` | List available workspaces |
-| `/workspace <n>` | Select workspace by number |
-| `/newtask`, `/new` | Start the next message fresh without cancelling the old task |
-| `/new temp` | Start a scratch temporary workspace session |
-| `/cancel`, `/stop` | Cancel the running task |
-| `/pause`, `/resume` | Pause or resume the current task |
-| `/queue <message>` | Send a follow-up to the current task |
-| `/steer <guidance>` | Send high-priority guidance to the current task |
-| `/background <prompt>` | Start an unlinked background task |
-| `/pair <code>` | Pair with code |
-| `/simplify [objective]` | Run simplify workflow on current/specified task context |
-| `/batch <objective>` | Run parallel batch workflow with safety policy controls |
+| Command                 | Description                                                           |
+| ----------------------- | --------------------------------------------------------------------- |
+| `/help`                 | Show compact channel help                                             |
+| `/commands [category]`  | Show the remote command catalog                                       |
+| `/status`               | Check gateway and task status                                         |
+| `/workspaces`           | List available workspaces                                             |
+| `/workspace <n>`        | Select workspace by number                                            |
+| `/newtask`, `/new`      | Start the next message fresh without cancelling the old task          |
+| `/new temp`             | Start a scratch temporary workspace session                           |
+| `/cancel`, `/stop`      | Cancel the running task                                               |
+| `/pause`, `/resume`     | Pause or resume the current task                                      |
+| `/queue <message>`      | Send a follow-up to the current task                                  |
+| `/steer <guidance>`     | Send high-priority guidance to the current task                       |
+| `/background <prompt>`  | Start an unlinked background task                                     |
+| `/pair <code>`          | Pair with code                                                        |
+| `/simplify [objective]` | Run simplify workflow on current/specified task context               |
+| `/batch <objective>`    | Run parallel batch workflow with safety policy controls               |
 | `/llm-wiki <objective>` | Build or maintain a persistent research vault in the active workspace |
-| `/<skill-slug> args` | Invoke an enabled skill by slash alias or skill slug |
-| `/schedule <prompt>` | Schedule a recurring task |
-| `/digest [lookback]` | Digest of recent chat messages |
-| `/followups [lookback]` | Extract follow-ups/commitments |
-| `/brief [today\|week]` | Generate a brief summary (DM only) |
+| `/<skill-slug> args`    | Invoke an enabled skill by slash alias or skill slug                  |
+| `/schedule <prompt>`    | Schedule a recurring task                                             |
+| `/digest [lookback]`    | Digest of recent chat messages                                        |
+| `/followups [lookback]` | Extract follow-ups/commitments                                        |
+| `/brief [today\|week]`  | Generate a brief summary (DM only)                                    |
 
 Recognized slash commands are handled by the gateway and are never forwarded as normal task text. Unknown slash commands return an explicit unknown-command reply.
 
@@ -107,10 +107,10 @@ WhatsApp supports typing indicators and editable task-progress messages. CoWork 
 
 ### Self-Chat Mode
 
-| Mode | Description | Best For |
-|------|-------------|----------|
+| Mode                            | Description                                  | Best For                     |
+| ------------------------------- | -------------------------------------------- | ---------------------------- |
 | **Self-Chat Mode ON** (default) | Bot only responds in "Message Yourself" chat | Using your personal WhatsApp |
-| **Self-Chat Mode OFF** | Bot responds to all incoming messages | Dedicated bot phone number |
+| **Self-Chat Mode OFF**          | Bot responds to all incoming messages        | Dedicated bot phone number   |
 
 ### Research Channels
 
@@ -149,8 +149,8 @@ Telegram groups can be specialized by chat ID, and Telegram forum topics can be 
 
 ### Additional Commands
 
-| Command | Description |
-|---------|-------------|
+| Command                | Description       |
+| ---------------------- | ----------------- |
 | `/addworkspace <path>` | Add new workspace |
 
 ### Research Channels
@@ -183,21 +183,21 @@ Discord channel settings support specialization for server channels and thread-a
 
 ### Additional Commands
 
-| Command | Description |
-|---------|-------------|
-| `/task <prompt>` | Run task directly |
-| `/workspace`, `/addworkspace` | Workspace selection |
-| `/approve`, `/deny` | Approve or deny pending actions |
-| `/pair <code>` | Pair with pairing code |
+| Command                       | Description                     |
+| ----------------------------- | ------------------------------- |
+| `/task <prompt>`              | Run task directly               |
+| `/workspace`, `/addworkspace` | Workspace selection             |
+| `/approve`, `/deny`           | Approve or deny pending actions |
+| `/pair <code>`                | Pair with pairing code          |
 
 ### Agent Tools (Live Discord API)
 
 The agent can fetch messages and download attachments directly from Discord, not just from the local gateway log:
 
-| Tool | Description |
-|------|-------------|
-| `channel_fetch_discord_messages` | Fetch up to 100 recent messages from a channel via the live Discord API. Use when you need messages that have not passed through CoWork yet. Messages with attachments are marked `+Natt`. |
-| `channel_download_discord_attachment` | Download all attachments from a specific message to the local inbox. Returns file paths for `read_file`. Use when `channel_fetch_discord_messages` shows a message has attachments. |
+| Tool                                  | Description                                                                                                                                                                                |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `channel_fetch_discord_messages`      | Fetch up to 100 recent messages from a channel via the live Discord API. Use when you need messages that have not passed through CoWork yet. Messages with attachments are marked `+Natt`. |
+| `channel_download_discord_attachment` | Download all attachments from a specific message to the local inbox. Returns file paths for `read_file`. Use when `channel_fetch_discord_messages` shows a message has attachments.        |
 
 **Typical flow:** Use `channel_list_chats` with `channel: "discord"` to discover chat IDs, then `channel_fetch_discord_messages` for live history, and `channel_download_discord_attachment` for any message with attachments.
 
@@ -259,6 +259,17 @@ Webhook-based enterprise messaging integration for Feishu and Lark.
 4. Set the callback URL shown by CoWork in the Feishu/Lark developer console
 5. Enable and test
 
+**Required:** you must supply either the **Encrypt Key** or the **Verification
+Token** (both are on the app's Event Subscriptions page). The callback server
+refuses to start without one, and rejects events that arrive without a valid
+signature or token.
+
+This is a change in behaviour: these fields were previously optional, and leaving
+both blank meant inbound events were accepted with no authenticity check at all.
+Because the listener binds all interfaces and inbound messages can start agent
+tasks with a sender identity taken from the request, it now fails closed. See the
+[Security Hardening Record](security-hardening.md#configuration-changes-that-can-break-an-existing-setup).
+
 ### Notes
 
 - Supports secure webhook verification and encrypted event handling
@@ -274,6 +285,12 @@ Enterprise WeCom gateway integration with signed/encrypted event handling.
 
 1. Create a WeCom app in your WeCom admin console
 2. Copy the Corp ID, Agent ID, Secret, token, and EncodingAESKey
+
+   The callback **Token** is required and is now used to verify `msg_signature`
+   on every inbound callback, encrypted or not. Plaintext callbacks without a
+   valid signature are rejected. Configuring **EncodingAESKey** is recommended —
+   WeCom's own console requires it for safe mode.
+
 3. Configure the channel in **Settings** > **Channels** > **WeCom**
 4. Set the callback URL shown by CoWork in WeCom
 5. Enable and test
@@ -389,10 +406,10 @@ End-to-end encrypted messaging via `signal-cli`.
 
 ### Registration
 
-| Option | Best For |
-|--------|----------|
-| **Dedicated Number** | Production use |
-| **Link as Device** | Testing (limited functionality) |
+| Option               | Best For                        |
+| -------------------- | ------------------------------- |
+| **Dedicated Number** | Production use                  |
+| **Link as Device**   | Testing (limited functionality) |
 
 ### Setup
 
@@ -401,17 +418,17 @@ End-to-end encrypted messaging via `signal-cli`.
 
 ### Trust Modes
 
-| Mode | Description |
-|------|-------------|
-| **TOFU** | Auto-trust new identity keys on first contact |
-| **Always** | Always trust identity keys |
-| **Manual** | Require manual verification |
+| Mode       | Description                                   |
+| ---------- | --------------------------------------------- |
+| **TOFU**   | Auto-trust new identity keys on first contact |
+| **Always** | Always trust identity keys                    |
+| **Manual** | Require manual verification                   |
 
 ### Operating Modes
 
-| Mode | Description |
-|------|-------------|
-| **Native** | Direct signal-cli command execution |
+| Mode       | Description                                      |
+| ---------- | ------------------------------------------------ |
+| **Native** | Direct signal-cli command execution              |
 | **Daemon** | Connect to signal-cli JSON-RPC daemon (advanced) |
 
 > **Important:** Registering signal-cli will deregister any existing Signal app using that phone number.
@@ -533,12 +550,12 @@ For personal Microsoft mailboxes, the Client ID field is not enough by itself. C
 
 ### Provider Settings
 
-| Provider | Auth | IMAP Host | IMAP Port | SMTP Host | SMTP Port |
-|----------|------|-----------|-----------|-----------|-----------|
-| **Gmail** | Password / app password | imap.gmail.com | 993 | smtp.gmail.com | 587 |
-| **Microsoft 365** | Password / app password | outlook.office365.com | 993 | smtp.office365.com | 587 |
-| **Outlook.com** | Microsoft OAuth | imap-mail.outlook.com | 993 | smtp-mail.outlook.com | 587 |
-| **Yahoo** | Password / app password | imap.mail.yahoo.com | 993 | smtp.mail.yahoo.com | 465 |
+| Provider          | Auth                    | IMAP Host             | IMAP Port | SMTP Host             | SMTP Port |
+| ----------------- | ----------------------- | --------------------- | --------- | --------------------- | --------- |
+| **Gmail**         | Password / app password | imap.gmail.com        | 993       | smtp.gmail.com        | 587       |
+| **Microsoft 365** | Password / app password | outlook.office365.com | 993       | smtp.office365.com    | 587       |
+| **Outlook.com**   | Microsoft OAuth         | imap-mail.outlook.com | 993       | smtp-mail.outlook.com | 587       |
+| **Yahoo**         | Password / app password | imap.mail.yahoo.com   | 993       | smtp.mail.yahoo.com   | 465       |
 
 ### Filtering Options
 

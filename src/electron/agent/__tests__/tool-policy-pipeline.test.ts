@@ -7,9 +7,13 @@ vi.mock("../../security/policy-manager", () => ({
 
 vi.mock("../../security/monty-tool-policy", () => ({
   evaluateMontyToolPolicy: vi.fn(async () => ({ decision: "pass", reason: null })),
+  TOOL_POLICY_UNAVAILABLE_REASON: "workspace tool policy unavailable",
 }));
 
-import { evaluateMontyToolPolicy } from "../../security/monty-tool-policy";
+import {
+  evaluateMontyToolPolicy,
+  TOOL_POLICY_UNAVAILABLE_REASON,
+} from "../../security/monty-tool-policy";
 import { evaluateToolPolicyPipeline } from "../runtime/ToolPolicyPipeline";
 import { PermissionEngine } from "../runtime/PermissionEngine";
 
@@ -235,6 +239,253 @@ describe("ToolPolicyPipeline", () => {
     expect(permissionEvaluation).toHaveBeenCalledWith({ approvalType: "network_access" });
   });
 
+  it("records advisory semantic review only after hard policy and permission allow", async () => {
+    const order: string[] = [];
+    const semanticReviewEvaluation = vi.fn(async () => {
+      order.push("semantic_review");
+      return {
+        status: "concerning" as const,
+        reasonCodes: ["possible_sensitive_export"],
+        model: "jev-latest",
+        latencyMs: 12,
+        stateDigest: "digest-1",
+      };
+    });
+    const permissionEvaluation = vi.fn(async () => {
+      order.push("permissions");
+      return {
+        decision: "allow" as const,
+        reason: {
+          type: "mode" as const,
+          mode: "dont_ask" as const,
+          summary: "Permission mode allows this tool.",
+        },
+        suggestions: [],
+        scopePreview: "http_request",
+      };
+    });
+
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "http_request",
+      toolInput: { method: "POST" },
+      permissionEvaluation,
+      semanticReviewEvaluation,
+    });
+
+    expect(result.decision).toBe("allow");
+    expect(order).toEqual(["permissions", "semantic_review"]);
+    expect(result.trace.finalDecision).toBe("allow");
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "semantic_review",
+        decision: "allow",
+        metadata: expect.objectContaining({
+          mode: "observe",
+          status: "concerning",
+          reasonCodes: ["possible_sensitive_export"],
+          stateDigest: "digest-1",
+        }),
+      }),
+    );
+  });
+
+  it("uses active semantic review to require the existing approval path", async () => {
+    const semanticReviewEvaluation = vi.fn(async () => ({
+      mode: "active" as const,
+      status: "concerning" as const,
+      reasonCodes: ["possible_sensitive_export"],
+      model: "jev-latest",
+    }));
+
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "http_request",
+      toolInput: { method: "POST" },
+      permissionEvaluation: async () => ({
+        decision: "allow" as const,
+        reason: {
+          type: "mode" as const,
+          mode: "dont_ask" as const,
+          summary: "Permission mode allows this tool.",
+        },
+        suggestions: [],
+        scopePreview: "http_request",
+      }),
+      semanticReviewEvaluation,
+    });
+
+    expect(result.decision).toBe("require_approval");
+    expect(result.approvalSource).toBe("semantic_review");
+    expect(result.trace.finalDecision).toBe("require_approval");
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "semantic_review",
+        decision: "require_approval",
+        metadata: expect.objectContaining({ mode: "active", status: "concerning" }),
+      }),
+    );
+  });
+
+  it("keeps explicit headless full authority from becoming a second Jev prompt", async () => {
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "write_file",
+      toolInput: { path: "notes.md", content: "hello" },
+      permissionEvaluation: async () => ({
+        decision: "allow" as const,
+        reason: {
+          type: "mode" as const,
+          mode: "bypass_permissions" as const,
+          summary: "Full access explicitly authorizes this workspace write.",
+        },
+        suggestions: [],
+        scopePreview: "write_file",
+      }),
+      semanticReviewEvaluation: async () => ({
+        mode: "active" as const,
+        status: "concerning" as const,
+        reasonCodes: ["consequential_change"],
+        model: "jev-latest",
+      }),
+      headlessSemanticReviewPolicy: "allow_if_authorized",
+    });
+
+    expect(result.decision).toBe("allow");
+    expect(result.approvalSource).toBeUndefined();
+    expect(result.trace.finalDecision).toBe("allow");
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "semantic_review",
+        decision: "allow",
+        reason: "Jev concern recorded; explicit headless authority remains authoritative",
+        metadata: expect.objectContaining({ mode: "active", status: "concerning" }),
+      }),
+    );
+  });
+
+  it("does not add a second approval gate when the semantic reviewer is unavailable", async () => {
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "http_request",
+      toolInput: { method: "POST" },
+      permissionEvaluation: async () => ({
+        decision: "allow" as const,
+        reason: {
+          type: "mode" as const,
+          mode: "dont_ask" as const,
+          summary: "Permission mode allows this tool.",
+        },
+        suggestions: [],
+        scopePreview: "http_request",
+      }),
+      semanticReviewMode: "active",
+      semanticReviewEvaluation: async () => {
+        throw new Error("unexpected reviewer failure");
+      },
+    });
+
+    expect(result.decision).toBe("allow");
+    expect(result.approvalSource).toBeUndefined();
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "semantic_review",
+        decision: "allow",
+        metadata: expect.objectContaining({ mode: "active", status: "unavailable" }),
+      }),
+    );
+  });
+
+  it("lets deterministic policy remain authoritative for active uncertainty", async () => {
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "write_file",
+      toolInput: { path: "notes.md", content: "hello" },
+      permissionEvaluation: async () => ({
+        decision: "allow" as const,
+        reason: {
+          type: "mode" as const,
+          mode: "dont_ask" as const,
+          summary: "Permission mode allows this workspace write.",
+        },
+        suggestions: [],
+        scopePreview: "write_file",
+      }),
+      semanticReviewEvaluation: async () => ({
+        mode: "active" as const,
+        status: "uncertain" as const,
+        reasonCodes: ["state_incomplete"],
+      }),
+    });
+
+    expect(result.decision).toBe("allow");
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "semantic_review",
+        decision: "allow",
+        metadata: expect.objectContaining({ mode: "active", status: "uncertain" }),
+      }),
+    );
+  });
+
+  it("does not run advisory review after a hard denial or approval request", async () => {
+    const semanticReviewEvaluation = vi.fn(async () => ({ status: "benign" as const }));
+    const denied = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "run_command",
+      toolInput: { command: "rm -rf draft" },
+      deniedTools: new Set(["run_command"]),
+      semanticReviewEvaluation,
+    });
+    expect(denied.decision).toBe("deny");
+    expect(semanticReviewEvaluation).not.toHaveBeenCalled();
+
+    const approval = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "edit_file",
+      toolInput: { path: "draft.ts" },
+      permissionEvaluation: async () => ({
+        decision: "ask" as const,
+        reason: {
+          type: "mode" as const,
+          mode: "default" as const,
+          summary: "Approval required.",
+        },
+        suggestions: [],
+        scopePreview: "edit_file",
+      }),
+      semanticReviewEvaluation,
+    });
+    expect(approval.decision).toBe("require_approval");
+    expect(semanticReviewEvaluation).not.toHaveBeenCalled();
+
+    const runtimeReview = vi.fn(async () => ({
+      status: "concerning" as const,
+      reasonCodes: ["consequential_change"],
+    }));
+    const runtimeApproval = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "run_command",
+      toolInput: { command: "npm test" },
+      approvalRequired: true,
+      runtimeApprovalType: "run_command",
+      permissionApprovalType: "run_command",
+      permissionEvaluation: async () => ({
+        decision: "allow" as const,
+        reason: {
+          type: "mode" as const,
+          mode: "dont_ask" as const,
+          summary: "Permission mode allows this tool.",
+        },
+        suggestions: [],
+        scopePreview: "run_command",
+      }),
+      semanticReviewEvaluation: runtimeReview,
+    });
+    expect(runtimeApproval.decision).toBe("require_approval");
+    expect(runtimeReview).toHaveBeenCalledTimes(1);
+  });
+
   it("requires runtime metadata approval after permissive permission evaluation", async () => {
     const permissionEvaluation = vi.fn(async () => ({
       decision: "allow" as const,
@@ -382,4 +633,85 @@ describe("ToolPolicyPipeline", () => {
     expect(permissionEvaluation).not.toHaveBeenCalled();
     expect(result.trace.entries.some((entry) => entry.stage === "approval")).toBe(false);
   });
+
+  it("fails closed when the workspace policy evaluator throws", async () => {
+    vi.mocked(evaluateMontyToolPolicy).mockRejectedValueOnce(new Error("policy runtime failure"));
+
+    const result = await evaluateToolPolicyPipeline({
+      workspace,
+      toolName: "read_file",
+      toolInput: { path: "foo.ts" },
+    });
+
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toBe(TOOL_POLICY_UNAVAILABLE_REASON);
+    expect(result.trace.entries).toContainEqual(
+      expect.objectContaining({
+        stage: "workspace_script",
+        decision: "deny",
+        reason: TOOL_POLICY_UNAVAILABLE_REASON,
+      }),
+    );
+  });
+
+  it("does not reinstate blanket shell approval after a named profile allows it", async () => {
+    const result = await evaluateToolPolicyPipeline({
+      workspace: {
+        ...workspace,
+        permissions: {
+          ...workspace.permissions,
+          accessProfileId: "ask_for_approval",
+          accessApprovalPolicy: "on-request",
+        },
+      },
+      toolName: "run_command",
+      toolInput: { command: "npm test" },
+      approvalRequired: true,
+      runtimeApprovalType: "run_command",
+      permissionApprovalType: "run_command",
+      permissionEvaluation: async () => ({
+        decision: "allow",
+        reason: {
+          type: "mode",
+          mode: "default",
+          summary: "Allowed inside the enforced workspace scope.",
+        },
+        suggestions: [],
+        scopePreview: "npm test",
+      }),
+    });
+    expect(result.decision).toBe("allow");
+    expect(result.trace.entries.some((entry) => entry.decision === "require_approval")).toBe(false);
+  });
+
+  it.each(["permission", "workspace", "metadata"])(
+    "never denies missing %s authority without asking",
+    async (source) => {
+      vi.mocked(evaluateMontyToolPolicy).mockResolvedValueOnce(
+        source === "workspace"
+          ? { decision: "require_approval", reason: "Explicit workspace consent" }
+          : { decision: "pass", reason: null },
+      );
+      const result = await evaluateToolPolicyPipeline({
+        workspace: {
+          ...workspace,
+          permissions: {
+            ...workspace.permissions,
+            accessProfileId: "bounded-no-prompts",
+            accessApprovalPolicy: "never",
+          },
+        },
+        toolName: "custom_action",
+        toolInput: {},
+        approvalRequired: source === "metadata",
+        permissionEvaluation: async () => ({
+          decision: source === "permission" ? "ask" : "allow",
+          reason: { type: "mode", mode: "default", summary: "Extra authority needed" },
+          suggestions: [],
+          scopePreview: "custom_action",
+        }),
+      });
+      expect(result.decision).toBe("deny");
+    },
+  );
 });

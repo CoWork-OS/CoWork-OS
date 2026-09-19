@@ -20,6 +20,7 @@ import {
 } from "./types";
 import { imageToTextFallback } from "./image-utils";
 import { loadPiAiModule } from "./pi-ai-loader";
+import { parseOpenAICompatibleToolArguments } from "./openai-compatible";
 
 const DEFAULT_PI_PROVIDER: KnownProvider = "anthropic";
 
@@ -345,11 +346,13 @@ export class PiProvider implements LLMProvider {
             text: block.text,
           });
         } else if (block.type === "toolCall") {
+          const parsedArguments = parseOpenAICompatibleToolArguments(block.arguments);
           content.push({
             type: "tool_use",
             id: block.id,
             name: block.name,
-            input: block.arguments || {},
+            input: parsedArguments.input,
+            ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
           });
         }
         // Skip 'thinking' blocks - they're internal reasoning

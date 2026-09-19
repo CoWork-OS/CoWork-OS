@@ -42,4 +42,3 @@ Release `0.5.47` is a reliability-focused release for longer-running CoWork OS s
   - `npm run test`
   - `npm run package:mac:unsigned`
   - `node scripts/smoke-desktop-artifacts.mjs --platform=mac --allow-unsigned --expected-version=0.5.47`
-

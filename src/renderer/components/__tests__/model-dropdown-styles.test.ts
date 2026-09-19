@@ -5,6 +5,24 @@ import { describe, expect, it } from "vitest";
 const stylesPath = fileURLToPath(new URL("../MainContent/main-content.css", import.meta.url));
 
 describe("Model dropdown styles", () => {
+  it("provides a compact quick-controls surface alongside the advanced picker", () => {
+    const source = readFileSync(stylesPath, "utf8");
+
+    expect(source).toMatch(
+      /\.model-dropdown-quick\s*\{[^}]*width:\s*min\(360px,\s*calc\(100vw\s*-\s*24px\)\);/s,
+    );
+    expect(source).toMatch(
+      /\.model-quick-effort-range\s*\{[^}]*appearance:\s*none;[^}]*cursor:\s*pointer;/s,
+    );
+    expect(source).toMatch(
+      /\.model-quick-panel\s*\{[^}]*border-radius:\s*18px;[^}]*animation:\s*quickPickerReveal/s,
+    );
+    expect(source).toMatch(/@keyframes\s+quickPickerSheen/);
+    expect(source).toMatch(
+      /\.model-quick-custom\s*\{[^}]*border-top:\s*1px\s+solid\s+var\(--color-border-subtle\);/s,
+    );
+  });
+
   it("gives model browsing enough width for model metadata and controls", () => {
     const source = readFileSync(stylesPath, "utf8");
 

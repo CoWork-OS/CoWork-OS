@@ -96,20 +96,20 @@ curl -s 'https://api.calendly.com/event_types/{event_type_uuid}' \
 
 ### Event type fields
 
-| Field | Description |
-|-------|-------------|
-| `name` | Display name ("30 Minute Meeting") |
-| `slug` | URL slug |
-| `duration` | Duration in minutes |
-| `scheduling_url` | Public booking link |
-| `active` | Whether it's live |
-| `kind` | `solo` or `group` |
-| `type` | `StandardEventType` or `AdhocEventType` |
-| `color` | Hex color |
-| `description_plain` | Plain text description |
-| `internal_note` | Private note |
-| `pooling_type` | For round-robin: `round_robin` or `collective` |
-| `custom_questions` | Intake form questions |
+| Field               | Description                                    |
+| ------------------- | ---------------------------------------------- |
+| `name`              | Display name ("30 Minute Meeting")             |
+| `slug`              | URL slug                                       |
+| `duration`          | Duration in minutes                            |
+| `scheduling_url`    | Public booking link                            |
+| `active`            | Whether it's live                              |
+| `kind`              | `solo` or `group`                              |
+| `type`              | `StandardEventType` or `AdhocEventType`        |
+| `color`             | Hex color                                      |
+| `description_plain` | Plain text description                         |
+| `internal_note`     | Private note                                   |
+| `pooling_type`      | For round-robin: `round_robin` or `collective` |
+| `custom_questions`  | Intake form questions                          |
 
 ---
 
@@ -168,19 +168,19 @@ curl -s "https://api.calendly.com/scheduled_events?user=$USER_URI&status=active&
 
 ### Scheduled event fields
 
-| Field | Description |
-|-------|-------------|
-| `name` | Event type name |
-| `status` | `active` or `canceled` |
-| `start_time` | ISO 8601 start |
-| `end_time` | ISO 8601 end |
-| `event_type` | URI of the event type |
-| `location` | Meeting location (Zoom, Google Meet, phone, etc.) |
-| `invitees_counter` | `{ total, active, limit }` |
-| `created_at` | When booked |
-| `updated_at` | Last update |
-| `cancellation` | Cancellation details (if cancelled) |
-| `event_memberships` | Host(s) assigned |
+| Field               | Description                                       |
+| ------------------- | ------------------------------------------------- |
+| `name`              | Event type name                                   |
+| `status`            | `active` or `canceled`                            |
+| `start_time`        | ISO 8601 start                                    |
+| `end_time`          | ISO 8601 end                                      |
+| `event_type`        | URI of the event type                             |
+| `location`          | Meeting location (Zoom, Google Meet, phone, etc.) |
+| `invitees_counter`  | `{ total, active, limit }`                        |
+| `created_at`        | When booked                                       |
+| `updated_at`        | Last update                                       |
+| `cancellation`      | Cancellation details (if cancelled)               |
+| `event_memberships` | Host(s) assigned                                  |
 
 ---
 
@@ -214,19 +214,19 @@ curl -s 'https://api.calendly.com/scheduled_events/{event_uuid}/invitees/{invite
 
 ### Invitee fields
 
-| Field | Description |
-|-------|-------------|
-| `name` | Invitee's name |
-| `email` | Invitee's email |
-| `status` | `active` or `canceled` |
-| `timezone` | Invitee's timezone |
-| `questions_and_answers` | Responses to custom questions |
-| `tracking` | UTM parameters (utm_source, utm_medium, etc.) |
-| `cancel_url` | Link invitee can use to cancel |
-| `reschedule_url` | Link invitee can use to reschedule |
-| `created_at` | When they booked |
-| `no_show` | No-show status if marked |
-| `payment` | Payment info if Calendly Payments enabled |
+| Field                   | Description                                   |
+| ----------------------- | --------------------------------------------- |
+| `name`                  | Invitee's name                                |
+| `email`                 | Invitee's email                               |
+| `status`                | `active` or `canceled`                        |
+| `timezone`              | Invitee's timezone                            |
+| `questions_and_answers` | Responses to custom questions                 |
+| `tracking`              | UTM parameters (utm_source, utm_medium, etc.) |
+| `cancel_url`            | Link invitee can use to cancel                |
+| `reschedule_url`        | Link invitee can use to reschedule            |
+| `created_at`            | When they booked                              |
+| `no_show`               | No-show status if marked                      |
+| `payment`               | Payment info if Calendly Payments enabled     |
 
 ---
 
@@ -354,12 +354,12 @@ curl -s -X POST 'https://api.calendly.com/webhook_subscriptions' \
 
 ### Available webhook events
 
-| Event | Fires When |
-|-------|------------|
-| `invitee.created` | Someone books a meeting |
-| `invitee.canceled` | Someone cancels a booking |
-| `invitee_no_show.created` | Invitee marked as no-show |
-| `routing_form_submission.created` | Routing form submitted |
+| Event                             | Fires When                |
+| --------------------------------- | ------------------------- |
+| `invitee.created`                 | Someone books a meeting   |
+| `invitee.canceled`                | Someone cancels a booking |
+| `invitee_no_show.created`         | Invitee marked as no-show |
+| `routing_form_submission.created` | Routing form submitted    |
 
 ### List webhook subscriptions
 
@@ -401,11 +401,11 @@ for m in d['collection']:
 
 All list endpoints support pagination:
 
-| Param | Description |
-|-------|-------------|
-| `count` | Results per page (max 100, default 20) |
-| `page_token` | Token from previous response for next page |
-| `sort` | Sort field and direction, e.g. `start_time:asc` |
+| Param        | Description                                     |
+| ------------ | ----------------------------------------------- |
+| `count`      | Results per page (max 100, default 20)          |
+| `page_token` | Token from previous response for next page      |
+| `sort`       | Sort field and direction, e.g. `start_time:asc` |
 
 The response includes `pagination.next_page_token` — pass it as `page_token` for the next page. When `null`, you've reached the end.
 

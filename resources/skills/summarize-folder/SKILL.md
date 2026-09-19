@@ -37,11 +37,11 @@ Create a summary of all files in a folder
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Folder path to summarize |
+| Name | Type   | Required | Description              |
+| ---- | ------ | -------- | ------------------------ |
+| path | string | Yes      | Folder path to summarize |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 372 characters.
-- Runtime prompt is defined directly in `../summarize-folder.json`. 
+- Runtime prompt is defined directly in `../summarize-folder.json`.

@@ -1,0 +1,419 @@
+/* Bot details rail — the right inspector shown for bot conversations.
+   Mirrors the floating `.right-panel` inspector treatment so the two surfaces
+   that share this slot look like the same component family. */
+.bot-details-rail {
+  --bot-accent: var(--accent-color, #8f72ed);
+  --bot-accent-soft: color-mix(in srgb, var(--bot-accent) 12%, transparent);
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-self: flex-start;
+  flex: 0 0 var(--right-panel-width);
+  width: var(--right-panel-width);
+  /* The title bar overlays the content row, so start below it like the other
+     panels in this slot instead of sliding underneath the window controls. */
+  margin: 54px 12px 12px 0;
+  max-height: calc(100% - 66px);
+  box-sizing: border-box;
+  padding: 16px 14px max(14px, env(safe-area-inset-bottom, 0px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+  border-radius: var(--app-shell-panel-radius, 16px);
+  background: var(--color-bg-primary);
+  box-shadow:
+    0 18px 42px rgba(3, 7, 18, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+/* ---- Header ---- */
+
+.bot-details-rail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.bot-details-rail-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: #fff;
+  background: var(--bot-role-color, var(--bot-accent));
+}
+
+/* min-width: 0 is what lets the long bot name ellipsize instead of pushing the
+   header buttons out of the rail. */
+.bot-details-rail-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bot-details-rail-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.bot-details-eyebrow {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+/* Three header actions leave little room on a 280px rail, so let a long bot
+   name use a second line rather than truncating after a few words. */
+.bot-details-rail h2 {
+  margin: 2px 0 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.bot-details-icon-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--color-text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.bot-details-icon-button:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+}
+
+.bot-details-icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- Description ---- */
+
+.bot-details-description-block {
+  display: grid;
+  gap: 4px;
+}
+
+.bot-details-description {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.bot-details-description.expanded {
+  display: block;
+  overflow: visible;
+}
+
+/* ---- Sections ---- */
+
+.bot-details-section {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 14px;
+}
+
+.bot-details-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bot-details-section-heading svg {
+  flex: 0 0 auto;
+}
+
+.bot-details-conversation {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  min-width: 0;
+}
+
+.bot-details-conversation strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.bot-details-status {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: capitalize;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+}
+
+.bot-details-status.busy {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+}
+
+.bot-details-status.good {
+  color: var(--color-success);
+  background: var(--color-success-subtle);
+}
+
+.bot-details-status.bad {
+  color: var(--color-error);
+  background: var(--color-error-subtle);
+}
+
+/* ---- Links & buttons ---- */
+
+.bot-details-link {
+  justify-self: start;
+  border: 0;
+  padding: 0;
+  color: var(--bot-accent);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bot-details-link:hover {
+  text-decoration: underline;
+}
+
+.bot-details-secondary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--color-text);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.bot-details-secondary-button:hover {
+  background: var(--bot-accent-soft);
+}
+
+/* ---- Notification toggles ---- */
+
+.bot-details-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.bot-details-toggle-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.bot-details-toggle-row strong {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.bot-details-toggle-row small,
+.bot-details-computer-note {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* A native checkbox stretched to 30x17 rendered as a squashed box; draw a real
+   switch instead so the control reads as on/off at a glance. */
+.bot-details-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 18px;
+  margin: 0;
+  border: 1px solid var(--color-border-light);
+  border-radius: 999px;
+  background: var(--color-bg-hover);
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.bot-details-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  transition:
+    transform 0.18s ease,
+    background 0.18s ease;
+}
+
+.bot-details-switch:checked {
+  border-color: transparent;
+  background: var(--bot-accent);
+}
+
+.bot-details-switch:checked::after {
+  transform: translateX(14px);
+  background: #fff;
+}
+
+.bot-details-switch:focus-visible {
+  outline: 2px solid var(--bot-accent);
+  outline-offset: 2px;
+}
+
+.bot-details-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- Host computer ---- */
+
+.bot-details-computer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.bot-details-status-dot {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.bot-details-status-dot.active {
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px var(--color-success-subtle);
+}
+
+.bot-details-computer-note-warning {
+  color: var(--color-warning);
+}
+
+.bot-details-computer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- States ---- */
+
+.bot-details-skeleton {
+  display: grid;
+  gap: 7px;
+}
+
+.bot-details-skeleton span {
+  height: 9px;
+  border-radius: 999px;
+  background: var(--color-bg-hover);
+  animation: bot-details-pulse 1.4s ease-in-out infinite;
+}
+
+.bot-details-skeleton span:nth-child(2) {
+  width: 85%;
+}
+
+.bot-details-skeleton span:nth-child(3) {
+  width: 60%;
+}
+
+.bot-details-error {
+  border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--color-error);
+  background: var(--color-error-subtle);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.bot-details-spin {
+  animation: bot-details-spin 0.8s linear infinite;
+}
+
+@keyframes bot-details-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes bot-details-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-details-skeleton span,
+  .bot-details-spin {
+    animation: none;
+  }
+}
+
+.theme-light .bot-details-rail {
+  border-color: rgba(40, 47, 60, 0.14);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
+}

@@ -204,6 +204,31 @@ describe("access profile inheritance", () => {
     expect(validateAccessProfileInheritance([childProfile])).toEqual([]);
   });
 
+  it("allows a scoped child to narrow a danger-full parent with on-request consent", () => {
+    const parentProfile: AccessProfileDefinition = {
+      id: "danger_parent",
+      label: "Danger parent",
+      description: "Unbounded local execution with external consent.",
+      sandbox: "danger-full-access",
+      approval: "on-request",
+      reviewer: "user",
+      network: "enabled",
+    };
+    const childProfile: AccessProfileDefinition = {
+      id: "danger_child",
+      label: "Danger child",
+      description: "A narrower scoped child.",
+      sandbox: "workspace-write",
+      approval: "on-request",
+      reviewer: "user",
+      network: "disabled",
+      workspaceRoots: ["/tmp/project"],
+      extends: parentProfile.id,
+    };
+
+    expect(validateAccessProfileInheritance([parentProfile, childProfile])).toEqual([]);
+  });
+
   it("treats a built-in workspace root as covering safe relative child rules", () => {
     const childProfile: AccessProfileDefinition = {
       id: "workspace_docs",

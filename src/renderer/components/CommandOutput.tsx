@@ -1,7 +1,10 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import type { CommandOutputStyle } from "../../shared/types";
 
 const DIR_NAME_MAX_LEN = 12;
 const DEFAULT_VISIBLE_OUTPUT_LINES = 300;
+/** Lines of tail output kept visible in the minimal style before expanding. */
+const MINIMAL_COLLAPSED_LINES = 5;
 
 function getDirName(cwd: string): string {
   const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
@@ -21,6 +24,8 @@ interface CommandOutputProps {
   cwd?: string;
   taskId?: string;
   onClose?: () => void;
+  /** "terminal" (default) renders the classic window; "minimal" renders a compact row. */
+  variant?: CommandOutputStyle;
 }
 
 export function CommandOutput({
@@ -31,12 +36,15 @@ export function CommandOutput({
   cwd,
   taskId,
   onClose,
+  variant = "terminal",
 }: CommandOutputProps) {
   const outputRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [stdinInput, setStdinInput] = useState("");
   const [stopClicked, setStopClicked] = useState(false);
+  const [minimalExpanded, setMinimalExpanded] = useState(false);
+  const isMinimal = variant === "minimal";
 
   // Auto-scroll to bottom when new output arrives
   useEffect(() => {
@@ -129,6 +137,20 @@ export function CommandOutput({
     ].join("\n");
   })();
 
+  // Minimal style shows the raw command output (no shell prompt chrome),
+  // tailed to a few lines until the user expands it.
+  const minimal = useMemo(() => {
+    const trimmed = output.replace(/\n+$/, "");
+    const lines = trimmed.length > 0 ? trimmed.split("\n") : [];
+    const hiddenCount = Math.max(0, lines.length - MINIMAL_COLLAPSED_LINES);
+    return {
+      lines,
+      hiddenCount,
+      collapsedText: lines.slice(-MINIMAL_COLLAPSED_LINES).join("\n"),
+      fullText: trimmed,
+    };
+  }, [output]);
+
   const getStatusIndicator = () => {
     if (isRunning) {
       return <span className="command-status running">Running...</span>;
@@ -141,6 +163,134 @@ export function CommandOutput({
     }
     return null;
   };
+
+  if (isMinimal) {
+    const failed = !isRunning && exitCode !== null && exitCode !== undefined && exitCode !== 0;
+    const statusClass = isRunning ? "running" : failed ? "error" : "success";
+    const canToggle = minimal.lines.length > 0;
+
+    return (
+      <div className={`command-output-minimal ${statusClass}`}>
+        <div className="command-minimal-header">
+          <button
+            type="button"
+            className="command-minimal-summary"
+            onClick={() => canToggle && setMinimalExpanded((prev) => !prev)}
+            disabled={!canToggle}
+            title={command}
+            aria-expanded={canToggle ? minimalExpanded : undefined}
+          >
+            <span className={`command-minimal-dot ${statusClass}`} aria-hidden="true" />
+            <span className="command-minimal-command">{command}</span>
+            {cwd && (
+              <span className="command-minimal-cwd" title={cwd}>
+                {dirName}
+              </span>
+            )}
+          </button>
+          <div className="command-minimal-actions">
+            {failed && <span className="command-minimal-exit">Exit {exitCode}</span>}
+            {isRunning && taskId && !stopClicked && (
+              <button
+                type="button"
+                className="command-minimal-action"
+                onClick={killCommand}
+                title="Stop command (Ctrl+C)"
+              >
+                Stop
+              </button>
+            )}
+            {isRunning && taskId && stopClicked && (
+              <button
+                type="button"
+                className="command-minimal-action"
+                onClick={forceKillCommand}
+                title="Force kill (SIGKILL) - immediate termination"
+              >
+                Force kill
+              </button>
+            )}
+            {!isRunning && onClose && (
+              <button
+                type="button"
+                className="command-minimal-action"
+                onClick={onClose}
+                title="Close output"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {(minimal.lines.length > 0 || isRunning) && (
+          <div className="command-minimal-body">
+            <span className="command-minimal-gutter" aria-hidden="true">
+              &#8985;
+            </span>
+            <div className="command-minimal-output">
+              {minimalExpanded && minimal.hiddenCount > 0 && (
+                <button
+                  type="button"
+                  className="command-minimal-more"
+                  onClick={() => setMinimalExpanded(false)}
+                >
+                  Show less
+                </button>
+              )}
+              <div
+                ref={minimalExpanded ? outputRef : null}
+                className={`command-minimal-scroll ${minimalExpanded ? "expanded" : ""}`}
+                onScroll={minimalExpanded ? handleScroll : undefined}
+              >
+                <pre>
+                  {minimal.lines.length > 0
+                    ? minimalExpanded
+                      ? minimal.fullText
+                      : minimal.collapsedText
+                    : "Waiting for output..."}
+                </pre>
+              </div>
+              {!minimalExpanded && minimal.hiddenCount > 0 && (
+                <button
+                  type="button"
+                  className="command-minimal-more"
+                  onClick={() => setMinimalExpanded(true)}
+                >
+                  +{minimal.hiddenCount} line{minimal.hiddenCount === 1 ? "" : "s"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isRunning && taskId && (
+          <div className="command-minimal-stdin">
+            <span className="command-minimal-stdin-prompt">&gt;</span>
+            <input
+              ref={inputRef}
+              type="text"
+              className="command-minimal-stdin-input"
+              placeholder="Type input and press Enter..."
+              value={stdinInput}
+              onChange={(e) => setStdinInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="command-output-container">

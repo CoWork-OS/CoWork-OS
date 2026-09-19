@@ -21,11 +21,11 @@ It is not a substitute for:
 
 The skill uses three bundled local MCP connectors:
 
-| Connector | Purpose | Default local endpoint |
-|-----------|---------|------------------------|
-| Rhino | Site references, terrain, setbacks, massing, floor plans, validation, viewport capture, model export | `http://127.0.0.1:17641` |
-| Blender | Scene import, materials, camera, lighting, viewport capture, render output, scene save | `http://127.0.0.1:17642` |
-| ComfyUI | Workflow listing, workflow submission, Flux-style photoreal pass, job status, output collection | `http://127.0.0.1:8188` |
+| Connector | Purpose                                                                                              | Default local endpoint   |
+| --------- | ---------------------------------------------------------------------------------------------------- | ------------------------ |
+| Rhino     | Site references, terrain, setbacks, massing, floor plans, validation, viewport capture, model export | `http://127.0.0.1:17641` |
+| Blender   | Scene import, materials, camera, lighting, viewport capture, render output, scene save               | `http://127.0.0.1:17642` |
+| ComfyUI   | Workflow listing, workflow submission, Flux-style photoreal pass, job status, output collection      | `http://127.0.0.1:8188`  |
 
 The Rhino and Blender connectors expect separate localhost bridge processes that expose JSON endpoints matching the connector tools. The ComfyUI connector calls a local ComfyUI API directly.
 

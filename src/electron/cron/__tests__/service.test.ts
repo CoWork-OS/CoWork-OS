@@ -278,6 +278,29 @@ describe("CronService", () => {
       expect(saveCronStore).toHaveBeenCalled();
     });
 
+    it("persists assigned agent role through update and task execution", async () => {
+      service = createService();
+      await service.start();
+      const added = await service.add({
+        name: "Role Job",
+        enabled: true,
+        workspaceId: "ws-1",
+        taskPrompt: "Run role task",
+        schedule: { kind: "at", atMs: 1000000 },
+        assignedAgentRoleId: "agent-1",
+      });
+      expect(added.ok).toBe(true);
+
+      const jobId = added.ok ? added.job.id : "";
+      const updated = await service.update(jobId, { assignedAgentRoleId: "agent-2" });
+      expect(updated.ok && updated.job.assignedAgentRoleId).toBe("agent-2");
+
+      await service.run(jobId, "force");
+      expect(mockCreateTask).toHaveBeenCalledWith(
+        expect.objectContaining({ assignedAgentRoleId: "agent-2" }),
+      );
+    });
+
     it("applies workspace resolution during add when resolver is provided", async () => {
       service = createService({
         resolveWorkspaceContext: async ({ phase }) =>

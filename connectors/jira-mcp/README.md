@@ -11,16 +11,19 @@ Provide credentials via environment variables:
 Authentication options (choose one):
 
 **1) OAuth (Bearer token)**
+
 - `JIRA_ACCESS_TOKEN`
 - Optional refresh: `JIRA_CLIENT_ID`, `JIRA_CLIENT_SECRET`, `JIRA_REFRESH_TOKEN`
 
 **2) API token (Basic auth)**
+
 - `JIRA_EMAIL`
 - `JIRA_API_TOKEN`
 
 Optional:
+
 - `JIRA_API_VERSION` (default: `3`)
-Notes for OAuth:
+  Notes for OAuth:
 - If using Atlassian 3LO OAuth, set `JIRA_BASE_URL` to `https://api.atlassian.com/ex/jira/<cloudId>` (the app can set this automatically when using the OAuth UI).
 
 ## Build & Run

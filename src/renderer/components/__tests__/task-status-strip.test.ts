@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { TaskStatusStripViewModel } from "../../../shared/types";
-import { TaskStatusStrip } from "../TaskStatusStrip";
+import { TaskStatusPlanStepDescription, TaskStatusStrip } from "../TaskStatusStrip";
 
 function model(overrides: Partial<TaskStatusStripViewModel> = {}): TaskStatusStripViewModel {
   return {
@@ -57,5 +57,18 @@ describe("TaskStatusStrip", () => {
       }),
     );
     expect(markup).toBe("");
+  });
+
+  it("renders plan-step Markdown without exposing the source markers", () => {
+    const markup = renderToStaticMarkup(
+      createElement(TaskStatusPlanStepDescription, {
+        description: "**Broad discovery** — Run `web_search` first.",
+      }),
+    );
+
+    expect(markup).toContain("<strong>Broad discovery</strong>");
+    expect(markup).toContain("<code>web_search</code>");
+    expect(markup).not.toContain("**Broad discovery**");
+    expect(markup).not.toContain("`web_search`");
   });
 });

@@ -8,9 +8,7 @@
   "parameters": [],
   "enabled": true,
   "requires": {
-    "bins": [
-      "gog"
-    ]
+    "bins": ["gog"]
   },
   "invocation": {
     "disableModelInvocation": true

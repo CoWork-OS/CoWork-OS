@@ -8,6 +8,7 @@ import {
   LLMTool,
   LLMToolUse,
 } from "./types";
+import { parseOpenAICompatibleToolArguments } from "./openai-compatible";
 
 function supportsOllamaThinkingControl(model: string): boolean {
   const normalized = String(model || "")
@@ -317,21 +318,16 @@ export class OllamaProvider implements LLMProvider {
     // Handle tool calls
     if (message.tool_calls && message.tool_calls.length > 0) {
       for (const toolCall of message.tool_calls) {
-        let args: Record<string, Any>;
-        try {
-          args =
-            typeof toolCall.function.arguments === "string"
-              ? JSON.parse(toolCall.function.arguments)
-              : toolCall.function.arguments || {};
-        } catch {
-          console.error("Failed to parse tool arguments:", toolCall.function.arguments);
-          args = {};
+        const parsedArguments = parseOpenAICompatibleToolArguments(toolCall.function.arguments);
+        if (parsedArguments.inputError) {
+          console.error("Ollama tool arguments rejected:", parsedArguments.inputError.message);
         }
         content.push({
           type: "tool_use",
           id: `tool_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
           name: toolCall.function.name,
-          input: args,
+          input: parsedArguments.input,
+          ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
         } as LLMToolUse);
       }
     }

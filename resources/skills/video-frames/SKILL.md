@@ -38,4 +38,4 @@ Extract frames or short clips from videos using ffmpeg.
 ## Runtime Prompt
 
 - Current runtime prompt length: 462 characters.
-- Runtime prompt is defined directly in `../video-frames.json`. 
+- Runtime prompt is defined directly in `../video-frames.json`.

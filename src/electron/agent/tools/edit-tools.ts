@@ -8,10 +8,16 @@ import {
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
 import {
+  authorizeToolActionWithFallback,
   evaluateWorkspaceFilesystemAccess,
   resolveAccessControlledPath,
 } from "../../security/access-profile-paths";
 import { LLMTool } from "../llm/types";
+
+function hasStableFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
+  if (left.dev === 0 || right.dev === 0 || left.ino === 0 || right.ino === 0) return true;
+  return left.dev === right.dev && left.ino === right.ino;
+}
 
 /**
  * EditTools provides surgical file editing capabilities
@@ -117,25 +123,23 @@ export class EditTools {
           throw new Error(`Path is denied by the active access profile: ${requestedFullPath}`);
         }
         if (access.reason === "outside_workspace") {
-          const requester = (this.daemon as Any)?.requestApproval;
-          if (typeof requester !== "function") {
-            throw new Error(
-              "External file access requires the approval system; the path must remain within workspace.",
-            );
-          }
-          const approved =
-            (await requester.call(
-              this.daemon,
-              this.taskId,
-              "external_file_access",
-              `Allow write access to external file: ${candidatePath}`,
-              {
-                path: candidatePath,
-                operation: "write",
-                tool: "edit_file",
-              },
-            )) === true;
+          const approved = await authorizeToolActionWithFallback(this.daemon, this.taskId, {
+            toolName: "edit_file",
+            approvalType: "external_file_access",
+            description: `Allow write access to external file: ${candidatePath}`,
+            details: {
+              path: candidatePath,
+              operation: "write",
+              tool: "edit_file",
+            },
+            allowAutoApprove: true,
+          });
           if (!approved) throw new Error("External file access was not approved.");
+          if (
+            resolveAccessControlledPath(this.workspace.path, requestedFullPath) !== candidatePath
+          ) {
+            throw new Error("File path changed while awaiting approval");
+          }
           externalApprovalGranted =
             typeof (this.daemon as Any)?.consumeExternalFileApproval === "function"
               ? (this.daemon as Any).consumeExternalFileApproval(
@@ -145,7 +149,7 @@ export class EditTools {
                 ) === true
               : true;
           access = evaluateWorkspaceFilesystemAccess(this.workspace, requestedFullPath, "write", {
-            externalApprovalGranted: true,
+            externalApprovalGranted,
           });
         }
         if (access.decision !== "allow") {
@@ -195,6 +199,7 @@ export class EditTools {
         }
         throw new Error(`Path is denied by the active access profile: ${realPath}`);
       }
+      const initialStats = fs.statSync(realPath);
 
       // Read file
       const content = fs.readFileSync(fullPath, "utf-8");
@@ -232,7 +237,42 @@ export class EditTools {
 
       // Write file
       await this.daemon.captureTaskMutationBaseline?.(this.taskId, fullPath);
-      fs.writeFileSync(fullPath, newContent, "utf-8");
+      const latestAccess = evaluateWorkspaceFilesystemAccess(
+        this.workspace,
+        requestedFullPath,
+        "write",
+        {
+          externalApprovalGranted,
+        },
+      );
+      if (latestAccess.decision !== "allow") {
+        if (latestAccess.reason === "profile_filesystem_denied") {
+          throw new Error(`Path is denied by the active access profile: ${requestedFullPath}`);
+        }
+        throw new Error("File path resolves outside workspace");
+      }
+      const latestRealPath = fs.realpathSync(latestAccess.path);
+      const latestRealAccess = evaluateWorkspaceFilesystemAccess(
+        this.workspace,
+        latestRealPath,
+        "write",
+        {
+          externalApprovalGranted,
+        },
+      );
+      if (latestRealAccess.decision !== "allow") {
+        if (latestRealAccess.reason === "profile_filesystem_denied") {
+          throw new Error(`Path is denied by the active access profile: ${latestRealPath}`);
+        }
+        throw new Error("File path resolves outside workspace");
+      }
+      if (latestRealPath !== realPath) {
+        throw new Error("File path changed during edit");
+      }
+      if (!hasStableFileIdentity(initialStats, fs.statSync(latestRealPath))) {
+        throw new Error("File target changed during edit");
+      }
+      this.writeFileThroughDescriptor(latestRealPath, newContent, initialStats);
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "edit_file",
@@ -295,5 +335,24 @@ export class EditTools {
     }
 
     return count;
+  }
+
+  private writeFileThroughDescriptor(
+    realPath: string,
+    content: string,
+    expectedIdentity: fs.Stats,
+  ): void {
+    const noFollow = (fs.constants as Any).O_NOFOLLOW;
+    const flags = fs.constants.O_WRONLY | (typeof noFollow === "number" ? noFollow : 0);
+    const fd = fs.openSync(realPath, flags);
+    try {
+      if (!hasStableFileIdentity(fs.fstatSync(fd), expectedIdentity)) {
+        throw new Error("File target changed before edit was written");
+      }
+      fs.ftruncateSync(fd, 0);
+      fs.writeFileSync(fd, content, "utf-8");
+    } finally {
+      fs.closeSync(fd);
+    }
   }
 }

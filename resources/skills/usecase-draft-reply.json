@@ -11,13 +11,7 @@
       "type": "select",
       "description": "Which channel to read from",
       "required": true,
-      "options": [
-        "imessage",
-        "whatsapp",
-        "slack",
-        "telegram",
-        "email"
-      ]
+      "options": ["imessage", "whatsapp", "slack", "telegram", "email"]
     },
     {
       "name": "chat_hint",
@@ -45,11 +39,7 @@
       "description": "Desired tone for the draft",
       "required": false,
       "default": "friendly",
-      "options": [
-        "friendly",
-        "concise",
-        "professional"
-      ]
+      "options": ["friendly", "concise", "professional"]
     }
   ],
   "enabled": true,

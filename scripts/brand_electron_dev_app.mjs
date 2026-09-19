@@ -26,11 +26,7 @@ let electronBinary;
 try {
   electronBinary = requireFromCwd("electron");
 } catch (error) {
-  fail(
-    `Unable to resolve Electron: ${
-      error instanceof Error ? error.message : String(error)
-    }`,
-  );
+  fail(`Unable to resolve Electron: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 if (typeof electronBinary !== "string" || !electronBinary) {
@@ -76,13 +72,9 @@ function setPlistValue(key, type, value) {
     return;
   }
 
-  execFileSync(
-    "/usr/libexec/PlistBuddy",
-    ["-c", `Add :${key} ${type} ${value}`, plistPath],
-    {
-      stdio: "pipe",
-    },
-  );
+  execFileSync("/usr/libexec/PlistBuddy", ["-c", `Add :${key} ${type} ${value}`, plistPath], {
+    stdio: "pipe",
+  });
 }
 
 mkdirSync(resourcesDir, { recursive: true });
@@ -90,11 +82,7 @@ copyFileSync(sourceIcon, targetIcon);
 
 setPlistValue("CFBundleDisplayName", "string", APP_DISPLAY_NAME);
 setPlistValue("CFBundleIconFile", "string", ICON_FILE);
-setPlistValue(
-  "LSApplicationCategoryType",
-  "string",
-  "public.app-category.productivity",
-);
+setPlistValue("LSApplicationCategoryType", "string", "public.app-category.productivity");
 
 const now = new Date();
 utimesSync(electronApp, now, now);

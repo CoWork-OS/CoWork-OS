@@ -38,4 +38,4 @@ Cloud migration strategy and execution: assessment frameworks, migration pattern
 ## Runtime Prompt
 
 - Current runtime prompt length: 940 characters.
-- Runtime prompt is defined directly in `../cloud-migration.json`. 
+- Runtime prompt is defined directly in `../cloud-migration.json`.

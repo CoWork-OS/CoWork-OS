@@ -128,6 +128,84 @@ describe("buildSavedLLMSettings", () => {
     });
   });
 
+  it("merges Jev routes without dropping either provider credential", () => {
+    const existingSettings: LLMSettingsData = {
+      providerType: "openrouter",
+      modelKey: "openrouter/free",
+      openrouter: { apiKey: "main-openrouter-key" },
+      jev: {
+        enabled: true,
+        provider: "openrouter",
+        teamSelectionEnabled: true,
+        harnessEnabled: true,
+        toolReviewMode: "observe",
+        typesafe: {
+          apiKey: "typesafe-key",
+          model: "jev-latest",
+        },
+        openrouter: {
+          apiKey: "jev-openrouter-key",
+          reuseOpenRouterKey: false,
+        },
+      },
+    };
+
+    const saved = buildSavedLLMSettings(
+      {
+        providerType: "openrouter",
+        modelKey: "openrouter/free",
+        jev: {
+          provider: "typesafe",
+          typesafe: { model: "jev-1.13" },
+        },
+      },
+      existingSettings,
+    );
+
+    expect(saved.jev).toEqual({
+      enabled: true,
+      provider: "typesafe",
+      teamSelectionEnabled: true,
+      harnessEnabled: true,
+      toolReviewMode: "observe",
+      typesafe: {
+        apiKey: "typesafe-key",
+        model: "jev-1.13",
+      },
+      openrouter: {
+        apiKey: "jev-openrouter-key",
+        reuseOpenRouterKey: false,
+      },
+    });
+  });
+
+  it("supports an explicit Jev credential clear while preserving omitted credentials", () => {
+    const existingSettings: LLMSettingsData = {
+      providerType: "typesafe",
+      modelKey: "gpt-5.5",
+      jev: {
+        typesafe: { apiKey: "typesafe-key" },
+        openrouter: { apiKey: "jev-openrouter-key" },
+      },
+    };
+
+    const saved = buildSavedLLMSettings(
+      {
+        providerType: "typesafe",
+        modelKey: "gpt-5.5",
+        jev: {
+          typesafe: { model: "jev-latest" },
+          openrouter: { clearApiKey: true },
+        },
+      },
+      existingSettings,
+    );
+
+    expect(saved.jev?.typesafe?.apiKey).toBe("typesafe-key");
+    expect(saved.jev?.openrouter?.apiKey).toBeUndefined();
+    expect(saved.jev?.openrouter).not.toHaveProperty("clearApiKey");
+  });
+
   it("preserves MoA presets while merging partial saves", () => {
     const existingSettings: LLMSettingsData = {
       providerType: "moa",
@@ -371,6 +449,47 @@ describe("buildSavedLLMSettings", () => {
 });
 
 describe("LLMSettingsSchema", () => {
+  it("accepts both Jev provider routes and bounded decision settings", () => {
+    const parsed = LLMSettingsSchema.parse({
+      providerType: "openrouter",
+      modelKey: "openrouter/free",
+      jev: {
+        enabled: true,
+        provider: "openrouter",
+        harnessEnabled: true,
+        toolReviewMode: "observe",
+        openrouter: {
+          apiKey: "test-key",
+          model: "~typesafe/jev-latest",
+          baseUrl: "https://openrouter.ai",
+          reuseOpenRouterKey: true,
+        },
+        timeoutMs: 1000,
+        maxRetries: 2,
+      },
+    });
+
+    expect(parsed.jev?.provider).toBe("openrouter");
+    expect(parsed.jev?.harnessEnabled).toBe(true);
+    expect(parsed.jev?.toolReviewMode).toBe("observe");
+    expect(parsed.jev?.openrouter?.reuseOpenRouterKey).toBe(true);
+  });
+
+  it("accepts active Jev harness mode", () => {
+    const parsed = LLMSettingsSchema.parse({
+      providerType: "openrouter",
+      modelKey: "openrouter/free",
+      jev: {
+        enabled: true,
+        harnessEnabled: true,
+        toolReviewMode: "active",
+        typesafe: { apiKey: "test-key" },
+      },
+    });
+
+    expect(parsed.jev?.toolReviewMode).toBe("active");
+  });
+
   it.each(["max", "ultra"] as const)(
     "accepts the GPT-5.6 %s reasoning effort",
     (reasoningEffort) => {

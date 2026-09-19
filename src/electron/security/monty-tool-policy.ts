@@ -1,4 +1,3 @@
-import * as fs from "fs/promises";
 import * as path from "path";
 import type { GatewayContextType, Workspace } from "../../shared/types";
 import {
@@ -14,6 +13,9 @@ export type ToolPolicyDecision = {
   decision: "pass" | "deny" | "require_approval";
   reason?: string;
 };
+
+/** Stable reason used when a configured workspace policy cannot be evaluated. */
+export const TOOL_POLICY_UNAVAILABLE_REASON = "workspace tool policy unavailable";
 
 const DEFAULT_LIMITS: MontyResourceLimits = {
   maxDurationSecs: 0.3,
@@ -36,22 +38,28 @@ const isTestEnv = !!process.env.VITEST || process.env.NODE_ENV === "test";
 
 type CachedPolicyFile = { mtimeMs: number; code: string; hash: string };
 const fileCache = new Map<string, CachedPolicyFile>();
+const nativeFs = process.getBuiltinModule("fs") as typeof import("node:fs");
 
 async function loadPolicyCode(workspacePath: string): Promise<CachedPolicyFile | null> {
   const absPath = path.join(workspacePath, ".cowork", "policy", "tools.monty");
   let stat: Any;
   try {
-    stat = await fs.stat(absPath);
+    stat = await nativeFs.promises.stat(absPath);
   } catch (err: Any) {
     if (err?.code === "ENOENT") return null;
     throw err;
   }
+  // A path that is not a regular file is "no policy configured", not a policy
+  // failure. The caller turns a throw here into a blanket deny for every tool
+  // in the workspace, so a checked-in directory named tools.monty — or a file
+  // the app cannot read — would otherwise brick the workspace with no
+  // remediation path.
   if (!stat.isFile()) return null;
 
   const cached = fileCache.get(absPath);
   if (cached && cached.mtimeMs === stat.mtimeMs) return cached;
 
-  const code = await fs.readFile(absPath, "utf8");
+  const code = await nativeFs.promises.readFile(absPath, "utf8");
   const hash = sha256Hex(code);
   const next: CachedPolicyFile = { mtimeMs: stat.mtimeMs, code, hash };
   fileCache.set(absPath, next);
@@ -81,6 +89,11 @@ export async function evaluateMontyToolPolicy(args: {
   const wsPath = args.workspace?.path;
   if (!wsPath) return { decision: "pass" };
 
+  const unavailable = (): ToolPolicyDecision => ({
+    decision: "deny",
+    reason: TOOL_POLICY_UNAVAILABLE_REASON,
+  });
+
   let cached: CachedPolicyFile | null = null;
   try {
     cached = await loadPolicyCode(wsPath);
@@ -88,7 +101,7 @@ export async function evaluateMontyToolPolicy(args: {
     if (!isTestEnv) {
       console.warn("[ToolPolicy] Failed to read tools.monty:", err);
     }
-    return { decision: "pass" };
+    return unavailable();
   }
 
   if (!cached) return { decision: "pass" };
@@ -96,42 +109,56 @@ export async function evaluateMontyToolPolicy(args: {
   const clamped = clampMontyLimits(args.limits, MAX_LIMITS) || {};
   const limits: MontyResourceLimits = { ...DEFAULT_LIMITS, ...clamped };
 
-  const stdlib = createMontySafeStdlib();
-  const externalFunctions = Object.fromEntries(
-    Object.entries(stdlib).map(([k, fn]) => [k, fn as Any]),
-  );
+  try {
+    const stdlib = createMontySafeStdlib();
+    const externalFunctions = Object.fromEntries(
+      Object.entries(stdlib).map(([k, fn]) => [k, fn as Any]),
+    );
 
-  const input = {
-    tool: args.toolName,
-    params: args.toolInput ?? null,
-    gatewayContext: args.gatewayContext ?? null,
-    workspace: {
-      id: args.workspace.id,
-      name: args.workspace.name,
-      path: args.workspace.path,
-      isTemp: !!args.workspace.isTemp,
-      permissions: args.workspace.permissions,
-    },
-    timestampMs: Date.now(),
-  };
+    const input = {
+      tool: args.toolName,
+      params: args.toolInput ?? null,
+      gatewayContext: args.gatewayContext ?? null,
+      workspace: {
+        id: args.workspace.id,
+        name: args.workspace.name,
+        path: args.workspace.path,
+        isTemp: !!args.workspace.isTemp,
+        permissions: args.workspace.permissions,
+      },
+      timestampMs: Date.now(),
+    };
 
-  const cacheKey = `tool_policy:${args.workspace.id}:${cached.hash}`;
-  const res = await runMontyCode({
-    code: cached.code,
-    input,
-    scriptName: "tools_policy.monty",
-    limits,
-    externalFunctions,
-    cache: programCache,
-    cacheKey,
-  });
+    const cacheKey = `tool_policy:${args.workspace.id}:${cached.hash}`;
+    const res = await runMontyCode({
+      code: cached.code,
+      input,
+      scriptName: "tools_policy.monty",
+      limits,
+      externalFunctions,
+      cache: programCache,
+      cacheKey,
+    });
 
-  if (!res.ok) {
-    if (!isTestEnv) {
-      console.warn("[ToolPolicy] tools.monty failed:", res.error);
+    if (!res.ok) {
+      if (!isTestEnv) {
+        console.warn("[ToolPolicy] tools.monty failed:", res.error);
+      }
+      return unavailable();
     }
-    return { decision: "pass" };
-  }
 
-  return normalizeDecision(res.output) || { decision: "pass" };
+    const decision = normalizeDecision(res.output);
+    if (!decision) {
+      if (!isTestEnv) {
+        console.warn("[ToolPolicy] tools.monty returned an invalid decision");
+      }
+      return unavailable();
+    }
+    return decision;
+  } catch (err) {
+    if (!isTestEnv) {
+      console.warn("[ToolPolicy] tools.monty evaluation failed:", err);
+    }
+    return unavailable();
+  }
 }

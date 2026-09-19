@@ -9,6 +9,7 @@ This skill provides personalized feedback on your recent coding work by analyzin
 ## When to Use This Skill
 
 Use this skill when you want to:
+
 - Understand your development patterns and habits from recent work
 - Identify specific technical gaps or recurring challenges
 - Discover which topics would benefit from deeper study
@@ -49,6 +50,7 @@ Analyze my work from today and suggest areas for improvement
 ```
 
 The skill will generate a formatted report with:
+
 - Overview of your recent work
 - Key improvement areas identified
 - Specific recommendations for each area
@@ -136,6 +138,7 @@ When a user requests analysis of their developer growth or coding patterns from 
    ## Action Items
 
    Priority order:
+
    1. [Action item derived from highest priority improvement area]
    2. [Action item from next area]
    3. [Action item from next area]
@@ -148,7 +151,6 @@ When a user requests analysis of their developer growth or coding patterns from 
 5. **Search for Learning Resources**
 
    Use Rube MCP to search HackerNews for articles related to each improvement area:
-
    - For each improvement area, construct a search query targeting high-quality resources
    - Search HackerNews using RUBE_SEARCH_TOOLS with queries like:
      - "Learn [Technology/Pattern] best practices"
@@ -190,7 +192,6 @@ When a user requests analysis of their developer growth or coding patterns from 
 7. **Send Report to Slack DMs**
 
    Use Rube MCP to send the complete report to the user's own Slack DMs:
-
    - Check if Slack connection is active via RUBE_SEARCH_TOOLS
    - If not connected, use RUBE_MANAGE_CONNECTIONS to initiate Slack auth
    - Use RUBE_MULTI_EXECUTE_TOOL to send the report as a formatted message:
@@ -264,6 +265,7 @@ Over the past two days, you focused on backend infrastructure and API developmen
 ## Action Items
 
 Priority order:
+
 1. Spend 1-2 hours learning TypeScript utility types and discriminated unions; apply to your connection data structures
 2. Document security patterns for your project (what data is safe to display, filtering/masking functions)
 3. Study one article on advanced React patterns and apply one pattern to your current UI work
@@ -313,6 +315,7 @@ Priority order:
 ## How Accuracy and Quality Are Maintained
 
 This skill:
+
 - Analyzes your actual work patterns from timestamped chat history
 - Generates evidence-based recommendations grounded in real projects
 - Curates learning resources that directly address your identified gaps

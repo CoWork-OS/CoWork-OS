@@ -326,13 +326,26 @@ export class WeComAdapter implements ChannelAdapter {
   }
 
   private parseIncomingXml(url: URL, rawBody: string): string {
-    if (!this.config.encodingAESKey) {
-      return rawBody;
-    }
-
+    // `msg_signature` is verified on every POST, encrypted or not. `token` is a
+    // required config field and computeWeComSignature is the same function
+    // verifyUrl already uses for the GET challenge — the plaintext branch
+    // simply never called it, which treated encryption as authentication and
+    // left the endpoint open to attacker-crafted plaintext XML.
     const signature = url.searchParams.get("msg_signature") || "";
     const timestamp = url.searchParams.get("timestamp") || "";
     const nonce = url.searchParams.get("nonce") || "";
+
+    if (!this.config.encodingAESKey) {
+      if (!signature || !timestamp || !nonce) {
+        throw new Error("Incomplete WeCom callback: msg_signature, timestamp and nonce required");
+      }
+      const expectedPlain = computeWeComSignature(this.config.token, timestamp, nonce, rawBody);
+      if (expectedPlain !== signature) {
+        throw new Error("WeCom signature validation failed");
+      }
+      return rawBody;
+    }
+
     const encrypted = xmlValue(rawBody, "Encrypt") || "";
     if (!signature || !timestamp || !nonce || !encrypted) {
       throw new Error("Incomplete encrypted WeCom callback");

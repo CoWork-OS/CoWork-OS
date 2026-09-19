@@ -28,7 +28,10 @@ const forbiddenCopy = [
   { pattern: /\bany LLM\b/i, guidance: "say supported model sources or routes" },
   { pattern: /\bevery model\b/i, guidance: "avoid universal model compatibility claims" },
   { pattern: /\bfully (?:local|offline|private)\b/i, guidance: "state the exact local boundary" },
-  { pattern: /\bkeys? never leave\b/i, guidance: "describe credential storage and provider transmission" },
+  {
+    pattern: /\bkeys? never leave\b/i,
+    guidance: "describe credential storage and provider transmission",
+  },
   { pattern: /\bstart with ChatGPT\b/i, guidance: "keep onboarding provider-neutral" },
   { pattern: /\bTell Codex\b/i, guidance: "use the CoWork OS product name" },
   { pattern: /\b36 LLM provider options\b/i, guidance: "avoid drift-prone fixed provider counts" },
@@ -52,4 +55,3 @@ if (findings.length > 0) {
 } else {
   console.log(`Positioning copy validation passed (${positioningFiles.length} files).`);
 }
-

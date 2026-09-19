@@ -32,6 +32,7 @@ Understanding the security boundaries in CoWork OS helps you configure appropria
 ### Workspace Isolation
 
 Each workspace operates in isolation:
+
 - Tools can only access files within the workspace by default
 - External paths require explicit profile roots/rules or a compatible one-shot approval
 - Different workspaces cannot access each other's files
@@ -142,6 +143,7 @@ This lets CoWork use uploaded PDFs automatically while preserving the boundary b
 ### Managed Imports
 
 For imported skills and imported packs that CoWork installs into managed storage:
+
 - the bundle is staged in a temp location before activation
 - structural checks reject path escapes, unsafe manifest references, and unexpected executable/binary payloads
 - content heuristics inspect imported text and script surfaces for high-confidence malicious behavior
@@ -153,6 +155,7 @@ For imported skills and imported packs that CoWork installs into managed storage
 ### Unmanaged Local Bundles
 
 Read-only local skill directories and unmanaged local pack folders are treated more conservatively in v1:
+
 - CoWork can compute a report and surface warning badges
 - those bundles are not auto-quarantined or blocked solely because they are local and unmanaged
 - operators must review and remove or relocate them manually if the findings are unacceptable
@@ -160,6 +163,7 @@ Read-only local skill directories and unmanaged local pack folders are treated m
 ### Intelligence Availability
 
 Package-intelligence checks are additive, not the sole gate:
+
 - if local structural or heuristic checks find a blocking issue, the bundle is quarantined
 - if network-backed package intelligence is temporarily unavailable and local checks are otherwise clean, install can continue with a warning state
 - persisted reports record whether package intelligence was unavailable during the scan
@@ -197,23 +201,25 @@ Package-intelligence checks are additive, not the sole gate:
 
 ### Channel Trust Levels
 
-| Level | How Users Get It | Capabilities |
-|-------|------------------|--------------|
-| Untrusted | Default for unknown users | Access denied |
-| Paired | Entered valid pairing code | Access allowed by the target profile |
-| Allowlisted | Pre-configured in settings | Access allowed by the target profile |
-| Open Mode | Any user | Still constrained by the target profile |
+| Level       | How Users Get It           | Capabilities                            |
+| ----------- | -------------------------- | --------------------------------------- |
+| Untrusted   | Default for unknown users  | Access denied                           |
+| Paired      | Entered valid pairing code | Access allowed by the target profile    |
+| Allowlisted | Pre-configured in settings | Access allowed by the target profile    |
+| Open Mode   | Any user                   | Still constrained by the target profile |
 
 ### Context-Based Restrictions
 
 Even after authentication, capabilities vary by context:
 
 **DM Context:**
+
 - Tools allowed by the target access profile
 - No additional group restriction by default
 - Clipboard access remains subject to profile, tool, and OS policy
 
 **Group Context:**
+
 - Memory tools blocked by default (including clipboard)
 - Prevents data leakage to other group members
 - Other tools remain subject to the target profile and context restrictions
@@ -255,18 +261,22 @@ Even after authentication, capabilities vary by context:
 ### Network Controls
 
 **Workspace Level:**
+
 - `network: true` enables network-capable tools to participate in permission evaluation
 - `network: false` blocks ordinary web access and export-sensitive actions
 
 **Profile and Guardrail Level:**
+
 - Profile `domainRules` and legacy `enforceAllowedDomains` can limit destinations
 - Positive domain rules act as an allowlist; deny rules win and later approval cannot widen them
 
 **Permission Rule Level:**
+
 - `domain` rules can allow or deny one destination hostname
 - those rules can optionally be scoped to a specific tool such as `web_fetch` or `http_request`
 
 **Sandbox Level:**
+
 - Docker: `--network none` by default
 - macOS: localhost only unless explicitly allowed
 
@@ -306,18 +316,19 @@ Even after authentication, capabilities vary by context:
 
 ### Tool Risk Levels
 
-| Risk Level | Examples | Behavior |
-|------------|----------|----------|
-| Read | read_file, list_directory | Auto-allowed if read permission |
-| Write | write_file, create_directory | Auto-allowed if write permission and no rule blocks it |
-| Destructive | delete_file, run_command | Usually prompts unless the access profile, rule, or legacy mode changes the outcome |
-| System | screenshot, clipboard | Context-dependent |
-| Network | browser_navigate, web_fetch | Requires network permission and may still prompt under default mode |
-| Export | mutating `http_request`, `analyze_image`, `read_pdf_visual` | Requires network permission and explicit export review unless an exact rule allows it |
+| Risk Level  | Examples                                                    | Behavior                                                                              |
+| ----------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Read        | read_file, list_directory                                   | Auto-allowed if read permission                                                       |
+| Write       | write_file, create_directory                                | Auto-allowed if write permission and no rule blocks it                                |
+| Destructive | delete_file, run_command                                    | Usually prompts unless the access profile, rule, or legacy mode changes the outcome   |
+| System      | screenshot, clipboard                                       | Context-dependent                                                                     |
+| Network     | browser_navigate, web_fetch                                 | Requires network permission and may still prompt under default mode                   |
+| Export      | mutating `http_request`, `analyze_image`, `read_pdf_visual` | Requires network permission and explicit export review unless an exact rule allows it |
 
 ### Approval Gates
 
 Some operations usually require user approval:
+
 - Command-tool execution
 - File deletion
 - Destructive operations
@@ -325,6 +336,7 @@ Some operations usually require user approval:
 - Export-sensitive operations that could send local or recently imported content outward
 
 The approval shows:
+
 - Tool name and description
 - Parameters being used
 - Exact reason and matched rule when available

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -13,6 +13,8 @@ import type {
   TaskImpactMetric,
   TaskStatusStripViewModel,
 } from "../../shared/types";
+import { MarkdownRenderer } from "./MarkdownRenderer";
+import { normalizeMarkdownForDisplay } from "./MainContent/markdown-normalization";
 import { formatTaskImpactMetric } from "../utils/task-impact-metrics";
 import { incrementRendererPerfCounter } from "../utils/renderer-perf";
 
@@ -23,6 +25,47 @@ interface TaskStatusStripProps {
   replay?: boolean;
   telemetryEnabled?: boolean;
   onOpenOutput?: (path?: string) => void;
+  markdownComponents?: unknown;
+}
+
+type InlineMarkdownNodeProps = {
+  children?: ReactNode;
+};
+
+function createInlinePlanMarkdownComponents(markdownComponents: unknown) {
+  const baseComponents =
+    markdownComponents && typeof markdownComponents === "object"
+      ? (markdownComponents as Record<string, unknown>)
+      : {};
+
+  return {
+    ...baseComponents,
+    // Plan rows live inside a button, so keep Markdown flow content inline.
+    p: ({ children }: InlineMarkdownNodeProps) => <>{children}</>,
+    // Avoid nesting another interactive element inside the plan-row button.
+    a: ({ children }: InlineMarkdownNodeProps) => <span>{children}</span>,
+  };
+}
+
+export function TaskStatusPlanStepDescription({
+  description,
+  markdownComponents,
+}: {
+  description: string;
+  markdownComponents?: unknown;
+}) {
+  const inlineMarkdownComponents = useMemo(
+    () => createInlinePlanMarkdownComponents(markdownComponents),
+    [markdownComponents],
+  );
+
+  return (
+    <span className="task-status-plan-step-description markdown-content">
+      <MarkdownRenderer components={inlineMarkdownComponents}>
+        {normalizeMarkdownForDisplay(description)}
+      </MarkdownRenderer>
+    </span>
+  );
 }
 
 function StatusIcon({ model }: { model: TaskStatusStripViewModel }) {
@@ -55,6 +98,7 @@ export function TaskStatusStrip({
   replay = false,
   telemetryEnabled = false,
   onOpenOutput,
+  markdownComponents,
 }: TaskStatusStripProps) {
   const [open, setOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
@@ -145,7 +189,10 @@ export function TaskStatusStrip({
                         aria-current={step.id === model.activeStepId ? "step" : undefined}
                       >
                         <span className="task-status-step-index">{index + 1}</span>
-                        <span>{step.description}</span>
+                        <TaskStatusPlanStepDescription
+                          description={step.description}
+                          markdownComponents={markdownComponents}
+                        />
                         <span className="task-status-step-state">
                           {step.status.replace("_", " ")}
                         </span>
@@ -220,6 +267,14 @@ export function TaskStatusStrip({
       >
         <StatusIcon model={model} />
         <strong className="task-status-strip-primary">{model.primaryLabel}</strong>
+        {model.hasUnreadActivity && (model.newActivityCount ?? 0) > 0 && (
+          <span
+            className="task-status-strip-unread"
+            aria-label={`${model.newActivityCount} new activities`}
+          >
+            {model.newActivityCount} new
+          </span>
+        )}
         {model.compactMetricSlots.map((slot, index) => (
           <span key={slot.id} className={`task-status-strip-metric metric-${index + 1}`}>
             {slot.label}

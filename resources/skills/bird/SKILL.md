@@ -38,4 +38,4 @@ X/Twitter CLI for reading, searching, posting, and engagement via cookies.
 ## Runtime Prompt
 
 - Current runtime prompt length: 4886 characters.
-- Runtime prompt is defined directly in `../bird.json`. 
+- Runtime prompt is defined directly in `../bird.json`.

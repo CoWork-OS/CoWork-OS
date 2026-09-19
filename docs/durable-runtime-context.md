@@ -205,14 +205,14 @@ Expected behavior:
 
 ## Implementation Landmarks
 
-| Area | File |
-|---|---|
-| Durable storage, search, large payloads, summary DAG, clearing | `src/electron/memory/DurableContextService.ts` |
-| Tool definitions and active-task scope enforcement | `src/electron/agent/tools/system-tools.ts` |
-| Tool registry dispatch | `src/electron/agent/tools/registry.ts` |
-| Runtime/executor history capture fallback | `src/electron/agent/executor.ts` |
-| Settings normalization | `src/electron/settings/memory-features-manager.ts` |
-| Memory Hub toggle | `src/renderer/components/MemoryHubSettings.tsx` |
+| Area                                                           | File                                               |
+| -------------------------------------------------------------- | -------------------------------------------------- |
+| Durable storage, search, large payloads, summary DAG, clearing | `src/electron/memory/DurableContextService.ts`     |
+| Tool definitions and active-task scope enforcement             | `src/electron/agent/tools/system-tools.ts`         |
+| Tool registry dispatch                                         | `src/electron/agent/tools/registry.ts`             |
+| Runtime/executor history capture fallback                      | `src/electron/agent/executor.ts`                   |
+| Settings normalization                                         | `src/electron/settings/memory-features-manager.ts` |
+| Memory Hub toggle                                              | `src/renderer/components/MemoryHubSettings.tsx`    |
 
 ## Validation
 

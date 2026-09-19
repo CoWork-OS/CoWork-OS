@@ -1,4 +1,5 @@
 import type { AgentCapability, AgentRole, WorkerRoleKind } from "../../shared/types";
+import { WORKER_ROLE_CALLSIGN, type SubagentCallsign } from "../../shared/subagent-presentation";
 
 type SubagentNameInput = {
   role?: Pick<AgentRole, "capabilities" | "displayName" | "name">;
@@ -8,7 +9,7 @@ type SubagentNameInput = {
 
 const CAPABILITY_CALLSIGN: Array<{
   capabilities: AgentCapability[];
-  label: string;
+  label: SubagentCallsign;
 }> = [
   { capabilities: ["code", "ops"], label: "builder" },
   { capabilities: ["test", "review", "security"], label: "inspector" },
@@ -17,13 +18,6 @@ const CAPABILITY_CALLSIGN: Array<{
   { capabilities: ["design"], label: "designer" },
   { capabilities: ["write", "document", "communicate", "market"], label: "writer" },
 ];
-
-const WORKER_ROLE_CALLSIGN: Record<WorkerRoleKind, string> = {
-  researcher: "explorer",
-  implementer: "builder",
-  verifier: "inspector",
-  synthesizer: "synthesizer",
-};
 
 const SUBAGENT_NAME_POOL = [
   "Anansi",
@@ -97,7 +91,7 @@ const SUBAGENT_NAME_POOL = [
   "Vishnu",
 ];
 
-function deriveRoleLabel(input: SubagentNameInput): string {
+function deriveRoleLabel(input: SubagentNameInput): SubagentCallsign {
   const capabilities = input.role?.capabilities || [];
   for (const entry of CAPABILITY_CALLSIGN) {
     if (entry.capabilities.some((capability) => capabilities.includes(capability))) {

@@ -290,6 +290,76 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     });
   });
 
+  it("routes ordinary approval decisions to assistant input without creating a queue row", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+    const previousVitest = process.env.VITEST;
+    process.env.NODE_ENV = "production";
+    delete process.env.COWORK_APPROVAL_PROMPTS;
+    delete process.env.VITEST;
+
+    const approvalRepo = {
+      create: vi.fn(),
+      update: vi.fn(),
+    };
+    const evaluatePermissionRequest = vi.fn().mockReturnValue({
+      evaluation: {
+        decision: "ask",
+        reason: { type: "mode", mode: "default", summary: "Prompt for network read." },
+      },
+      promptDetails: {
+        reason: { type: "mode", mode: "default", summary: "Prompt for network read." },
+        scopePreview: "domain docs.example.com",
+        suggestedActions: [],
+      },
+      scope: { kind: "domain", toolName: "web_fetch", domain: "docs.example.com" },
+      trackingKey: "domain:web_fetch:docs.example.com",
+      runtime: null,
+      workspace: undefined,
+    });
+    const daemonLike = {
+      sessionAutoApproveAll: false,
+      approvalRepo,
+      requestAssistantApproval: vi.fn().mockResolvedValue(true),
+      logEvent: vi.fn(),
+      updateTask: vi.fn(),
+      evaluatePermissionRequest,
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({ agentConfig: { accessProfileId: "ask_for_approval" } }),
+      },
+      pendingApprovals: new Map(),
+    } as Any;
+
+    try {
+      const approved = await AgentDaemon.prototype.requestApproval.call(
+        daemonLike,
+        "task-no-prompt",
+        "network_access",
+        "Approve action",
+        { tool: "web_fetch", params: { url: "https://docs.example.com/page" } },
+      );
+
+      expect(approved).toBe(true);
+      expect(approvalRepo.create).not.toHaveBeenCalled();
+      expect(daemonLike.requestAssistantApproval).toHaveBeenCalledWith(
+        "task-no-prompt",
+        "network_access",
+        "Approve action",
+        expect.objectContaining({ tool: "web_fetch" }),
+        null,
+        "domain:web_fetch:docs.example.com",
+        undefined,
+      );
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+      else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+      if (previousVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = previousVitest;
+    }
+  });
+
   it("does not session auto-approve network reads denied by network policy", async () => {
     vi.useFakeTimers();
     vi.mocked(evaluateNetworkPolicy).mockReturnValueOnce({
@@ -987,5 +1057,241 @@ describe("AgentDaemon.buildPermissionRules", () => {
     );
 
     expect(rules).toEqual([]);
+  });
+});
+
+describe("boundary authorization broker", () => {
+  it("consumes an identity-bound queued response exactly once", () => {
+    const daemon = {
+      pendingDurableApprovalGrants: new Map(),
+      evaluatePermissionRequest: vi.fn(() => ({ authorizationKey: "current-exact-operation" })),
+      buildPermissionTrackingKey: vi.fn(() => "legacy-broad-scope"),
+    } as Any;
+    AgentDaemon.prototype["rememberDurableApprovalGrant"].call(daemon, "task-legacy", {
+      id: "approval-old",
+      taskId: "task-legacy",
+      type: "run_command",
+      details: {
+        command: "npm test",
+        authorization: { version: 1, key: "current-exact-operation" },
+        permissionPrompt: { scope: { kind: "tool", toolName: "run_command" } },
+      },
+    });
+    expect(
+      AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
+        daemon,
+        "task-legacy",
+        "legacy-broad-scope",
+      ),
+    ).toBeUndefined();
+    expect(
+      AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
+        daemon,
+        "task-legacy",
+        "current-exact-operation",
+      ),
+    ).toMatchObject({ approvalId: "approval-old" });
+    expect(
+      AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
+        daemon,
+        "task-legacy",
+        "current-exact-operation",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not reuse an expired durable grant", () => {
+    const daemon = {
+      pendingDurableApprovalGrants: new Map([
+        [
+          "task-old",
+          new Map([
+            ["exact-operation", { approvalId: "expired", grantedAt: Date.now() - 6 * 60 * 1000 }],
+          ]),
+        ],
+      ]),
+    } as Any;
+    expect(
+      AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
+        daemon,
+        "task-old",
+        "exact-operation",
+      ),
+    ).toBeUndefined();
+    expect(daemon.pendingDurableApprovalGrants.size).toBe(0);
+  });
+
+  it("allows granted work without touching the approval lifecycle", async () => {
+    const daemon = {
+      evaluateToolPermission: vi.fn(() => ({ decision: "allow" })),
+      requestApproval: vi.fn(),
+      logEvent: vi.fn(),
+    } as Any;
+    expect(
+      await AgentDaemon.prototype.authorizeToolAction.call(daemon, "task-note", {
+        toolName: "write_file",
+        approvalType: "workspace_write",
+        details: { path: "/workspace/note.md" },
+      }),
+    ).toBe(true);
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+    expect(daemon.logEvent).not.toHaveBeenCalled();
+  });
+
+  it("routes an explicit no-auto-approve request even when policy already allows it", async () => {
+    const daemon = {
+      evaluateToolPermission: vi.fn(() => ({ decision: "allow" })),
+      requestApproval: vi.fn(async () => false),
+      logEvent: vi.fn(),
+    } as Any;
+    await expect(
+      AgentDaemon.prototype.authorizeToolAction.call(daemon, "task-note", {
+        toolName: "http_request",
+        approvalType: "external_service",
+        details: { method: "POST" },
+        allowAutoApprove: false,
+      }),
+    ).resolves.toBe(false);
+    expect(daemon.requestApproval).toHaveBeenCalledWith(
+      "task-note",
+      "external_service",
+      expect.any(String),
+      expect.objectContaining({ method: "POST", tool: "http_request" }),
+      expect.objectContaining({ allowAutoApprove: false }),
+    );
+  });
+
+  it("does not offer approval for a hard denial", async () => {
+    const daemon = {
+      evaluateToolPermission: vi.fn(() => ({ decision: "deny" })),
+      requestApproval: vi.fn(),
+    } as Any;
+    expect(
+      await AgentDaemon.prototype.authorizeToolAction.call(daemon, "task-note", {
+        toolName: "write_file",
+        approvalType: "workspace_write",
+        details: { path: "/workspace/.cowork/policy/permissions.json" },
+      }),
+    ).toBe(false);
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it("routes an eligible exception through exactly one approval request", async () => {
+    const daemon = {
+      evaluateToolPermission: vi.fn(() => ({ decision: "ask" })),
+      requestApproval: vi.fn(async () => true),
+    } as Any;
+    expect(
+      await AgentDaemon.prototype.authorizeToolAction.call(daemon, "task-note", {
+        toolName: "write_file",
+        approvalType: "external_file_access",
+        details: { path: "/approved-extra/note.md", operation: "write" },
+      }),
+    ).toBe(true);
+    expect(daemon.requestApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not execute or request consent after cancellation", async () => {
+    const daemon = { evaluateToolPermission: vi.fn(), requestApproval: vi.fn() } as Any;
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      AgentDaemon.prototype.authorizeToolAction.call(daemon, "task-note", {
+        toolName: "write_file",
+        approvalType: "workspace_write",
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("cancelled");
+    expect(daemon.evaluateToolPermission).not.toHaveBeenCalled();
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+  });
+  it("never returns a denial without creating approval rows, events, or a wait", async () => {
+    const daemon = {
+      evaluatePermissionRequest: vi.fn(() => ({
+        evaluation: {
+          decision: "ask",
+          reason: { type: "mode", mode: "default", summary: "External scope" },
+        },
+        promptDetails: {},
+      })),
+      taskRepo: {
+        findById: vi.fn(() => ({
+          id: "task-never",
+          agentConfig: { accessProfileId: "bounded-never" },
+        })),
+      },
+      getEffectiveAccessProfile: vi.fn(() => ({
+        permissionMode: "default",
+        definition: { approval: "never" },
+      })),
+      approvalRepo: { create: vi.fn() },
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+    } as Any;
+    const allowed = await AgentDaemon.prototype.requestApproval.call(
+      daemon,
+      "task-never",
+      "external_file_access",
+      "Write outside workspace",
+      { path: "/outside/file.md" },
+    );
+    expect(allowed).toBe(false);
+    expect(daemon.approvalRepo.create).not.toHaveBeenCalled();
+    expect(daemon.updateTask).not.toHaveBeenCalled();
+    expect(daemon.logEvent.mock.calls.every((call: Any[]) => call[1] === "log")).toBe(true);
+  });
+
+  it("rejects pending approval when its arguments or policy identity changed", () => {
+    const daemon = {
+      taskRepo: { findById: vi.fn(() => ({ id: "task-a", status: "blocked" })) },
+      evaluatePermissionRequest: vi.fn(() => ({
+        evaluation: { decision: "ask" },
+        authorizationKey: "new-policy-or-arguments",
+        workspace: { permissions: { accessApprovalPolicy: "on-request" } },
+      })),
+    } as Any;
+    expect(
+      AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
+        taskId: "task-a",
+        type: "run_command",
+        details: { command: "npm test", authorization: { version: 1, key: "original" } },
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects fingerprint-less legacy approval rows even when current policy permits review", () => {
+    const daemon = {
+      taskRepo: { findById: vi.fn(() => ({ id: "task-legacy", status: "blocked" })) },
+      evaluatePermissionRequest: vi.fn(() => ({
+        evaluation: { decision: "ask" },
+        authorizationKey: "new",
+      })),
+    } as Any;
+    expect(
+      AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
+        taskId: "task-legacy",
+        type: "run_command",
+        details: { command: "npm test" },
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    undefined,
+    { id: "task-a", status: "completed" },
+    { id: "task-a", status: "cancelled" },
+  ])("rejects approval after the task has ended or disappeared (%j)", (task) => {
+    const daemon = {
+      taskRepo: { findById: vi.fn(() => task) },
+      evaluatePermissionRequest: vi.fn(() => ({ evaluation: { decision: "allow" } })),
+    } as Any;
+    expect(
+      AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
+        taskId: "task-a",
+        type: "run_command",
+        details: { command: "npm test" },
+      }),
+    ).toBe(false);
+    expect(daemon.evaluatePermissionRequest).not.toHaveBeenCalled();
   });
 });

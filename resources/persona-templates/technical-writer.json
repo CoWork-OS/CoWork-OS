@@ -19,11 +19,7 @@
     "staggerOffset": 12
   },
   "cognitiveOffload": {
-    "primaryCategories": [
-      "documentation",
-      "knowledge-curation",
-      "review-preparation"
-    ],
+    "primaryCategories": ["documentation", "knowledge-curation", "review-preparation"],
     "proactiveTasks": [
       {
         "id": "doc-freshness-audit",

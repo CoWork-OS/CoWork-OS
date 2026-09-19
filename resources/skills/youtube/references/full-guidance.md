@@ -13,13 +13,13 @@ Use whichever is available. Prefer `yt-dlp` when installed.
 
 YouTube URLs come in many formats. Extract the video ID first:
 
-| URL Format | Video ID |
-|------------|----------|
+| URL Format                                    | Video ID      |
+| --------------------------------------------- | ------------- |
 | `https://www.youtube.com/watch?v=dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
-| `https://youtu.be/dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
-| `https://youtube.com/embed/dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
-| `https://youtube.com/shorts/dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
-| `https://m.youtube.com/watch?v=dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
+| `https://youtu.be/dQw4w9WgXcQ`                | `dQw4w9WgXcQ` |
+| `https://youtube.com/embed/dQw4w9WgXcQ`       | `dQw4w9WgXcQ` |
+| `https://youtube.com/shorts/dQw4w9WgXcQ`      | `dQw4w9WgXcQ` |
+| `https://m.youtube.com/watch?v=dQw4w9WgXcQ`   | `dQw4w9WgXcQ` |
 
 Regex: `(?:v=|youtu\.be/|embed/|shorts/)([a-zA-Z0-9_-]{11})`
 

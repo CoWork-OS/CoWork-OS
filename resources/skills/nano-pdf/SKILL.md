@@ -38,4 +38,4 @@ Edit PDFs with natural-language instructions using the nano-pdf CLI.
 ## Runtime Prompt
 
 - Current runtime prompt length: 430 characters.
-- Runtime prompt is defined directly in `../nano-pdf.json`. 
+- Runtime prompt is defined directly in `../nano-pdf.json`.

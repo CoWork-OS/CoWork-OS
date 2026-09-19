@@ -1,12 +1,17 @@
 ## Description
+
 <!-- Provide a brief description of the changes in this PR -->
 
 ## Related Issue
+
 <!-- Link to the issue this PR addresses (if applicable) -->
+
 Fixes #
 
 ## Type of Change
+
 <!-- Mark the relevant option with an "x" -->
+
 - [ ] Bug fix (non-breaking change that fixes an issue)
 - [ ] New feature (non-breaking change that adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to change)
@@ -17,14 +22,18 @@ Fixes #
 - [ ] Test update
 
 ## Reliability Regression Policy
+
 <!-- Required for incident-driven fixes -->
+
 - [ ] This PR fixes a production failure/incident.
 - [ ] If checked above, I added or updated at least one eval case file under `scripts/qa/eval-cases/`.
-- Eval case file path(s): 
+- Eval case file path(s):
   - `scripts/qa/eval-cases/...`
 
 ## Category
+
 <!-- What area does this change affect? -->
+
 - [ ] Security / Guardrails
 - [ ] Messaging Channels (WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, iMessage, Signal, Matrix, etc.)
 - [ ] LLM Providers
@@ -37,21 +46,27 @@ Fixes #
 - [ ] Other
 
 ## Changes Made
-<!-- List the main changes made in this PR -->
--
+
+## <!-- List the main changes made in this PR -->
+
 -
 -
 
 ## Security Considerations
+
 <!-- Does this PR have security implications? If so, describe them -->
+
 - [ ] This change has NO security implications
 - [ ] This change has been reviewed for security implications (describe below)
 
 ## Screenshots
+
 <!-- If applicable, add screenshots showing the changes -->
 
 ## Testing
+
 <!-- Describe how you tested your changes -->
+
 - [ ] Tested locally on macOS
 - [ ] Tested with at least one LLM provider (Anthropic/Bedrock/Gemini/OpenRouter/OpenAI/Ollama)
 - [ ] Tested messaging channel integration (if applicable)
@@ -60,7 +75,9 @@ Fixes #
 - [ ] Security tests pass (if applicable)
 
 ## Checklist
+
 <!-- Mark completed items with an "x" -->
+
 - [ ] My code follows the project's style guidelines
 - [ ] I have performed a self-review of my code
 - [ ] I have commented my code, particularly in hard-to-understand areas
@@ -71,4 +88,5 @@ Fixes #
 - [ ] Any dependent changes have been merged and published
 
 ## Additional Notes
+
 <!-- Any additional information reviewers should know -->

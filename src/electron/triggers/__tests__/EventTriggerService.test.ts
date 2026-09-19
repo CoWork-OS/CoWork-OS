@@ -181,7 +181,52 @@ describe("EventTriggerService", () => {
 
       expect(localDeps.createTask).toHaveBeenCalledTimes(1);
       expect(db.prepare("SELECT COUNT(*) AS count FROM event_trigger_queue").get().count).toBe(0);
-      localService.stop();
+      await localService.stop();
+      db.close();
+    },
+  );
+
+  (nativeSqliteAvailable ? it : it.skip)(
+    "waits for an in-flight queued event before stopping",
+    async () => {
+      const Database = (await import("better-sqlite3")).default;
+      const db = new Database(":memory:");
+      let activeCount = 4;
+      let resolveCreateTask: ((value: { id: string }) => void) | undefined;
+      const createTask = vi.fn(
+        () =>
+          new Promise<{ id: string }>((resolve) => {
+            resolveCreateTask = resolve;
+          }),
+      );
+      const localDeps = makeDeps({ getActiveTaskCount: () => activeCount, createTask });
+      const localService = new EventTriggerService(localDeps, db);
+      localService.start();
+      localService.addTrigger({
+        name: "Queued shutdown",
+        enabled: true,
+        source: "channel_message",
+        conditions: [],
+        action: { type: "create_task", config: { prompt: "Queued event" } },
+        workspaceId: "ws-1",
+      });
+
+      await localService.evaluateEvent(makeMessageEvent("queued"));
+      activeCount = 0;
+      const drainPromise = localService.drainPendingEvents();
+      await vi.waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
+
+      let stopped = false;
+      const stopPromise = localService.stop().then(() => {
+        stopped = true;
+      });
+      await Promise.resolve();
+      expect(stopped).toBe(false);
+
+      resolveCreateTask?.({ id: "new-task-1" });
+      await drainPromise;
+      await stopPromise;
+      expect(stopped).toBe(true);
       db.close();
     },
   );
@@ -266,7 +311,7 @@ describe("EventTriggerService", () => {
       workspaceId: "ws-1",
     });
 
-    service.stop();
+    await service.stop();
     await service.evaluateEvent(makeMessageEvent("hello"));
     expect(deps.createTask).not.toHaveBeenCalled();
   });

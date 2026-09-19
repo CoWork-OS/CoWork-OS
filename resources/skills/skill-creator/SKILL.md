@@ -38,4 +38,4 @@ Create or update AgentSkills for CoWork-OSS. Use when designing, structuring, or
 ## Runtime Prompt
 
 - Current runtime prompt length: 962 characters.
-- Runtime prompt is defined directly in `../skill-creator.json`. 
+- Runtime prompt is defined directly in `../skill-creator.json`.

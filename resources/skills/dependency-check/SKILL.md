@@ -38,4 +38,4 @@ Audit dependencies for updates and vulnerabilities
 ## Runtime Prompt
 
 - Current runtime prompt length: 501 characters.
-- Runtime prompt is defined directly in `../dependency-check.json`. 
+- Runtime prompt is defined directly in `../dependency-check.json`.
